@@ -1,0 +1,222 @@
+"""
+WeChat Parser - 微信账单解析器
+
+解析微信支付账单导出的 CSV 和 Excel (xlsx) 文件。
+支持两种格式：
+1. CSV格式（旧版导出）
+2. XLSX格式（新版导出，从第17行开始为列名）
+"""
+
+import csv
+from pathlib import Path
+from typing import Dict, List, Any
+import openpyxl
+
+from .base import ParserBase
+from ..utils.logger import log_method
+
+
+class WeChatParser(ParserBase):
+    """微信账单解析器"""
+
+    def __init__(self):
+        """初始化"""
+        super().__init__()
+        self.supported_extensions = ['.csv', '.xlsx']
+        self.logger.info("微信账单解析器已初始化，支持格式: %s", self.supported_extensions)
+
+    @log_method
+    def can_parse(self, file_path: str) -> bool:
+        """判断是否为微信账单"""
+        file_ext = Path(file_path).suffix.lower()
+
+        if file_ext == '.csv':
+            return self._can_parse_csv(file_path)
+        elif file_ext == '.xlsx':
+            return self._can_parse_xlsx(file_path)
+        else:
+            return False
+
+    def _can_parse_csv(self, file_path: str) -> bool:
+        """判断CSV文件是否为微信账单"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                first_lines = ''.join([f.readline() for _ in range(5)])
+                return '微信支付账单' in first_lines or '交易时间' in first_lines
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def _can_parse_xlsx(self, file_path: str) -> bool:
+        """判断XLSX文件是否为微信账单"""
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True)
+            ws = wb.active
+            # 检查前几行是否包含微信账单特征
+            for row in ws.iter_rows(max_row=5, values_only=True):
+                if row[0] and '微信支付账单明细' in str(row[0]):
+                    wb.close()
+                    return True
+            wb.close()
+            return False
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    @log_method
+    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+        """解析微信账单"""
+        if not self.validate_file(file_path):
+            return []
+
+        file_ext = Path(file_path).suffix.lower()
+
+        if file_ext == '.csv':
+            return self._parse_csv(file_path)
+        elif file_ext == '.xlsx':
+            return self._parse_xlsx(file_path)
+        else:
+            self.logger.error("不支持的文件格式: %s", file_ext)
+            return []
+
+    @log_method
+    def _parse_csv(self, file_path: str) -> List[Dict[str, Any]]:
+        """解析CSV格式的微信账单"""
+        bills = []
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # 跳过头部说明行
+                lines = f.readlines()
+                data_start = 0
+
+                for i, line in enumerate(lines):
+                    if '交易时间' in line:
+                        data_start = i
+                        break
+
+                if data_start == 0:
+                    self.logger.warning("未找到数据起始行")
+                    return []
+
+                # 解析CSV数据
+                reader = csv.DictReader(lines[data_start:])
+
+                for row in reader:
+                    try:
+                        # 跳过空行和统计行
+                        if not row.get('交易时间') or '总计' in str(row.get('交易时间')):
+                            continue
+
+                        bill = self._extract_bill_from_csv_row(row)
+                        if bill:
+                            bills.append(bill)
+
+                    except Exception as e:  # pylint: disable=broad-except
+                        self.logger.error("解析CSV行数据失败: %s", e)
+
+            self.logger.info("CSV微信账单解析完成: %d 条", len(bills))
+
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("解析CSV微信账单失败: %s", e)
+            return []
+
+        return self.post_process(bills)
+
+    @log_method
+    def _parse_xlsx(self, file_path: str) -> List[Dict[str, Any]]:
+        """解析XLSX格式的微信账单"""
+        bills = []
+
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb.active
+
+            # 找到列名行（通常在第17行左右）
+            header_row = None
+            header_row_idx = 0
+
+            for idx, row in enumerate(ws.iter_rows(values_only=True), 1):
+                if row[0] == '交易时间':
+                    header_row = row
+                    header_row_idx = idx
+                    self.logger.info("找到列名行，位于第 %d 行", idx)
+                    break
+
+            if not header_row:
+                self.logger.error("未找到列名行")
+                wb.close()
+                return []
+
+            # 创建列名到索引的映射
+            column_map = {col: i for i, col in enumerate(header_row) if col}
+            self.logger.info("列名映射: %s", column_map)
+
+            # 解析数据行
+            for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+                try:
+                    # 跳过空行
+                    if not row[0]:
+                        continue
+
+                    # 跳过分隔线和统计行
+                    if '----' in str(row[0]) or '注：' in str(row[0]) or '总计' in str(row[0]):
+                        continue
+
+                    bill = self._extract_bill_from_xlsx_row(row, column_map)
+                    if bill:
+                        bills.append(bill)
+
+                except Exception as e:  # pylint: disable=broad-except
+                    self.logger.error("解析XLSX行数据失败: %s, 行数据: %s", e, row)
+
+            wb.close()
+            self.logger.info("XLSX微信账单解析完成: %d 条", len(bills))
+
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("解析XLSX微信账单失败: %s", e)
+            return []
+
+        return self.post_process(bills)
+
+    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Dict[str, Any]:
+        """从CSV行数据提取账单信息"""
+        return {
+            'date': row.get('交易时间', ''),  # 临时使用date，post_process会转为trade_time
+            'type': row.get('收/支', ''),
+            'counterparty': row.get('交易对方', ''),
+            'description': row.get('商品', ''),
+            'amount': row.get('金额(元)', '0'),
+            'channel': '微信支付'  # 临时使用channel，post_process会转为account
+        }
+
+    def _extract_bill_from_xlsx_row(self, row: tuple, column_map: Dict[str, int]) -> Dict[str, Any]:
+        """从XLSX行数据提取账单信息"""
+        try:
+            # 获取列值的辅助函数
+            def get_cell(col_name: str) -> str:
+                idx = column_map.get(col_name)
+                if idx is not None and idx < len(row):
+                    value = row[idx]
+                    return str(value) if value is not None else ''
+                return ''
+
+            # 提取金额并去除¥符号
+            amount = get_cell('金额(元)')
+            if amount.startswith('¥'):
+                amount = amount[1:]
+
+            # 转换收支类型
+            trans_type = get_cell('收/支')
+
+            return {
+                'date': get_cell('交易时间'),  # 临时使用date，post_process会转为trade_time
+                'type': trans_type,
+                'counterparty': get_cell('交易对方'),
+                'description': get_cell('商品'),
+                'amount': amount,
+                'channel': '微信支付'  # 临时使用channel，post_process会转为account
+            }
+
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("提取XLSX账单信息失败: %s", e)
+            return None
+

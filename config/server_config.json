@@ -1,0 +1,28 @@
+{
+  "jwt_secret": "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY_IN_PRODUCTION",
+  "jwt_algorithm": "HS256",
+  "jwt_expiration_days": 7,
+  "refresh_token_expiration_days": 30,
+  "password_min_length": 8,
+  "password_require_uppercase": false,
+  "password_require_lowercase": false,
+  "password_require_digit": false,
+  "password_require_special": false,
+  "require_email_verification": false,
+  "enable_2fa": false,
+  "enable_oauth2": false,
+  "enable_user_registration": true,
+  "enable_user_forget_password": false,
+  "max_login_attempts": 5,
+  "lockout_duration_minutes": 15,
+  "session_cleanup_days": 90,
+  "default_user": {
+    "username": "admin",
+    "password": "admin123",
+    "email": "admin@bill-analyser.local",
+    "nickname": "管理员",
+    "language": "zh_Hans",
+    "default_currency": "CNY",
+    "first_day_of_week": 1
+  }
+}
