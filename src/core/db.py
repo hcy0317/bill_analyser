@@ -76,6 +76,7 @@ class Database:
         amount REAL NOT NULL,
         counterparty TEXT NOT NULL,
         description TEXT NOT NULL,
+        payment_method TEXT DEFAULT '',
         main_category TEXT,
         sub_category TEXT,
         batch_id TEXT,
@@ -175,6 +176,7 @@ class Database:
         hidden BOOLEAN DEFAULT 0,
         display_order INTEGER DEFAULT 0,
         comment TEXT,
+        aliases TEXT,
         parent_id INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -188,6 +190,11 @@ class Database:
         if 'parent_id' not in columns:
             self.logger.info("添加 parent_id 列到 accounts 表")
             await conn.execute("ALTER TABLE accounts ADD COLUMN parent_id INTEGER DEFAULT 0")
+
+        # 检查 accounts 表是否有 aliases 列 (用于账户别名匹配)
+        if 'aliases' not in columns:
+            self.logger.info("添加 aliases 列到 accounts 表 (用于账户别名匹配)")
+            await conn.execute("ALTER TABLE accounts ADD COLUMN aliases TEXT")
 
         # === 多用户数据隔离迁移 ===
         # 为现有表添加 user_id 字段（如果不存在）
@@ -695,6 +702,125 @@ class Database:
         except sqlite3.OperationalError:
             self.logger.debug("bills表已有source_account_id字段")
 
+        # v6.32: 为bills表添加payment_method字段（用于存储支付方式/渠道）
+        try:
+            await conn.execute("ALTER TABLE bills ADD COLUMN payment_method TEXT DEFAULT ''")
+            self.logger.info("成功为bills表添加payment_method字段（用于存储支付方式/渠道）")
+        except sqlite3.OperationalError:
+            self.logger.debug("bills表已有payment_method字段")
+
+        # ==================== v6.47: 账单导入系统三阶段表 ====================
+
+        # 创建导入会话表 (管理导入生命周期)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS import_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'parsing',
+            file_count INTEGER DEFAULT 0,
+            total_parsed INTEGER DEFAULT 0,
+            total_preview INTEGER DEFAULT 0,
+            total_confirmed INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_import_sessions_session "
+            "ON import_sessions(session_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_import_sessions_user "
+            "ON import_sessions(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_import_sessions_status "
+            "ON import_sessions(status)"
+        )
+
+        # 创建解析器模板表 (阶段1: 解析后的原始数据)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS bills_parser_template (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            parser_date TEXT NOT NULL,
+            parser_amount REAL NOT NULL,
+            parser_type TEXT NOT NULL,
+            parser_description TEXT,
+            parser_id TEXT NOT NULL,
+            parser_counterparty TEXT,
+            parser_payment_method TEXT,
+            parser_original_type TEXT,
+            parser_original_category TEXT,
+            parser_account_id TEXT,
+            parser_is_processed TEXT DEFAULT '0',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_session "
+            "ON bills_parser_template(session_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_processed "
+            "ON bills_parser_template(parser_is_processed)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_date "
+            "ON bills_parser_template(parser_date)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_parser_id "
+            "ON bills_parser_template(parser_id)"
+        )
+
+        # 创建预览账单表 (阶段2: 去重后待确认的数据)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS bills_preview (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            preview_date TEXT NOT NULL,
+            preview_type TEXT NOT NULL,
+            preview_amount REAL NOT NULL,
+            preview_destination_amount REAL DEFAULT 0,
+            preview_main_category TEXT,
+            preview_sub_category TEXT,
+            preview_source_account_id INTEGER,
+            preview_destination_account_id INTEGER,
+            preview_counterparty TEXT,
+            preview_payment_method TEXT,
+            preview_description TEXT,
+            preview_selected INTEGER DEFAULT 1,
+            dedup_type TEXT,
+            dedup_source_ids TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_preview_session "
+            "ON bills_preview(session_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_preview_selected "
+            "ON bills_preview(preview_selected)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_preview_type "
+            "ON bills_preview(preview_type)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_preview_date "
+            "ON bills_preview(preview_date)"
+        )
+
+        self.logger.info("v6.47: 账单导入三阶段表创建完成")
+
         await conn.commit()
 
         self.logger.info("数据库初始化完成")
@@ -793,9 +919,9 @@ class Database:
                     await conn.execute("""
                         INSERT INTO bills (
                             user_id, date, type, amount, counterparty, description,
-                            main_category, sub_category, batch_id, hash,
+                            payment_method, main_category, sub_category, batch_id, hash,
                             created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         user_id,
                         bill.get('date'),
@@ -803,6 +929,7 @@ class Database:
                         bill.get('amount'),
                         bill.get('counterparty'),
                         bill.get('description'),
+                        bill.get('payment_method'),
                         bill.get('main_category'),
                         bill.get('sub_category'),
                         batch_id,
@@ -897,6 +1024,40 @@ class Database:
         return row['count'] > 0
 
     @log_method
+    @log_method
+    async def get_bills_by_date_range(
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: int = 1
+    ) -> List[Dict[str, Any]]:
+        """按日期范围查询账单（用于去重对比）
+
+        Args:
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            user_id: 用户ID
+
+        Returns:
+            List[Dict]: 账单列表
+        """
+        conn = await self._get_connection()
+
+        query = """
+            SELECT id, date, amount, counterparty, description,
+                   type, main_category, sub_category, source_account_id
+            FROM bills
+            WHERE user_id = ?
+              AND date >= ?
+              AND date <= ?
+            ORDER BY date
+        """
+        params = [user_id, start_date, end_date + ' 23:59:59']
+
+        async with conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     async def get_bills(self, filters: Optional[Dict[str, Any]] = None,
            limit: Optional[int] = None,
            offset: int = 0,
@@ -2035,10 +2196,10 @@ class Database:
         return categories
 
     @log_method
-    async def get_category_by_name(self, main_category: str, sub_category: str, 
+    async def get_category_by_name(self, main_category: str, sub_category: str,
                                    user_id: int = 1) -> Optional[Dict[str, Any]]:
         """根据名称获取分类
-        
+
         Args:
             main_category: 主分类名称
             sub_category: 子分类名称
@@ -2106,10 +2267,10 @@ class Database:
         except Exception as e:
             self.logger.error(f"创建分类失败: {type(e).__name__}: {e}", exc_info=True)
             return None    @log_method
-    async def update_category(self, category_id: int, updates: Dict[str, Any], 
+    async def update_category(self, category_id: int, updates: Dict[str, Any],
                               user_id: int = 1) -> bool:
         """更新分类
-        
+
         Args:
             category_id: 分类ID
             updates: 更新数据字典
@@ -2219,7 +2380,7 @@ class Database:
     @log_method
     async def get_category_by_id(self, category_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
         """获取单个分类
-        
+
         Args:
             category_id: 分类ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2227,7 +2388,7 @@ class Database:
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            "SELECT * FROM categories WHERE id = ? AND user_id = ?", 
+            "SELECT * FROM categories WHERE id = ? AND user_id = ?",
             (category_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
@@ -2283,7 +2444,7 @@ class Database:
     @log_method
     async def get_all_accounts(self, user_id: int = 1) -> List[Dict[str, Any]]:
         """获取所有账户
-        
+
         Args:
             user_id: 用户ID (默认1, 用于多用户数据隔离)
         """
@@ -2299,7 +2460,7 @@ class Database:
     @log_method
     async def get_account_by_id(self, account_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
         """根据ID获取账户
-        
+
         Args:
             account_id: 账户ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2316,7 +2477,7 @@ class Database:
     @log_method
     async def get_sub_accounts(self, parent_id: int, user_id: int = 1) -> List[Dict[str, Any]]:
         """获取子账户列表
-        
+
         Args:
             parent_id: 父账户ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2331,9 +2492,59 @@ class Database:
             return [dict(row) for row in rows]
 
     @log_method
+    async def get_account_alias_mapping(self, user_id: int = 1) -> Dict[str, int]:
+        """获取账户别名到账户ID的映射
+
+        用于账单导入时根据别名匹配账户。返回一个字典，键为别名（小写），值为账户ID。
+        同时包含账户名称作为默认别名。
+
+        Args:
+            user_id: 用户ID (默认1, 用于多用户数据隔离)
+
+        Returns:
+            Dict[str, int]: 别名 -> 账户ID 映射
+            例如: {"微信零钱": 1, "支付宝余额": 2, "余额宝": 2}
+        """
+        import json
+        conn = await self._get_connection()
+
+        alias_map: Dict[str, int] = {}
+
+        async with conn.execute(
+            "SELECT id, name, aliases FROM accounts WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+            for row in rows:
+                account_id = row['id']
+                account_name = row['name']
+                aliases_json = row['aliases']
+
+                # 账户名称作为默认别名
+                if account_name:
+                    alias_map[account_name.lower()] = account_id
+                    alias_map[account_name] = account_id  # 保留原始大小写
+
+                # 解析JSON格式的别名数组
+                if aliases_json:
+                    try:
+                        aliases = json.loads(aliases_json)
+                        if isinstance(aliases, list):
+                            for alias in aliases:
+                                if alias and isinstance(alias, str):
+                                    alias_map[alias.lower()] = account_id
+                                    alias_map[alias] = account_id  # 保留原始大小写
+                    except json.JSONDecodeError:
+                        self.logger.warning(f"账户 {account_id} 的别名JSON解析失败: {aliases_json}")
+
+        self.logger.info(f"加载账户别名映射: {len(alias_map)} 条")
+        return alias_map
+
+    @log_method
     async def create_account(self, data: Dict[str, Any], user_id: int = 1) -> int:
         """创建账户
-        
+
         Args:
             data: 账户数据
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2351,9 +2562,9 @@ class Database:
             INSERT INTO accounts (
                 name, type, category, currency, icon, color,
                 balance, initial_balance, hidden, display_order,
-                comment, parent_id, created_at, updated_at, user_id
+                comment, aliases, parent_id, created_at, updated_at, user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.get('name'),
             data.get('type', 1),
@@ -2366,6 +2577,7 @@ class Database:
             1 if data.get('hidden', False) else 0,
             data.get('display_order', 0),
             data.get('comment'),
+            data.get('aliases'),  # JSON数组格式存储别名
             parent_id,
             now,
             now,
@@ -2385,10 +2597,10 @@ class Database:
         return account_id
 
     @log_method
-    async def update_account(self, account_id: int, data: Dict[str, Any], 
+    async def update_account(self, account_id: int, data: Dict[str, Any],
                              user_id: int = 1) -> bool:
         """更新账户
-        
+
         Args:
             account_id: 账户ID
             data: 更新数据
@@ -2416,7 +2628,7 @@ class Database:
         valid_columns = {
             'name', 'type', 'category', 'currency', 'icon', 'color',
             'balance', 'initial_balance', 'hidden', 'display_order',
-            'comment', 'parent_id', 'updated_at'
+            'comment', 'aliases', 'parent_id', 'updated_at'
         }
 
         # 过滤掉不在白名单中的字段
@@ -2447,7 +2659,7 @@ class Database:
     @log_method
     async def delete_account(self, account_id: int, user_id: int = 1) -> bool:
         """删除账户
-        
+
         Args:
             account_id: 账户ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2455,7 +2667,7 @@ class Database:
         conn = await self._get_connection()
 
         cursor = await conn.execute(
-            "DELETE FROM accounts WHERE id = ? AND user_id = ?", 
+            "DELETE FROM accounts WHERE id = ? AND user_id = ?",
             (account_id, user_id)
         )
         await conn.commit()
@@ -2654,7 +2866,7 @@ class Database:
     @log_method
     async def get_all_tags(self, user_id: int = 1) -> List[Dict[str, Any]]:
         """获取所有标签
-        
+
         Args:
             user_id: 用户ID (默认1, 用于多用户数据隔离)
         """
@@ -2670,7 +2882,7 @@ class Database:
     @log_method
     async def get_tag_by_id(self, tag_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
         """根据ID获取标签
-        
+
         Args:
             tag_id: 标签ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2687,7 +2899,7 @@ class Database:
     @log_method
     async def create_tag(self, data: Dict[str, Any], user_id: int = 1) -> int:
         """创建标签
-        
+
         Args:
             data: 标签数据
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2711,10 +2923,10 @@ class Database:
         return cursor.lastrowid
 
     @log_method
-    async def update_tag(self, tag_id: int, data: Dict[str, Any], 
+    async def update_tag(self, tag_id: int, data: Dict[str, Any],
                          user_id: int = 1) -> bool:
         """更新标签
-        
+
         Args:
             tag_id: 标签ID
             data: 更新数据
@@ -2741,7 +2953,7 @@ class Database:
     @log_method
     async def delete_tag(self, tag_id: int, user_id: int = 1) -> bool:
         """删除标签
-        
+
         Args:
             tag_id: 标签ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -2749,7 +2961,7 @@ class Database:
         conn = await self._get_connection()
 
         cursor = await conn.execute(
-            "DELETE FROM tags WHERE id = ? AND user_id = ?", 
+            "DELETE FROM tags WHERE id = ? AND user_id = ?",
             (tag_id, user_id)
         )
         await conn.commit()
@@ -2757,14 +2969,14 @@ class Database:
         return cursor.rowcount > 0
 
     @log_method
-    async def update_tag_display_orders(self, orders: List[tuple], 
+    async def update_tag_display_orders(self, orders: List[tuple],
                                         user_id: int = 1) -> bool:
         """批量更新标签显示顺序
-        
+
         Args:
             orders: [(tag_id, display_order), ...] 标签ID和显示顺序的元组列表
             user_id: 用户ID (默认1, 用于多用户数据隔离)
-        
+
         Returns:
             bool: 更新是否成功
         """
@@ -2782,7 +2994,7 @@ class Database:
                     "UPDATE tags SET display_order = ?, updated_at = ? WHERE id = ? AND user_id = ?",
                     (display_order, now, tag_id, user_id)
                 )
-            
+
             await conn.commit()
             self.logger.info(f"[update_tag_display_orders] 成功更新{len(orders)}个标签的显示顺序 (user_id={user_id})")
             return True
@@ -3242,10 +3454,10 @@ class Database:
 
     # === 预算管理方法 ===
     @log_method
-    async def get_budgets(self, filters: Dict[str, Any] = None, 
+    async def get_budgets(self, filters: Dict[str, Any] = None,
                           user_id: int = 1) -> List[Dict[str, Any]]:
         """获取预算列表
-        
+
         Args:
             filters: 筛选条件
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -3277,7 +3489,7 @@ class Database:
     @log_method
     async def get_budget_by_id(self, budget_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
         """根据ID获取预算
-        
+
         Args:
             budget_id: 预算ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -3294,7 +3506,7 @@ class Database:
     @log_method
     async def create_budget(self, data: Dict[str, Any], user_id: int = 1) -> int:
         """创建预算
-        
+
         Args:
             data: 预算数据
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -3443,10 +3655,10 @@ class Database:
             return row['total'] if row else 0
 
     @log_method
-    async def update_budget(self, budget_id: int, data: Dict[str, Any], 
+    async def update_budget(self, budget_id: int, data: Dict[str, Any],
                             user_id: int = 1) -> bool:
         """更新预算
-        
+
         Args:
             budget_id: 预算ID
             data: 更新数据
@@ -3482,7 +3694,7 @@ class Database:
     @log_method
     async def delete_budget(self, budget_id: int, user_id: int = 1) -> bool:
         """删除预算
-        
+
         Args:
             budget_id: 预算ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -3490,7 +3702,7 @@ class Database:
         conn = await self._get_connection()
 
         cursor = await conn.execute(
-            "DELETE FROM budgets WHERE id = ? AND user_id = ?", 
+            "DELETE FROM budgets WHERE id = ? AND user_id = ?",
             (budget_id, user_id)
         )
         await conn.commit()
@@ -3559,7 +3771,7 @@ class Database:
                 f"category={budget.get('category')}, sub_category={budget.get('sub_category')}, "
                 f"start_date={budget.get('start_date')}, end_date={budget.get('end_date')}"
             )
-            
+
             # 构建账单查询 - 添加 user_id 过滤
             bill_query = """
                 SELECT COALESCE(SUM(amount), 0) as spent
@@ -3580,11 +3792,11 @@ class Database:
             # 日期筛选 - 使用预算自身的日期范围
             budget_start = start_date or budget.get('start_date')
             budget_end = end_date or budget.get('end_date')
-            
+
             if budget_start:
                 bill_query += " AND date >= ?"
                 bill_params.append(budget_start)
-            
+
             if budget_end:
                 bill_query += " AND date <= ?"
                 bill_params.append(budget_end)
@@ -3598,12 +3810,12 @@ class Database:
             self.logger.debug(
                 f"[get_budget_execution_details] 查询SQL: {bill_query}, 参数: {bill_params}"
             )
-            
+
             # 执行查询
             async with conn.execute(bill_query, bill_params) as cursor:
                 row = await cursor.fetchone()
                 spent = abs(row['spent']) if row else 0
-            
+
             self.logger.debug(
                 f"[get_budget_execution_details] 预算 {budget.get('category')}/{budget.get('sub_category')} "
                 f"查询结果: spent={spent}"
@@ -4125,7 +4337,7 @@ class Database:
     @log_method
     async def add_tags_to_bill(self, bill_id: int, tag_ids: List[int], user_id: int = 1) -> bool:
         """添加标签到账单
-        
+
         Args:
             bill_id: 账单ID
             tag_ids: 标签ID列表
@@ -4157,7 +4369,7 @@ class Database:
     @log_method
     async def get_tags_for_bill(self, bill_id: int, user_id: int = 1) -> List[Dict[str, Any]]:
         """获取账单的所有标签
-        
+
         Args:
             bill_id: 账单ID
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -4177,7 +4389,7 @@ class Database:
     @log_method
     async def get_tags_for_bills(self, bill_ids: List[int], user_id: int = 1) -> Dict[int, List[Dict[str, Any]]]:
         """批量获取账单标签
-        
+
         Args:
             bill_ids: 账单ID列表
             user_id: 用户ID (默认1, 用于多用户数据隔离)
@@ -4211,7 +4423,7 @@ class Database:
     @log_method
     async def update_bill_tags(self, bill_id: int, tag_ids: List[int], user_id: int = 1) -> bool:
         """更新账单标签（覆盖）
-        
+
         Args:
             bill_id: 账单ID
             tag_ids: 标签ID列表
@@ -4492,4 +4704,977 @@ class Database:
         result = password == stored_password
         self.logger.info(f"数据库密码验证: {'成功' if result else '失败'}")
         return result
+
+    # ==================== v6.47: 账单导入三阶段系统方法 ====================
+
+    @log_method
+    async def create_import_session(self, session_id: str, user_id: int = 1,
+                                     file_count: int = 0) -> int:
+        """
+        创建导入会话
+
+        Args:
+            session_id: 会话唯一标识（UUID格式）
+            user_id: 用户ID
+            file_count: 待导入文件数量
+
+        Returns:
+            int: 会话数据库ID
+        """
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+
+        self.logger.info(f"[创建导入会话] session_id={session_id}, user_id={user_id}, "
+                         f"file_count={file_count}")
+
+        cursor = await conn.execute(
+            """
+            INSERT INTO import_sessions (
+                session_id, user_id, status, file_count,
+                total_parsed, total_preview, total_confirmed,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, user_id, 'parsing', file_count, 0, 0, 0, now, now)
+        )
+
+        await conn.commit()
+        session_db_id = cursor.lastrowid
+
+        self.logger.info(f"[导入会话创建成功] id={session_db_id}, session_id={session_id}")
+        return session_db_id
+
+    @log_method
+    async def update_import_session_status(
+        self,
+        session_id: str,
+        status: str,
+        total_parsed: Optional[int] = None,
+        total_preview: Optional[int] = None,
+        total_confirmed: Optional[int] = None
+    ) -> bool:
+        """
+        更新导入会话状态
+
+        Args:
+            session_id: 会话唯一标识
+            status: 状态（parsing/deduping/previewing/confirming/completed/failed）
+            total_parsed: 解析总数
+            total_preview: 预览总数
+            total_confirmed: 确认总数
+
+        Returns:
+            bool: 是否成功
+        """
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+
+        self.logger.info(f"[更新导入会话] session_id={session_id}, status={status}, "
+                         f"parsed={total_parsed}, preview={total_preview}, "
+                         f"confirmed={total_confirmed}")
+
+        # 构建动态更新语句
+        update_parts = ["status = ?", "updated_at = ?"]
+        params = [status, now]
+
+        if total_parsed is not None:
+            update_parts.append("total_parsed = ?")
+            params.append(total_parsed)
+
+        if total_preview is not None:
+            update_parts.append("total_preview = ?")
+            params.append(total_preview)
+
+        if total_confirmed is not None:
+            update_parts.append("total_confirmed = ?")
+            params.append(total_confirmed)
+
+        params.append(session_id)
+
+        await conn.execute(
+            f"UPDATE import_sessions SET {', '.join(update_parts)} WHERE session_id = ?",
+            tuple(params)
+        )
+
+        await conn.commit()
+        self.logger.info(f"[导入会话更新成功] session_id={session_id}")
+        return True
+
+    @log_method
+    async def get_import_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取导入会话信息
+
+        Args:
+            session_id: 会话唯一标识
+
+        Returns:
+            Optional[Dict]: 会话信息
+        """
+        conn = await self._get_connection()
+
+        async with conn.execute(
+            "SELECT * FROM import_sessions WHERE session_id = ?",
+            (session_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+    @log_method
+    async def insert_parser_templates(
+        self,
+        session_id: str,
+        bills: List[Dict[str, Any]],
+        parser_id: str,
+        user_id: int = 1
+    ) -> int:
+        """
+        批量插入解析器模板数据（阶段1）
+
+        Args:
+            session_id: 会话唯一标识
+            bills: 解析后的账单列表
+            parser_id: 解析器标识（wechat/alipay/icbc等）
+            user_id: 用户ID
+
+        Returns:
+            int: 成功插入的数量
+        """
+        if not bills:
+            self.logger.warning("[插入解析模板] 账单列表为空")
+            return 0
+
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        inserted_count = 0
+
+        self.logger.info(f"[插入解析模板] session={session_id}, parser={parser_id}, "
+                         f"count={len(bills)}, user_id={user_id}")
+
+        # 分批插入
+        for i in range(0, len(bills), self.batch_size):
+            batch = bills[i:i + self.batch_size]
+            self.logger.debug(f"[解析模板批次] {i//self.batch_size + 1}: {len(batch)} 条")
+
+            for bill in batch:
+                try:
+                    # 根据金额正负确定类型
+                    amount = float(bill.get('amount', 0))
+                    if bill.get('type'):
+                        bill_type = bill.get('type')
+                    elif amount > 0:
+                        bill_type = '收入'
+                    elif amount < 0:
+                        bill_type = '支出'
+                    else:
+                        bill_type = '其他'
+
+                    await conn.execute(
+                        """
+                        INSERT INTO bills_parser_template (
+                            session_id, user_id, parser_date, parser_amount,
+                            parser_type, parser_description, parser_id,
+                            parser_counterparty, parser_payment_method,
+                            parser_original_type, parser_original_category,
+                            parser_account_id, parser_is_processed, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            bill.get('date', ''),
+                            amount,
+                            bill_type,
+                            bill.get('description', ''),
+                            parser_id,
+                            bill.get('counterparty', ''),
+                            bill.get('payment_method', ''),
+                            bill.get('original_type', ''),
+                            bill.get('original_category', ''),
+                            bill.get('account_id', ''),
+                            '0',  # parser_is_processed默认为"0"
+                            now
+                        )
+                    )
+                    inserted_count += 1
+
+                except Exception as e:
+                    self.logger.error(f"[插入解析模板失败] {bill.get('date')} - {e}")
+
+            await conn.commit()
+
+        self.logger.info(f"[解析模板插入完成] session={session_id}, "
+                         f"成功={inserted_count}/{len(bills)}")
+        return inserted_count
+
+    @log_method
+    async def get_parser_templates_by_session(
+        self,
+        session_id: str,
+        processed_only: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取会话的解析模板数据
+
+        Args:
+            session_id: 会话唯一标识
+            processed_only: True只获取已处理，False只获取未处理，None获取全部
+
+        Returns:
+            List[Dict]: 解析模板列表
+        """
+        conn = await self._get_connection()
+
+        query = "SELECT * FROM bills_parser_template WHERE session_id = ?"
+        params = [session_id]
+
+        if processed_only is True:
+            query += " AND parser_is_processed = '1'"
+        elif processed_only is False:
+            query += " AND parser_is_processed = '0'"
+
+        query += " ORDER BY parser_date ASC"
+
+        self.logger.debug(f"[获取解析模板] session={session_id}, processed={processed_only}")
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+            templates = [dict(row) for row in rows]
+
+        self.logger.info(f"[解析模板获取完成] session={session_id}, count={len(templates)}")
+        return templates
+
+    @log_method
+    async def update_parser_template_status(
+        self,
+        template_ids: List[int],
+        processed: bool = True,
+        account_id: Optional[str] = None
+    ) -> int:
+        """
+        更新解析模板处理状态
+
+        Args:
+            template_ids: 模板ID列表
+            processed: 是否已处理
+            account_id: 匹配到的账户ID
+
+        Returns:
+            int: 更新的记录数
+        """
+        if not template_ids:
+            return 0
+
+        conn = await self._get_connection()
+
+        processed_value = '1' if processed else '0'
+
+        self.logger.info(f"[更新解析模板状态] ids={template_ids}, processed={processed}, "
+                         f"account_id={account_id}")
+
+        # 构建动态更新语句
+        update_parts = ["parser_is_processed = ?"]
+        params = [processed_value]
+
+        if account_id is not None:
+            update_parts.append("parser_account_id = ?")
+            params.append(account_id)
+
+        # 构建IN子句
+        placeholders = ','.join(['?' for _ in template_ids])
+        params.extend(template_ids)
+
+        await conn.execute(
+            f"UPDATE bills_parser_template SET {', '.join(update_parts)} "
+            f"WHERE id IN ({placeholders})",
+            tuple(params)
+        )
+
+        await conn.commit()
+        self.logger.info(f"[解析模板状态更新完成] count={len(template_ids)}")
+        return len(template_ids)
+
+    @log_method
+    async def insert_preview_bill(
+        self,
+        session_id: str,
+        preview_data: Dict[str, Any],
+        user_id: int = 1,
+        dedup_type: Optional[str] = None,
+        dedup_source_ids: Optional[List[int]] = None
+    ) -> int:
+        """
+        插入预览账单（阶段2）
+
+        Args:
+            session_id: 会话唯一标识
+            preview_data: 预览数据
+            user_id: 用户ID
+            dedup_type: 去重类型（transfer/platform_bank/similar/split_merge/remaining）
+            dedup_source_ids: 去重来源模板ID列表
+
+        Returns:
+            int: 预览账单ID
+        """
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+
+        source_ids_str = ','.join(map(str, dedup_source_ids)) if dedup_source_ids else ''
+
+        self.logger.debug(f"[插入预览账单] session={session_id}, type={dedup_type}, "
+                          f"source_ids={source_ids_str}")
+
+        cursor = await conn.execute(
+            """
+            INSERT INTO bills_preview (
+                session_id, user_id, preview_date, preview_type,
+                preview_amount, preview_destination_amount,
+                preview_main_category, preview_sub_category,
+                preview_source_account_id, preview_destination_account_id,
+                preview_counterparty, preview_payment_method, preview_description,
+                preview_selected, dedup_type, dedup_source_ids, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                user_id,
+                preview_data.get('preview_date', ''),
+                preview_data.get('preview_type', ''),
+                preview_data.get('preview_amount', 0),
+                preview_data.get('preview_destination_amount', 0),
+                preview_data.get('preview_main_category', ''),
+                preview_data.get('preview_sub_category', ''),
+                preview_data.get('preview_source_account_id'),
+                preview_data.get('preview_destination_account_id'),
+                preview_data.get('preview_counterparty', ''),
+                preview_data.get('preview_payment_method', ''),
+                preview_data.get('preview_description', ''),
+                1,  # preview_selected默认选中
+                dedup_type,
+                source_ids_str,
+                now
+            )
+        )
+
+        await conn.commit()
+        preview_id = cursor.lastrowid
+
+        self.logger.debug(f"[预览账单插入成功] id={preview_id}")
+        return preview_id
+
+    @log_method
+    async def insert_preview_bills_batch(
+        self,
+        session_id: str,
+        preview_list: List[Dict[str, Any]],
+        user_id: int = 1
+    ) -> int:
+        """
+        批量插入预览账单
+
+        Args:
+            session_id: 会话唯一标识
+            preview_list: 预览数据列表，每项包含preview_data, dedup_type, dedup_source_ids
+            user_id: 用户ID
+
+        Returns:
+            int: 成功插入的数量
+        """
+        if not preview_list:
+            return 0
+
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        inserted_count = 0
+
+        self.logger.info(f"[批量插入预览账单] session={session_id}, count={len(preview_list)}")
+
+        for i in range(0, len(preview_list), self.batch_size):
+            batch = preview_list[i:i + self.batch_size]
+
+            for item in batch:
+                try:
+                    preview_data = item.get('preview_data', item)
+                    dedup_type = item.get('dedup_type', 'remaining')
+                    dedup_source_ids = item.get('dedup_source_ids', [])
+                    source_ids_str = ','.join(map(str, dedup_source_ids)) if dedup_source_ids else ''
+
+                    await conn.execute(
+                        """
+                        INSERT INTO bills_preview (
+                            session_id, user_id, preview_date, preview_type,
+                            preview_amount, preview_destination_amount,
+                            preview_main_category, preview_sub_category,
+                            preview_source_account_id, preview_destination_account_id,
+                            preview_counterparty, preview_payment_method, preview_description,
+                            preview_selected, dedup_type, dedup_source_ids, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            preview_data.get('preview_date', ''),
+                            preview_data.get('preview_type', ''),
+                            preview_data.get('preview_amount', 0),
+                            preview_data.get('preview_destination_amount', 0),
+                            preview_data.get('preview_main_category', ''),
+                            preview_data.get('preview_sub_category', ''),
+                            preview_data.get('preview_source_account_id'),
+                            preview_data.get('preview_destination_account_id'),
+                            preview_data.get('preview_counterparty', ''),
+                            preview_data.get('preview_payment_method', ''),
+                            preview_data.get('preview_description', ''),
+                            1,
+                            dedup_type,
+                            source_ids_str,
+                            now
+                        )
+                    )
+                    inserted_count += 1
+
+                except Exception as e:
+                    self.logger.error(f"[批量插入预览失败] {e}")
+
+            await conn.commit()
+
+        self.logger.info(f"[批量预览账单插入完成] session={session_id}, "
+                         f"成功={inserted_count}/{len(preview_list)}")
+        return inserted_count
+
+    @log_method
+    async def get_preview_by_session(
+        self,
+        session_id: str,
+        selected_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        获取会话的预览账单数据
+
+        Args:
+            session_id: 会话唯一标识
+            selected_only: 是否只获取选中的账单
+
+        Returns:
+            List[Dict]: 预览账单列表
+        """
+        conn = await self._get_connection()
+
+        query = "SELECT * FROM bills_preview WHERE session_id = ?"
+        params = [session_id]
+
+        if selected_only:
+            query += " AND preview_selected = 1"
+
+        query += " ORDER BY preview_date ASC"
+
+        self.logger.debug(f"[获取预览账单] session={session_id}, selected_only={selected_only}")
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+            previews = [dict(row) for row in rows]
+
+        self.logger.info(f"[预览账单获取完成] session={session_id}, count={len(previews)}")
+        return previews
+
+    @log_method
+    async def update_preview_selection(
+        self,
+        preview_ids: List[int],
+        selected: bool
+    ) -> int:
+        """
+        更新预览账单选中状态
+
+        Args:
+            preview_ids: 预览账单ID列表
+            selected: 是否选中
+
+        Returns:
+            int: 更新的记录数
+        """
+        if not preview_ids:
+            return 0
+
+        conn = await self._get_connection()
+        selected_value = 1 if selected else 0
+
+        self.logger.info(f"[更新预览选中状态] ids={preview_ids}, selected={selected}")
+
+        placeholders = ','.join(['?' for _ in preview_ids])
+        await conn.execute(
+            f"UPDATE bills_preview SET preview_selected = ? WHERE id IN ({placeholders})",
+            tuple([selected_value] + preview_ids)
+        )
+
+        await conn.commit()
+        self.logger.info(f"[预览选中状态更新完成] count={len(preview_ids)}")
+        return len(preview_ids)
+
+    @log_method
+    async def reset_session_preview_selection(
+        self,
+        session_id: str
+    ) -> int:
+        """
+        重置会话中所有预览账单的选中状态为未选中
+
+        在阶段3确认导入前调用，确保只有前端传入的选中账单会被标记为选中。
+
+        Args:
+            session_id: 会话唯一标识
+
+        Returns:
+            int: 更新的记录数
+        """
+        conn = await self._get_connection()
+
+        self.logger.info(f"[重置会话预览选中状态] session={session_id}")
+
+        cursor = await conn.execute(
+            "UPDATE bills_preview SET preview_selected = 0 WHERE session_id = ?",
+            (session_id,)
+        )
+        updated_count = cursor.rowcount
+
+        await conn.commit()
+        self.logger.info(f"[会话预览选中状态重置完成] session={session_id}, count={updated_count}")
+        return updated_count
+
+    @log_method
+    async def update_preview_bill(
+        self,
+        preview_id: int,
+        update_data: Dict[str, Any]
+    ) -> bool:
+        """
+        更新预览账单数据
+
+        Args:
+            preview_id: 预览账单ID
+            update_data: 更新数据字典
+
+        Returns:
+            bool: 是否成功
+        """
+        if not update_data:
+            return False
+
+        conn = await self._get_connection()
+
+        # 构建动态更新语句
+        update_parts = []
+        params = []
+
+        field_mapping = {
+            'preview_date': 'preview_date',
+            'preview_type': 'preview_type',
+            'preview_amount': 'preview_amount',
+            'preview_destination_amount': 'preview_destination_amount',
+            'preview_main_category': 'preview_main_category',
+            'preview_sub_category': 'preview_sub_category',
+            'preview_source_account_id': 'preview_source_account_id',
+            'preview_destination_account_id': 'preview_destination_account_id',
+            'preview_counterparty': 'preview_counterparty',
+            'preview_payment_method': 'preview_payment_method',
+            'preview_description': 'preview_description',
+            'preview_selected': 'preview_selected',
+        }
+
+        for key, column in field_mapping.items():
+            if key in update_data:
+                update_parts.append(f"{column} = ?")
+                params.append(update_data[key])
+
+        if not update_parts:
+            return False
+
+        params.append(preview_id)
+
+        self.logger.debug(f"[更新预览账单] id={preview_id}, fields={list(update_data.keys())}")
+
+        await conn.execute(
+            f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?",
+            tuple(params)
+        )
+
+        await conn.commit()
+        self.logger.info(f"[预览账单更新成功] id={preview_id}")
+        return True
+
+    @log_method
+    async def update_preview_bills_batch(
+        self,
+        session_id: str,
+        updates: List[Dict[str, Any]],
+        user_id: int = 1
+    ) -> int:
+        """
+        批量更新预览账单数据（阶段3用户编辑后保存）
+
+        Args:
+            session_id: 会话唯一标识
+            updates: 更新数据列表，每项包含id和需要更新的字段
+            user_id: 用户ID
+
+        Returns:
+            int: 成功更新的数量
+        """
+        if not updates:
+            return 0
+
+        conn = await self._get_connection()
+        updated_count = 0
+
+        self.logger.info(f"[批量更新预览] session={session_id}, "
+                         f"count={len(updates)}, user_id={user_id}")
+
+        for update_item in updates:
+            try:
+                preview_id = update_item.get('id')
+                if not preview_id:
+                    continue
+
+                # 构建动态更新语句
+                update_parts = []
+                params = []
+
+                field_mapping = {
+                    'preview_type': 'preview_type',
+                    'preview_amount': 'preview_amount',
+                    'preview_destination_amount': 'preview_destination_amount',
+                    'preview_source_account_id': 'preview_source_account_id',
+                    'preview_destination_account_id': 'preview_destination_account_id',
+                    'category_id': None,  # 需要特殊处理
+                    'selected': 'preview_selected',
+                }
+
+                for key, column in field_mapping.items():
+                    if key in update_item and update_item[key] is not None:
+                        if key == 'category_id':
+                            # 如果提供了category_id，需要查询对应的分类名称
+                            cat_id = update_item[key]
+                            if cat_id:
+                                category = await self.get_category_by_id(cat_id)
+                                if category:
+                                    update_parts.append("preview_main_category = ?")
+                                    params.append(category.get('main_category', ''))
+                                    update_parts.append("preview_sub_category = ?")
+                                    params.append(category.get('sub_category', ''))
+                        elif key == 'selected':
+                            update_parts.append("preview_selected = ?")
+                            params.append(1 if update_item[key] else 0)
+                        else:
+                            update_parts.append(f"{column} = ?")
+                            params.append(update_item[key])
+
+                if update_parts:
+                    params.append(preview_id)
+                    await conn.execute(
+                        f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?",
+                        tuple(params)
+                    )
+                    updated_count += 1
+
+            except Exception as e:
+                self.logger.error(f"[批量更新预览失败] id={update_item.get('id')}, error={e}")
+
+        await conn.commit()
+        self.logger.info(f"[批量更新预览完成] updated={updated_count}/{len(updates)}")
+        return updated_count
+
+    @log_method
+    async def confirm_preview_to_bills(
+        self,
+        session_id: str,
+        user_id: int = 1
+    ) -> Dict[str, Any]:
+        """
+        将选中的预览账单确认写入正式账单表（阶段3）
+
+        Args:
+            session_id: 会话唯一标识
+            user_id: 用户ID
+
+        Returns:
+            Dict: 确认结果，包含confirmed_count, skipped_count, errors
+        """
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        batch_id = datetime.now().strftime('%Y%m%d%H%M%S')
+
+        self.logger.info(f"[确认预览账单] session={session_id}, user_id={user_id}, "
+                         f"batch_id={batch_id}")
+
+        result = {
+            'confirmed_count': 0,
+            'skipped_count': 0,
+            'duplicate_count': 0,
+            'errors': []
+        }
+
+        # 获取选中的预览账单
+        previews = await self.get_preview_by_session(session_id, selected_only=True)
+
+        self.logger.info(f"[确认预览账单] 选中 {len(previews)} 条待确认")
+
+        for preview in previews:
+            try:
+                # 准备账单数据
+                bill_type = preview.get('preview_type', '')
+                amount = abs(float(preview.get('preview_amount', 0)))
+
+                # 根据类型确定金额符号
+                if bill_type in ['支出', 'expense']:
+                    amount = -abs(amount)
+                elif bill_type in ['收入', 'income']:
+                    amount = abs(amount)
+                elif bill_type in ['转账', 'transfer', '投资', 'investment']:
+                    amount = abs(amount)
+
+                # 计算哈希用于去重
+                bill_data = {
+                    'date': preview.get('preview_date', ''),
+                    'type': bill_type,
+                    'amount': amount,
+                    'counterparty': preview.get('preview_counterparty', ''),
+                    'description': preview.get('preview_description', '')
+                }
+                bill_hash = self._calculate_hash(bill_data)
+
+                # 插入正式账单表
+                await conn.execute(
+                    """
+                    INSERT INTO bills (
+                        user_id, date, type, amount, counterparty, description,
+                        payment_method, main_category, sub_category,
+                        source_account_id, destination_account_id, destination_amount,
+                        batch_id, hash, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        preview.get('preview_date', ''),
+                        bill_type,
+                        amount,
+                        preview.get('preview_counterparty', ''),
+                        preview.get('preview_description', ''),
+                        preview.get('preview_payment_method', ''),
+                        preview.get('preview_main_category', ''),
+                        preview.get('preview_sub_category', ''),
+                        preview.get('preview_source_account_id'),
+                        preview.get('preview_destination_account_id'),
+                        preview.get('preview_destination_amount', 0),
+                        batch_id,
+                        bill_hash,
+                        now,
+                        now
+                    )
+                )
+                result['confirmed_count'] += 1
+
+            except sqlite3.IntegrityError:
+                # 哈希重复，跳过
+                result['duplicate_count'] += 1
+                self.logger.debug(f"[确认跳过重复] date={preview.get('preview_date')}")
+
+            except Exception as e:
+                result['errors'].append(str(e))
+                self.logger.error(f"[确认失败] {e}")
+
+        await conn.commit()
+
+        # 更新会话状态
+        await self.update_import_session_status(
+            session_id,
+            'completed',
+            total_confirmed=result['confirmed_count']
+        )
+
+        self.logger.info(f"[确认完成] session={session_id}, confirmed={result['confirmed_count']}, "
+                         f"duplicate={result['duplicate_count']}, errors={len(result['errors'])}")
+
+        return result
+
+    @log_method
+    async def clear_session_data(self, session_id: str, user_id: int = None) -> Dict[str, int]:
+        """
+        清空会话相关的临时数据
+
+        Args:
+            session_id: 会话唯一标识
+            user_id: 用户ID (可选，用于安全验证)
+
+        Returns:
+            Dict: 删除统计，包含parser_count, preview_count
+        """
+        conn = await self._get_connection()
+
+        self.logger.info(f"[清空会话数据] session={session_id}, user_id={user_id}")
+
+        result = {
+            'parser_count': 0,
+            'preview_count': 0
+        }
+
+        # 删除解析模板数据
+        cursor = await conn.execute(
+            "DELETE FROM bills_parser_template WHERE session_id = ?",
+            (session_id,)
+        )
+        result['parser_count'] = cursor.rowcount
+
+        # 删除预览数据
+        cursor = await conn.execute(
+            "DELETE FROM bills_preview WHERE session_id = ?",
+            (session_id,)
+        )
+        result['preview_count'] = cursor.rowcount
+
+        await conn.commit()
+
+        self.logger.info(f"[会话数据清空完成] session={session_id}, "
+                         f"parser={result['parser_count']}, preview={result['preview_count']}")
+
+        return result
+
+    @log_method
+    async def get_unprocessed_templates_for_dedup(
+        self,
+        session_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取未处理的解析模板用于去重
+
+        按日期排序，便于时间窗口匹配
+
+        Args:
+            session_id: 会话唯一标识
+
+        Returns:
+            List[Dict]: 未处理的模板列表
+        """
+        conn = await self._get_connection()
+
+        self.logger.debug(f"[获取未处理模板] session={session_id}")
+
+        async with conn.execute(
+            """
+            SELECT * FROM bills_parser_template
+            WHERE session_id = ? AND parser_is_processed = '0'
+            ORDER BY parser_date ASC, id ASC
+            """,
+            (session_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            templates = [dict(row) for row in rows]
+
+        self.logger.info(f"[未处理模板] session={session_id}, count={len(templates)}")
+        return templates
+
+    @log_method
+    async def get_existing_bills_for_dedup(
+        self,
+        user_id: int,
+        start_date: str,
+        end_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取指定日期范围内的已有账单用于数据库去重
+
+        Args:
+            user_id: 用户ID
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+
+        Returns:
+            List[Dict]: 已有账单列表
+        """
+        conn = await self._get_connection()
+
+        self.logger.debug(f"[获取已有账单] user_id={user_id}, "
+                          f"range={start_date} ~ {end_date}")
+
+        async with conn.execute(
+            """
+            SELECT id, date, type, amount, counterparty, description,
+                   payment_method, main_category, sub_category,
+                   source_account_id, destination_account_id
+            FROM bills
+            WHERE user_id = ?
+              AND date >= ?
+              AND date <= ?
+            ORDER BY date ASC
+            """,
+            (user_id, start_date, end_date + ' 23:59:59')
+        ) as cursor:
+            rows = await cursor.fetchall()
+            bills = [dict(row) for row in rows]
+
+        self.logger.info(f"[已有账单] user_id={user_id}, count={len(bills)}")
+        return bills
+
+    @log_method
+    async def batch_update_preview_classification(
+        self,
+        updates: List[Dict[str, Any]]
+    ) -> int:
+        """
+        v6.55: 批量更新预览账单的分类和账户信息
+
+        用于重新分类功能，仅更新分类和账户字段
+
+        Args:
+            updates: 更新数据列表，每项包含:
+                - id: 预览记录ID
+                - preview_main_category: 主分类
+                - preview_sub_category: 子分类
+                - preview_source_account_id: 源账户ID
+                - preview_destination_account_id: 目标账户ID
+
+        Returns:
+            int: 成功更新的数量
+        """
+        if not updates:
+            return 0
+
+        conn = await self._get_connection()
+        updated_count = 0
+
+        self.logger.info(f"[重新分类-批量更新] count={len(updates)}")
+
+        for update_item in updates:
+            try:
+                preview_id = update_item.get('id')
+                if not preview_id:
+                    continue
+
+                await conn.execute(
+                    """
+                    UPDATE bills_preview SET
+                        preview_main_category = ?,
+                        preview_sub_category = ?,
+                        preview_source_account_id = ?,
+                        preview_destination_account_id = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        update_item.get('preview_main_category', ''),
+                        update_item.get('preview_sub_category', ''),
+                        update_item.get('preview_source_account_id'),
+                        update_item.get('preview_destination_account_id'),
+                        preview_id
+                    )
+                )
+                updated_count += 1
+
+            except Exception as e:
+                self.logger.error(f"[重新分类-更新失败] id={update_item.get('id')}, error={e}")
+
+        await conn.commit()
+        self.logger.info(f"[重新分类-批量更新完成] updated={updated_count}/{len(updates)}")
+        return updated_count
+
+
 

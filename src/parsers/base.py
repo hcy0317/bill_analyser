@@ -1,10 +1,22 @@
 """
 Parser Base Module - 账单解析器基类
 
-定义账单解析器的抽象接口。
+定义账单解析器的抽象接口和标准化输出格式。
+
+标准账单格式 (StandardBill):
+    - date: 交易时间 (str, YYYY-MM-DD HH:MM:SS格式, 必须包含时分秒)
+    - amount: 金额 (float, 带正负号: 支出为负, 收入为正)
+    - type: 类型 (str, 收入/支出/转账/投资/退款)
+    - description: 描述聚合字段 (str, 聚合商品说明/交易对方/对方账号/备注/交易摘要等)
+    - source_account_id: 来源账户ID (str, 解析器标识如 'wechat'/'alipay'/'icbc' 等)
+    - counterparty: 交易对方 (str, 可为空)
+    - payment_method: 支付方式 (str, 可为空)
+    - original_type: 原始交易类型 (str, 保留原始值用于智能识别)
+    - original_category: 原始分类 (str, 如支付宝的"投资理财"等)
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any
@@ -12,8 +24,90 @@ from typing import Dict, List, Any
 from ..utils.logger import get_logger, log_method
 
 
+@dataclass
+class StandardBill:
+    """标准账单数据结构
+
+    所有解析器的输出都必须转换为这个标准格式，
+    便于后续的去重、分类和导入处理。
+    """
+    # 必需字段
+    date: str  # YYYY-MM-DD HH:MM:SS 格式
+    amount: float  # 带正负号：支出为负，收入为正
+    type: str  # 收入/支出/转账/投资/退款
+    description: str  # 聚合描述字段
+    source_account_id: str  # 解析器标识: wechat/alipay/icbc/cmbc/abc/ccb
+
+    # 可选字段
+    counterparty: str = ""  # 交易对方
+    payment_method: str = ""  # 支付方式
+    original_type: str = ""  # 原始交易类型
+    original_category: str = ""  # 原始分类
+    transaction_id: str = ""  # 原始交易单号
+    merchant_id: str = ""  # 商户订单号
+    status: str = ""  # 交易状态
+
+    # 分类字段 (由分类引擎填充)
+    main_category: str = ""
+    sub_category: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            'date': self.date,
+            'amount': self.amount,
+            'type': self.type,
+            'description': self.description,
+            'source_account_id': self.source_account_id,
+            'counterparty': self.counterparty,
+            'payment_method': self.payment_method,
+            'original_type': self.original_type,
+            'original_category': self.original_category,
+            'transaction_id': self.transaction_id,
+            'merchant_id': self.merchant_id,
+            'status': self.status,
+            'main_category': self.main_category,
+            'sub_category': self.sub_category,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StandardBill':
+        """从字典创建实例"""
+        return cls(
+            date=data.get('date', ''),
+            amount=float(data.get('amount', 0)),
+            type=data.get('type', '支出'),
+            description=data.get('description', ''),
+            source_account_id=data.get('source_account_id', ''),
+            counterparty=data.get('counterparty', ''),
+            payment_method=data.get('payment_method', ''),
+            original_type=data.get('original_type', ''),
+            original_category=data.get('original_category', ''),
+            transaction_id=data.get('transaction_id', ''),
+            merchant_id=data.get('merchant_id', ''),
+            status=data.get('status', ''),
+            main_category=data.get('main_category', ''),
+            sub_category=data.get('sub_category', ''),
+        )
+
+
 class ParserBase(ABC):
-    """账单解析器抽象基类"""
+    """账单解析器抽象基类
+
+    所有银行/支付平台的解析器都必须继承此类并实现：
+    1. can_parse(): 判断是否能解析指定文件
+    2. parse(): 解析文件并返回标准格式账单列表
+
+    解析器需要将各平台的字段映射为标准格式，特别注意：
+    - date: 必须包含时分秒
+    - amount: 支出为负数，收入为正数
+    - description: 聚合多个字段便于关键词匹配
+    - source_account_id: 使用解析器标识便于账户匹配
+    """
+
+    # 解析器标识符，子类必须覆盖
+    PARSER_ID: str = "unknown"
+    PARSER_NAME: str = "未知解析器"
 
     def __init__(self):
         """初始化解析器"""
@@ -21,7 +115,6 @@ class ParserBase(ABC):
         self.supported_extensions = ['.csv', '.xlsx', '.xls']
 
     @abstractmethod
-    @log_method
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
         """
         解析账单文件
@@ -30,16 +123,16 @@ class ParserBase(ABC):
             file_path: 账单文件路径
 
         Returns:
-            List[Dict]: 账单列表，每个账单包含以下字段:
-                - trade_time: 交易时间 (str, YYYY-MM-DD HH:MM:SS格式)
-                - type: 类型 (收入/支出/转账/退款)
-                - main_category: 主分类 (str, 可为空)
-                - sub_category: 子分类 (str, 可为空)
-                - amount: 金额 (float)
-                - account: 账户/来源 (str, 如"微信支付"、"支付宝"、"工商银行"等)
-                - description: 描述/备注 (str)
+            List[Dict]: 标准格式账单列表，每个账单包含以下字段:
+                - date: 交易时间 (str, YYYY-MM-DD HH:MM:SS格式)
+                - amount: 金额 (float, 支出为负, 收入为正)
+                - type: 类型 (收入/支出/转账/投资/退款)
+                - description: 描述聚合字段 (str, 聚合多个信息字段)
+                - source_account_id: 来源账户标识 (str, 如 'wechat'/'alipay')
                 - counterparty: 交易对方 (str, 可为空)
                 - payment_method: 支付方式 (str, 可为空)
+                - original_type: 原始交易类型 (str)
+                - original_category: 原始分类 (str)
         """
         raise NotImplementedError
 
@@ -164,6 +257,9 @@ class ParserBase(ABC):
             '退款': '退款',
             '退钱': '退款',
             '不计收支': '转账',
+            '投资理财': '投资',
+            '投资': '投资',
+            '理财': '投资',
         }
 
         type_str = str(type_str).strip()
@@ -176,80 +272,151 @@ class ParserBase(ABC):
         self.logger.debug(f"未识别的交易类型: {type_str}")
         return '支出'
 
+    def aggregate_description(self, bill: Dict[str, Any]) -> str:
+        """
+        聚合账单的多个字段生成统一的description
+
+        聚合字段包括：商品说明、交易对方、对方账号、备注、交易摘要等
+        便于后续关键词匹配分类
+
+        Args:
+            bill: 账单字典
+
+        Returns:
+            str: 聚合后的描述字符串
+        """
+        # 可能包含有用信息的字段列表
+        description_fields = [
+            'description',
+            'counterparty',
+            'goods',  # 商品
+            'product',  # 商品说明
+            'remark',  # 备注
+            'note',  # 备注
+            'memo',  # 备注
+            'abstract',  # 交易摘要
+            'summary',  # 摘要
+            'payment_method',  # 支付方式
+            'original_category',  # 原始分类
+            'merchant',  # 商户
+            'shop',  # 店铺
+            'transaction_type',  # 交易类型
+            'opponent_account',  # 对方账号
+        ]
+
+        parts = []
+        seen = set()  # 避免重复内容
+
+        for field in description_fields:
+            value = bill.get(field, '')
+            if value and str(value).strip():
+                cleaned = str(value).strip()
+                # 过滤无意义的值
+                if cleaned not in ['/', '-', '无', '空', '', 'nan', 'None']:
+                    if cleaned not in seen:
+                        parts.append(cleaned)
+                        seen.add(cleaned)
+
+        return ' | '.join(parts) if parts else ''
+
     @log_method
     def post_process(self, bills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        后处理账单数据，统一字段格式
+        后处理账单数据，转换为标准格式
+
+        标准格式字段:
+        - date: 交易时间 (YYYY-MM-DD HH:MM:SS)
+        - amount: 金额 (支出为负数, 收入为正数)
+        - type: 类型 (收入/支出/转账/投资/退款)
+        - description: 聚合描述 (商品+对方+备注等)
+        -   : 解析器标识
+        - counterparty: 交易对方
+        - payment_method: 支付方式
+        - original_type: 原始交易类型
+        - original_category: 原始分类
 
         Args:
-            bills: 原始账单列表（支持旧格式字段）
+            bills: 原始账单列表
 
         Returns:
-            List[Dict]: 处理后的账单列表（统一为新格式字段）
+            List[Dict]: 标准格式账单列表
         """
         processed_bills = []
 
         for bill in bills:
             try:
-                # 创建新格式的账单对象
+                # 创建标准格式账单
                 processed_bill = {}
 
-                # 1. 处理交易时间字段
-                # 旧字段: date, 新字段: trade_time
-                time_value = bill.get('trade_time') or bill.get('date', '')
+                # 1. 处理交易时间
+                time_value = bill.get('date') or bill.get('trade_time', '')
                 if time_value:
-                    processed_bill['trade_time'] = self.normalize_date(time_value)
+                    processed_bill['date'] = self.normalize_date(time_value)
                 else:
-                    processed_bill['trade_time'] = ''
+                    self.logger.warning("账单缺少交易时间")
+                    continue
 
-                # 2. 处理交易类型字段
-                # 保持字段名: type
+                # 2. 处理交易类型
+                # v6.36规则: 在智能配对成功之前，所有账单类型只能是收入或支出
+                # 投资/转账类型只在SmartDeduplicationEngine配对成功后设置
                 type_value = bill.get('type', '')
+                original_type = type_value
+                original_category = bill.get('original_category', '') or bill.get('category', '')
+
+                # 类型规范化，但不自动设置为投资（即使original_category包含投资理财）
                 if type_value:
-                    processed_bill['type'] = self.normalize_type(type_value)
+                    normalized_type = self.normalize_type(type_value)
+                    # 如果normalize_type返回投资/转账，改为根据金额符号判断收入/支出
+                    if normalized_type in ['投资', '转账']:
+                        # 保持原始金额符号判断: 正数=收入, 负数=支出
+                        amount_value = bill.get('amount', 0)
+                        amount = self.normalize_amount(amount_value)
+                        processed_bill['type'] = '收入' if amount >= 0 else '支出'
+                    else:
+                        processed_bill['type'] = normalized_type
                 else:
-                    processed_bill['type'] = '支出'  # 默认为支出
+                    processed_bill['type'] = '支出'
 
-                # 3. 处理金额字段
-                # 保持字段名: amount
+                # 3. 处理金额 - 统一为带符号的数值
                 amount_value = bill.get('amount', 0)
-                processed_bill['amount'] = self.normalize_amount(amount_value)
+                amount = self.normalize_amount(amount_value)
 
-                # 4. 处理账户字段
-                # 旧字段: channel, 新字段: account
-                account_value = bill.get('account') or bill.get('channel', '')
-                processed_bill['account'] = str(account_value) if account_value else ''
+                # 根据类型调整金额符号
+                if processed_bill['type'] == '支出':
+                    processed_bill['amount'] = -abs(amount)  # 支出为负
+                elif processed_bill['type'] in ['收入', '退款']:
+                    processed_bill['amount'] = abs(amount)  # 收入为正
+                else:
+                    # 转账/投资保持原值
+                    processed_bill['amount'] = amount
 
-                # 5. 处理描述字段
-                # 保持字段名: description
-                processed_bill['description'] = str(bill.get('description', ''))
+                # 4. 处理来源账户 - 使用解析器标识
+                processed_bill['source_account_id'] = self.PARSER_ID
 
-                # 6. 处理交易对方字段
-                # 保持字段名: counterparty
+                # 5. 聚合描述字段
+                processed_bill['description'] = self.aggregate_description(bill)
+
+                # 6. 保留原始字段
                 processed_bill['counterparty'] = str(bill.get('counterparty', ''))
+                processed_bill['payment_method'] = str(bill.get('payment_method', '') or
+                                                       bill.get('channel', ''))
+                processed_bill['original_type'] = original_type
+                processed_bill['original_category'] = original_category
+                processed_bill['transaction_id'] = str(bill.get('transaction_id', '') or
+                                                       bill.get('order_id', ''))
+                processed_bill['merchant_id'] = str(bill.get('merchant_id', ''))
+                processed_bill['status'] = str(bill.get('status', ''))
 
-                # 7. 处理分类字段（解析器不负责分类，后端会通过CategoryEngine处理）
-                # 保持为空，由后端业务逻辑填充
-                processed_bill['main_category'] = bill.get('main_category', '')
-                processed_bill['sub_category'] = bill.get('sub_category', '')
-
-                # 8. 处理支付方式字段
-                # 新增字段: payment_method
-                processed_bill['payment_method'] = bill.get('payment_method', '')
+                # 7. 分类字段初始为空
+                processed_bill['main_category'] = ''
+                processed_bill['sub_category'] = ''
 
                 # 验证必需字段
-                required_fields = ['trade_time', 'type', 'amount', 'account']
-                if all(field in processed_bill for field in required_fields):
-                    # 确保所有字段都存在（即使为空）
-                    for field in ['description', 'counterparty', 'main_category',
-                                  'sub_category', 'payment_method']:
-                        if field not in processed_bill:
-                            processed_bill[field] = ''
-
+                if processed_bill['date'] and processed_bill['amount'] != 0:
                     processed_bills.append(processed_bill)
                 else:
-                    missing = [f for f in required_fields if f not in processed_bill]
-                    self.logger.warning(f"账单缺少必需字段: {missing}")
+                    self.logger.warning(f"账单数据不完整: date={processed_bill.get('date')}, "
+                                       f"amount={processed_bill.get('amount')}")
 
             except Exception as e:  # pylint: disable=broad-except
                 self.logger.error(f"处理账单时出错: {e}")

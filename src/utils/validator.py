@@ -17,8 +17,8 @@ class BillValidator:
     # 必需字段
     REQUIRED_FIELDS = ['date', 'type', 'amount', 'counterparty', 'description']
 
-    # 交易类型
-    VALID_TYPES = ['收入', '支出', '转账', '退款']
+    # 交易类型（包含投资类型）
+    VALID_TYPES = ['收入', '支出', '转账', '退款', '投资']
 
     def __init__(self):
         """初始化验证器"""
@@ -141,9 +141,8 @@ class BillValidator:
         if not isinstance(counterparty_value, str):
             return False, f"对方信息必须是字符串: {type(counterparty_value).__name__}"
 
-        if len(counterparty_value.strip()) == 0:
-            return False, "对方信息不能为空"
-
+        # 允许空的对方信息（某些交易如投资理财可能没有明确的对方）
+        # 长度检查
         if len(counterparty_value) > 200:
             return False, f"对方信息过长: {len(counterparty_value)} 字符（最多200）"
 

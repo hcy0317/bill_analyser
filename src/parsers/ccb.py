@@ -2,10 +2,17 @@
 CCB Parser - 建设银行账单解析器
 
 解析中国建设银行账单导出的 Excel 文件。
+
+输出标准格式:
+- date: 交易时间 (YYYY-MM-DD HH:MM:SS)
+- amount: 金额 (支出为负, 收入为正)
+- type: 类型 (收入/支出)
+- description: 聚合描述
+- source_account_id: 'ccb'
 """
 
 import pandas as pd
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from .base import ParserBase
 from ..utils.logger import log_method
@@ -14,10 +21,15 @@ from ..utils.logger import log_method
 class CCBParser(ParserBase):
     """建设银行账单解析器"""
 
+    # 解析器标识符
+    PARSER_ID = "ccb"
+    PARSER_NAME = "建设银行"
+
     def __init__(self):
         """初始化"""
         super().__init__()
         self.supported_extensions = ['.xlsx', '.xls']
+        self.logger.info("建设银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:

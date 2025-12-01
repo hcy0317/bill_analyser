@@ -5,11 +5,18 @@ WeChat Parser - 微信账单解析器
 支持两种格式：
 1. CSV格式（旧版导出）
 2. XLSX格式（新版导出，从第17行开始为列名）
+
+输出标准格式:
+- date: 交易时间 (YYYY-MM-DD HH:MM:SS)
+- amount: 金额 (支出为负, 收入为正)
+- type: 类型 (收入/支出/转账/退款)
+- description: 聚合描述
+- source_account_id: 'wechat'
 """
 
 import csv
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import openpyxl
 
 from .base import ParserBase
@@ -18,12 +25,17 @@ from ..utils.logger import log_method
 
 class WeChatParser(ParserBase):
     """微信账单解析器"""
+    
+    # 解析器标识符
+    PARSER_ID = "wechat"
+    PARSER_NAME = "微信支付"
 
     def __init__(self):
         """初始化"""
         super().__init__()
         self.supported_extensions = ['.csv', '.xlsx']
-        self.logger.info("微信账单解析器已初始化，支持格式: %s", self.supported_extensions)
+        self.logger.info("微信账单解析器已初始化 [ID=%s], 支持格式: %s",
+                        self.PARSER_ID, self.supported_extensions)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:
@@ -32,10 +44,9 @@ class WeChatParser(ParserBase):
 
         if file_ext == '.csv':
             return self._can_parse_csv(file_path)
-        elif file_ext == '.xlsx':
+        if file_ext == '.xlsx':
             return self._can_parse_xlsx(file_path)
-        else:
-            return False
+        return False
 
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV文件是否为微信账单"""
@@ -64,6 +75,8 @@ class WeChatParser(ParserBase):
     @log_method
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
         """解析微信账单"""
+        self.logger.info("[解析开始] 文件: %s", file_path)
+        
         if not self.validate_file(file_path):
             return []
 
@@ -71,11 +84,11 @@ class WeChatParser(ParserBase):
 
         if file_ext == '.csv':
             return self._parse_csv(file_path)
-        elif file_ext == '.xlsx':
+        if file_ext == '.xlsx':
             return self._parse_xlsx(file_path)
-        else:
-            self.logger.error("不支持的文件格式: %s", file_ext)
-            return []
+        
+        self.logger.error("不支持的文件格式: %s", file_ext)
+        return []
 
     @log_method
     def _parse_csv(self, file_path: str) -> List[Dict[str, Any]]:
@@ -113,7 +126,7 @@ class WeChatParser(ParserBase):
                     except Exception as e:  # pylint: disable=broad-except
                         self.logger.error("解析CSV行数据失败: %s", e)
 
-            self.logger.info("CSV微信账单解析完成: %d 条", len(bills))
+            self.logger.info("[解析完成] CSV微信账单: %d 条", len(bills))
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("解析CSV微信账单失败: %s", e)
@@ -148,7 +161,7 @@ class WeChatParser(ParserBase):
 
             # 创建列名到索引的映射
             column_map = {col: i for i, col in enumerate(header_row) if col}
-            self.logger.info("列名映射: %s", column_map)
+            self.logger.debug("列名映射: %s", column_map)
 
             # 解析数据行
             for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
@@ -169,7 +182,7 @@ class WeChatParser(ParserBase):
                     self.logger.error("解析XLSX行数据失败: %s, 行数据: %s", e, row)
 
             wb.close()
-            self.logger.info("XLSX微信账单解析完成: %d 条", len(bills))
+            self.logger.info("[解析完成] XLSX微信账单: %d 条", len(bills))
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("解析XLSX微信账单失败: %s", e)
@@ -177,18 +190,26 @@ class WeChatParser(ParserBase):
 
         return self.post_process(bills)
 
-    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Dict[str, Any]:
+    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """从CSV行数据提取账单信息"""
+        # 提取所有可能有用的字段
         return {
-            'date': row.get('交易时间', ''),  # 临时使用date，post_process会转为trade_time
+            'date': row.get('交易时间', ''),
             'type': row.get('收/支', ''),
             'counterparty': row.get('交易对方', ''),
             'description': row.get('商品', ''),
+            'goods': row.get('商品', ''),
             'amount': row.get('金额(元)', '0'),
-            'channel': '微信支付'  # 临时使用channel，post_process会转为account
+            'payment_method': row.get('支付方式', ''),
+            'status': row.get('当前状态', ''),
+            'transaction_id': row.get('交易单号', ''),
+            'merchant_id': row.get('商户单号', ''),
+            'remark': row.get('备注', ''),
+            'original_category': row.get('交易类型', ''),
         }
 
-    def _extract_bill_from_xlsx_row(self, row: tuple, column_map: Dict[str, int]) -> Dict[str, Any]:
+    def _extract_bill_from_xlsx_row(self, row: tuple,
+                                    column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
         """从XLSX行数据提取账单信息"""
         try:
             # 获取列值的辅助函数
@@ -204,16 +225,19 @@ class WeChatParser(ParserBase):
             if amount.startswith('¥'):
                 amount = amount[1:]
 
-            # 转换收支类型
-            trans_type = get_cell('收/支')
-
             return {
-                'date': get_cell('交易时间'),  # 临时使用date，post_process会转为trade_time
-                'type': trans_type,
+                'date': get_cell('交易时间'),
+                'type': get_cell('收/支'),
                 'counterparty': get_cell('交易对方'),
                 'description': get_cell('商品'),
+                'goods': get_cell('商品'),
                 'amount': amount,
-                'channel': '微信支付'  # 临时使用channel，post_process会转为account
+                'payment_method': get_cell('支付方式'),
+                'status': get_cell('当前状态'),
+                'transaction_id': get_cell('交易单号'),
+                'merchant_id': get_cell('商户单号'),
+                'remark': get_cell('备注'),
+                'original_category': get_cell('交易类型'),
             }
 
         except Exception as e:  # pylint: disable=broad-except

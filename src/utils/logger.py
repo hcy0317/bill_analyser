@@ -1,8 +1,13 @@
 """
 Logger Module - 异步日志模块
 
-提供异步日志记录功能，支持自动滚动清理和统一的日志格式。
+提供异步日志记录功能，支持按日期自动滚动和统一的日志格式。
 日志格式：时间戳 | 线程名 | 级别 | 类名.方法名 | 消息
+
+v6.47 更新：
+- 改为按日期滚动，每天一个日志文件
+- 不再按文件大小切割
+- 保留7天自动清理功能
 """
 
 import asyncio
@@ -11,7 +16,7 @@ import threading
 import queue
 import sys
 from datetime import datetime, timedelta
-from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
+from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 from typing import Optional
 import functools
@@ -29,8 +34,88 @@ class SafeStreamHandler(logging.StreamHandler):
             # 忽略 I/O operation on closed file 错误
             pass
 
+
+class DailyFileHandler(logging.FileHandler):
+    """
+    按日期滚动的日志处理器
+
+    v6.47版本：每天一个日志文件，不按大小切割
+
+    特点：
+    1. 日志文件名格式: bill_analyser_YYYYMMDD.log
+    2. 每天午夜自动切换到新文件
+    3. 不进行大小切割，一天的日志全部保存在一个文件中
+    4. Windows安全：避免多线程/多进程环境中的文件锁定问题
+    """
+
+    def __init__(self, log_dir: Path, prefix: str = 'bill_analyser',
+                 encoding: str = 'utf-8'):
+        """初始化处理器
+
+        Args:
+            log_dir: 日志目录
+            prefix: 日志文件名前缀
+            encoding: 文件编码
+        """
+        self.log_dir = log_dir
+        self.prefix = prefix
+        self._current_date = datetime.now().strftime('%Y%m%d')
+        self._file_lock = threading.Lock()
+
+        # 初始化当前日期的日志文件
+        log_file = self._get_log_file_path()
+        super().__init__(log_file, mode='a', encoding=encoding, delay=False)
+
+    def _get_log_file_path(self) -> Path:
+        """获取当前日期的日志文件路径"""
+        return self.log_dir / f"{self.prefix}_{self._current_date}.log"
+
+    def _check_date_rollover(self) -> bool:
+        """检查是否需要切换到新日期的日志文件"""
+        current_date = datetime.now().strftime('%Y%m%d')
+        if current_date != self._current_date:
+            self._current_date = current_date
+            return True
+        return False
+
+    def _do_rollover(self):
+        """执行日期滚动（切换到新日期的日志文件）"""
+        with self._file_lock:
+            # 关闭当前流
+            if self.stream:
+                try:
+                    self.stream.flush()
+                    self.stream.close()
+                except (OSError, ValueError):
+                    pass
+                self.stream = None
+
+            # 更新文件路径并重新打开
+            self.baseFilename = str(self._get_log_file_path())
+            self.stream = self._open()
+
+    def emit(self, record):
+        """
+        发出日志记录（带日期滚动检查）
+
+        如果日期变化，自动切换到新文件
+        """
+        try:
+            if self._check_date_rollover():
+                self._do_rollover()
+            super().emit(record)
+        except (OSError, PermissionError, ValueError):
+            # 静默处理日志错误，避免影响主程序
+            pass
+
 class AsyncLogger:
-    """异步日志管理器"""
+    """异步日志管理器
+
+    v6.47版本：
+    - 每天一个日志文件，不按大小切割
+    - 日志文件名格式: bill_analyser_YYYYMMDD.log
+    - 保留7天自动清理功能
+    """
 
     def __init__(self):
         """初始化日志管理器"""
@@ -38,7 +123,6 @@ class AsyncLogger:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # 配置参数
-        self.max_log_size_mb = 10
         self.max_log_age_days = 7  # 7天自动清理
 
         # 创建日志队列
@@ -66,30 +150,26 @@ class AsyncLogger:
             console_handler.setLevel(logging.INFO)
             console_handler.setFormatter(formatter)
             handlers.append(console_handler)
-# ...existing code...
 
-        # 添加文件处理器（按大小轮转）
-        log_file = self.log_dir / f"bill_analyser_{datetime.now().strftime('%Y%m%d')}.log"
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=self.max_log_size_mb * 1024 * 1024,
-            backupCount=5,
+        # 添加文件处理器（使用按日期滚动的处理器，不按大小切割）
+        file_handler = DailyFileHandler(
+            self.log_dir,
+            prefix='bill_analyser',
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         handlers.append(file_handler)
 
-        # 添加错误日志文件处理器
-        error_log_file = self.log_dir / f"error_{datetime.now().strftime('%Y%m%d')}.log"
-        error_handler = RotatingFileHandler(
-            error_log_file,
-            maxBytes=self.max_log_size_mb * 1024 * 1024,
-            backupCount=5,
+        # 添加错误日志文件处理器（使用按日期滚动的处理器）
+        error_handler = DailyFileHandler(
+            self.log_dir,
+            prefix='error',
             encoding='utf-8'
         )
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(formatter)
+        handlers.append(error_handler)
         handlers.append(error_handler)
 
         # 配置队列监听器
@@ -158,6 +238,10 @@ class AsyncLogger:
 # 全局日志实例
 _logger_instance = AsyncLogger()
 
+# v6.64: 全局开关控制 @log_method 装饰器的详细日志输出
+# 设置为 False 可以禁用方法入口/出口的 DEBUG 日志，大幅减少日志量
+LOG_METHOD_VERBOSE = False
+
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
@@ -208,7 +292,7 @@ def log_method(func):
         # 记录方法入口
         start_time = datetime.now()
         try:
-            if sys.meta_path:
+            if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
         except (ImportError, Exception):
             pass
@@ -229,7 +313,7 @@ def log_method(func):
                 result_str = "无法解析返回值"
 
             try:
-                if sys.meta_path:
+                if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
             except (ImportError, Exception):
                 pass
@@ -270,7 +354,7 @@ def log_method(func):
         # 记录方法入口
         start_time = datetime.now()
         try:
-            if sys.meta_path:
+            if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
         except (ImportError, Exception):
             # 忽略解释器关闭时的错误
@@ -292,7 +376,7 @@ def log_method(func):
                 result_str = "无法解析返回值"
 
             try:
-                if sys.meta_path:
+                if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
             except (ImportError, Exception):
                 pass

@@ -20,6 +20,9 @@ export class ImportTransaction implements ImportTransactionResponse {
     public originalTagNames: string[];
     public comment: string;
     public geoLocation?: TransactionGeoLocationResponse;
+    // v6.32新增: 交易对方和支付方式字段
+    public counterparty: string;
+    public paymentMethod: string;
 
     public actualCategoryName: string;
     public actualSourceAccountName: string;
@@ -46,6 +49,9 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.originalTagNames = response.originalTagNames || [];
         this.comment = response.comment;
         this.geoLocation = response.geoLocation;
+        // v6.32新增
+        this.counterparty = response.counterparty || '';
+        this.paymentMethod = response.paymentMethod || '';
 
         this.actualCategoryName = response.originalCategoryName;
         this.actualSourceAccountName = response.originalSourceAccountName;
@@ -55,16 +61,26 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.valid = this.isTransactionValid();
     }
 
+    /**
+     * 判断交易是否需要目标账户（转账或投资类型）
+     */
+    public requiresDestinationAccount(): boolean {
+        return this.type === TransactionType.Transfer || this.type === TransactionType.Investment;
+    }
+
     public toCreateRequest(): TransactionCreateRequest {
+        // 转账和投资类型都需要目标账户
+        const needsDestAccount = this.requiresDestinationAccount();
+
         return {
             type: this.type,
             categoryId: this.categoryId,
             time: this.time,
             utcOffset: this.utcOffset,
             sourceAccountId: this.sourceAccountId,
-            destinationAccountId: this.type === TransactionType.Transfer ? this.destinationAccountId : '0',
+            destinationAccountId: needsDestAccount ? this.destinationAccountId : '0',
             sourceAmount: this.sourceAmount,
-            destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
+            destinationAmount: needsDestAccount ? this.destinationAmount : 0,
             hideAmount: false,
             tagIds: this.tagIds,
             pictureIds: [],
@@ -83,7 +99,8 @@ export class ImportTransaction implements ImportTransactionResponse {
             return false;
         }
 
-        if (this.type === TransactionType.Transfer && (!this.destinationAccountId || this.destinationAccountId === '0')) {
+        // 转账和投资类型都需要验证目标账户
+        if (this.requiresDestinationAccount() && (!this.destinationAccountId || this.destinationAccountId === '0')) {
             return false;
         }
 
@@ -139,6 +156,9 @@ export interface ImportTransactionResponse {
     readonly originalTagNames: string[];
     readonly comment: string;
     readonly geoLocation?: TransactionGeoLocationResponse;
+    // v6.32新增: 交易对方和支付方式字段
+    readonly counterparty?: string;
+    readonly paymentMethod?: string;
 }
 
 export interface ImportTransactionResponsePageWrapper {

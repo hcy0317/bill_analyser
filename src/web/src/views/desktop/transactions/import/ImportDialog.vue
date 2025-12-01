@@ -111,18 +111,6 @@
                             />
                         </v-col>
 
-                        <v-col cols="12" md="12" v-if="!isImportDataFromTextbox && allSupportedEncodings">
-                            <v-select
-                                item-title="displayName"
-                                item-value="encoding"
-                                :disabled="submitting"
-                                :label="tt('File Encoding')"
-                                :placeholder="tt('File Encoding')"
-                                :items="allSupportedEncodings"
-                                v-model="fileEncoding"
-                            />
-                        </v-col>
-
                         <v-col cols="12" md="12" v-if="fileType === 'dsv' || fileType === 'dsv_data'">
                             <v-select
                                 item-title="displayName"
@@ -192,6 +180,8 @@
                         ref="importTransactionCheckDataTab"
                         :import-transactions="importTransactions"
                         :disabled="loading || submitting"
+                        :session-id="serverSessionId"
+                        @reclassified="onReclassified"
                     />
                 </v-window-item>
                 <v-window-item value="finalResult">
@@ -242,6 +232,7 @@ import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.
 import { ref, computed, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
+import { getTimezoneOffsetMinutes } from '@/lib/datetime.ts';
 
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
@@ -249,14 +240,16 @@ import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
 import { useTransactionsStore } from '@/stores/transaction.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
 import { useStatisticsStore } from '@/stores/statistics.ts';
+import { useSettingsStore } from '@/stores/setting.ts';
 
 import { type NumeralSystem } from '@/core/numeral.ts';
 
-import type { LocalizedImportFileTypeSubType, LocalizedImportFileTypeSupportedEncodings } from '@/core/file.ts';
+import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
 import { ImportTransaction, type ImportTransactionResponse } from '@/models/imported_transaction.ts';
 
 import { isNumber } from '@/lib/common.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
+import { getCurrentToken } from '@/lib/userstate.ts';
 import logger from '@/lib/logger.ts';
 
 import {
@@ -296,6 +289,7 @@ const transactionTagsStore = useTransactionTagsStore();
 const transactionsStore = useTransactionsStore();
 const overviewStore = useOverviewStore();
 const statisticsStore = useStatisticsStore();
+const settingsStore = useSettingsStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -306,6 +300,7 @@ const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
 const showState = ref<boolean>(false);
 const clientSessionId = ref<string>('');
+const serverSessionId = ref<string>('');  // v6.48: 后端三阶段导入的会话ID
 const currentStep = ref<ImportTransactionDialogStep>('uploadFile');
 const importProcess = ref<number>(0);
 const selectedFileTypes = ref<string[]>(['auto']);
@@ -313,15 +308,15 @@ const importFiles = ref<File[]>([]);
 const importData = ref<string>('');
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
+const dedupStats = ref<Record<string, number>>({});  // v6.48: 去重统计信息
 
 const fileSubType = ref<string>('');
-const fileEncoding = ref<string>('utf-8');
 const processDSVMethod = ref<ImportDSVProcessMethod>(ImportDSVProcessMethod.ColumnMapping);
 
 const allSteps = computed<StepBarItem[]>(() => [
     { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
     { name: 'defineColumn', title: tt('Define Columns'), subTitle: tt('Map columns to fields') },
-    { name: 'executeCustomScript', title: tt('Custom Script'), subTitle: tt('Execute custom script') },
+    { name: 'executeCustomScript', title: tt('Custom Script'), subTitle: tt('Execute Custom Script') },
     { name: 'checkData', title: tt('Check Data'), subTitle: tt('Verify and edit data') },
     { name: 'finalResult', title: tt('Import Result'), subTitle: tt('View import result') }
 ]);
@@ -337,13 +332,6 @@ const fileType = computed<string>(() => {
 const allFileSubTypes = computed<LocalizedImportFileTypeSubType[] | undefined>(() => undefined);
 
 const isImportDataFromTextbox = computed<boolean>(() => false);
-
-const allSupportedEncodings = computed<LocalizedImportFileTypeSupportedEncodings[] | undefined>(() => [
-    { displayName: 'UTF-8', encoding: 'utf-8' },
-    { displayName: 'GBK', encoding: 'gbk' },
-    { displayName: 'GB18030', encoding: 'gb18030' },
-    { displayName: 'Big5', encoding: 'big5' }
-]);
 
 const supportedImportFileExtensions = computed<string>(() => '.csv,.xls,.xlsx,.txt');
 
@@ -389,6 +377,12 @@ function getDisplayCount(count: number): string {
 }
 
 function open(): Promise<void> {
+    // v6.52: 清理之前可能残留的导入会话数据
+    // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
+    if (serverSessionId.value) {
+        cleanupServerSession();
+    }
+
     selectedFileTypes.value = ['auto'];
     currentStep.value = 'uploadFile';
     importProcess.value = 0;
@@ -452,7 +446,13 @@ function setImportFile(event: Event): void {
     el.value = '';
 }
 
-function parseData(): void {
+/**
+ * v6.48: 三阶段导入 - 解析并去重
+ *
+ * 阶段1: 上传所有文件到后端，写入 bills_parser_template 表
+ * 阶段2: 执行去重处理，结果写入 bills_preview 表，返回预览数据
+ */
+async function parseData(): Promise<void> {
     if (importFiles.value.length === 0) {
         snackbar.value?.showError('Please select at least one file');
         return;
@@ -461,99 +461,237 @@ function parseData(): void {
     submitting.value = true;
     importProcess.value = 0;
 
-    const parserType = selectedFileTypes.value.includes('auto') ? 'auto' : selectedFileTypes.value.join(',');
-    
-    const processNextFile = async (index: number, accumulatedTransactions: ImportTransaction[]) => {
-        if (index >= importFiles.value.length) {
-            // All files processed
-            importTransactions.value = accumulatedTransactions;
-            currentStep.value = 'checkData';
-            submitting.value = false;
-            return;
-        }
-        
-        const file = importFiles.value[index];
-
-        if (!file) {
-            processNextFile(index + 1, accumulatedTransactions);
-            return;
-        }
+    try {
+        // ========== 阶段1: 上传并解析所有文件 ==========
+        logger.info(`[三阶段导入-阶段1] 开始上传 ${importFiles.value.length} 个文件`);
 
         const formData = new FormData();
-        formData.append('file', file);
-        formData.append('parser_type', parserType);
-        formData.append('preview_only', 'true');
-        
-        try {
-            const response = await fetch('/api/bills/import/upload', {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to upload ${file.name}: ${errorText}`);
-            }
-            
-            const result = await response.json();
-            if (result.success && result.data && result.data.preview) {
-                const transactions = result.data.preview.map((item: any, idx: number) => {
-                    // Map backend item to ImportTransactionResponse
-                    // Backend item keys: time, type, amount, description, counterparty, main_category, sub_category, account
-                    
-                    const typeMap: Record<string, number> = { '支出': 1, '收入': 2, '转账': 3 };
-                    const type = typeMap[item.type] || 1;
-                    
-                    // Parse time string to timestamp (seconds)
-                    const time = new Date(item.time).getTime() / 1000;
-
-                    const responseItem: ImportTransactionResponse = {
-                        type: type,
-                        categoryId: '',
-                        originalCategoryName: item.sub_category || item.main_category || '',
-                        time: isNaN(time) ? Date.now() / 1000 : time,
-                        utcOffset: 0,
-                        sourceAccountId: '',
-                        originalSourceAccountName: item.account || '',
-                        originalSourceAccountCurrency: 'CNY',
-                        destinationAccountId: '',
-                        sourceAmount: Math.abs(item.amount),
-                        destinationAmount: Math.abs(item.amount),
-                        tagIds: [],
-                        originalTagNames: [],
-                        comment: item.description || item.counterparty || ''
-                    };
-                    
-                    return ImportTransaction.of(responseItem, accumulatedTransactions.length + idx);
-                });
-                
-                accumulatedTransactions.push(...transactions);
-            }
-            
-            processNextFile(index + 1, accumulatedTransactions);
-            
-        } catch (error) {
-            console.error(error);
-            snackbar.value?.showError(`Error processing ${file.name}: ${error}`);
-            submitting.value = false;
+        for (const file of importFiles.value) {
+            formData.append('files', file);
         }
-    };
-    
-    processNextFile(0, []);
+
+        const parserType = selectedFileTypes.value.includes('auto') ? 'auto' : selectedFileTypes.value.join(',');
+        formData.append('parser_type', parserType);
+
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        // 调用阶段1 API
+        const stage1Response = await fetch('/api/bills/import/v2/parse', {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (!stage1Response.ok) {
+            const errorText = await stage1Response.text();
+            throw new Error(`阶段1失败: ${errorText}`);
+        }
+
+        const stage1Result = await stage1Response.json();
+        logger.info(`[三阶段导入-阶段1] 完成: success=${stage1Result.success}, ` +
+                    `session_id=${stage1Result.data?.session_id}, ` +
+                    `parsed_count=${stage1Result.data?.parsed_count}`);
+
+        if (!stage1Result.success || !stage1Result.data?.session_id) {
+            throw new Error(stage1Result.error || '解析失败：未获取到session_id');
+        }
+
+        serverSessionId.value = stage1Result.data.session_id;
+        importProcess.value = 30;  // 更新进度
+
+        // ========== 阶段2: 去重并获取预览 ==========
+        logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
+
+        const stage2Response = await fetch('/api/bills/import/v2/dedup', {
+            method: 'POST',
+            headers: {
+                ...headers,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ session_id: serverSessionId.value })
+        });
+
+        if (!stage2Response.ok) {
+            const errorText = await stage2Response.text();
+            throw new Error(`阶段2失败: ${errorText}`);
+        }
+
+        const stage2Result = await stage2Response.json();
+        logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, ` +
+                    `total=${stage2Result.data?.total}, ` +
+                    `after_dedup=${stage2Result.data?.after_dedup}, ` +
+                    `preview_count=${stage2Result.data?.preview?.length || 0}`);
+
+        if (!stage2Result.success) {
+            throw new Error(stage2Result.error || '去重处理失败');
+        }
+
+        // 保存去重统计
+        dedupStats.value = stage2Result.data?.dedup_stats || {};
+        importProcess.value = 80;
+
+        // 转换预览数据为前端ImportTransaction格式
+        const previewData = stage2Result.data?.preview || [];
+        const transactions = previewData.map((item: any, idx: number) => {
+            return convertPreviewToImportTransaction(item, idx);
+        });
+
+        logger.info(`[三阶段导入-阶段2] 转换完成: ${transactions.length} 条交易`);
+
+        importTransactions.value = transactions;
+        currentStep.value = 'checkData';
+        importProcess.value = 100;
+
+    } catch (error) {
+        logger.error('[三阶段导入] 失败:', error);
+        snackbar.value?.showError(`导入失败: ${error}`);
+        // 如果失败，清理后端会话
+        if (serverSessionId.value) {
+            cleanupServerSession();
+        }
+    } finally {
+        submitting.value = false;
+    }
 }
 
+/**
+ * 将后端预览数据转换为前端 ImportTransaction 格式
+ */
+function convertPreviewToImportTransaction(item: any, index: number): ImportTransaction {
+    // 类型映射: 后端中文类型 -> 前端数字类型
+    const typeMap: Record<string, number> = {
+        '支出': 3,    // Expense
+        '收入': 2,    // Income
+        '转账': 4,    // Transfer
+        '投资': 5,    // Investment
+        '退款': 2     // 退款视为收入
+    };
+    const type = typeMap[item.preview_type] || 3;
+
+    // 解析时间
+    const timeStr = item.preview_date || '';
+    const time = new Date(timeStr).getTime() / 1000;
+
+    // 金额转换：后端是元，前端期望分
+    const amountInCents = Math.round(Math.abs(item.preview_amount || 0) * 100);
+    const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
+
+    // 根据分类名称查找categoryId
+    let categoryId = '';
+    const mainCat = item.preview_main_category || '';
+    const subCat = item.preview_sub_category || '';
+    if (mainCat || subCat) {
+        const categoriesMap = transactionCategoriesStore.allTransactionCategoriesMap;
+        for (const [catId, cat] of Object.entries(categoriesMap)) {
+            if (subCat && cat.name === subCat) {
+                categoryId = catId;
+                break;
+            }
+            if (!subCat && mainCat && cat.name === mainCat && !cat.parentId) {
+                categoryId = catId;
+                break;
+            }
+        }
+    }
+
+    // 账户ID
+    const sourceAccountId = item.preview_source_account_id ? String(item.preview_source_account_id) : '';
+    const destAccountId = item.preview_destination_account_id ? String(item.preview_destination_account_id) : '';
+
+    // 时区
+    const currentTimezone = settingsStore.appSettings.timeZone;
+    const defaultUtcOffset = getTimezoneOffsetMinutes(currentTimezone);
+
+    const responseItem: ImportTransactionResponse = {
+        type: type,
+        categoryId: categoryId,
+        originalCategoryName: subCat || mainCat || '',
+        time: isNaN(time) ? Date.now() / 1000 : time,
+        utcOffset: defaultUtcOffset,
+        sourceAccountId: sourceAccountId,
+        originalSourceAccountName: item.preview_payment_method || '',
+        originalSourceAccountCurrency: 'CNY',
+        destinationAccountId: destAccountId,
+        sourceAmount: amountInCents,
+        // v6.55: 转账和投资类型都使用目标金额
+        destinationAmount: (type === 4 || type === 5) ? destAmountInCents || amountInCents : amountInCents,
+        tagIds: [],
+        originalTagNames: [],
+        comment: item.preview_description || '',
+        counterparty: item.preview_counterparty || '',
+        paymentMethod: item.preview_payment_method || ''
+    };
+
+    // 添加预览表ID，用于阶段3确认导入
+    const transaction = ImportTransaction.of(responseItem, index);
+    (transaction as any)._previewId = item.id;  // 保存预览表记录ID
+
+    return transaction;
+}
+
+/**
+ * v6.55: 处理重新分类后的数据更新
+ * @param previewData 后端返回的原始预览数据数组（preview_* 字段格式）
+ */
+function onReclassified(previewData: any[]): void {
+    if (!previewData || previewData.length === 0) {
+        return;
+    }
+
+    logger.info(`[三阶段导入] 收到重新分类结果: ${previewData.length} 条预览数据`);
+
+    // 将后端预览数据转换为前端 ImportTransaction 格式
+    const convertedTransactions = previewData.map((item, idx) => {
+        return convertPreviewToImportTransaction(item, idx);
+    });
+
+    logger.info(`[三阶段导入] 转换完成: ${convertedTransactions.length} 条交易`);
+
+    // 替换整个数组
+    importTransactions.value = convertedTransactions;
+}
+
+/**
+ * 清理后端导入会话
+ */
+async function cleanupServerSession(): Promise<void> {
+    if (!serverSessionId.value) return;
+
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        await fetch(`/api/bills/import/v2/session/${serverSessionId.value}`, {
+            method: 'DELETE',
+            headers: headers
+        });
+        logger.info(`[三阶段导入] 已清理会话: ${serverSessionId.value}`);
+    } catch (e) {
+        logger.warn('[三阶段导入] 清理会话失败:', e);
+    }
+
+    serverSessionId.value = '';
+}
 
 function submit(): void {
     if (importTransactionCheckDataTab.value?.isEditing) {
         return;
     }
 
-    const transactions: ImportTransaction[] = [];
+    // 收集用户选中的交易
+    const selectedTransactions: ImportTransaction[] = [];
 
     if (importTransactions.value) {
         for (const importTransaction of importTransactions.value) {
             if (importTransaction.valid && importTransaction.selected) {
-                transactions.push(importTransaction);
+                selectedTransactions.push(importTransaction);
             } else if (!importTransaction.valid && importTransaction.selected) {
                 snackbar.value?.showError('Cannot import invalid transactions');
                 return;
@@ -561,17 +699,107 @@ function submit(): void {
         }
     }
 
-    if (transactions.length < 1) {
+    if (selectedTransactions.length < 1) {
         snackbar.value?.showError('No data to import');
         return;
     }
 
     confirmDialog.value?.open('format.misc.confirmImportTransactions', {
-        count: getDisplayCount(transactions.length)
-    }).then(() => {
+        count: getDisplayCount(selectedTransactions.length)
+    }).then(async () => {
         submitting.value = true;
+        importProcess.value = 0;
 
-        let showProcessTimer : number | undefined = undefined;
+        try {
+            // v6.48: 使用三阶段确认API
+            if (serverSessionId.value) {
+                logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
+
+                // 收集用户编辑后的数据
+                const previewUpdates = selectedTransactions.map(t => {
+                    // 类型反向映射
+                    const typeReverseMap: Record<number, string> = {
+                        2: '收入',
+                        3: '支出',
+                        4: '转账',
+                        5: '投资'
+                    };
+
+                    return {
+                        id: (t as any)._previewId,
+                        preview_type: typeReverseMap[t.type] || '支出',
+                        preview_amount: t.sourceAmount / 100,  // 分转元
+                        preview_destination_amount: t.destinationAmount / 100,
+                        preview_source_account_id: t.sourceAccountId ? parseInt(t.sourceAccountId) : null,
+                        preview_destination_account_id: t.destinationAccountId ? parseInt(t.destinationAccountId) : null,
+                        category_id: t.categoryId ? parseInt(t.categoryId) : null,
+                        selected: t.selected
+                    };
+                });
+
+                const token = getCurrentToken();
+                const headers: Record<string, string> = {
+                    'Content-Type': 'application/json'
+                };
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+
+                const response = await fetch('/api/bills/import/v2/confirm', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        session_id: serverSessionId.value,
+                        preview_updates: previewUpdates
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`确认导入失败: ${errorText}`);
+                }
+
+                const result = await response.json();
+                logger.info(`[三阶段导入-阶段3] 完成: imported=${result.data?.imported_count}`);
+
+                if (!result.success) {
+                    throw new Error(result.error || '确认导入失败');
+                }
+
+                importedCount.value = result.data?.imported_count || selectedTransactions.length;
+                currentStep.value = 'finalResult';
+
+                // v6.61: 清理服务器会话（虽然后端 import_stage3_confirm 已经清理了临时表，
+                // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
+                await cleanupServerSession();
+                serverSessionId.value = '';
+
+            } else {
+                // 兼容旧的导入方式
+                await legacySubmit(selectedTransactions);
+            }
+
+            // 刷新相关store
+            accountsStore.updateAccountListInvalidState(true);
+            transactionsStore.updateTransactionListInvalidState(true);
+            overviewStore.updateTransactionOverviewInvalidState(true);
+            statisticsStore.updateTransactionStatisticsInvalidState(true);
+
+        } catch (error) {
+            logger.error('[三阶段导入-阶段3] 失败:', error);
+            snackbar.value?.showError(`导入失败: ${error}`);
+        } finally {
+            submitting.value = false;
+        }
+    });
+}
+
+/**
+ * 旧的导入提交方式（兼容）
+ */
+async function legacySubmit(transactions: ImportTransaction[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+        let showProcessTimer: number | undefined = undefined;
 
         if (transactions.length > 100) {
             setTimeout(() => {
@@ -615,25 +843,14 @@ function submit(): void {
 
             importedCount.value = response;
             currentStep.value = 'finalResult';
-
-            accountsStore.updateAccountListInvalidState(true);
-            transactionsStore.updateTransactionListInvalidState(true);
-            overviewStore.updateTransactionOverviewInvalidState(true);
-            statisticsStore.updateTransactionStatisticsInvalidState(true);
-
-            submitting.value = false;
+            resolve();
         }).catch(error => {
             if (showProcessTimer) {
                 importProcess.value = 0;
                 clearInterval(showProcessTimer);
                 showProcessTimer = undefined;
             }
-
-            submitting.value = false;
-
-            if (!error.processed) {
-                snackbar.value?.showError(error);
-            }
+            reject(error);
         });
     });
 }
@@ -644,6 +861,10 @@ function close(completed: boolean): void {
             resolveFunc();
         }
     } else {
+        // v6.51: 用户点击取消时，清理后端会话（清空 parser_template 和 preview 表）
+        if (serverSessionId.value) {
+            cleanupServerSession();
+        }
         if (rejectFunc) {
             rejectFunc();
         }

@@ -2,6 +2,17 @@
 Parser Factory - 解析器工厂
 
 根据文件特征自动识别并选择合适的解析器。
+
+工厂模式：按顺序尝试所有注册的解析器的 can_parse() 方法，
+返回第一个能够解析该文件的解析器。
+
+支持的解析器:
+- WeChatParser (wechat): 微信支付
+- AlipayParser (alipay): 支付宝  
+- ICBCParser (icbc): 工商银行
+- CMBCParser (cmbc): 民生银行
+- ABCParser (abc): 农业银行
+- CCBParser (ccb): 建设银行
 """
 
 from pathlib import Path
@@ -18,13 +29,18 @@ from ..utils.logger import get_logger, log_method
 
 
 class ParserFactory:
-    """解析器工厂"""
+    """解析器工厂
+    
+    自动识别账单类型并返回对应的解析器。
+    解析器按优先级顺序尝试：微信 > 支付宝 > 工商银行 > 民生银行 > 农业银行 > 建设银行
+    """
 
     def __init__(self):
         """初始化工厂"""
         self.logger = get_logger('ParserFactory')
 
-        # 注册所有解析器
+        # 注册所有解析器（按优先级顺序）
+        # 支付平台在前（信息更丰富），银行在后
         self.parsers: List[ParserBase] = [
             WeChatParser(),
             AlipayParser(),
@@ -34,7 +50,66 @@ class ParserFactory:
             CCBParser(),
         ]
 
-        self.logger.info("解析器工厂初始化完成，注册了 %d 个解析器", len(self.parsers))
+        # 解析器ID到类的映射
+        self._parser_map = {
+            'wechat': WeChatParser,
+            'alipay': AlipayParser,
+            'icbc': ICBCParser,
+            'cmbc': CMBCParser,
+            'abc': ABCParser,
+            'ccb': CCBParser
+        }
+
+        self.logger.info("[解析器工厂] 初始化完成，注册了 %d 个解析器: %s",
+                        len(self.parsers),
+                        ', '.join(p.PARSER_ID for p in self.parsers))
+
+    def get_parser_by_id(self, parser_id: str) -> Optional[ParserBase]:
+        """根据解析器ID获取解析器实例
+        
+        Args:
+            parser_id: 解析器标识符 (wechat/alipay/icbc/cmbc/abc/ccb)
+            
+        Returns:
+            解析器实例或None
+        """
+        parser_class = self._parser_map.get(parser_id.lower())
+        if parser_class:
+            return parser_class()
+        return None
+
+    @log_method
+    def detect_parser(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """检测文件应该使用哪个解析器
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            解析器信息字典 {id, name, class_name} 或 None
+        """
+        path = Path(file_path)
+        
+        if not path.exists():
+            self.logger.error("[检测解析器] 文件不存在: %s", file_path)
+            return None
+            
+        for parser in self.parsers:
+            try:
+                if parser.can_parse(file_path):
+                    self.logger.info("[检测解析器] 文件 %s -> 使用 %s (%s)",
+                                   path.name, parser.PARSER_NAME, parser.PARSER_ID)
+                    return {
+                        'id': parser.PARSER_ID,
+                        'name': parser.PARSER_NAME,
+                        'class_name': parser.__class__.__name__
+                    }
+            except Exception as e:  # pylint: disable=broad-except
+                self.logger.debug("[检测解析器] %s 检测失败: %s",
+                                parser.__class__.__name__, e)
+                
+        self.logger.warning("[检测解析器] 无法识别文件类型: %s", file_path)
+        return None
 
     @log_method
     def get_parser(self, file_path: str, parser_type: Optional[str] = None) -> Optional[ParserBase]:
@@ -51,49 +126,30 @@ class ParserFactory:
         path = Path(file_path)
 
         if not path.exists():
-            self.logger.error("文件不存在: %s", file_path)
+            self.logger.error("[获取解析器] 文件不存在: %s", file_path)
             return None
 
         # 如果指定了解析器类型，直接返回对应解析器
         if parser_type:
-            parser_map = {
-                'wechat': WeChatParser,
-                'alipay': AlipayParser,
-                'icbc': ICBCParser,
-                'cmbc': CMBCParser,
-                'abc': ABCParser,
-                'ccb': CCBParser
-            }
-
-            parser_class = parser_map.get(parser_type.lower())
-            if parser_class:
-                self.logger.info(
-                    "使用指定解析器 %s 处理文件: %s",
-                    parser_type,
-                    path.name
-                )
-                return parser_class()
-
-            self.logger.warning("未知的解析器类型: %s，将自动检测", parser_type)
+            parser = self.get_parser_by_id(parser_type)
+            if parser:
+                self.logger.info("[获取解析器] 使用指定解析器 %s 处理: %s",
+                               parser.PARSER_ID, path.name)
+                return parser
+            self.logger.warning("[获取解析器] 未知解析器类型: %s，将自动检测", parser_type)
 
         # 尝试所有解析器自动检测
         for parser in self.parsers:
             try:
                 if parser.can_parse(file_path):
-                    self.logger.info(
-                        "为文件 %s 选择解析器: %s",
-                        path.name,
-                        parser.__class__.__name__
-                    )
+                    self.logger.info("[获取解析器] 自动选择 %s (%s) 处理: %s",
+                                   parser.PARSER_NAME, parser.PARSER_ID, path.name)
                     return parser
             except Exception as e:  # pylint: disable=broad-except
-                self.logger.debug(
-                    "解析器 %s 无法处理文件: %s",
-                    parser.__class__.__name__,
-                    e
-                )
+                self.logger.debug("[获取解析器] %s 无法处理: %s",
+                                parser.__class__.__name__, e)
 
-        self.logger.warning("未找到合适的解析器: %s", file_path)
+        self.logger.warning("[获取解析器] 未找到合适的解析器: %s", file_path)
         return None
 
     @log_method

@@ -87,10 +87,13 @@
             <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="value === TransactionType.Income">{{ tt('Income') }}</v-chip>
             <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="value === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
             <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="value === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
+            <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="value === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
             <v-chip label color="default" variant="outlined" size="x-small" v-else>{{ tt('Unknown') }}</v-chip>
         </template>
         <template #item.actualCategoryName="{ item }">
-            <div class="d-flex align-center" v-if="editingTransaction !== item || item.type === TransactionType.ModifyBalance">
+            <!-- 非编辑状态或余额调整类型：显示分类名称 -->
+            <!-- 使用 v-if 避免创建不必要的复杂组件实例 -->
+            <div class="d-flex align-center" v-if="editingTransaction !== item || item.type === TransactionType.ModifyBalance" :key="`cat-view-${item.index}`">
                 <span v-if="item.type === TransactionType.ModifyBalance">-</span>
                 <ItemIcon size="24px" icon-type="category"
                           :icon-id="allCategoriesMap[item.categoryId]?.icon ?? ''"
@@ -104,7 +107,9 @@
                     <span>{{ item.originalCategoryName }}</span>
                 </div>
             </div>
-            <div style="width: 260px" v-if="editingTransaction === item && item.type === TransactionType.Expense">
+            <!-- 编辑状态：统一分类选择器（根据交易类型动态选择分类列表） -->
+            <!-- 使用 v-if 确保只有当前编辑行才创建选择器组件，避免同时创建大量组件实例 -->
+            <div style="width: 260px" v-if="editingTransaction === item && item.type !== TransactionType.ModifyBalance" :key="`cat-edit-${item.index}`">
                 <two-column-select density="compact" variant="plain"
                                    primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
@@ -112,60 +117,26 @@
                                    secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
                                    secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
                                    secondary-hidden-field="hidden"
-                                   :disabled="!!disabled || !hasAvailableExpenseCategories"
+                                   :disabled="!!disabled || !hasAvailableCategoriesForType(item.type)"
                                    :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
                                    :show-selection-primary-text="true"
-                                   :custom-selection-primary-text="getTransactionPrimaryCategoryName(item.categoryId, allCategories[CategoryType.Expense])"
-                                   :custom-selection-secondary-text="getTransactionSecondaryCategoryName(item.categoryId, allCategories[CategoryType.Expense])"
+                                   :custom-selection-primary-text="getCategoryPrimaryText(item)"
+                                   :custom-selection-secondary-text="getCategorySecondaryText(item)"
                                    :placeholder="tt('Category')"
-                                   :items="allCategories[CategoryType.Expense]"
-                                   v-model="item.categoryId">
-                </two-column-select>
-            </div>
-            <div style="width: 260px" v-if="editingTransaction === item && item.type === TransactionType.Income">
-                <two-column-select density="compact" variant="plain"
-                                   primary-key-field="id" primary-value-field="id" primary-title-field="name"
-                                   primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
-                                   primary-hidden-field="hidden" primary-sub-items-field="subCategories"
-                                   secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
-                                   secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
-                                   secondary-hidden-field="hidden"
-                                   :disabled="!!disabled || !hasAvailableIncomeCategories"
-                                   :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                   :show-selection-primary-text="true"
-                                   :custom-selection-primary-text="getTransactionPrimaryCategoryName(item.categoryId, allCategories[CategoryType.Income])"
-                                   :custom-selection-secondary-text="getTransactionSecondaryCategoryName(item.categoryId, allCategories[CategoryType.Income])"
-                                   :placeholder="tt('Category')"
-                                   :items="allCategories[CategoryType.Income]"
-                                   v-model="item.categoryId">
-                </two-column-select>
-            </div>
-            <div style="width: 260px" v-if="editingTransaction === item && item.type === TransactionType.Transfer">
-                <two-column-select density="compact" variant="plain"
-                                   primary-key-field="id" primary-value-field="id" primary-title-field="name"
-                                   primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
-                                   primary-hidden-field="hidden" primary-sub-items-field="subCategories"
-                                   secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
-                                   secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
-                                   secondary-hidden-field="hidden"
-                                   :disabled="!!disabled || !hasAvailableTransferCategories"
-                                   :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                   :show-selection-primary-text="true"
-                                   :custom-selection-primary-text="getTransactionPrimaryCategoryName(item.categoryId, allCategories[CategoryType.Transfer])"
-                                   :custom-selection-secondary-text="getTransactionSecondaryCategoryName(item.categoryId, allCategories[CategoryType.Transfer])"
-                                   :placeholder="tt('Category')"
-                                   :items="allCategories[CategoryType.Transfer]"
+                                   :items="getCategoriesForType(item.type)"
                                    v-model="item.categoryId">
                 </two-column-select>
             </div>
         </template>
         <template #item.sourceAmount="{ item }">
-            <div class="d-flex align-center" v-if="editingTransaction !== item">
+            <!-- 非编辑状态：显示金额 -->
+            <div class="d-flex align-center" v-if="editingTransaction !== item" :key="`amount-view-${item.index}`">
                 <span>{{ getTransactionDisplayAmount(item) }}</span>
-                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId"></v-icon>
-                <span v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId">{{ getTransactionDisplayDestinationAmount(item) }}</span>
+                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"></v-icon>
+                <span v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId">{{ getTransactionDisplayDestinationAmount(item) }}</span>
             </div>
-            <div class="d-flex align-center" :style="`width: ${item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId ? 250 : 100}px`" v-if="editingTransaction === item">
+            <!-- 编辑状态：金额输入框 -->
+            <div class="d-flex align-center" :style="`width: ${requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId ? 250 : 100}px`" v-else :key="`amount-edit-${item.index}`">
                 <amount-input density="compact" variant="plain"
                               persistent-placeholder
                               :currency="item.originalSourceAccountCurrency || defaultCurrency"
@@ -173,32 +144,34 @@
                               :disabled="!!disabled"
                               :placeholder="tt('Amount')"
                               v-model="item.sourceAmount"/>
-                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId"></v-icon>
+                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"></v-icon>
                 <amount-input density="compact" variant="plain"
                               persistent-placeholder
                               :currency="item.originalDestinationAccountCurrency || defaultCurrency"
                               :show-currency="true"
                               :disabled="!!disabled"
-                              :placeholder="tt('Transfer In Amount')"
+                              :placeholder="tt('Destination Amount')"
                               v-model="item.destinationAmount"
-                              v-if="item.type === TransactionType.Transfer && item.sourceAccountId !== item.destinationAccountId"/>
+                              v-if="requiresDestinationAccount(item) && item.sourceAccountId !== item.destinationAccountId"/>
             </div>
         </template>
         <template #item.actualSourceAccountName="{ item }">
-            <div class="d-flex align-center" v-if="editingTransaction !== item">
+            <!-- 非编辑状态：显示账户名称 -->
+            <div class="d-flex align-center" v-if="editingTransaction !== item" :key="`account-view-${item.index}`">
                 <span v-if="item.sourceAccountId && item.sourceAccountId !== '0' && allAccountsMap[item.sourceAccountId]">{{ allAccountsMap[item.sourceAccountId]?.name }}</span>
                 <div class="text-error font-italic" v-else>
                     <v-icon class="me-1" :icon="mdiAlertOutline"/>
                     <span>{{ item.originalSourceAccountName }}</span>
                 </div>
-                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="item.type === TransactionType.Transfer"></v-icon>
-                <span v-if="item.type === TransactionType.Transfer && item.destinationAccountId && item.destinationAccountId !== '0' && allAccountsMap[item.destinationAccountId]">{{allAccountsMap[item.destinationAccountId]?.name }}</span>
-                <div class="text-error font-italic" v-else-if="item.type === TransactionType.Transfer && (!item.destinationAccountId || item.destinationAccountId === '0' || !allAccountsMap[item.destinationAccountId])">
+                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item)"></v-icon>
+                <span v-if="requiresDestinationAccount(item) && item.destinationAccountId && item.destinationAccountId !== '0' && allAccountsMap[item.destinationAccountId]">{{allAccountsMap[item.destinationAccountId]?.name }}</span>
+                <div class="text-error font-italic" v-else-if="requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0' || !allAccountsMap[item.destinationAccountId])">
                     <v-icon class="me-1" :icon="mdiAlertOutline"/>
                     <span>{{ item.originalDestinationAccountName }}</span>
                 </div>
             </div>
-            <div class="d-flex align-center" :style="`width: ${item.type === TransactionType.Transfer ? 450 : 200}px`"  v-if="editingTransaction === item">
+            <!-- 编辑状态：账户选择器 -->
+            <div class="d-flex align-center" :style="`width: ${requiresDestinationAccount(item) ? 450 : 200}px`" v-else :key="`account-edit-${item.index}`">
                 <two-column-select density="compact" variant="plain"
                                    primary-key-field="id" primary-value-field="category"
                                    primary-title-field="name" primary-footer-field="displayBalance"
@@ -215,7 +188,7 @@
                                    :items="allVisibleCategorizedAccounts"
                                    v-model="item.sourceAccountId">
                 </two-column-select>
-                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="item.type === TransactionType.Transfer"></v-icon>
+                <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item)"></v-icon>
                 <two-column-select density="compact" variant="plain"
                                    primary-key-field="id" primary-value-field="category"
                                    primary-title-field="name" primary-footer-field="displayBalance"
@@ -228,10 +201,10 @@
                                    :disabled="!!disabled || !allVisibleAccounts.length"
                                    :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
                                    :custom-selection-primary-text="getDestinationAccountDisplayName(item)"
-                                   :placeholder="tt('Destination Account')"
+                                   :placeholder="getDestinationAccountTitle(item)"
                                    :items="allVisibleCategorizedAccounts"
                                    v-model="item.destinationAccountId"
-                                   v-if="item.type === TransactionType.Transfer">
+                                   v-if="requiresDestinationAccount(item)">
                 </two-column-select>
             </div>
         </template>
@@ -240,7 +213,8 @@
             <span v-else-if="!item.geoLocation">{{ tt('None') }}</span>
         </template>
         <template #item.tagIds="{ item }">
-            <div v-if="editingTransaction !== item">
+            <!-- 非编辑状态：显示标签 -->
+            <div v-if="editingTransaction !== item" :key="`tags-view-${item.index}`">
                 <v-chip class="transaction-tag" size="small"
                         :class="{ 'font-italic': !tagId || tagId === '0' || !allTagsMap[tagId] }"
                         :prepend-icon="tagId && tagId !== '0' && allTagsMap[tagId] ? mdiPound : mdiAlertOutline"
@@ -252,7 +226,8 @@
                         :text="tt('None')"
                         v-if="!item.tagIds || !item.tagIds.length"/>
             </div>
-            <div style="width: 200px" v-if="editingTransaction === item">
+            <!-- 编辑状态：标签选择器 -->
+            <div style="width: 200px" v-else :key="`tags-edit-${item.index}`">
                 <v-autocomplete
                     item-title="name"
                     item-value="id"
@@ -291,9 +266,35 @@
                 </v-autocomplete>
             </div>
         </template>
+        <!-- v6.32新增: 交易对方列 -->
+        <template #item.counterparty="{ item }">
+            <span v-if="editingTransaction !== item" :key="`counterparty-view-${item.index}`">{{ item.counterparty || '-' }}</span>
+            <div v-else :key="`counterparty-edit-${item.index}`">
+                <v-text-field style="width: 150px" type="text"
+                              density="compact" variant="plain"
+                              persistent-placeholder
+                              :placeholder="tt('Counterparty')"
+                              :disabled="!!disabled"
+                              v-model="item.counterparty" />
+            </div>
+        </template>
+        <!-- v6.32新增: 支付方式列 -->
+        <template #item.paymentMethod="{ item }">
+            <span v-if="editingTransaction !== item" :key="`paymentMethod-view-${item.index}`">{{ item.paymentMethod || '-' }}</span>
+            <div v-else :key="`paymentMethod-edit-${item.index}`">
+                <v-text-field style="width: 150px" type="text"
+                              density="compact" variant="plain"
+                              persistent-placeholder
+                              :placeholder="tt('Payment Method')"
+                              :disabled="!!disabled"
+                              v-model="item.paymentMethod" />
+            </div>
+        </template>
         <template #item.comment="{ item }">
-            <span v-if="editingTransaction !== item">{{ item.comment || '' }}</span>
-            <div v-if="editingTransaction === item">
+            <!-- 非编辑状态：显示备注 -->
+            <span v-if="editingTransaction !== item" :key="`comment-view-${item.index}`">{{ item.comment || '' }}</span>
+            <!-- 编辑状态：备注输入框 -->
+            <div v-else :key="`comment-edit-${item.index}`">
                 <v-text-field style="width: 200px" type="text"
                               density="compact" variant="plain"
                               persistent-placeholder
@@ -307,6 +308,29 @@
                 <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
                     {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
                 </span>
+
+                <!-- 快速编辑按钮组 -->
+                <v-btn-group class="ms-4" density="compact" variant="outlined" color="primary">
+                    <!-- v6.56: 移除选择限制，重新分类按钮始终可点击 -->
+                    <v-btn :disabled="!!disabled"
+                           :prepend-icon="mdiAutoFix"
+                           @click="reclassifySelected">
+                        {{ tt('Reclassify') }}
+                    </v-btn>
+                    <!-- v6.40: 分类按钮直接打开管理分类对话框 -->
+                    <v-btn :disabled="!!disabled"
+                           :prepend-icon="mdiTagMultiple"
+                           @click="openCategoryManagement">
+                        {{ tt('Manage Categories') }}
+                    </v-btn>
+                    <!-- v6.40: 账户按钮直接打开管理账户对话框 -->
+                    <v-btn :disabled="!!disabled"
+                           :prepend-icon="mdiWallet"
+                           @click="openAccountManagement">
+                        {{ tt('Manage Accounts') }}
+                    </v-btn>
+                </v-btn-group>
+
                 <v-spacer v-if="importTransactions.length > 10"/>
                 <span v-if="importTransactions.length > 10">{{ tt('Transactions Per Page') }}</span>
                 <v-select class="ms-2" density="compact" max-width="100"
@@ -325,6 +349,98 @@
             </div>
         </template>
     </v-data-table>
+
+    <!-- 批量编辑分类对话框 -->
+    <v-dialog width="640" v-model="showBatchCategoryDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Edit Category for Selected') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: importTransactions?.length || 0 }) }}
+                </p>
+                <!-- 分类类型选择 -->
+                <v-select
+                    :label="tt('Transaction Type')"
+                    :items="batchCategoryTypeOptions"
+                    item-title="name"
+                    item-value="value"
+                    v-model="batchCategoryType"
+                    class="mb-4"
+                />
+                <!-- 分类选择器 -->
+                <two-column-select
+                    :label="tt('Category')"
+                    :placeholder="tt('Select Category')"
+                    :items="getBatchCategoryItems()"
+                    primary-key-field="id"
+                    primary-value-field="id"
+                    primary-title-field="name"
+                    primary-icon-field="icon"
+                    primary-icon-type="category"
+                    primary-color-field="color"
+                    primary-hidden-field="hidden"
+                    primary-sub-items-field="subCategories"
+                    secondary-key-field="id"
+                    secondary-value-field="id"
+                    secondary-title-field="name"
+                    secondary-icon-field="icon"
+                    secondary-icon-type="category"
+                    secondary-color-field="color"
+                    secondary-hidden-field="hidden"
+                    :enable-filter="true"
+                    :filter-placeholder="tt('Find category')"
+                    v-model="batchCategoryId"
+                />
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4">
+                <v-btn color="primary" :disabled="!batchCategoryId" @click="applyBatchCategory">
+                    {{ tt('Apply') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="showBatchCategoryDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- 批量编辑账户对话框 -->
+    <v-dialog width="640" v-model="showBatchAccountDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Edit Account for Selected') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: importTransactions?.length || 0 }) }}
+                </p>
+                <!-- 账户选择器 -->
+                <icon-select
+                    :label="tt('Account')"
+                    :placeholder="tt('Select Account')"
+                    :items="availableAccounts"
+                    item-value-field="id"
+                    item-title-field="name"
+                    item-icon-field="icon"
+                    item-icon-type="account"
+                    item-color-field="color"
+                    item-hidden-field="hidden"
+                    :enable-filter="true"
+                    :filter-placeholder="tt('Find account')"
+                    v-model="batchAccountId"
+                />
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4">
+                <v-btn color="primary" :disabled="!batchAccountId" @click="applyBatchAccount">
+                    {{ tt('Apply') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="showBatchAccountDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
 
     <v-dialog width="640" v-model="showCustomDescriptionDialog">
         <v-card class="pa-2 pa-sm-4 pa-md-4">
@@ -361,6 +477,107 @@
     <batch-replace-all-types-dialog ref="batchReplaceAllTypesDialog" />
     <batch-create-dialog ref="batchCreateDialog" />
     <snack-bar ref="snackbar" />
+
+    <!-- v6.34: 分类管理选择对话框 -->
+    <v-dialog width="700" v-model="showCategorySelectDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Select Category to Edit') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('Select a category to edit its keywords and settings') }}
+                </p>
+                <!-- 分类类型切换 -->
+                <v-tabs v-model="manageCategoryType" class="mb-4">
+                    <v-tab :value="CategoryType.Expense">{{ tt('Expense') }}</v-tab>
+                    <v-tab :value="CategoryType.Income">{{ tt('Income') }}</v-tab>
+                    <v-tab :value="CategoryType.Transfer">{{ tt('Transfer') }}</v-tab>
+                    <v-tab :value="CategoryType.Investment">{{ tt('Investment') }}</v-tab>
+                </v-tabs>
+                <!-- 分类选择器 -->
+                <two-column-select
+                    :label="tt('Category')"
+                    :placeholder="tt('Select Category')"
+                    :items="getManageCategoryItems()"
+                    primary-key-field="id"
+                    primary-value-field="id"
+                    primary-title-field="name"
+                    primary-icon-field="icon"
+                    primary-icon-type="category"
+                    primary-color-field="color"
+                    primary-hidden-field="hidden"
+                    primary-sub-items-field="subCategories"
+                    secondary-key-field="id"
+                    secondary-value-field="id"
+                    secondary-title-field="name"
+                    secondary-icon-field="icon"
+                    secondary-icon-type="category"
+                    secondary-color-field="color"
+                    secondary-hidden-field="hidden"
+                    :enable-filter="true"
+                    :filter-placeholder="tt('Find category')"
+                    v-model="manageCategoryId"
+                />
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4">
+                <v-btn color="primary" :disabled="!manageCategoryId" @click="openSelectedCategoryEditDialog">
+                    {{ tt('Edit') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="showCategorySelectDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- v6.34: 分类编辑对话框 -->
+    <category-edit-dialog ref="categoryEditDialog" />
+
+    <!-- v6.34: 账户管理选择对话框 -->
+    <v-dialog width="600" v-model="showAccountSelectDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Select Account to Edit') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('Select an account to edit its aliases and settings') }}
+                </p>
+                <!-- 账户选择器 -->
+                <v-select
+                    :label="tt('Account')"
+                    :placeholder="tt('Select Account')"
+                    :items="allDisplayAccounts"
+                    item-title="name"
+                    item-value="id"
+                    :no-data-text="tt('No available account')"
+                    v-model="manageAccountId"
+                >
+                    <template #item="{ props, item }">
+                        <v-list-item v-bind="props">
+                            <template #prepend>
+                                <ItemIcon class="me-2" icon-type="account"
+                                          :icon-id="item.raw.icon"
+                                          :color="item.raw.color" />
+                            </template>
+                        </v-list-item>
+                    </template>
+                </v-select>
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4">
+                <v-btn color="primary" :disabled="!manageAccountId" @click="openSelectedAccountEditDialog">
+                    {{ tt('Edit') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="showAccountSelectDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- v6.34: 账户编辑对话框 -->
+    <account-edit-dialog ref="accountEditDialog" />
 </template>
 
 <script setup lang="ts">
@@ -369,6 +586,9 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/BatchReplaceDialog.vue';
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
+// v6.34: 导入分类和账户编辑对话框
+import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
+import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 
@@ -409,6 +629,10 @@ import {
     getTransactionPrimaryCategoryName,
     getTransactionSecondaryCategoryName
 } from '@/lib/category.ts';
+import {
+    getCurrentToken
+} from '@/lib/userstate.ts';
+import logger from '@/lib/logger.ts';
 
 import {
     mdiCheck,
@@ -421,13 +645,19 @@ import {
     mdiPound,
     mdiFindReplace,
     mdiShapePlusOutline,
-    mdiTransfer
+    mdiTransfer,
+    mdiAutoFix,
+    mdiTagMultiple,
+    mdiWallet
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;
 type BatchReplaceDialogType = InstanceType<typeof BatchReplaceDialog>;
 type BatchReplaceAllTypesDialogType = InstanceType<typeof BatchReplaceAllTypesDialog>;
 type BatchCreateDialogType = InstanceType<typeof BatchCreateDialog>;
+// v6.34: 分类和账户编辑对话框类型
+type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
+type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
 
 interface ImportTransactionCheckDataFilter {
     minDatetime: number | null; // minDatetime or maxDatetime is null for 'All Date Range', all are not null for 'Custom Date Range'
@@ -457,6 +687,12 @@ interface ImportTransactionCheckDataMenu {
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
+    sessionId?: string;  // v6.55: 导入会话ID，用于调用重新分类API
+}>();
+
+// v6.55: 定义事件，用于通知父组件数据刷新
+const emit = defineEmits<{
+    (e: 'reclassified', data: ImportTransaction[]): void;
 }>();
 
 const {
@@ -477,6 +713,18 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const batchReplaceDialog = useTemplateRef<BatchReplaceDialogType>('batchReplaceDialog');
 const batchReplaceAllTypesDialog = useTemplateRef<BatchReplaceAllTypesDialogType>('batchReplaceAllTypesDialog');
 const batchCreateDialog = useTemplateRef<BatchCreateDialogType>('batchCreateDialog');
+// v6.34: 分类和账户编辑对话框引用
+const categoryEditDialog = useTemplateRef<CategoryEditDialogType>('categoryEditDialog');
+const accountEditDialog = useTemplateRef<AccountEditDialogType>('accountEditDialog');
+
+// v6.34: 分类管理选择对话框状态
+const showCategorySelectDialog = ref<boolean>(false);
+const manageCategoryType = ref<CategoryType>(CategoryType.Expense);
+const manageCategoryId = ref<string>('');
+
+// v6.34: 账户管理选择对话框状态
+const showAccountSelectDialog = ref<boolean>(false);
+const manageAccountId = ref<string>('');
 
 const editingTransaction = ref<ImportTransaction | null>(null);
 const editingTags = ref<string[]>([]);
@@ -496,6 +744,13 @@ const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
 
+// 批量编辑对话框状态和数据
+const showBatchCategoryDialog = ref<boolean>(false);
+const showBatchAccountDialog = ref<boolean>(false);
+const batchCategoryType = ref<number>(TransactionType.Expense);
+const batchCategoryId = ref<string>('');
+const batchAccountId = ref<string>('');
+
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
 const currentTimezoneOffsetMinutes = computed<number>(() => getTimezoneOffsetMinutes(settingsStore.appSettings.timeZone));
@@ -513,9 +768,292 @@ const allCategoriesMap = computed<Record<string, TransactionCategory>>(() => tra
 const allTags = computed<TransactionTag[]>(() => transactionTagsStore.allTransactionTags);
 const allTagsMap = computed<Record<string, TransactionTag>>(() => transactionTagsStore.allTransactionTagsMap);
 
-const hasAvailableExpenseCategories = computed<boolean>(() => transactionCategoriesStore.hasAvailableExpenseCategories);
-const hasAvailableIncomeCategories = computed<boolean>(() => transactionCategoriesStore.hasAvailableIncomeCategories);
-const hasAvailableTransferCategories = computed<boolean>(() => transactionCategoriesStore.hasAvailableTransferCategories);
+// 根据交易类型获取对应的分类列表（统一函数，避免多个 v-if 分支导致的 Vue 渲染问题）
+function getCategoriesForType(type: number): TransactionCategory[] {
+    const typeToCategory: Record<number, number> = {
+        [TransactionType.Expense]: CategoryType.Expense,
+        [TransactionType.Income]: CategoryType.Income,
+        [TransactionType.Transfer]: CategoryType.Transfer,
+        [TransactionType.Investment]: CategoryType.Investment
+    };
+    const categoryType = typeToCategory[type];
+    return categoryType !== undefined ? (allCategories.value[categoryType] || []) : [];
+}
+
+// 检查指定交易类型是否有可用的分类
+function hasAvailableCategoriesForType(type: number): boolean {
+    const categories = getCategoriesForType(type);
+    return categories.some(cat => !cat.hidden);
+}
+
+// 获取分类主文本（处理空 categoryId 的情况，避免触发大量警告日志）
+function getCategoryPrimaryText(item: ImportTransaction): string {
+    // 如果 categoryId 为空或 '0'，返回空字符串避免触发查找
+    if (!item.categoryId || item.categoryId === '0') {
+        return '';
+    }
+    return getTransactionPrimaryCategoryName(item.categoryId, getCategoriesForType(item.type));
+}
+
+// 获取分类次要文本（处理空 categoryId 的情况）
+function getCategorySecondaryText(item: ImportTransaction): string {
+    if (!item.categoryId || item.categoryId === '0') {
+        return '';
+    }
+    return getTransactionSecondaryCategoryName(item.categoryId, getCategoriesForType(item.type));
+}
+
+/**
+ * 判断交易是否需要双账户（转账或投资类型）
+ * 转账：资金从一个账户转到另一个账户
+ * 投资：资金从一个账户投入到投资账户（如余额宝、股票账户等）
+ */
+function requiresDestinationAccount(item: ImportTransaction): boolean {
+    return item.type === TransactionType.Transfer || item.type === TransactionType.Investment;
+}
+
+/**
+ * 获取目标账户标题（根据交易类型返回不同文案）
+ */
+function getDestinationAccountTitle(item: ImportTransaction): string {
+    if (item.type === TransactionType.Investment) {
+        return tt('Investment Account');
+    }
+    return tt('Destination Account');
+}
+
+// 批量编辑分类：交易类型选项
+const batchCategoryTypeOptions = computed<NameNumeralValue[]>(() => [
+    { name: tt('Expense'), value: TransactionType.Expense },
+    { name: tt('Income'), value: TransactionType.Income },
+    { name: tt('Transfer'), value: TransactionType.Transfer },
+    { name: tt('Investment'), value: TransactionType.Investment }
+]);
+
+// 批量编辑分类：根据选中的交易类型获取分类列表
+function getBatchCategoryItems(): TransactionCategory[] {
+    return getCategoriesForType(batchCategoryType.value);
+}
+
+// 批量编辑账户：可用账户列表
+const availableAccounts = computed<Account[]>(() => allVisibleAccounts.value);
+
+/**
+ * v6.55: 重新分类所有预览账单
+ * 调用后端 /api/bills/import/v2/reclassify/{session_id} 端点
+ * 后端会：
+ * 1. 刷新分类规则
+ * 2. 按照 dedup_type 分离账单
+ * 3. 对不同类型使用不同的分类规则
+ * 4. 更新预览表中的分类和账户信息
+ * 5. 返回更新后的完整预览数据
+ */
+async function reclassifySelected(): Promise<void> {
+    // 检查 session_id 是否存在
+    if (!props.sessionId) {
+        logger.error('[重新分类] 缺少 sessionId');
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    logger.info(`[重新分类] 开始重新分类，session_id=${props.sessionId}`);
+
+    try {
+        // 获取认证token
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        // 调用 v6.55 新增的 reclassify API
+        const response = await fetch(`/api/bills/import/v2/reclassify/${props.sessionId}`, {
+            method: 'POST',
+            headers: headers
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Reclassify failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}`);
+
+        // 通知父组件使用新数据
+        // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
+        if (result.data?.preview && result.data.preview.length > 0) {
+            emit('reclassified', result.data.preview);
+            snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
+                count: getDisplayCount(result.data.preview.length)
+            });
+        } else {
+            snackbar.value?.showMessage('No transactions updated');
+        }
+
+        logger.info('[重新分类] 完成');
+
+    } catch (error) {
+        logger.error(`[重新分类] 失败: ${error}`);
+        snackbar.value?.showMessage(`Reclassify failed: ${error}`);
+    }
+}
+
+// v6.34: 打开分类选择对话框
+function openCategoryManagement(): void {
+    manageCategoryId.value = '';
+    manageCategoryType.value = CategoryType.Expense;
+    showCategorySelectDialog.value = true;
+}
+
+// v6.34: 打开账户选择对话框
+function openAccountManagement(): void {
+    manageAccountId.value = '';
+    showAccountSelectDialog.value = true;
+}
+
+// v6.34: 获取当前选中类型的分类列表
+function getManageCategoryItems(): TransactionCategory[] {
+    return allCategories.value[manageCategoryType.value] || [];
+}
+
+// v6.34: 获取所有显示账户（用于选择器）
+const allDisplayAccounts = computed<Account[]>(() => {
+    const allAccounts: Account[] = [];
+    const categorizedAccounts = getCategorizedAccountsWithDisplayBalance(
+        accountsStore.allAccounts,
+        false  // 不显示余额
+    );
+
+    for (const category of categorizedAccounts) {
+        for (const account of category.accounts) {
+            allAccounts.push(account);
+        }
+    }
+
+    return allAccounts;
+});
+
+// v6.34: 打开选中分类的编辑对话框
+function openSelectedCategoryEditDialog(): void {
+    if (!manageCategoryId.value) return;
+
+    showCategorySelectDialog.value = false;
+
+    // 查找选中的分类
+    const category = allCategoriesMap.value[manageCategoryId.value];
+    if (category) {
+        categoryEditDialog.value?.open({
+            id: manageCategoryId.value,
+            type: manageCategoryType.value,
+            currentCategory: category
+        }).then(() => {
+            // 编辑完成后刷新分类数据
+            transactionCategoriesStore.loadAllCategories({ force: true });
+        }).catch((error: unknown) => {
+            if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+                logger.error(`[分类编辑] 失败: ${error}`);
+            }
+        });
+    }
+}
+
+// v6.34: 打开选中账户的编辑对话框
+function openSelectedAccountEditDialog(): void {
+    if (!manageAccountId.value) return;
+
+    showAccountSelectDialog.value = false;
+
+    // 查找选中的账户
+    const account = allDisplayAccounts.value.find(acc => acc.id === manageAccountId.value);
+    if (account) {
+        accountEditDialog.value?.open({
+            id: manageAccountId.value,
+            currentAccount: account
+        }).then(() => {
+            // 编辑完成后刷新账户数据
+            accountsStore.loadAllAccounts({ force: true });
+        }).catch((error: unknown) => {
+            if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+                logger.error(`[账户编辑] 失败: ${error}`);
+            }
+        });
+    }
+}
+
+// 应用批量分类修改
+function applyBatchCategory(): void {
+    if (!props.importTransactions || !batchCategoryId.value) return;
+
+    let updatedCount = 0;
+
+    for (const importTransaction of props.importTransactions) {
+        if (!importTransaction.selected) continue;
+
+        // 更新交易类型和分类ID
+        importTransaction.type = batchCategoryType.value;
+        importTransaction.categoryId = batchCategoryId.value;
+
+        // 更新分类名称显示
+        const category = allCategoriesMap.value[batchCategoryId.value];
+        if (category) {
+            importTransaction.actualCategoryName = category.name;
+            importTransaction.originalCategoryName = category.name;
+        }
+
+        updateTransactionData(importTransaction);
+        updatedCount++;
+    }
+
+    showBatchCategoryDialog.value = false;
+    batchCategoryId.value = '';
+
+    if (updatedCount > 0) {
+        snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
+            count: getDisplayCount(updatedCount)
+        });
+    }
+}
+
+// 应用批量账户修改
+function applyBatchAccount(): void {
+    if (!props.importTransactions || !batchAccountId.value) return;
+
+    let updatedCount = 0;
+
+    for (const importTransaction of props.importTransactions) {
+        if (!importTransaction.selected) continue;
+
+        // 更新账户ID
+        importTransaction.sourceAccountId = batchAccountId.value;
+
+        // 更新账户名称显示
+        const account = allAccountsMap.value[batchAccountId.value];
+        if (account) {
+            importTransaction.actualSourceAccountName = account.name;
+            importTransaction.originalSourceAccountName = account.name;
+        }
+
+        updateTransactionData(importTransaction);
+        updatedCount++;
+    }
+
+    showBatchAccountDialog.value = false;
+    batchAccountId.value = '';
+
+    if (updatedCount > 0) {
+        snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
+            count: getDisplayCount(updatedCount)
+        });
+    }
+}
 
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
@@ -562,6 +1100,11 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 title: tt('Transfer'),
                 appendIcon: filters.value.transactionType === TransactionType.Transfer ? mdiCheck : undefined,
                 onClick: () => filters.value.transactionType = TransactionType.Transfer
+            },
+            {
+                title: tt('Investment'),
+                appendIcon: filters.value.transactionType === TransactionType.Investment ? mdiCheck : undefined,
+                onClick: () => filters.value.transactionType = TransactionType.Investment
             }
         ]
     },
@@ -829,6 +1372,9 @@ const importTransactionHeaders = computed<object[]>(() => {
         { value: 'actualSourceAccountName', title: tt('Account'), sortable: true, nowrap: true },
         { value: 'geoLocation', title: tt('Geographic Location'), sortable: true, nowrap: true },
         { value: 'tagIds', title: tt('Tags'), sortable: true, nowrap: true },
+        // v6.33: 交易对方和支付方式列移到标签列之后
+        { value: 'counterparty', title: tt('Counterparty'), sortable: true, nowrap: true },
+        { value: 'paymentMethod', title: tt('Payment Method'), sortable: true, nowrap: true },
         { value: 'comment', title: tt('Description'), sortable: true, nowrap: true },
     ];
 });
@@ -1192,7 +1738,8 @@ function getTransactionDisplayAmount(transaction: ImportTransaction): string {
 }
 
 function getTransactionDisplayDestinationAmount(transaction: ImportTransaction): string {
-    if (transaction.type !== TransactionType.Transfer) {
+    // v6.55: 转账和投资类型都需要显示目标金额
+    if (transaction.type !== TransactionType.Transfer && transaction.type !== TransactionType.Investment) {
         return '-';
     }
 

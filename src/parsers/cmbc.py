@@ -2,11 +2,19 @@
 CMBC Parser - 民生银行账单解析器
 
 解析中国民生银行账单导出的 CSV/Excel 文件。
+
+输出标准格式:
+- date: 交易时间 (YYYY-MM-DD HH:MM:SS)
+- amount: 金额 (支出为负, 收入为正)
+- type: 类型 (收入/支出)
+- description: 聚合描述
+- source_account_id: 'cmbc'
 """
 
 import csv
-import pandas as pd
 from typing import Dict, List, Any
+
+import pandas as pd
 
 from .base import ParserBase
 from ..utils.logger import log_method
@@ -15,10 +23,15 @@ from ..utils.logger import log_method
 class CMBCParser(ParserBase):
     """民生银行账单解析器"""
 
+    # 解析器标识符
+    PARSER_ID = "cmbc"
+    PARSER_NAME = "民生银行"
+
     def __init__(self):
         """初始化"""
         super().__init__()
         self.supported_extensions = ['.csv', '.xlsx', '.xls']
+        self.logger.info("民生银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:
@@ -51,10 +64,10 @@ class CMBCParser(ParserBase):
                             df = tables[0].head(15)
                         else:
                             df = pd.read_excel(file_path, nrows=15, header=None)
-                    except:
+                    except Exception:  # pylint: disable=broad-except
                         df = pd.read_excel(file_path, nrows=15, header=None)
 
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 return False
 
             # 检查内容是否包含民生银行特征
@@ -114,6 +127,131 @@ class CMBCParser(ParserBase):
             self.logger.debug(f"判断民生银行文件失败: {file_path}, 错误: {e}")
             return False
 
+    def _is_html_file(self, file_path: str) -> bool:
+        """检查文件是否为HTML格式（某些银行导出的.xls实际是HTML）"""
+        try:
+            with open(file_path, 'rb') as f:
+                first_bytes = f.read(100)
+                # 检查是否以 <html 或 <!DOCTYPE html 开头
+                first_str = first_bytes.decode('utf-8', errors='ignore').lower().strip()
+                return first_str.startswith('<html') or first_str.startswith('<!doctype html')
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+    def _parse_html_xls(self, file_path: str) -> List[Dict[str, Any]]:
+        """解析HTML格式伪装的.xls文件（民生银行网银导出格式）"""
+        bills = []
+
+        try:
+            # 使用pandas的read_html读取HTML表格
+            tables = pd.read_html(file_path, encoding='utf-8')
+
+            if not tables:
+                self.logger.warning("HTML文件中未找到表格")
+                return []
+
+            # 民生银行通常只有一个表格
+            df = tables[0]
+            self.logger.info(f"[民生银行HTML] 读取到 {len(df)} 行数据")
+
+            # 查找表头行（包含"交易时间"的行）
+            header_row_idx = None
+            for idx in range(min(10, len(df))):
+                row_values = [str(v) for v in df.iloc[idx].tolist() if pd.notna(v)]
+                row_text = ' '.join(row_values)
+                if '交易时间' in row_text:
+                    header_row_idx = idx
+                    break
+
+            if header_row_idx is None:
+                self.logger.warning("未找到民生银行表头行")
+                return []
+
+            # 提取列名
+            headers = []
+            for val in df.iloc[header_row_idx].tolist():
+                if pd.isna(val):
+                    headers.append('')
+                else:
+                    headers.append(str(val).strip())
+
+            self.logger.info(f"[民生银行HTML] 列名: {headers}")
+
+            # 从表头下一行开始解析数据
+            for idx in range(header_row_idx + 1, len(df)):
+                try:
+                    row = df.iloc[idx]
+                    row_dict = {}
+                    for col_idx, header in enumerate(headers):
+                        if header and col_idx < len(row):
+                            val = row.iloc[col_idx]
+                            row_dict[header] = str(val).strip() if pd.notna(val) else ''
+
+                    # 提取交易时间（格式: 20170101\t19:36:56）
+                    date_str = row_dict.get('交易时间', '')
+                    if not date_str or date_str == 'nan' or '交易时间' in date_str:
+                        continue
+
+                    # 处理日期格式：20170101\t19:36:56 -> 2017-01-01 19:36:56
+                    date_str = date_str.replace('\\t', ' ').replace('\t', ' ')
+                    if len(date_str) >= 8 and date_str[:8].isdigit():
+                        # 格式化日期：20170101 -> 2017-01-01
+                        date_part = date_str[:8]
+                        time_part = date_str[8:].strip() if len(date_str) > 8 else ''
+                        formatted_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
+                        if time_part:
+                            formatted_date += f" {time_part}"
+                        date_str = formatted_date
+
+                    # 提取金额 - 民生银行有"支出金额"和"存入金额"两列
+                    debit_str = row_dict.get('支出金额', '').strip()
+                    credit_str = row_dict.get('存入金额', '').strip()
+
+                    amount_value = 0.0
+                    transaction_type = '支出'
+
+                    if credit_str and credit_str not in ['', 'nan', 'NaN']:
+                        try:
+                            amount_value = abs(float(credit_str.replace(',', '')))
+                            transaction_type = '收入'
+                        except (ValueError, TypeError):
+                            pass
+                    elif debit_str and debit_str not in ['', 'nan', 'NaN']:
+                        try:
+                            amount_value = abs(float(debit_str.replace(',', '')))
+                            transaction_type = '支出'
+                        except (ValueError, TypeError):
+                            pass
+
+                    if amount_value == 0:
+                        continue
+
+                    # 构建账单
+                    bill = {
+                        'date': date_str,
+                        'type': transaction_type,
+                        'counterparty': row_dict.get('对方名称', '') or row_dict.get('对方户名', ''),
+                        'description': row_dict.get('摘要', '') or row_dict.get('交易方式', ''),
+                        'amount': str(amount_value),
+                        'channel': '民生银行',
+                        'opponent_account': row_dict.get('对方账号', ''),
+                        'payment_method': row_dict.get('交易方式', ''),
+                    }
+
+                    bills.append(bill)
+
+                except Exception as e:  # pylint: disable=broad-except
+                    self.logger.debug(f"解析民生银行HTML行失败: {e}")
+                    continue
+
+            self.logger.info(f"[民生银行HTML] 解析完成: {len(bills)} 条账单")
+
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error(f"解析民生银行HTML账单失败: {e}")
+            return []
+
+        return bills
+
     @log_method
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
         """解析民生银行账单"""
@@ -168,13 +306,23 @@ class CMBCParser(ParserBase):
                         except Exception as e:  # pylint: disable=broad-except
                             self.logger.error("解析CSV行数据失败: %s", e)
             else:
-                # Excel格式
+                # Excel格式 - 先检查是否为HTML伪装的.xls
+                if self._is_html_file(file_path):
+                    self.logger.info(f"检测到HTML格式的.xls文件: {file_path}")
+                    bills = self._parse_html_xls(file_path)
+                    return self.post_process(bills)
+
+                # 真正的Excel格式
                 df = pd.read_excel(file_path, header=None)
 
                 # 查找表头行
                 header_row = -1
                 for i in range(min(10, len(df))):
-                    row_text = ' '.join(str(df.iloc[i, j]) for j in range(len(df.columns)) if not pd.isna(df.iloc[i, j]))
+                    cols = df.columns
+                    row_text = ' '.join(
+                        str(df.iloc[i, j]) for j in range(len(cols))
+                        if not pd.isna(df.iloc[i, j])
+                    )
                     if '交易日期' in row_text or '交易时间' in row_text:
                         header_row = i
                         break
@@ -215,13 +363,13 @@ class CMBCParser(ParserBase):
                                 try:
                                     amount_str = str(abs(float(credit.replace(',', ''))))
                                     transaction_type = '收入'
-                                except:
+                                except (ValueError, TypeError):
                                     pass
                             elif debit and debit != 'nan' and debit != '':
                                 try:
                                     amount_str = str(abs(float(debit.replace(',', ''))))
                                     transaction_type = '支出'
-                                except:
+                                except (ValueError, TypeError):
                                     pass
                         else:
                             # 旧格式：单列显示
@@ -229,7 +377,7 @@ class CMBCParser(ParserBase):
                             try:
                                 if float(amount_str.replace(',', '')) > 0:
                                     transaction_type = '收入'
-                            except:
+                            except (ValueError, TypeError):
                                 pass
 
                         if not amount_str or amount_str == '0' or amount_str == 'nan':

@@ -36,7 +36,7 @@ export function useTwoLevelItemSelectionBase(props: TwoLevelItemSelectionBasePro
     const visibleItemsCount = computed<number>(() => {
         let count = 0;
 
-        for (const item of props.items) {
+        for (const item of props.items || []) {
             if (props.primaryHiddenField && item[props.primaryHiddenField]) {
                 continue;
             }
@@ -49,7 +49,7 @@ export function useTwoLevelItemSelectionBase(props: TwoLevelItemSelectionBasePro
 
     const filteredItems = computed<Record<string, unknown>[]>(() => {
         const finalItems: Record<string, unknown>[] = [];
-        const items = props.items;
+        const items = props.items || [];
         const lowerCaseFilterContent = filterContent.value?.toLowerCase() ?? '';
 
         for (const item of items) {

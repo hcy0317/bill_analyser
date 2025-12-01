@@ -7,6 +7,7 @@ Bills API Routes - 账单相关API端点
 
 import asyncio
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -999,6 +1000,9 @@ def upload_and_import():
         # 导入账单
         _, bill_service, _, _ = get_app_context()
 
+        # 获取用户ID
+        user_id = getattr(request, 'user_id', 1)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -1007,7 +1011,8 @@ def upload_and_import():
             bill_service.import_bills(
                 str(file_path),
                 parser_type=parser_type,
-                preview_only=preview_only
+                preview_only=preview_only,
+                user_id=user_id
             )
         )
 
@@ -1021,9 +1026,26 @@ def upload_and_import():
             except Exception as e:
                 logger.warning(f"删除临时文件失败: {e}")
 
+        # 日志记录返回数据
+        preview_count = len(result.get('preview', []))
+        logger.info(f"[导入API返回] success={result.get('success')}, "
+                    f"preview_count={preview_count}, "
+                    f"total={result.get('total')}, valid={result.get('valid')}")
+
+        # 前端期望格式: { success, data: { preview: [...] } }
         return jsonify({
             'success': result.get('success', False),
-            'result': result
+            'data': {
+                'preview': result.get('preview', []),
+                'total': result.get('total', 0),
+                'valid': result.get('valid', 0),
+                'invalid': result.get('invalid', 0),
+                'inserted': result.get('inserted', 0),
+                'duplicates': result.get('duplicates', 0),
+                'dedup_stats': result.get('dedup_stats'),
+                'parser_type': result.get('parser_type', 'unknown'),
+                'errors': result.get('errors', [])
+            }
         })
 
     except Exception as e:
@@ -1104,6 +1126,451 @@ def get_available_parsers():
 
     except Exception as e:
         logger.error(f"获取解析器列表失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/reclassify', methods=['POST'])
+@log_method
+@require_auth
+def reclassify_transactions():
+    """
+    重新分类导入预览中的交易
+
+    使用后端分类引擎和账户匹配逻辑重新计算交易的分类和账户
+
+    Request:
+        {
+            'transactions': [
+                {
+                    'description': '...',
+                    'counterparty': '...',
+                    'amount': 100.50,
+                    'type': 3,  # TransactionType
+                    'originalSourceAccountName': '...',
+                    'originalDestinationAccountName': '...'
+                },
+                ...
+            ]
+        }
+
+    Response:
+        {
+            'success': true,
+            'result': [
+                {
+                    'index': 0,
+                    'categoryId': '123',
+                    'categoryName': '餐饮-外卖',
+                    'sourceAccountId': '456',
+                    'destinationAccountId': '789'  # 仅转账/投资类型
+                },
+                ...
+            ]
+        }
+    """
+    try:
+        data = request.get_json()
+        if not data or 'transactions' not in data:
+            return jsonify({
+                'success': False,
+                'error': '缺少transactions字段'
+            }), 400
+
+        transactions = data['transactions']
+        if not isinstance(transactions, list):
+            return jsonify({
+                'success': False,
+                'error': 'transactions必须是数组'
+            }), 400
+
+        logger.info(f"[重新分类] 收到 {len(transactions)} 条交易")
+
+        # 获取分类引擎和数据库
+        db, _, category_engine, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # 加载分类规则
+            loop.run_until_complete(category_engine.load_rules_from_db(db, user_id=request.user_id))
+
+            # 获取所有账户用于匹配
+            all_accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
+
+            # 获取所有分类用于ID查询
+            all_categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
+            category_map = {}
+            for cat in all_categories:
+                key = (cat.get('main_category', ''), cat.get('sub_category', ''))
+                category_map[key] = cat
+
+            results = []
+            for idx, trans in enumerate(transactions):
+                result = {'index': idx}
+
+                # 构建用于分类匹配的bill结构
+                bill = {
+                    'description': trans.get('description', ''),
+                    'counterparty': trans.get('counterparty', ''),
+                    'amount': float(trans.get('amount', 0)),
+                    'type': trans.get('type', '支出')
+                }
+
+                # 1. 分类匹配
+                main_cat, sub_cat = category_engine.match_category(bill)
+                if main_cat:
+                    result['mainCategory'] = main_cat
+                    result['subCategory'] = sub_cat or ''
+                    # 查找分类ID
+                    cat_info = category_map.get((main_cat, sub_cat or ''))
+                    if cat_info:
+                        result['categoryId'] = str(cat_info.get('id', ''))
+                        result['categoryName'] = f"{main_cat}-{sub_cat}" if sub_cat else main_cat
+                    else:
+                        result['categoryId'] = ''
+                        result['categoryName'] = f"{main_cat}-{sub_cat}" if sub_cat else main_cat
+                else:
+                    result['categoryId'] = ''
+                    result['categoryName'] = ''
+
+                # 2. 账户匹配（通过账户名称或别名）
+                original_source = trans.get('originalSourceAccountName', '')
+                original_dest = trans.get('originalDestinationAccountName', '')
+
+                if original_source:
+                    source_account = _match_account_by_name(all_accounts, original_source)
+                    result['sourceAccountId'] = str(source_account['id']) if source_account else ''
+                    result['sourceAccountName'] = source_account['name'] if source_account else ''
+
+                if original_dest:
+                    dest_account = _match_account_by_name(all_accounts, original_dest)
+                    result['destinationAccountId'] = str(dest_account['id']) if dest_account else ''
+                    result['destinationAccountName'] = dest_account['name'] if dest_account else ''
+
+                results.append(result)
+
+            logger.info(f"[重新分类] 完成 {len(results)} 条交易的重新分类")
+
+            return jsonify({
+                'success': True,
+                'result': results
+            })
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"重新分类失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+def _match_account_by_name(accounts: list, name: str) -> dict:
+    """
+    通过名称或别名匹配账户
+
+    Args:
+        accounts: 账户列表
+        name: 要匹配的名称
+
+    Returns:
+        匹配到的账户字典，或None
+    """
+    if not name:
+        return None
+
+    name_lower = name.lower().strip()
+
+    for account in accounts:
+        # 精确匹配账户名称
+        if account.get('name', '').lower() == name_lower:
+            return account
+
+        # 匹配别名（存储在comment字段或aliases字段）
+        aliases_str = account.get('aliases', '') or account.get('comment', '')
+        if aliases_str:
+            aliases = [a.strip().lower() for a in aliases_str.split(',')]
+            if name_lower in aliases:
+                return account
+
+    # 模糊匹配：名称包含关系
+    for account in accounts:
+        account_name = account.get('name', '').lower()
+        if name_lower in account_name or account_name in name_lower:
+            return account
+
+    return None
+
+
+@bp.route('/import/v2/reclassify/<session_id>', methods=['POST'])
+@log_method
+@require_auth
+def reclassify_preview_session(session_id: str):
+    """
+    v6.55: 重新分类导入会话中的预览账单
+
+    功能：
+    1. 刷新分类规则（从数据库重新加载）
+    2. 从 bills_preview 表读取所有账单
+    3. 根据 dedup_type 使用不同类型的分类规则
+    4. 重新执行账户匹配
+    5. 更新 bills_preview 表
+    6. 返回更新后的预览数据
+
+    Request:
+        POST /api/bills/import/v2/reclassify/<session_id>
+
+    Response:
+        {
+            'success': true,
+            'data': {
+                'session_id': 'xxx',
+                'total': 100,
+                'categorized': 80,
+                'account_matched': 90,
+                'preview': [...]  // 更新后的预览数据
+            }
+        }
+    """
+    try:
+        logger.info(f"[v2重新分类] session_id={session_id}, user_id={request.user_id}")
+
+        db, bill_service, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # 1. 执行重新分类
+            reclassify_result = loop.run_until_complete(
+                bill_service.reclassify_preview_bills(session_id, user_id=request.user_id)
+            )
+
+            if not reclassify_result.get('success'):
+                return jsonify({
+                    'success': False,
+                    'error': reclassify_result.get('errors', ['未知错误'])[0] if reclassify_result.get('errors') else '重新分类失败'
+                }), 500
+
+            # 2. 获取更新后的预览数据
+            preview_data = loop.run_until_complete(
+                bill_service.get_import_preview(session_id)
+            )
+
+            logger.info(f"[v2重新分类] 完成 session={session_id}, "
+                        f"total={reclassify_result.get('total')}, "
+                        f"categorized={reclassify_result.get('categorized')}, "
+                        f"account_matched={reclassify_result.get('account_matched')}")
+
+            return jsonify({
+                'success': True,
+                'data': {
+                    'session_id': session_id,
+                    'total': reclassify_result.get('total', 0),
+                    'categorized': reclassify_result.get('categorized', 0),
+                    'account_matched': reclassify_result.get('account_matched', 0),
+                    'preview': preview_data
+                }
+            })
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"[v2重新分类] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/confirm', methods=['POST'])
+@log_method
+@require_auth
+def confirm_import():
+    """
+    确认导入预览的账单
+
+    用户在预览后可能修改了分类，然后确认导入
+
+    Request:
+        {
+            'bills': [...]  # 经用户确认（可能修改）的账单列表
+        }
+
+    Response:
+        {
+            'success': true,
+            'result': {
+                'total': 100,
+                'inserted': 95,
+                'duplicates': 5
+            }
+        }
+    """
+    try:
+        data = request.get_json()
+        if not data or 'bills' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'bills is required'
+            }), 400
+
+        _, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(
+            bill_service.import_preview_confirmed(
+                data['bills'],
+                user_id=user_id
+            )
+        )
+        loop.close()
+
+        return jsonify({
+            'success': result.get('success', False),
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"确认导入失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/category/quick-add-keyword', methods=['POST'])
+@log_method
+@require_auth
+def quick_add_category_keyword():
+    """
+    快速为分类添加关键词
+
+    用户在手动分类时可以将交易的某个关键词添加到分类规则中
+
+    Request:
+        {
+            'main_category': '餐饮',
+            'sub_category': '外卖',  # 可选
+            'keyword': '美团'
+        }
+
+    Response:
+        {
+            'success': true,
+            'message': 'Keyword added successfully'
+        }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Request body is required'
+            }), 400
+
+        main_category = data.get('main_category')
+        sub_category = data.get('sub_category')
+        keyword = data.get('keyword')
+
+        if not main_category or not keyword:
+            return jsonify({
+                'success': False,
+                'error': 'main_category and keyword are required'
+            }), 400
+
+        _, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        success = loop.run_until_complete(
+            bill_service.add_category_keyword(
+                main_category,
+                sub_category,
+                keyword,
+                user_id=user_id
+            )
+        )
+        loop.close()
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Keyword added successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to add keyword'
+            }), 400
+
+    except Exception as e:
+        logger.error(f"添加关键词失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/category/refresh', methods=['POST'])
+@log_method
+@require_auth
+def refresh_bill_categories():
+    """
+    刷新账单分类
+
+    使用最新的分类规则重新匹配账单
+
+    Request:
+        {
+            'bill_ids': [1, 2, 3]  # 可选，不提供则刷新所有未分类账单
+        }
+
+    Response:
+        {
+            'success': true,
+            'result': {
+                'total': 50,
+                'categorized': 45,
+                'still_uncategorized': 5
+            }
+        }
+    """
+    try:
+        data = request.get_json() or {}
+        bill_ids = data.get('bill_ids')
+
+        _, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(
+            bill_service.refresh_category_for_bills(
+                bill_ids,
+                user_id=user_id
+            )
+        )
+        loop.close()
+
+        return jsonify({
+            'success': result.get('success', False),
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"刷新分类失败: {e}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
@@ -2285,4 +2752,559 @@ def clear_all_transactions_by_account():
             'success': False,
             'error': str(e),
             'message': 'Failed to delete transactions'
+        }), 500
+
+
+# ==================== v6.47 三阶段导入API ====================
+
+
+@bp.route('/import/v2/parse', methods=['POST'])
+@log_method
+@require_auth
+def import_stage1_parse():
+    """
+    三阶段导入 - 阶段1: 解析文件
+    
+    支持多文件并行上传解析，将解析结果写入 bills_parser_template 表。
+    
+    Request:
+        FormData:
+            - files: 多个账单文件（支持csv, xlsx, xls, txt）
+            
+    Response:
+        {
+            'success': true,
+            'data': {
+                'session_id': 'uuid',
+                'parsed_count': 100,
+                'files': [
+                    {'filename': 'xxx.csv', 'parser_type': 'wechat', 'count': 50},
+                    ...
+                ],
+                'errors': []
+            }
+        }
+    """
+    try:
+        logger.info("[阶段1-解析] 开始处理上传文件")
+        
+        # 检查是否有文件
+        if 'files' not in request.files and 'file' not in request.files:
+            logger.warning("[阶段1-解析] 未找到上传文件")
+            return jsonify({
+                'success': False,
+                'error': 'No files provided'
+            }), 400
+        
+        # 兼容单文件和多文件上传
+        files = request.files.getlist('files') or [request.files['file']]
+        
+        if not files or (len(files) == 1 and files[0].filename == ''):
+            logger.warning("[阶段1-解析] 文件列表为空")
+            return jsonify({
+                'success': False,
+                'error': 'No files selected'
+            }), 400
+        
+        # 获取服务实例
+        _, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        # 保存文件到临时目录
+        saved_files = []
+        for file in files:
+            if file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                unique_filename = f"{timestamp}_{filename}"
+                file_path = UPLOAD_FOLDER / unique_filename
+                file.save(str(file_path))
+                saved_files.append({
+                    'path': str(file_path),
+                    'original_name': file.filename
+                })
+                logger.info(f"[阶段1-解析] 文件已保存: {file_path}")
+            else:
+                logger.warning(f"[阶段1-解析] 跳过不支持的文件: {file.filename}")
+        
+        if not saved_files:
+            logger.error("[阶段1-解析] 没有有效的文件")
+            return jsonify({
+                'success': False,
+                'error': 'No valid files to process'
+            }), 400
+        
+        # 生成session_id
+        session_id = str(uuid.uuid4())
+        logger.info(f"[阶段1-解析] 生成会话ID: {session_id}")
+        
+        # 调用阶段1解析
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            file_paths = [f['path'] for f in saved_files]
+            result = loop.run_until_complete(
+                bill_service.import_stage1_parse(file_paths, session_id, user_id)
+            )
+            
+            logger.info(f"[阶段1-解析] 完成: session={result.get('session_id')}, "
+                        f"总数={result.get('total_parsed', 0)}")
+            
+            return jsonify({
+                'success': result.get('success', False),
+                'data': {
+                    'session_id': result.get('session_id'),
+                    'parsed_count': result.get('total_parsed', 0),
+                    'files': result.get('file_results', []),
+                    'errors': result.get('errors', [])
+                }
+            })
+            
+        finally:
+            loop.close()
+            # 清理临时文件
+            for f in saved_files:
+                try:
+                    os.remove(f['path'])
+                    logger.debug(f"[阶段1-解析] 临时文件已删除: {f['path']}")
+                except Exception as e:
+                    logger.warning(f"[阶段1-解析] 删除临时文件失败: {e}")
+    
+    except Exception as e:
+        logger.error(f"[阶段1-解析] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/dedup', methods=['POST'])
+@log_method
+@require_auth
+def import_stage2_dedup():
+    """
+    三阶段导入 - 阶段2: 去重并预览
+    
+    对 bills_parser_template 表中的账单进行去重处理，
+    结果写入 bills_preview 表供用户确认。
+    
+    Request:
+        JSON:
+            - session_id: 导入会话ID
+            
+    Response:
+        {
+            'success': true,
+            'data': {
+                'session_id': 'uuid',
+                'preview': [...],         # 预览账单列表
+                'total': 100,             # 原始总数
+                'after_dedup': 80,        # 去重后数量
+                'dedup_stats': {          # 去重统计
+                    'transfer_pairs': 5,
+                    'platform_bank': 10,
+                    'similar': 3,
+                    'split_merge': 2
+                }
+            }
+        }
+    """
+    try:
+        logger.info("[阶段2-去重] 开始处理")
+        
+        data = request.get_json()
+        if not data or 'session_id' not in data:
+            logger.warning("[阶段2-去重] 缺少session_id")
+            return jsonify({
+                'success': False,
+                'error': 'Missing session_id'
+            }), 400
+        
+        session_id = data['session_id']
+        
+        # 获取服务实例
+        _, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # 执行阶段2去重处理
+            result = loop.run_until_complete(
+                bill_service.import_stage2_dedup(session_id, user_id)
+            )
+            
+            # 获取预览数据返回给前端
+            preview_data = []
+            if result.get('success'):
+                preview_data = loop.run_until_complete(
+                    bill_service.get_import_preview(session_id, selected_only=False)
+                )
+            
+            logger.info(f"[阶段2-去重] 完成: session={session_id}, "
+                        f"原始={result.get('template_count', 0)}, "
+                        f"去重后={result.get('preview_count', 0)}, "
+                        f"预览数据={len(preview_data)}条")
+            
+            return jsonify({
+                'success': result.get('success', False),
+                'data': {
+                    'session_id': session_id,
+                    'preview': preview_data,
+                    'total': result.get('template_count', 0),
+                    'after_dedup': result.get('preview_count', 0),
+                    'dedup_stats': result.get('dedup_stats', {}),
+                    'match_stats': result.get('match_stats', {})
+                }
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[阶段2-去重] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/confirm', methods=['POST'])
+@log_method
+@require_auth
+def import_stage3_confirm():
+    """
+    三阶段导入 - 阶段3: 确认导入
+    
+    将 bills_preview 表中的账单正式写入 bills 表，
+    并清理临时表数据。
+    
+    Request:
+        JSON:
+            - session_id: 导入会话ID
+            - selected_ids: 可选，用户选择的预览账单ID列表（不传则全部导入）
+            - preview_updates: 可选，用户编辑后的预览数据列表
+            
+    Response:
+        {
+            'success': true,
+            'data': {
+                'imported_count': 80,     # 导入成功数量
+                'skipped_count': 0,       # 跳过数量
+                'errors': []
+            }
+        }
+    """
+    try:
+        logger.info("[阶段3-确认] 开始处理")
+        
+        data = request.get_json()
+        if not data or 'session_id' not in data:
+            logger.warning("[阶段3-确认] 缺少session_id")
+            return jsonify({
+                'success': False,
+                'error': 'Missing session_id'
+            }), 400
+        
+        session_id = data['session_id']
+        selected_ids = data.get('selected_ids')  # 可选：用户选择的账单ID
+        preview_updates = data.get('preview_updates')  # 可选：用户编辑后的数据
+        
+        # 获取服务实例
+        db, bill_service, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # v6.61: 如果有preview_updates，先重置所有选中状态，再更新选中的账单
+            # 这确保只有前端传入的选中账单才会被导入，未选中的不会被导入
+            if preview_updates:
+                # 第一步：重置该会话所有账单的选中状态为未选中
+                reset_count = loop.run_until_complete(
+                    db.reset_session_preview_selection(session_id)
+                )
+                logger.info(f"[阶段3-确认] 已重置 {reset_count} 条账单的选中状态")
+                
+                # 第二步：更新前端传入的选中账单
+                logger.info(f"[阶段3-确认] 更新 {len(preview_updates)} 条预览数据")
+                loop.run_until_complete(
+                    db.update_preview_bills_batch(session_id, preview_updates, user_id)
+                )
+                # 从preview_updates中提取选中的ID
+                selected_ids = [u['id'] for u in preview_updates if u.get('selected', True) and u.get('id')]
+                logger.info(f"[阶段3-确认] 选中的账单ID数: {len(selected_ids)}")
+            
+            result = loop.run_until_complete(
+                bill_service.import_stage3_confirm(session_id, user_id, selected_ids)
+            )
+            
+            logger.info(f"[阶段3-确认] 完成: session={session_id}, "
+                        f"导入={result.get('imported_count', 0)}")
+            
+            return jsonify({
+                'success': result.get('success', False),
+                'data': {
+                    'imported_count': result.get('imported_count', 0),
+                    'skipped_count': result.get('skipped_count', 0),
+                    'errors': result.get('errors', [])
+                }
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[阶段3-确认] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/session/<session_id>', methods=['GET'])
+@log_method
+@require_auth
+def get_import_session(session_id: str):
+    """
+    获取导入会话状态
+    
+    Response:
+        {
+            'success': true,
+            'data': {
+                'session_id': 'uuid',
+                'status': 'parsed|deduped|confirmed|expired',
+                'created_at': '2025-11-30 10:00:00',
+                'parsed_count': 100,
+                'preview_count': 80
+            }
+        }
+    """
+    try:
+        db, _, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            session = loop.run_until_complete(db.get_import_session(session_id, user_id))
+            
+            if not session:
+                return jsonify({
+                    'success': False,
+                    'error': 'Session not found or expired'
+                }), 404
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'session_id': session['session_id'],
+                    'status': session['status'],
+                    'created_at': session['created_at'],
+                    'parsed_count': session.get('parsed_count', 0),
+                    'preview_count': session.get('preview_count', 0),
+                    'file_paths': session.get('file_paths', '')
+                }
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[获取会话] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/session/<session_id>', methods=['DELETE'])
+@log_method
+@require_auth
+def cancel_import_session(session_id: str):
+    """
+    取消/清理导入会话
+    
+    清理 bills_parser_template 和 bills_preview 中的临时数据。
+    """
+    try:
+        db, _, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            success = loop.run_until_complete(db.clear_session_data(session_id, user_id))
+            
+            return jsonify({
+                'success': success,
+                'message': 'Session cleared' if success else 'Session not found'
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[取消会话] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/preview/<session_id>', methods=['GET'])
+@log_method
+@require_auth
+def get_import_preview(session_id: str):
+    """
+    获取预览数据（分页）
+    
+    Query Parameters:
+        - page: 页码（默认1）
+        - page_size: 每页数量（默认50）
+        
+    Response:
+        {
+            'success': true,
+            'data': {
+                'preview': [...],
+                'total': 100,
+                'page': 1,
+                'page_size': 50
+            }
+        }
+    """
+    try:
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 50, type=int)
+        
+        db, _, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # 获取预览数据
+            previews = loop.run_until_complete(
+                db.get_preview_by_session(session_id, user_id)
+            )
+            
+            # 分页
+            total = len(previews)
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_data = previews[start:end]
+            
+            # 转换为前端格式
+            result = []
+            for preview in page_data:
+                result.append({
+                    'id': preview['id'],
+                    'time': preview['preview_date'],
+                    'type': preview['preview_type'],
+                    'amount': yuan_to_cents(preview['preview_amount']),
+                    'destinationAmount': yuan_to_cents(preview.get('preview_destination_amount', 0)),
+                    'categoryId': str(preview.get('category_id', '')),
+                    'mainCategory': preview.get('preview_main_category', ''),
+                    'subCategory': preview.get('preview_sub_category', ''),
+                    'sourceAccountId': str(preview.get('preview_source_account_id', '')),
+                    'destinationAccountId': str(preview.get('preview_destination_account_id', '')),
+                    'counterparty': preview.get('preview_counterparty', ''),
+                    'paymentMethod': preview.get('preview_payment_method', ''),
+                    'description': preview.get('preview_description', ''),
+                    'isSelected': preview.get('is_selected', 1) == 1
+                })
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'preview': result,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size
+                }
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[获取预览] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/preview/<session_id>/update', methods=['PUT'])
+@log_method
+@require_auth
+def update_preview_bill(session_id: str):
+    """
+    更新预览账单（用户编辑）
+    
+    Request:
+        JSON:
+            - id: 预览账单ID
+            - 其他可更新字段...
+    """
+    try:
+        data = request.get_json()
+        if not data or 'id' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'Missing bill id'
+            }), 400
+        
+        db, _, _, _ = get_app_context()
+        user_id = getattr(request, 'user_id', 1)
+        
+        preview_id = data['id']
+        
+        # 使用session_id验证预览账单归属（可选的安全检查）
+        logger.debug(f"[更新预览] session_id={session_id}, preview_id={preview_id}")
+        
+        updates = {
+            'preview_type': data.get('type'),
+            'preview_amount': data.get('amount'),
+            'preview_destination_amount': data.get('destinationAmount'),
+            'preview_main_category': data.get('mainCategory'),
+            'preview_sub_category': data.get('subCategory'),
+            'preview_source_account_id': data.get('sourceAccountId'),
+            'preview_destination_account_id': data.get('destinationAccountId'),
+            'preview_counterparty': data.get('counterparty'),
+            'preview_payment_method': data.get('paymentMethod'),
+            'preview_description': data.get('description'),
+            'is_selected': 1 if data.get('isSelected', True) else 0
+        }
+        # 过滤None值
+        updates = {k: v for k, v in updates.items() if v is not None}
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            success = loop.run_until_complete(
+                db.update_preview_bill(preview_id, updates, user_id)
+            )
+            
+            return jsonify({
+                'success': success
+            })
+            
+        finally:
+            loop.close()
+    
+    except Exception as e:
+        logger.error(f"[更新预览] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500

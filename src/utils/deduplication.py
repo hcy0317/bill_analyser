@@ -155,9 +155,14 @@ class DeduplicationEngine:
                     self.logger.debug(
                         f"发现重复 | 支付工具账单: {payment_bill.get('date')} "
                         f"{payment_bill.get('amount')} {payment_bill.get('description', '')[:20]} "
-                        f"<-> 银行账单(将被移除): {bank_bill.get('date')} "
+                        f"<-> 银行账单(将被合并): {bank_bill.get('date')} "
                         f"{bank_bill.get('amount')} {bank_bill.get('description', '')[:20]}"
                     )
+                    
+                    # v6.32: 合并银行账单信息到支付工具账单
+                    # 保留支付工具的时间和描述，合并counterparty和payment_method
+                    self._merge_bank_info_to_payment(payment_bill, bank_bill)
+                    
                     removed_bills.append(bank_bill)
                     matched_bank_bill_ids.add(id(bank_bill))
                     # 找到对应银行账单后，停止查找（假设一对一）
@@ -166,15 +171,60 @@ class DeduplicationEngine:
         # 保留未匹配的银行账单
         kept_bank_bills = [b for b in bank_bills if id(b) not in matched_bank_bill_ids]
 
-        # 合并结果: 保留的银行账单 + 所有支付工具账单 + 其他账单
-        # 注意：这里我们保留了支付工具账单（因为它们通常包含更详细的商户信息），移除了银行账单
+        # 合并结果: 保留的银行账单 + 所有支付工具账单(已合并银行信息) + 其他账单
         result = kept_bank_bills + payment_bills + other_bills
 
         self.logger.info(
-            f"支付工具-银行去重完成 | 移除银行账单: {len(removed_bills)}, 保留总数: {len(result)}"
+            f"支付工具-银行去重完成 | 合并银行账单: {len(removed_bills)}, 保留总数: {len(result)}"
         )
 
         return result, removed_bills
+
+    def _merge_bank_info_to_payment(
+        self,
+        payment_bill: Dict[str, Any],
+        bank_bill: Dict[str, Any]
+    ) -> None:
+        """
+        将银行账单信息合并到支付工具账单 (v6.32新增)
+        
+        合并策略：
+        - 保留支付工具的时间(date)和描述(description)
+        - 合并counterparty: 如果支付工具没有，使用银行的
+        - 合并payment_method: 附加银行渠道信息
+        
+        Args:
+            payment_bill: 支付工具账单 (将被修改)
+            bank_bill: 银行账单
+        """
+        # 1. 合并counterparty - 如果支付工具没有或为空，使用银行的
+        payment_counterparty = payment_bill.get('counterparty', '').strip()
+        bank_counterparty = bank_bill.get('counterparty', '').strip()
+        
+        if not payment_counterparty and bank_counterparty:
+            payment_bill['counterparty'] = bank_counterparty
+            self.logger.debug(f"合并counterparty: 使用银行账单的 '{bank_counterparty}'")
+        elif payment_counterparty and bank_counterparty and payment_counterparty != bank_counterparty:
+            # 两者都有且不同，追加银行的（用括号标注来源）
+            payment_bill['counterparty'] = f"{payment_counterparty} ({bank_counterparty})"
+            self.logger.debug(f"合并counterparty: '{payment_counterparty}' + 银行 '({bank_counterparty})'")
+        
+        # 2. 合并payment_method - 附加银行渠道信息
+        payment_method = payment_bill.get('payment_method', '').strip()
+        bank_source = bank_bill.get('source_account_id', '') or bank_bill.get('channel', '')
+        
+        if bank_source:
+            if payment_method:
+                payment_bill['payment_method'] = f"{payment_method} → {bank_source}"
+            else:
+                payment_bill['payment_method'] = str(bank_source)
+            self.logger.debug(f"合并payment_method: '{payment_bill['payment_method']}'")
+        
+        self.logger.info(
+            f"账单合并完成 | 支付工具: {payment_bill.get('date')} ¥{payment_bill.get('amount')} "
+            f"counterparty='{payment_bill.get('counterparty', '')}' "
+            f"payment_method='{payment_bill.get('payment_method', '')}'"
+        )
 
     @log_method
     def _is_duplicate_payment_bank(

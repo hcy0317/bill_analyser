@@ -5,11 +5,18 @@ ICBC Parser - 工商银行账单解析器
 支持格式：
 1. CSV格式（编码gbk）
 2. XLS/XLSX格式（第2行为列名，第3行开始为数据）
+
+输出标准格式:
+- date: 交易时间 (YYYY-MM-DD HH:MM:SS)
+- amount: 金额 (支出为负, 收入为正)
+- type: 类型 (收入/支出/转账)
+- description: 聚合描述
+- source_account_id: 'icbc'
 """
 
 import csv
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import openpyxl
 import pandas as pd
 
@@ -20,11 +27,15 @@ from ..utils.logger import log_method
 class ICBCParser(ParserBase):
     """工商银行账单解析器"""
 
+    # 解析器标识符
+    PARSER_ID = "icbc"
+    PARSER_NAME = "工商银行"
+
     def __init__(self):
         """初始化"""
         super().__init__()
         self.supported_extensions = ['.csv', '.xlsx', '.xls']
-        self.logger.info("工商银行账单解析器已初始化")
+        self.logger.info("工商银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:
@@ -37,7 +48,7 @@ class ICBCParser(ParserBase):
 
         if file_ext in ['.xlsx', '.xls']:
             return self._can_parse_excel(file_path)
-        elif file_ext == '.csv':
+        if file_ext == '.csv':
             return self._can_parse_csv(file_path)
 
         return False
@@ -60,75 +71,110 @@ class ICBCParser(ParserBase):
         except Exception:  # pylint: disable=broad-except
             return False
 
+    def _detect_file_format(self, file_path: str) -> tuple:
+        """检测Excel文件格式
+
+        Returns:
+            tuple: (is_html_format: bool, error: Optional[str])
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                header_bytes = f.read(8)
+
+            # 检查文件魔数（magic number）
+            # HTML格式伪装的xls: 以<html开头
+            if header_bytes.startswith(b'<htm') or header_bytes.startswith(b'<HTM'):
+                self.logger.debug("检测到HTML伪装XLS格式: %s", file_path)
+                return True, None
+
+            # 其他格式（XLSX/OLE2/未知）都使用pandas读取
+            self.logger.debug("检测到标准Excel格式: %s", file_path)
+            return False, None
+
+        except (IOError, OSError) as e:
+            return False, str(e)
+
+    def _read_html_content(self, file_path: str) -> str:
+        """读取HTML格式文件内容，尝试多种编码"""
+        for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    content = f.read(5000)
+                self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
+                return content
+            except (UnicodeDecodeError, IOError):
+                continue
+        return ""
+
+    def _read_excel_content(self, file_path: str) -> str:
+        """读取Excel格式文件内容"""
+        try:
+            df = pd.read_excel(file_path, header=None, nrows=15)
+            content_parts = []
+            for i in range(len(df)):
+                for j in range(len(df.columns)):
+                    cell_value = str(df.iloc[i, j]) if not pd.isna(df.iloc[i, j]) else ""
+                    content_parts.append(cell_value)
+            content = " ".join(content_parts)
+            self.logger.debug("pandas读取Excel成功，内容长度: %d", len(content))
+            return content
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.debug("pandas读取Excel失败: %s", e)
+            return ""
+
+    def _is_icbc_content(self, content: str) -> bool:
+        """判断内容是否为工商银行账单"""
+        # 工商银行强特征标识
+        icbc_strong_indicators = ["中国工商银行", "工商银行", "ICBC"]
+
+        # 工商银行特有列名组合（核心识别依据）
+        icbc_column_patterns = [
+            ["储种", "账号", "交易日期"],
+            ["账号", "交易日期", "交易时间", "对方账号"],
+            ["交易日期", "交易附言", "对方账号名称"]
+        ]
+
+        # 排除其他银行特征
+        other_bank_indicators = [
+            "支出金额", "存入金额", "凭证类型",
+            "⼾名", "账⼾", "对⼿信息",
+            "记账日", "开户机构：", "账户明细查询", "交易用途"
+        ]
+
+        has_icbc_strong = any(ind in content for ind in icbc_strong_indicators)
+        has_icbc_columns = any(all(col in content for col in pattern)
+                              for pattern in icbc_column_patterns)
+        has_other_bank = any(ind in content for ind in other_bank_indicators)
+
+        return (has_icbc_strong or has_icbc_columns) and not has_other_bank
+
     def _can_parse_excel(self, file_path: str) -> bool:
         """判断Excel是否为工商银行账单"""
         try:
-            content = ""
+            # 检测文件格式
+            is_html_format, error = self._detect_file_format(file_path)
+            if error:
+                self.logger.debug("读取文件头失败: %s", error)
+                return False
 
-            # 先检查是否是HTML格式伪装的xls
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    first_line = f.readline()
-                    if first_line.strip().startswith('<html'):
-                        # 读取更多内容
-                        content = first_line + ''.join([f.readline() for _ in range(20)])
-            except:
-                pass
+            # 根据文件类型读取内容
+            if is_html_format:
+                content = self._read_html_content(file_path)
+            else:
+                content = self._read_excel_content(file_path)
 
-            # 如果不是HTML或读取失败，尝试用pandas读取Excel
             if not content:
-                try:
-                    df = pd.read_excel(file_path, header=None, nrows=15)
-                    for i in range(len(df)):
-                        for j in range(len(df.columns)):
-                            cell_value = str(df.iloc[i, j]) if not pd.isna(df.iloc[i, j]) else ""
-                            content += cell_value + " "
-                except:
-                    return False
+                return False
 
-            # 工商银行强特征标识
-            icbc_strong_indicators = [
-                "中国工商银行", "工商银行", "ICBC"
-            ]
-
-            # 工商银行特有列名组合（核心识别依据）
-            icbc_column_patterns = [
-                ["储种", "账号", "交易日期"],  # 经典格式
-                ["账号", "交易日期", "交易时间", "对方账号"],  # 新格式
-                ["交易日期", "交易附言", "对方账号名称"]
-            ]
-
-            # 排除其他银行特征
-            other_bank_indicators = [
-                "支出金额",  # 民生银行特有（与"存入金额"配对）
-                "存入金额",  # 民生银行特有
-                "凭证类型",  # 民生银行
-                "⼾名", "账⼾", "对⼿信息",  # 农业银行特殊编码
-                "记账日",  # 建设银行（工商用"交易日期"）
-                "开户机构：",  # 建设银行
-                "账户明细查询",  # 农业银行
-                "交易用途"  # 农业银行
-            ]
-
-            # 检查强特征
-            has_icbc_strong = any(indicator in content for indicator in icbc_strong_indicators)
-
-            # 检查列名组合（任一组合全匹配即可）
-            has_icbc_columns = any(all(col in content for col in pattern) for pattern in icbc_column_patterns)
-
-            # 检查是否有其他银行特征
-            has_other_bank = any(indicator in content for indicator in other_bank_indicators)
-
-            # 工商银行判定：有强标识或列名组合，且无其他银行特征
-            is_icbc = (has_icbc_strong or has_icbc_columns) and not has_other_bank
-
+            # 判断是否为工商银行
+            is_icbc = self._is_icbc_content(content)
             if is_icbc:
-                self.logger.info(f"识别为工商银行文件: {file_path}")
+                self.logger.info("识别为工商银行文件: %s", file_path)
 
             return is_icbc
 
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.debug(f"判断工商银行Excel失败: {e}")
+            self.logger.debug("判断工商银行Excel失败: %s", e)
             return False
 
     @log_method
@@ -141,20 +187,64 @@ class ICBCParser(ParserBase):
 
         if file_ext == '.csv':
             return self._parse_csv(file_path)
-        elif file_ext in ['.xlsx', '.xls']:
-            # 检查是否是HTML格式伪装的xls
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    first_line = f.readline()
-                    if first_line.strip().startswith('<html'):
-                        return self._parse_html_xls(file_path)
-            except Exception:  # pylint: disable=broad-except
-                pass
 
-            return self._parse_excel(file_path)
-        else:
-            self.logger.error("不支持的文件格式: %s", file_ext)
-            return []
+        if file_ext in ['.xlsx', '.xls']:
+            # 检查文件格式（通过魔数判断）
+            try:
+                with open(file_path, 'rb') as f:
+                    header_bytes = f.read(8)
+
+                # HTML格式伪装的xls: 以<html开头
+                if header_bytes.startswith(b'<htm') or header_bytes.startswith(b'<HTM'):
+                    self.logger.info("检测到HTML伪装XLS格式，使用HTML解析器")
+                    return self._parse_html_xls(file_path)
+                # 真正的Excel格式（XLSX或OLE2 XLS）
+                self.logger.info("检测到标准Excel格式，使用Excel解析器")
+                return self._parse_excel(file_path)
+            except Exception as e:  # pylint: disable=broad-except
+                self.logger.error("判断Excel格式失败: %s, 尝试标准解析", e)
+                return self._parse_excel(file_path)
+
+        self.logger.error("不支持的文件格式: %s", file_ext)
+        return []
+
+    def _extract_bill_from_html_row(self, row) -> Optional[Dict[str, Any]]:
+        """从HTML表格行提取账单信息"""
+        try:
+            # 提取交易日期
+            date_str = str(row.get('交易日期', ''))
+            if not date_str or date_str == 'nan':
+                return None
+
+            # 提取金额
+            amount_str = str(row.get('收入/支出金额', '') or row.get('金额', ''))
+            if not amount_str or amount_str == 'nan' or amount_str == '0':
+                return None
+
+            try:
+                amount_value = float(amount_str.replace(',', ''))
+            except (ValueError, TypeError):
+                return None
+
+            if amount_value == 0:
+                return None
+
+            # 判断收支类型
+            transaction_type = '收入' if amount_value > 0 else '支出'
+
+            return {
+                'date': date_str,
+                'type': transaction_type,
+                'counterparty': str(row.get('对方户名', '') or row.get('交易对方', '')),
+                'opponent_account': str(row.get('对方账号', '') or ''),
+                'description': str(row.get('摘要', '') or row.get('用途', '')),
+                'abstract': str(row.get('摘要', '') or row.get('交易附言', '')),
+                'amount': str(abs(amount_value)),
+                'transaction_id': str(row.get('交易流水号', '') or ''),
+            }
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.debug("解析HTML行失败: %s", e)
+            return None
 
     @log_method
     def _parse_html_xls(self, file_path: str) -> List[Dict[str, Any]]:
@@ -162,19 +252,27 @@ class ICBCParser(ParserBase):
         bills = []
 
         try:
-            import pandas as pd
-
-            # 使用pandas读取HTML表格
-            dfs = pd.read_html(file_path, encoding='utf-8')
+            # 尝试多种编码读取HTML表格
+            dfs = None
+            encoding_used = None
+            for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
+                try:
+                    dfs = pd.read_html(file_path, encoding=encoding)
+                    encoding_used = encoding
+                    self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
+                    break
+                except (UnicodeDecodeError, ValueError):
+                    continue
 
             if not dfs:
-                self.logger.warning("未找到HTML表格")
+                self.logger.warning("未找到HTML表格或所有编码尝试失败")
                 return []
 
             # 通常第一个表格是账单数据
             df = dfs[0]
 
-            self.logger.info(f"读取到 {len(df)} 行数据，列名: {df.columns.tolist()}")
+            self.logger.info("读取到 %d 行数据，列名: %s，编码: %s",
+                           len(df), df.columns.tolist(), encoding_used)
 
             # 查找列名(可能在不同行)
             column_row_idx = None
@@ -191,46 +289,14 @@ class ICBCParser(ParserBase):
 
             # 解析每一行
             for _, row in df.iterrows():
-                try:
-                    # 提取交易日期
-                    date_str = str(row.get('交易日期', ''))
-                    if not date_str or date_str == 'nan':
-                        continue
-
-                    # 提取金额
-                    amount_str = str(row.get('收入/支出金额', '') or row.get('金额', ''))
-                    if not amount_str or amount_str == 'nan' or amount_str == '0':
-                        continue
-
-                    try:
-                        amount_value = float(amount_str.replace(',', ''))
-                    except (ValueError, TypeError):
-                        continue
-
-                    if amount_value == 0:
-                        continue
-
-                    # 判断收支类型
-                    transaction_type = '收入' if amount_value > 0 else '支出'
-
-                    bill = {
-                        'date': date_str,
-                        'type': transaction_type,
-                        'counterparty': str(row.get('对方户名', '') or row.get('交易对方', '')),
-                        'description': str(row.get('摘要', '') or row.get('用途', '')),
-                        'amount': str(abs(amount_value)),
-                        'channel': '工商银行'
-                    }
+                bill = self._extract_bill_from_html_row(row)
+                if bill:
                     bills.append(bill)
 
-                except Exception as e:  # pylint: disable=broad-except
-                    self.logger.debug(f"解析HTML行失败: {e}")
-                    continue
-
-            self.logger.info(f"HTML工商银行账单解析完成: {len(bills)} 条")
+            self.logger.info("[解析完成] HTML工商银行账单: %d 条", len(bills))
 
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.error(f"解析HTML工商银行账单失败: {e}")
+            self.logger.error("解析HTML工商银行账单失败: %s", e)
             return []
 
         return self.post_process(bills)
@@ -317,7 +383,7 @@ class ICBCParser(ParserBase):
 
         return self.post_process(bills)
 
-    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Dict[str, Any]:
+    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """从CSV行数据提取账单信息"""
         try:
             # 获取日期字段
@@ -339,16 +405,19 @@ class ICBCParser(ParserBase):
                 'date': date_field,
                 'type': transaction_type,
                 'counterparty': row.get('对方户名') or row.get('交易对方') or '',
+                'opponent_account': row.get('对方账号') or '',
                 'description': row.get('摘要') or row.get('用途') or '',
+                'abstract': row.get('摘要') or row.get('交易摘要') or '',
                 'amount': str(amount_str).replace('+', '').replace('-', ''),
-                'channel': '工商银行'
+                'transaction_id': row.get('交易流水号') or '',
             }
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("提取CSV账单信息失败: %s", e)
             return None
 
-    def _extract_bill_from_excel_row(self, row: tuple, column_map: Dict[str, int]) -> Dict[str, Any]:
+    def _extract_bill_from_excel_row(self, row: tuple,
+                                     column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
         """从Excel行数据提取账单信息"""
         try:
             def get_cell(col_name: str) -> str:
@@ -389,12 +458,13 @@ class ICBCParser(ParserBase):
                 'date': date_str,
                 'type': transaction_type,
                 'counterparty': get_cell('对方户名'),
+                'opponent_account': get_cell('对方账号'),
                 'description': get_cell('摘要'),
+                'abstract': get_cell('摘要') or get_cell('交易附言'),
                 'amount': amount_str,
-                'channel': '工商银行'
+                'transaction_id': get_cell('交易流水号'),
             }
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("提取Excel账单信息失败: %s", e)
             return None
-

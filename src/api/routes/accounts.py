@@ -43,7 +43,7 @@ def get_accounts():
             accounts = []
 
         logger.info(f"查询到 {len(accounts)} 个账户")
-        
+
         # 使用adapter构建层级并格式化
         response = account_adapter.format_list_response(accounts, build_hierarchy_flag=True)
 
@@ -122,7 +122,7 @@ def create_account():
             }), 400
 
         logger.debug(f"请求数据: {data}")
-        
+
         # 使用adapter转换前端数据格式
         data = account_adapter.frontend_to_backend(data)
 
@@ -182,10 +182,17 @@ def update_account(account_id: int):
                 'error': 'No data provided'
             }), 400
 
-        logger.debug(f"[账户更新] 请求数据字段: {list(data.keys())}")
-        
+        # v6.52: 记录aliases字段用于调试
+        logger.info(f"[账户更新] 请求数据字段: {list(data.keys())}")
+        if 'aliases' in data:
+            logger.info(f"[账户更新] aliases原始值(前端): {data['aliases']}, 类型: {type(data['aliases'])}")
+
         # 使用adapter转换前端数据格式
         data = account_adapter.frontend_to_backend(data)
+
+        # v6.52: 记录转换后的aliases字段
+        if 'aliases' in data:
+            logger.info(f"[账户更新] aliases转换后(后端): {data['aliases']}, 类型: {type(data['aliases'])}")
 
         db = get_app_context()
 
@@ -205,7 +212,7 @@ def update_account(account_id: int):
             # 更新或创建子账户
             for sub_data in sub_accounts_data:
                 sub_id = sub_data.get('id')
-                
+
                 # 使用adapter转换子账户数据格式
                 sub_data = account_adapter.frontend_to_backend(sub_data)
 
@@ -426,7 +433,10 @@ def hide_account_v1():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        result = loop.run_until_complete(db.update_account(account_id, {'hidden': 1 if hidden else 0}, user_id=request.user_id))
+        hidden_value = 1 if hidden else 0
+        result = loop.run_until_complete(
+            db.update_account(account_id, {'hidden': hidden_value}, user_id=request.user_id)
+        )
         loop.close()
 
         if result:
@@ -519,7 +529,10 @@ def move_account_v1():
             if 'id' in item and 'displayOrder' in item:
                 acc_id = int(item['id'])
                 order = int(item['displayOrder'])
-                if loop.run_until_complete(db.update_account(acc_id, {'display_order': order}, user_id=request.user_id)):
+                update_result = loop.run_until_complete(
+                    db.update_account(acc_id, {'display_order': order}, user_id=request.user_id)
+                )
+                if update_result:
                     success_count += 1
 
         loop.close()
