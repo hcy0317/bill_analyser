@@ -64,6 +64,7 @@
                                                 <v-btn :value="TransactionType.Income">{{ tt('Income') }}</v-btn>
                                                 <v-btn :value="TransactionType.Expense">{{ tt('Expense') }}</v-btn>
                                                 <v-btn :value="TransactionType.Transfer">{{ tt('Transfer') }}</v-btn>
+                                                <v-btn :value="TransactionType.Investment">{{ tt('Investment') }}</v-btn>
                                             </v-btn-toggle>
                                         </td>
                                     </tr>
@@ -520,6 +521,34 @@ function reset(): void {
     countPerPage.value = 10;
 }
 
+function applyFieldMappings(fieldMappings: Partial<ImportTransactionDefineColumnResult> | undefined): void {
+    if (!fieldMappings) {
+        return;
+    }
+
+    const nextMapping = ImportTransactionDataMapping.createEmpty();
+
+    nextMapping.includeHeader = fieldMappings.includeHeader ?? nextMapping.includeHeader;
+    nextMapping.dataColumnMapping = fieldMappings.columnMapping ?? {};
+    nextMapping.transactionTypeMapping = fieldMappings.transactionTypeMapping ?? {};
+    nextMapping.timeFormat = fieldMappings.timeFormat ?? '';
+    nextMapping.timezoneFormat = fieldMappings.timezoneFormat ?? '';
+
+    if (fieldMappings.amountDecimalSeparator) {
+        const matchedFormat = KnownAmountFormat.values().find(format =>
+            format.decimalSeparator.symbol === fieldMappings.amountDecimalSeparator &&
+            (format.digitGroupingSymbol?.symbol || '') === (fieldMappings.amountDigitGroupingSymbol || '')
+        );
+        nextMapping.amountFormat = matchedFormat?.type || '';
+    }
+
+    nextMapping.geoLocationSeparator = fieldMappings.geoLocationSeparator || nextMapping.geoLocationSeparator;
+    nextMapping.geoLocationOrder = fieldMappings.geoLocationOrder || nextMapping.geoLocationOrder;
+    nextMapping.tagSeparator = fieldMappings.tagSeparator || nextMapping.tagSeparator;
+
+    parsedFileDataColumnMapping.value = nextMapping;
+}
+
 function loadColumnMappingFile(): void {
     openTextFileContent({
         allowedExtensions: KnownFileType.JSON.contentType
@@ -546,6 +575,7 @@ function saveColumnMappingFile(): void {
 defineExpose({
     menus,
     generateResult,
+    applyFieldMappings,
     reset,
     loadColumnMappingFile,
     saveColumnMappingFile

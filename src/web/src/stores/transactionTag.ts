@@ -1,6 +1,5 @@
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
-import axios from 'axios';
 
 import { type BeforeResolveFunction, itemAndIndex } from '@/core/base.ts';
 
@@ -259,8 +258,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
         }
 
         return new Promise((resolve, reject) => {
-            // 直接使用axios调用标签移动API
-            axios.post('/api/v1/transaction/tags/move.json', {
+            services.moveTransactionTag({
                 newDisplayOrders: newDisplayOrders
             }).then(response => {
                 const data = response.data;

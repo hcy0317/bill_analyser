@@ -18,6 +18,10 @@ import { setExpenseAndIncomeAmountColor } from '@/lib/ui/common.ts';
 import { getCategorizedAccounts } from '@/lib/account.ts';
 
 export function useUserProfilePageBase() {
+    const normalizeKeywordList = (keywords: string[]): string => JSON.stringify(
+        (keywords || []).map(keyword => `${keyword || ''}`.trim()).filter(keyword => !!keyword)
+    );
+
     const {
         tt,
         getDefaultCurrency,
@@ -133,7 +137,13 @@ export function useUserProfilePageBase() {
             newProfile.value.digitGrouping === oldProfile.value.digitGrouping &&
             newProfile.value.coordinateDisplayType === oldProfile.value.coordinateDisplayType &&
             newProfile.value.expenseAmountColor === oldProfile.value.expenseAmountColor &&
-            newProfile.value.incomeAmountColor === oldProfile.value.incomeAmountColor) {
+            newProfile.value.incomeAmountColor === oldProfile.value.incomeAmountColor &&
+            newProfile.value.cashAccountId === oldProfile.value.cashAccountId &&
+            newProfile.value.cashTransferCategoryId === oldProfile.value.cashTransferCategoryId &&
+            newProfile.value.importLearningEnabled === oldProfile.value.importLearningEnabled &&
+            normalizeKeywordList(newProfile.value.investmentPlatformKeywords) === normalizeKeywordList(oldProfile.value.investmentPlatformKeywords) &&
+            normalizeKeywordList(newProfile.value.investmentProductKeywords) === normalizeKeywordList(oldProfile.value.investmentProductKeywords) &&
+            normalizeKeywordList(newProfile.value.investmentExcludeKeywords) === normalizeKeywordList(oldProfile.value.investmentExcludeKeywords)) {
             return 'Nothing has been modified';
         } else if (!newProfile.value.password && newProfile.value.confirmPassword) {
             return 'Password cannot be blank';

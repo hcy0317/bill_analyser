@@ -36,6 +36,12 @@ export class User {
     public coordinateDisplayType: number = EMPTY_USER_BASIC_INFO.coordinateDisplayType;
     public expenseAmountColor: number = EMPTY_USER_BASIC_INFO.expenseAmountColor;
     public incomeAmountColor: number = EMPTY_USER_BASIC_INFO.incomeAmountColor;
+    public cashAccountId: string = EMPTY_USER_BASIC_INFO.cashAccountId;
+    public cashTransferCategoryId: string = EMPTY_USER_BASIC_INFO.cashTransferCategoryId;
+    public importLearningEnabled: boolean = EMPTY_USER_BASIC_INFO.importLearningEnabled;
+    public investmentPlatformKeywords: string[] = [...EMPTY_USER_BASIC_INFO.investmentPlatformKeywords];
+    public investmentProductKeywords: string[] = [...EMPTY_USER_BASIC_INFO.investmentProductKeywords];
+    public investmentExcludeKeywords: string[] = [...EMPTY_USER_BASIC_INFO.investmentExcludeKeywords];
 
     private constructor(language: string, defaultCurrency: string, firstDayOfWeek: number) {
         this.language = language;
@@ -68,6 +74,12 @@ export class User {
         this.coordinateDisplayType = user.coordinateDisplayType;
         this.expenseAmountColor = user.expenseAmountColor;
         this.incomeAmountColor = user.incomeAmountColor;
+        this.cashAccountId = user.cashAccountId;
+        this.cashTransferCategoryId = user.cashTransferCategoryId;
+        this.importLearningEnabled = user.importLearningEnabled;
+        this.investmentPlatformKeywords = [...(user.investmentPlatformKeywords || [])];
+        this.investmentProductKeywords = [...(user.investmentProductKeywords || [])];
+        this.investmentExcludeKeywords = [...(user.investmentExcludeKeywords || [])];
     }
 
     public toRegisterRequest(categories?: LocalizedPresetCategory[]): UserRegisterRequest {
@@ -109,7 +121,13 @@ export class User {
             digitGrouping: this.digitGrouping,
             coordinateDisplayType: this.coordinateDisplayType,
             expenseAmountColor: this.expenseAmountColor,
-            incomeAmountColor: this.incomeAmountColor
+            incomeAmountColor: this.incomeAmountColor,
+            cashAccountId: this.cashAccountId,
+            cashTransferCategoryId: this.cashTransferCategoryId,
+            importLearningEnabled: this.importLearningEnabled,
+            investmentPlatformKeywords: this.investmentPlatformKeywords,
+            investmentProductKeywords: this.investmentProductKeywords,
+            investmentExcludeKeywords: this.investmentExcludeKeywords
         };
     }
 
@@ -133,6 +151,12 @@ export class User {
         user.coordinateDisplayType = userInfo.coordinateDisplayType;
         user.expenseAmountColor = userInfo.expenseAmountColor;
         user.incomeAmountColor = userInfo.incomeAmountColor;
+        user.cashAccountId = userInfo.cashAccountId;
+        user.cashTransferCategoryId = userInfo.cashTransferCategoryId;
+        user.importLearningEnabled = userInfo.importLearningEnabled;
+        user.investmentPlatformKeywords = [...(userInfo.investmentPlatformKeywords || [])];
+        user.investmentProductKeywords = [...(userInfo.investmentProductKeywords || [])];
+        user.investmentExcludeKeywords = [...(userInfo.investmentExcludeKeywords || [])];
 
         return user;
     }
@@ -170,6 +194,12 @@ export interface UserBasicInfo {
     readonly coordinateDisplayType: number;
     readonly expenseAmountColor: number;
     readonly incomeAmountColor: number;
+    readonly cashAccountId: string;
+    readonly cashTransferCategoryId: string;
+    readonly importLearningEnabled: boolean;
+    readonly investmentPlatformKeywords: string[];
+    readonly investmentProductKeywords: string[];
+    readonly investmentExcludeKeywords: string[];
     readonly emailVerified: boolean;
 }
 
@@ -226,6 +256,12 @@ export interface UserProfileUpdateRequest {
     readonly coordinateDisplayType?: number;
     readonly expenseAmountColor?: number;
     readonly incomeAmountColor?: number;
+    readonly cashAccountId?: string;
+    readonly cashTransferCategoryId?: string;
+    readonly importLearningEnabled?: boolean;
+    readonly investmentPlatformKeywords?: string[];
+    readonly investmentProductKeywords?: string[];
+    readonly investmentExcludeKeywords?: string[];
 }
 
 export interface UserProfileUpdateResponse {
@@ -265,5 +301,11 @@ export const EMPTY_USER_BASIC_INFO: UserBasicInfo = {
     coordinateDisplayType: CoordinateDisplayType.Default.type,
     expenseAmountColor: PresetAmountColor.DefaultExpenseColor.type,
     incomeAmountColor: PresetAmountColor.DefaultIncomeColor.type,
+    cashAccountId: '',
+    cashTransferCategoryId: '',
+    importLearningEnabled: true,
+    investmentPlatformKeywords: [],
+    investmentProductKeywords: [],
+    investmentExcludeKeywords: [],
     emailVerified: false
 }

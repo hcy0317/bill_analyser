@@ -51,8 +51,10 @@
             </template>
             <v-card-text class="d-flex flex-column flex-md-row mt-md-4 pt-0">
                 <div class="mb-4">
-                    <v-tabs class="v-tabs-pill" direction="vertical"
-                            :disabled="loading || submitting" v-model="transaction.type">
+                        <v-tabs class="v-tabs-pill"
+                            :class="{ 'transaction-type-tabs-readonly': mode === TransactionEditPageMode.View }"
+                            direction="vertical"
+                            :disabled="loading || submitting || mode === TransactionEditPageMode.View" v-model="transaction.type">
                         <v-tab :value="TransactionType.Expense" v-if="transaction.type !== TransactionType.ModifyBalance">
                             <span>{{ tt('Expense') }}</span>
                         </v-tab>
@@ -141,7 +143,7 @@
                                 <v-col cols="12" md="12" v-if="transaction.type === TransactionType.Expense">
                                     <v-tooltip :disabled="hasAvailableExpenseCategories" :text="hasAvailableExpenseCategories ? '' : tt('No secondary expense categories are available')">
                                         <template v-slot:activator="{ props }">
-                                            <div v-bind="props" class="d-block">
+                                            <div v-bind="props" class="d-block" @click="onCategorySelectorClick(hasAvailableExpenseCategories)">
                                                 <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
@@ -165,7 +167,7 @@
                                 <v-col cols="12" md="12" v-if="transaction.type === TransactionType.Income">
                                     <v-tooltip :disabled="hasAvailableIncomeCategories" :text="hasAvailableIncomeCategories ? '' : tt('No secondary income categories are available')">
                                         <template v-slot:activator="{ props }">
-                                            <div v-bind="props" class="d-block">
+                                            <div v-bind="props" class="d-block" @click="onCategorySelectorClick(hasAvailableIncomeCategories)">
                                                 <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
@@ -189,7 +191,7 @@
                                 <v-col cols="12" md="12" v-if="transaction.type === TransactionType.Transfer">
                                     <v-tooltip :disabled="hasAvailableTransferCategories" :text="hasAvailableTransferCategories ? '' : tt('No secondary transfer categories are available')">
                                         <template v-slot:activator="{ props }">
-                                            <div v-bind="props" class="d-block">
+                                            <div v-bind="props" class="d-block" @click="onCategorySelectorClick(hasAvailableTransferCategories)">
                                                 <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
@@ -213,7 +215,7 @@
                                 <v-col cols="12" md="12" v-if="transaction.type === TransactionType.Investment">
                                     <v-tooltip :disabled="hasAvailableInvestmentCategories" :text="hasAvailableInvestmentCategories ? '' : tt('No secondary investment categories are available')">
                                         <template v-slot:activator="{ props }">
-                                            <div v-bind="props" class="d-block">
+                                            <div v-bind="props" class="d-block" @click="onCategorySelectorClick(hasAvailableInvestmentCategories)">
                                                 <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                                                    primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                                                    primary-hidden-field="hidden" primary-sub-items-field="subCategories"
@@ -386,6 +388,39 @@
                                             </v-list>
                                         </template>
                                     </v-select>
+                                </v-col>
+                                <v-col cols="12" md="12"
+                                       v-if="type === TransactionEditPageType.Transaction && mode !== TransactionEditPageMode.Add && editId">
+                                    <v-card variant="tonal" class="pa-3 recurring-match-card">
+                                        <div class="d-flex justify-space-between align-center flex-wrap ga-3">
+                                            <div class="flex-grow-1 min-w-0">
+                                                <div class="text-caption text-medium-emphasis mb-1">{{ tt('Scheduled Match') }}</div>
+                                                <div class="text-body-1 font-weight-medium text-truncate">
+                                                    {{ recurringMatchDisplayText }}
+                                                </div>
+                                                <div class="text-caption text-medium-emphasis mt-1"
+                                                     v-if="recurringCandidateCount || recurringMatchPrimaryReason">
+                                                    <span v-if="recurringCandidateCount">{{ tt('Scheduled Candidates') }} {{ recurringCandidateCount }}</span>
+                                                    <span v-if="recurringCandidateCount && recurringMatchPrimaryReason"> · </span>
+                                                    <span v-if="recurringMatchPrimaryReason">{{ recurringMatchPrimaryReason }}</span>
+                                                </div>
+                                            </div>
+                                            <div class="d-flex flex-wrap ga-2 align-center">
+                                                <v-progress-circular v-if="loadingRecurringCandidates" indeterminate size="20" />
+                                                <v-btn size="small" variant="outlined"
+                                                       :disabled="loading || submitting || recurringBindingSubmitting"
+                                                       @click="openBillRecurringCandidateDialog">
+                                                    {{ tt('Choose Scheduled Match') }}
+                                                </v-btn>
+                                                <v-btn size="small" color="warning" variant="tonal"
+                                                       v-if="linkedRecurringId"
+                                                       :disabled="loading || submitting || recurringBindingSubmitting"
+                                                       @click="clearBillRecurringMatch">
+                                                    {{ tt('Clear Scheduled Match') }}
+                                                </v-btn>
+                                            </div>
+                                        </div>
+                                    </v-card>
                                 </v-col>
                                 <v-col cols="12" md="12">
                                     <v-autocomplete
@@ -567,6 +602,71 @@
         </v-card>
     </v-dialog>
 
+    <v-dialog width="720" v-model="showRecurringCandidateDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Choose Scheduled Match') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <div class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('Pick a scheduled transaction to link with this imported bill') }}
+                </div>
+                <div class="d-flex justify-center py-8" v-if="loadingRecurringCandidates">
+                    <v-progress-circular indeterminate size="36" />
+                </div>
+                <v-list class="rounded border-sm" v-else>
+                    <v-list-item v-for="candidate in recurringCandidates"
+                                 :key="`bill-recurring-${candidate.id}`"
+                                 :active="selectedRecurringCandidateId === String(candidate.id)"
+                                 @click="selectedRecurringCandidateId = String(candidate.id)">
+                        <template #prepend>
+                            <v-icon :icon="isBestRecurringCandidate(candidate) ? mdiCheck : mdiSwapHorizontal" />
+                        </template>
+                        <template #title>
+                            <div class="d-flex align-center flex-wrap ga-2">
+                                <span>{{ candidate.name || tt('Unnamed Template') }}</span>
+                                <v-chip size="x-small" color="primary" variant="tonal"
+                                        v-if="isBestRecurringCandidate(candidate)">
+                                    {{ tt('Best Candidate') }}
+                                </v-chip>
+                                <v-chip size="x-small" variant="outlined">
+                                    {{ tt('Match Score') }} {{ Number(candidate.matchScore || 0) }}
+                                </v-chip>
+                            </div>
+                        </template>
+                        <template #subtitle>
+                            <div class="mt-1">
+                                {{ formatRecurringCandidateSubtitle(candidate) }}
+                            </div>
+                            <div class="text-caption text-medium-emphasis mt-1"
+                                 v-if="isBestRecurringCandidate(candidate) && getRecurringCandidatePrimaryReason(candidate)">
+                                {{ tt('Best Candidate Reason') }}: {{ getRecurringCandidatePrimaryReason(candidate) }}
+                            </div>
+                        </template>
+                    </v-list-item>
+                    <v-list-item v-if="!recurringCandidates.length">
+                        <v-list-item-title>{{ tt('No Scheduled Candidates') }}</v-list-item-title>
+                    </v-list-item>
+                </v-list>
+            </v-card-text>
+            <v-card-actions class="justify-center ga-3 pt-4">
+                <v-btn color="primary" :disabled="!selectedRecurringCandidateId || recurringBindingSubmitting || loadingRecurringCandidates"
+                       @click="applyBillRecurringCandidate">
+                    {{ tt('Save') }}
+                </v-btn>
+                <v-btn color="warning" variant="tonal"
+                       v-if="linkedRecurringId"
+                       :disabled="recurringBindingSubmitting || loadingRecurringCandidates"
+                       @click="clearBillRecurringMatchFromDialog">
+                    {{ tt('Clear Scheduled Match') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="closeBillRecurringCandidateDialog">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
     <confirm-dialog ref="confirmDialog"/>
     <snack-bar ref="snackbar" />
     <input ref="pictureInput" type="file" style="display: none" :accept="SUPPORTED_IMAGE_EXTENSIONS" @change="uploadPicture($event)" />
@@ -611,11 +711,14 @@ import {
     getTimezoneOffsetMinutes,
     getCurrentUnixTime
 } from '@/lib/datetime.ts';
+import { categorizedArrayToPlainArray } from '@/lib/common.ts';
 import { formatCoordinate } from '@/lib/coordinate.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
+import { getCurrentToken } from '@/lib/userstate.ts';
 import {
     getTransactionPrimaryCategoryName,
-    getTransactionSecondaryCategoryName
+    getTransactionSecondaryCategoryName,
+    localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories
 } from '@/lib/category.ts';
 import { type SetTransactionOptions, setTransactionModelByTransaction } from '@/lib/transaction.ts';
 import {
@@ -655,6 +758,14 @@ interface TransactionEditResponse {
     deleted?: boolean;
 }
 
+interface RecurringCandidateItem {
+    id: string | number;
+    name: string;
+    matchScore?: number;
+    matchedOccurrenceDate?: string;
+    matchReasons?: string[];
+}
+
 type MapViewType = InstanceType<typeof MapView>;
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -665,7 +776,7 @@ const props = defineProps<{
     show?: boolean;
 }>();
 
-const { tt } = useI18n();
+const { tt, getCurrentLanguageTag, getAllTransactionDefaultCategories } = useI18n();
 
 const {
     mode,
@@ -738,6 +849,15 @@ const noTransactionDraft = ref<boolean>(false);
 const geoMenuState = ref<boolean>(false);
 const tagSearchContent = ref<string>('');
 const removingPictureId = ref<string>('');
+const addingDefaultCategories = ref<boolean>(false);
+const loadingRecurringCandidates = ref<boolean>(false);
+const recurringBindingSubmitting = ref<boolean>(false);
+const showRecurringCandidateDialog = ref<boolean>(false);
+const recurringCandidates = ref<RecurringCandidateItem[]>([]);
+const selectedRecurringCandidateId = ref<string>('');
+const linkedRecurringId = ref<string>('');
+const linkedRecurringName = ref<string>('');
+const recurringCandidateCount = ref<number>(0);
 
 const initAmount = ref<number | undefined>(undefined);
 const initCategoryId = ref<string | undefined>(undefined);
@@ -786,6 +906,225 @@ const isTransactionModified = computed<boolean>(() => {
     }
 });
 
+const recurringMatchDisplayText = computed<string>(() => {
+    if (linkedRecurringName.value) {
+        return linkedRecurringName.value;
+    }
+
+    if (linkedRecurringId.value) {
+        return `#${linkedRecurringId.value}`;
+    }
+
+    if (recurringCandidateCount.value > 0) {
+        return `${tt('Scheduled Candidates')} ${recurringCandidateCount.value}`;
+    }
+
+    return tt('None');
+});
+
+const recurringMatchPrimaryReason = computed<string>(() => {
+    const linkedCandidate = recurringCandidates.value.find(
+        candidate => String(candidate.id) === linkedRecurringId.value
+    );
+
+    if (linkedCandidate) {
+        return getRecurringCandidatePrimaryReason(linkedCandidate);
+    }
+
+    const bestCandidate = recurringCandidates.value[0];
+    return bestCandidate ? getRecurringCandidatePrimaryReason(bestCandidate) : '';
+});
+
+function resetBillRecurringState(): void {
+    loadingRecurringCandidates.value = false;
+    recurringBindingSubmitting.value = false;
+    showRecurringCandidateDialog.value = false;
+    recurringCandidates.value = [];
+    selectedRecurringCandidateId.value = '';
+    linkedRecurringId.value = '';
+    linkedRecurringName.value = '';
+    recurringCandidateCount.value = 0;
+}
+
+function buildRecurringAuthHeaders(): Record<string, string> {
+    const token = getCurrentToken();
+    const headers: Record<string, string> = {};
+
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return headers;
+}
+
+function formatRecurringCandidateSubtitle(candidate: RecurringCandidateItem): string {
+    const reasons = Array.isArray(candidate.matchReasons)
+        ? candidate.matchReasons.join(' | ')
+        : '';
+
+    return [
+        candidate.matchedOccurrenceDate ? `${tt('Matched Date')}: ${candidate.matchedOccurrenceDate}` : '',
+        reasons ? `${tt('Match Reasons')}: ${reasons}` : ''
+    ].filter(text => !!text).join(' · ');
+}
+
+function isBestRecurringCandidate(candidate: RecurringCandidateItem): boolean {
+    const bestCandidate = recurringCandidates.value[0];
+    if (!bestCandidate) {
+        return false;
+    }
+
+    return String(bestCandidate.id) === String(candidate.id);
+}
+
+function getRecurringCandidatePrimaryReason(candidate: RecurringCandidateItem): string {
+    if (!Array.isArray(candidate.matchReasons) || candidate.matchReasons.length < 1) {
+        return '';
+    }
+
+    return String(candidate.matchReasons[0] || '');
+}
+
+function showRecurringOperationError(error: unknown): void {
+    if (error instanceof Error) {
+        snackbar.value?.showError(error.message);
+        return;
+    }
+
+    snackbar.value?.showError(String(error));
+}
+
+async function refreshBillRecurringCandidates(silent = false): Promise<void> {
+    if (props.type !== TransactionEditPageType.Transaction || !editId.value || mode.value === TransactionEditPageMode.Add) {
+        resetBillRecurringState();
+        return;
+    }
+
+    loadingRecurringCandidates.value = true;
+
+    try {
+        const response = await fetch(`/api/bills/${editId.value}/recurring-candidates?toleranceDays=3`, {
+            method: 'GET',
+            headers: buildRecurringAuthHeaders()
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Load recurring candidates failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        recurringCandidates.value = (result.result?.candidates || []) as RecurringCandidateItem[];
+        recurringCandidateCount.value = recurringCandidates.value.length;
+        linkedRecurringId.value = String(result.result?.linkedRecurringId || '');
+        linkedRecurringName.value = String(result.result?.linkedRecurringName || '');
+
+        if (linkedRecurringId.value && !linkedRecurringName.value) {
+            const linkedCandidate = recurringCandidates.value.find(
+                candidate => String(candidate.id) === linkedRecurringId.value
+            );
+            linkedRecurringName.value = linkedCandidate?.name || '';
+        }
+
+        selectedRecurringCandidateId.value = linkedRecurringId.value
+            || (recurringCandidates.value[0] ? String(recurringCandidates.value[0].id) : '');
+    } catch (error) {
+        logger.error('failed to load recurring candidates for bill', error);
+        if (!silent) {
+            snackbar.value?.showMessage(tt('Load Scheduled Candidates Failed'));
+        }
+    } finally {
+        loadingRecurringCandidates.value = false;
+    }
+}
+
+async function openBillRecurringCandidateDialog(): Promise<void> {
+    showRecurringCandidateDialog.value = true;
+    await refreshBillRecurringCandidates();
+}
+
+function closeBillRecurringCandidateDialog(): void {
+    showRecurringCandidateDialog.value = false;
+}
+
+async function applyBillRecurringCandidate(): Promise<void> {
+    if (!editId.value || !selectedRecurringCandidateId.value) {
+        return;
+    }
+
+    recurringBindingSubmitting.value = true;
+
+    try {
+        const response = await fetch(`/api/bills/${editId.value}/recurring-match`, {
+            method: 'PUT',
+            headers: {
+                ...buildRecurringAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ recurringId: selectedRecurringCandidateId.value })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Bind recurring match failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        await refreshBillRecurringCandidates(true);
+        closeBillRecurringCandidateDialog();
+    } catch (error) {
+        logger.error('failed to bind recurring match for bill', error);
+        showRecurringOperationError(error);
+    } finally {
+        recurringBindingSubmitting.value = false;
+    }
+}
+
+async function clearBillRecurringMatch(): Promise<void> {
+    if (!editId.value || !linkedRecurringId.value) {
+        return;
+    }
+
+    recurringBindingSubmitting.value = true;
+
+    try {
+        const response = await fetch(`/api/bills/${editId.value}/recurring-match`, {
+            method: 'DELETE',
+            headers: buildRecurringAuthHeaders()
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Clear recurring match failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        await refreshBillRecurringCandidates(true);
+        closeBillRecurringCandidateDialog();
+    } catch (error) {
+        logger.error('failed to clear recurring match for bill', error);
+        showRecurringOperationError(error);
+    } finally {
+        recurringBindingSubmitting.value = false;
+    }
+}
+
+function clearBillRecurringMatchFromDialog(): void {
+    clearBillRecurringMatch();
+}
+
 function setTransaction(newTransaction: Transaction | null, options: SetTransactionOptions, setContextData: boolean, convertContextTime: boolean): void {
     setTransactionModelByTransaction(
         transaction.value,
@@ -823,6 +1162,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
     setGeoLocationByClickMap.value = false;
     originalTransactionEditable.value = false;
     noTransactionDraft.value = options.noTransactionDraft || false;
+    resetBillRecurringState();
 
     initAmount.value = options.amount;
     initCategoryId.value = options.categoryId;
@@ -889,7 +1229,10 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
             editId.value = options.id;
             transaction.value.id = options.id;
 
-            promises.push(transactionTemplatesStore.getTemplate({ templateId: editId.value }));
+            promises.push(transactionTemplatesStore.getTemplate({
+                templateId: editId.value,
+                templateType: (transaction.value as TransactionTemplate).templateType
+            }));
         } else {
             mode.value = TransactionEditPageMode.Add;
             editId.value = null;
@@ -964,6 +1307,7 @@ function open(options: TransactionEditOptions): Promise<TransactionEditResponse 
             }
 
             originalTransactionEditable.value = transaction.editable;
+            refreshBillRecurringCandidates(true);
         } else if (props.type === TransactionEditPageType.Template && options && options.id && responses[3] && responses[3] instanceof TransactionTemplate) {
             const template: TransactionTemplate = responses[3];
             setTransaction(template, options, false, false);
@@ -1099,6 +1443,56 @@ function save(): void {
             }
         });
     }
+}
+
+async function addDefaultCategories(): Promise<boolean> {
+    if (addingDefaultCategories.value) {
+        return false;
+    }
+
+    const allPresetCategories = getAllTransactionDefaultCategories(0, getCurrentLanguageTag());
+    const presetCategoriesArray = categorizedArrayToPlainArray(allPresetCategories);
+    const submitCategories = localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories(presetCategoriesArray);
+
+    if (!submitCategories.length) {
+        snackbar.value?.showMessage('No available category');
+        return false;
+    }
+
+    addingDefaultCategories.value = true;
+
+    try {
+        await transactionCategoriesStore.addPresetCategories({
+            categories: submitCategories
+        });
+
+        await transactionCategoriesStore.loadAllCategories({ force: true });
+        return true;
+    } catch (error: any) {
+        if (error && !error.processed) {
+            snackbar.value?.showError(error);
+        }
+
+        return false;
+    } finally {
+        addingDefaultCategories.value = false;
+    }
+}
+
+function onCategorySelectorClick(hasAvailableCategories: boolean): void {
+    if (hasAvailableCategories || mode.value === TransactionEditPageMode.View || loading.value || submitting.value || addingDefaultCategories.value) {
+        return;
+    }
+
+    confirmDialog.value?.open(`${tt('No available category')}. ${tt('Add Default Categories')}?`).then(async () => {
+        const success = await addDefaultCategories();
+
+        if (success) {
+            snackbar.value?.showMessage('You have added preset categories');
+        }
+    }).catch(() => {
+        // 用户取消时不处理
+    });
 }
 
 function duplicate(withTime?: boolean, withGeoLocation?: boolean): void {
@@ -1445,6 +1839,16 @@ defineExpose({
 
 .transaction-edit-map-view {
     height: 220px;
+}
+
+.transaction-type-tabs-readonly .v-tab {
+    opacity: 1 !important;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.transaction-type-tabs-readonly .v-tab--selected {
+    background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
+    color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
 }
 
 @media (min-height: 630px) {

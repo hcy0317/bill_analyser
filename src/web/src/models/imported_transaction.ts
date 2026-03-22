@@ -23,6 +23,21 @@ export class ImportTransaction implements ImportTransactionResponse {
     // v6.32新增: 交易对方和支付方式字段
     public counterparty: string;
     public paymentMethod: string;
+    public suggestedType?: number;
+    public transferSuggestionScore: number;
+    public transferSuggestionLevel: string;
+    public transferSuggestionReason: string;
+    public investmentSignalScore: number;
+    public investmentSignalLevel: string;
+    public investmentSignalReason: string;
+    public investmentPlatform: string;
+    public investmentProduct: string;
+    public recurringTemplateId: string;
+    public recurringTemplateName: string;
+    public recurringCandidateCount: number;
+    public recurringMatchScore: number;
+    public recurringMatchReasons: string;
+    public recurringMatchedDate: string;
 
     public actualCategoryName: string;
     public actualSourceAccountName: string;
@@ -52,6 +67,21 @@ export class ImportTransaction implements ImportTransactionResponse {
         // v6.32新增
         this.counterparty = response.counterparty || '';
         this.paymentMethod = response.paymentMethod || '';
+        this.suggestedType = response.suggestedType;
+        this.transferSuggestionScore = response.transferSuggestionScore || 0;
+        this.transferSuggestionLevel = response.transferSuggestionLevel || '';
+        this.transferSuggestionReason = response.transferSuggestionReason || '';
+        this.investmentSignalScore = response.investmentSignalScore || 0;
+        this.investmentSignalLevel = response.investmentSignalLevel || '';
+        this.investmentSignalReason = response.investmentSignalReason || '';
+        this.investmentPlatform = response.investmentPlatform || '';
+        this.investmentProduct = response.investmentProduct || '';
+        this.recurringTemplateId = response.recurringTemplateId || '';
+        this.recurringTemplateName = response.recurringTemplateName || '';
+        this.recurringCandidateCount = response.recurringCandidateCount || 0;
+        this.recurringMatchScore = response.recurringMatchScore || 0;
+        this.recurringMatchReasons = response.recurringMatchReasons || '';
+        this.recurringMatchedDate = response.recurringMatchedDate || '';
 
         this.actualCategoryName = response.originalCategoryName;
         this.actualSourceAccountName = response.originalSourceAccountName;
@@ -66,6 +96,36 @@ export class ImportTransaction implements ImportTransactionResponse {
      */
     public requiresDestinationAccount(): boolean {
         return this.type === TransactionType.Transfer || this.type === TransactionType.Investment;
+    }
+
+    public hasTransferSuggestion(): boolean {
+        return !!this.suggestedType &&
+            this.suggestedType === TransactionType.Transfer &&
+            this.type !== TransactionType.Transfer &&
+            this.transferSuggestionScore > 0;
+    }
+
+    public hasInvestmentSignal(): boolean {
+        return this.type === TransactionType.Investment && this.investmentSignalScore > 0;
+    }
+
+    public getInvestmentProfileText(): string {
+        return [this.investmentPlatform, this.investmentProduct].filter(item => !!item).join(' · ');
+    }
+
+    public hasRecurringMatch(): boolean {
+        return !!this.recurringTemplateId;
+    }
+
+    public clearRecurringMatch(resetCandidateCount: boolean = true): void {
+        this.recurringTemplateId = '';
+        this.recurringTemplateName = '';
+        if (resetCandidateCount) {
+            this.recurringCandidateCount = 0;
+        }
+        this.recurringMatchScore = 0;
+        this.recurringMatchReasons = '';
+        this.recurringMatchedDate = '';
     }
 
     public toCreateRequest(): TransactionCreateRequest {
@@ -159,6 +219,21 @@ export interface ImportTransactionResponse {
     // v6.32新增: 交易对方和支付方式字段
     readonly counterparty?: string;
     readonly paymentMethod?: string;
+    readonly suggestedType?: number;
+    readonly transferSuggestionScore?: number;
+    readonly transferSuggestionLevel?: string;
+    readonly transferSuggestionReason?: string;
+    readonly investmentSignalScore?: number;
+    readonly investmentSignalLevel?: string;
+    readonly investmentSignalReason?: string;
+    readonly investmentPlatform?: string;
+    readonly investmentProduct?: string;
+    readonly recurringTemplateId?: string;
+    readonly recurringTemplateName?: string;
+    readonly recurringCandidateCount?: number;
+    readonly recurringMatchScore?: number;
+    readonly recurringMatchReasons?: string;
+    readonly recurringMatchedDate?: string;
 }
 
 export interface ImportTransactionResponsePageWrapper {

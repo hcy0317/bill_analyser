@@ -1,5 +1,5 @@
 <template>
-    <v-dialog width="600" :persistent="submitting || !!selectedNames.length" v-model="showState">
+    <v-dialog width="960" :persistent="submitting" v-model="showState">
         <v-card class="pa-2 pa-sm-4 pa-md-4">
             <template #title>
                 <div class="d-flex align-center justify-center">
@@ -31,24 +31,66 @@
                     </v-btn>
                 </div>
             </template>
-            <v-card-text class="my-md-4 w-100 d-flex justify-center">
-                <v-row>
-                    <v-col cols="12">
-                        <v-list class="py-0" density="compact" select-strategy="classic"
-                                :disabled="submitting" v-model:selected="selectedNames">
-                            <v-list-item class="py-0"
-                                         :key="item.value" :value="item.name" :title="item.name"
-                                         v-for="item in invalidItems">
-                                <template #prepend="{ isActive }">
-                                    <v-list-item-action start>
-                                        <v-checkbox-btn :model-value="isActive"
-                                                        @update:model-value="updateSelectedNames(item.name, $event)"></v-checkbox-btn>
-                                    </v-list-item-action>
-                                </template>
-                            </v-list-item>
-                        </v-list>
-                    </v-col>
-                </v-row>
+            <v-card-text class="my-md-4 w-100">
+                <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
+                    <v-text-field
+                        class="batch-create-search"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        clearable
+                        :disabled="submitting"
+                        :label="tt('Keyword')"
+                        v-model="searchKeyword"
+                    />
+                    <div class="d-flex align-center flex-wrap ga-2">
+                        <v-checkbox-btn
+                            density="compact"
+                            color="primary"
+                            :disabled="submitting || !filteredInvalidItems.length"
+                            :indeterminate="anyButNotAllSelected"
+                            v-model="allFilteredItemsSelected"
+                        />
+                        <span class="text-body-2 text-medium-emphasis">
+                            {{ tt('selectedCount', { count: selectedNames.length, totalCount: invalidItems?.length || 0 }) }}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="batch-create-table-wrapper">
+                    <v-table density="compact" fixed-header>
+                        <thead>
+                            <tr>
+                                <th class="text-center" style="width: 56px"></th>
+                                <th style="width: 80px">#</th>
+                                <th>{{ tt('Name') }}</th>
+                                <th>{{ tt('Status') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(item, index) in filteredInvalidItems" :key="item.value || item.name">
+                                <td class="text-center">
+                                    <v-checkbox-btn
+                                        density="compact"
+                                        color="primary"
+                                        :disabled="submitting"
+                                        :model-value="selectedNameSet[item.name] === true"
+                                        @update:model-value="updateSelectedNames(item.name, $event)"
+                                    />
+                                </td>
+                                <td>{{ index + 1 }}</td>
+                                <td>
+                                    <div class="text-truncate" :title="item.name">{{ item.name }}</div>
+                                </td>
+                                <td>
+                                    <v-chip size="small" color="warning" variant="tonal">
+                                        {{ tt('Ready to Create') }}
+                                    </v-chip>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </v-table>
+                </div>
             </v-card-text>
             <v-card-text class="overflow-y-visible">
                 <div class="w-100 d-flex justify-center gap-4">
@@ -68,7 +110,7 @@
 <script setup lang="ts">
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { ref, useTemplateRef } from 'vue';
+import { computed, ref, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -112,9 +154,53 @@ const submitting = ref<boolean>(false);
 const type = ref<BatchCreateDialogDataType | ''>('');
 const invalidItems = ref<NameValue[] | undefined>([]);
 const selectedNames = ref<string[]>([]);
+const searchKeyword = ref<string>('');
 
 let resolveFunc: ((response: BatchCreateDialogResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
+
+const selectedNameSet = computed<Record<string, boolean>>(() => {
+    return arrayItemToObjectField(selectedNames.value, true);
+});
+
+const filteredInvalidItems = computed<NameValue[]>(() => {
+    const keyword = searchKeyword.value.trim().toLowerCase();
+    const allItems = invalidItems.value || [];
+
+    if (!keyword) {
+        return allItems;
+    }
+
+    return allItems.filter(item => item.name.toLowerCase().includes(keyword));
+});
+
+const anyButNotAllSelected = computed<boolean>(() => {
+    const filteredItems = filteredInvalidItems.value;
+    if (!filteredItems.length) {
+        return false;
+    }
+
+    const selectedCount = filteredItems.filter(item => selectedNameSet.value[item.name]).length;
+    return selectedCount > 0 && selectedCount < filteredItems.length;
+});
+
+const allFilteredItemsSelected = computed<boolean>({
+    get(): boolean {
+        const filteredItems = filteredInvalidItems.value;
+        return filteredItems.length > 0 && filteredItems.every(item => selectedNameSet.value[item.name]);
+    },
+    set(value: boolean): void {
+        const filteredNames = filteredInvalidItems.value.map(item => item.name);
+        if (value) {
+            const merged = new Set([...selectedNames.value, ...filteredNames]);
+            selectedNames.value = [...merged];
+            return;
+        }
+
+        const filteredNameSet = new Set(filteredNames);
+        selectedNames.value = selectedNames.value.filter(name => !filteredNameSet.has(name));
+    }
+});
 
 function updateSelectedNames(value: string, selected: boolean | null): void {
     const newSelectedNames: string[] = [];
@@ -193,7 +279,8 @@ function buildBatchCreateTagResponse(createdTags: TransactionTag[]): BatchCreate
 function open(options: { type: BatchCreateDialogDataType, invalidItems?: NameValue[] }): Promise<BatchCreateDialogResponse> {
     type.value = options.type;
     invalidItems.value = options.invalidItems;
-    selectedNames.value = [];
+    searchKeyword.value = '';
+    selectedNames.value = (options.invalidItems || []).map(item => item.name);
 
     showState.value = true;
 
@@ -324,3 +411,17 @@ defineExpose({
     open
 });
 </script>
+
+<style scoped>
+.batch-create-search {
+    max-width: 320px;
+    min-width: 240px;
+}
+
+.batch-create-table-wrapper {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid rgba(var(--v-theme-outline), 0.24);
+    border-radius: 8px;
+}
+</style>

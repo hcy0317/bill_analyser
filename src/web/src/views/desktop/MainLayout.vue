@@ -186,7 +186,7 @@
             </div>
             <div class="layout-page-content">
                 <div class="page-content-container">
-                    <router-view :key="currentRoutePath" />
+                    <router-view />
                 </div>
             </div>
         </div>
@@ -209,7 +209,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import { ref, computed, useTemplateRef } from 'vue';
 
 import { useDisplay, useTheme } from 'vuetify';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -252,7 +252,6 @@ type SnackBarType = InstanceType<typeof SnackBar>;
 
 const display = useDisplay();
 const theme = useTheme();
-const route = useRoute();
 const router = useRouter();
 
 const { tt, initLocale } = useI18n();
@@ -271,8 +270,6 @@ const showLoading = ref<boolean>(false);
 const showMobileQrCode = ref<boolean>(false);
 
 const mdAndDown = computed<boolean>(() => display.mdAndDown.value);
-const currentRoutePath = computed<string>(() => route.path);
-
 const currentNickName = computed<string>(() => userStore.currentUserNickname || tt('User'));
 const currentUserAvatar = computed<string | null>(() => userStore.getUserAvatarUrl(userStore.currentUserBasicInfo, true));
 

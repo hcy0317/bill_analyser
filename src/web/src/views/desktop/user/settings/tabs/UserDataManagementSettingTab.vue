@@ -81,6 +81,125 @@
             </v-card>
         </v-col>
 
+        <v-col cols="12">
+            <v-card :class="{ 'disabled': loadingImportLearningRules }">
+                <template #title>
+                    <div class="d-flex align-center">
+                        <span>{{ tt('Import Learning Rules') }}</span>
+                        <v-btn density="compact" color="default" variant="text" size="24"
+                               class="ms-2" :icon="true" :loading="loadingImportLearningRules"
+                               @click="reloadImportLearningRules(true)">
+                            <template #loader>
+                                <v-progress-circular indeterminate size="20"/>
+                            </template>
+                            <v-icon :icon="mdiRefresh" size="24" />
+                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                        </v-btn>
+                    </div>
+                </template>
+
+                <v-card-text v-if="loadingImportLearningRules">
+                    <v-skeleton-loader type="table-row-divider@4" />
+                </v-card-text>
+
+                <v-card-text v-else-if="!importLearningRules.length">
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('No import learning rules yet') }}</span>
+                </v-card-text>
+
+                <template v-else>
+                    <v-card-text class="pt-0 pb-2 d-flex align-center flex-wrap gap-2">
+                        <v-checkbox-btn
+                            density="compact"
+                            color="primary"
+                            :disabled="loadingImportLearningRules || bulkUpdatingImportLearningRules"
+                            :indeterminate="anyButNotAllImportLearningRulesSelected"
+                            v-model="allImportLearningRulesSelected"
+                        />
+                        <span class="text-body-2 text-medium-emphasis">
+                            {{ tt('Selected import learning rules: {count}', { count: selectedImportLearningRuleIds.length }) }}
+                        </span>
+                        <v-btn size="small" density="comfortable" variant="text" color="primary"
+                               :disabled="!hasSelectedImportLearningRules || bulkUpdatingImportLearningRules"
+                               @click="setSelectedImportLearningRulesEnabled(true)">
+                            {{ tt('Enable Selected') }}
+                        </v-btn>
+                        <v-btn size="small" density="comfortable" variant="text" color="secondary"
+                               :disabled="!hasSelectedImportLearningRules || bulkUpdatingImportLearningRules"
+                               @click="setSelectedImportLearningRulesEnabled(false)">
+                            {{ tt('Disable Selected') }}
+                        </v-btn>
+                        <v-btn size="small" density="comfortable" variant="text" color="error"
+                               :disabled="!hasSelectedImportLearningRules || bulkUpdatingImportLearningRules"
+                               @click="deleteSelectedImportLearningRules">
+                            {{ tt('Delete Selected') }}
+                        </v-btn>
+                    </v-card-text>
+
+                    <v-table density="compact">
+                    <thead>
+                        <tr>
+                            <th class="text-center" style="width: 48px">
+                                <v-checkbox-btn
+                                    density="compact"
+                                    color="primary"
+                                    :disabled="loadingImportLearningRules || bulkUpdatingImportLearningRules"
+                                    :indeterminate="anyButNotAllImportLearningRulesSelected"
+                                    v-model="allImportLearningRulesSelected"
+                                />
+                            </th>
+                            <th>{{ tt('Match Field') }}</th>
+                            <th>{{ tt('Match Value') }}</th>
+                            <th>{{ tt('Learned Result') }}</th>
+                            <th>{{ tt('Hits') }}</th>
+                            <th>{{ tt('Status') }}</th>
+                            <th>{{ tt('Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="rule in importLearningRules" :key="rule.id">
+                            <td class="text-center">
+                                <v-checkbox-btn
+                                    density="compact"
+                                    color="primary"
+                                    :disabled="bulkUpdatingImportLearningRules"
+                                    :model-value="isImportLearningRuleSelected(rule.id)"
+                                    @update:model-value="toggleImportLearningRuleSelection(rule.id, $event)"
+                                />
+                            </td>
+                            <td>{{ getImportLearningMatchTypeName(rule.matchType) }}</td>
+                            <td style="max-width: 260px">
+                                <div class="text-truncate" :title="rule.matchValue">{{ rule.matchValue }}</div>
+                            </td>
+                            <td style="max-width: 320px">
+                                <div class="text-truncate" :title="getImportLearningRuleSummary(rule)">
+                                    {{ getImportLearningRuleSummary(rule) }}
+                                </div>
+                            </td>
+                            <td>{{ rule.appliedCount }}</td>
+                            <td>
+                                <v-chip size="small" :color="rule.enabled ? 'success' : 'default'" variant="tonal">
+                                    {{ rule.enabled ? tt('Enabled') : tt('Disabled') }}
+                                </v-chip>
+                            </td>
+                            <td class="text-no-wrap">
+                                <v-btn size="small" density="comfortable" variant="text" color="primary"
+                                       :disabled="updatingImportLearningRuleId === rule.id"
+                                       @click="toggleImportLearningRule(rule)">
+                                    {{ rule.enabled ? tt('Disable') : tt('Enable') }}
+                                </v-btn>
+                                <v-btn size="small" density="comfortable" variant="text" color="error"
+                                       :disabled="updatingImportLearningRuleId === rule.id"
+                                       @click="deleteImportLearningRule(rule)">
+                                    {{ tt('Delete') }}
+                                </v-btn>
+                            </td>
+                        </tr>
+                    </tbody>
+                    </v-table>
+                </template>
+            </v-card>
+        </v-col>
+
         <v-col cols="12" v-if="isDataExportingEnabled()">
             <v-card :class="{ 'disabled': exportingData }" :title="tt('Export Data')">
                 <v-card-text>
@@ -166,7 +285,7 @@
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { ref, useTemplateRef } from 'vue';
+import { computed, ref, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useDataManagementPageBase } from '@/views/base/users/DataManagementPageBase.ts';
@@ -176,6 +295,7 @@ import { useUserStore } from '@/stores/user.ts';
 
 import { isEquals } from '@/lib/common.ts';
 import { isDataExportingEnabled } from '@/lib/server_settings.ts';
+import { getCurrentToken } from '@/lib/userstate.ts';
 import { startDownloadFile } from '@/lib/ui/common.ts';
 
 import {
@@ -193,6 +313,18 @@ import {
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
+interface ImportLearningRuleInfo {
+    id: number;
+    matchType: string;
+    matchValue: string;
+    learnedType: string;
+    learnedCategoryName: string;
+    learnedSourceAccountName: string;
+    learnedDestinationAccountName: string;
+    enabled: boolean;
+    appliedCount: number;
+}
+
 const { tt } = useI18n();
 const { dataStatistics, displayDataStatistics, getExportFileName } = useDataManagementPageBase();
 
@@ -203,9 +335,297 @@ const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const loadingDataStatistics = ref<boolean>(true);
+const loadingImportLearningRules = ref<boolean>(true);
 const exportingData = ref<boolean>(false);
 const currentPasswordForClearData = ref<string>('');
 const clearingData = ref<boolean>(false);
+const updatingImportLearningRuleId = ref<number>(0);
+const bulkUpdatingImportLearningRules = ref<boolean>(false);
+const importLearningRules = ref<ImportLearningRuleInfo[]>([]);
+const selectedImportLearningRuleIds = ref<number[]>([]);
+
+const selectedImportLearningRules = computed<ImportLearningRuleInfo[]>(() => {
+    const selectedIdSet = new Set(selectedImportLearningRuleIds.value);
+    return importLearningRules.value.filter(rule => selectedIdSet.has(rule.id));
+});
+
+const hasSelectedImportLearningRules = computed<boolean>(() => {
+    return selectedImportLearningRuleIds.value.length > 0;
+});
+
+const anyButNotAllImportLearningRulesSelected = computed<boolean>(() => {
+    return hasSelectedImportLearningRules.value &&
+        selectedImportLearningRuleIds.value.length < importLearningRules.value.length;
+});
+
+const allImportLearningRulesSelected = computed<boolean>({
+    get(): boolean {
+        return importLearningRules.value.length > 0 &&
+            selectedImportLearningRuleIds.value.length === importLearningRules.value.length;
+    },
+    set(value: boolean): void {
+        if (value) {
+            selectedImportLearningRuleIds.value = importLearningRules.value.map(rule => rule.id);
+        } else {
+            selectedImportLearningRuleIds.value = [];
+        }
+    }
+});
+
+function getImportLearningHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+    const token = getCurrentToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
+function getImportLearningMatchTypeName(matchType: string): string {
+    if (matchType === 'counterparty') {
+        return tt('Counterparty');
+    }
+    if (matchType === 'payment_method') {
+        return tt('Payment Method');
+    }
+    if (matchType === 'description') {
+        return tt('Description');
+    }
+    return matchType;
+}
+
+function getImportLearningRuleSummary(rule: ImportLearningRuleInfo): string {
+    const parts: string[] = [];
+
+    if (rule.learnedType) {
+        parts.push(rule.learnedType);
+    }
+    if (rule.learnedCategoryName) {
+        parts.push(rule.learnedCategoryName);
+    }
+    if (rule.learnedSourceAccountName || rule.learnedDestinationAccountName) {
+        parts.push(`${rule.learnedSourceAccountName || '-'} → ${rule.learnedDestinationAccountName || '-'}`);
+    }
+
+    return parts.join(' | ');
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    return String(error || 'Unknown error');
+}
+
+function isImportLearningRuleSelected(ruleId: number): boolean {
+    return selectedImportLearningRuleIds.value.includes(ruleId);
+}
+
+function toggleImportLearningRuleSelection(ruleId: number, checked: boolean | null): void {
+    const nextChecked = Boolean(checked);
+
+    if (nextChecked) {
+        if (!selectedImportLearningRuleIds.value.includes(ruleId)) {
+            selectedImportLearningRuleIds.value = [...selectedImportLearningRuleIds.value, ruleId];
+        }
+        return;
+    }
+
+    selectedImportLearningRuleIds.value = selectedImportLearningRuleIds.value.filter(id => id !== ruleId);
+}
+
+function syncSelectedImportLearningRules(rules: ImportLearningRuleInfo[]): void {
+    const validRuleIds = new Set(rules.map(rule => rule.id));
+    selectedImportLearningRuleIds.value = selectedImportLearningRuleIds.value.filter(id => validRuleIds.has(id));
+}
+
+async function updateImportLearningRuleEnabledById(ruleId: number, enabled: boolean): Promise<void> {
+    const response = await fetch(`/api/bills/import/learning-rules/${ruleId}`, {
+        method: 'PUT',
+        headers: getImportLearningHeaders(),
+        body: JSON.stringify({ enabled })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to update import learning rule');
+    }
+}
+
+async function deleteImportLearningRuleById(ruleId: number): Promise<void> {
+    const response = await fetch(`/api/bills/import/learning-rules/${ruleId}`, {
+        method: 'DELETE',
+        headers: getImportLearningHeaders()
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to delete import learning rule');
+    }
+}
+
+async function reloadImportLearningRules(force: boolean): Promise<void> {
+    loadingImportLearningRules.value = true;
+
+    try {
+        const response = await fetch('/api/bills/import/learning-rules?limit=100', {
+            method: 'GET',
+            headers: getImportLearningHeaders()
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to load import learning rules');
+        }
+
+        const data = await response.json();
+        const newRules = (data.result || []) as ImportLearningRuleInfo[];
+
+        if (force) {
+            if (isEquals(importLearningRules.value, newRules)) {
+                snackbar.value?.showMessage('Data is up to date');
+            } else {
+                snackbar.value?.showMessage('Data has been updated');
+            }
+        }
+
+        importLearningRules.value = newRules;
+        syncSelectedImportLearningRules(newRules);
+        loadingImportLearningRules.value = false;
+    } catch (error) {
+        loadingImportLearningRules.value = false;
+        snackbar.value?.showError(getErrorMessage(error));
+    }
+}
+
+async function toggleImportLearningRule(rule: ImportLearningRuleInfo): Promise<void> {
+    updatingImportLearningRuleId.value = rule.id;
+
+    try {
+        await updateImportLearningRuleEnabledById(rule.id, !rule.enabled);
+        rule.enabled = !rule.enabled;
+        snackbar.value?.showMessage(rule.enabled ? 'Rule enabled' : 'Rule disabled');
+    } catch (error) {
+        snackbar.value?.showError(getErrorMessage(error));
+    } finally {
+        updatingImportLearningRuleId.value = 0;
+    }
+}
+
+function deleteImportLearningRule(rule: ImportLearningRuleInfo): void {
+    confirmDialog.value?.open('Are you sure you want to delete this import learning rule?', {
+        color: 'warning'
+    }).then(async confirmed => {
+        const isConfirmed = Boolean(confirmed);
+
+        if (!isConfirmed) {
+            return;
+        }
+
+        updatingImportLearningRuleId.value = rule.id;
+
+        try {
+            await deleteImportLearningRuleById(rule.id);
+            importLearningRules.value = importLearningRules.value.filter(item => item.id !== rule.id);
+            syncSelectedImportLearningRules(importLearningRules.value);
+            snackbar.value?.showMessage('Import learning rule deleted');
+        } catch (error) {
+            snackbar.value?.showError(getErrorMessage(error));
+        } finally {
+            updatingImportLearningRuleId.value = 0;
+        }
+    });
+}
+
+async function setSelectedImportLearningRulesEnabled(enabled: boolean): Promise<void> {
+    const selectedRules = [...selectedImportLearningRules.value];
+
+    if (!selectedRules.length || bulkUpdatingImportLearningRules.value) {
+        return;
+    }
+
+    bulkUpdatingImportLearningRules.value = true;
+
+    try {
+        const results = await Promise.allSettled(
+            selectedRules.map(rule => updateImportLearningRuleEnabledById(rule.id, enabled))
+        );
+
+        let successCount = 0;
+        const failedMessages: string[] = [];
+
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                selectedRules[index]!.enabled = enabled;
+                successCount += 1;
+            } else {
+                failedMessages.push(getErrorMessage(result.reason));
+            }
+        });
+
+        if (successCount > 0) {
+            snackbar.value?.showMessage(enabled
+                ? tt('Enabled selected import learning rules: {count}', { count: successCount })
+                : tt('Disabled selected import learning rules: {count}', { count: successCount }));
+        }
+
+        if (failedMessages.length > 0 && failedMessages[0]) {
+            snackbar.value?.showError(failedMessages[0]);
+        }
+    } finally {
+        bulkUpdatingImportLearningRules.value = false;
+    }
+}
+
+function deleteSelectedImportLearningRules(): void {
+    const selectedRules = [...selectedImportLearningRules.value];
+
+    if (!selectedRules.length || bulkUpdatingImportLearningRules.value) {
+        return;
+    }
+
+    confirmDialog.value?.open('Are you sure you want to delete selected import learning rules?', {
+        color: 'warning'
+    }).then(async confirmed => {
+        if (!confirmed) {
+            return;
+        }
+
+        bulkUpdatingImportLearningRules.value = true;
+
+        try {
+            const results = await Promise.allSettled(
+                selectedRules.map(rule => deleteImportLearningRuleById(rule.id))
+            );
+
+            const deletedIds = new Set<number>();
+            const failedMessages: string[] = [];
+
+            results.forEach((result, index) => {
+                if (result.status === 'fulfilled') {
+                    deletedIds.add(selectedRules[index]!.id);
+                } else {
+                    failedMessages.push(getErrorMessage(result.reason));
+                }
+            });
+
+            if (deletedIds.size > 0) {
+                importLearningRules.value = importLearningRules.value.filter(rule => !deletedIds.has(rule.id));
+                syncSelectedImportLearningRules(importLearningRules.value);
+                snackbar.value?.showMessage(tt('Deleted selected import learning rules: {count}', { count: deletedIds.size }));
+            }
+
+            if (failedMessages.length > 0 && failedMessages[0]) {
+                snackbar.value?.showError(failedMessages[0]);
+            }
+        } finally {
+            bulkUpdatingImportLearningRules.value = false;
+        }
+    });
+}
 
 function reloadUserDataStatistics(force: boolean): void {
     loadingDataStatistics.value = true;
@@ -312,4 +732,5 @@ function clearAllData(): void {
 }
 
 reloadUserDataStatistics(false);
+reloadImportLearningRules(false);
 </script>

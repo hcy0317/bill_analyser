@@ -80,6 +80,10 @@
                                                 </v-menu>
                                             </v-btn>
                                             <v-btn class="ms-3" color="default" variant="outlined"
+                                                   :disabled="loading || !canAddTransaction" @click="batchAdd()">
+                                                {{ tt('Batch Add') }}
+                                            </v-btn>
+                                            <v-btn class="ms-3" color="default" variant="outlined"
                                                    :disabled="loading" @click="importTransaction"
                                                    v-if="isDataImportingEnabled()">
                                                 {{ tt('Import') }}
@@ -627,6 +631,7 @@
                             @error="onShowDateRangeError" />
 
     <edit-dialog ref="editDialog" :type="TransactionEditPageType.Transaction" />
+    <batch-manual-entry-dialog ref="batchManualEntryDialog" />
     <a-i-image-recognition-dialog ref="aiImageRecognitionDialog" />
     <import-dialog ref="importDialog" :persistent="true" />
 
@@ -655,6 +660,7 @@ import PaginationButtons from '@/components/desktop/PaginationButtons.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
+import BatchManualEntryDialog from './list/dialogs/BatchManualEntryDialog.vue';
 import AIImageRecognitionDialog from './list/dialogs/AIImageRecognitionDialog.vue';
 import ImportDialog from './import/ImportDialog.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
@@ -770,6 +776,7 @@ const props = defineProps<TransactionListProps>();
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 type EditDialogType = InstanceType<typeof EditDialog>;
+type BatchManualEntryDialogType = InstanceType<typeof BatchManualEntryDialog>;
 type AIImageRecognitionDialogType = InstanceType<typeof AIImageRecognitionDialog>;
 type ImportDialogType = InstanceType<typeof ImportDialog>;
 
@@ -870,6 +877,7 @@ const tagFilterMenu = useTemplateRef<VMenu>('tagFilterMenu');
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editDialog = useTemplateRef<EditDialogType>('editDialog');
+const batchManualEntryDialog = useTemplateRef<BatchManualEntryDialogType>('batchManualEntryDialog');
 const aiImageRecognitionDialog = useTemplateRef<AIImageRecognitionDialogType>('aiImageRecognitionDialog');
 const importDialog = useTemplateRef<ImportDialogType>('importDialog');
 
@@ -1666,6 +1674,38 @@ function addByRecognizingImage(): void {
                 snackbar.value?.showError(error);
             }
         });
+    });
+}
+
+function batchAdd(): void {
+    const currentUnixTime = getCurrentUnixTime();
+
+    let newTransactionTime: number | undefined = undefined;
+
+    if (query.value.maxTime && query.value.minTime) {
+        if (query.value.maxTime < currentUnixTime) {
+            newTransactionTime = query.value.maxTime;
+        } else if (currentUnixTime < query.value.minTime) {
+            newTransactionTime = query.value.minTime;
+        }
+    }
+
+    batchManualEntryDialog.value?.open({
+        time: newTransactionTime,
+        type: query.value.type,
+        categoryId: queryAllFilterCategoryIdsCount.value === 1 ? query.value.categoryIds : '',
+        accountId: queryAllFilterAccountIdsCount.value === 1 ? query.value.accountIds : '',
+        tagIds: query.value.tagIds || ''
+    }).then(result => {
+        if (result && result.message) {
+            snackbar.value?.showMessage(result.message);
+        }
+
+        reload(false, false);
+    }).catch(error => {
+        if (error) {
+            snackbar.value?.showError(error);
+        }
     });
 }
 

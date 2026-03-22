@@ -157,7 +157,7 @@ export class ImportTransactionDataMapping {
         }
 
         for (const [name, type] of entries(this.transactionTypeMapping)) {
-            if (TransactionType.ModifyBalance <= type && type <= TransactionType.Transfer) {
+            if (TransactionType.ModifyBalance <= type && type <= TransactionType.Investment) {
                 result[name] = type;
             }
         }

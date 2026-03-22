@@ -321,7 +321,7 @@ import MoveAllTransactionsDialog from '@/views/desktop/accounts/list/dialogs/Mov
 import ClearAllTransactionsDialog from '@/views/desktop/accounts/list/dialogs/ClearAllTransactionsDialog.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
 
-import { ref, computed, useTemplateRef, watch } from 'vue';
+import { ref, computed, onMounted, useTemplateRef, watch } from 'vue';
 import { useDisplay } from 'vuetify';
 
 import { useI18n } from '@/locales/helpers.ts';
@@ -399,6 +399,7 @@ const alwaysShowNav = ref<boolean>(display.mdAndUp.value);
 const showNav = ref<boolean>(display.mdAndUp.value);
 const showAccountsIncludedInTotalDialog = ref<boolean>(false);
 const showCustomDateRangeDialog = ref<boolean>(false);
+let reloadRequestId = 0;
 
 const hasAnyVisibleAccount = computed<boolean>(() => accountsStore.allVisibleAccountsCount > 0);
 const activeAccountCategory = computed<AccountCategory | undefined>(() => AccountCategory.valueOf(activeAccountCategoryType.value));
@@ -431,11 +432,22 @@ const activeAccountCategoryVisibleAccountCount = computed<number>(() => {
 });
 
 function reload(force: boolean): void {
+    const currentRequestId = ++reloadRequestId;
     loading.value = true;
 
-    accountsStore.loadAllAccounts({
+    const loadAccounts = () => accountsStore.loadAllAccounts({
         force: force
-    }).then(() => {
+    });
+
+    const promise = force
+        ? accountsStore.syncAllAccountBalances({ refreshAccounts: false }).then(loadAccounts)
+        : loadAccounts();
+
+    promise.then(() => {
+        if (currentRequestId !== reloadRequestId) {
+            return;
+        }
+
         loading.value = false;
         displayOrderModified.value = false;
 
@@ -451,6 +463,10 @@ function reload(force: boolean): void {
             snackbar.value?.showMessage('Account list has been updated');
         }
     }).catch(error => {
+        if (currentRequestId !== reloadRequestId) {
+            return;
+        }
+
         loading.value = false;
 
         if (error && error.isUpToDate) {
@@ -700,7 +716,9 @@ watch(() => display.mdAndUp.value, (newValue) => {
     }
 });
 
-reload(false);
+onMounted(() => {
+    reload(false);
+});
 </script>
 
 <style>

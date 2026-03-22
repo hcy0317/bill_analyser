@@ -46,6 +46,7 @@ v6.57 版本 (2025-12-01):
 """
 
 import hashlib
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
@@ -374,6 +375,12 @@ class SmartDeduplicationEngine:
         db_duplicate_groups = await self._find_database_duplicates(bills, db, user_id)
         duplicate_groups.extend(db_duplicate_groups)
 
+        # v6.88: 跨批次转账配对（在数据库中查找金额相反的已有账单）
+        cross_transfer_pairs = await self._find_cross_batch_transfer_pairs(
+            bills, db, user_id
+        )
+        transfer_pairs.extend(cross_transfer_pairs)
+
         # 收集保留的账单
         kept_bills = [b for b in bills if not b.get('_removed', False)]
 
@@ -395,8 +402,9 @@ class SmartDeduplicationEngine:
 
         # v6.62: 合并日志 - 一行汇总所有去重结果
         self.logger.info(
-            "[去重+DB] 原始=%d, 保留=%d | 完全=%d, 转账=%d, 平台银行=%d, 相似=%d, 分账=%d, DB重复=%d",
-            original_count, len(kept_bills), len(exact_groups), len(transfer_pairs),
+            "[去重+DB] 原始=%d, 保留=%d | 完全=%d, 转账=%d(+跨批%d), 平台银行=%d, 相似=%d, 分账=%d, DB重复=%d",
+            original_count, len(kept_bills), len(exact_groups), len(transfer_pairs) - len(cross_transfer_pairs),
+            len(cross_transfer_pairs),
             len(platform_bank_groups), len(similar_groups), len(split_groups), len(db_duplicate_groups)
         )
 
@@ -607,10 +615,21 @@ class SmartDeduplicationEngine:
         if secondary_bill.get('_template_id'):
             merged['_merged_template_ids'].append(secondary_bill.get('_template_id'))
 
+        # v6.69: 使用更有意义的日志标识，避免显示空值
+        primary_id = (
+            primary_bill.get('_parser_id') or
+            primary_bill.get('source_account_id') or
+            primary_bill.get('date', '')[:10]
+        )
+        secondary_id = (
+            secondary_bill.get('_parser_id') or
+            secondary_bill.get('source_account_id') or
+            secondary_bill.get('date', '')[:10]
+        )
         self.logger.debug(
-            "[字段合并] 主=%s, 次=%s",
-            primary_bill.get('source_account_id'),
-            secondary_bill.get('source_account_id')
+            "[字段合并] 主=%s (金额=%.2f), 次=%s (金额=%.2f)",
+            primary_id, float(primary_bill.get('amount', 0)),
+            secondary_id, float(secondary_bill.get('amount', 0))
         )
 
         return merged
@@ -714,17 +733,23 @@ class SmartDeduplicationEngine:
                 for bill in remove_bills:
                     bill['_removed'] = True
 
+                # v6.69: 使用更有意义的日志标识
+                keep_id = (
+                    keep_bill.get('_parser_id') or
+                    keep_bill.get('source_account_id') or
+                    keep_bill.get('date', '')[:10]
+                )
                 groups.append(DuplicateGroup(
                     type=DeduplicationType.EXACT,
                     bills=dup_bills,
                     keep_bill=keep_bill,
                     remove_bills=remove_bills,
-                    reason=f"完全重复，保留 {keep_bill.get('source_account_id')} 来源"
+                    reason=f"完全重复，保留 {keep_id} 来源"
                 ))
 
                 self.logger.debug(
-                    "[完全重复] 保留=%s, 移除%d条",
-                    keep_bill.get('source_account_id'), len(remove_bills)
+                    "[完全重复] 保留=%s (金额=%.2f), 移除%d条",
+                    keep_id, float(keep_bill.get('amount', 0)), len(remove_bills)
                 )
 
         return groups
@@ -916,6 +941,7 @@ class SmartDeduplicationEngine:
     def _find_similar_duplicates(self, bills: List[Dict[str, Any]]) -> List[DuplicateGroup]:
         """基于相似度查找重复账单
 
+        v6.72优化: 使用金额+时间分桶替代全量笛卡尔积，内存占用从O(n²)降到O(n)
         v6.57优化: 使用pandas进行初步筛选，再对候选配对进行相似度计算
         v6.42去重条件（全部满足）：
         1. 时间误差30秒以内
@@ -942,60 +968,90 @@ class SmartDeduplicationEngine:
         if n < 2:
             return groups
 
-        # v6.57: 使用pandas构建DataFrame
-        df = self._bills_to_dataframe(active_bills)
-        df = df[df['datetime'].notna()].copy()
+        # v6.72: 使用金额+时间分桶策略替代全量笛卡尔积
+        # 分桶策略：按 (金额桶, 方向, 时间桶) 分组，只在同组内比较
+        # 这将复杂度从 O(n²) 降低到 O(n * k)，其中 k 是桶内平均元素数
+        buckets: Dict[tuple, List[int]] = defaultdict(list)
 
-        if len(df) < 2:
-            return groups
+        # 时间桶大小：30秒（与TIME_TOLERANCE一致），相邻桶需要交叉检查
+        TIME_BUCKET_SECONDS = self.TIME_TOLERANCE
 
-        # 自我笛卡尔积，但只取 idx1 < idx2 的组合
-        df['_key'] = 1
-        cross = df.merge(df, on='_key', suffixes=('_1', '_2'))
-        cross = cross[cross['_idx_1'] < cross['_idx_2']].copy()
-        del cross['_key']
+        for i, bill in enumerate(active_bills):
+            dt = self._parse_datetime(bill.get('date', ''))
+            if not dt:
+                continue
 
-        if cross.empty:
-            return groups
+            amt = float(bill.get('amount', 0))
+            abs_amt = abs(amt)
+            is_positive = amt >= 0
 
-        # v6.57: 向量化条件筛选
-        # v6.60: 使用 _source_identifier 判断来源不同
-        # 只有当两个来源标识都非空且不相等时才认为来源不同
-        cross = cross[
-            (cross['_source_identifier_1'] != cross['_source_identifier_2']) &
-            (cross['_source_identifier_1'] != '') &
-            (cross['_source_identifier_2'] != '')
-        ]
+            # 金额桶：精确到分（0.01）
+            amt_bucket = round(abs_amt, 2)
 
-        if cross.empty:
-            return groups
+            # 时间桶：按30秒分桶
+            timestamp = int(dt.timestamp())
+            time_bucket = timestamp // TIME_BUCKET_SECONDS
 
-        # 条件1: 时间30秒内
-        time_diff = (cross['datetime_1'] - cross['datetime_2']).abs()
-        cross = cross[time_diff <= pd.Timedelta(seconds=self.TIME_TOLERANCE)]
+            # 添加到当前桶
+            key = (amt_bucket, is_positive, time_bucket)
+            buckets[key].append(i)
 
-        if cross.empty:
-            return groups
+            # 同时添加到相邻时间桶（处理边界情况）
+            key_prev = (amt_bucket, is_positive, time_bucket - 1)
+            buckets[key_prev].append(i)
 
-        # 条件2: 金额绝对值相等且方向相同
-        cross['abs_diff'] = (cross['abs_amount_1'] - cross['abs_amount_2']).abs()
-        cross = cross[
-            (cross['abs_diff'] <= self.AMOUNT_TOLERANCE) &
-            (cross['is_positive_1'] == cross['is_positive_2'])
-        ]
+        # 收集候选配对（只比较同桶内的账单）
+        candidate_pairs: List[Tuple[int, int]] = []
+        seen_pairs: Set[Tuple[int, int]] = set()
 
-        if cross.empty:
-            return groups
+        for bucket_indices in buckets.values():
+            if len(bucket_indices) < 2:
+                continue
 
-        self.logger.debug("[类似账单去重] 时间+金额候选数: %d", len(cross))
+            # 桶内两两配对
+            for i, idx1 in enumerate(bucket_indices):
+                for idx2 in bucket_indices[i + 1:]:
+
+                    # 确保 idx1 < idx2 避免重复
+                    pair = (min(idx1, idx2), max(idx1, idx2))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+
+                    bill1 = active_bills[pair[0]]
+                    bill2 = active_bills[pair[1]]
+
+                    # 条件4: 来源不同
+                    source1 = self._get_source_type(bill1) or str(bill1.get('source_account_id', ''))
+                    source2 = self._get_source_type(bill2) or str(bill2.get('source_account_id', ''))
+                    if source1 == source2 or not source1 or not source2:
+                        continue
+
+                    # 条件1: 时间30秒内（精确验证）
+                    dt1 = self._parse_datetime(bill1.get('date', ''))
+                    dt2 = self._parse_datetime(bill2.get('date', ''))
+                    if not dt1 or not dt2:
+                        continue
+                    if abs((dt1 - dt2).total_seconds()) > self.TIME_TOLERANCE:
+                        continue
+
+                    # 条件2: 金额绝对值相等且方向相同（精确验证）
+                    amt1 = float(bill1.get('amount', 0))
+                    amt2 = float(bill2.get('amount', 0))
+                    if abs(abs(amt1) - abs(amt2)) > self.AMOUNT_TOLERANCE:
+                        continue
+                    if (amt1 >= 0) != (amt2 >= 0):
+                        continue
+
+                    candidate_pairs.append(pair)
+
+        self.logger.debug("[类似账单去重] 时间+金额候选数: %d (分桶数=%d)",
+                          len(candidate_pairs), len(buckets))
 
         # 条件3: 相似度计算（需要逐对计算）
         matched: Set[int] = set()
 
-        for _, row in cross.iterrows():
-            idx1 = int(row['_idx_1'])
-            idx2 = int(row['_idx_2'])
-
+        for idx1, idx2 in candidate_pairs:
             if idx1 in matched or idx2 in matched:
                 continue
 
@@ -1393,6 +1449,155 @@ class SmartDeduplicationEngine:
         for b in active_bills:
             if '_temp_idx' in b:
                 del b['_temp_idx']
+
+        return pairs
+
+    # ==================== v6.88: 跨批次转账配对 ====================
+
+    @log_method
+    async def _find_cross_batch_transfer_pairs(
+        self,
+        bills: List[Dict[str, Any]],
+        db,
+        user_id: int = 1,
+        time_tolerance_seconds: int = 300
+    ) -> List[Tuple[Dict, Dict]]:
+        """检测新导入账单与数据库已有账单之间的转账关系
+
+        当前批次有一笔-100元(支出)的账单，数据库中已有一笔+100元(收入)
+        的账单且时间接近来源不同，则识别为跨批次转账配对。
+
+        配对成功后会更新数据库中已有账单的type为'转账'并设置目标/来源账户。
+
+        Args:
+            bills: 待导入的账单列表
+            db: 数据库实例
+            user_id: 用户ID
+            time_tolerance_seconds: 时间容差（秒），默认5分钟
+
+        Returns:
+            List[Tuple[Dict, Dict]]: 转账对列表 [(新账单, 已有账单), ...]
+        """
+        pairs: List[Tuple[Dict, Dict]] = []
+
+        active_bills = [b for b in bills if not b.get('_removed', False)]
+        if not active_bills:
+            return pairs
+
+        # 获取日期范围
+        dates = []
+        for bill in active_bills:
+            dt = self._parse_datetime(bill.get('date', ''))
+            if dt:
+                dates.append(dt)
+        if not dates:
+            return pairs
+
+        min_date = min(dates)
+        max_date = max(dates)
+        start_date = (min_date - timedelta(days=1)).strftime('%Y-%m-%d')
+        end_date = (max_date + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        try:
+            existing_bills = await db.get_bills_by_date_range(
+                start_date, end_date, user_id=user_id
+            )
+        except Exception as e:
+            self.logger.error("[跨批次转账] 查询数据库失败: %s", e)
+            return pairs
+
+        if not existing_bills:
+            return pairs
+
+        # 构建已有账单按 (日期, 金额绝对值) 索引
+        existing_index: Dict[str, List[Dict]] = {}
+        for eb in existing_bills:
+            abs_amt = abs(float(eb.get('amount', 0)))
+            key = f"{eb.get('date', '')[:10]}_{abs_amt:.2f}"
+            if key not in existing_index:
+                existing_index[key] = []
+            existing_index[key].append(eb)
+
+        matched_db_ids = set()
+
+        for bill in active_bills:
+            # 跳过已经被标记为转账的账单
+            if bill.get('_dedup_type') == 'transfer':
+                continue
+
+            bill_amt = float(bill.get('amount', 0))
+            bill_abs_amt = abs(bill_amt)
+            bill_dt = self._parse_datetime(bill.get('date', ''))
+            if not bill_dt:
+                continue
+
+            bill_source = self._get_source_type(bill)
+            key = f"{bill.get('date', '')[:10]}_{bill_abs_amt:.2f}"
+
+            candidates = existing_index.get(key, [])
+            for eb in candidates:
+                if eb.get('id') in matched_db_ids:
+                    continue
+
+                eb_amt = float(eb.get('amount', 0))
+
+                # 金额必须相反（一正一负）
+                if not self._amount_opposite(bill_amt, eb_amt):
+                    continue
+
+                eb_dt = self._parse_datetime(eb.get('date', ''))
+                if not eb_dt:
+                    continue
+
+                # 时间必须接近
+                if abs((bill_dt - eb_dt).total_seconds()) > time_tolerance_seconds:
+                    continue
+
+                eb_source = str(eb.get('source_account_id', '')).lower()
+                # 来源必须不同
+                if bill_source and eb_source and bill_source == eb_source:
+                    continue
+
+                # 配对成功！
+                matched_db_ids.add(eb.get('id'))
+
+                # 确定转出/转入方
+                if bill_amt < 0:
+                    outgoing, incoming_db = bill, eb
+                else:
+                    outgoing, incoming_db = eb, bill
+                    # 新账单是正金额 → 把新账单当做收入方
+                    outgoing, incoming_db = eb, bill
+
+                # 更新新账单的转账标记
+                bill['type'] = '转账'
+                bill['_dedup_type'] = 'transfer_cross_batch'
+                bill['_cross_batch_db_id'] = eb.get('id')
+
+                # 更新数据库中已有账单（异步更新其type）
+                try:
+                    await db.update_bill(
+                        eb.get('id'),
+                        {'type': '转账'},
+                        user_id=user_id
+                    )
+                except Exception as update_err:
+                    self.logger.warning(
+                        "[跨批次转账] 更新已有账单 ID=%s 失败: %s",
+                        eb.get('id'), update_err
+                    )
+
+                self.logger.debug(
+                    "[跨批次转账] 金额=%.2f, 新账单(%s) ↔ 已有ID=%s",
+                    bill_abs_amt, bill_source, eb.get('id')
+                )
+                pairs.append((bill, eb))
+                break  # 每条新账单最多配对一条已有账单
+
+        if pairs:
+            self.logger.info(
+                "[跨批次转账] 共发现 %d 对跨批次转账", len(pairs)
+            )
 
         return pairs
 

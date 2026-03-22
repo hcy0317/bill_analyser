@@ -23,6 +23,18 @@
                         </v-menu>
                     </v-btn>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" :disabled="loading || submitting || !parsedFileData"
+                           v-if="currentStep === 'defineColumn'"
+                              @click="openManageImportConfigDialog">
+                           <v-icon :icon="mdiFolderOpenOutline" />
+                          </v-btn>
+                          <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                              :icon="true" :disabled="loading || submitting || !parsedFileData"
+                              v-if="currentStep === 'defineColumn'"
+                           @click="openSaveImportConfigDialog">
+                        <v-icon :icon="mdiContentSaveOutline" />
+                    </v-btn>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                            :icon="true" :disabled="loading || submitting"
                            v-if="currentStep === 'executeCustomScript' && importTransactionExecuteCustomScriptTab?.menus">
                         <v-icon :icon="mdiDotsVertical" />
@@ -86,18 +98,7 @@
             <v-window class="disable-tab-transition" v-model="currentStep">
                 <v-window-item value="uploadFile">
                     <v-row>
-                        <v-col cols="12" md="12">
-                            <v-select
-                                :items="fileTypeOptions"
-                                item-title="title"
-                                item-value="value"
-                                :label="tt('File Type')"
-                                v-model="selectedFileTypes"
-                                multiple
-                                chips
-                                :disabled="submitting"
-                            ></v-select>
-                        </v-col>
+                        <!-- v6.79: 移除文件类型选择器，因为解析器会自动识别文件格式 -->
 
                         <v-col cols="12" md="12" v-if="allFileSubTypes">
                             <v-select
@@ -111,7 +112,7 @@
                             />
                         </v-col>
 
-                        <v-col cols="12" md="12" v-if="fileType === 'dsv' || fileType === 'dsv_data'">
+                        <v-col cols="12" md="12" v-if="importFiles.length <= 1 && (fileType === 'dsv' || fileType === 'dsv_data')">
                             <v-select
                                 item-title="displayName"
                                 item-value="type"
@@ -119,8 +120,8 @@
                                 :label="tt('Handling Method')"
                                 :placeholder="tt('Handling Method')"
                                 :items="[
+                                    { displayName: tt('Auto detect'), type: ImportDSVProcessMethod.AutoDetect },
                                     { displayName: tt('Column Mapping'), type: ImportDSVProcessMethod.ColumnMapping },
-                                    { displayName: tt('Custom Script'), type: ImportDSVProcessMethod.CustomScript }
                                  ]"
                                 v-model="processDSVMethod"
                             />
@@ -218,6 +219,93 @@
 
     <confirm-dialog ref="confirmDialog"/>
     <snack-bar ref="snackbar" />
+    <v-dialog v-model="showSaveImportConfigDialog" max-width="520">
+        <v-card class="pa-4">
+            <v-card-title>{{ tt('Save Data Mapping File') }}</v-card-title>
+            <v-card-text>
+                <v-text-field
+                    v-model="saveImportConfigName"
+                    :label="tt('Name')"
+                    :placeholder="tt('Name')"
+                    :disabled="submitting"
+                    persistent-placeholder
+                />
+                <v-checkbox
+                    v-model="saveImportConfigIsDefault"
+                    :label="tt('Default')"
+                    :disabled="submitting"
+                    hide-details
+                />
+            </v-card-text>
+            <v-card-actions class="justify-end gap-2">
+                <v-btn variant="text" :disabled="submitting" @click="showSaveImportConfigDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+                <v-btn color="primary" :disabled="submitting || !saveImportConfigName.trim()" @click="saveCurrentImportConfig">
+                    {{ tt('Save') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+    <v-dialog v-model="showManageImportConfigDialog" max-width="760">
+        <v-card class="pa-4">
+            <v-card-title>{{ tt('Saved Templates') }}</v-card-title>
+            <v-card-text>
+                <v-list v-if="importConfigList.length > 0">
+                    <v-list-item :key="config.id" v-for="config in importConfigList">
+                        <template #prepend>
+                            <v-icon :icon="matchedImportConfig?.id === config.id ? mdiCheck : mdiFolderOpenOutline" />
+                        </template>
+                        <v-list-item-title>{{ config.name }}</v-list-item-title>
+                        <v-list-item-subtitle>
+                            {{ config.sampleHeaders?.join(' / ') || tt('No data to import') }}
+                        </v-list-item-subtitle>
+                        <template #append>
+                            <div class="d-flex ga-2">
+                                <v-btn size="small" variant="text" color="primary" @click="applyImportConfig(config)">
+                                    {{ tt('Apply') }}
+                                </v-btn>
+                                <v-btn size="small" variant="text" color="secondary" @click="openRenameImportConfigDialog(config)">
+                                    {{ tt('Rename') }}
+                                </v-btn>
+                                <v-btn size="small" variant="text" color="error" @click="removeImportConfig(config)">
+                                    {{ tt('Delete') }}
+                                </v-btn>
+                            </div>
+                        </template>
+                    </v-list-item>
+                </v-list>
+                <div class="text-medium-emphasis" v-else>{{ tt('No saved templates') }}</div>
+            </v-card-text>
+            <v-card-actions class="justify-end">
+                <v-btn variant="text" @click="showManageImportConfigDialog = false">
+                    {{ tt('Close') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+    <v-dialog v-model="showRenameImportConfigDialog" max-width="520">
+        <v-card class="pa-4">
+            <v-card-title>{{ tt('Rename Template') }}</v-card-title>
+            <v-card-text>
+                <v-text-field
+                    v-model="renameImportConfigName"
+                    :label="tt('Template Name')"
+                    :placeholder="tt('Template Name')"
+                    :disabled="submitting"
+                    persistent-placeholder
+                />
+            </v-card-text>
+            <v-card-actions class="justify-end gap-2">
+                <v-btn variant="text" :disabled="submitting" @click="showRenameImportConfigDialog = false">
+                    {{ tt('Cancel') }}
+                </v-btn>
+                <v-btn color="primary" :disabled="submitting || !renameImportConfigName.trim()" @click="renameImportConfig">
+                    {{ tt('Save') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
     <input ref="fileInput" type="file" multiple style="display: none" :accept="supportedImportFileExtensions" @change="setImportFile($event)" />
 </template>
 
@@ -229,7 +317,7 @@ import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColu
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, nextTick, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { getTimezoneOffsetMinutes } from '@/lib/datetime.ts';
@@ -247,15 +335,16 @@ import { type NumeralSystem } from '@/core/numeral.ts';
 import type { LocalizedImportFileTypeSubType } from '@/core/file.ts';
 import { ImportTransaction, type ImportTransactionResponse } from '@/models/imported_transaction.ts';
 
-import { isNumber } from '@/lib/common.ts';
-import { generateRandomUUID } from '@/lib/misc.ts';
 import { getCurrentToken } from '@/lib/userstate.ts';
+import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
 
 import {
     mdiFilterOutline,
     mdiCheck,
+    mdiContentSaveOutline,
     mdiDotsVertical,
+    mdiFolderOpenOutline,
     mdiHelpCircleOutline,
     mdiClose,
     mdiArrowRight
@@ -269,9 +358,47 @@ type ImportTransactionCheckDataTabType = InstanceType<typeof ImportTransactionCh
 
 type ImportTransactionDialogStep = 'uploadFile' | 'defineColumn' | 'executeCustomScript' | 'checkData' | 'finalResult';
 enum ImportDSVProcessMethod {
+    AutoDetect,
     ColumnMapping,
-    CustomScript
-};
+}
+
+interface ImportConfigMatchResult {
+    id: number;
+    name: string;
+    fileFormat?: string;
+    description?: string;
+    fieldMappings: Record<string, unknown>;
+    sampleHeaders?: string[];
+    dateFormat?: string;
+    delimiter?: string;
+    encoding?: string;
+    skipRows?: number;
+    hasHeader?: boolean;
+    customRules?: Record<string, unknown>;
+    isDefault?: boolean;
+    matchScore?: number;
+}
+
+interface ImportFilePreviewResult {
+    headers: string[];
+    sampleData: string[][];
+    previewRows?: string[][];
+    totalRows: number;
+    encoding?: string;
+    delimiter?: string;
+}
+
+interface ImportConfigSuggestionResult {
+    includeHeader?: boolean;
+    columnMapping?: Record<string, number>;
+    transactionTypeMapping?: Record<string, number>;
+    suggestions?: Array<{
+        columnType: number;
+        columnIndex: number;
+        header: string;
+        score: number;
+    }>;
+}
 
 defineProps<{
     persistent?: boolean;
@@ -299,7 +426,6 @@ const importTransactionCheckDataTab = useTemplateRef<ImportTransactionCheckDataT
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
 const showState = ref<boolean>(false);
-const clientSessionId = ref<string>('');
 const serverSessionId = ref<string>('');  // v6.48: 后端三阶段导入的会话ID
 const currentStep = ref<ImportTransactionDialogStep>('uploadFile');
 const importProcess = ref<number>(0);
@@ -308,10 +434,19 @@ const importFiles = ref<File[]>([]);
 const importData = ref<string>('');
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
-const dedupStats = ref<Record<string, number>>({});  // v6.48: 去重统计信息
+const parsedFileDelimiter = ref<string>('');
+const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
 const fileSubType = ref<string>('');
-const processDSVMethod = ref<ImportDSVProcessMethod>(ImportDSVProcessMethod.ColumnMapping);
+const processDSVMethod = ref<ImportDSVProcessMethod>(ImportDSVProcessMethod.AutoDetect);
+const showSaveImportConfigDialog = ref<boolean>(false);
+const saveImportConfigName = ref<string>('');
+const saveImportConfigIsDefault = ref<boolean>(false);
+const showManageImportConfigDialog = ref<boolean>(false);
+const importConfigList = ref<ImportConfigMatchResult[]>([]);
+const showRenameImportConfigDialog = ref<boolean>(false);
+const renameImportConfigName = ref<string>('');
+const renamingImportConfig = ref<ImportConfigMatchResult | null>(null);
 
 const allSteps = computed<StepBarItem[]>(() => [
     { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
@@ -323,9 +458,16 @@ const allSteps = computed<StepBarItem[]>(() => [
 
 const fileType = computed<string>(() => {
     const type = selectedFileTypes.value[0];
-    if (selectedFileTypes.value.length > 0 && type) {
+    if (selectedFileTypes.value.length > 0 && type && type !== 'auto') {
         return type;
     }
+
+    const currentFile = importFile.value;
+    const lowerName = currentFile?.name.toLowerCase() || '';
+    if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
+        return 'dsv';
+    }
+
     return 'auto';
 });
 
@@ -346,24 +488,31 @@ const importedCount = ref<number | null>(null);
 const loading = ref<boolean>(true);
 const submitting = ref<boolean>(false);
 
+const shouldUseColumnMapping = computed<boolean>(() => {
+    return importFiles.value.length === 1 &&
+        isGenericImportFile() &&
+        (processDSVMethod.value === ImportDSVProcessMethod.ColumnMapping ||
+            processDSVMethod.value === ImportDSVProcessMethod.AutoDetect);
+});
+
 let resolveFunc: (() => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 
 // Simplified file type options
-const fileTypeOptions = [
-    { title: 'Auto', value: 'auto' },
-    { title: 'Alipay', value: 'alipay' },
-    { title: 'WeChat', value: 'wechat' },
-    { title: 'ICBC', value: 'icbc' },
-    { title: 'ABC', value: 'abc' },
-    { title: 'CMBC', value: 'cmbc' },
-    { title: 'CCB', value: 'ccb' },
-    { title: 'ABC Credit', value: 'abc_credit' },
-    { title: 'PSBC Credit', value: 'psbc_credit' },
-    { title: 'SPDB Credit', value: 'spdb_credit' }
-];
+// const fileTypeOptions = [
+//     { title: 'Auto', value: 'auto' },
+//     { title: 'Alipay', value: 'alipay' },
+//     { title: 'WeChat', value: 'wechat' },
+//     { title: 'ICBC', value: 'icbc' },
+//     { title: 'ABC', value: 'abc' },
+//     { title: 'CMBC', value: 'cmbc' },
+//     { title: 'CCB', value: 'ccb' },
+//     { title: 'ABC Credit', value: 'abc_credit' },
+//     { title: 'PSBC Credit', value: 'psbc_credit' },
+//     { title: 'SPDB Credit', value: 'spdb_credit' }
+// ];
 
 const fileName = computed<string>(() => {
     if (importFiles.value.length === 0) return '';
@@ -389,13 +538,21 @@ function open(): Promise<void> {
     importFiles.value = [];
     importData.value = '';
     parsedFileData.value = undefined;
+    parsedFileDelimiter.value = '';
+    matchedImportConfig.value = null;
+    showSaveImportConfigDialog.value = false;
+    saveImportConfigName.value = '';
+    saveImportConfigIsDefault.value = false;
+    showManageImportConfigDialog.value = false;
+    showRenameImportConfigDialog.value = false;
+    renameImportConfigName.value = '';
+    renamingImportConfig.value = null;
+    importConfigList.value = [];
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
-    clientSessionId.value = generateRandomUUID();
-
     const promises = [
         accountsStore.loadAllAccounts({ force: false }),
         transactionCategoriesStore.loadAllCategories({ force: false }),
@@ -443,7 +600,313 @@ function setImportFile(event: Event): void {
     }
 
     importFiles.value = Array.from(el.files);
+    processDSVMethod.value = ImportDSVProcessMethod.AutoDetect;
+    matchedImportConfig.value = null;
+    parsedFileData.value = undefined;
     el.value = '';
+}
+
+function getImportConfigFileFormat(): string {
+    const lowerName = importFile.value?.name.toLowerCase() || '';
+    if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
+        return 'csv';
+    }
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+        return 'excel';
+    }
+    return 'csv';
+}
+
+function isGenericImportFile(): boolean {
+    const lowerName = importFile.value?.name.toLowerCase() || '';
+    return lowerName.endsWith('.csv') || lowerName.endsWith('.txt') ||
+        lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
+}
+
+async function prepareColumnMappingStep(): Promise<void> {
+    if (!importFile.value) {
+        snackbar.value?.showError('Please select at least one file');
+        return;
+    }
+
+    if (importFiles.value.length !== 1) {
+        snackbar.value?.showError('Column mapping currently supports one file at a time');
+        return;
+    }
+
+    const previewResponse = await services.previewImportFile({
+        importFile: importFile.value,
+        delimiter: parsedFileDelimiter.value || undefined,
+        fileEncoding: matchedImportConfig.value?.encoding || undefined
+    });
+    const preview = previewResponse.data?.result as ImportFilePreviewResult | undefined;
+    const rows = preview?.sampleData || [];
+
+    if (!rows.length) {
+        snackbar.value?.showError('No data to import');
+        return;
+    }
+
+    parsedFileDelimiter.value = preview?.delimiter || parsedFileDelimiter.value;
+    parsedFileData.value = rows.slice(0, 300);
+    currentStep.value = 'defineColumn';
+
+    await nextTick();
+    importTransactionDefineColumnTab.value?.reset();
+
+    const headers = rows[0] || [];
+    if (!headers.length) {
+        return;
+    }
+
+    try {
+        const response = await services.matchImportConfig({
+            fileFormat: getImportConfigFileFormat(),
+            headers
+        });
+        const result = response.data?.result;
+
+        if (response.data?.success && result?.fieldMappings) {
+            matchedImportConfig.value = result;
+            parsedFileDelimiter.value = result.delimiter || parsedFileDelimiter.value;
+            importTransactionDefineColumnTab.value?.applyFieldMappings(result.fieldMappings);
+            if (typeof result.hasHeader === 'boolean' && result.hasHeader !== undefined) {
+                importTransactionDefineColumnTab.value?.applyFieldMappings({
+                    ...result.fieldMappings,
+                    includeHeader: result.hasHeader
+                });
+            }
+            snackbar.value?.showMessage(`已自动套用模板：${result.name}`);
+            return;
+        }
+    } catch (error) {
+        logger.warn('failed to match import config', error);
+    }
+
+    try {
+        const suggestionResponse = await services.suggestImportConfig({
+            fileFormat: getImportConfigFileFormat(),
+            headers,
+            sampleRows: rows.slice(1, 21)
+        });
+        const suggestion = suggestionResponse.data?.result as ImportConfigSuggestionResult | undefined;
+        if (suggestion?.columnMapping && Object.keys(suggestion.columnMapping).length > 0) {
+            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as any);
+            snackbar.value?.showMessage('已自动建议列映射');
+        }
+    } catch (error) {
+        logger.warn('failed to suggest import config', error);
+    }
+}
+
+async function loadImportConfigList(): Promise<void> {
+    const response = await services.getImportConfigs({
+        fileFormat: getImportConfigFileFormat()
+    });
+    const result = response.data?.result || [];
+    importConfigList.value = result.map((config: any) => ({
+        id: config.id,
+        name: config.name,
+        fileFormat: config.fileFormat,
+        description: config.description,
+        fieldMappings: config.fieldMappings,
+        sampleHeaders: config.sampleHeaders || [],
+        dateFormat: config.dateFormat,
+        delimiter: config.delimiter,
+        encoding: config.encoding,
+        skipRows: config.skipRows,
+        hasHeader: config.hasHeader,
+        customRules: config.customRules,
+        isDefault: config.isDefault,
+        matchScore: config.matchScore
+    }));
+}
+
+async function openManageImportConfigDialog(): Promise<void> {
+    try {
+        await loadImportConfigList();
+        showManageImportConfigDialog.value = true;
+    } catch (error) {
+        logger.error('failed to load import config list', error);
+        snackbar.value?.showError('Unable to load saved templates');
+    }
+}
+
+function applyImportConfig(config: ImportConfigMatchResult): void {
+    importTransactionDefineColumnTab.value?.applyFieldMappings(config.fieldMappings as any);
+    matchedImportConfig.value = config;
+    parsedFileDelimiter.value = config.delimiter || parsedFileDelimiter.value;
+    showManageImportConfigDialog.value = false;
+    snackbar.value?.showMessage(`已套用模板：${config.name}`);
+}
+
+function openRenameImportConfigDialog(config: ImportConfigMatchResult): void {
+    renamingImportConfig.value = config;
+    renameImportConfigName.value = config.name || '';
+    showRenameImportConfigDialog.value = true;
+}
+
+async function renameImportConfig(): Promise<void> {
+    if (!renamingImportConfig.value || !renameImportConfigName.value.trim()) {
+        return;
+    }
+
+    try {
+        const targetConfig = renamingImportConfig.value;
+        const response = await services.saveImportConfig({
+            id: targetConfig.id,
+            name: renameImportConfigName.value.trim(),
+            fileFormat: targetConfig.fileFormat || getImportConfigFileFormat(),
+            description: targetConfig.description || '',
+            fieldMappings: targetConfig.fieldMappings,
+            dateFormat: targetConfig.dateFormat || '',
+            encoding: targetConfig.encoding || 'utf-8',
+            delimiter: targetConfig.delimiter,
+            skipRows: targetConfig.skipRows || 0,
+            hasHeader: targetConfig.hasHeader ?? true,
+            customRules: targetConfig.customRules || {},
+            sampleHeaders: targetConfig.sampleHeaders || [],
+            isDefault: targetConfig.isDefault || false
+        });
+
+        if (!response.data?.success) {
+            throw new Error('rename failed');
+        }
+
+        if (matchedImportConfig.value?.id === targetConfig.id) {
+            matchedImportConfig.value = {
+                ...matchedImportConfig.value,
+                name: renameImportConfigName.value.trim()
+            };
+        }
+
+        await loadImportConfigList();
+        showRenameImportConfigDialog.value = false;
+        snackbar.value?.showMessage('模板已重命名');
+    } catch (error) {
+        logger.error('failed to rename import config', error);
+        snackbar.value?.showError('Unable to rename saved template');
+    }
+}
+
+function removeImportConfig(config: ImportConfigMatchResult): void {
+    confirmDialog.value?.open('format.misc.confirmDelete', {
+        name: config.name
+    }).then(async () => {
+        try {
+            const response = await services.deleteImportConfig({ id: config.id });
+            if (!response.data?.success) {
+                throw new Error('delete failed');
+            }
+            if (matchedImportConfig.value?.id === config.id) {
+                matchedImportConfig.value = null;
+            }
+            await loadImportConfigList();
+            snackbar.value?.showMessage('模板已删除');
+        } catch (error) {
+            logger.error('failed to delete import config', error);
+            snackbar.value?.showError('Unable to delete saved template');
+        }
+    });
+}
+
+function buildImportTransactionsFromParsedItems(items: ImportTransaction[] | undefined): ImportTransaction[] | undefined {
+    if (!items) {
+        return undefined;
+    }
+
+    for (const transaction of items) {
+        if (transaction.valid) {
+            transaction.selected = true;
+        }
+    }
+
+    return items;
+}
+
+async function executeColumnMappingImport(): Promise<void> {
+    if (!importFile.value || !importTransactionDefineColumnTab.value) {
+        snackbar.value?.showError('Please select at least one file');
+        return;
+    }
+
+    const mapping = importTransactionDefineColumnTab.value.generateResult();
+    if (!mapping) {
+        return;
+    }
+
+    const parseResult = await transactionsStore.parseImportTransaction({
+        fileType: getImportConfigFileFormat(),
+        importFile: importFile.value,
+        columnMapping: mapping.columnMapping,
+        transactionTypeMapping: mapping.transactionTypeMapping,
+        hasHeaderLine: mapping.includeHeader,
+        timeFormat: mapping.timeFormat,
+        timezoneFormat: mapping.timezoneFormat,
+        amountDecimalSeparator: mapping.amountDecimalSeparator,
+        amountDigitGroupingSymbol: mapping.amountDigitGroupingSymbol,
+        geoSeparator: mapping.geoLocationSeparator,
+        geoOrder: mapping.geoLocationOrder,
+        tagSeparator: mapping.tagSeparator,
+        delimiter: parsedFileDelimiter.value
+    });
+
+    importTransactions.value = buildImportTransactionsFromParsedItems(
+        parseResult.items.map((item, idx) => ImportTransaction.of(item, idx))
+    );
+    serverSessionId.value = '';
+    currentStep.value = 'checkData';
+}
+
+function openSaveImportConfigDialog(): void {
+    if (!parsedFileData.value || !importTransactionDefineColumnTab.value) {
+        return;
+    }
+
+    saveImportConfigName.value = matchedImportConfig.value?.name ||
+        `${importFile.value?.name || 'import'} 模板`;
+    saveImportConfigIsDefault.value = !!matchedImportConfig.value?.hasHeader;
+    showSaveImportConfigDialog.value = true;
+}
+
+async function saveCurrentImportConfig(): Promise<void> {
+    if (!importTransactionDefineColumnTab.value || !parsedFileData.value?.length) {
+        return;
+    }
+
+    const mapping = importTransactionDefineColumnTab.value.generateResult();
+    if (!mapping) {
+        return;
+    }
+
+    try {
+        const response = await services.saveImportConfig({
+            id: matchedImportConfig.value?.id,
+            name: saveImportConfigName.value.trim(),
+            fileFormat: getImportConfigFileFormat(),
+            fieldMappings: mapping,
+            delimiter: parsedFileDelimiter.value,
+            hasHeader: mapping.includeHeader,
+            sampleHeaders: parsedFileData.value[0] || [],
+            isDefault: saveImportConfigIsDefault.value,
+            encoding: matchedImportConfig.value?.encoding || 'utf-8'
+        });
+
+        const savedId = response.data?.result?.id;
+        matchedImportConfig.value = {
+            id: savedId || matchedImportConfig.value?.id || 0,
+            name: saveImportConfigName.value.trim(),
+            fieldMappings: mapping as unknown as Record<string, unknown>,
+            delimiter: parsedFileDelimiter.value,
+            encoding: matchedImportConfig.value?.encoding || 'utf-8',
+            hasHeader: mapping.includeHeader
+        };
+        showSaveImportConfigDialog.value = false;
+        snackbar.value?.showMessage('模板已保存');
+    } catch (error) {
+        logger.error('failed to save import config', error);
+        snackbar.value?.showError('Unable to save data mapping file');
+    }
 }
 
 /**
@@ -453,6 +916,33 @@ function setImportFile(event: Event): void {
  * 阶段2: 执行去重处理，结果写入 bills_preview 表，返回预览数据
  */
 async function parseData(): Promise<void> {
+    if (currentStep.value === 'uploadFile' && shouldUseColumnMapping.value) {
+        try {
+            await prepareColumnMappingStep();
+        } catch (error) {
+            logger.error('failed to prepare column mapping step', error);
+            snackbar.value?.showError('Unable to prepare column mapping data');
+        }
+        return;
+    }
+
+    if (currentStep.value === 'uploadFile' && importFiles.value.length > 1) {
+        logger.info(`[导入] 检测到多文件导入 ${importFiles.value.length} 个文件，将直接使用三阶段并行解析`);
+    }
+
+    if (currentStep.value === 'defineColumn') {
+        submitting.value = true;
+        try {
+            await executeColumnMappingImport();
+        } catch (error) {
+            logger.error('failed to parse import file by column mapping', error);
+            snackbar.value?.showError('Unable to parse import file');
+        } finally {
+            submitting.value = false;
+        }
+        return;
+    }
+
     if (importFiles.value.length === 0) {
         snackbar.value?.showError('Please select at least one file');
         return;
@@ -470,8 +960,8 @@ async function parseData(): Promise<void> {
             formData.append('files', file);
         }
 
-        const parserType = selectedFileTypes.value.includes('auto') ? 'auto' : selectedFileTypes.value.join(',');
-        formData.append('parser_type', parserType);
+        // v6.79: 直接使用 'auto'，解析器会自动识别文件格式
+        formData.append('parser_type', 'auto');
 
         const token = getCurrentToken();
         const headers: Record<string, string> = {};
@@ -479,7 +969,6 @@ async function parseData(): Promise<void> {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 调用阶段1 API
         const stage1Response = await fetch('/api/bills/import/v2/parse', {
             method: 'POST',
             headers: headers,
@@ -492,16 +981,14 @@ async function parseData(): Promise<void> {
         }
 
         const stage1Result = await stage1Response.json();
-        logger.info(`[三阶段导入-阶段1] 完成: success=${stage1Result.success}, ` +
-                    `session_id=${stage1Result.data?.session_id}, ` +
-                    `parsed_count=${stage1Result.data?.parsed_count}`);
+        logger.info(`[三阶段导入-阶段1] 完成: success=${stage1Result.success}, session_id=${stage1Result.data?.session_id}, parsed_count=${stage1Result.data?.parsed_count}`);
 
         if (!stage1Result.success || !stage1Result.data?.session_id) {
             throw new Error(stage1Result.error || '解析失败：未获取到session_id');
         }
 
         serverSessionId.value = stage1Result.data.session_id;
-        importProcess.value = 30;  // 更新进度
+        importProcess.value = 30;
 
         // ========== 阶段2: 去重并获取预览 ==========
         logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
@@ -521,18 +1008,13 @@ async function parseData(): Promise<void> {
         }
 
         const stage2Result = await stage2Response.json();
-        logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, ` +
-                    `total=${stage2Result.data?.total}, ` +
-                    `after_dedup=${stage2Result.data?.after_dedup}, ` +
-                    `preview_count=${stage2Result.data?.preview?.length || 0}`);
+        logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, preview_count=${stage2Result.data?.preview_count || stage2Result.data?.preview?.length || 0}`);
 
         if (!stage2Result.success) {
-            throw new Error(stage2Result.error || '去重处理失败');
+            throw new Error(stage2Result.error || '去重预览失败');
         }
 
-        // 保存去重统计
-        dedupStats.value = stage2Result.data?.dedup_stats || {};
-        importProcess.value = 80;
+        logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
 
         // 转换预览数据为前端ImportTransaction格式
         const previewData = stage2Result.data?.preview || [];
@@ -623,7 +1105,22 @@ function convertPreviewToImportTransaction(item: any, index: number): ImportTran
         originalTagNames: [],
         comment: item.preview_description || '',
         counterparty: item.preview_counterparty || '',
-        paymentMethod: item.preview_payment_method || ''
+        paymentMethod: item.preview_payment_method || '',
+        suggestedType: typeMap[item.suggested_preview_type] || undefined,
+        transferSuggestionScore: Number(item.transfer_suggestion_score || 0),
+        transferSuggestionLevel: item.transfer_suggestion_level || '',
+        transferSuggestionReason: item.transfer_suggestion_reason || '',
+        investmentSignalScore: Number(item.investment_signal_score || 0),
+        investmentSignalLevel: item.investment_signal_level || '',
+        investmentSignalReason: item.investment_signal_reason || '',
+        investmentPlatform: item.investment_platform || '',
+        investmentProduct: item.investment_product || '',
+        recurringTemplateId: item.preview_recurring_id ? String(item.preview_recurring_id) : '',
+        recurringTemplateName: item.preview_recurring_name || '',
+        recurringCandidateCount: Number(item.preview_recurring_candidate_count || 0),
+        recurringMatchScore: Number(item.preview_recurring_match_score || 0),
+        recurringMatchReasons: item.preview_recurring_match_reasons || '',
+        recurringMatchedDate: item.preview_recurring_matched_date || ''
     };
 
     // 添加预览表ID，用于阶段3确认导入
@@ -711,32 +1208,8 @@ function submit(): void {
         importProcess.value = 0;
 
         try {
-            // v6.48: 使用三阶段确认API
-            if (serverSessionId.value) {
-                logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
-
-                // 收集用户编辑后的数据
-                const previewUpdates = selectedTransactions.map(t => {
-                    // 类型反向映射
-                    const typeReverseMap: Record<number, string> = {
-                        2: '收入',
-                        3: '支出',
-                        4: '转账',
-                        5: '投资'
-                    };
-
-                    return {
-                        id: (t as any)._previewId,
-                        preview_type: typeReverseMap[t.type] || '支出',
-                        preview_amount: t.sourceAmount / 100,  // 分转元
-                        preview_destination_amount: t.destinationAmount / 100,
-                        preview_source_account_id: t.sourceAccountId ? parseInt(t.sourceAccountId) : null,
-                        preview_destination_account_id: t.destinationAccountId ? parseInt(t.destinationAccountId) : null,
-                        category_id: t.categoryId ? parseInt(t.categoryId) : null,
-                        selected: t.selected
-                    };
-                });
-
+            if (!serverSessionId.value) {
+                const clientSessionId = `import-${Date.now()}`;
                 const token = getCurrentToken();
                 const headers: Record<string, string> = {
                     'Content-Type': 'application/json'
@@ -745,39 +1218,105 @@ function submit(): void {
                     headers['Authorization'] = `Bearer ${token}`;
                 }
 
-                const response = await fetch('/api/bills/import/v2/confirm', {
+                const response = await fetch('/api/bills/batch', {
                     method: 'POST',
-                    headers: headers,
+                    headers,
                     body: JSON.stringify({
-                        session_id: serverSessionId.value,
-                        preview_updates: previewUpdates
+                        clientSessionId,
+                        transactions: selectedTransactions.map(transaction => ({
+                            ...transaction.toCreateRequest(),
+                            clientSessionId
+                        }))
                     })
                 });
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    throw new Error(`确认导入失败: ${errorText}`);
+                    throw new Error(`导入失败: ${errorText}`);
                 }
 
                 const result = await response.json();
-                logger.info(`[三阶段导入-阶段3] 完成: imported=${result.data?.imported_count}`);
-
                 if (!result.success) {
-                    throw new Error(result.error || '确认导入失败');
+                    throw new Error(result.error || '导入失败');
                 }
 
-                importedCount.value = result.data?.imported_count || selectedTransactions.length;
+                importedCount.value = result.result?.items?.length || selectedTransactions.length;
                 currentStep.value = 'finalResult';
 
-                // v6.61: 清理服务器会话（虽然后端 import_stage3_confirm 已经清理了临时表，
-                // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
-                await cleanupServerSession();
-                serverSessionId.value = '';
-
-            } else {
-                // 兼容旧的导入方式
-                await legacySubmit(selectedTransactions);
+                accountsStore.updateAccountListInvalidState(true);
+                transactionsStore.updateTransactionListInvalidState(true);
+                overviewStore.updateTransactionOverviewInvalidState(true);
+                statisticsStore.updateTransactionStatisticsInvalidState(true);
+                return;
             }
+
+            // v6.48+: 使用三阶段确认API作为唯一主链
+            logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
+
+            // 收集用户编辑后的数据
+            const previewUpdates = selectedTransactions.map(t => {
+                // 类型反向映射
+                const typeReverseMap: Record<number, string> = {
+                    2: '收入',
+                    3: '支出',
+                    4: '转账',
+                    5: '投资'
+                };
+
+                return {
+                    id: (t as any)._previewId,
+                    preview_type: typeReverseMap[t.type] || '支出',
+                    preview_amount: t.sourceAmount / 100,  // 分转元
+                    preview_destination_amount: t.destinationAmount / 100,
+                    preview_source_account_id: t.sourceAccountId ? parseInt(t.sourceAccountId) : null,
+                    preview_destination_account_id: t.destinationAccountId ? parseInt(t.destinationAccountId) : null,
+                    preview_recurring_id: t.recurringTemplateId ? parseInt(t.recurringTemplateId) : null,
+                    preview_recurring_name: t.recurringTemplateName || '',
+                    preview_recurring_candidate_count: t.recurringCandidateCount || 0,
+                    preview_recurring_match_score: t.recurringMatchScore || 0,
+                    preview_recurring_match_reasons: t.recurringMatchReasons || '',
+                    preview_recurring_matched_date: t.recurringMatchedDate || '',
+                    category_id: t.categoryId ? parseInt(t.categoryId) : null,
+                    selected: t.selected
+                };
+            });
+
+            const token = getCurrentToken();
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json'
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch('/api/bills/import/v2/confirm', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    session_id: serverSessionId.value,
+                    preview_updates: previewUpdates
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`确认导入失败: ${errorText}`);
+            }
+
+            const result = await response.json();
+            logger.info(`[三阶段导入-阶段3] 完成: imported=${result.data?.imported_count}`);
+
+            if (!result.success) {
+                throw new Error(result.error || '确认导入失败');
+            }
+
+            importedCount.value = result.data?.imported_count || selectedTransactions.length;
+            currentStep.value = 'finalResult';
+
+            // v6.61: 清理服务器会话（虽然后端 import_stage3_confirm 已经清理了临时表，
+            // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
+            await cleanupServerSession();
+            serverSessionId.value = '';
 
             // 刷新相关store
             accountsStore.updateAccountListInvalidState(true);
@@ -791,67 +1330,6 @@ function submit(): void {
         } finally {
             submitting.value = false;
         }
-    });
-}
-
-/**
- * 旧的导入提交方式（兼容）
- */
-async function legacySubmit(transactions: ImportTransaction[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-        let showProcessTimer: number | undefined = undefined;
-
-        if (transactions.length > 100) {
-            setTimeout(() => {
-                if (!submitting.value) {
-                    logger.warn('transaction import is not submitting');
-                    return;
-                }
-
-                // @ts-expect-error the return value of setInterval is number, but lint shows it as NodeJS.Timer
-                showProcessTimer = setInterval(() => {
-                    if (submitting.value) {
-                        transactionsStore.getImportTransactionsProcess({
-                            clientSessionId: clientSessionId.value
-                        }).then(response => {
-                            if (isNumber(response) && 0 <= response && response < 100) {
-                                importProcess.value = response;
-                            } else {
-                                importProcess.value = 0;
-                                clearInterval(showProcessTimer);
-                                showProcessTimer = undefined;
-                            }
-                        }).catch(() => {
-                            importProcess.value = 0;
-                            clearInterval(showProcessTimer);
-                            showProcessTimer = undefined;
-                        });
-                    }
-                }, 2000);
-            }, 2000);
-        }
-
-        transactionsStore.importTransactions({
-            transactions: transactions,
-            clientSessionId: clientSessionId.value
-        }).then(response => {
-            if (showProcessTimer) {
-                importProcess.value = 0;
-                clearInterval(showProcessTimer);
-                showProcessTimer = undefined;
-            }
-
-            importedCount.value = response;
-            currentStep.value = 'finalResult';
-            resolve();
-        }).catch(error => {
-            if (showProcessTimer) {
-                importProcess.value = 0;
-                clearInterval(showProcessTimer);
-                showProcessTimer = undefined;
-            }
-            reject(error);
-        });
     });
 }
 

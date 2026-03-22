@@ -127,19 +127,33 @@ class ICBCParser(ParserBase):
         # 工商银行强特征标识
         icbc_strong_indicators = ["中国工商银行", "工商银行", "ICBC"]
 
+        # v6.76: 工商银行专属列名特征（包含这些列名一定是工商银行，优先级最高）
+        # "收入/支出金额" 是工商银行特有的列名格式，其他银行不会使用
+        icbc_exclusive_columns = ["收入/支出金额", "对方账号名称", "交易附言"]
+
         # 工商银行特有列名组合（核心识别依据）
         icbc_column_patterns = [
             ["储种", "账号", "交易日期"],
             ["账号", "交易日期", "交易时间", "对方账号"],
-            ["交易日期", "交易附言", "对方账号名称"]
+            ["交易日期", "交易附言", "对方账号名称"],
+            # v6.76: 新增工商银行历史明细格式
+            ["储种", "交易日期", "收入/支出金额", "对方户名"],
+            ["账号", "储种", "币种", "摘要", "对方户名"]
         ]
 
         # 排除其他银行特征
         other_bank_indicators = [
-            "支出金额", "存入金额", "凭证类型",
+            "存入金额", "凭证类型",  # v6.76: 移除"支出金额"，因为工商银行使用"收入/支出金额"
             "⼾名", "账⼾", "对⼿信息",
             "记账日", "开户机构：", "账户明细查询", "交易用途"
         ]
+
+        # v6.76: 先检查工商银行专属列名（优先级最高，直接返回True）
+        has_icbc_exclusive = any(col in content for col in icbc_exclusive_columns)
+        if has_icbc_exclusive:
+            self.logger.debug("检测到工商银行专属列名特征: %s",
+                              [col for col in icbc_exclusive_columns if col in content])
+            return True
 
         has_icbc_strong = any(ind in content for ind in icbc_strong_indicators)
         has_icbc_columns = any(all(col in content for col in pattern)

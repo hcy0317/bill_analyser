@@ -5,7 +5,8 @@ Statistics API Routes - 统计分析相关API端点
 import asyncio
 import time
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from typing import Any, Dict, List
+from flask import Blueprint, request, jsonify, current_app
 
 from src.core.analyzer import Analyzer
 from src.utils.logger import get_logger, log_method
@@ -19,8 +20,58 @@ bp = Blueprint('statistics', __name__)
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    from flask import current_app
     return current_app.config.get('DB_INSTANCE')
+
+
+def _get_request_base_currency(db) -> str:
+    """获取请求使用的基准币种。"""
+    requested = (request.args.get('base_currency') or '').strip().upper()
+    if requested:
+        return requested
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        return (user or {}).get('default_currency', 'CNY') or 'CNY'
+    finally:
+        loop.close()
+
+
+def _build_user_custom_exchange_rates_result(
+    base_currency: str,
+    custom_rates: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """构建用户自定义汇率响应。"""
+    update_time = int(time.time())
+    exchange_rates_list = [{
+        'currency': base_currency,
+        'rate': '1.0'
+    }]
+
+    latest_update_time = update_time
+    for rate in custom_rates:
+        exchange_rates_list.append({
+            'currency': rate.get('to_currency', ''),
+            'rate': str(rate.get('rate', '1.0'))
+        })
+        effective_date = rate.get('effective_date')
+        if effective_date:
+            try:
+                latest_update_time = max(
+                    latest_update_time,
+                    int(datetime.fromisoformat(str(effective_date)).timestamp())
+                )
+            except ValueError:
+                logger.debug("忽略非法 effective_date: %s", effective_date)
+
+    return {
+        'dataSource': 'user_custom',
+        'referenceUrl': '',
+        'updateTime': latest_update_time,
+        'baseCurrency': base_currency,
+        'exchangeRates': exchange_rates_list
+    }
 
 
 @bp.route('/overview', methods=['GET'])
@@ -453,7 +504,14 @@ def get_transaction_amounts():
 @require_auth
 def get_exchange_rates():
     """
-    获取最新汇率数据
+    获取最新汇率数据 (v6.79: 从网络获取实时汇率，支持3个以上数据源)
+
+    数据源优先级:
+        1. ECB (欧洲央行) - 支持30+货币，包括CNY
+        2. BOC (加拿大银行) - 支持CNY
+        3. RBA (澳大利亚储备银行) - 支持CNY
+        4. NBP (波兰国家银行) - 支持主要欧洲货币
+        5. SNB (瑞士国家银行) - 支持主要货币
 
     Query Parameters:
         base_currency: 基准货币代码，默认为CNY
@@ -465,8 +523,8 @@ def get_exchange_rates():
         {
             "success": true,
             "result": {
-                "dataSource": "内置汇率数据",
-                "referenceUrl": "",
+                "dataSource": "ECB (欧洲央行)",
+                "referenceUrl": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
                 "updateTime": 1700000000,
                 "baseCurrency": "CNY",
                 "exchangeRates": [
@@ -477,86 +535,80 @@ def get_exchange_rates():
         }
     """
     try:
-        logger.info("开始处理汇率数据请求")
+        logger.info("[汇率API] 开始处理汇率数据请求")
+
+        db = get_app_context()
 
         # 获取请求参数
-        base_currency = request.args.get('base_currency', 'CNY')
-        logger.debug("请求参数: base_currency=%s", base_currency)
+        base_currency = _get_request_base_currency(db)
+        logger.debug("[汇率API] 请求参数: base_currency=%s", base_currency)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            custom_rates = loop.run_until_complete(
+                db.get_user_custom_exchange_rates(base_currency, request.user_id)
+            )
+        finally:
+            loop.close()
+
+        if custom_rates:
+            result = _build_user_custom_exchange_rates_result(base_currency, custom_rates)
+            logger.info("[汇率API] 返回用户自定义汇率: user_id=%s, base=%s, count=%d",
+                        request.user_id, base_currency, len(result['exchangeRates']))
+            return jsonify({'success': True, 'result': result})
 
         # 获取当前时间戳
         update_time = int(time.time())
-        update_date = datetime.now().strftime('%Y-%m-%d')
 
-        logger.debug("生成汇率数据: 时间=%s, 时间戳=%d", update_date, update_time)
+        # 定义要获取的目标货币列表
+        target_currencies = [
+            'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'KRW', 'AUD', 'CAD',
+            'SGD', 'TWD', 'MYR', 'THB', 'VND', 'CHF', 'NZD', 'CNY'
+        ]
 
-        # 构建汇率数据（以CNY为基准）
-        # 这些是示例汇率，实际应该从外部API获取
-        cny_based_rates = {
-            'USD': 0.139,   # 1 CNY = 0.139 USD (约7.2 CNY/USD)
-            'EUR': 0.128,   # 1 CNY = 0.128 EUR
-            'GBP': 0.110,   # 1 CNY = 0.110 GBP
-            'JPY': 20.76,   # 1 CNY = 20.76 JPY
-            'HKD': 1.087,   # 1 CNY = 1.087 HKD
-            'KRW': 183.33,  # 1 CNY = 183.33 KRW
-            'AUD': 0.211,   # 1 CNY = 0.211 AUD
-            'CAD': 0.189,   # 1 CNY = 0.189 CAD
-            'SGD': 0.186,   # 1 CNY = 0.186 SGD
-            'TWD': 4.35,    # 1 CNY = 4.35 TWD
-            'MYR': 0.646,   # 1 CNY = 0.646 MYR
-            'THB': 4.86,    # 1 CNY = 4.86 THB
-            'VND': 3425.0,  # 1 CNY = 3425 VND
-        }
+        # 移除基准货币（不需要自己对自己的汇率）
+        if base_currency in target_currencies:
+            target_currencies.remove(base_currency)
 
-        # 如果基准货币不是CNY，需要转换汇率
+        # 创建事件循环获取汇率
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # 尝试从多个数据源获取汇率
+            rates_data = loop.run_until_complete(
+                _fetch_exchange_rates_from_providers(base_currency, target_currencies)
+            )
+        finally:
+            loop.close()
+
+        # 构建汇率列表
         exchange_rates_list = []
 
-        if base_currency == 'CNY':
-            # 直接使用CNY基准的汇率
-            for currency, rate in cny_based_rates.items():
-                exchange_rates_list.append({
-                    'currency': currency,
-                    'rate': str(round(rate, 6))
-                })
-            logger.info("使用CNY基准汇率，生成%d条汇率数据", len(exchange_rates_list))
+        # v6.86: 始终返回基准币种本身（汇率=1.0），避免前端在基准币换算时找不到币种
+        exchange_rates_list.append({
+            'currency': base_currency,
+            'rate': '1.0'
+        })
 
-        elif base_currency in cny_based_rates:
-            # 转换为其他货币为基准
-            base_rate = cny_based_rates[base_currency]
-
-            # 添加CNY汇率（倒数）
+        for currency, rate in rates_data['rates'].items():
             exchange_rates_list.append({
-                'currency': 'CNY',
-                'rate': str(round(1.0 / base_rate, 6))
+                'currency': currency,
+                'rate': str(round(rate, 6))
             })
 
-            # 添加其他货币汇率（交叉汇率）
-            for currency, rate in cny_based_rates.items():
-                if currency != base_currency:
-                    # 交叉汇率 = 目标货币对CNY汇率 / 基准货币对CNY汇率
-                    cross_rate = rate / base_rate
-                    exchange_rates_list.append({
-                        'currency': currency,
-                        'rate': str(round(cross_rate, 6))
-                    })
-
-            logger.info("转换为%s基准汇率，生成%d条汇率数据",
-                       base_currency, len(exchange_rates_list))
-        else:
-            # 不支持的基准货币，返回空列表
-            logger.warning("不支持的基准货币: %s，返回空汇率数据", base_currency)
-
-        # 构建响应数据（前端期望result字段，不是data字段）
+        # 构建响应数据
         result = {
-            'dataSource': '内置汇率数据',
-            'referenceUrl': '',
+            'dataSource': rates_data['source'],
+            'referenceUrl': rates_data['url'],
             'updateTime': update_time,
             'baseCurrency': base_currency,
             'exchangeRates': exchange_rates_list
         }
 
-        logger.info("成功生成汇率数据: 基准=%s, 汇率数=%d, 时间戳=%d",
-                   base_currency, len(exchange_rates_list), update_time)
-        logger.debug("返回数据: %s", result)
+        logger.info("[汇率API] 成功获取汇率: 来源=%s, 基准=%s, 汇率数=%d",
+                   rates_data['source'], base_currency, len(exchange_rates_list))
 
         return jsonify({
             'success': True,
@@ -564,19 +616,265 @@ def get_exchange_rates():
         })
 
     except Exception as e:
-        logger.error("获取汇率数据失败: %s", e, exc_info=True)
+        logger.error("[汇率API] 获取汇率数据失败: %s", e, exc_info=True)
+
+        # 失败时回退到内置汇率
+        logger.warning("[汇率API] 回退到内置汇率数据")
+        return _get_fallback_exchange_rates(base_currency)
+
+
+@bp.route('/exchange-rates/custom', methods=['PUT'])
+@log_method
+@require_auth
+def update_user_custom_exchange_rate():
+    """更新当前用户自定义汇率。"""
+    loop = None
+    try:
+        data = request.get_json(silent=True) or {}
+        currency = (data.get('currency') or '').strip().upper()
+        rate_raw = data.get('rate')
+        if not currency or rate_raw in [None, '']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request',
+                'message': 'currency and rate are required'
+            }), 400
+
+        rate = float(rate_raw)
+        if rate <= 0:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request',
+                'message': 'rate must be greater than 0'
+            }), 400
+
+        db = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        user = loop.run_until_complete(db.get_user_by_id(request.user_id)) or {}
+        base_currency = (user.get('default_currency') or 'CNY').upper()
+        result = loop.run_until_complete(
+            db.upsert_user_custom_exchange_rate(base_currency, currency, rate, request.user_id)
+        )
+        loop.close()
+
+        if not result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': 'Internal Server Error',
+                'message': result.get('message', 'Failed to update user custom exchange rate')
+            }), 500
+
+        return jsonify({
+            'success': True,
+            'result': {
+                'currency': currency,
+                'rate': str(rate),
+                'updateTime': result.get('update_time', int(time.time()))
+            }
+        })
+
+    except ValueError:
+        if loop and not loop.is_closed():
+            loop.close()
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Invalid request',
+            'message': 'rate must be numeric'
+        }), 400
+    except Exception as e:
+        if loop and not loop.is_closed():
+            loop.close()
+        logger.error("更新用户自定义汇率失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': 'Internal Server Error',
+            'message': str(e)
         }), 500
+
+
+@bp.route('/exchange-rates/custom/<currency>', methods=['DELETE'])
+@log_method
+@require_auth
+def delete_user_custom_exchange_rate(currency: str):
+    """删除当前用户自定义汇率。"""
+    loop = None
+    try:
+        normalized_currency = (currency or '').strip().upper()
+        if not normalized_currency:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid request',
+                'message': 'currency is required'
+            }), 400
+
+        db = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        user = loop.run_until_complete(db.get_user_by_id(request.user_id)) or {}
+        base_currency = (user.get('default_currency') or 'CNY').upper()
+        deleted = loop.run_until_complete(
+            db.delete_user_custom_exchange_rate(base_currency, normalized_currency, request.user_id)
+        )
+        loop.close()
+
+        return jsonify({'success': True, 'result': deleted})
+
+    except Exception as e:
+        if loop and not loop.is_closed():
+            loop.close()
+        logger.error("删除用户自定义汇率失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': 'Internal Server Error',
+            'message': str(e)
+        }), 500
+
+
+async def _fetch_exchange_rates_from_providers(
+    base_currency: str,
+    target_currencies: list
+) -> dict:
+    """
+    从多个数据源获取汇率 (v6.79)
+
+    按优先级尝试各个提供者，成功获取后立即返回。
+
+    Args:
+        base_currency: 基准货币
+        target_currencies: 目标货币列表
+
+    Returns:
+        dict: {
+            'rates': {currency: rate, ...},
+            'source': '数据源名称',
+            'url': '参考URL'
+        }
+    """
+    from src.core.exchange_rate_providers import (
+        ECBProvider, BOCProvider, RBAProvider, NBPProvider, SNBProvider
+    )
+
+    # 按优先级排列的数据源（优先选择支持CNY的数据源）
+    providers = [
+        ('ECB (欧洲央行)', ECBProvider(), 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml'),
+        ('BOC (加拿大银行)', BOCProvider(), 'https://www.bankofcanada.ca/valet/observations/group/FX_RATES_DAILY'),
+        ('RBA (澳大利亚储备银行)', RBAProvider(), 'https://www.rba.gov.au/rss/rss-cb-exchange-rates.xml'),
+        ('NBP (波兰国家银行)', NBPProvider(), 'https://api.nbp.pl/api/exchangerates/tables/A'),
+        ('SNB (瑞士国家银行)', SNBProvider(), 'https://data.snb.ch/api/cube/devkum/data/csv/en'),
+    ]
+
+    last_error = None
+
+    for source_name, provider, reference_url in providers:
+        try:
+            logger.info("[汇率API] 尝试从 %s 获取汇率...", source_name)
+
+            # 调用提供者的fetch_rates方法
+            rates = await provider.fetch_rates(base_currency, target_currencies)
+
+            if rates and len(rates) > 0:
+                logger.info("[汇率API] 成功从 %s 获取 %d 个汇率", source_name, len(rates))
+                return {
+                    'rates': rates,
+                    'source': source_name,
+                    'url': reference_url
+                }
+            else:
+                logger.warning("[汇率API] %s 返回空汇率数据", source_name)
+
+        except Exception as e:
+            last_error = e
+            logger.warning("[汇率API] 从 %s 获取汇率失败: %s", source_name, str(e))
+            continue
+
+    # 所有提供者都失败，抛出异常
+    raise RuntimeError(f"所有汇率数据源都无法获取数据: {last_error}")
+
+
+def _get_fallback_exchange_rates(base_currency: str):
+    """
+    获取回退的内置汇率数据 (v6.79)
+
+    当网络获取失败时使用内置的静态汇率作为回退。
+
+    Args:
+        base_currency: 基准货币
+
+    Returns:
+        Flask JSON响应
+    """
+    update_time = int(time.time())
+
+    # 内置汇率（以CNY为基准）- 仅作为回退
+    cny_based_rates = {
+        'USD': 0.139,   # 1 CNY = 0.139 USD
+        'EUR': 0.128,   # 1 CNY = 0.128 EUR
+        'GBP': 0.110,   # 1 CNY = 0.110 GBP
+        'JPY': 20.76,   # 1 CNY = 20.76 JPY
+        'HKD': 1.087,   # 1 CNY = 1.087 HKD
+        'KRW': 183.33,  # 1 CNY = 183.33 KRW
+        'AUD': 0.211,   # 1 CNY = 0.211 AUD
+        'CAD': 0.189,   # 1 CNY = 0.189 CAD
+        'SGD': 0.186,   # 1 CNY = 0.186 SGD
+        'TWD': 4.35,    # 1 CNY = 4.35 TWD
+        'MYR': 0.646,   # 1 CNY = 0.646 MYR
+        'THB': 4.86,    # 1 CNY = 4.86 THB
+        'VND': 3425.0,  # 1 CNY = 3425 VND
+        'CHF': 0.123,   # 1 CNY = 0.123 CHF
+        'NZD': 0.231,   # 1 CNY = 0.231 NZD
+    }
+
+    exchange_rates_list = []
+
+    if base_currency == 'CNY':
+        exchange_rates_list.append({
+            'currency': 'CNY',
+            'rate': '1.0'
+        })
+        for currency, rate in cny_based_rates.items():
+            exchange_rates_list.append({
+                'currency': currency,
+                'rate': str(round(rate, 6))
+            })
+    elif base_currency in cny_based_rates:
+        base_rate = cny_based_rates[base_currency]
+        exchange_rates_list.append({
+            'currency': base_currency,
+            'rate': '1.0'
+        })
+        exchange_rates_list.append({
+            'currency': 'CNY',
+            'rate': str(round(1.0 / base_rate, 6))
+        })
+        for currency, rate in cny_based_rates.items():
+            if currency != base_currency:
+                cross_rate = rate / base_rate
+                exchange_rates_list.append({
+                    'currency': currency,
+                    'rate': str(round(cross_rate, 6))
+                })
+
+    result = {
+        'dataSource': '内置汇率数据 (回退)',
+        'referenceUrl': '',
+        'updateTime': update_time,
+        'baseCurrency': base_currency,
+        'exchangeRates': exchange_rates_list
+    }
+
+    logger.info("[汇率API] 使用内置回退汇率: 基准=%s, 汇率数=%d",
+               base_currency, len(exchange_rates_list))
+
+    return jsonify({
+        'success': True,
+        'result': result
+    })
 
 
 # ==================== V1 统计分析API (ezBookkeeping兼容) ====================
 
-bp_v1 = Blueprint('statistics_v1', __name__)
-
-
-@bp_v1.route('/v1/transactions/statistics.json', methods=['GET'])
+@bp.route('/category-statistics', methods=['GET'])
 @log_method
 @require_auth
 def get_categorical_analysis():
@@ -614,18 +912,26 @@ def get_categorical_analysis():
                    request.method, request.path, dict(request.args))
 
         # 解析请求参数（支持驼峰和下划线两种命名）
-        start_time = request.args.get('startTime') or request.args.get('start_time')
-        end_time = request.args.get('endTime') or request.args.get('end_time')
+        start_time_raw = request.args.get('startTime') or request.args.get('start_time')
+        end_time_raw = request.args.get('endTime') or request.args.get('end_time')
         keyword = request.args.get('keyword', '')
         # tag_ids = request.args.get('tagIds', '')
         # tag_filter_type = request.args.get('tagFilterType', type=int)
         # use_transaction_timezone = request.args.get('useTransactionTimezone', 'false').lower() == 'true'  # noqa: E501 # pylint: disable=line-too-long
 
         logger.info("[分类分析] 解析参数: start_time=%s, end_time=%s, keyword=%s",
-                   start_time, end_time, keyword)
+                   start_time_raw, end_time_raw, keyword)
+
+        # v6.88: 前端选择“全部”时会传 0/0，这里显式识别为全量查询
+        start_time_str = str(start_time_raw).strip() if start_time_raw is not None else ''
+        end_time_str = str(end_time_raw).strip() if end_time_raw is not None else ''
+        is_all_mode = start_time_str == '0' and end_time_str == '0'
+
+        start_time = start_time_raw
+        end_time = end_time_raw
 
         # 如果缺少时间参数,使用本月作为默认范围
-        if start_time is None or end_time is None:
+        if not is_all_mode and (start_time is None or end_time is None):
             now = datetime.now()
             # 本月第一天00:00:00
             month_start = datetime(now.year, now.month, 1)
@@ -641,30 +947,40 @@ def get_categorical_analysis():
             logger.warning("[分类分析] 缺少时间参数,使用本月作为默认范围: start_time=%d, end_time=%d (%s ~ %s)",
                         start_time, end_time, month_start.strftime('%Y-%m-%d'), month_end.strftime('%Y-%m-%d'))
 
-        # 转换为整数
-        try:
-            start_time = int(start_time)
-            end_time = int(end_time)
-        except (ValueError, TypeError) as e:
-            logger.error("[分类分析] 时间戳格式错误: %s", e)
-            return jsonify({
-                'success': False,
-                'error': f'Invalid timestamp format: {e}'
-            }), 400
+        filters = {}
+        if not is_all_mode:
+            if start_time is None or end_time is None:
+                logger.error("[分类分析] 时间参数缺失")
+                return jsonify({
+                    'success': False,
+                    'error': 'Missing required time parameters'
+                }), 400
 
-        # 转换时间戳为日期字符串
-        start_date = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d')
-        end_date = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d')
+            # 转换为整数
+            try:
+                start_time = int(start_time)
+                end_time = int(end_time)
+            except (ValueError, TypeError) as e:
+                logger.error("[分类分析] 时间戳格式错误: %s", e)
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid timestamp format: {e}'
+                }), 400
 
-        logger.info("[分类分析] 查询时间范围: %s 到 %s", start_date, end_date)
+            # 转换时间戳为日期字符串
+            start_date = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d')
+            end_date = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d')
+            filters = {
+                'start_date': start_date,
+                'end_date': end_date
+            }
+            logger.info("[分类分析] 查询时间范围: %s 到 %s", start_date, end_date)
+        else:
+            start_time = 0
+            end_time = 0
+            logger.info("[分类分析] 使用全部时间范围查询（不加时间过滤）")
 
         db = get_app_context()
-
-        # 构建查询过滤条件
-        filters = {
-            'start_date': start_date,
-            'end_date': end_date
-        }
 
         if keyword:
             filters['keyword'] = keyword
@@ -801,7 +1117,7 @@ def get_categorical_analysis():
         }), 500
 
 
-@bp_v1.route('/v1/transactions/statistics/trends.json', methods=['GET'])
+@bp.route('/category-statistics/trends', methods=['GET'])
 @log_method
 @require_auth
 def get_trend_analysis():
@@ -850,7 +1166,15 @@ def get_trend_analysis():
         logger.info("[趋势分析] 解析参数: start_year_month=%s, end_year_month=%s, keyword=%s",
                    start_year_month, end_year_month, keyword)
 
-        if not start_year_month or not end_year_month:
+        # v6.88: 前端选择“全部”时会传 1970-01 / 197001，这里识别为全量查询
+        start_year_month_clean = start_year_month.replace('-', '') if start_year_month else ''
+        end_year_month_clean = end_year_month.replace('-', '') if end_year_month else ''
+        is_all_mode = (
+            start_year_month_clean in ['0', '197001'] and
+            end_year_month_clean in ['0', '197001']
+        )
+
+        if not is_all_mode and (not start_year_month or not end_year_month):
             now = datetime.now()
             start_year_month = f"{now.year}01"  # 本年1月
             end_year_month = f"{now.year}12"    # 本年12月
@@ -858,44 +1182,52 @@ def get_trend_analysis():
             logger.warning("[趋势分析] 缺少年月参数,使用本年作为默认范围: start_year_month=%s, end_year_month=%s",
                         start_year_month, end_year_month)
 
-        # 解析年月字符串（支持两种格式: 202411 或 2024-11）
-        try:
-            # 去除连字符
-            start_year_month_clean = start_year_month.replace('-', '')
-            end_year_month_clean = end_year_month.replace('-', '')
+        if not is_all_mode:
+            # 解析年月字符串（支持两种格式: 202411 或 2024-11）
+            try:
+                # 去除连字符
+                start_year_month_clean = start_year_month.replace('-', '')
+                end_year_month_clean = end_year_month.replace('-', '')
 
-            logger.info("[趋势分析] 清理后的年月: start=%s, end=%s",
-                       start_year_month_clean, end_year_month_clean)
+                logger.info("[趋势分析] 清理后的年月: start=%s, end=%s",
+                           start_year_month_clean, end_year_month_clean)
 
-            start_year = int(start_year_month_clean[:4])
-            start_month = int(start_year_month_clean[4:6])
-            end_year = int(end_year_month_clean[:4])
-            end_month = int(end_year_month_clean[4:6])
+                start_year = int(start_year_month_clean[:4])
+                start_month = int(start_year_month_clean[4:6])
+                end_year = int(end_year_month_clean[:4])
+                end_month = int(end_year_month_clean[4:6])
 
-            logger.info("[趋势分析] 解析年月: start=%d-%02d, end=%d-%02d",
-                       start_year, start_month, end_year, end_month)
-        except (ValueError, IndexError) as e:
-            logger.error("[趋势分析] 年月格式错误: %s", e)
-            return jsonify({
-                'success': False,
-                'error': f'Invalid year-month format (expected: 202411 or 2024-11): {e}'
-            }), 400
+                logger.info("[趋势分析] 解析年月: start=%d-%02d, end=%d-%02d",
+                           start_year, start_month, end_year, end_month)
+            except (ValueError, IndexError) as e:
+                logger.error("[趋势分析] 年月格式错误: %s", e)
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid year-month format (expected: 202411 or 2024-11): {e}'
+                }), 400
 
-        start_date = f"{start_year}-{start_month:02d}-01"
-        # 计算结束日期（月末最后一天）
-        from calendar import monthrange
-        _, last_day = monthrange(end_year, end_month)
-        end_date = f"{end_year}-{end_month:02d}-{last_day}"
-
-        logger.info("[趋势分析] 查询时间范围: %s 到 %s", start_date, end_date)
+            start_date = f"{start_year}-{start_month:02d}-01"
+            # 计算结束日期（月末最后一天）
+            from calendar import monthrange
+            _, last_day = monthrange(end_year, end_month)
+            end_date = f"{end_year}-{end_month:02d}-{last_day}"
+            logger.info("[趋势分析] 查询时间范围: %s 到 %s", start_date, end_date)
+        else:
+            start_year = 0
+            start_month = 0
+            end_year = 0
+            end_month = 0
+            start_date = ''
+            end_date = ''
+            logger.info("[趋势分析] 使用全部时间范围查询（不加年月过滤）")
 
         db = get_app_context()
 
         # 构建查询过滤条件
-        filters = {
-            'start_date': start_date,
-            'end_date': end_date
-        }
+        filters = {}
+        if not is_all_mode:
+            filters['start_date'] = start_date
+            filters['end_date'] = end_date
 
         if keyword:
             filters['keyword'] = keyword
@@ -997,6 +1329,34 @@ def get_trend_analysis():
                 monthly_stats[month_key][stat_key] = 0
             monthly_stats[month_key][stat_key] += amount_cents
 
+        # v6.88: 全量模式下按实际账单时间动态计算起止年月
+        if is_all_mode:
+            valid_bill_dates = []
+            for bill in bills:
+                bill_date_str = bill.get('date', '')
+                if not bill_date_str:
+                    continue
+                try:
+                    bill_date = datetime.fromisoformat(bill_date_str.replace('Z', '+00:00'))
+                    valid_bill_dates.append((bill_date.year, bill_date.month))
+                except (ValueError, AttributeError):
+                    continue
+
+            if valid_bill_dates:
+                sorted_dates = sorted(valid_bill_dates)
+                start_year, start_month = sorted_dates[0]
+                end_year, end_month = sorted_dates[-1]
+                logger.info(
+                    "[趋势分析] 全量模式动态范围: %d-%02d 到 %d-%02d",
+                    start_year, start_month, end_year, end_month
+                )
+            else:
+                logger.info("[趋势分析] 全量模式无账单数据，返回空结果")
+                return jsonify({
+                    'success': True,
+                    'result': []
+                })
+
         # 转换为前端期望的数组格式
         result = []
 
@@ -1060,7 +1420,7 @@ def get_trend_analysis():
         }), 500
 
 
-@bp_v1.route('/v1/transactions/statistics/asset_trends.json', methods=['GET'])
+@bp.route('/asset-trends', methods=['GET'])
 @log_method
 @require_auth
 def get_asset_trends():
@@ -1092,26 +1452,104 @@ def get_asset_trends():
         }
     """
     try:
-        logger.info("[资产趋势] API调用: %s", request.args)
-        logger.info("[资产趋势] 完整请求: method=%s, path=%s, args=%s",
+        # v6.72: API调用日志改为DEBUG级别，仅保留开始和完成的INFO日志
+        logger.debug("[资产趋势] API调用: %s", request.args)
+        logger.debug("[资产趋势] 完整请求: method=%s, path=%s, args=%s",
                    request.method, request.path, dict(request.args))
 
         # 解析请求参数（支持驼峰和下划线两种命名）
-        start_time = request.args.get('startTime') or request.args.get('start_time')
-        end_time = request.args.get('endTime') or request.args.get('end_time')
+        start_time_raw = request.args.get('startTime') or request.args.get('start_time')
+        end_time_raw = request.args.get('endTime') or request.args.get('end_time')
 
-        logger.info("[资产趋势] 解析参数: start_time=%s, end_time=%s",
-                   start_time, end_time)
+        # v6.72: 参数解析改为DEBUG级别
+        logger.debug("[资产趋势] 解析参数: start_time=%s, end_time=%s",
+                   start_time_raw, end_time_raw)
 
-        if start_time is None or end_time is None:
-            logger.error("[资产趋势] 缺少必需参数: start_time=%s, end_time=%s",
-                        start_time, end_time)
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameters: startTime/start_time, endTime/end_time'
-            }), 400
+        # v6.88: 前端“全部”会传 0/0，识别为全量模式
+        start_time_str = str(start_time_raw).strip() if start_time_raw is not None else ''
+        end_time_str = str(end_time_raw).strip() if end_time_raw is not None else ''
+        is_all_mode = start_time_str == '0' and end_time_str == '0'
+
+        start_time = start_time_raw
+        end_time = end_time_raw
+
+        if is_all_mode:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                db = get_app_context()
+                bills_all, _ = loop.run_until_complete(
+                    db.query_bills(page=1, page_size=1000000, filters={}, user_id=request.user_id)
+                )
+            finally:
+                loop.close()
+
+            bill_timestamps = []
+            for bill in bills_all:
+                bill_date_str = bill.get('date', '')
+                if not bill_date_str:
+                    continue
+                try:
+                    bill_date = datetime.fromisoformat(bill_date_str.replace('Z', '+00:00'))
+                    bill_timestamps.append(int(bill_date.timestamp()))
+                except (ValueError, AttributeError):
+                    continue
+
+            if not bill_timestamps:
+                logger.info("[资产趋势] 全量模式无账单数据，返回空结果")
+                return jsonify({
+                    'success': True,
+                    'result': []
+                })
+
+            start_time = min(bill_timestamps)
+            end_time = max(bill_timestamps)
+
+            # 与现有接口限制保持一致：最多365天
+            if (end_time - start_time) // 86400 > 365:
+                end_date_dt = datetime.fromtimestamp(end_time)
+                start_date_dt = end_date_dt - timedelta(days=365)
+                start_time = int(start_date_dt.timestamp())
+                logger.warning(
+                    "[资产趋势] 全量模式超过365天，自动裁剪为最近365天: %s ~ %s",
+                    start_date_dt.strftime('%Y-%m-%d'),
+                    end_date_dt.strftime('%Y-%m-%d')
+                )
+            else:
+                logger.info("[资产趋势] 使用全量模式时间范围: %s ~ %s",
+                           datetime.fromtimestamp(start_time).strftime('%Y-%m-%d'),
+                           datetime.fromtimestamp(end_time).strftime('%Y-%m-%d'))
+
+        if not is_all_mode and (start_time is None or end_time is None):
+            # v6.84: 资产趋势缺少时间参数时，默认使用本月范围（与分类分析接口保持一致）
+            now = datetime.now()
+            month_start = datetime(now.year, now.month, 1)
+
+            if now.month == 12:
+                next_month = datetime(now.year + 1, 1, 1)
+            else:
+                next_month = datetime(now.year, now.month + 1, 1)
+
+            month_end = next_month - timedelta(seconds=1)
+
+            start_time = int(month_start.timestamp())
+            end_time = int(month_end.timestamp())
+
+            logger.warning(
+                "[资产趋势] 缺少时间参数,使用本月作为默认范围: start_time=%d, end_time=%d (%s ~ %s)",
+                start_time, end_time,
+                month_start.strftime('%Y-%m-%d'),
+                month_end.strftime('%Y-%m-%d')
+            )
 
         # 转换为整数
+        if start_time is None or end_time is None:
+            logger.error("[资产趋势] 时间参数缺失")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required time parameters'
+            }), 400
+
         try:
             start_time = int(start_time)
             end_time = int(end_time)
@@ -1125,7 +1563,8 @@ def get_asset_trends():
         # 【关键】验证时间范围，防止无限循环（限制最多365天，支持本年查询）
         time_diff_seconds = end_time - start_time
         time_diff_days = time_diff_seconds // 86400
-        logger.info("[资产趋势] 时间跨度: %d天", time_diff_days)
+        # v6.72: 时间跨度改为DEBUG级别，除非超限
+        logger.debug("[资产趋势] 时间跨度: %d天", time_diff_days)
 
         if time_diff_days > 365:
             logger.warning("[资产趋势] 时间跨度超过365天限制，拒绝请求: %d天", time_diff_days)
@@ -1141,8 +1580,9 @@ def get_asset_trends():
         start_date = datetime.fromtimestamp(start_time)
         end_date = datetime.fromtimestamp(end_time)
 
-        logger.info("[资产趋势] 查询时间范围: %s 到 %s",
-                   start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+        # v6.72: 查询开始时用INFO记录一次，后续详情用DEBUG
+        logger.info("[资产趋势] 开始查询: %s ~ %s (%d天)",
+                   start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), time_diff_days)
 
         db = get_app_context()
 
@@ -1152,12 +1592,15 @@ def get_asset_trends():
         try:
             # 1. 获取所有账户
             accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
-            logger.info("[资产趋势] 查询到 %d 个账户", len(accounts))
+            # v6.72: 中间步骤日志改为DEBUG级别
+            logger.debug("[资产趋势] 查询到 %d 个账户", len(accounts))
 
             # 2. 获取起始日期前的所有账户余额（期初余额）
             start_date_str = start_date.strftime('%Y-%m-%d')
-            initial_balances = loop.run_until_complete(db.get_balances_before_date(start_date_str, user_id=request.user_id))
-            logger.info("[资产趋势] 已计算期初余额")
+            initial_balances = loop.run_until_complete(
+                db.get_balances_before_date(start_date_str, user_id=request.user_id)
+            )
+            logger.debug("[资产趋势] 已计算期初余额")
 
             # 3. 获取时间范围内的所有账单
             end_date_str = end_date.strftime('%Y-%m-%d')
@@ -1170,7 +1613,7 @@ def get_asset_trends():
                 },
                 user_id=request.user_id
             ))
-            logger.info("[资产趋势] 查询到范围内 %d 条账单", len(bills_in_range))
+            logger.debug("[资产趋势] 查询到范围内 %d 条账单", len(bills_in_range))
 
         finally:
             loop.close()
@@ -1205,8 +1648,8 @@ def get_asset_trends():
             day_count += 1
             date_str = current_date.strftime('%Y-%m-%d')
 
-            if day_count <= 3 or day_count % 10 == 0:
-                logger.info("[资产趋势] 计算第%d天: %s", day_count, date_str)
+            # v6.72: 移除逐日计算日志，改为最终汇总日志（见函数末尾）
+            # 原有逻辑: if day_count <= 3 or day_count % 10 == 0: logger.info(...)
 
             # 获取当天的账单
             day_bills = bills_by_date.get(date_str, [])
@@ -1258,24 +1701,17 @@ def get_asset_trends():
 
             current_date += timedelta(days=1)
 
-        logger.info("[资产趋势] 生成 %d 天的资产数据", len(result))
-
-        # 统计结果概要
+        # v6.72: 合并日志输出，只保留一条汇总日志
         if result:
             total_accounts_per_day = len(result[0]['items']) if result[0]['items'] else 0
-            logger.info("[资产趋势] 结果统计: 天数=%d, 每天账户数=%d", len(result), total_accounts_per_day)
-
-            # 记录第一天的详情
-            first_day = result[0]
-            logger.debug("[资产趋势] 第一天(%d-%02d-%02d)前3个账户:",
-                       first_day['year'], first_day['month'], first_day['day'])
-            for i, item in enumerate(first_day['items'][:3]):
-                logger.debug("[资产趋势]   账户%d: ID=%s, 期初=%.2f元, 期末=%.2f元",
-                           i+1, item['accountId'],
-                           item['accountOpeningBalance']/100.0,
-                           item['accountClosingBalance']/100.0)
-
-        logger.info("[资产趋势] ✅ 返回结果: %d天的数据", len(result))
+            logger.info("[资产趋势] 完成: %d天, %d个账户, 日期范围 %s ~ %s",
+                       len(result), total_accounts_per_day,
+                       result[0]['year'] * 10000 + result[0]['month'] * 100 + result[0]['day']
+                       if result else 0,
+                       result[-1]['year'] * 10000 + result[-1]['month'] * 100 + result[-1]['day']
+                       if result else 0)
+        else:
+            logger.info("[资产趋势] 完成: 无数据")
 
         return jsonify({
             'success': True,

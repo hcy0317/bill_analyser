@@ -1,21 +1,32 @@
 """
 Bills API Routes - 账单相关API端点
 
-重构后使用统一的V1 Adapter进行数据格式转换，
+重构后使用统一事务适配器进行数据格式转换，
 消除冗余代码，提升性能和可维护性。
 """
 
 import asyncio
+import csv
+import base64
+import json
+import mimetypes
 import os
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 from werkzeug.utils import secure_filename
 from flask import Blueprint, request, jsonify
 
+try:
+    import openpyxl
+except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
+    openpyxl = None
+
 from src.utils.logger import get_logger, log_method
 from src.utils.currency import yuan_to_cents  # 金额单位转换工具
-from src.api.adapters.v1_adapter import V1TransactionAdapter
+from src.api.adapters.transaction_adapter import TransactionAdapter
 from src.utils.constants import (
     BACKEND_TO_FRONTEND_TYPE
 )
@@ -26,16 +37,81 @@ logger = get_logger('BillsAPI')
 # 主蓝图 - 现代RESTful API
 bp = Blueprint('bills', __name__)
 
-# v1蓝图 - 兼容ezBookkeeping前端（无url_prefix，直接匹配/api/v1/...路径）
-bp_v1 = Blueprint('bills_v1', __name__)
-
 # 上传文件配置 - 指向项目根目录的 uploads 文件夹
 UPLOAD_FOLDER = Path(__file__).parent.parent.parent.parent / "uploads"
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls', 'txt'}
+ALLOWED_PICTURE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # 确保上传目录存在
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+
+def _get_query_arg(args, *names, default=None):
+    """按顺序获取第一个非空查询参数。"""
+    for name in names:
+        value = args.get(name)
+        if value not in (None, ''):
+            return value
+    return default
+
+
+def _parse_int_list(raw_value: str):
+    """解析逗号分隔的整数列表。"""
+    if not raw_value:
+        return []
+    return [int(item) for item in str(raw_value).split(',') if str(item).strip()]
+
+
+async def _apply_common_transaction_filters(args, filters, db, user_id: int):
+    """应用交易列表公共筛选条件。"""
+    keyword = _get_query_arg(args, 'keyword', default='')
+    if keyword:
+        from urllib.parse import unquote
+        filters['keyword'] = unquote(keyword)
+
+    account_ids_str = _get_query_arg(args, 'accountIds', 'account_ids', default='')
+    if account_ids_str:
+        try:
+            account_ids = _parse_int_list(account_ids_str)
+            if account_ids:
+                filters['account_ids'] = account_ids
+        except ValueError:
+            logger.warning(f"无效的account_ids参数: {account_ids_str}")
+
+    category_ids_str = _get_query_arg(args, 'categoryIds', 'category_ids', default='')
+    if category_ids_str:
+        try:
+            category_ids = _parse_int_list(category_ids_str)
+            if category_ids:
+                all_categories = await db.get_all_categories(user_id=user_id)
+                target_categories = []
+
+                for cat in all_categories:
+                    if cat['id'] in category_ids:
+                        target_categories.append({
+                            'main': cat.get('main_category'),
+                            'sub': cat.get('sub_category')
+                        })
+
+                if target_categories:
+                        # 主蓝图 - 现代RESTful API
+                    filters['categories'] = target_categories
+        except ValueError:
+            logger.warning(f"无效的category_ids参数: {category_ids_str}")
+
+    tag_ids_str = _get_query_arg(args, 'tagIds', 'tag_ids', default='')
+    if tag_ids_str:
+        try:
+            tag_ids = _parse_int_list(tag_ids_str)
+            if tag_ids:
+                filters['tag_ids'] = tag_ids
+        except ValueError:
+            logger.warning(f"无效的tag_ids参数: {tag_ids_str}")
+
+    amount_filter = _get_query_arg(args, 'amountFilter', 'amount_filter', default='')
+    if amount_filter:
+        filters['amount_filter'] = amount_filter
 
 
 def allowed_file(filename):
@@ -44,23 +120,755 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+IMPORT_COLUMN_TYPE_KEYWORDS = {
+    1: ['交易时间', '入账时间', '记账时间', '发生时间', '交易日期', '时间', '日期', 'datetime', 'date', 'time'],
+    2: ['时区', 'timezone', 'tz'],
+    3: ['交易类型', '收支类型', '类型', '类别', 'type'],
+    4: ['分类', '一级分类', '主分类', 'category'],
+    5: ['子分类', '二级分类', '次分类', 'subcategory', 'subcategoryname'],
+    6: ['账户', '账户名', '账户名称', '账号', '付款账户', '支付账户', 'account'],
+    7: ['币种', '货币', 'currency'],
+    8: ['金额', '交易金额', '发生金额', '收支金额', 'amount', 'money'],
+    9: ['对方账户', '相关账户', '转入账户', '目标账户', '收款账户', 'destinationaccount', 'relatedaccount'],
+    10: ['对方币种', '目标币种', '转入币种', 'destinationcurrency', 'relatedcurrency'],
+    11: ['对方金额', '目标金额', '转入金额', '收款金额', 'destinationamount', 'relatedamount'],
+    12: ['地理位置', '位置', '经纬度', '坐标', 'location', 'geolocation'],
+    13: ['标签', '标记', 'tags', 'tag'],
+    14: ['备注', '摘要', '描述', '说明', '附言', '用途', 'memo', 'remark', 'description', 'note', 'detail']
+}
+
+LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE = {
+    'date': 1,
+    'time': 1,
+    'type': 3,
+    'category': 4,
+    'subcategory': 5,
+    'sub_category': 5,
+    'account': 6,
+    'accountname': 6,
+    'currency': 7,
+    'amount': 8,
+    'relatedaccount': 9,
+    'relatedaccountname': 9,
+    'relatedcurrency': 10,
+    'relatedamount': 11,
+    'geolocation': 12,
+    'tags': 13,
+    'description': 14,
+    'comment': 14,
+    'memo': 14
+}
+
+AUTO_TRANSACTION_TYPE_MAPPING = {
+    '支出': 3,
+    '收入': 2,
+    '转账': 4,
+    '投资': 5,
+    '退款': 2,
+    'expense': 3,
+    'income': 2,
+    'transfer': 4,
+    'investment': 5,
+}
+
+
+def _normalize_import_suggestion_text(value: Any) -> str:
+    """标准化导入建议比较文本。"""
+    text = str(value or '').strip().lower()
+    return re.sub(r'[\s_\-\/\\()（）\[\]【】:：]+', '', text)
+
+
+def _score_header_keyword_match(normalized_header: str, column_type: int) -> float:
+    """根据关键词规则计算表头与导入列类型的匹配分。"""
+    best_score = 0.0
+    for keyword in IMPORT_COLUMN_TYPE_KEYWORDS.get(column_type, []):
+        normalized_keyword = _normalize_import_suggestion_text(keyword)
+        if not normalized_keyword:
+            continue
+        if normalized_header == normalized_keyword:
+            best_score = max(best_score, 10.0)
+        elif normalized_keyword in normalized_header or normalized_header in normalized_keyword:
+            best_score = max(best_score, 6.0)
+
+    if column_type == 9 and any(token in normalized_header for token in ['对方', '转入', '目标', '收款']):
+        best_score = max(best_score, 8.0)
+    if column_type == 11 and any(token in normalized_header for token in ['对方', '转入', '目标', '收款']) and '金额' in str(normalized_header):
+        best_score = max(best_score, 8.0)
+    if column_type == 6 and '账户' in str(normalized_header) and not any(token in normalized_header for token in ['对方', '转入', '目标', '收款']):
+        best_score = max(best_score, 7.0)
+    if column_type == 8 and '金额' in str(normalized_header) and not any(token in normalized_header for token in ['对方', '转入', '目标', '收款']):
+        best_score = max(best_score, 7.0)
+
+    return best_score
+
+
+def _extract_import_config_header_type_pairs(config: Dict[str, Any]) -> List[Tuple[str, int, float]]:
+    """从历史模板中提取 表头 -> 导入列类型 的关联。"""
+    field_mappings = config.get('field_mappings') or {}
+    sample_headers = config.get('sample_headers') or []
+    use_count = float(config.get('use_count', 0) or 0)
+    base_weight = 3.0 + min(use_count, 20.0) * 0.1
+    pairs: List[Tuple[str, int, float]] = []
+
+    column_mapping = field_mappings.get('columnMapping') if isinstance(field_mappings, dict) else None
+    if isinstance(column_mapping, dict):
+        for column_type, column_index in column_mapping.items():
+            try:
+                column_type_int = int(column_type)
+                column_index_int = int(column_index)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= column_index_int < len(sample_headers):
+                normalized_header = _normalize_import_suggestion_text(sample_headers[column_index_int])
+                if normalized_header:
+                    pairs.append((normalized_header, column_type_int, base_weight))
+        return pairs
+
+    if isinstance(field_mappings, dict):
+        for field_name, header_name in field_mappings.items():
+            normalized_field = _normalize_import_suggestion_text(field_name)
+            column_type_int = LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE.get(normalized_field)
+            normalized_header = _normalize_import_suggestion_text(header_name)
+            if column_type_int and normalized_header:
+                pairs.append((normalized_header, column_type_int, base_weight))
+
+    return pairs
+
+
+def _build_auto_transaction_type_mapping(sample_rows: List[List[Any]], type_column_index: Optional[int]) -> Dict[str, int]:
+    """根据样本行自动推断交易类型映射。"""
+    if type_column_index is None:
+        return {}
+
+    result: Dict[str, int] = {}
+    for row in sample_rows[:100]:
+        if not isinstance(row, list) or type_column_index >= len(row):
+            continue
+        raw_value = str(row[type_column_index] or '').strip()
+        if not raw_value or raw_value in result:
+            continue
+        mapped_type = AUTO_TRANSACTION_TYPE_MAPPING.get(raw_value.lower())
+        if mapped_type:
+            result[raw_value] = mapped_type
+    return result
+
+
+def _build_import_mapping_suggestion(
+    headers: List[Any],
+    configs: List[Dict[str, Any]],
+    sample_rows: Optional[List[List[Any]]] = None
+) -> Dict[str, Any]:
+    """基于表头关键词和历史模板构建列映射建议。"""
+    normalized_headers = [_normalize_import_suggestion_text(header) for header in headers]
+    historical_scores: Dict[Tuple[int, int], float] = {}
+
+    for config in configs:
+        for normalized_header, column_type, weight in _extract_import_config_header_type_pairs(config):
+            for index, incoming_header in enumerate(normalized_headers):
+                if incoming_header and incoming_header == normalized_header:
+                    historical_scores[(column_type, index)] = historical_scores.get((column_type, index), 0.0) + weight
+
+    candidates: List[Tuple[float, int, int]] = []
+    for index, normalized_header in enumerate(normalized_headers):
+        if not normalized_header:
+            continue
+        for column_type in IMPORT_COLUMN_TYPE_KEYWORDS:
+            score = _score_header_keyword_match(normalized_header, column_type)
+            score += historical_scores.get((column_type, index), 0.0)
+            if score > 0:
+                candidates.append((score, column_type, index))
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    chosen_types = set()
+    chosen_indices = set()
+    column_mapping: Dict[str, int] = {}
+    suggestions: List[Dict[str, Any]] = []
+
+    for score, column_type, index in candidates:
+        if score < 5.0:
+            continue
+        if column_type in chosen_types or index in chosen_indices:
+            continue
+        chosen_types.add(column_type)
+        chosen_indices.add(index)
+        column_mapping[str(column_type)] = index
+        suggestions.append({
+            'columnType': column_type,
+            'columnIndex': index,
+            'header': headers[index],
+            'score': round(score, 2)
+        })
+
+    transaction_type_mapping = _build_auto_transaction_type_mapping(
+        sample_rows or [],
+        column_mapping.get('3')
+    )
+
+    return {
+        'includeHeader': True,
+        'columnMapping': column_mapping,
+        'transactionTypeMapping': transaction_type_mapping,
+        'suggestions': suggestions
+    }
+
+
+def allowed_picture_file(filename):
+    """检查图片扩展名是否允许。"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_PICTURE_EXTENSIONS
+
+
+def _parse_json_form_field(raw_value, default):
+    """解析 multipart/form-data 中的 JSON 字段。"""
+    if raw_value in (None, ''):
+        return default
+
+    try:
+        return json.loads(raw_value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_bool_form_field(raw_value, default=False):
+    """解析布尔表单字段。"""
+    if raw_value in (None, ''):
+        return default
+
+    return str(raw_value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _read_text_with_fallback(file_path: Path, requested_encoding: str = '') -> Tuple[str, str]:
+    """按多种编码回退读取文本文件。"""
+    encodings = []
+    if requested_encoding:
+        encodings.append(str(requested_encoding).strip())
+    encodings.extend(['utf-8', 'utf-8-sig', 'gbk', 'gb18030'])
+
+    seen = set()
+    for encoding in encodings:
+        if not encoding or encoding.lower() in seen:
+            continue
+        seen.add(encoding.lower())
+        try:
+            with open(file_path, 'r', encoding=encoding) as file_obj:
+                return file_obj.read(), encoding
+        except UnicodeDecodeError:
+            continue
+
+    raise UnicodeDecodeError('unknown', b'', 0, 1, 'unable to decode text file')
+
+
+def _detect_csv_delimiter(sample_text: str, fallback: str = ',') -> str:
+    """检测 CSV/TXT 分隔符。"""
+    if not sample_text:
+        return fallback
+
+    try:
+        return csv.Sniffer().sniff(sample_text).delimiter
+    except csv.Error:
+        candidates = [',', '\t', ';', '|']
+        counts = {candidate: sample_text.count(candidate) for candidate in candidates}
+        best = max(counts.items(), key=lambda item: item[1])
+        return best[0] if best[1] > 0 else fallback
+
+
+def _load_generic_import_rows(
+    file_path: Path,
+    requested_encoding: str = '',
+    delimiter: Optional[str] = None
+) -> Tuple[List[List[str]], str, str]:
+    """读取通用表格文件为二维数组。"""
+    suffix = file_path.suffix.lower()
+
+    if suffix in ('.csv', '.txt'):
+        text, actual_encoding = _read_text_with_fallback(file_path, requested_encoding)
+        actual_delimiter = delimiter or _detect_csv_delimiter(text[:2048], ',')
+        reader = csv.reader(text.splitlines(), delimiter=actual_delimiter)
+        rows = [[str(cell).strip() for cell in row] for row in reader]
+        return rows, actual_encoding, actual_delimiter
+
+    if suffix in ('.xlsx', '.xls'):
+        if openpyxl is None:
+            raise ImportError('需要安装 openpyxl 以支持 Excel 导入')
+
+        workbook = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            sheet = workbook.worksheets[0]
+            rows = []
+            for row in sheet.iter_rows(values_only=True):
+                rows.append([
+                    '' if cell is None else str(cell).strip()
+                    for cell in row
+                ])
+            return rows, 'utf-8', ''
+        finally:
+            workbook.close()
+
+    raise ValueError(f'Unsupported file format for generic import: {suffix}')
+
+
+def _parse_generic_import_time(raw_value: Any, time_format: str = '') -> int:
+    """解析导入时间并返回 Unix 秒时间戳。"""
+    if raw_value in (None, ''):
+        return int(datetime.now().timestamp())
+
+    if isinstance(raw_value, datetime):
+        return int(raw_value.timestamp())
+
+    value = str(raw_value).strip()
+    if not value:
+        return int(datetime.now().timestamp())
+
+    candidate_formats = []
+    if time_format:
+        candidate_formats.append(time_format)
+    candidate_formats.extend([
+        '%Y-%m-%d %H:%M:%S',
+        '%Y/%m/%d %H:%M:%S',
+        '%Y-%m-%d %H:%M',
+        '%Y/%m/%d %H:%M',
+        '%Y-%m-%d',
+        '%Y/%m/%d',
+        '%Y.%m.%d %H:%M:%S',
+        '%Y.%m.%d',
+        '%d/%m/%Y %H:%M:%S',
+        '%d/%m/%Y',
+        '%m/%d/%Y %H:%M:%S',
+        '%m/%d/%Y'
+    ])
+
+    for fmt in candidate_formats:
+        try:
+            return int(datetime.strptime(value, fmt).timestamp())
+        except ValueError:
+            continue
+
+    try:
+        return int(datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp())
+    except ValueError:
+        logger.debug('[通用导入] 无法解析时间，使用当前时间: %s', value)
+        return int(datetime.now().timestamp())
+
+
+def _parse_generic_import_amount(
+    raw_value: Any,
+    decimal_separator: str = '.',
+    grouping_symbol: Optional[str] = None
+) -> float:
+    """解析导入金额。"""
+    if raw_value in (None, ''):
+        return 0.0
+
+    if isinstance(raw_value, (int, float)):
+        return abs(float(raw_value))
+
+    value = str(raw_value).strip()
+    if not value:
+        return 0.0
+
+    if grouping_symbol:
+        value = value.replace(grouping_symbol, '')
+    if decimal_separator and decimal_separator != '.':
+        value = value.replace(decimal_separator, '.')
+    value = value.replace('¥', '').replace('￥', '').replace(',', '')
+
+    if value.startswith('(') and value.endswith(')'):
+        value = '-' + value[1:-1]
+
+    try:
+        return abs(float(value))
+    except ValueError:
+        logger.debug('[通用导入] 无法解析金额，使用0: %s', raw_value)
+        return 0.0
+
+
+def _frontend_type_number_to_backend_label(raw_type: Any) -> str:
+    """前端数字类型转后端中文类型。"""
+    type_value = str(raw_type).strip()
+    mapping = {
+        '1': '余额调整',
+        '2': '收入',
+        '3': '支出',
+        '4': '转账',
+        '5': '投资'
+    }
+
+    if type_value in mapping:
+        return mapping[type_value]
+
+    normalized = type_value.lower()
+    keyword_mapping = {
+        'income': '收入',
+        'expense': '支出',
+        'transfer': '转账',
+        'investment': '投资',
+        'modifybalance': '余额调整',
+        '余额调整': '余额调整',
+        '收入': '收入',
+        '支出': '支出',
+        '转账': '转账',
+        '投资': '投资',
+        '退款': '收入'
+    }
+    return keyword_mapping.get(normalized, '支出')
+
+
+def _map_generic_import_type(raw_type: Any, transaction_type_mapping: Dict[str, Any]) -> str:
+    """根据前端交易类型映射解析后端账单类型。"""
+    raw_type_text = str(raw_type or '').strip()
+    if raw_type_text and transaction_type_mapping:
+        if raw_type_text in transaction_type_mapping:
+            return _frontend_type_number_to_backend_label(transaction_type_mapping[raw_type_text])
+
+        lowered = raw_type_text.lower()
+        for candidate, mapped_value in transaction_type_mapping.items():
+            if str(candidate).strip().lower() == lowered:
+                return _frontend_type_number_to_backend_label(mapped_value)
+
+    return _frontend_type_number_to_backend_label(raw_type_text)
+
+
+def _get_mapped_cell(row: List[str], column_mapping: Dict[str, Any], column_type: int) -> str:
+    """根据列映射读取单元格值。"""
+    index = column_mapping.get(str(column_type))
+    if index is None:
+        return ''
+
+    try:
+        column_index = int(index)
+    except (TypeError, ValueError):
+        return ''
+
+    if column_index < 0 or column_index >= len(row):
+        return ''
+
+    return str(row[column_index]).strip()
+
+
+def _build_original_category(main_category: str, sub_category: str) -> str:
+    """构建原始分类展示文本。"""
+    if main_category and sub_category:
+        return f'{main_category}/{sub_category}'
+    return main_category or sub_category or ''
+
+
+def _convert_bill_to_import_item(bill: Dict[str, Any]) -> Dict[str, Any]:
+    """统一把解析账单转换为前端导入检查页结构。"""
+    type_name = str(bill.get('type', '') or '').strip()
+    frontend_type = BACKEND_TO_FRONTEND_TYPE.get(type_name)
+    if frontend_type is None:
+        frontend_type = {
+            '余额调整': 1,
+            '收入': 2,
+            '支出': 3,
+            '转账': 4,
+            '投资': 5,
+            '退款': 2
+        }.get(type_name, 3)
+
+    main_category = str(bill.get('main_category', '') or '').strip()
+    sub_category = str(bill.get('sub_category', '') or '').strip()
+    source_amount = int(round(abs(float(bill.get('amount', 0) or 0)) * 100))
+    destination_amount_raw = bill.get('destination_amount', bill.get('related_amount', 0) or 0)
+    destination_amount = int(round(abs(float(destination_amount_raw or 0)) * 100))
+    time_value = _parse_generic_import_time(
+        bill.get('trade_time') or bill.get('date') or '',
+        ''
+    )
+    original_tag_names = bill.get('original_tag_names') or []
+    if not isinstance(original_tag_names, list):
+        original_tag_names = []
+
+    item = {
+        'type': frontend_type,
+        'categoryId': '',
+        'originalCategoryName': _build_original_category(main_category, sub_category),
+        'time': time_value,
+        'utcOffset': 0,
+        'sourceAccountId': '',
+        'originalSourceAccountName': str(
+            bill.get('account') or bill.get('payment_method') or ''
+        ).strip(),
+        'originalSourceAccountCurrency': str(
+            bill.get('account_currency') or 'CNY'
+        ).strip() or 'CNY',
+        'destinationAccountId': '',
+        'originalDestinationAccountName': str(
+            bill.get('related_account') or bill.get('destination_account_name') or ''
+        ).strip(),
+        'originalDestinationAccountCurrency': str(
+            bill.get('related_account_currency') or 'CNY'
+        ).strip() or 'CNY',
+        'sourceAmount': source_amount,
+        'destinationAmount': destination_amount if frontend_type in (4, 5) else 0,
+        'tagIds': [],
+        'originalTagNames': original_tag_names,
+        'comment': str(bill.get('description', '') or '').strip(),
+        'counterparty': str(bill.get('counterparty', '') or '').strip(),
+        'paymentMethod': str(bill.get('payment_method', '') or '').strip(),
+        # 兼容旧返回结构
+        'timeText': bill.get('trade_time') or bill.get('date') or '',
+        'categoryName': main_category,
+        'subCategoryName': sub_category,
+        'accountName': str(bill.get('account', '') or '').strip(),
+        'amount': abs(float(bill.get('amount', 0) or 0)),
+        'description': str(bill.get('description', '') or '').strip()
+    }
+
+    return item
+
+
+def _build_account_mapping_payload(accounts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """构建导入检查页使用的账户映射。"""
+    return {
+        'id_to_account': {int(acc['id']): acc for acc in accounts if acc.get('id') is not None},
+        'name_to_id': {
+            str(acc.get('name') or '').strip(): int(acc['id'])
+            for acc in accounts
+            if acc.get('id') is not None and str(acc.get('name') or '').strip()
+        },
+        'id_to_name': {
+            int(acc['id']): str(acc.get('name') or '').strip()
+            for acc in accounts
+            if acc.get('id') is not None
+        }
+    }
+
+
+def _build_category_mapping_payload(categories: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """构建导入检查页使用的分类映射。"""
+    return {
+        'id_to_category': {int(cat['id']): cat for cat in categories if cat.get('id') is not None},
+        'name_to_id': {
+            (
+                str(cat.get('main_category') or '').strip(),
+                str(cat.get('sub_category') or '').strip()
+            ): int(cat['id'])
+            for cat in categories
+            if cat.get('id') is not None and str(cat.get('main_category') or '').strip()
+        }
+    }
+
+
+async def _apply_learning_to_column_mapping_bills(
+    bills: List[Dict[str, Any]],
+    db,
+    bill_service,
+    user_id: int
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any], int]:
+    """为通用列映射导入结果应用长期学习规则。"""
+    enriched_bills = [dict(bill) for bill in bills]
+    applied_count = 0
+
+    if enriched_bills and bill_service:
+        original_snapshots = [
+            {
+                'type': str(bill.get('type', '') or '').strip(),
+                'main_category': str(bill.get('main_category', '') or '').strip(),
+                'sub_category': str(bill.get('sub_category', '') or '').strip(),
+                'has_explicit_type': bool(bill.get('_import_has_explicit_type')),
+                'has_explicit_category': bool(bill.get('_import_has_explicit_category')),
+            }
+            for bill in enriched_bills
+        ]
+
+        applied_count = await bill_service._apply_import_learning_rules(  # pylint: disable=protected-access
+            enriched_bills,
+            user_id=user_id,
+            type_only=False,
+            record_usage=False
+        )
+
+        for bill, snapshot in zip(enriched_bills, original_snapshots):
+            if snapshot['has_explicit_type'] and snapshot['type']:
+                bill['type'] = snapshot['type']
+            if snapshot['has_explicit_category']:
+                bill['main_category'] = snapshot['main_category']
+                bill['sub_category'] = snapshot['sub_category']
+
+    accounts = await db.get_all_accounts(user_id=user_id) if db else []
+    categories = await db.get_all_categories(user_id=user_id) if db else []
+
+    return (
+        enriched_bills,
+        _build_account_mapping_payload(accounts),
+        _build_category_mapping_payload(categories),
+        applied_count
+    )
+
+
+def _convert_bill_to_import_item_with_mappings(
+    bill: Dict[str, Any],
+    account_mappings: Optional[Dict[str, Any]] = None,
+    category_mappings: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """将账单转换为导入检查页结构，并补充已匹配的分类/账户ID。"""
+    item = _convert_bill_to_import_item(bill)
+
+    source_account_id = bill.get('source_account_id')
+    destination_account_id = bill.get('destination_account_id')
+    main_category = str(bill.get('main_category', '') or '').strip()
+    sub_category = str(bill.get('sub_category', '') or '').strip()
+
+    if source_account_id not in (None, '', 0, '0'):
+        item['sourceAccountId'] = str(source_account_id)
+    if destination_account_id not in (None, '', 0, '0'):
+        item['destinationAccountId'] = str(destination_account_id)
+
+    if category_mappings and main_category:
+        category_id = category_mappings.get('name_to_id', {}).get((main_category, sub_category))
+        if category_id is None:
+            category_id = category_mappings.get('name_to_id', {}).get((main_category, ''))
+        if category_id is not None:
+            item['categoryId'] = str(category_id)
+
+    if account_mappings:
+        id_to_account = account_mappings.get('id_to_account', {})
+
+        if source_account_id not in (None, '', 0, '0'):
+            source_account = id_to_account.get(int(source_account_id))
+            if source_account:
+                item['accountName'] = str(source_account.get('name') or item.get('accountName') or '').strip()
+                item['originalSourceAccountName'] = (
+                    item.get('originalSourceAccountName') or item['accountName']
+                )
+                item['originalSourceAccountCurrency'] = str(
+                    source_account.get('currency') or item.get('originalSourceAccountCurrency') or 'CNY'
+                ).strip() or 'CNY'
+
+        if destination_account_id not in (None, '', 0, '0'):
+            destination_account = id_to_account.get(int(destination_account_id))
+            if destination_account:
+                item['originalDestinationAccountName'] = (
+                    item.get('originalDestinationAccountName') or
+                    str(destination_account.get('name') or '').strip()
+                )
+                item['originalDestinationAccountCurrency'] = str(
+                    destination_account.get('currency') or item.get('originalDestinationAccountCurrency') or 'CNY'
+                ).strip() or 'CNY'
+
+    return item
+
+
+def _parse_import_file_with_column_mapping(
+    file_path: Path,
+    column_mapping: Dict[str, Any],
+    transaction_type_mapping: Dict[str, Any],
+    has_header_line: bool,
+    time_format: str,
+    amount_decimal_separator: str,
+    amount_digit_grouping_symbol: str,
+    tag_separator: str,
+    file_encoding: str,
+    delimiter: str
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    """按列映射解析通用表格文件。"""
+    rows, actual_encoding, actual_delimiter = _load_generic_import_rows(
+        file_path,
+        requested_encoding=file_encoding,
+        delimiter=delimiter
+    )
+    if not rows:
+        return [], actual_encoding, actual_delimiter
+
+    start_index = 1 if has_header_line else 0
+    normalized_bills = []
+
+    for row_index, row in enumerate(rows[start_index:], start=1):
+        date_value = _get_mapped_cell(row, column_mapping, 1)
+        type_value = _get_mapped_cell(row, column_mapping, 3)
+        amount_value = _get_mapped_cell(row, column_mapping, 8)
+
+        if not date_value and not type_value and not amount_value:
+            continue
+
+        try:
+            type_name = _map_generic_import_type(type_value, transaction_type_mapping)
+            amount = _parse_generic_import_amount(
+                amount_value,
+                decimal_separator=amount_decimal_separator or '.',
+                grouping_symbol=amount_digit_grouping_symbol or None
+            )
+            related_amount_raw = _get_mapped_cell(row, column_mapping, 11)
+            related_amount = _parse_generic_import_amount(
+                related_amount_raw,
+                decimal_separator=amount_decimal_separator or '.',
+                grouping_symbol=amount_digit_grouping_symbol or None
+            )
+
+            main_category = _get_mapped_cell(row, column_mapping, 4)
+            sub_category = _get_mapped_cell(row, column_mapping, 5)
+            raw_tags = _get_mapped_cell(row, column_mapping, 13)
+            original_tag_names = []
+            if raw_tags:
+                separator = tag_separator or ';'
+                original_tag_names = [
+                    item.strip() for item in raw_tags.split(separator) if item.strip()
+                ]
+
+            normalized_bill = {
+                'trade_time': datetime.fromtimestamp(_parse_generic_import_time(date_value, time_format)).strftime('%Y-%m-%d %H:%M:%S'),
+                'type': type_name,
+                'amount': amount,
+                'destination_amount': related_amount or amount,
+                'account': _get_mapped_cell(row, column_mapping, 6),
+                'account_currency': _get_mapped_cell(row, column_mapping, 7) or 'CNY',
+                'related_account': _get_mapped_cell(row, column_mapping, 9),
+                'related_account_currency': _get_mapped_cell(row, column_mapping, 10) or 'CNY',
+                'description': _get_mapped_cell(row, column_mapping, 14),
+                'main_category': main_category,
+                'sub_category': sub_category,
+                'counterparty': _get_mapped_cell(row, column_mapping, 9),
+                'payment_method': _get_mapped_cell(row, column_mapping, 6),
+                'original_tag_names': original_tag_names,
+                '_import_has_explicit_type': bool(str(type_value or '').strip()),
+                '_import_has_explicit_category': bool(main_category or sub_category)
+            }
+
+            normalized_bills.append(normalized_bill)
+        except Exception as row_error:  # pylint: disable=broad-except
+            logger.warning('[通用导入] 解析第 %s 行失败: %s', row_index, row_error)
+
+    return normalized_bills, actual_encoding, actual_delimiter
+
+
+def _build_picture_data_url(file_path: Path) -> str:
+    """将图片文件转换为 data URL，供前端直接预览。"""
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    if not mime_type:
+        mime_type = 'application/octet-stream'
+
+    with open(file_path, 'rb') as file_obj:
+        encoded = base64.b64encode(file_obj.read()).decode('ascii')
+
+    return f'data:{mime_type};base64,{encoded}'
+
+
 def get_app_context(user_id: int = None):
-    """获取应用上下文中的服务实例
-    
-    Args:
-        user_id: 用户ID (如果为None，自动从request获取)
-    """
-    from flask import current_app, request as flask_request
+    """获取应用上下文中的基础服务实例。"""
+    from flask import current_app
     db = current_app.config.get('DB_INSTANCE')
     bill_service = current_app.config.get('BILL_SERVICE_INSTANCE')
     category_engine = current_app.config.get('CATEGORY_ENGINE_INSTANCE')
 
     # 自动获取user_id
     if user_id is None:
-        user_id = getattr(flask_request, 'user_id', 1)
+        user_id = getattr(request, 'user_id', 1)
+
+    _ = user_id
+
+    return db, bill_service, category_engine
+
+
+def get_app_context_with_adapter(user_id: int = None):
+    """获取应用上下文中的基础服务实例及事务适配器。"""
+    db, bill_service, category_engine = get_app_context(user_id=user_id)
+
+    if user_id is None:
+        user_id = getattr(request, 'user_id', 1)
 
     # 创建adapter实例(带数据库引用和用户ID)
-    adapter = V1TransactionAdapter(db=db, user_id=user_id)
+    adapter = TransactionAdapter(db=db, user_id=user_id)
 
     return db, bill_service, category_engine, adapter
 
@@ -160,8 +968,10 @@ def get_bills():
     """
     try:
         # 获取查询参数
-        page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 20))
+        page = int(_get_query_arg(request.args, 'page', default=1))
+        page_size = int(_get_query_arg(request.args, 'page_size', 'count', default=20))
+        max_time = int(_get_query_arg(request.args, 'max_time', default=0) or 0)
+        min_time = int(_get_query_arg(request.args, 'min_time', default=0) or 0)
 
         # 构建过滤条件
         filters = {}
@@ -193,59 +1003,19 @@ def get_bills():
             filters['start_date'] = request.args.get('start_date')
         if request.args.get('end_date'):
             filters['end_date'] = request.args.get('end_date')
-        if request.args.get('keyword'):
-            filters['keyword'] = request.args.get('keyword')
+        if min_time > 0:
+            filters['start_date'] = datetime.fromtimestamp(min_time / 1000).strftime('%Y-%m-%d')
+        if max_time > 0:
+            filters['end_date'] = datetime.fromtimestamp(max_time / 1000).strftime('%Y-%m-%d')
 
-        # **新增：解析 accountIds (逗号分隔)**
-        if request.args.get('accountIds'):
-            try:
-                account_ids = [int(x) for x in request.args.get('accountIds').split(',') if x]
-                if account_ids:
-                    filters['account_ids'] = account_ids
-            except ValueError:
-                logger.warning(f"无效的accountIds参数: {request.args.get('accountIds')}")
-
-        # **新增：解析 categoryIds (逗号分隔)**
-        # 需要先查询分类信息，转换为 (main, sub) 列表
-        if request.args.get('categoryIds'):
-            try:
-                category_ids = [int(x) for x in request.args.get('categoryIds').split(',') if x]
-                if category_ids:
-                    # 注意：这里需要获取db实例，但get_app_context在下面才调用
-                    # 为了避免重复获取，我们提前获取
-                    if 'db' not in locals():
-                        db, _, _, _ = get_app_context()
-
-                    loop_cat = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop_cat)
-                    all_categories = loop_cat.run_until_complete(db.get_all_categories())
-                    loop_cat.close()
-
-                    target_categories = []
-                    for cat in all_categories:
-                        if cat['id'] in category_ids:
-                            target_categories.append({
-                                'main': cat.get('main_category'),
-                                'sub': cat.get('sub_category')
-                            })
-
-                    if target_categories:
-                        filters['categories'] = target_categories
-            except ValueError:
-                logger.warning(f"无效的categoryIds参数: {request.args.get('categoryIds')}")
-
-        # **新增：解析 amountFilter**
-        if request.args.get('amountFilter'):
-            filters['amount_filter'] = request.args.get('amountFilter')
-
-        if 'db' not in locals():
-            db, _, _, adapter = get_app_context()
-        else:
-            _, _, _, adapter = get_app_context()
+        db, _, _, adapter = get_app_context_with_adapter()
 
         # 异步调用
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        loop.run_until_complete(
+            _apply_common_transaction_filters(request.args, filters, db, request.user_id)
+        )
         bills, total = loop.run_until_complete(
             db.query_bills(
                 page=page,
@@ -277,13 +1047,152 @@ def get_bills():
         }), 500
 
 
+@bp.route('/pictures', methods=['POST'])
+@log_method
+@require_auth
+def upload_transaction_picture_rest():
+    """上传交易图片（REST 主链）。"""
+    try:
+        if 'picture' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'Missing picture file'
+            }), 400
+
+        picture = request.files['picture']
+        if not picture or not picture.filename:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid picture file'
+            }), 400
+
+        if not allowed_picture_file(picture.filename):
+            return jsonify({
+                'success': False,
+                'error': f'Picture type not allowed. Supported: {", ".join(sorted(ALLOWED_PICTURE_EXTENSIONS))}'
+            }), 400
+
+        filename = secure_filename(picture.filename)
+        suffix = Path(filename).suffix.lower()
+        picture_id = f'{uuid.uuid4().hex}{suffix}'
+        file_path = UPLOAD_FOLDER / picture_id
+        picture.save(str(file_path))
+
+        logger.info('[交易图片上传] user_id=%s, picture_id=%s', request.user_id, picture_id)
+
+        return jsonify({
+            'success': True,
+            'result': {
+                'pictureId': picture_id,
+                'originalUrl': _build_picture_data_url(file_path)
+            }
+        })
+
+    except Exception as e:
+        logger.error('上传交易图片失败: %s', e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/pictures/unused', methods=['POST'])
+@log_method
+@require_auth
+def remove_unused_transaction_picture_rest():
+    """删除未使用的交易图片（REST 主链）。"""
+    try:
+        data = request.get_json() or {}
+        picture_id = str(data.get('id', '') or '').strip()
+
+        if not picture_id:
+            return jsonify({
+                'success': False,
+                'error': 'Missing picture id'
+            }), 400
+
+        file_path = UPLOAD_FOLDER / secure_filename(picture_id)
+        if file_path.exists() and file_path.is_file():
+            os.remove(file_path)
+            logger.info('[交易图片删除] user_id=%s, picture_id=%s', request.user_id, picture_id)
+
+        return jsonify({
+            'success': True,
+            'result': True
+        })
+
+    except Exception as e:
+        logger.error('删除未使用交易图片失败: %s', e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/by-month', methods=['GET'])
+@log_method
+@require_auth
+def get_bills_rest_by_month():
+    """按月查询账单列表（REST 主链）。"""
+    try:
+        year = int(_get_query_arg(request.args, 'year', default=datetime.now().year))
+        month = int(_get_query_arg(request.args, 'month', default=datetime.now().month))
+        transaction_type = _get_query_arg(request.args, 'type', default='0')
+
+        filters = {}
+        start_date = f"{year:04d}-{month:02d}-01"
+        if month == 12:
+            end_date = f"{year + 1:04d}-01-01"
+        else:
+            end_date = f"{year:04d}-{month + 1:02d}-01"
+
+        filters['start_date'] = start_date
+        filters['end_date'] = end_date
+
+        if transaction_type and int(transaction_type) > 0:
+            type_int = int(transaction_type)
+            if type_int in BACKEND_TO_FRONTEND_TYPE.values():
+                for chinese, v1_type in BACKEND_TO_FRONTEND_TYPE.items():
+                    if v1_type == type_int:
+                        filters['type'] = chinese
+                        break
+
+        db, _, _, adapter = get_app_context_with_adapter()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(
+            _apply_common_transaction_filters(request.args, filters, db, request.user_id)
+        )
+        bills, total = loop.run_until_complete(
+            db.query_bills(
+                page=1,
+                page_size=10000,
+                filters=filters,
+                user_id=request.user_id
+            )
+        )
+        response = loop.run_until_complete(
+            adapter.backend_list_to_frontend(bills, total, 1, 10000)
+        )
+        loop.close()
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error("按月获取账单列表失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @bp.route('/<int:bill_id>', methods=['GET'])
 @log_method
 @require_auth
 def get_bill(bill_id: int):
     """获取单个账单详情"""
     try:
-        db, _, _, adapter = get_app_context()
+        db, _, _, adapter = get_app_context_with_adapter()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -316,6 +1225,129 @@ def get_bill(bill_id: int):
         }), 500
 
 
+@bp.route('/<int:bill_id>/recurring-candidates', methods=['GET'])
+@log_method
+@require_auth
+def get_bill_recurring_candidates(bill_id: int):
+    """获取账单可匹配的定时交易候选。"""
+    try:
+        tolerance_days = request.args.get('toleranceDays', default=3, type=int)
+        tolerance_days = max(0, min(tolerance_days, 31))
+
+        db = get_app_context()[0]
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            db.get_recurring_candidates_for_bill(
+                bill_id,
+                user_id=request.user_id,
+                tolerance_days=tolerance_days
+            )
+        )
+        loop.close()
+
+        if not result.get('bill'):
+            return jsonify({
+                'success': False,
+                'error': 'Bill not found'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'result': {
+                'billId': bill_id,
+                'linkedRecurringId': result.get('linked_recurring_id'),
+                'linkedRecurringName': result.get('linked_recurring_name', ''),
+                'candidates': result.get('candidates', [])
+            }
+        })
+    except Exception as e:
+        logger.error("获取定时交易候选失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/<int:bill_id>/recurring-match', methods=['PUT'])
+@log_method
+@require_auth
+def bind_bill_recurring_match(bill_id: int):
+    """将账单绑定到定时交易。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        recurring_id = data.get('recurringId')
+        if recurring_id in (None, ''):
+            return jsonify({
+                'success': False,
+                'error': 'Missing recurringId'
+            }), 400
+
+        db = get_app_context()[0]
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            db.bind_bill_to_recurring(
+                bill_id,
+                int(recurring_id),
+                user_id=request.user_id
+            )
+        )
+        loop.close()
+
+        if not result:
+            return jsonify({
+                'success': False,
+                'error': 'Bill or recurring template not found'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'result': result
+        })
+    except Exception as e:
+        logger.error("绑定定时交易失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/<int:bill_id>/recurring-match', methods=['DELETE'])
+@log_method
+@require_auth
+def unbind_bill_recurring_match(bill_id: int):
+    """取消账单与定时交易的绑定。"""
+    try:
+        db = get_app_context()[0]
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            db.unbind_bill_from_recurring(
+                bill_id,
+                user_id=request.user_id
+            )
+        )
+        loop.close()
+
+        if not result:
+            return jsonify({
+                'success': False,
+                'error': 'Bill not found'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'result': True
+        })
+    except Exception as e:
+        logger.error("取消定时交易绑定失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @bp.route('/get', methods=['GET'])
 @log_method
 @require_auth
@@ -329,7 +1361,7 @@ def get_bill_by_query():
                 'error': 'Missing id parameter'
             }), 400
 
-        db, _, _, adapter = get_app_context()
+        db, _, _, adapter = get_app_context_with_adapter()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -376,7 +1408,7 @@ def modify_bill():
             }), 400
 
         bill_id = int(data['id'])
-        db, _, _, adapter = get_app_context()
+        db, _, _, adapter = get_app_context_with_adapter()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -492,7 +1524,7 @@ def delete_bill_by_query():
             }), 400
 
         bill_id = int(data['id'])
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -538,6 +1570,192 @@ def delete_bill_by_query():
         }), 500
 
 
+def _prepare_backend_bill_for_create(
+    frontend_data: Dict[str, Any],
+    db,
+    category_engine,
+    adapter,
+    loop,
+    user_id: int
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """将前端交易转换为可写入数据库的账单数据。"""
+    backend_data, metadata = adapter.frontend_to_backend(frontend_data)
+    logger.info("转换后的后端数据: %s", backend_data)
+    logger.info("元数据: %s", metadata)
+
+    # v6.89: create_bill() 会直接按传入字段构造 INSERT，bills.counterparty 为 NOT NULL。
+    # 批量手工录入请求通常不显式提供 counterparty，因此这里统一补齐回退值，
+    # 同时也保证 description 在前端未填写时仍有可写入的默认文本。
+    description_fallback = str(
+        frontend_data.get('comment')
+        or frontend_data.get('remark')
+        or frontend_data.get('description')
+        or ''
+    ).strip()
+    counterparty_fallback = str(
+        frontend_data.get('counterparty')
+        or frontend_data.get('payee')
+        or frontend_data.get('merchant')
+        or frontend_data.get('merchantName')
+        or frontend_data.get('shopName')
+        or frontend_data.get('targetAccountName')
+        or description_fallback
+        or backend_data.get('payment_method')
+        or '手工录入'
+    ).strip()
+
+    backend_data['description'] = str(
+        backend_data.get('description') or description_fallback or counterparty_fallback
+    ).strip()
+    backend_data['counterparty'] = str(
+        backend_data.get('counterparty') or counterparty_fallback
+    ).strip()
+
+    if metadata.get('auto_invest_account', False) and backend_data.get('type') == '投资':
+        all_accounts = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
+        investment_account = None
+
+        for acc in all_accounts:
+            if acc['name'] in ['活期资产', '投资账户', '中信建投证券']:
+                investment_account = acc
+                break
+
+        if investment_account:
+            backend_data['destination_account_id'] = investment_account['id']
+            backend_data['destination_amount'] = backend_data['amount']
+            logger.info(
+                "投资自动设置目标账户: %s (ID=%s)",
+                investment_account['name'],
+                investment_account['id']
+            )
+        else:
+            logger.warning("未找到合适的投资目标账户，destination_account_id保持为0")
+
+    source_account_id = backend_data.get('source_account_id')
+    logger.info(
+        "[创建账单] 收到的source_account_id: %s (类型: %s)",
+        source_account_id,
+        type(source_account_id)
+    )
+    logger.info(
+        "[创建账单] 收到的destination_account_id: %s (类型: %s)",
+        backend_data.get('destination_account_id'),
+        type(backend_data.get('destination_account_id'))
+    )
+
+    if not source_account_id or source_account_id == 0:
+        all_accounts_fallback = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
+        if all_accounts_fallback:
+            fallback_account = all_accounts_fallback[0]
+            backend_data['source_account_id'] = fallback_account['id']
+            logger.warning(
+                "⚠ source_account_id为0，使用默认账户: %s (ID=%s)",
+                fallback_account['name'],
+                fallback_account['id']
+            )
+        else:
+            logger.error("✗✗✗ 没有可用账户，创建将失败！")
+            raise ValueError('No account available')
+
+    if metadata.get('category_id'):
+        try:
+            category = loop.run_until_complete(
+                db.get_category_by_id(int(metadata['category_id']), user_id=user_id)
+            )
+            if category:
+                backend_data['main_category'] = category.get('main_category', '')
+                backend_data['sub_category'] = category.get('sub_category', '')
+                logger.info(
+                    "查询到分类: %s - %s",
+                    backend_data['main_category'],
+                    backend_data['sub_category']
+                )
+        except ValueError:
+            logger.error("无效的分类ID: %s", metadata['category_id'])
+
+    if not backend_data.get('main_category'):
+        main_cat, sub_cat = category_engine.match_category(backend_data)
+        if main_cat:
+            backend_data['main_category'] = main_cat
+            backend_data['sub_category'] = sub_cat
+            logger.info("自动分类（规则匹配）: %s - %s", main_cat, sub_cat)
+        else:
+            default_categories = {
+                '收入': ('工资', ''),
+                '支出': ('其他', '日常支出'),
+                '转账': ('转账', ''),
+                '投资': ('投资理财', '证券投资')
+            }
+            bill_type = backend_data.get('type', '支出')
+            if bill_type in default_categories:
+                backend_data['main_category'], backend_data['sub_category'] = default_categories[bill_type]
+                logger.info(
+                    "自动分类（默认分类）: %s - %s",
+                    backend_data['main_category'],
+                    backend_data['sub_category']
+                )
+            else:
+                backend_data['main_category'] = '其他'
+                backend_data['sub_category'] = ''
+                logger.warning("未知账单类型: %s，使用默认分类'其他'", bill_type)
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    backend_data['created_at'] = now
+    backend_data['updated_at'] = now
+
+    logger.info("=" * 60)
+    logger.info("📝 准备插入数据库的完整数据:")
+    logger.info("  - type: %s", backend_data.get('type'))
+    logger.info("  - amount: %s", backend_data.get('amount'))
+    logger.info("  - counterparty: %s", backend_data.get('counterparty'))
+    logger.info("  - description: %s", backend_data.get('description'))
+    logger.info("  - source_account_id: %s", backend_data.get('source_account_id'))
+    logger.info("  - destination_account_id: %s", backend_data.get('destination_account_id'))
+    logger.info("  - destination_amount: %s", backend_data.get('destination_amount'))
+    logger.info("  - date: %s", backend_data.get('date'))
+    logger.info("  - main_category: %s", backend_data.get('main_category'))
+    logger.info("  - sub_category: %s", backend_data.get('sub_category'))
+    logger.info("=" * 60)
+
+    return backend_data, metadata
+
+
+def _create_bill_and_build_response(
+    backend_data: Dict[str, Any],
+    metadata: Dict[str, Any],
+    db,
+    adapter,
+    loop,
+    user_id: int
+) -> Tuple[int, Dict[str, Any]]:
+    """写入账单并返回前端响应格式。"""
+    bill_id = loop.run_until_complete(db.create_bill(backend_data, user_id=user_id))
+
+    if not bill_id:
+        raise RuntimeError('Failed to create bill')
+
+    if metadata.get('tag_ids'):
+        logger.info("[创建账单] 保存标签: %s", metadata['tag_ids'])
+        loop.run_until_complete(db.add_tags_to_bill(bill_id, metadata['tag_ids'], user_id=user_id))
+
+    sync_data = {
+        'source_account_id': backend_data.get('source_account_id'),
+        'destination_account_id': backend_data.get('destination_account_id')
+    }
+    logger.info(
+        "🔄 同步账户余额: source=%s, dest=%s",
+        sync_data['source_account_id'],
+        sync_data['destination_account_id']
+    )
+    loop.run_until_complete(sync_balances_for_bill(db, sync_data))
+
+    bill = loop.run_until_complete(db.get_bill_by_id(bill_id, user_id=user_id))
+    tags = loop.run_until_complete(db.get_tags_for_bill(bill_id, user_id=user_id))
+    frontend_bill = loop.run_until_complete(adapter.backend_to_frontend(bill, tags=tags))
+
+    return bill_id, frontend_bill
+
+
 @bp.route('/', methods=['POST'])
 @log_method
 @require_auth
@@ -553,159 +1771,157 @@ def create_bill():
 
         logger.info("收到前端数据: %s", frontend_data)
 
-        db, _, category_engine, adapter = get_app_context()
-
-        # 转换前端格式为后端格式
-        backend_data, metadata = adapter.frontend_to_backend(frontend_data)
-        logger.info("转换后的后端数据: %s", backend_data)
-        logger.info("元数据: %s", metadata)
-
-        # 异步查询账户和分类信息
+        db, _, category_engine, adapter = get_app_context_with_adapter()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # **处理投资类型的自动目标账户**
-        if metadata.get('auto_invest_account', False) and backend_data.get('type') == '投资':
-            # 查找或创建投资目标账户
-            all_accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
-            investment_account = None
-
-            # 优先查找"活期资产"账户
-            for acc in all_accounts:
-                if acc['name'] in ['活期资产', '投资账户', '中信建投证券']:
-                    investment_account = acc
-                    break
-
-            if investment_account:
-                backend_data['destination_account_id'] = investment_account['id']
-                backend_data['destination_amount'] = backend_data['amount']  # 默认同金额
-                logger.info(f"投资自动设置目标账户: {investment_account['name']} (ID={investment_account['id']})")
-            else:
-                logger.warning("未找到合适的投资目标账户，destination_account_id保持为0")
-
-        # ⚠️ 关键修复: 验证source_account_id有效性
-        source_account_id = backend_data.get('source_account_id')
-        logger.info(f"[创建账单] 收到的source_account_id: {source_account_id} (类型: {type(source_account_id)})")
-        logger.info(f"[创建账单] 收到的destination_account_id: {backend_data.get('destination_account_id')} (类型: {type(backend_data.get('destination_account_id'))})")
-
-        # 验证source_account_id是否有效
-        if not source_account_id or source_account_id == 0:
-            # 使用默认账户
-            all_accounts_fallback = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
-            if all_accounts_fallback:
-                fallback_account = all_accounts_fallback[0]
-                backend_data['source_account_id'] = fallback_account['id']
-                logger.warning(f"⚠ source_account_id为0，使用默认账户: {fallback_account['name']} (ID={fallback_account['id']})")
-            else:
-                logger.error("✗✗✗ 没有可用账户，创建将失败！")
-                loop.close()
-                return jsonify({
-                    'success': False,
-                    'error': 'No account available'
-                }), 400        # 查询分类名称
-        if metadata.get('category_id'):
-            try:
-                category = loop.run_until_complete(
-                    db.get_category_by_id(int(metadata['category_id']), user_id=request.user_id)
-                )
-                if category:
-                    # categories表结构: main_category, sub_category
-                    backend_data['main_category'] = category.get('main_category', '')
-                    backend_data['sub_category'] = category.get('sub_category', '')
-                    logger.info("查询到分类: %s - %s",
-                              backend_data['main_category'], backend_data['sub_category'])
-            except ValueError:
-                logger.error("无效的分类ID: %s", metadata['category_id'])
-
-        # **强化自动分类逻辑**
-        if not backend_data.get('main_category'):
-            # 先尝试使用分类引擎
-            main_cat, sub_cat = category_engine.match_category(backend_data)
-            if main_cat:
-                backend_data['main_category'] = main_cat
-                backend_data['sub_category'] = sub_cat
-                logger.info("自动分类（规则匹配）: %s - %s", main_cat, sub_cat)
-            else:
-                # 如果没有匹配规则，使用类型默认分类
-                default_categories = {
-                    '收入': ('工资', ''),
-                    '支出': ('其他', '日常支出'),
-                    '转账': ('转账', ''),
-                    '投资': ('投资理财', '证券投资')
-                }
-                bill_type = backend_data.get('type', '支出')
-                if bill_type in default_categories:
-                    backend_data['main_category'], backend_data['sub_category'] = default_categories[bill_type]
-                    logger.info("自动分类（默认分类）: %s - %s", backend_data['main_category'], backend_data['sub_category'])
-                else:
-                    backend_data['main_category'] = '其他'
-                    backend_data['sub_category'] = ''
-                    logger.warning(f"未知账单类型: {bill_type}，使用默认分类'其他'")
-
-        # 设置创建时间和更新时间
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        backend_data['created_at'] = now
-        backend_data['updated_at'] = now
-
-        # 创建账单
-        logger.info("="*60)
-        logger.info("📝 准备插入数据库的完整数据:")
-        logger.info(f"  - type: {backend_data.get('type')}")
-        logger.info(f"  - amount: {backend_data.get('amount')}")
-        logger.info(f"  - source_account_id: {backend_data.get('source_account_id')}")
-        logger.info(f"  - destination_account_id: {backend_data.get('destination_account_id')}")
-        logger.info(f"  - destination_amount: {backend_data.get('destination_amount')}")
-        logger.info(f"  - date: {backend_data.get('date')}")
-        logger.info(f"  - main_category: {backend_data.get('main_category')}")
-        logger.info(f"  - sub_category: {backend_data.get('sub_category')}")
-        logger.info("="*60)
-
-        bill_id = loop.run_until_complete(db.create_bill(backend_data, user_id=request.user_id))
-
-        if bill_id:
-            # 保存标签
-            if metadata.get('tag_ids'):
-                logger.info(f"[创建账单] 保存标签: {metadata['tag_ids']}")
-                loop.run_until_complete(db.add_tags_to_bill(bill_id, metadata['tag_ids'], user_id=request.user_id))
+        try:
+            backend_data, metadata = _prepare_backend_bill_for_create(
+                frontend_data,
+                db,
+                category_engine,
+                adapter,
+                loop,
+                request.user_id
+            )
+            bill_id, v1_bill = _create_bill_and_build_response(
+                backend_data,
+                metadata,
+                db,
+                adapter,
+                loop,
+                request.user_id
+            )
 
             logger.info("✅ 账单创建成功，ID: %s", bill_id)
-
-            # **使用全量同步更新余额**
-            # 构造包含所有相关账户ID的数据字典
-            sync_data = {
-                'source_account_id': backend_data.get('source_account_id'),
-                'destination_account_id': backend_data.get('destination_account_id')
-            }
-            logger.info(f"🔄 同步账户余额: source={sync_data['source_account_id']}, dest={sync_data['destination_account_id']}")
-
-            # 执行同步
-            loop.run_until_complete(sync_balances_for_bill(db, sync_data))
-
-            # 获取创建的账单详情
-            bill = loop.run_until_complete(db.get_bill_by_id(bill_id, user_id=request.user_id))
-
-            # 获取标签
-            tags = loop.run_until_complete(db.get_tags_for_bill(bill_id, user_id=request.user_id))
-
-            # 使用adapter转换为v1格式
-            v1_bill = loop.run_until_complete(adapter.backend_to_frontend(bill, tags=tags))
-            loop.close()
-
-            logger.info(f"返回创建的账单(v1格式): {v1_bill}")
+            logger.info("返回创建的账单(v1格式): %s", v1_bill)
 
             return jsonify({
                 'success': True,
                 'result': v1_bill
             }), 201
+        finally:
+            loop.close()
 
-        loop.close()
+    except ValueError as e:
+        logger.error("创建账单参数错误: %s", e, exc_info=True)
         return jsonify({
             'success': False,
-            'error': 'Failed to create bill'
-        }), 500
+            'error': str(e)
+        }), 400
 
     except Exception as e:
         logger.error("创建账单失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/batch', methods=['POST'])
+@log_method
+@require_auth
+def batch_create_bills():
+    """批量创建账单。"""
+    try:
+        payload = request.get_json(silent=True)
+        transactions = []
+
+        if isinstance(payload, dict):
+            transactions = payload.get('transactions') or payload.get('bills') or []
+        elif isinstance(payload, list):
+            transactions = payload
+
+        if not isinstance(transactions, list) or not transactions:
+            return jsonify({
+                'success': False,
+                'error': 'transactions is required'
+            }), 400
+
+        db, _, category_engine, adapter = get_app_context_with_adapter()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            prepared_items: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+            for index, transaction in enumerate(transactions):
+                if not isinstance(transaction, dict):
+                    return jsonify({
+                        'success': False,
+                        'error': f'transactions[{index}] must be an object'
+                    }), 400
+
+                try:
+                    prepared_items.append(_prepare_backend_bill_for_create(
+                        transaction,
+                        db,
+                        category_engine,
+                        adapter,
+                        loop,
+                        request.user_id
+                    ))
+                except ValueError as prepare_error:
+                    logger.error(
+                        "批量创建预校验失败: index=%s, error=%s",
+                        index,
+                        prepare_error
+                    )
+                    return jsonify({
+                        'success': False,
+                        'error': str(prepare_error),
+                        'result': {
+                            'failedIndex': index,
+                            'createdCount': 0,
+                            'items': []
+                        }
+                    }), 400
+
+            created_items: List[Dict[str, Any]] = []
+            created_ids: List[str] = []
+
+            for index, (backend_data, metadata) in enumerate(prepared_items):
+                try:
+                    bill_id, frontend_bill = _create_bill_and_build_response(
+                        backend_data,
+                        metadata,
+                        db,
+                        adapter,
+                        loop,
+                        request.user_id
+                    )
+                    created_items.append(frontend_bill)
+                    created_ids.append(str(bill_id))
+                except Exception as create_error:
+                    logger.error(
+                        "批量创建账单失败: index=%s, error=%s",
+                        index,
+                        create_error,
+                        exc_info=True
+                    )
+                    return jsonify({
+                        'success': False,
+                        'error': str(create_error),
+                        'result': {
+                            'failedIndex': index,
+                            'createdCount': len(created_items),
+                            'items': created_items,
+                            'ids': created_ids
+                        }
+                    }), 500
+
+            return jsonify({
+                'success': True,
+                'result': {
+                    'items': created_items,
+                    'ids': created_ids,
+                    'createdCount': len(created_items)
+                }
+            }), 201
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("批量创建账单失败: %s", e, exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
@@ -727,7 +1943,7 @@ def update_bill(bill_id: int):
 
         logger.info(f"更新账单 {bill_id}, 收到前端数据: {frontend_data}")
 
-        db, _, category_engine, adapter = get_app_context()
+        db, _, category_engine, adapter = get_app_context_with_adapter()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -791,7 +2007,7 @@ def update_bill(bill_id: int):
                 logger.info(f"[更新账单] 更新标签: {tag_ids}")
                 loop.run_until_complete(db.update_bill_tags(bill_id, tag_ids, user_id=request.user_id))
             else:
-                logger.debug(f"[更新账单] 未提供标签数据，保持现有标签")
+                logger.debug("[更新账单] 未提供标签数据，保持现有标签")
 
             # 获取更新后的账单
             updated_bill = loop.run_until_complete(db.get_bill_by_id(bill_id, user_id=request.user_id))
@@ -845,7 +2061,7 @@ def update_bill(bill_id: int):
 def delete_bill(bill_id: int):
     """删除账单"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -908,7 +2124,7 @@ def import_bills_batch():
                 'error': 'file_path is required'
             }), 400
 
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -998,7 +2214,7 @@ def upload_and_import():
         logger.info(f"文件已保存: {file_path}")
 
         # 导入账单
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
 
         # 获取用户ID
         user_id = getattr(request, 'user_id', 1)
@@ -1189,7 +2405,7 @@ def reclassify_transactions():
         logger.info(f"[重新分类] 收到 {len(transactions)} 条交易")
 
         # 获取分类引擎和数据库
-        db, _, category_engine, _ = get_app_context()
+        db, _, category_engine = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -1340,14 +2556,21 @@ def reclassify_preview_session(session_id: str):
     try:
         logger.info(f"[v2重新分类] session_id={session_id}, user_id={request.user_id}")
 
-        db, bill_service, _, _ = get_app_context()
+        data = request.get_json(silent=True) or {}
+        preview_updates = data.get('preview_updates') or []
+
+        _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         try:
             # 1. 执行重新分类
             reclassify_result = loop.run_until_complete(
-                bill_service.reclassify_preview_bills(session_id, user_id=request.user_id)
+                bill_service.reclassify_preview_bills(
+                    session_id,
+                    preview_updates=preview_updates,
+                    user_id=request.user_id
+                )
             )
 
             if not reclassify_result.get('success'):
@@ -1373,6 +2596,8 @@ def reclassify_preview_session(session_id: str):
                     'total': reclassify_result.get('total', 0),
                     'categorized': reclassify_result.get('categorized', 0),
                     'account_matched': reclassify_result.get('account_matched', 0),
+                    'session_samples_saved': reclassify_result.get('session_samples_saved', 0),
+                    'annotation_applied': reclassify_result.get('annotation_applied', 0),
                     'preview': preview_data
                 }
             })
@@ -1382,6 +2607,523 @@ def reclassify_preview_session(session_id: str):
 
     except Exception as e:
         logger.error(f"[v2重新分类] 失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/v2/learning/<session_id>/promote', methods=['POST'])
+@log_method
+@require_auth
+def promote_import_learning(session_id: str):
+    """将当前导入会话中的人工标注提升为长期学习规则。"""
+    try:
+        logger.info("[长期学习提升] session_id=%s, user_id=%s", session_id, request.user_id)
+        data = request.get_json(silent=True) or {}
+        preview_updates = data.get('preview_updates') or []
+
+        _, bill_service, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            promote_result = loop.run_until_complete(
+                bill_service.promote_session_annotations_to_learning(
+                    session_id,
+                    preview_updates=preview_updates,
+                    user_id=request.user_id
+                )
+            )
+
+            return jsonify({
+                'success': True,
+                'data': promote_result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[长期学习提升] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/learning-rules', methods=['GET'])
+@log_method
+@require_auth
+def list_import_learning_rules():
+    """获取当前用户的长期导入学习规则列表。"""
+    try:
+        db, _, _ = get_app_context()
+        limit = int(request.args.get('limit', 100) or 100)
+        enabled_only = str(request.args.get('enabledOnly', '')).lower() in ('1', 'true', 'yes')
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            rules = loop.run_until_complete(
+                db.get_import_learning_rules(
+                    user_id=request.user_id,
+                    enabled_only=enabled_only,
+                    limit=limit
+                )
+            )
+
+            result = []
+            for rule in rules:
+                learned_category = None
+                source_account = None
+                destination_account = None
+
+                if rule.get('learned_category_id'):
+                    learned_category = loop.run_until_complete(
+                        db.get_category_by_id(int(rule['learned_category_id']), request.user_id)
+                    )
+                if rule.get('learned_source_account_id'):
+                    source_account = loop.run_until_complete(
+                        db.get_account_by_id(int(rule['learned_source_account_id']), request.user_id)
+                    )
+                if rule.get('learned_destination_account_id'):
+                    destination_account = loop.run_until_complete(
+                        db.get_account_by_id(int(rule['learned_destination_account_id']), request.user_id)
+                    )
+
+                result.append({
+                    'id': rule.get('id'),
+                    'matchType': rule.get('match_type', ''),
+                    'matchValue': rule.get('match_value', ''),
+                    'learnedType': rule.get('learned_type', ''),
+                    'learnedCategoryId': rule.get('learned_category_id') or '',
+                    'learnedCategoryName': (
+                        f"{learned_category.get('main_category', '')}/"
+                        f"{learned_category.get('sub_category', '')}"
+                        if learned_category and learned_category.get('sub_category')
+                        else (learned_category.get('main_category', '') if learned_category else '')
+                    ),
+                    'learnedSourceAccountId': rule.get('learned_source_account_id') or '',
+                    'learnedSourceAccountName': source_account.get('name', '') if source_account else '',
+                    'learnedDestinationAccountId': rule.get('learned_destination_account_id') or '',
+                    'learnedDestinationAccountName': destination_account.get('name', '') if destination_account else '',
+                    'enabled': bool(rule.get('enabled', 1)),
+                    'appliedCount': int(rule.get('applied_count', 0) or 0),
+                    'createdAt': rule.get('created_at', ''),
+                    'updatedAt': rule.get('updated_at', ''),
+                    'lastAppliedAt': rule.get('last_applied_at', ''),
+                })
+
+            return jsonify({
+                'success': True,
+                'result': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[长期学习规则列表] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/learning-rules/<int:rule_id>', methods=['PUT'])
+@log_method
+@require_auth
+def update_import_learning_rule(rule_id: int):
+    """启用或禁用单条长期导入学习规则。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        if 'enabled' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'enabled is required'
+            }), 400
+
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            success = loop.run_until_complete(
+                db.set_import_learning_rule_enabled(
+                    rule_id,
+                    bool(data.get('enabled')),
+                    user_id=request.user_id
+                )
+            )
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Rule not found'
+                }), 404
+
+            return jsonify({
+                'success': True,
+                'result': True
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[更新长期学习规则] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/learning-rules/<int:rule_id>', methods=['DELETE'])
+@log_method
+@require_auth
+def delete_import_learning_rule(rule_id: int):
+    """删除单条长期导入学习规则。"""
+    try:
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            success = loop.run_until_complete(
+                db.delete_import_learning_rule(rule_id, user_id=request.user_id)
+            )
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Rule not found'
+                }), 404
+
+            return jsonify({
+                'success': True,
+                'result': True
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[删除长期学习规则] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/configs', methods=['GET'])
+@log_method
+@require_auth
+def list_import_configs():
+    """获取当前用户的导入列映射模板。"""
+    try:
+        db, _, _ = get_app_context()
+        file_format = str(request.args.get('file_format', '') or '').strip().lower() or None
+        limit = int(request.args.get('limit', 100) or 100)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            configs = loop.run_until_complete(
+                db.get_import_configs(
+                    user_id=request.user_id,
+                    file_format=file_format,
+                    limit=limit
+                )
+            )
+
+            result = []
+            for config in configs:
+                result.append({
+                    'id': config.get('id'),
+                    'name': config.get('name', ''),
+                    'fileFormat': config.get('file_format', ''),
+                    'description': config.get('description', ''),
+                    'fieldMappings': config.get('field_mappings', {}),
+                    'dateFormat': config.get('date_format', ''),
+                    'encoding': config.get('encoding', 'utf-8'),
+                    'delimiter': config.get('delimiter'),
+                    'skipRows': int(config.get('skip_rows', 0) or 0),
+                    'hasHeader': bool(config.get('has_header', True)),
+                    'customRules': config.get('custom_rules', {}),
+                    'sampleHeaders': config.get('sample_headers', []),
+                    'headerSignature': config.get('header_signature', ''),
+                    'isDefault': bool(config.get('is_default', False)),
+                    'useCount': int(config.get('use_count', 0) or 0),
+                    'lastUsedAt': config.get('last_used_at', ''),
+                    'createdAt': config.get('created_at', ''),
+                    'updatedAt': config.get('updated_at', ''),
+                })
+
+            return jsonify({
+                'success': True,
+                'result': result
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[导入模板列表] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/configs', methods=['POST'])
+@log_method
+@require_auth
+def save_import_config():
+    """保存导入列映射模板。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        if not data.get('name'):
+            return jsonify({'success': False, 'error': 'name is required'}), 400
+        if not data.get('fileFormat'):
+            return jsonify({'success': False, 'error': 'fileFormat is required'}), 400
+        if not data.get('fieldMappings'):
+            return jsonify({'success': False, 'error': 'fieldMappings is required'}), 400
+
+        db, _, _ = get_app_context()
+        payload = {
+            'id': data.get('id'),
+            'name': data.get('name'),
+            'file_format': data.get('fileFormat'),
+            'description': data.get('description', ''),
+            'field_mappings': data.get('fieldMappings', {}),
+            'date_format': data.get('dateFormat', ''),
+            'encoding': data.get('encoding', 'utf-8'),
+            'delimiter': data.get('delimiter'),
+            'skip_rows': data.get('skipRows', 0),
+            'has_header': data.get('hasHeader', True),
+            'custom_rules': data.get('customRules', {}),
+            'sample_headers': data.get('sampleHeaders') or data.get('headers') or [],
+            'is_default': data.get('isDefault', False)
+        }
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            config_id = loop.run_until_complete(
+                db.save_import_config(payload, user_id=request.user_id)
+            )
+            return jsonify({
+                'success': True,
+                'result': {
+                    'id': config_id
+                }
+            }), 201
+        finally:
+            loop.close()
+
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 400
+    except Exception as e:
+        logger.error("[保存导入模板] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/preview', methods=['POST'])
+@log_method
+@require_auth
+def preview_import_file():
+    """预览通用表格导入文件内容。"""
+    temp_file_path = None
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if not file or not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        if not allowed_file(file.filename):
+            return jsonify({
+                'success': False,
+                'error': f'File type not allowed. Supported: {", ".join(ALLOWED_EXTENSIONS)}'
+            }), 400
+
+        filename = secure_filename(file.filename)
+        unique_filename = f"preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+        temp_file_path = UPLOAD_FOLDER / unique_filename
+        file.save(str(temp_file_path))
+
+        requested_encoding = str(request.form.get('fileEncoding', '') or '').strip()
+        requested_delimiter = str(request.form.get('delimiter', '') or '').strip() or None
+        rows, actual_encoding, actual_delimiter = _load_generic_import_rows(
+            temp_file_path,
+            requested_encoding=requested_encoding,
+            delimiter=requested_delimiter
+        )
+
+        headers = rows[0] if rows else []
+        sample_rows = rows[1:11] if len(rows) > 1 else []
+
+        return jsonify({
+            'success': True,
+            'result': {
+                'headers': headers,
+                'sampleData': rows[:50],
+                'previewRows': sample_rows,
+                'totalRows': max(len(rows) - 1, 0),
+                'encoding': actual_encoding,
+                'delimiter': actual_delimiter
+            }
+        })
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error('[导入文件预览] 失败: %s', e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if temp_file_path and temp_file_path.exists():
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                logger.warning('[导入文件预览] 删除临时文件失败: %s', temp_file_path)
+
+
+@bp.route('/import/configs/match', methods=['POST'])
+@log_method
+@require_auth
+def match_import_config():
+    """根据文件格式与表头自动匹配导入模板。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        file_format = str(data.get('fileFormat', '') or '').strip().lower()
+        headers = data.get('headers') or []
+        if not file_format:
+            return jsonify({'success': False, 'error': 'fileFormat is required'}), 400
+        if not isinstance(headers, list) or not headers:
+            return jsonify({'success': False, 'error': 'headers is required'}), 400
+
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            matched = loop.run_until_complete(
+                db.find_matching_import_config(
+                    file_format=file_format,
+                    headers=headers,
+                    user_id=request.user_id
+                )
+            )
+
+            if not matched:
+                return jsonify({
+                    'success': True,
+                    'result': None
+                })
+
+            return jsonify({
+                'success': True,
+                'result': {
+                    'id': matched.get('id'),
+                    'name': matched.get('name', ''),
+                    'fileFormat': matched.get('file_format', ''),
+                    'fieldMappings': matched.get('field_mappings', {}),
+                    'dateFormat': matched.get('date_format', ''),
+                    'encoding': matched.get('encoding', 'utf-8'),
+                    'delimiter': matched.get('delimiter'),
+                    'skipRows': int(matched.get('skip_rows', 0) or 0),
+                    'hasHeader': bool(matched.get('has_header', True)),
+                    'customRules': matched.get('custom_rules', {}),
+                    'sampleHeaders': matched.get('sample_headers', []),
+                    'matchScore': matched.get('match_score', 0),
+                    'matchReason': matched.get('match_reason', ''),
+                    'matchedHeaderCount': matched.get('matched_header_count', 0),
+                }
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[匹配导入模板] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/configs/suggest', methods=['POST'])
+@log_method
+@require_auth
+def suggest_import_config():
+    """基于表头和样本行自动建议列映射。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        file_format = str(data.get('fileFormat', '') or '').strip().lower()
+        headers = data.get('headers') or []
+        sample_rows = data.get('sampleRows') or []
+        if not file_format:
+            return jsonify({'success': False, 'error': 'fileFormat is required'}), 400
+        if not isinstance(headers, list) or not headers:
+            return jsonify({'success': False, 'error': 'headers is required'}), 400
+
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            configs = loop.run_until_complete(
+                db.get_import_configs(
+                    user_id=request.user_id,
+                    file_format=file_format,
+                    limit=200
+                )
+            )
+        finally:
+            loop.close()
+
+        suggestion = _build_import_mapping_suggestion(headers, configs, sample_rows)
+        return jsonify({
+            'success': True,
+            'result': suggestion
+        })
+
+    except Exception as e:
+        logger.error("[导入模板建议] 失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/import/configs/<int:config_id>', methods=['DELETE'])
+@log_method
+@require_auth
+def delete_import_config(config_id: int):
+    """删除导入列映射模板。"""
+    try:
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            success = loop.run_until_complete(
+                db.delete_import_config(config_id, user_id=request.user_id)
+            )
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'error': 'Config not found'
+                }), 404
+
+            return jsonify({
+                'success': True,
+                'result': True
+            })
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[删除导入模板] 失败: %s", e, exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1420,7 +3162,7 @@ def confirm_import():
                 'error': 'bills is required'
             }), 400
 
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
 
         loop = asyncio.new_event_loop()
@@ -1487,7 +3229,7 @@ def quick_add_category_keyword():
                 'error': 'main_category and keyword are required'
             }), 400
 
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
 
         loop = asyncio.new_event_loop()
@@ -1550,7 +3292,7 @@ def refresh_bill_categories():
         data = request.get_json() or {}
         bill_ids = data.get('bill_ids')
 
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
 
         loop = asyncio.new_event_loop()
@@ -1590,7 +3332,7 @@ def batch_update_bills():
                 'error': 'ids and updates are required'
             }), 400
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         ids = data['ids']
         updates = data['updates']
@@ -1631,7 +3373,7 @@ def batch_delete_bills():
                 'error': 'ids are required'
             }), 400
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1681,161 +3423,6 @@ def batch_delete_bills():
         }), 500
 
 
-@bp_v1.route('/v1/transactions/list/by_month.json', methods=['GET'])
-@log_method
-@require_auth
-def get_bills_by_month():
-    """
-    按月查询交易记录（兼容v1 API）
-
-    Query Parameters:
-        - year: 年份
-        - month: 月份
-        - type: 交易类型（0=全部，1=支出，2=收入，3=转账）
-        - category_ids: 分类ID过滤（逗号分隔）
-        - account_ids: 账户ID过滤（逗号分隔）
-        - tag_ids: 标签ID过滤（逗号分隔）
-        - tag_filter_type: 标签过滤类型
-        - amount_filter: 金额过滤
-        - keyword: 关键词搜索
-    """
-    logger.info("=" * 50)
-    logger.info("按月查询交易记录")
-
-    try:
-        # 获取查询参数
-        year = int(request.args.get('year', datetime.now().year))
-        month = int(request.args.get('month', datetime.now().month))
-        transaction_type = request.args.get('type', '0')
-
-        logger.info(f"📅 查询参数: year={year}, month={month}, type={transaction_type}")
-
-        # 构建过滤条件
-        filters = {}
-
-        # 计算月份的起止日期
-        start_date = f"{year:04d}-{month:02d}-01"
-        if month == 12:
-            end_date = f"{year+1:04d}-01-01"
-        else:
-            end_date = f"{year:04d}-{month+1:02d}-01"
-
-        filters['start_date'] = start_date
-        filters['end_date'] = end_date
-        logger.info(f"⏰ 时间范围: {start_date} 至 {end_date}")
-
-        # 交易类型映射：v1格式 -> 后端格式
-        # 0=全部(不过滤), 1=修改(暂不支持), 2=收入, 3=支出, 4=转账, 5=投资
-        if transaction_type and int(transaction_type) > 0:
-            type_int = int(transaction_type)
-            if type_int in BACKEND_TO_FRONTEND_TYPE.values():
-                # 反向查找
-                for chinese, v1_type in BACKEND_TO_FRONTEND_TYPE.items():
-                    if v1_type == type_int:
-                        filters['type'] = chinese
-                        logger.info(f"🏷️ 类型筛选: {type_int} -> {chinese}")
-                        break
-
-        # 处理 category_ids 过滤（逗号分隔的ID列表）
-        category_ids_str = request.args.get('category_ids', default='')
-        if category_ids_str:
-            try:
-                category_ids = [int(x) for x in category_ids_str.split(',') if x.strip()]
-                if category_ids:
-                    logger.info(f"🗂️ 分类筛选: {category_ids}")
-                    # 需要查询分类信息转换为 (main, sub) 列表
-                    db, _, _, adapter = get_app_context()
-                    loop_cat = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop_cat)
-                    all_categories = loop_cat.run_until_complete(db.get_all_categories(user_id=request.user_id))
-                    loop_cat.close()
-
-                    target_categories = []
-                    for cat in all_categories:
-                        if cat['id'] in category_ids:
-                            target_categories.append({
-                                'main': cat.get('main_category'),
-                                'sub': cat.get('sub_category')
-                            })
-
-                    if target_categories:
-                        filters['categories'] = target_categories
-                        logger.info(f"   转换为: {target_categories}")
-            except ValueError as e:
-                logger.warning(f"⚠️ 无效的category_ids参数: {category_ids_str}, 错误: {e}")
-
-        # 处理 account_ids 过滤（逗号分隔的ID列表）
-        account_ids_str = request.args.get('account_ids', default='')
-        if account_ids_str:
-            try:
-                account_ids = [int(x) for x in account_ids_str.split(',') if x.strip()]
-                if account_ids:
-                    filters['account_ids'] = account_ids
-                    logger.info(f"💳 账户筛选: {account_ids}")
-            except ValueError as e:
-                logger.warning(f"⚠️ 无效的account_ids参数: {account_ids_str}, 错误: {e}")
-
-        # 处理 tag_ids 过滤
-        tag_ids_str = request.args.get('tag_ids', default='')
-        if tag_ids_str:
-            try:
-                tag_ids = [int(x) for x in tag_ids_str.split(',') if x.strip()]
-                if tag_ids:
-                    filters['tag_ids'] = tag_ids
-                    logger.info(f"🏷️ 标签筛选: {tag_ids}")
-            except ValueError as e:
-                logger.warning(f"⚠️ 无效的tag_ids参数: {tag_ids_str}, 错误: {e}")
-
-        # 关键词搜索
-        keyword = request.args.get('keyword', default='')
-        if keyword:
-            from urllib.parse import unquote
-            filters['keyword'] = unquote(keyword)
-            logger.info(f"🔍 关键词搜索: {filters['keyword']}")
-
-        # 处理 amount_filter 过滤
-        amount_filter = request.args.get('amount_filter', default='')
-        if amount_filter:
-            filters['amount_filter'] = amount_filter
-            logger.info(f"💰 金额筛选: {amount_filter}")
-
-        logger.info(f"📋 最终过滤条件: {filters}")
-
-        db, _, _, adapter = get_app_context()
-
-        # 异步查询（获取所有数据，不分页）
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bills, total = loop.run_until_complete(
-            db.query_bills(
-                page=1,
-                page_size=10000,  # 足够大的数字获取全部
-                filters=filters,
-                user_id=request.user_id
-            )
-        )
-
-        # ⚠️ 关键修复: 使用adapter转换为v1格式
-        logger.info(f"📦 数据库查询完成: 找到 {total} 条记录，开始转换为v1格式...")
-        response = loop.run_until_complete(
-            adapter.backend_list_to_frontend(bills, total, 1, 10000)
-        )
-        loop.close()
-
-        logger.info(f"✅ 按月查询完成: 返回 {len(response['result']['items'])} 条v1格式记录")
-        logger.info("=" * 50)
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"按月查询交易失败: {e}", exc_info=True)
-        logger.info("=" * 50)
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 @bp.route('/parse_import', methods=['POST'])
 @log_method
 @require_auth
@@ -1879,9 +3466,32 @@ def parse_import_file():
             }), 400
 
         # 获取解析器类型
-        parser_type = request.form.get('fileType', 'auto')
+        requested_file_type = request.form.get('fileType', 'auto')
+        parser_type = requested_file_type
         if parser_type == 'auto':
             parser_type = None  # None表示自动检测
+
+        # v6.89: 支持前端列映射通用表格解析
+        column_mapping = _parse_json_form_field(request.form.get('columnMapping'), {})
+        transaction_type_mapping = _parse_json_form_field(
+            request.form.get('transactionTypeMapping'),
+            {}
+        )
+        has_header_line = _parse_bool_form_field(
+            request.form.get('hasHeaderLine'),
+            default=True
+        )
+        time_format = str(request.form.get('timeFormat', '') or '').strip()
+        amount_decimal_separator = str(
+            request.form.get('amountDecimalSeparator', '.') or '.'
+        ).strip() or '.'
+        amount_digit_grouping_symbol = str(
+            request.form.get('amountDigitGroupingSymbol', '') or ''
+        ).strip()
+        tag_separator = str(request.form.get('tagSeparator', ';') or ';').strip() or ';'
+        file_encoding = str(request.form.get('fileEncoding', '') or '').strip()
+        delimiter = str(request.form.get('delimiter', '') or '').strip() or None
+        use_column_mapping = isinstance(column_mapping, dict) and bool(column_mapping)
 
         logger.info(f"文件: {file.filename}, 解析器类型: {parser_type or '自动检测'}")
 
@@ -1908,13 +3518,66 @@ def parse_import_file():
         file.save(str(file_path))
         logger.info(f"临时文件已保存: {file_path}")
 
-        # 使用ParserFactory解析
-        from src.parsers.factory import ParserFactory
-        parser_factory = ParserFactory()
+        items = []
 
-        logger.debug("开始解析文件...")
-        bills = parser_factory.parse(str(file_path), parser_type=parser_type)
-        logger.info(f"解析完成: {len(bills)} 条记录")
+        if use_column_mapping:
+            logger.info(
+                "[通用导入] 使用列映射解析: file_type=%s, has_header=%s",
+                requested_file_type,
+                has_header_line
+            )
+            normalized_bills, actual_encoding, actual_delimiter = _parse_import_file_with_column_mapping(
+                file_path,
+                column_mapping=column_mapping,
+                transaction_type_mapping=transaction_type_mapping,
+                has_header_line=has_header_line,
+                time_format=time_format,
+                amount_decimal_separator=amount_decimal_separator,
+                amount_digit_grouping_symbol=amount_digit_grouping_symbol,
+                tag_separator=tag_separator,
+                file_encoding=file_encoding,
+                delimiter=delimiter
+            )
+            logger.info(
+                "[通用导入] 解析完成: %s 条记录, encoding=%s, delimiter=%s",
+                len(normalized_bills),
+                actual_encoding,
+                actual_delimiter
+            )
+
+            db, bill_service, _ = get_app_context(user_id=request.user_id)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                normalized_bills, account_mappings, category_mappings, learning_applied = loop.run_until_complete(
+                    _apply_learning_to_column_mapping_bills(
+                        normalized_bills,
+                        db,
+                        bill_service,
+                        request.user_id
+                    )
+                )
+            finally:
+                loop.close()
+
+            items = [
+                _convert_bill_to_import_item_with_mappings(
+                    bill,
+                    account_mappings=account_mappings,
+                    category_mappings=category_mappings
+                )
+                for bill in normalized_bills
+            ]
+            logger.info("[通用导入] 长期学习命中: %s 条", learning_applied)
+        else:
+            # 使用ParserFactory解析银行/平台原生账单
+            from src.parsers.factory import ParserFactory
+            parser_factory = ParserFactory()
+
+            logger.debug("开始解析文件...")
+            bills = parser_factory.parse(str(file_path), parser_type=parser_type)
+            logger.info(f"解析完成: {len(bills)} 条记录")
+            items = [_convert_bill_to_import_item(bill) for bill in bills]
 
         # 删除临时文件
         try:
@@ -1922,24 +3585,6 @@ def parse_import_file():
             logger.debug(f"临时文件已删除: {file_path}")
         except Exception as e:
             logger.warning(f"删除临时文件失败: {e}")
-
-        # 转换为前端期望的格式
-        # 解析器已经返回统一字段：trade_time, type, amount, account, description, counterparty,
-        # main_category, sub_category, payment_method
-        items = []
-        for bill in bills:
-            item = {
-                'time': bill.get('trade_time', ''),  # 交易时间
-                'type': bill.get('type', ''),  # 交易类型（收入/支出/转账/退款）
-                'categoryName': bill.get('main_category', ''),  # 主分类
-                'subCategoryName': bill.get('sub_category', ''),  # 子分类
-                'accountName': bill.get('account', ''),  # 账户/来源
-                'amount': bill.get('amount', 0),  # 金额
-                'description': bill.get('description', ''),  # 描述/备注
-                'counterparty': bill.get('counterparty', ''),  # 交易对方
-                'paymentMethod': bill.get('payment_method', '')  # 支付方式
-            }
-            items.append(item)
 
         logger.info("=" * 50)
 
@@ -1952,170 +3597,11 @@ def parse_import_file():
         })
 
     except Exception as e:
-        logger.error(f"解析导入文件失败: %s", e, exc_info=True)
+        logger.error("解析导入文件失败: %s", e, exc_info=True)
         logger.info("=" * 50)
         return jsonify({
             'success': False,
             'error': str(e)
-        }), 500
-
-
-# ============================================================================
-# v1 API兼容层 - 兼容ezBookkeeping前端格式
-# ============================================================================
-
-@bp_v1.route('/v1/transactions/list.json', methods=['GET'])
-@log_method
-@require_auth
-def get_transactions_v1():
-    """
-    v1版本的交易列表接口 - 兼容ezBookkeeping前端
-
-    Query Parameters:
-        - max_time: 最大时间(Unix timestamp ms)
-        - min_time: 最小时间(Unix timestamp ms)
-        - type: 类型过滤 (0=全部, 1=修改, 2=收入, 3=支出, 4=转账, 5=投资)
-        - category_ids: 分类ID列表（逗号分隔）
-        - account_ids: 账户ID列表（逗号分隔）
-        - tag_ids: 标签ID列表（逗号分隔）
-        - tag_filter_type: 标签过滤类型
-        - amount_filter: 金额过滤
-        - keyword: 关键词
-        - count: 每页数量（默认50）
-        - page: 页码（默认1）
-        - with_count: 是否返回总数
-        - trim_account: 是否精简账户信息
-        - trim_category: 是否精简分类信息
-        - trim_tag: 是否精简标签信息
-
-    Returns:
-        {
-            "success": true,
-            "result": {
-                "items": [{"id": "1", "date": "2024-01-01", ...}],
-                "totalCount": 100,
-                "nextTimeSequenceId": 123456
-            }
-        }
-    """
-    try:
-        # 解析查询参数
-        max_time = request.args.get('max_time', type=int, default=0)
-        min_time = request.args.get('min_time', type=int, default=0)
-        transaction_type = request.args.get('type', type=int, default=0)
-        count = request.args.get('count', type=int, default=50)
-        page = request.args.get('page', type=int, default=1)
-        # with_count用于是否返回总数，保留以保持API兼容性
-        _ = request.args.get('with_count', default='false').lower() == 'true'
-        keyword = request.args.get('keyword', default='')
-
-        # 分类、账户、标签ID（逗号分隔字符串）
-        category_ids_str = request.args.get('category_ids', default='')
-        account_ids_str = request.args.get('account_ids', default='')
-        amount_filter = request.args.get('amount_filter', default='')
-
-        logger.info((
-            f"v1交易列表查询: page={page}, count={count}, type={transaction_type}, "
-            f"keyword={keyword}, category_ids={category_ids_str}, "
-            f"account_ids={account_ids_str}, amount_filter={amount_filter}"
-        ))
-
-        # 构建过滤条件
-        filters = {}
-
-        # 时间范围（转换为日期字符串）
-        if min_time > 0:
-            filters['start_date'] = datetime.fromtimestamp(min_time / 1000).strftime('%Y-%m-%d')
-
-        if max_time > 0:
-            filters['end_date'] = datetime.fromtimestamp(max_time / 1000).strftime('%Y-%m-%d')
-
-        # 交易类型映射：v1格式 -> 后端格式
-        # 0=全部(不过滤), 1=修改(暂不支持), 2=收入, 3=支出, 4=转账, 5=投资
-        if transaction_type > 0 and transaction_type in BACKEND_TO_FRONTEND_TYPE.values():
-            # 反向查找
-            for chinese, type_int in BACKEND_TO_FRONTEND_TYPE.items():
-                if type_int == transaction_type:
-                    filters['type'] = chinese
-                    break
-        # transaction_type=0表示查询全部类型,不设置filters['type']
-
-        # 关键词搜索
-        if keyword:
-            from urllib.parse import unquote
-            filters['keyword'] = unquote(keyword)
-
-        db, _, _, adapter = get_app_context()
-
-        # 处理 account_ids 过滤（逗号分隔的ID列表）
-        if account_ids_str:
-            try:
-                account_ids = [int(x) for x in account_ids_str.split(',') if x.strip()]
-                if account_ids:
-                    filters['account_ids'] = account_ids
-                    logger.info(f"account_ids筛选: {account_ids}")
-            except ValueError:
-                logger.warning(f"无效的account_ids参数: {account_ids_str}")
-
-        # 处理 category_ids 过滤（需要查询分类信息转换为 (main, sub) 列表）
-        if category_ids_str:
-            try:
-                category_ids = [int(x) for x in category_ids_str.split(',') if x.strip()]
-                if category_ids:
-                    loop_cat = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop_cat)
-                    all_categories = loop_cat.run_until_complete(db.get_all_categories(user_id=request.user_id))
-                    loop_cat.close()
-
-                    target_categories = []
-                    for cat in all_categories:
-                        if cat['id'] in category_ids:
-                            target_categories.append({
-                                'main': cat.get('main_category'),
-                                'sub': cat.get('sub_category')
-                            })
-
-                    if target_categories:
-                        filters['categories'] = target_categories
-                        logger.info(f"category_ids筛选: {category_ids} -> {target_categories}")
-            except ValueError:
-                logger.warning(f"无效的category_ids参数: {category_ids_str}")
-
-        # 处理 amount_filter 过滤（格式：equals=100 或 gt=100 或 lt=100 或 between=100-200）
-        if amount_filter:
-            filters['amount_filter'] = amount_filter
-            logger.info(f"amount_filter筛选: {amount_filter}")
-
-        # TODO: 处理 tag_ids 过滤（暂未实现标签系统）
-
-        # 查询账单
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bills, total = loop.run_until_complete(
-            db.query_bills(
-                page=page,
-                page_size=count,
-                filters=filters,
-                user_id=request.user_id
-            )
-        )
-
-        # 使用adapter批量转换为v1格式
-        response = loop.run_until_complete(
-            adapter.backend_list_to_frontend(bills, total, page, count)
-        )
-        loop.close()
-
-        logger.info(f"v1交易列表返回: 共{len(response['result']['items'])}条记录, 总数={total}")
-
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error("v1获取交易列表失败: %s", e, exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'message': 'Unable to retrieve transaction list'
         }), 500
 
 
@@ -2186,7 +3672,7 @@ def get_reconciliation_statements():
                 'error': f'Invalid account_id: {account_id}'
             }), 400
 
-        db, _, _, adapter = get_app_context()
+        db, _, _, adapter = get_app_context_with_adapter()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -2444,317 +3930,6 @@ def get_reconciliation_statements():
             'message': 'Failed to retrieve reconciliation statements'
         }), 500
 
-
-@bp_v1.route('/v1/transactions/move/all.json', methods=['POST'])
-@log_method
-@require_auth
-def move_all_transactions():
-    """
-    移动所有交易从一个账户到另一个账户（v1兼容API）
-    
-    Request Body:
-        {
-            "fromAccountId": "源账户ID",
-            "toAccountId": "目标账户ID"
-        }
-    
-    Returns:
-        {
-            "success": true,
-            "result": true,  # v1格式兼容
-            "moved_count": 10  # 移动的交易数量
-        }
-    """
-    try:
-        data = request.get_json()
-        from_account_id = data.get('fromAccountId')
-        to_account_id = data.get('toAccountId')
-        password = data.get('password')  # 新增：密码验证
-        
-        if not from_account_id or not to_account_id:
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameters',
-                'message': 'fromAccountId and toAccountId are required'
-            }), 400
-        
-        # 新增：密码验证
-        if not password:
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameter',
-                'message': 'Password is required for security verification'
-            }), 400
-        
-        if from_account_id == to_account_id:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid parameters',
-                'message': 'Source and target accounts must be different'
-            }), 400
-        
-        # 转换为整数
-        try:
-            from_account_id = int(from_account_id)
-            to_account_id = int(to_account_id)
-        except ValueError:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid parameter type',
-                'message': 'Account IDs must be valid integers'
-            }), 400
-        
-        db, _, _, _ = get_app_context()
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            # 新增：验证密码
-            password_valid = loop.run_until_complete(
-                db.verify_operation_password(password)
-            )
-            
-            if not password_valid:
-                # 记录失败的审计日志
-                loop.run_until_complete(
-                    db.create_audit_log(
-                        operation_type='move_transactions',
-                        operation_target='account',
-                        target_id=from_account_id,
-                        details={'from_account_id': from_account_id, 'to_account_id': to_account_id},
-                        status='failed',
-                        error_message='Invalid password',
-                        ip_address=request.remote_addr,
-                        user_agent=request.headers.get('User-Agent')
-                    )
-                )
-                
-                logger.warning(f"密码验证失败: 移动账户 {from_account_id} 的交易")
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid password',
-                    'message': 'Password verification failed'
-                }), 401
-            
-            # 执行移动操作
-            result = loop.run_until_complete(
-                db.move_all_transactions(from_account_id, to_account_id, user_id=request.user_id)
-            )
-            
-            if not result.get('success'):
-                # 记录失败的审计日志
-                loop.run_until_complete(
-                    db.create_audit_log(
-                        operation_type='move_transactions',
-                        operation_target='account',
-                        target_id=from_account_id,
-                        details={'from_account_id': from_account_id, 'to_account_id': to_account_id},
-                        status='failed',
-                        error_message=result.get('message'),
-                        ip_address=request.remote_addr,
-                        user_agent=request.headers.get('User-Agent')
-                    )
-                )
-                
-                logger.error(f"移动交易失败: {result.get('message')}")
-                return jsonify({
-                    'success': False,
-                    'error': result.get('message', 'Failed to move transactions'),
-                    'message': result.get('message', 'Failed to move transactions')
-                }), 500
-            
-            moved_count = result.get('moved_count', 0)
-            
-            # 新增：记录成功的审计日志
-            loop.run_until_complete(
-                db.create_audit_log(
-                    operation_type='move_transactions',
-                    operation_target='account',
-                    target_id=from_account_id,
-                    details={
-                        'from_account_id': from_account_id,
-                        'to_account_id': to_account_id,
-                        'moved_count': moved_count
-                    },
-                    affected_count=moved_count,
-                    status='success',
-                    ip_address=request.remote_addr,
-                    user_agent=request.headers.get('User-Agent')
-                )
-            )
-            
-            logger.info(f"成功移动 {moved_count} 条交易从账户 {from_account_id} 到 {to_account_id}")
-            
-            return jsonify({
-                'success': True,
-                'result': True,  # v1格式兼容
-                'moved_count': moved_count
-            })
-            
-        finally:
-            loop.close()
-    
-    except Exception as e:
-        logger.error(f"移动所有交易失败: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'message': 'Failed to move transactions'
-        }), 500
-
-
-@bp_v1.route('/v1/data/clear/transactions/by_account.json', methods=['POST'])
-@log_method
-@require_auth
-def clear_all_transactions_by_account():
-    """
-    删除指定账户的所有交易（v1兼容API）
-    
-    Request Body:
-        {
-            "accountId": "账户ID",
-            "password": "用户密码"（用于安全验证）
-        }
-    
-    Returns:
-        {
-            "success": true,
-            "result": true,  # v1格式兼容
-            "deleted_count": 10  # 删除的交易数量
-        }
-    
-    Note:
-        此操作需要密码验证以防误操作
-    """
-    try:
-        data = request.get_json()
-        account_id = data.get('accountId')
-        password = data.get('password')
-        
-        if not account_id:
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameter',
-                'message': 'accountId is required'
-            }), 400
-        
-        if not password:
-            return jsonify({
-                'success': False,
-                'error': 'Missing required parameter',
-                'message': 'password is required for security verification'
-            }), 400
-        
-        # 转换为整数
-        try:
-            account_id = int(account_id)
-        except ValueError:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid parameter type',
-                'message': 'Account ID must be a valid integer'
-            }), 400
-        
-        db, _, _, _ = get_app_context()
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            # 验证密码
-            password_valid = loop.run_until_complete(
-                db.verify_operation_password(password)
-            )
-            
-            if not password_valid:
-                # 记录失败的审计日志
-                loop.run_until_complete(
-                    db.create_audit_log(
-                        operation_type='delete_transactions',
-                        operation_target='account',
-                        target_id=account_id,
-                        details={'account_id': account_id},
-                        status='failed',
-                        error_message='Invalid password',
-                        ip_address=request.remote_addr,
-                        user_agent=request.headers.get('User-Agent')
-                    )
-                )
-                
-                logger.warning(f"密码验证失败: 删除账户 {account_id} 的交易")
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid password',
-                    'message': 'Password verification failed'
-                }), 401
-            
-            # 执行删除操作
-            result = loop.run_until_complete(
-                db.delete_all_transactions_by_account(account_id, user_id=request.user_id)
-            )
-            
-            if not result.get('success'):
-                # 记录失败的审计日志
-                loop.run_until_complete(
-                    db.create_audit_log(
-                        operation_type='delete_transactions',
-                        operation_target='account',
-                        target_id=account_id,
-                        details={'account_id': account_id},
-                        status='failed',
-                        error_message=result.get('message'),
-                        ip_address=request.remote_addr,
-                        user_agent=request.headers.get('User-Agent')
-                    )
-                )
-                
-                logger.error(f"删除账户交易失败: {result.get('message')}")
-                return jsonify({
-                    'success': False,
-                    'error': result.get('message', 'Failed to delete transactions'),
-                    'message': result.get('message', 'Failed to delete transactions')
-                }), 500
-            
-            deleted_count = result.get('deleted_count', 0)
-            
-            # 记录成功的审计日志
-            loop.run_until_complete(
-                db.create_audit_log(
-                    operation_type='delete_transactions',
-                    operation_target='account',
-                    target_id=account_id,
-                    details={
-                        'account_id': account_id,
-                        'deleted_count': deleted_count
-                    },
-                    affected_count=deleted_count,
-                    status='success',
-                    ip_address=request.remote_addr,
-                    user_agent=request.headers.get('User-Agent')
-                )
-            )
-            
-            logger.info(f"成功删除账户 {account_id} 的 {deleted_count} 条交易")
-            
-            return jsonify({
-                'success': True,
-                'result': True,  # v1格式兼容
-                'deleted_count': deleted_count
-            })
-            
-        finally:
-            loop.close()
-    
-    except Exception as e:
-        logger.error(f"删除账户所有交易失败: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'message': 'Failed to delete transactions'
-        }), 500
-
-
 # ==================== v6.47 三阶段导入API ====================
 
 
@@ -2807,7 +3982,7 @@ def import_stage1_parse():
             }), 400
         
         # 获取服务实例
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         # 保存文件到临时目录
@@ -2924,7 +4099,7 @@ def import_stage2_dedup():
         session_id = data['session_id']
         
         # 获取服务实例
-        _, bill_service, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         loop = asyncio.new_event_loop()
@@ -3013,7 +4188,7 @@ def import_stage3_confirm():
         preview_updates = data.get('preview_updates')  # 可选：用户编辑后的数据
         
         # 获取服务实例
-        db, bill_service, _, _ = get_app_context()
+        db, bill_service, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         loop = asyncio.new_event_loop()
@@ -3085,7 +4260,7 @@ def get_import_session(session_id: str):
         }
     """
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         loop = asyncio.new_event_loop()
@@ -3133,7 +4308,7 @@ def cancel_import_session(session_id: str):
     清理 bills_parser_template 和 bills_preview 中的临时数据。
     """
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         loop = asyncio.new_event_loop()
@@ -3184,7 +4359,7 @@ def get_import_preview(session_id: str):
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('page_size', 50, type=int)
         
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         loop = asyncio.new_event_loop()
@@ -3243,6 +4418,49 @@ def get_import_preview(session_id: str):
         }), 500
 
 
+@bp.route('/import/v2/preview-item/<int:preview_id>/recurring-candidates', methods=['GET'])
+@log_method
+@require_auth
+def get_preview_recurring_candidates(preview_id: int):
+    """获取导入预览账单可匹配的定时交易候选。"""
+    try:
+        tolerance_days = request.args.get('toleranceDays', default=3, type=int)
+        tolerance_days = max(0, min(tolerance_days, 31))
+
+        db = get_app_context()[0]
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            db.get_recurring_candidates_for_preview(
+                preview_id,
+                user_id=request.user_id,
+                tolerance_days=tolerance_days
+            )
+        )
+        loop.close()
+
+        if not result.get('preview'):
+            return jsonify({
+                'success': False,
+                'error': 'Preview bill not found'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'result': {
+                'previewId': preview_id,
+                'linkedRecurringId': result.get('linked_recurring_id'),
+                'candidates': result.get('candidates', [])
+            }
+        })
+    except Exception as e:
+        logger.error("获取预览定时交易候选失败: %s", e, exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @bp.route('/import/v2/preview/<session_id>/update', methods=['PUT'])
 @log_method
 @require_auth
@@ -3263,7 +4481,7 @@ def update_preview_bill(session_id: str):
                 'error': 'Missing bill id'
             }), 400
         
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         user_id = getattr(request, 'user_id', 1)
         
         preview_id = data['id']

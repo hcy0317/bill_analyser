@@ -11,12 +11,11 @@ from src.api.middleware.auth import require_auth
 logger = get_logger('TagsAPI')
 
 bp = Blueprint('tags', __name__)
-bp_v1 = Blueprint('tags_v1', __name__)
 
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    from flask import current_app
+    from flask import current_app  # pylint: disable=import-outside-toplevel
     return current_app.config.get('DB_INSTANCE')
 
 
@@ -96,11 +95,12 @@ def create_tag():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         tag_id = loop.run_until_complete(db.create_tag(data, user_id=request.user_id))
+        tag = loop.run_until_complete(db.get_tag_by_id(tag_id, user_id=request.user_id))
         loop.close()
 
         return jsonify({
             'success': True,
-            'result': {'id': tag_id}
+            'result': tag or {'id': tag_id}
         }), 201
 
     except Exception as e:
@@ -129,12 +129,15 @@ def update_tag(tag_id: int):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         result = loop.run_until_complete(db.update_tag(tag_id, data, user_id=request.user_id))
+        tag = None
+        if result:
+            tag = loop.run_until_complete(db.get_tag_by_id(tag_id, user_id=request.user_id))
         loop.close()
 
         if result:
             return jsonify({
                 'success': True,
-                'message': 'Tag updated successfully'
+                'result': tag or {'id': tag_id}
             })
         return jsonify({
             'success': False,
@@ -165,7 +168,7 @@ def delete_tag(tag_id: int):
         if result:
             return jsonify({
                 'success': True,
-                'message': 'Tag deleted successfully'
+                'result': True
             })
         return jsonify({
             'success': False,
@@ -180,201 +183,88 @@ def delete_tag(tag_id: int):
         }), 500
 
 
-@bp_v1.route('/v1/transaction/tags/list.json', methods=['GET'])
+@bp.route('/batch', methods=['POST'])
 @log_method
 @require_auth
-def get_tags_v1():
-    """获取标签列表 (v1兼容)"""
+def create_tags_batch():  # pylint: disable=too-many-return-statements
+    """批量创建标签 - REST API"""
     try:
+        data = request.get_json()
+        tags_data = data.get('tags') if data else None
+        skip_exists = bool(data.get('skipExists', False)) if data else False
+
+        if not isinstance(tags_data, list) or not tags_data:
+            return jsonify({
+                'success': False,
+                'error': 'tags is required and must be a non-empty array'
+            }), 400
+
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
+        created_tags = []
         try:
-            tags = loop.run_until_complete(db.get_all_tags(user_id=request.user_id))
-            # 转换ID为字符串，符合v1规范
-            for tag in tags:
-                tag['id'] = str(tag['id'])
+            existing_tags = loop.run_until_complete(db.get_all_tags(user_id=request.user_id))
+            existing_by_name = {str(tag.get('name', '')).strip().lower(): tag for tag in existing_tags}
+
+            for item in tags_data:
+                if not isinstance(item, dict) or not str(item.get('name', '')).strip():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Each tag item must contain a non-empty name'
+                    }), 400
+
+                normalized_name = str(item['name']).strip().lower()
+                if normalized_name in existing_by_name:
+                    if skip_exists:
+                        created_tags.append(existing_by_name[normalized_name])
+                        continue
+                    return jsonify({
+                        'success': False,
+                        'error': f"Tag already exists: {item['name']}"
+                    }), 409
+
+                tag_id = loop.run_until_complete(db.create_tag(item, user_id=request.user_id))
+                created_tag = loop.run_until_complete(db.get_tag_by_id(tag_id, user_id=request.user_id))
+                if created_tag:
+                    created_tags.append(created_tag)
+                    existing_by_name[normalized_name] = created_tag
         finally:
             loop.close()
 
         return jsonify({
             'success': True,
-            'result': tags
-        })
+            'result': created_tags
+        }), 201
     except Exception as e:
-        logger.error("获取标签列表失败: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@bp_v1.route('/v1/transaction/tags/add.json', methods=['POST'])
-@log_method
-@require_auth
-def add_tag_v1():
-    """创建标签 (v1兼容)"""
-    try:
-        data = request.get_json()
-        logger.info(f"[创建标签] 收到请求数据: {data}")
-
-        if not data or 'name' not in data:
-            logger.error(f"[创建标签] 缺少name字段: {data}")
-            return jsonify({'success': False, 'error': 'name is required'}), 400
-
-        logger.info(f"[创建标签] 标签名称: {data['name']}")
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            tag_id = loop.run_until_complete(db.create_tag(data, user_id=request.user_id))
-            logger.info(f"[创建标签] 成功创建标签，ID: {tag_id}")
-        finally:
-            loop.close()
-
-        result = {
-            'id': str(tag_id),
-            'name': data['name'],
-            'color': data.get('color', '#000000'),
-            'icon': data.get('icon', ''),
-            'hidden': False
-        }
-        logger.info(f"[创建标签] 返回结果: {result}")
-
+        logger.error("批量创建标签失败: %s", e, exc_info=True)
         return jsonify({
-            'success': True,
-            'result': result
-        })
-    except Exception as e:
-        logger.error("创建标签失败: %s", e, exc_info=True)
-        return jsonify({'success': False, 'error': str(e)}), 500
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
-@bp_v1.route('/v1/transaction/tags/modify.json', methods=['POST'])
+@bp.route('/display-orders', methods=['PUT'])
 @log_method
 @require_auth
-def modify_tag_v1():
-    """更新标签 (v1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({'success': False, 'error': 'id is required'}), 400
-
-        tag_id = int(data.pop('id'))
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.update_tag(tag_id, data, user_id=request.user_id))
-        finally:
-            loop.close()
-
-        if result:
-            return jsonify({'success': True, 'result': {}})
-        return jsonify({'success': False, 'error': 'Tag not found'}), 404
-    except Exception as e:
-        logger.error("更新标签失败: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@bp_v1.route('/v1/transaction/tags/hide.json', methods=['POST'])
-@log_method
-@require_auth
-def hide_tag_v1():
-    """隐藏标签 (v1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({'success': False, 'error': 'id is required'}), 400
-
-        tag_id = int(data['id'])
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.update_tag(tag_id, {'hidden': True}, user_id=request.user_id))
-        finally:
-            loop.close()
-
-        if result:
-            return jsonify({'success': True, 'result': {}})
-        return jsonify({'success': False, 'error': 'Tag not found'}), 404
-    except Exception as e:
-        logger.error("隐藏标签失败: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@bp_v1.route('/v1/transaction/tags/show.json', methods=['POST'])
-@log_method
-@require_auth
-def show_tag_v1():
-    """显示标签 (v1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({'success': False, 'error': 'id is required'}), 400
-
-        tag_id = int(data['id'])
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.update_tag(tag_id, {'hidden': False}, user_id=request.user_id))
-        finally:
-            loop.close()
-
-        if result:
-            return jsonify({'success': True, 'result': {}})
-        return jsonify({'success': False, 'error': 'Tag not found'}), 404
-    except Exception as e:
-        logger.error("显示标签失败: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@bp_v1.route('/v1/transaction/tags/delete.json', methods=['POST'])
-@log_method
-@require_auth
-def delete_tag_v1():
-    """删除标签 (v1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({'success': False, 'error': 'id is required'}), 400
-
-        tag_id = int(data['id'])
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.delete_tag(tag_id, user_id=request.user_id))
-        finally:
-            loop.close()
-
-        if result:
-            return jsonify({'success': True, 'result': {}})
-        return jsonify({'success': False, 'error': 'Tag not found'}), 404
-    except Exception as e:
-        logger.error("删除标签失败: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@bp_v1.route('/v1/transaction/tags/move.json', methods=['POST'])
-@log_method
-@require_auth
-def move_tags_v1():
-    """批量更新标签显示顺序 (v1兼容)"""
+def update_tag_display_orders_rest():  # pylint: disable=too-many-return-statements
+    """批量更新标签显示顺序 - REST API"""
     try:
         data = request.get_json()
         if not data or 'newDisplayOrders' not in data:
-            return jsonify({'success': False, 'error': 'newDisplayOrders is required'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'newDisplayOrders is required'
+            }), 400
 
         new_orders = data['newDisplayOrders']
         if not isinstance(new_orders, list):
-            return jsonify({'success': False, 'error': 'newDisplayOrders must be an array'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'newDisplayOrders must be an array'
+            }), 400
 
-        # 转换为数据库格式: [(tag_id, display_order), ...]
         orders = []
         for item in new_orders:
             if not isinstance(item, dict) or 'id' not in item or 'displayOrder' not in item:
@@ -393,19 +283,24 @@ def move_tags_v1():
                     'error': f'Invalid id or displayOrder: {e}'
                 }), 400
 
-        logger.info(f"[move_tags_v1] 更新{len(orders)}个标签的显示顺序")
+        logger.info("[标签排序更新] 开始: user_id=%s, count=%s", request.user_id, len(orders))
 
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(db.update_tag_display_orders(orders, user_id=request.user_id))
+            result = loop.run_until_complete(
+                db.update_tag_display_orders(orders, user_id=request.user_id)
+            )
         finally:
             loop.close()
 
         if result:
+            logger.info("[标签排序更新] 完成: user_id=%s, count=%s", request.user_id, len(orders))
             return jsonify({'success': True, 'result': True})
         return jsonify({'success': False, 'error': 'Failed to update display orders'}), 500
     except Exception as e:
         logger.error("更新标签显示顺序失败: %s", e, exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
+
+

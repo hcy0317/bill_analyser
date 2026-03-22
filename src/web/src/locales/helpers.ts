@@ -158,7 +158,12 @@ import type { ErrorResponse } from '@/core/api.ts';
 import { DISPLAY_HIDDEN_AMOUNT, INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
 import { UTC_TIMEZONE, ALL_TIMEZONES } from '@/consts/timezone.ts';
 import { ALL_CURRENCIES } from '@/consts/currency.ts';
-import { DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES, DEFAULT_TRANSFER_CATEGORIES } from '@/consts/category.ts';
+import {
+    DEFAULT_EXPENSE_CATEGORIES,
+    DEFAULT_INCOME_CATEGORIES,
+    DEFAULT_TRANSFER_CATEGORIES,
+    DEFAULT_INVESTMENT_CATEGORIES
+} from '@/consts/category.ts';
 import { KnownErrorCode, SPECIFIED_API_NOT_FOUND_ERRORS, PARAMETERIZED_ERRORS } from '@/consts/api.ts';
 import { OAUTH2_PROVIDER_DISPLAY_NAME } from '@/consts/oauth2.ts';
 import { DEFAULT_DOCUMENT_LANGUAGE_FOR_IMPORT_FILE, SUPPORTED_DOCUMENT_LANGUAGES_FOR_IMPORT_FILE, SUPPORTED_IMPORT_FILE_CATEGORY_AND_TYPES } from '@/consts/file.ts';
@@ -1361,6 +1366,8 @@ export function useI18n() {
                 defaultCategories = DEFAULT_EXPENSE_CATEGORIES;
             } else if (categoryType === CategoryType.Transfer) {
                 defaultCategories = DEFAULT_TRANSFER_CATEGORIES;
+            } else if (categoryType === CategoryType.Investment) {
+                defaultCategories = DEFAULT_INVESTMENT_CATEGORIES;
             }
 
             for (const category of defaultCategories) {
@@ -1369,6 +1376,7 @@ export function useI18n() {
                     type: categoryType,
                     icon: category.categoryIconId,
                     color: category.color,
+                    keywords: category.keywords || '',
                     subCategories: []
                 };
 
@@ -1377,7 +1385,8 @@ export function useI18n() {
                         name: t('category.' + subCategory.name, {}, { locale: locale }),
                         type: categoryType,
                         icon: subCategory.categoryIconId,
-                        color: subCategory.color
+                        color: subCategory.color,
+                        keywords: subCategory.keywords || ''
                     };
 
                     submitCategory.subCategories.push(submitSubCategory);

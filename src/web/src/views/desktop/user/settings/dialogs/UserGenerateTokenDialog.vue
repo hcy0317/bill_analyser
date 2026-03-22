@@ -178,7 +178,7 @@ const tokenTypeOptions = computed<NameValue[]>(() => {
 });
 
 const apiExample = computed<string>(() => {
-    return `curl -H 'Authorization: Bearer ${generatedToken.value}' '${serverUrl.value}/v1/users/profile/get.json'`;
+    return `curl -H 'Authorization: Bearer ${generatedToken.value}' '${serverUrl.value}/profile'`;
 });
 
 const mcpServerConfiguration = computed<string>(() => {

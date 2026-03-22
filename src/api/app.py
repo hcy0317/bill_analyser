@@ -35,97 +35,17 @@ from src.utils.logger import get_logger
 # 导入蓝图
 from src.api.routes import bills, categories, statistics, accounts, tags, templates, auth, budgets, backup
 
+try:
+    from src.api.routes import ml
+except ImportError:  # pylint: disable=import-error
+    ml = None
+
 logger = get_logger('WebAPI')
 
 # 全局实例
 db: Database = None
 category_engine: CategoryEngine = None
 bill_service: BillService = None
-
-
-class URLRewriteMiddleware:
-    """WSGI中间件 - 在Flask处理之前重写v1旧路径"""
-
-    def __init__(self, flask_app):
-        self.app = flask_app
-        self.logger = get_logger('URLRewrite')
-
-    def __call__(self, environ, start_response):
-        """WSGI应用接口"""
-        import re  # pylint: disable=import-outside-toplevel
-
-        path = environ.get('PATH_INFO', '')
-        method = environ.get('REQUEST_METHOD', 'GET')
-
-        # 记录所有v1请求
-        if '/v1/' in path:
-            self.logger.info(f"收到v1请求: {method} {path}")
-
-        # v1路径映射规则
-        simple_mappings = {
-            # 账户相关
-            r'^/api/v1/accounts/list\.json$': '/api/accounts/',
-            r'^/api/v1/accounts/add\.json$': '/api/accounts/',
-            r'^/api/v1/accounts/get\.json$': '/api/accounts/get',
-            r'^/api/v1/accounts/modify\.json$': '/api/accounts/modify',
-            r'^/api/v1/accounts/hide\.json$': '/api/accounts/hide',
-            r'^/api/v1/accounts/delete\.json$': '/api/accounts/delete',
-            r'^/api/v1/accounts/move\.json$': '/api/accounts/move',
-
-            # 交易相关（保持v1路径，不重写，让bills.py中的v1路由直接处理）
-            # r'^/api/v1/transactions/list\.json$': '/api/bills/',  # 禁用重写，使用bills.py中的get_transactions_v1
-            # r'^/api/v1/transactions/list/by_month\.json$': '/api/bills/by_month',  # 禁用重写，使用bills.py中的get_bills_by_month
-            r'^/api/v1/transactions/get\.json$': '/api/bills/get',
-            r'^/api/v1/transactions/add\.json$': '/api/bills/',
-            r'^/api/v1/transactions/modify\.json$': '/api/bills/modify',
-            r'^/api/v1/transactions/delete\.json$': '/api/bills/delete',
-            r'^/api/v1/transactions/import\.json$': '/api/bills/batch',
-            r'^/api/v1/transactions/parse_import\.json$': '/api/bills/parse_import',
-            r'^/api/v1/transactions/reconciliation_statements\.json$': '/api/bills/reconciliation_statements',
-
-            # 分类相关
-            r'^/api/v1/transaction/categories/list\.json$': '/api/categories/',
-            r'^/api/v1/transaction/categories/add\.json$': '/api/categories/',
-            r'^/api/v1/transaction/categories/add_batch\.json$': '/api/categories/batch',
-
-            # 模板相关
-            r'^/api/v1/transaction/templates/list\.json$': '/api/templates/',
-            r'^/api/v1/transaction/templates/add\.json$': '/api/templates/',
-
-            # 统计相关 - 保留amounts和exchange_rates重写，其他让statistics.py的bp_v1处理
-            # r'^/api/v1/transactions/statistics\.json$': 禁用，使用statistics.py的bp_v1
-            # r'^/api/v1/transactions/statistics/trends\.json$': 禁用，使用statistics.py的bp_v1
-            # r'^/api/v1/transactions/statistics/asset_trends\.json$': 禁用，使用statistics.py的bp_v1
-            r'^/api/v1/transactions/amounts\.json$': '/api/statistics/amounts',
-            r'^/api/v1/exchange_rates/latest\.json$': '/api/statistics/exchange-rates',
-
-            # 用户相关
-            r'^/api/v1/users/profile/get\.json$': '/api/v1/users/profile.json',
-            r'^/api/v1/users/profile/update\.json$': '/api/v1/users/profile.json',
-            r'^/api/v1/users/login\.json$': '/api/authorize.json',
-
-            # 令牌相关
-            r'^/api/v1/tokens/list\.json$': '/api/v1/tokens/list.json',
-
-            # 2FA相关
-            r'^/api/v1/users/2fa/status\.json$': '/api/v1/users/2fa/status.json',
-
-            # 用户数据统计
-            r'^/api/v1/data/statistics\.json$': '/api/v1/data/statistics.json',
-        }
-
-        # 尝试简单映射
-        for pattern, replacement in simple_mappings.items():
-            if re.match(pattern, path):
-                self.logger.info(f"URL重写: {path} -> {replacement}")
-                environ['PATH_INFO'] = replacement
-                break
-
-        # 记录未匹配的v1请求
-        if '/v1/' in path and environ.get('PATH_INFO', '') == path:
-            self.logger.warning(f"未匹配的v1路径: {path}")
-
-        return self.app(environ, start_response)
 
 
 def create_app():
@@ -162,47 +82,39 @@ def create_app():
         }
     })
 
-    # 应用URL重写中间件（WSGI级别）
-    flask_app.wsgi_app = URLRewriteMiddleware(flask_app.wsgi_app)
-
     # 调试日志 - 记录所有请求的关键信息
     @flask_app.before_request
     def log_request_details():
         """记录所有请求的详细信息，特别是OPTIONS预检和Authorization头"""
         from flask import request as flask_request  # pylint: disable=import-outside-toplevel
 
-        # 记录OPTIONS预检请求
+        # v6.72: OPTIONS预检请求改为DEBUG级别，减少日志输出
         if flask_request.method == 'OPTIONS':
-            logger.info(f"[CORS Preflight] {flask_request.path}")
-            logger.info(f"[CORS Preflight] Origin: {flask_request.headers.get('Origin', 'N/A')}")
+            logger.debug(f"[CORS Preflight] {flask_request.path}")
+            logger.debug(f"[CORS Preflight] Origin: {flask_request.headers.get('Origin', 'N/A')}")
             access_control_header = flask_request.headers.get(
                 'Access-Control-Request-Headers', 'N/A'
             )
-            logger.info(f"[CORS Preflight] Access-Control-Request-Headers: {access_control_header}")
+            logger.debug(f"[CORS Preflight] Access-Control-Request-Headers: {access_control_header}")
 
-        # 记录所有/api/accounts请求，检查Authorization头
+        # v6.72: 账户请求调试日志改为DEBUG级别，仅在Authorization头缺失时用WARNING
         if '/api/accounts' in flask_request.path:
             auth_header = flask_request.headers.get('Authorization', None)
-            logger.info(f"[Request Debug] {flask_request.method} {flask_request.path}")
-            logger.info(f"[Request Debug] Has Authorization: {bool(auth_header)}")
+            logger.debug(f"[Request Debug] {flask_request.method} {flask_request.path}")
+            logger.debug(f"[Request Debug] Has Authorization: {bool(auth_header)}")
             if auth_header:
-                logger.info(f"[Request Debug] Authorization: {auth_header[:30]}...")
+                logger.debug(f"[Request Debug] Authorization: {auth_header[:30]}...")
             else:
+                # 仅当缺少Authorization头时记录WARNING（实际问题）
                 logger.warning("[Request Debug] Missing Authorization header!")
-                logger.info(f"[Request Debug] All headers: {dict(flask_request.headers)}")
+                logger.debug(f"[Request Debug] All headers: {dict(flask_request.headers)}")
 
-        # 记录v1路径请求
+        # v6.72: 记录v1路径请求改为DEBUG级别
         if '/v1/' in flask_request.path:
             logger.debug(f"v1请求: {flask_request.method} {flask_request.path}")
 
     # 注册认证蓝图（在/api路径下，以匹配前端axios的baseURL配置）
     flask_app.register_blueprint(auth.bp, url_prefix='/api')
-
-    # 注册v1 API兼容蓝图（直接在/api下，不加前缀，匹配 /api/v1/... 路径）
-    flask_app.register_blueprint(bills.bp_v1, url_prefix='/api')
-    flask_app.register_blueprint(statistics.bp_v1, url_prefix='/api')  # 统计分析v1兼容API
-    flask_app.register_blueprint(tags.bp_v1, url_prefix='/api')  # 标签v1兼容API
-    flask_app.register_blueprint(budgets.bp_v1, url_prefix='/api')  # 预算v1兼容API
 
     # 注册其他业务蓝图
     flask_app.register_blueprint(bills.bp, url_prefix='/api/bills')
@@ -213,6 +125,8 @@ def create_app():
     flask_app.register_blueprint(templates.bp, url_prefix='/api/templates')
     flask_app.register_blueprint(budgets.bp, url_prefix='/api/budgets')
     flask_app.register_blueprint(backup.bp, url_prefix='/api/backup')
+    if ml is not None:
+        flask_app.register_blueprint(ml.bp, url_prefix='/api/ml')  # v6.88: ML分类器
 
     # 健康检查端点
     @flask_app.route('/api/health', methods=['GET'])
@@ -259,6 +173,15 @@ async def initialize(db_path: str = None):
     try:
         logger.info("=" * 50)
         logger.info("初始化Web API服务器")
+
+        # 测试场景下 initialize() 可能被重复调用。
+        # 先关闭旧的数据库连接，避免遗留 aiosqlite 线程导致进程无法退出。
+        if db is not None:
+            try:
+                await db.close()
+                logger.info("[OK] 已关闭旧数据库连接")
+            except Exception as close_err:  # pylint: disable=broad-except
+                logger.warning(f"关闭旧数据库连接失败: {close_err}")
 
         # 初始化数据库
         db = Database(db_path=db_path)

@@ -443,3 +443,50 @@ export const DEFAULT_TRANSFER_CATEGORIES: PresetCategory[] = [
         ]
     }
 ];
+
+export const DEFAULT_INVESTMENT_CATEGORIES: PresetCategory[] = [
+    {
+        name: 'Investment Principal',
+        categoryIconId: '800',
+        color: 'ff9500',
+        subCategories: [
+            {
+                name: 'Fund Investment',
+                categoryIconId: '810',
+                color: 'ff9500'
+            },
+            {
+                name: 'Stock Investment',
+                categoryIconId: '820',
+                color: 'ff9500'
+            },
+            {
+                name: 'Wealth Management',
+                categoryIconId: '830',
+                color: 'ff9500'
+            }
+        ]
+    },
+    {
+        name: 'Alternative Investments',
+        categoryIconId: '840',
+        color: '607d8b',
+        subCategories: [
+            {
+                name: 'Gold Investment',
+                categoryIconId: '850',
+                color: '607d8b'
+            },
+            {
+                name: 'Crypto Investment',
+                categoryIconId: '860',
+                color: '607d8b'
+            },
+            {
+                name: 'Other Investment',
+                categoryIconId: '890',
+                color: '607d8b'
+            }
+        ]
+    }
+];

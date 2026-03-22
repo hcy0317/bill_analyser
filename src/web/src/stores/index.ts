@@ -403,8 +403,16 @@ export const useRootStore = defineStore('root', () => {
             }).catch(error => {
                 logger.error('failed to sign up', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
+                if (error.response && error.response.data) {
+                    const errorData = error.response.data;
+                    if (errorData.errorMessage || errorData.message) {
+                        reject({ message: errorData.errorMessage || errorData.message, error: errorData });
+                        return;
+                    }
+                    if (!error.processed) {
+                        reject({ message: 'Unable to sign up', error: errorData });
+                        return;
+                    }
                 } else if (!error.processed) {
                     reject({ message: 'Unable to sign up' });
                 } else {

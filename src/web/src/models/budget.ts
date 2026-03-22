@@ -67,6 +67,14 @@ export interface BudgetForecastItem {
     readonly budgetAmount: number;         // 预算金额（分）
     readonly projectedOverBudget: boolean; // 预计是否超预算
     readonly trend: 'up' | 'down' | 'stable'; // 趋势：上升/下降/稳定
+    readonly samplePeriods?: number;       // 样本周期数
+    readonly strategyExplanation?: string; // 策略说明
+    readonly backtestMape?: number | null; // 回测MAPE
+    readonly confidence?: 'high' | 'medium' | 'low'; // 置信等级
+    readonly periods?: Array<{            // 历史周期明细（用于图表）
+        readonly period: string;          // 周期标识（如 YYYY-MM）
+        readonly amount: number;          // 该周期金额（分）
+    }>;
 }
 
 /**
@@ -78,6 +86,14 @@ export interface BudgetForecastResponse {
     readonly periodEnd: string;                 // 预计周期结束
     readonly daysRemaining: number;             // 剩余天数
     readonly daysElapsed: number;               // 已过天数
+    readonly forecastStrategy?: string;         // 预测策略
+    readonly historyPeriods?: number;           // 历史周期数
+    readonly avgBacktestMape?: number | null;   // 平均回测MAPE
+}
+
+export enum BudgetForecastStrategy {
+    HistoricalAverage = 'historical_average',
+    MovingAverage = 'moving_average'
 }
 
 // ============================================================================
@@ -143,6 +159,58 @@ export interface BudgetExecutionRequest {
     readonly year?: number;                // 年份
     readonly month?: number;               // 月份（1-12）
     readonly quarter?: number;             // 季度（1-4）
+    readonly startDate?: string;           // 自定义开始日期
+    readonly endDate?: string;             // 自定义结束日期
+}
+
+/**
+ * 预算历史查询请求
+ */
+export interface BudgetHistoryRequest {
+    readonly type?: BudgetType;             // 预算类型
+    readonly periodType?: BudgetPeriodType; // 周期类型
+    readonly year?: number;                 // 年份
+    readonly month?: number;                // 月份（1-12）
+    readonly quarter?: number;              // 季度（1-4）
+    readonly startDate?: string;            // 查询开始日期
+    readonly endDate?: string;              // 查询结束日期
+    readonly budgetId?: string;             // 预算ID
+    readonly categoryId?: string;           // 分类ID
+    readonly accountIds?: string[];         // 账户ID列表
+    readonly tagIds?: string[];             // 标签ID列表
+}
+
+/**
+ * 预算历史快照项
+ */
+export interface BudgetHistoryItem {
+    readonly id: string;                    // 快照ID
+    readonly budgetId: string;              // 预算ID
+    readonly name: string;                  // 预算名称
+    readonly category: string;              // 主分类
+    readonly subCategory: string;           // 子分类
+    readonly periodType: BudgetPeriodType;  // 周期类型
+    readonly periodStart: string;           // 周期开始
+    readonly periodEnd: string;             // 周期结束
+    readonly budgetAmount: number;          // 预算金额（分）
+    readonly spentAmount: number;           // 已花费金额（分）
+    readonly remainingAmount: number;       // 剩余金额（分）
+    readonly executionRate: number;         // 执行率
+    readonly status: string;                // 状态
+    readonly filterSummary: string;         // 筛选摘要
+    readonly calculatedAt: string;          // 计算时间
+    readonly alertThreshold: number;        // 预警阈值
+    readonly enabled: boolean;              // 是否启用
+}
+
+/**
+ * 预算历史响应
+ */
+export interface BudgetHistoryResponse {
+    readonly items: BudgetHistoryItem[];    // 历史快照列表
+    readonly count: number;                 // 数量
+    readonly periodStart: string;           // 查询范围开始
+    readonly periodEnd: string;             // 查询范围结束
 }
 
 /**
@@ -152,6 +220,7 @@ export interface BudgetForecastRequest {
     readonly type?: BudgetType;            // 预算类型
     readonly periodType?: BudgetPeriodType;// 周期类型
     readonly monthsHistory?: number;       // 历史数据月数（默认6）
+    readonly forecastStrategy?: BudgetForecastStrategy; // 预测策略
 }
 
 /**

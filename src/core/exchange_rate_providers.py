@@ -2,10 +2,14 @@
 Exchange Rate Providers - 汇率数据源提供者
 
 支持多个央行和金融机构的汇率数据获取
+
+v6.79: 添加SSL证书支持，修复SSLCertVerificationError问题
 """
 
 import aiohttp
 import asyncio
+import ssl
+import certifi
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -20,6 +24,8 @@ class ExchangeRateProvider(ABC):
     def __init__(self):
         self.logger = get_logger(self.__class__.__name__)
         self.timeout = aiohttp.ClientTimeout(total=30)
+        # v6.79: 创建使用certifi证书的SSL上下文，解决证书验证失败问题
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 
     @abstractmethod
     async def fetch_rates(
@@ -50,6 +56,71 @@ class ExchangeRateProvider(ABC):
     def get_supported_currencies(self) -> List[str]:
         """获取支持的货币列表"""
         pass
+
+    def _convert_base_currency(
+        self,
+        rates: Dict[str, float],
+        original_base: str,
+        target_base: str,
+        target_currencies: List[str],
+        rate_format: str = 'base_to_target'
+    ) -> Dict[str, float]:
+        """
+        转换基准货币
+        
+        将以 original_base 为基准的汇率转换为以 target_base 为基准的汇率
+        
+        Args:
+            rates: 原始汇率字典 {货币: 汇率}
+            original_base: 原始基准货币 (如 EUR, CAD)
+            target_base: 目标基准货币 (如 CNY)
+            target_currencies: 需要返回的目标货币列表
+            rate_format: 汇率数据格式
+                - 'base_to_target': rates[X] = "1 original_base = ? X"
+                  例如 ECB: rates['CNY']=7.69 表示 1 EUR = 7.69 CNY
+                - 'target_to_base': rates[X] = "1 X = ? original_base"
+                  例如 BOC: rates['USD']=1.38 表示 1 USD = 1.38 CAD
+            
+        Returns:
+            Dict[str, float]: {货币: 相对于target_base的汇率}，格式为 "1 target_base = ? currency"
+        """
+        if original_base == target_base:
+            return {c: rates.get(c, 0) for c in target_currencies if c in rates}
+        
+        result = {}
+        base_rate = rates.get(target_base)
+        if not base_rate:
+            self.logger.warning(f"目标基准货币 {target_base} 不在汇率数据中")
+            return result
+        
+        for currency in target_currencies:
+            if currency == target_base:
+                result[currency] = 1.0
+            elif currency == original_base:
+                # 原基准货币相对于新基准货币的汇率
+                if rate_format == 'base_to_target':
+                    # ECB格式: rates[CNY]=7.69 表示 1 EUR = 7.69 CNY
+                    # CNY/EUR = 1/7.69 (1 CNY = 1/7.69 EUR)
+                    result[currency] = 1.0 / base_rate
+                else:
+                    # BOC格式: rates[CNY]=0.19 表示 1 CNY = 0.19 CAD
+                    # CNY/CAD = 0.19 (1 CNY = 0.19 CAD)
+                    result[currency] = base_rate
+            elif currency in rates:
+                if rate_format == 'base_to_target':
+                    # ECB格式: rates[CNY]=7.69, rates[USD]=1.09
+                    # 表示 1 EUR = 7.69 CNY, 1 EUR = 1.09 USD
+                    # CNY/USD = rates[USD] / rates[CNY] = 1.09/7.69 ≈ 0.1417
+                    # (1 CNY = 0.1417 USD)
+                    result[currency] = rates[currency] / base_rate
+                else:
+                    # BOC格式: rates[CNY]=0.19, rates[USD]=1.38
+                    # 表示 1 CNY = 0.19 CAD, 1 USD = 1.38 CAD
+                    # CNY/USD = rates[CNY] / rates[USD] = 0.19/1.38 ≈ 0.1377
+                    # (1 CNY = 0.1377 USD)
+                    result[currency] = base_rate / rates[currency]
+                
+        return result
 
 
 class ECBProvider(ExchangeRateProvider):
@@ -83,7 +154,9 @@ class ECBProvider(ExchangeRateProvider):
             # ECB的基准货币是EUR
             url = self.BASE_URL if date is None else self.HIST_URL
             
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # v6.79: 使用SSL连接器解决证书验证问题
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
                         self.logger.error(f"ECB API请求失败: {response.status}")
@@ -92,8 +165,11 @@ class ECBProvider(ExchangeRateProvider):
                     xml_data = await response.text()
                     rates = self._parse_ecb_xml(xml_data, date)
                     
-                    # 转换基准货币
-                    return self._convert_base_currency(rates, 'EUR', base_currency, target_currencies)
+                    # 转换基准货币 (ECB 使用 base_to_target 格式: rates[USD]=1.09 表示 1 EUR = 1.09 USD)
+                    return self._convert_base_currency(
+                        rates, 'EUR', base_currency, target_currencies, 
+                        rate_format='base_to_target'
+                    )
                     
         except Exception as e:
             self.logger.error(f"获取ECB汇率失败: {e}")
@@ -126,31 +202,6 @@ class ECBProvider(ExchangeRateProvider):
             self.logger.error(f"解析ECB XML失败: {e}")
             
         return rates
-
-    def _convert_base_currency(
-        self,
-        rates: Dict[str, float],
-        original_base: str,
-        target_base: str,
-        target_currencies: List[str]
-    ) -> Dict[str, float]:
-        """转换基准货币"""
-        if original_base == target_base:
-            return {c: rates.get(c, 0) for c in target_currencies if c in rates}
-        
-        result = {}
-        base_rate = rates.get(target_base)
-        if not base_rate:
-            return result
-        
-        for currency in target_currencies:
-            if currency == target_base:
-                result[currency] = 1.0
-            elif currency in rates:
-                # 转换公式: 新汇率 = 原汇率 / 新基准汇率
-                result[currency] = rates[currency] / base_rate
-                
-        return result
 
 
 class BOCProvider(ExchangeRateProvider):
@@ -189,8 +240,13 @@ class BOCProvider(ExchangeRateProvider):
             
             rates = {'CAD': 1.0}
             
+            # v6.79: 构建请求的货币列表，必须包含 base_currency 以支持基准货币转换
+            currencies_to_fetch = set(target_currencies)
+            if base_currency in series_map:
+                currencies_to_fetch.add(base_currency)
+            
             # 构建请求的系列列表
-            series_codes = [series_map.get(c) for c in target_currencies if c in series_map]
+            series_codes = [series_map[c] for c in currencies_to_fetch if c in series_map]
             if not series_codes:
                 return {}
             
@@ -200,7 +256,9 @@ class BOCProvider(ExchangeRateProvider):
             if date:
                 url += f"?start_date={date}&end_date={date}"
             
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # v6.79: 使用SSL连接器解决证书验证问题
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
                         self.logger.error(f"BOC API请求失败: {response.status}")
@@ -216,7 +274,10 @@ class BOCProvider(ExchangeRateProvider):
                                 if rate_value:
                                     rates[currency] = float(rate_value)
                     
-                    return self._convert_base_currency(rates, 'CAD', base_currency, target_currencies)
+                    return self._convert_base_currency(
+                        rates, 'CAD', base_currency, target_currencies,
+                        rate_format='target_to_base'
+                    )
                     
         except Exception as e:
             self.logger.error(f"获取BOC汇率失败: {e}")
@@ -247,7 +308,9 @@ class RBAProvider(ExchangeRateProvider):
     ) -> Dict[str, float]:
         """从RBA获取汇率"""
         try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # v6.79: 使用SSL连接器解决证书验证问题
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(self.BASE_URL) as response:
                     if response.status != 200:
                         self.logger.error(f"RBA API请求失败: {response.status}")
@@ -256,36 +319,45 @@ class RBAProvider(ExchangeRateProvider):
                     xml_data = await response.text()
                     rates = self._parse_rba_xml(xml_data)
                     
-                    return self._convert_base_currency(rates, 'AUD', base_currency, target_currencies)
+                    # RBA格式: rates['USD'] = 0.6602 表示 1 AUD = 0.6602 USD (base_to_target)
+                    return self._convert_base_currency(
+                        rates, 'AUD', base_currency, target_currencies,
+                        rate_format='base_to_target'
+                    )
                     
         except Exception as e:
             self.logger.error(f"获取RBA汇率失败: {e}")
             return {}
 
     def _parse_rba_xml(self, xml_data: str) -> Dict[str, float]:
-        """解析RBA XML数据"""
+        """解析RBA XML数据
+        
+        RBA 使用 RDF/XML 格式，标题格式为 "AU: 0.6602 USD = 1 AUD ..."
+        表示 0.6602 USD = 1 AUD，即 1 AUD = 0.6602 USD
+        
+        我们使用正则表达式从 <cb:targetCurrency> 和 <cb:value> 标签提取数据
+        """
+        import re
         rates = {'AUD': 1.0}
         
         try:
-            root = ET.fromstring(xml_data)
+            # 使用正则表达式提取每个 item 块
+            # 格式: <cb:targetCurrency>USD</cb:targetCurrency> 和 <cb:value>0.6602</cb:value>
+            item_pattern = r'<item[^>]*>.*?</item>'
+            items = re.findall(item_pattern, xml_data, re.DOTALL)
             
-            # RBA RSS格式
-            for item in root.findall('.//item'):
-                title = item.find('title')
-                description = item.find('description')
+            for item in items:
+                # 提取目标货币
+                currency_match = re.search(r'<cb:targetCurrency>(\w+)</cb:targetCurrency>', item)
+                # 提取汇率值
+                value_match = re.search(r'<cb:value>([0-9.]+)</cb:value>', item)
                 
-                if title is not None and description is not None:
-                    # 标题格式: "1 AUD = X.XX USD"
-                    title_text = title.text
-                    if '=' in title_text:
-                        parts = title_text.split('=')
-                        if len(parts) == 2:
-                            rate_part = parts[1].strip().split()
-                            if len(rate_part) >= 2:
-                                rate_value = float(rate_part[0])
-                                currency = rate_part[1]
-                                rates[currency] = rate_value
-                                
+                if currency_match and value_match:
+                    currency = currency_match.group(1)
+                    rate_value = float(value_match.group(1))
+                    rates[currency] = rate_value
+                    self.logger.debug(f"RBA 解析: {currency} = {rate_value}")
+                    
         except Exception as e:
             self.logger.error(f"解析RBA XML失败: {e}")
             
@@ -321,7 +393,9 @@ class NBPProvider(ExchangeRateProvider):
                 url += f"/{date}"
             url += "?format=json"
             
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # v6.79: 使用SSL连接器解决证书验证问题
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
                         self.logger.error(f"NBP API请求失败: {response.status}")
@@ -380,7 +454,9 @@ class SNBProvider(ExchangeRateProvider):
         """从SNB获取汇率"""
         try:
             # SNB CSV格式较复杂，这里简化处理
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            # v6.79: 使用SSL连接器解决证书验证问题
+            connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+            async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(self.BASE_URL) as response:
                     if response.status != 200:
                         self.logger.error(f"SNB API请求失败: {response.status}")

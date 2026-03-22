@@ -8,13 +8,13 @@ from flask import Blueprint, request, jsonify, Response
 
 from src.utils.logger import get_logger, log_method
 from src.utils.config import save_config
-from src.api.adapters.v1_category_adapter import V1CategoryAdapter
+from src.api.adapters.category_adapter import CategoryAdapter
 from src.api.middleware.auth import require_auth
 
 logger = get_logger('CategoriesAPI')
 
 bp = Blueprint('categories', __name__)
-category_adapter = V1CategoryAdapter()
+category_adapter = CategoryAdapter()
 
 # 分类图标映射 (MDI图标)
 CATEGORY_ICONS = {
@@ -62,12 +62,11 @@ CATEGORY_ICONS = {
 
 def get_app_context(user_id: int = None):
     """获取应用上下文中的服务实例
-    
+
     Args:
         user_id: 用户ID (如果为None，自动从request获取)
     """
-    from flask import current_app, request as flask_request
-    from src.api.adapters.v1_adapter import V1TransactionAdapter
+    from flask import current_app
 
     db = current_app.config.get('DB_INSTANCE')
     bill_service = current_app.config.get('BILL_SERVICE_INSTANCE')
@@ -75,12 +74,9 @@ def get_app_context(user_id: int = None):
 
     # 自动获取user_id
     if user_id is None:
-        user_id = getattr(flask_request, 'user_id', 1)
+        user_id = getattr(request, 'user_id', 1)
 
-    # 创建adapter实例(带数据库引用和用户ID)
-    adapter = V1TransactionAdapter(db=db, user_id=user_id)
-
-    return db, bill_service, category_engine, adapter
+    return db, bill_service, category_engine
 
 
 @bp.route('/', methods=['GET'])
@@ -89,7 +85,7 @@ def get_app_context(user_id: int = None):
 def get_categories():
     """获取所有分类"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -123,7 +119,7 @@ def create_category():
             logger.warning("请求数据为空")
             return jsonify({'success': False, 'error': 'No data provided'}), 400
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         name = data.get('name')
         parent_id = data.get('parentId', '0')
@@ -267,7 +263,7 @@ def update_category(category_id):
     """更新分类"""
     try:
         data = request.get_json()
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -399,7 +395,7 @@ def move_categories():
         if not new_display_orders:
             return jsonify({'success': True, 'result': True})
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -423,7 +419,7 @@ def move_categories():
 def delete_category(category_id):
     """删除分类"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -459,7 +455,7 @@ def delete_category(category_id):
 def get_flat_categories():
     """获取扁平分类列表"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -488,7 +484,7 @@ def get_flat_categories():
 def get_category_rules():
     """获取分类规则"""
     try:
-        _, _, category_engine, _ = get_app_context()
+        _, _, category_engine = get_app_context()
 
         return jsonify({
             'success': True,
@@ -521,7 +517,7 @@ def update_category_rules():
         save_config('categories.json', rules)
 
         # 重新加载规则
-        _, _, category_engine, _ = get_app_context()
+        _, _, category_engine = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(category_engine.load_rules())
@@ -551,7 +547,7 @@ def get_category_statistics():
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -614,7 +610,7 @@ def get_category_tree():
 def get_all_categories():
     """获取所有分类(原始列表)"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -675,7 +671,7 @@ def batch_create_categories():
             logger.warning("请求数据缺少categories字段")
             return jsonify({'success': False, 'error': 'No categories provided'}), 400
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         categories = data['categories']
         logger.info(f"准备创建 {len(categories)} 个分类")
 
@@ -762,7 +758,7 @@ def recategorize_all_bills():
         data = request.get_json() or {}
         force = data.get('force', False)
 
-        db, _, category_engine, _ = get_app_context()
+        db, _, category_engine = get_app_context()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -811,7 +807,7 @@ def export_categories():
     """导出分类为JSON（仅导出必要字段，不包含id和created_at）"""
     logger.info("收到导出分类请求")
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -880,7 +876,7 @@ def import_categories():
 
         logger.info(f"准备导入 {len(categories)} 个分类")
 
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -954,7 +950,7 @@ def import_categories():
 def get_category(category_id):
     """获取单个分类"""
     try:
-        db, _, _, _ = get_app_context()
+        db, _, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 

@@ -10,17 +10,24 @@ Bill Service Module - 账单导入服务
 """
 
 import asyncio
+import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from .db import Database
 from .category_engine import CategoryEngine
+from .investment_settings import (
+    DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS,
+    DEFAULT_INVESTMENT_PLATFORM_ALIASES,
+    DEFAULT_INVESTMENT_PRODUCT_PATTERNS,
+    build_user_investment_keyword_settings,
+)
 from .smart_dedup import SmartDeduplicationEngine, DeduplicationType
 from ..parsers.factory import ParserFactory
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.validator import BillValidator
 from ..utils.deduplication import DeduplicationEngine, DeduplicationMode
-from ..utils.constants import TransactionType  # v6.54: 分类类型过滤
+# v6.72: 移除 TransactionType 导入，分类类型过滤改为由 match_category() 内部自动处理
 
 
 class BillService:
@@ -239,35 +246,50 @@ class BillService:
                 self.logger.debug("分类规则加载: user_id=%d, 规则数=%d",
                                   user_id, len(self.category_engine.rules))
 
-            # v6.54: 基于 _dedup_type 分离账单，使用不同类型的分类规则
-            # - 转账配对账单：使用转账类关键词
-            # - 其他账单：使用支出、收入、投资类关键词（不使用转账类）
-            transfer_bills = [b for b in deduplicated_bills if b.get('_dedup_type') == 'transfer']
-            non_transfer_bills = [b for b in deduplicated_bills if b.get('_dedup_type') != 'transfer']
+            learned_seed_count = await self._apply_import_learning_rules(
+                deduplicated_bills,
+                user_id=user_id,
+                type_only=True,
+                record_usage=False
+            )
+            if learned_seed_count > 0:
+                self.logger.info("[长期学习] 分类前类型预填充 %d 条", learned_seed_count)
 
-            self.logger.info("[分类匹配] 转账配对账单: %d 条, 其他账单: %d 条",
-                             len(transfer_bills), len(non_transfer_bills))
+            # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型
+            # - 转账配对账单：使用转账类关键词（通过 _dedup_type='transfer' 识别）
+            # - 收入账单（amount > 0）：只使用收入类和投资类关键词
+            # - 支出账单（amount < 0）：只使用支出类和投资类关键词
+            # 不再需要在调用层分离账单，由 match_category() 内部根据金额自动判断
 
-            # 转账配对账单使用转账类型规则
-            transfer_categorized = []
-            if transfer_bills:
-                transfer_categorized = await self.category_engine.batch_match_categories(
-                    transfer_bills, types=[TransactionType.TRANSFER]
-                )
+            self.logger.info("[分类匹配] 共 %d 条账单待分类", len(deduplicated_bills))
 
-            # 其他账单使用支出、收入、投资类型规则（排除转账）
-            non_transfer_categorized = []
-            if non_transfer_bills:
-                non_transfer_categorized = await self.category_engine.batch_match_categories(
-                    non_transfer_bills,
-                    types=[TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.INVESTMENT]
-                )
+            # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
+            categorized_bills = await self.category_engine.batch_match_categories(
+                deduplicated_bills, types=None
+            )
 
-            categorized_bills = transfer_categorized + non_transfer_categorized
+            # 4.2 投资账单专门识别链路（平台/产品关键词）
+            self.logger.info("步骤 4.2/5: 投资候选识别")
+            categorized_bills = await self._detect_investment_candidates(
+                categorized_bills, user_id=user_id
+            )
 
             # 5. 账户匹配（基于账户名称）
             self.logger.info("步骤 4.5/5: 自动匹配账户")
             matched_bills = await self._match_accounts(categorized_bills, user_id)
+
+            # 6. v6.77: 存取转账检测（用户指定的分类自动转换为转账类型）
+            self.logger.info("步骤 4.6/5: 存取转账检测")
+            matched_bills = await self._detect_cash_transfers(matched_bills, user_id)
+
+            learned_replay_count = await self._apply_import_learning_rules(
+                matched_bills,
+                user_id=user_id,
+                type_only=False,
+                record_usage=True
+            )
+            if learned_replay_count > 0:
+                self.logger.info("[长期学习] 匹配后回放 %d 条", learned_replay_count)
 
             # 如果是预览模式，返回分类和匹配后的数据供前端确认
             if preview_only:
@@ -475,7 +497,8 @@ class BillService:
                             match_source = f"payment_method:{alias}"
                             break
 
-                # v6.39 优先级2: 从 description 中匹配账户别名
+                # v6.66: 优先级2: 从 description/counterparty 中匹配账户别名
+                # 将此优先级提前到 _parser_id 匹配之前
                 if not matched_account_id:
                     description = str(bill.get('description', ''))
                     counterparty = str(bill.get('counterparty', ''))
@@ -487,6 +510,40 @@ class BillService:
                             matched_account_id = alias_mapping[alias]
                             match_source = f"description:{alias}"
                             break
+
+                # M2-1: 历史账单记忆匹配（优先于 parser_id 回退）
+                if not matched_account_id:
+                    history_match = await self.db.get_historical_source_account_suggestion(
+                        user_id=user_id,
+                        payment_method=str(bill.get('payment_method', '')),
+                        counterparty=str(bill.get('counterparty', '')),
+                        description=str(bill.get('description', '')),
+                        bill_type=str(bill.get('type', '')),
+                    )
+                    if history_match:
+                        matched_account_id = history_match['account_id']
+                        match_source = (
+                            'history:' + ','.join(history_match.get('reasons', []))
+                        )
+
+                # v6.66: 优先级3（最低）- 使用 _parser_id 匹配账户（回退机制）
+                # _parser_id 是解析器标识，如 'alipay', 'wechat', 'abc', 'icbc' 等
+                # 仅当 payment_method 和 description/counterparty 都无法匹配时才使用
+                if not matched_account_id:
+                    parser_id = str(bill.get('_parser_id', '')).strip()
+                    if parser_id:
+                        parser_id_lower = parser_id.lower()
+                        for alias in sorted_aliases:
+                            if alias.lower() == parser_id_lower or \
+                               alias.lower() in parser_id_lower or \
+                               parser_id_lower in alias.lower():
+                                matched_account_id = alias_mapping[alias]
+                                match_source = f"parser_id:{alias}"
+                                self.logger.debug(
+                                    "[源账户-parser_id匹配] parser_id='%s' 匹配别名='%s'",
+                                    parser_id, alias
+                                )
+                                break
 
                 # 如果匹配到账户，更新账单
                 if matched_account_id:
@@ -504,8 +561,9 @@ class BillService:
                     # 未匹配到账户，清空（避免混淆）
                     bill['source_account_id'] = None
                     self.logger.debug(
-                        "源账户匹配失败: payment_method='%s', description='%s'",
+                        "源账户匹配失败: payment_method='%s', parser_id='%s', description='%s'",
                         payment_method[:20] if payment_method else '',
+                        str(bill.get('_parser_id', ''))[:20],
                         str(bill.get('description', ''))[:30]
                     )
 
@@ -522,10 +580,15 @@ class BillService:
                 )
 
                 if not is_valid_dest or str(current_dest_id) not in account_by_id:
-                    # 尝试从counterparty和description中匹配目标账户
+                    # v6.65: 优先使用 counterparty 和 description 匹配目标账户
                     counterparty = str(bill.get('counterparty', ''))
                     description = str(bill.get('description', ''))
-                    combined_text = f"{counterparty} {description}"
+                    parser_id = str(bill.get('_parser_id', ''))
+                    investment_hint = str(bill.get('_investment_hint', ''))
+                    # 将 parser_id 也加入匹配文本，当 counterparty/description 无法匹配时提供回退
+                    combined_text = (
+                        f"{counterparty} {description} {parser_id} {investment_hint}"
+                    )
                     combined_text_lower = combined_text.lower()
 
                     dest_account_id = None
@@ -540,6 +603,40 @@ class BillService:
                                 dest_match_source = alias
                                 break
 
+                    # v6.65: 如果上面匹配失败，单独尝试使用 parser_id 精确匹配
+                    if not dest_account_id and parser_id:
+                        parser_id_lower = parser_id.lower()
+                        for alias in sorted_aliases:
+                            if alias.lower() == parser_id_lower or \
+                               alias.lower() in parser_id_lower or \
+                               parser_id_lower in alias.lower():
+                                potential_id = alias_mapping[alias]
+                                if str(potential_id) != str(bill.get('source_account_id')):
+                                    dest_account_id = potential_id
+                                    dest_match_source = f"parser_id:{alias}"
+                                    break
+
+                    if not dest_account_id:
+                        history_dest = await self.db.get_historical_destination_account_suggestion(
+                            user_id=user_id,
+                            payment_method=str(bill.get('payment_method', '')),
+                            counterparty=counterparty,
+                            description=description,
+                            bill_type=str(bill.get('type', '')),
+                            source_account_id=(
+                                int(bill.get('source_account_id'))
+                                if isinstance(bill.get('source_account_id'), int) or
+                                (isinstance(bill.get('source_account_id'), str) and
+                                 str(bill.get('source_account_id')).isdigit())
+                                else None
+                            )
+                        )
+                        if history_dest:
+                            dest_account_id = history_dest['account_id']
+                            dest_match_source = (
+                                'history:' + ','.join(history_dest.get('reasons', []))
+                            )
+
                     if dest_account_id:
                         dest_account = account_by_id.get(str(dest_account_id))
                         if dest_account:
@@ -551,8 +648,9 @@ class BillService:
                             )
                     else:
                         self.logger.debug(
-                            "[投资目标账户] 匹配失败: counterparty='%s'",
-                            counterparty[:30] if counterparty else ''
+                            "[投资目标账户] 匹配失败: counterparty='%s', parser_id='%s'",
+                            counterparty[:30] if counterparty else '',
+                            parser_id[:20] if parser_id else ''
                         )
 
             # v6.62: 转账类型账单的目标账户匹配
@@ -586,6 +684,27 @@ class BillService:
                                 dest_match_source = alias
                                 break
 
+                    if not dest_account_id:
+                        history_dest = await self.db.get_historical_destination_account_suggestion(
+                            user_id=user_id,
+                            payment_method=dest_payment_method,
+                            counterparty=dest_counterparty,
+                            description='',
+                            bill_type=str(bill.get('type', '')),
+                            source_account_id=(
+                                int(bill.get('source_account_id'))
+                                if isinstance(bill.get('source_account_id'), int) or
+                                (isinstance(bill.get('source_account_id'), str) and
+                                 str(bill.get('source_account_id')).isdigit())
+                                else None
+                            )
+                        )
+                        if history_dest:
+                            dest_account_id = history_dest['account_id']
+                            dest_match_source = (
+                                'history:' + ','.join(history_dest.get('reasons', []))
+                            )
+
                     if dest_account_id:
                         dest_account = account_by_id.get(str(dest_account_id))
                         if dest_account:
@@ -611,6 +730,517 @@ class BillService:
         )
 
         return bills
+
+    async def _detect_investment_candidates(
+        self,
+        bills: List[Dict[str, Any]],
+        user_id: int = 1
+    ) -> List[Dict[str, Any]]:
+        """基于平台/产品关键词识别投资账单。
+
+        这是 M2 的轻量增强切片：
+        - 不依赖用户预先配置投资关键词规则
+        - 优先识别常见投资平台、基金/理财产品与投资动作词
+        - 命中后仅提升账单类型为“投资”，再交由现有双账户匹配链路处理资金流向
+        """
+        _ = user_id
+        if not bills:
+            return bills
+
+        keyword_config = await self._get_investment_keyword_config(user_id)
+        detected_count = 0
+
+        for bill in bills:
+            candidate = self._score_investment_candidate(
+                bill,
+                keyword_config=keyword_config
+            )
+            if not candidate:
+                continue
+
+            bill['type'] = '投资'
+            bill['_investment_hint'] = candidate.get('hint_text', '')
+            bill['_investment_candidate_score'] = candidate.get('score', 0.0)
+            bill['_investment_candidate_reason'] = candidate.get('reason', '')
+            bill['_investment_platform'] = candidate.get('platform', '')
+            bill['_investment_product'] = candidate.get('product', '')
+            detected_count += 1
+
+            self.logger.debug(
+                "[投资候选识别] 命中: date=%s, score=%.2f, reason=%s, hint=%s",
+                str(bill.get('date', ''))[:19],
+                candidate.get('score', 0.0),
+                candidate.get('reason', ''),
+                candidate.get('hint_text', '')
+            )
+
+        self.logger.info(
+            "[投资候选识别] 完成: 命中 %d/%d 条",
+            detected_count, len(bills)
+        )
+        return bills
+
+    async def _get_investment_keyword_config(
+        self,
+        user_id: int = 1
+    ) -> Dict[str, List[str]]:
+        """获取用户有效的投资识别关键词配置。"""
+        user = await self.db.get_user_by_id(user_id)
+        return build_user_investment_keyword_settings(user)
+
+    def _score_investment_candidate(
+        self,
+        bill: Dict[str, Any],
+        allow_existing_investment: bool = False,
+        keyword_config: Optional[Dict[str, List[str]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """为单条账单计算投资候选分数。"""
+        current_type = str(bill.get('type', '') or '').strip().lower()
+        if current_type in ['转账', 'transfer', '4']:
+            return None
+        if not allow_existing_investment and current_type in ['投资', 'investment', '5']:
+            return None
+
+        text_parts = [
+            str(bill.get('counterparty', '') or '').strip(),
+            str(bill.get('payment_method', '') or '').strip(),
+            str(bill.get('description', '') or '').strip(),
+            str(bill.get('main_category', '') or '').strip(),
+            str(bill.get('sub_category', '') or '').strip(),
+            str(bill.get('original_category', '') or '').strip(),
+        ]
+        text_blob = ' '.join(part for part in text_parts if part)
+        if not text_blob:
+            return None
+
+        text_lower = text_blob.lower()
+        effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+        investment_profile = self._extract_investment_profile(
+            text_blob,
+            keyword_config=effective_keyword_config
+        )
+        normalized_platform = investment_profile.get('platform', '')
+        normalized_product = investment_profile.get('product', '')
+
+        platform_keywords = effective_keyword_config['platform_keywords']
+        product_keywords = effective_keyword_config['product_keywords']
+        exclude_keywords = effective_keyword_config['exclude_keywords']
+
+        matched_platforms = []
+        if normalized_platform:
+            matched_platforms.append(normalized_platform)
+        matched_platforms.extend([
+            kw for kw in platform_keywords
+            if kw not in matched_platforms and kw.lower() in text_lower
+        ])
+        matched_products = [kw for kw in product_keywords if kw.lower() in text_lower]
+        if normalized_product and normalized_product not in matched_products:
+            matched_products.insert(0, normalized_product)
+        matched_excludes = [kw for kw in exclude_keywords if kw.lower() in text_lower]
+
+        score = 0.0
+        if matched_platforms:
+            score += min(0.65, 0.38 * len(matched_platforms[:2]))
+        if matched_products:
+            score += min(0.42, 0.18 * len(matched_products[:3]))
+        if matched_excludes:
+            score -= min(0.48, 0.28 * len(matched_excludes[:2]))
+
+        # 若没有平台词，则至少需要两个投资相关产品/动作词，降低误判。
+        if not matched_platforms and len(matched_products) < 2:
+            return None
+
+        if score < 0.55:
+            return None
+
+        reason_parts: List[str] = []
+        if matched_platforms:
+            reason_parts.append('platform:' + '/'.join(matched_platforms[:2]))
+        if matched_products:
+            reason_parts.append('product:' + '/'.join(matched_products[:3]))
+        if matched_excludes:
+            reason_parts.append('exclude:' + '/'.join(matched_excludes[:2]))
+
+        hint_tokens = matched_platforms[:1] + matched_products[:2]
+        hint_text = ' '.join(hint_tokens)
+
+        return {
+            'score': round(min(score, 1.0), 2),
+            'reason': ', '.join(reason_parts),
+            'hint_text': hint_text,
+            'platform': normalized_platform,
+            'product': normalized_product
+        }
+
+    def _extract_investment_profile(
+        self,
+        text: str,
+        keyword_config: Optional[Dict[str, List[str]]] = None
+    ) -> Dict[str, str]:
+        """提取投资平台与产品归一信息。"""
+        raw_text = str(text or '').strip()
+        if not raw_text:
+            return {'platform': '', 'product': ''}
+
+        text_lower = raw_text.lower()
+        effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+
+        generic_platforms = {'基金销售平台', '证券账户'}
+
+        platform = ''
+        best_platform_score = (-1, -1)
+        for canonical, aliases in DEFAULT_INVESTMENT_PLATFORM_ALIASES:
+            alias_candidates = [canonical] + aliases
+            matched_aliases = [alias for alias in alias_candidates if alias.lower() in text_lower]
+            if not matched_aliases:
+                continue
+
+            best_alias = max(matched_aliases, key=len)
+            platform_score = (0 if canonical in generic_platforms else 1, len(best_alias))
+            if platform_score > best_platform_score:
+                best_platform_score = platform_score
+                platform = canonical
+
+        if not platform:
+            for keyword in sorted(
+                effective_keyword_config['platform_keywords'],
+                key=len,
+                reverse=True
+            ):
+                if keyword.lower() in text_lower:
+                    platform = keyword
+                    break
+
+        product = ''
+        named_product = ''
+
+        matched_config_products = [
+            keyword for keyword in sorted(
+                effective_keyword_config['product_keywords'],
+                key=len,
+                reverse=True
+            )
+            if keyword.lower() in text_lower
+        ]
+        if matched_config_products:
+            product = matched_config_products[0]
+
+        for pattern in DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS:
+            match = re.search(pattern, raw_text, re.IGNORECASE)
+            if match:
+                candidate = self._clean_investment_product_name(
+                    match.group(1).strip(),
+                    platform=platform
+                )
+                if candidate:
+                    named_product = candidate
+                    break
+
+        if named_product and (not product or len(named_product) > len(product)):
+            product = named_product
+
+        if not product:
+            best_product_score = -1
+            for canonical, aliases in DEFAULT_INVESTMENT_PRODUCT_PATTERNS:
+                alias_candidates = [canonical] + aliases
+                matched_aliases = [alias for alias in alias_candidates if alias.lower() in text_lower]
+                if not matched_aliases:
+                    continue
+
+                best_alias = max(matched_aliases, key=len)
+                if len(best_alias) > best_product_score:
+                    best_product_score = len(best_alias)
+                    product = best_alias
+
+        if product:
+            product = self._clean_investment_product_name(product, platform=platform)
+
+        return {
+            'platform': platform,
+            'product': product
+        }
+
+    def _clean_investment_product_name(self, product: str, platform: str = '') -> str:
+        """清理提取出的投资产品名，移除平台前缀与交易动作后缀。"""
+        cleaned = str(product or '').strip().strip('|｜,， ')
+        if not cleaned:
+            return ''
+
+        cleaned = re.sub(r'^(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出)[-－:：\s]*', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'[-－:：\s]*(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出|确认份额|分红再投资)$', '', cleaned, flags=re.IGNORECASE)
+
+        for canonical, aliases in DEFAULT_INVESTMENT_PLATFORM_ALIASES:
+            alias_candidates = [canonical] + aliases
+            for alias in alias_candidates:
+                cleaned = re.sub(
+                    rf'^{re.escape(alias)}[-－:：\s]*',
+                    '',
+                    cleaned,
+                    flags=re.IGNORECASE
+                )
+
+        if platform:
+            cleaned = re.sub(
+                rf'^{re.escape(platform)}[-－:：\s]*',
+                '',
+                cleaned,
+                flags=re.IGNORECASE
+            )
+
+        if '|' in cleaned or '｜' in cleaned:
+            candidates = [segment.strip().strip('|｜,， ') for segment in re.split(r'[|｜]', cleaned)]
+            preferred = [
+                segment for segment in candidates
+                if re.search(r'(基金|ETF|LOF|REITs|REIT|理财|计划|组合|债券|股票|黄金|A类|C类|联接)', segment, re.IGNORECASE)
+            ]
+            if preferred:
+                cleaned = max(preferred, key=len)
+
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip().strip('-－:：|｜,， ')
+        return cleaned[:80]
+
+    @log_method
+    async def _detect_cash_transfers(
+        self,
+        bills: List[Dict[str, Any]],
+        user_id: int = 1
+    ) -> List[Dict[str, Any]]:
+        """
+        v6.77: 检测存取转账（用户指定的分类自动转换为转账类型）
+
+        当账单的分类匹配用户设置的"存取分类"时，将其转换为转账类型：
+        - 原收入账单：来源账户=现金账户，目标账户=原匹配账户
+        - 原支出账单：来源账户=原匹配账户，目标账户=现金账户
+
+        Args:
+            bills: 账单列表
+            user_id: 用户ID
+
+        Returns:
+            List[Dict]: 处理后的账单列表
+        """
+        # 1. 获取用户设置
+        user = await self.db.get_user_by_id(user_id)
+        if not user:
+            self.logger.warning("[存取转账检测] 用户不存在: user_id=%d", user_id)
+            return bills
+
+        cash_account_id = user.get('cash_account_id')
+        cash_transfer_category_id = user.get('cash_transfer_category_id')
+
+        # 2. 如果没有配置，直接返回
+        if not cash_account_id or not cash_transfer_category_id:
+            self.logger.debug(
+                "[存取转账检测] 用户未配置存取设置: cash_account_id=%s, "
+                "cash_transfer_category_id=%s",
+                cash_account_id, cash_transfer_category_id
+            )
+            return bills
+
+        # 3. 获取目标分类信息
+        category = await self.db.get_category_by_id(cash_transfer_category_id, user_id)
+        if not category:
+            self.logger.warning(
+                "[存取转账检测] 分类不存在: category_id=%d",
+                cash_transfer_category_id
+            )
+            return bills
+
+        target_main_category = category.get('main_category', '')
+        target_sub_category = category.get('sub_category', '')
+
+        self.logger.info(
+            "[存取转账检测] 开始检测, 目标分类='%s/%s', 现金账户ID=%d",
+            target_main_category, target_sub_category, cash_account_id
+        )
+
+        # 4. 遍历账单检测并转换
+        converted_count = 0
+        for bill in bills:
+            bill_main_category = bill.get('main_category', '')
+            bill_sub_category = bill.get('sub_category', '')
+
+            # 检查分类是否匹配
+            if (bill_main_category == target_main_category and
+                    bill_sub_category == target_sub_category):
+                # 获取原类型和金额
+                original_type = str(bill.get('type', '')).lower()
+                amount = float(bill.get('amount', 0))
+                matched_account_id = bill.get('source_account_id')
+
+                # 确定账户方向
+                # 收入（amount > 0 或 type 包含收入）：现金 -> 匹配账户
+                # 支出（amount < 0 或 type 包含支出）：匹配账户 -> 现金
+                is_income = (
+                    amount > 0 or
+                    original_type in ['收入', 'income', '2']
+                )
+
+                if is_income:
+                    # 收入：从现金账户转入匹配账户
+                    bill['source_account_id'] = cash_account_id
+                    bill['destination_account_id'] = matched_account_id
+                    direction = "现金->账户"
+                else:
+                    # 支出：从匹配账户转出到现金账户
+                    # source_account_id 保持不变（已是匹配账户）
+                    bill['destination_account_id'] = cash_account_id
+                    direction = "账户->现金"
+
+                # 设置类型为转账
+                bill['type'] = '转账'
+
+                # 设置 destination_amount（与 amount 绝对值相等）
+                bill['destination_amount'] = abs(amount)
+
+                converted_count += 1
+                self.logger.debug(
+                    "[存取转账检测] 转换: date=%s, amount=%.2f, %s, "
+                    "source=%s, dest=%s",
+                    bill.get('date', '')[:10], amount, direction,
+                    bill.get('source_account_id'),
+                    bill.get('destination_account_id')
+                )
+
+        if converted_count > 0:
+            self.logger.info(
+                "[存取转账检测] 完成, 转换 %d 条账单为转账类型",
+                converted_count
+            )
+
+        return bills
+
+    @staticmethod
+    def _normalize_learning_text(raw_value: Any) -> str:
+        """标准化长期学习匹配文本。"""
+        if raw_value is None:
+            return ''
+
+        text = str(raw_value).strip().lower()
+        if not text:
+            return ''
+
+        parts = [part.strip() for part in text.split('|') if part.strip()]
+        if parts:
+            text = ' | '.join(parts)
+
+        return ' '.join(text.split())
+
+    async def _apply_import_learning_rules(
+        self,
+        bills: List[Dict[str, Any]],
+        user_id: int = 1,
+        type_only: bool = False,
+        record_usage: bool = False
+    ) -> int:
+        """应用长期导入学习规则。"""
+        if not bills:
+            return 0
+
+        user = await self.db.get_user_by_id(user_id)
+        if not user or not bool(user.get('import_learning_enabled', 1)):
+            self.logger.debug("[长期学习] 已关闭或用户不存在: user_id=%d", user_id)
+            return 0
+
+        rules = await self.db.get_import_learning_rules(
+            user_id=user_id,
+            enabled_only=True,
+            limit=1000
+        )
+        if not rules:
+            return 0
+
+        rule_lookup = {
+            (rule.get('match_type', ''), rule.get('normalized_match_value', '')): rule
+            for rule in rules
+            if rule.get('match_type') and rule.get('normalized_match_value')
+        }
+        category_cache: Dict[int, Optional[Dict[str, Any]]] = {}
+        matched_rule_ids: List[int] = []
+        applied_count = 0
+
+        for bill in bills:
+            matched_rule = None
+            for match_type, raw_value in [
+                ('counterparty', bill.get('counterparty', '')),
+                ('description', bill.get('description', '')),
+                ('payment_method', bill.get('payment_method', '')),
+            ]:
+                normalized_value = self._normalize_learning_text(raw_value)
+                if not normalized_value:
+                    continue
+
+                matched_rule = rule_lookup.get((match_type, normalized_value))
+                if matched_rule:
+                    bill['_import_learning_match_type'] = match_type
+                    bill['_import_learning_rule_id'] = matched_rule.get('id')
+                    break
+
+            if not matched_rule:
+                continue
+
+            learned_type = matched_rule.get('learned_type')
+            if learned_type:
+                bill['type'] = learned_type
+
+            if not type_only:
+                learned_category_id = matched_rule.get('learned_category_id')
+                if learned_category_id:
+                    cat_id = int(learned_category_id)
+                    if cat_id not in category_cache:
+                        category_cache[cat_id] = await self.db.get_category_by_id(cat_id, user_id)
+                    category = category_cache.get(cat_id)
+                    if category:
+                        bill['main_category'] = category.get('main_category', '')
+                        bill['sub_category'] = category.get('sub_category', '')
+
+                if matched_rule.get('learned_source_account_id'):
+                    bill['source_account_id'] = matched_rule.get('learned_source_account_id')
+                if matched_rule.get('learned_destination_account_id'):
+                    bill['destination_account_id'] = matched_rule.get('learned_destination_account_id')
+
+            applied_count += 1
+            rule_id = matched_rule.get('id')
+            if record_usage and rule_id:
+                matched_rule_ids.append(int(rule_id))
+
+        if record_usage and matched_rule_ids:
+            await self.db.increment_import_learning_rule_usage(matched_rule_ids, user_id=user_id)
+
+        if applied_count > 0:
+            self.logger.info(
+                "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s",
+                user_id, len(bills), applied_count, type_only
+            )
+
+        return applied_count
+
+    @log_method
+    async def promote_session_annotations_to_learning(
+        self,
+        session_id: str,
+        preview_updates: Optional[List[Dict[str, Any]]] = None,
+        user_id: int = 1
+    ) -> Dict[str, Any]:
+        """将当前会话人工标注提升为长期学习规则。"""
+        preview_ids: List[int] = []
+        if preview_updates:
+            await self.db.save_import_annotation_samples(session_id, preview_updates, user_id=user_id)
+            preview_ids = [
+                int(item['id']) for item in preview_updates
+                if item.get('id')
+            ]
+
+        promote_result = await self.db.promote_import_annotation_samples_to_learning(
+            session_id,
+            preview_ids=preview_ids or None,
+            user_id=user_id
+        )
+        return {
+            'success': True,
+            'session_id': session_id,
+            **promote_result,
+        }
 
     @log_method
     async def import_multiple_files(
@@ -1269,18 +1899,38 @@ class BillService:
             template_id_map = {}  # bill_index -> template_id
 
             for idx, template in enumerate(templates):
+                # v6.74: 获取 payment_method，如果为空则使用 parser_id 作为回退
+                raw_payment_method = template.get('parser_payment_method', '')
+                parser_id = template.get('parser_id', '')
+                if raw_payment_method and str(raw_payment_method).strip():
+                    payment_method = str(raw_payment_method).strip()
+                    payment_method_source = 'parser_payment_method'
+                elif parser_id and str(parser_id).strip():
+                    # 使用 parser_id（如 'alipay', 'wechat', 'abc'）作为回退
+                    payment_method = str(parser_id).strip()
+                    payment_method_source = 'parser_id_fallback'
+                else:
+                    payment_method = ''
+                    payment_method_source = 'empty'
+
+                self.logger.debug(
+                    "[模板转账单] idx=%d, payment_method='%s' (来源=%s), parser_id='%s'",
+                    idx, payment_method, payment_method_source, parser_id
+                )
+
                 bill = {
                     'date': template.get('parser_date', ''),
                     'amount': float(template.get('parser_amount', 0)),
                     'type': template.get('parser_type', ''),
                     'description': template.get('parser_description', ''),
                     'counterparty': template.get('parser_counterparty', ''),
-                    'payment_method': template.get('parser_payment_method', ''),
+                    'payment_method': payment_method,
                     'original_type': template.get('parser_original_type', ''),
                     'original_category': template.get('parser_original_category', ''),
                     'source_account_id': template.get('parser_account_id'),
                     '_template_id': template.get('id'),  # 保存模板ID用于回溯
-                    '_parser_id': template.get('parser_id', ''),
+                    '_parser_id': parser_id,
+                    '_payment_method_source': payment_method_source,  # 记录来源便于调试
                 }
                 bills.append(bill)
                 template_id_map[idx] = template.get('id')
@@ -1288,7 +1938,7 @@ class BillService:
             # 3. 执行智能去重（包含数据库对比）
             if self.use_smart_dedup and self.smart_dedup_engine:
                 dedup_result = await self.smart_dedup_engine.process_with_db(
-                    bills, self.db, user_id
+                    bills, self.db, user_id 
                 )
 
                 result['dedup_stats'] = {
@@ -1309,42 +1959,56 @@ class BillService:
                self.category_engine.current_user_id != user_id:
                 await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
 
+            learned_seed_count = await self._apply_import_learning_rules(
+                kept_bills,
+                user_id=user_id,
+                type_only=True,
+                record_usage=False
+            )
+            if learned_seed_count > 0:
+                self.logger.info("[阶段2] 长期学习类型预填充 %d 条", learned_seed_count)
+
             # 5. 分类匹配
-            # v6.54: 基于 _dedup_type 分离账单，使用不同类型的分类规则
-            # - 转账配对账单：使用转账类关键词
-            # - 其他账单：使用支出、收入、投资类关键词（不使用转账类）
-            transfer_bills = [b for b in kept_bills if b.get('_dedup_type') == 'transfer']
-            non_transfer_bills = [b for b in kept_bills if b.get('_dedup_type') != 'transfer']
+            # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型
+            # - 转账配对账单：使用转账类关键词（通过 _dedup_type='transfer' 识别）
+            # - 收入账单（amount > 0）：只使用收入类和投资类关键词
+            # - 支出账单（amount < 0）：只使用支出类和投资类关键词
+            self.logger.info("[阶段2] 分类匹配: 共 %d 条账单", len(kept_bills))
 
-            self.logger.info("[阶段2] 分类匹配: 转账配对账单 %d 条, 其他账单 %d 条",
-                             len(transfer_bills), len(non_transfer_bills))
+            # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
+            categorized_bills = await self.category_engine.batch_match_categories(
+                kept_bills, types=None
+            )
 
-            # 转账配对账单使用转账类型规则
-            transfer_categorized = []
-            if transfer_bills:
-                transfer_categorized = await self.category_engine.batch_match_categories(
-                    transfer_bills, types=[TransactionType.TRANSFER]
-                )
-
-            # 其他账单使用支出、收入、投资类型规则（排除转账）
-            non_transfer_categorized = []
-            if non_transfer_bills:
-                non_transfer_categorized = await self.category_engine.batch_match_categories(
-                    non_transfer_bills,
-                    types=[TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.INVESTMENT]
-                )
-
-            categorized_bills = transfer_categorized + non_transfer_categorized
+            # 5.5 投资账单专门识别链路（平台/产品关键词）
+            self.logger.info("[阶段2] 投资候选识别...")
+            categorized_bills = await self._detect_investment_candidates(
+                categorized_bills, user_id=user_id
+            )
 
             # 6. 账户匹配
             self.logger.info("[阶段2] 执行账户匹配...")
             matched_bills = await self._match_accounts(categorized_bills, user_id)
 
-            # 7. 生成预览数据并写入 bills_preview 表
+            # 7. v6.77: 存取转账检测（用户指定的分类自动转换为转账类型）
+            self.logger.info("[阶段2] 存取转账检测...")
+            matched_bills = await self._detect_cash_transfers(matched_bills, user_id)
+
+            learning_replay_count = await self._apply_import_learning_rules(
+                matched_bills,
+                user_id=user_id,
+                type_only=False,
+                record_usage=True
+            )
+            if learning_replay_count > 0:
+                self.logger.info("[阶段2] 长期学习结果回放 %d 条", learning_replay_count)
+
+            # 8. 生成预览数据并写入 bills_preview 表
             self.logger.info("[阶段2] 生成预览数据...")
             preview_list = []
             matched_category_count = 0
             matched_account_count = 0
+            recurring_templates = await self.db.get_enabled_recurring_templates(user_id=user_id)
 
             for bill in matched_bills:
                 # 统计匹配情况
@@ -1387,6 +2051,30 @@ class BillService:
                     # 其他类型：使用原有值
                     destination_amount = float(bill.get('destination_amount', 0))
 
+                # v6.74: 获取 preview_payment_method，如果为空则使用 _parser_id 作为回退
+                raw_payment_method = bill.get('payment_method', '')
+                parser_id = bill.get('_parser_id', '')
+                if raw_payment_method and str(raw_payment_method).strip():
+                    preview_payment_method = str(raw_payment_method).strip()
+                elif parser_id and str(parser_id).strip():
+                    # 使用 _parser_id（如 'alipay', 'wechat', 'abc'）作为回退
+                    preview_payment_method = str(parser_id).strip()
+                    self.logger.debug(
+                        "[账单转预览] 使用 parser_id 回退: payment_method 为空, "
+                        "使用 parser_id='%s' 作为 preview_payment_method",
+                        parser_id
+                    )
+                else:
+                    preview_payment_method = ''
+
+                recurring_candidates = self.db.build_recurring_candidates_for_bill_data(
+                    bill,
+                    recurring_templates,
+                    linked_recurring_id=bill.get('created_from_recurring'),
+                    tolerance_days=3
+                )
+                top_recurring_candidate = recurring_candidates[0] if recurring_candidates else None
+
                 # 构建预览数据
                 # v6.54: preview_amount 和 preview_destination_amount 使用绝对值
                 preview_data = {
@@ -1399,8 +2087,14 @@ class BillService:
                     'preview_source_account_id': bill.get('source_account_id'),
                     'preview_destination_account_id': bill.get('destination_account_id'),
                     'preview_counterparty': bill.get('counterparty', ''),
-                    'preview_payment_method': bill.get('payment_method', ''),
+                    'preview_payment_method': preview_payment_method,
                     'preview_description': bill.get('description', ''),
+                    'preview_recurring_id': top_recurring_candidate.get('id') if top_recurring_candidate else None,
+                    'preview_recurring_name': top_recurring_candidate.get('name', '') if top_recurring_candidate else '',
+                    'preview_recurring_candidate_count': len(recurring_candidates),
+                    'preview_recurring_match_score': top_recurring_candidate.get('matchScore', 0) if top_recurring_candidate else 0,
+                    'preview_recurring_match_reasons': '|'.join(top_recurring_candidate.get('matchReasons', [])) if top_recurring_candidate else '',
+                    'preview_recurring_matched_date': top_recurring_candidate.get('matchedOccurrenceDate', '') if top_recurring_candidate else '',
                     'dedup_type': dedup_type,
                     'dedup_source_ids': source_ids
                 }
@@ -1526,10 +2220,17 @@ class BillService:
             List[Dict]: 预览账单列表
         """
         previews = await self.db.get_preview_by_session(session_id, selected_only)
+        preview_user_id = previews[0].get('user_id', 1) if previews else 1
+        keyword_config = await self._get_investment_keyword_config(int(preview_user_id or 1))
 
         # 转换为前端期望的格式 (v6.51: 保持preview_前缀与前端字段名匹配)
         result = []
         for preview in previews:
+            transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
+            investment_signal = self._build_investment_signal_from_preview(
+                preview,
+                keyword_config=keyword_config
+            )
             item = {
                 'id': preview.get('id'),
                 # v6.51: 前端 convertPreviewToImportTransaction 期望 preview_date/preview_amount 等字段
@@ -1544,13 +2245,155 @@ class BillService:
                 'preview_counterparty': preview.get('preview_counterparty', ''),
                 'preview_payment_method': preview.get('preview_payment_method', ''),
                 'preview_description': preview.get('preview_description', ''),
+                'preview_recurring_id': preview.get('preview_recurring_id'),
+                'preview_recurring_name': preview.get('preview_recurring_name', ''),
+                'preview_recurring_candidate_count': preview.get('preview_recurring_candidate_count', 0),
+                'preview_recurring_match_score': preview.get('preview_recurring_match_score', 0),
+                'preview_recurring_match_reasons': preview.get('preview_recurring_match_reasons', ''),
+                'preview_recurring_matched_date': preview.get('preview_recurring_matched_date', ''),
                 'preview_selected': bool(preview.get('preview_selected', 1)),
                 'dedup_type': preview.get('dedup_type', ''),
                 'dedup_source_ids': preview.get('dedup_source_ids', ''),
+                'suggested_preview_type': transfer_suggestion.get('suggested_preview_type', ''),
+                'transfer_suggestion_score': transfer_suggestion.get('score', 0.0),
+                'transfer_suggestion_level': transfer_suggestion.get('level', ''),
+                'transfer_suggestion_reason': transfer_suggestion.get('reason', ''),
+                'investment_signal_score': investment_signal.get('score', 0.0),
+                'investment_signal_level': investment_signal.get('level', ''),
+                'investment_signal_reason': investment_signal.get('reason', ''),
+                'investment_platform': investment_signal.get('platform', ''),
+                'investment_product': investment_signal.get('product', ''),
             }
             result.append(item)
 
         return result
+
+    def _build_transfer_suggestion_from_preview(
+        self,
+        preview: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """根据预览账单生成疑似转账推荐。
+
+        该推荐是一个轻量级 M2 切片：
+        - 不修改数据库结构
+        - 仅在读取预览时基于现有字段计算推荐分数
+        - 主要用于提醒用户将可疑的收支账单快速切换为转账类型
+        """
+        preview_type = str(preview.get('preview_type', '') or '').strip().lower()
+        if preview_type in ['转账', 'transfer', '4', '投资', 'investment', '5']:
+            return {}
+
+        score = 0.0
+        reasons: List[str] = []
+
+        source_account_id = preview.get('preview_source_account_id')
+        destination_account_id = preview.get('preview_destination_account_id')
+        destination_amount = float(preview.get('preview_destination_amount', 0) or 0)
+        dedup_type = str(preview.get('dedup_type', '') or '').strip().lower()
+
+        category_text = ' '.join(filter(None, [
+            str(preview.get('preview_main_category', '') or '').strip(),
+            str(preview.get('preview_sub_category', '') or '').strip(),
+        ])).lower()
+        text_blob = ' '.join(filter(None, [
+            str(preview.get('preview_counterparty', '') or '').strip(),
+            str(preview.get('preview_payment_method', '') or '').strip(),
+            str(preview.get('preview_description', '') or '').strip(),
+            category_text,
+        ])).lower()
+
+        transfer_keywords = [
+            '转账', '转入', '转出', '还款', '充值', '提现', '存取', '存款', '取款', '划转'
+        ]
+
+        if dedup_type == 'transfer':
+            score += 0.75
+            reasons.append('dedup_pair')
+
+        if source_account_id and destination_account_id and str(source_account_id) != str(destination_account_id):
+            score += 0.35
+            reasons.append('dual_account')
+
+        if destination_amount > 0:
+            score += 0.20
+            reasons.append('destination_amount')
+
+        if any(keyword in category_text for keyword in ['转账', '存取', '还款']):
+            score += 0.20
+            reasons.append('transfer_category')
+
+        matched_keywords = [keyword for keyword in transfer_keywords if keyword in text_blob]
+        if matched_keywords:
+            score += min(0.30, 0.12 * len(matched_keywords))
+            reasons.append('keyword:' + '/'.join(matched_keywords[:3]))
+
+        score = min(score, 1.0)
+        if score < 0.55:
+            return {}
+
+        if score >= 0.8:
+            level = 'high'
+        elif score >= 0.65:
+            level = 'medium'
+        else:
+            level = 'low'
+
+        reason_text = ', '.join(reasons)
+        self.logger.debug(
+            '[预览转账推荐] preview_id=%s, score=%.2f, level=%s, reasons=%s',
+            preview.get('id'), score, level, reason_text
+        )
+        return {
+            'suggested_preview_type': '转账',
+            'score': round(score, 2),
+            'level': level,
+            'reason': reason_text
+        }
+
+    def _build_investment_signal_from_preview(
+        self,
+        preview: Dict[str, Any],
+        keyword_config: Optional[Dict[str, List[str]]] = None
+    ) -> Dict[str, Any]:
+        """为投资类型预览账单生成可解释信号。"""
+        preview_type = str(preview.get('preview_type', '') or '').strip().lower()
+        if preview_type not in ['投资', 'investment', '5']:
+            return {}
+
+        candidate = self._score_investment_candidate(
+            {
+                'type': preview.get('preview_type', ''),
+                'counterparty': preview.get('preview_counterparty', ''),
+                'payment_method': preview.get('preview_payment_method', ''),
+                'description': preview.get('preview_description', ''),
+                'main_category': preview.get('preview_main_category', ''),
+                'sub_category': preview.get('preview_sub_category', ''),
+                'original_category': (
+                    preview.get('preview_sub_category', '') or
+                    preview.get('preview_main_category', '')
+                ),
+            },
+            allow_existing_investment=True,
+            keyword_config=keyword_config
+        )
+        if not candidate:
+            return {}
+
+        score = float(candidate.get('score', 0.0) or 0.0)
+        if score >= 0.8:
+            level = 'high'
+        elif score >= 0.65:
+            level = 'medium'
+        else:
+            level = 'low'
+
+        return {
+            'score': score,
+            'level': level,
+            'reason': candidate.get('reason', ''),
+            'platform': candidate.get('platform', ''),
+            'product': candidate.get('product', '')
+        }
 
     @log_method
     async def update_preview_selections(
@@ -1610,6 +2453,7 @@ class BillService:
     async def reclassify_preview_bills(
         self,
         session_id: str,
+        preview_updates: Optional[List[Dict[str, Any]]] = None,
         user_id: int = 1
     ) -> Dict[str, Any]:
         """
@@ -1639,10 +2483,19 @@ class BillService:
             'total': 0,
             'categorized': 0,
             'account_matched': 0,
+            'session_samples_saved': 0,
+            'annotation_applied': 0,
             'errors': []
         }
 
         try:
+            if preview_updates:
+                self.logger.info("[重新分类] 步骤0: 保存当前会话人工标注样本 (%d 条)",
+                                 len(preview_updates))
+                result['session_samples_saved'] = await self.db.save_import_annotation_samples(
+                    session_id, preview_updates, user_id=user_id
+                )
+
             # 1. 强制刷新分类规则
             self.logger.info("[重新分类] 步骤1: 刷新分类规则")
             await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
@@ -1677,34 +2530,71 @@ class BillService:
                 }
                 bills_for_category.append(bill)
 
-            # 4. 基于 dedup_type 分离账单进行分类匹配
-            self.logger.info("[重新分类] 步骤3: 分类匹配（基于dedup_type）")
-            transfer_bills = [b for b in bills_for_category if b.get('_dedup_type') == 'transfer']
-            non_transfer_bills = [b for b in bills_for_category if b.get('_dedup_type') != 'transfer']
+            annotation_samples = await self.db.get_import_annotation_samples(
+                session_id, user_id=user_id
+            )
+            annotation_map = {
+                int(sample['preview_id']): sample for sample in annotation_samples
+                if sample.get('preview_id')
+            }
 
-            self.logger.info("[重新分类] 转账配对账单: %d 条, 其他账单: %d 条",
-                             len(transfer_bills), len(non_transfer_bills))
+            for bill in bills_for_category:
+                sample = annotation_map.get(int(bill.get('id', 0))) if bill.get('id') else None
+                if sample and sample.get('annotated_type'):
+                    bill['type'] = sample.get('annotated_type')
 
-            # 转账账单使用转账类型规则
-            transfer_categorized = []
-            if transfer_bills:
-                transfer_categorized = await self.category_engine.batch_match_categories(
-                    transfer_bills, types=[TransactionType.TRANSFER]
-                )
+            learned_seed_count = await self._apply_import_learning_rules(
+                bills_for_category,
+                user_id=user_id,
+                type_only=True,
+                record_usage=False
+            )
+            if learned_seed_count > 0:
+                self.logger.info("[重新分类] 长期学习类型预填充 %d 条", learned_seed_count)
 
-            # 其他账单使用支出、收入、投资规则
-            non_transfer_categorized = []
-            if non_transfer_bills:
-                non_transfer_categorized = await self.category_engine.batch_match_categories(
-                    non_transfer_bills,
-                    types=[TransactionType.EXPENSE, TransactionType.INCOME, TransactionType.INVESTMENT]
-                )
+            for bill in bills_for_category:
+                sample = annotation_map.get(int(bill.get('id', 0))) if bill.get('id') else None
+                if sample and sample.get('annotated_type'):
+                    bill['type'] = sample.get('annotated_type')
 
-            categorized_bills = transfer_categorized + non_transfer_categorized
+            # 4. 分类匹配
+            # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型
+            # - 转账配对账单：使用转账类关键词（通过 _dedup_type='transfer' 识别）
+            # - 收入账单（amount > 0）：只使用收入类和投资类关键词
+            # - 支出账单（amount < 0）：只使用支出类和投资类关键词
+            self.logger.info("[重新分类] 步骤3: 分类匹配 (%d 条账单)", len(bills_for_category))
+
+            # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
+            categorized_bills = await self.category_engine.batch_match_categories(
+                bills_for_category, types=None
+            )
+
+            # 4.5 投资账单专门识别链路（平台/产品关键词）
+            self.logger.info("[重新分类] 步骤3.5: 投资候选识别")
+            categorized_bills = await self._detect_investment_candidates(
+                categorized_bills, user_id=user_id
+            )
 
             # 5. 账户匹配
             self.logger.info("[重新分类] 步骤4: 账户匹配")
             matched_bills = await self._match_accounts(categorized_bills, user_id)
+
+            matched_bills = await self._detect_cash_transfers(matched_bills, user_id)
+
+            learned_replay_count = await self._apply_import_learning_rules(
+                matched_bills,
+                user_id=user_id,
+                type_only=False,
+                record_usage=True
+            )
+            if learned_replay_count > 0:
+                self.logger.info("[重新分类] 长期学习结果回放 %d 条", learned_replay_count)
+
+            result['annotation_applied'] = await self._apply_session_annotation_samples(
+                matched_bills,
+                annotation_map,
+                user_id=user_id
+            )
 
             # 6. 统计并更新预览表
             self.logger.info("[重新分类] 步骤5: 更新预览表")
@@ -1719,6 +2609,7 @@ class BillService:
 
                 update_data = {
                     'id': preview_id,
+                    'preview_type': bill.get('type', ''),
                     'preview_main_category': bill.get('main_category', ''),
                     'preview_sub_category': bill.get('sub_category', ''),
                     'preview_source_account_id': bill.get('source_account_id'),
@@ -1744,11 +2635,62 @@ class BillService:
             result['categorized'] = categorized_count
             result['account_matched'] = account_matched_count
 
-            self.logger.info("[重新分类] 完成: 总计 %d, 分类匹配 %d, 账户匹配 %d",
-                             result['total'], result['categorized'], result['account_matched'])
+            self.logger.info(
+                "[重新分类] 完成: 总计 %d, 分类匹配 %d, 账户匹配 %d, 会话样本 %d, 回放 %d",
+                result['total'], result['categorized'], result['account_matched'],
+                result['session_samples_saved'], result['annotation_applied']
+            )
 
         except Exception as e:
             self.logger.error("[重新分类] 失败: %s", e, exc_info=True)
             result['errors'].append(str(e))
 
         return result
+
+    @log_method
+    async def _apply_session_annotation_samples(
+        self,
+        bills: List[Dict[str, Any]],
+        annotation_map: Dict[int, Dict[str, Any]],
+        user_id: int = 1
+    ) -> int:
+        """将当前会话中的人工标注样本回放到重新分类结果。"""
+        if not bills or not annotation_map:
+            return 0
+
+        applied_count = 0
+        category_cache: Dict[int, Dict[str, Any]] = {}
+
+        for bill in bills:
+            bill_id = bill.get('id')
+            if not bill_id:
+                continue
+
+            sample = annotation_map.get(int(bill_id))
+            if not sample:
+                continue
+
+            if sample.get('annotated_type'):
+                bill['type'] = sample.get('annotated_type')
+
+            category_id = sample.get('annotated_category_id')
+            if category_id:
+                category_id = int(category_id)
+                if category_id not in category_cache:
+                    category_cache[category_id] = await self.db.get_category_by_id(
+                        category_id, user_id=user_id
+                    ) or {}
+                category = category_cache.get(category_id, {})
+                bill['main_category'] = category.get('main_category', '')
+                bill['sub_category'] = category.get('sub_category', '')
+
+            if sample.get('annotated_source_account_id'):
+                bill['source_account_id'] = sample.get('annotated_source_account_id')
+
+            if sample.get('annotated_destination_account_id'):
+                bill['destination_account_id'] = sample.get('annotated_destination_account_id')
+
+            applied_count += 1
+
+        self.logger.info("[重新分类] 回放会话标注样本 %d 条", applied_count)
+        return applied_count

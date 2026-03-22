@@ -29,7 +29,7 @@ export interface SpecifiedApiError {
 }
 
 export const SPECIFIED_API_NOT_FOUND_ERRORS: Record<string, SpecifiedApiError> = {
-    '/api/register.json': {
+    '/api/auth/register': {
         message: 'User registration is disabled'
     }
 };

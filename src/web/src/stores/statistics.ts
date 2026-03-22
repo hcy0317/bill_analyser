@@ -425,6 +425,24 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
                 incomeByAccountItem.outflows.push({ amount: item.amountInDefaultCurrency, relatedItem: transferToAccountItem });
                 transferToAccountItem.inflows.push({ amount: item.amountInDefaultCurrency, relatedItem: incomeByAccountItem });
+            } else if (item.category.type === CategoryType.Investment && item.relatedPrimaryAccount && item.relatedAccount) {
+                // v6.70: 投资类型处理 - 与转账类似，从源账户流出到投资账户
+                const investmentToAccountKey = `${TransactionCategoricalOverviewAnalysisDataItemType.ExpenseByAccount}:${item.relatedAccount.id}`;
+                let investmentToAccountItem: TransactionCategoricalOverviewAnalysisDataItem | undefined = allDataItemsMap[investmentToAccountKey];
+
+                if (!investmentToAccountItem) {
+                    investmentToAccountItem = createNewTransactionCategoricalOverviewAnalysisDataItem(
+                        item.relatedAccount.id,
+                        item.relatedAccount.name,
+                        TransactionCategoricalOverviewAnalysisDataItemType.ExpenseByAccount,
+                        [item.relatedPrimaryAccount.category, item.relatedPrimaryAccount.displayOrder, item.relatedAccount.displayOrder],
+                        item.relatedPrimaryAccount.hidden || item.relatedAccount.hidden);
+                    allDataItemsMap[investmentToAccountKey] = investmentToAccountItem;
+                    allExpenseByAccountDataItems.push(investmentToAccountItem);
+                }
+
+                incomeByAccountItem.outflows.push({ amount: item.amountInDefaultCurrency, relatedItem: investmentToAccountItem });
+                investmentToAccountItem.inflows.push({ amount: item.amountInDefaultCurrency, relatedItem: incomeByAccountItem });
             }
         }
 
@@ -974,7 +992,21 @@ export const useStatisticsStore = defineStore('statistics', () => {
         const allAssetTrendsDataItems: TransactionAssetTrendsAnalysisDataItem[] = [];
 
         for (const assetTrendsDataItem of values(combinedDataMap)) {
-            allAssetTrendsDataItems.push(assetTrendsDataItem);
+            // v6.71: 过滤没有数据的账户 - 只显示有非零数据的账户
+            // 检查该账户是否有任何非零数据点
+            const hasNonZeroData = assetTrendsDataItem.items.some(item => {
+                // 检查 totalAmount 是否非零（使用小数精度容差）
+                const hasAmount = Math.abs(item.totalAmount) > 0.001;
+                // 也检查 totalOpeningAmount 是否非零（如果存在）
+                const hasOpeningAmount = item.totalOpeningAmount !== undefined &&
+                    Math.abs(item.totalOpeningAmount) > 0.001;
+                return hasAmount || hasOpeningAmount;
+            });
+
+            // 只添加有非零数据的账户到图表中
+            if (hasNonZeroData) {
+                allAssetTrendsDataItems.push(assetTrendsDataItem);
+            }
         }
 
         sortCategoryTotalAmountItems(allAssetTrendsDataItems, transactionStatisticsFilter.value);
@@ -1105,7 +1137,13 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
             if (transactionStatisticsFilter.chartDataType === ChartDataType.OutflowsByAccount.type ||
                 transactionStatisticsFilter.chartDataType === ChartDataType.TotalOutflows.type) {
+                // v6.70: 流出统计包含支出、转账流出和投资类型
                 if (item.category.type === CategoryType.Transfer) {
+                    if (item.relatedAccountType !== TransactionRelatedAccountType.TransferTo) {
+                        continue;
+                    }
+                } else if (item.category.type === CategoryType.Investment) {
+                    // 投资类型视为资金流出（从源账户流出到投资账户）
                     if (item.relatedAccountType !== TransactionRelatedAccountType.TransferTo) {
                         continue;
                     }
@@ -1121,7 +1159,13 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 }
             } else if (transactionStatisticsFilter.chartDataType === ChartDataType.InflowsByAccount.type ||
                 transactionStatisticsFilter.chartDataType === ChartDataType.TotalInflows.type) {
+                // v6.70: 流入统计包含收入、转账流入和投资流入（投资账户收到资金）
                 if (item.category.type === CategoryType.Transfer) {
+                    if (item.relatedAccountType !== TransactionRelatedAccountType.TransferFrom) {
+                        continue;
+                    }
+                } else if (item.category.type === CategoryType.Investment) {
+                    // 投资账户收到资金视为流入
                     if (item.relatedAccountType !== TransactionRelatedAccountType.TransferFrom) {
                         continue;
                     }
@@ -1254,7 +1298,10 @@ export const useStatisticsStore = defineStore('statistics', () => {
                     let includeInTotal: boolean = true;
 
                     if (transactionStatisticsFilter.chartDataType === ChartDataType.NetCashFlow.type &&
-                        (item.category.type === CategoryType.Expense || (item.category.type === CategoryType.Transfer && item.relatedAccountType === TransactionRelatedAccountType.TransferTo))) {
+                        (item.category.type === CategoryType.Expense ||
+                         (item.category.type === CategoryType.Transfer && item.relatedAccountType === TransactionRelatedAccountType.TransferTo) ||
+                         (item.category.type === CategoryType.Investment && item.relatedAccountType === TransactionRelatedAccountType.TransferTo))) {
+                        // v6.70: 支出、转账流出、投资流出都视为负数
                         amount = -amount;
                     } else if (transactionStatisticsFilter.chartDataType === ChartDataType.NetIncome.type &&
                         item.category.type === CategoryType.Expense) {
@@ -1567,6 +1614,15 @@ export const useStatisticsStore = defineStore('statistics', () => {
         if (filter && isInteger(filter.categoricalChartDateType) && transactionStatisticsFilter.value.categoricalChartDateType !== filter.categoricalChartDateType) {
             transactionStatisticsFilter.value.categoricalChartDateType = filter.categoricalChartDateType;
             changed = true;
+
+            if (filter.categoricalChartDateType !== DateRange.Custom.type) {
+                const categoricalChartDateRange = getDateRangeByDateType(filter.categoricalChartDateType, userStore.currentUserFirstDayOfWeek, userStore.currentUserFiscalYearStart);
+
+                if (categoricalChartDateRange) {
+                    transactionStatisticsFilter.value.categoricalChartStartTime = categoricalChartDateRange.minTime;
+                    transactionStatisticsFilter.value.categoricalChartEndTime = categoricalChartDateRange.maxTime;
+                }
+            }
         }
 
         if (filter && isInteger(filter.categoricalChartStartTime) && transactionStatisticsFilter.value.categoricalChartStartTime !== filter.categoricalChartStartTime) {
@@ -1588,6 +1644,15 @@ export const useStatisticsStore = defineStore('statistics', () => {
         if (filter && isInteger(filter.trendChartDateType) && transactionStatisticsFilter.value.trendChartDateType !== filter.trendChartDateType) {
             transactionStatisticsFilter.value.trendChartDateType = filter.trendChartDateType;
             changed = true;
+
+            if (filter.trendChartDateType !== DateRange.Custom.type) {
+                const trendChartDateRange = getDateRangeByDateType(filter.trendChartDateType, userStore.currentUserFirstDayOfWeek, userStore.currentUserFiscalYearStart);
+
+                if (trendChartDateRange) {
+                    transactionStatisticsFilter.value.trendChartStartYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.minTime);
+                    transactionStatisticsFilter.value.trendChartEndYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.maxTime);
+                }
+            }
         }
 
         if (filter && (isYearMonth(filter.trendChartStartYearMonth) || filter.trendChartStartYearMonth === '') && !isYearMonthEquals(transactionStatisticsFilter.value.trendChartStartYearMonth, filter.trendChartStartYearMonth)) {
@@ -1609,6 +1674,15 @@ export const useStatisticsStore = defineStore('statistics', () => {
         if (filter && isInteger(filter.assetTrendsChartDateType) && transactionStatisticsFilter.value.assetTrendsChartDateType !== filter.assetTrendsChartDateType) {
             transactionStatisticsFilter.value.assetTrendsChartDateType = filter.assetTrendsChartDateType;
             changed = true;
+
+            if (filter.assetTrendsChartDateType !== DateRange.Custom.type) {
+                const assetTrendsChartDateRange = getDateRangeByDateType(filter.assetTrendsChartDateType, userStore.currentUserFirstDayOfWeek, userStore.currentUserFiscalYearStart);
+
+                if (assetTrendsChartDateRange) {
+                    transactionStatisticsFilter.value.assetTrendsChartStartTime = assetTrendsChartDateRange.minTime;
+                    transactionStatisticsFilter.value.assetTrendsChartEndTime = assetTrendsChartDateRange.maxTime;
+                }
+            }
         }
 
         if (filter && isInteger(filter.assetTrendsChartStartTime) && transactionStatisticsFilter.value.assetTrendsChartStartTime !== filter.assetTrendsChartStartTime) {

@@ -50,6 +50,10 @@ window.bill_analyser_SERVER_SETTINGS = {
     
     // air: AI Image Recognition (0=disabled, 1=enabled)
     air: 0,
+
+    // llmt: LLM / AI annotation capability (0=disabled, 1=enabled)
+    // 为兼容历史前端检测逻辑，默认与 air 一致
+    llmt: 0,
     
     // mcp: MCP Server (0=disabled, 1=enabled)
     mcp: 0

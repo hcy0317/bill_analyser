@@ -67,6 +67,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
     public toTemplateModifyRequest(): TransactionTemplateModifyRequest {
         return {
             id: this.id,
+            templateType: this.templateType,
             name: this.name,
             type: this.type,
             categoryId: this.getCategoryId(),
@@ -172,6 +173,7 @@ export interface TransactionTemplateCreateRequest {
 
 export interface TransactionTemplateModifyRequest {
     readonly id: string;
+    readonly templateType: number;
     readonly name: string;
     readonly type: number;
     readonly categoryId: string;
@@ -191,10 +193,12 @@ export interface TransactionTemplateModifyRequest {
 
 export interface TransactionTemplateHideRequest {
     readonly id: string;
+    readonly templateType: number;
     readonly hidden: boolean;
 }
 
 export interface TransactionTemplateMoveRequest {
+    readonly templateType: number;
     readonly newDisplayOrders: TransactionTemplateNewDisplayOrderRequest[];
 }
 
@@ -205,6 +209,7 @@ export interface TransactionTemplateNewDisplayOrderRequest {
 
 export interface TransactionTemplateDeleteRequest {
     readonly id: string;
+    readonly templateType: number;
 }
 
 export interface TransactionTemplateInfoResponse extends TransactionInfoResponse {

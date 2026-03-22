@@ -246,10 +246,12 @@ npm run lint
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1/transactions/list.json` | GET | 获取交易列表 |
-| `/api/v1/accounts/list.json` | GET | 获取账户列表 |
-| `/api/v1/transaction/categories/list.json` | GET | 获取分类列表 |
-| `/api/v1/budgets/list.json` | GET | 获取预算列表 |
+| `/api/bills/` | GET | 获取交易列表 |
+| `/api/accounts/` | GET | 获取账户列表 |
+| `/api/categories/` | GET | 获取分类列表 |
+| `/api/budgets/` | GET | 获取预算列表 |
+| `/api/statistics/category-statistics` | GET | 获取分类统计 |
+| `/api/statistics/exchange-rates` | GET | 获取最新汇率 |
 | `/api/health` | GET | 健康检查 |
 
 详细 API 文档请参考 `.github/copilot-instructions.md`

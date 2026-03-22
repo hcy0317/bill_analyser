@@ -9,15 +9,18 @@
             </f7-nav-right>
 
             <f7-subnavbar>
-                <f7-segmented strong>
+                <f7-segmented strong :class="{ 'transaction-type-segmented-readonly': mode === TransactionEditPageMode.View }">
                     <f7-button :text="tt('Expense')" :active="transaction.type === TransactionType.Expense"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
+                               :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Expense"></f7-button>
                     <f7-button :text="tt('Income')" :active="transaction.type === TransactionType.Income"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
+                               :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Income"></f7-button>
                     <f7-button :text="tt('Transfer')" :active="transaction.type === TransactionType.Transfer"
                                v-if="transaction.type !== TransactionType.ModifyBalance"
+                               :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Transfer"></f7-button>
                     <f7-button :text="tt('Modify Balance')" :active="transaction.type === TransactionType.ModifyBalance"
                                :disabled="true"
@@ -95,9 +98,9 @@
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
                 key="expenseCategorySelection"
                 link="#" no-chevron
-                :class="{ 'disabled': !hasAvailableExpenseCategories, 'readonly': mode === TransactionEditPageMode.View }"
+                :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
-                @click="showCategorySheet = true"
+                @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Expense"
             >
                 <template #title>
@@ -127,9 +130,9 @@
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
                 key="incomeCategorySelection"
                 link="#" no-chevron
-                :class="{ 'disabled': !hasAvailableIncomeCategories, 'readonly': mode === TransactionEditPageMode.View }"
+                :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
-                @click="showCategorySheet = true"
+                @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Income"
             >
                 <template #title>
@@ -159,9 +162,9 @@
                 class="list-item-with-header-and-title list-item-title-hide-overflow"
                 key="transferCategorySelection"
                 link="#" no-chevron
-                :class="{ 'disabled': !hasAvailableTransferCategories, 'readonly': mode === TransactionEditPageMode.View }"
+                :class="{ 'readonly': mode === TransactionEditPageMode.View }"
                 :header="tt('Category')"
-                @click="showCategorySheet = true"
+                @click="handleCategoryItemClick"
                 v-if="transaction.type === TransactionType.Transfer"
             >
                 <template #title>
@@ -514,9 +517,14 @@ import {
     getTimezoneOffset,
     getTimezoneOffsetMinutes
 } from '@/lib/datetime.ts';
+import { categorizedArrayToPlainArray } from '@/lib/common.ts';
 import { formatCoordinate } from '@/lib/coordinate.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
-import { getTransactionPrimaryCategoryName, getTransactionSecondaryCategoryName } from '@/lib/category.ts';
+import {
+    getTransactionPrimaryCategoryName,
+    getTransactionSecondaryCategoryName,
+    localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories
+} from '@/lib/category.ts';
 import { setTransactionModelByTransaction } from '@/lib/transaction.ts';
 import { getMapProvider, isTransactionPicturesEnabled } from '@/lib/server_settings.ts';
 import logger from '@/lib/logger.ts';
@@ -531,6 +539,8 @@ const pageTypeAndMode = getPageTypeNameMode();
 
 const {
     tt,
+    getCurrentLanguageTag,
+    getAllTransactionDefaultCategories,
     getMultiMonthdayShortNames,
     getMultiWeekdayLongNames,
     formatUnixTimeToLongDate,
@@ -621,6 +631,7 @@ const showScheduledStartDateSheet = ref<boolean>(false);
 const showScheduledEndDateSheet = ref<boolean>(false);
 const showGeoLocationMapSheet = ref<boolean>(false);
 const showTransactionTagSheet = ref<boolean>(false);
+const addingDefaultCategories = ref<boolean>(false);
 const showTransactionPictures = ref<boolean>(pageTypeAndMode?.type === TransactionEditPageType.Transaction
     && (pageTypeAndMode?.mode === TransactionEditPageMode.Add || pageTypeAndMode?.mode === TransactionEditPageMode.Edit)
     && settingsStore.appSettings.alwaysShowTransactionPicturesInMobileTransactionEditPage);
@@ -827,6 +838,77 @@ function getTagName(tagId: string): string {
     return '';
 }
 
+function hasAvailableCategoriesForType(type: number): boolean {
+    if (type === TransactionType.Expense) {
+        return hasAvailableExpenseCategories.value;
+    }
+
+    if (type === TransactionType.Income) {
+        return hasAvailableIncomeCategories.value;
+    }
+
+    if (type === TransactionType.Transfer) {
+        return hasAvailableTransferCategories.value;
+    }
+
+    return false;
+}
+
+async function addDefaultCategoriesAndOpenSheet(type: number): Promise<void> {
+    if (addingDefaultCategories.value) {
+        return;
+    }
+
+    const allPresetCategories = getAllTransactionDefaultCategories(0, getCurrentLanguageTag());
+    const presetCategoriesArray = categorizedArrayToPlainArray(allPresetCategories);
+    const submitCategories = localizedPresetCategoriesToTransactionCategoryCreateWithSubCategories(presetCategoriesArray);
+
+    if (!submitCategories.length) {
+        showToast('No available category');
+        return;
+    }
+
+    addingDefaultCategories.value = true;
+    showLoading(() => addingDefaultCategories.value);
+
+    try {
+        await transactionCategoriesStore.addPresetCategories({
+            categories: submitCategories
+        });
+
+        await transactionCategoriesStore.loadAllCategories({ force: true });
+        showToast('You have added preset categories');
+
+        if (hasAvailableCategoriesForType(type)) {
+            showCategorySheet.value = true;
+        }
+    } catch (error: any) {
+        if (!error?.processed) {
+            showToast(error?.message || error);
+        }
+    } finally {
+        addingDefaultCategories.value = false;
+        hideLoading();
+    }
+}
+
+function handleCategoryItemClick(): void {
+    if (mode.value === TransactionEditPageMode.View || loading.value || submitting.value || addingDefaultCategories.value) {
+        return;
+    }
+
+    const currentType = transaction.value.type;
+
+    if (hasAvailableCategoriesForType(currentType)) {
+        showCategorySheet.value = true;
+        return;
+    }
+
+    showConfirm(`${tt('No available category')}. ${tt('Add Default Categories')}?`, () => {
+        void addDefaultCategoriesAndOpenSheet(currentType);
+    });
+}
+
 function init(): void {
     if (!pageTypeAndMode) {
         showToast('Parameter Invalid');
@@ -873,7 +955,10 @@ function init(): void {
                 editId.value = query['id'];
             }
 
-            promises.push(transactionTemplatesStore.getTemplate({ templateId: query['id'] }));
+            promises.push(transactionTemplatesStore.getTemplate({
+                templateId: query['id'],
+                templateType: (transaction.value as TransactionTemplate).templateType
+            }));
         }
     }
 
@@ -1271,6 +1356,10 @@ init();
     font-size: var(--ebk-category-separate-icon-font-size);
     line-height: 16px;
     color: var(--f7-color-gray-tint);
+}
+
+.transaction-type-segmented-readonly {
+    opacity: 0.7;
 }
 
 .transaction-edit-amount {

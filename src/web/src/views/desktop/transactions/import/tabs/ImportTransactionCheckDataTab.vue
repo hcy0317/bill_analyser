@@ -33,6 +33,10 @@
                                      :title="tt('Select All Invalid Items')"
                                      :disabled="!!disabled"
                                      @click="selectAllInvalid"></v-list-item>
+                        <v-list-item :prepend-icon="mdiMessageAlertOutline"
+                                     :title="getSelectAllAnnotationText()"
+                                     :disabled="!!disabled"
+                                     @click="selectAllNeedsAnnotation"></v-list-item>
                         <v-divider class="my-2"/>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All')"
@@ -70,25 +74,163 @@
                         v-model="item.selected"></v-checkbox>
         </template>
         <template #item.valid="{ item }">
+            <div class="d-flex align-center ga-1">
             <v-icon size="small" :class="{ 'text-error': !item.valid }"
-                    :disabled="!!disabled"
-                    :icon="editingTransaction === item ? mdiCheck : mdiPencilOutline"
-                    @click="editTransaction(item)">
+                :disabled="!!disabled"
+                :icon="editingTransaction === item ? mdiCheck : mdiPencilOutline"
+                @click="editTransaction(item)">
             </v-icon>
-            <v-tooltip activator="parent" v-if="!disabled">{{ tt('Edit') }}</v-tooltip>
+            <v-icon v-if="needsAnnotation(item)"
+                size="small"
+                color="warning"
+                :icon="mdiMessageAlertOutline"
+                :title="getAnnotationSummary(item)">
+            </v-icon>
+            </div>
         </template>
         <template #item.time="{ item }">
             <span>{{ getDisplayDateTime(item) }}</span>
             <v-chip class="ms-1" variant="flat" color="grey" size="x-small"
                     v-if="item.utcOffset !== currentTimezoneOffsetMinutes">{{ getDisplayTimezone(item) }}</v-chip>
         </template>
-        <template #item.type="{ value }">
-            <v-chip label color="secondary" variant="outlined" size="x-small" v-if="value === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
-            <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="value === TransactionType.Income">{{ tt('Income') }}</v-chip>
-            <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="value === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
-            <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="value === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
-            <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="value === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
-            <v-chip label color="default" variant="outlined" size="x-small" v-else>{{ tt('Unknown') }}</v-chip>
+        <!-- v6.77: 类型列 - 支持编辑模式切换 -->
+        <template #item.type="{ item }">
+            <!-- 非编辑状态：显示类型标签 -->
+            <div v-if="editingTransaction !== item" :key="`type-view-${item.index}`">
+                <v-chip label color="secondary" variant="outlined" size="x-small" v-if="item.type === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
+                <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Income">{{ tt('Income') }}</v-chip>
+                <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
+                <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
+                <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
+                <v-chip label color="default" variant="outlined" size="x-small" v-else>{{ tt('Unknown') }}</v-chip>
+                <div class="mt-1" v-if="item.hasTransferSuggestion()">
+                    <v-chip
+                        color="warning"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiLightbulbOutline"
+                        :title="item.transferSuggestionReason"
+                        @click.stop="applySuggestedType(item)">
+                        {{ tt('Likely Transfer') }}
+                    </v-chip>
+                </div>
+                <div class="mt-1" v-if="item.hasInvestmentSignal()">
+                    <v-chip
+                        color="info"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiChartLine"
+                        :title="item.investmentSignalReason">
+                        {{ tt('Investment Signal') }}
+                    </v-chip>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.getInvestmentProfileText()">
+                        {{ item.getInvestmentProfileText() }}
+                    </div>
+                </div>
+                <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
+                    <v-chip
+                        v-if="item.hasRecurringMatch()"
+                        color="success"
+                        variant="tonal"
+                        size="x-small"
+                        :title="getRecurringMatchSummary(item)">
+                        {{ tt('Scheduled Match') }}
+                    </v-chip>
+                    <v-chip
+                        v-if="item.recurringCandidateCount > 0"
+                        class="ms-1"
+                        color="info"
+                        variant="outlined"
+                        size="x-small">
+                        {{ tt('Scheduled Candidates') }} {{ getDisplayCount(item.recurringCandidateCount) }}
+                    </v-chip>
+                    <v-chip
+                        v-if="item.recurringCandidateCount > 0 && getPrimaryRecurringReason(item)"
+                        class="ms-1"
+                        color="amber"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiStar">
+                        {{ tt('Best Candidate') }} · {{ getPrimaryRecurringReason(item) }}
+                    </v-chip>
+                    <v-btn
+                        class="mt-1"
+                        variant="text"
+                        color="success"
+                        size="x-small"
+                        :disabled="!!disabled || !props.sessionId"
+                        @click.stop="openRecurringCandidateDialog(item)">
+                        {{ tt('Choose Scheduled Match') }}
+                    </v-btn>
+                </div>
+            </div>
+            <!-- 编辑状态：类型选择器（余额调整类型不可编辑） -->
+            <div style="width: 120px" v-else :key="`type-edit-${item.index}`">
+                <v-select
+                    density="compact"
+                    variant="plain"
+                    hide-details
+                    :disabled="!!disabled || item.type === TransactionType.ModifyBalance"
+                    :items="transactionTypeOptions"
+                    item-title="text"
+                    item-value="value"
+                    v-model="item.type"
+                    @update:model-value="onTransactionTypeChange(item)"
+                ></v-select>
+                <v-btn
+                    v-if="item.hasTransferSuggestion()"
+                    class="mt-1"
+                    variant="text"
+                    color="warning"
+                    size="x-small"
+                    :prepend-icon="mdiLightbulbOutline"
+                    @click.stop="applySuggestedType(item)">
+                    {{ tt('Apply Suggestion') }}
+                </v-btn>
+                <v-chip
+                    v-if="item.hasInvestmentSignal()"
+                    class="mt-1"
+                    color="info"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiChartLine"
+                    :title="item.investmentSignalReason">
+                    {{ tt('Investment Signal') }}
+                </v-chip>
+                <div class="text-caption text-medium-emphasis mt-1"
+                     v-if="item.hasInvestmentSignal() && item.getInvestmentProfileText()">
+                    {{ item.getInvestmentProfileText() }}
+                </div>
+                <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
+                    <v-chip
+                        v-if="item.hasRecurringMatch()"
+                        color="success"
+                        variant="tonal"
+                        size="x-small"
+                        :title="getRecurringMatchSummary(item)">
+                        {{ tt('Scheduled Match') }}
+                    </v-chip>
+                    <v-btn
+                        class="mt-1"
+                        variant="text"
+                        color="success"
+                        size="x-small"
+                        :disabled="!!disabled || !props.sessionId"
+                        @click.stop="openRecurringCandidateDialog(item)">
+                        {{ tt('Choose Scheduled Match') }}
+                    </v-btn>
+                    <v-btn
+                        class="mt-1"
+                        variant="text"
+                        color="warning"
+                        size="x-small"
+                        :disabled="!item.hasRecurringMatch()"
+                        @click.stop="clearRecurringMatch(item)">
+                        {{ tt('Clear Scheduled Match') }}
+                    </v-btn>
+                </div>
+            </div>
         </template>
         <template #item.actualCategoryName="{ item }">
             <!-- 非编辑状态或余额调整类型：显示分类名称 -->
@@ -308,6 +450,23 @@
                 <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
                     {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
                 </span>
+                <v-chip class="ms-3"
+                        color="warning"
+                        variant="tonal"
+                        size="small"
+                        v-if="annotationTransactionCount > 0">
+                    {{ getNeedsAnnotationText() }} {{ getDisplayCount(annotationTransactionCount) }}
+                </v-chip>
+                <v-btn class="ms-2"
+                       v-if="aiAnnotationEnabled"
+                       density="compact"
+                       variant="tonal"
+                       color="warning"
+                       :disabled="!!disabled || selectedAnnotationTransactionCount < 1"
+                       :prepend-icon="mdiMessageAlertOutline"
+                       @click="openAnnotationDialog">
+                    {{ getAnnotationActionText() }}
+                </v-btn>
 
                 <!-- 快速编辑按钮组 -->
                 <v-btn-group class="ms-4" density="compact" variant="outlined" color="primary">
@@ -317,6 +476,11 @@
                            @click="reclassifySelected">
                         {{ tt('Reclassify') }}
                     </v-btn>
+                              <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
+                                    :prepend-icon="mdiSchoolOutline"
+                                    @click="promoteSelectedToLongTermLearning">
+                                {{ tt('Save as Long-term Learning') }}
+                          </v-btn>
                     <!-- v6.40: 分类按钮直接打开管理分类对话框 -->
                     <v-btn :disabled="!!disabled"
                            :prepend-icon="mdiTagMultiple"
@@ -578,6 +742,124 @@
 
     <!-- v6.34: 账户编辑对话框 -->
     <account-edit-dialog ref="accountEditDialog" />
+
+    <v-dialog width="760" v-model="showRecurringCandidateDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ tt('Choose Scheduled Match') }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ tt('Pick a scheduled transaction to link with this imported bill') }}
+                </p>
+                <div class="text-body-2 mb-4" v-if="recurringCandidateTarget">
+                    {{ getAnnotationListTitle(recurringCandidateTarget) }}
+                </div>
+                <div class="d-flex justify-center py-8" v-if="recurringCandidateLoading">
+                    <v-progress-circular indeterminate color="primary" />
+                </div>
+                <v-list class="border rounded" lines="three" max-height="360" v-else-if="recurringCandidates.length > 0">
+                    <v-list-item
+                        v-for="candidate in recurringCandidates"
+                        :key="String(candidate.id)"
+                        :active="selectedRecurringCandidateId === String(candidate.id)"
+                        @click="selectedRecurringCandidateId = String(candidate.id)">
+                        <template #prepend>
+                            <v-icon :icon="selectedRecurringCandidateId === String(candidate.id) ? mdiCheck : mdiPencilOutline" />
+                        </template>
+                        <v-list-item-title>
+                            <div class="d-flex align-center ga-2 flex-wrap">
+                                <span>{{ candidate.name || tt('Unnamed Template') }}</span>
+                                <v-chip v-if="isBestRecurringCandidate(candidate)"
+                                        color="amber"
+                                        variant="tonal"
+                                        size="x-small"
+                                        :prepend-icon="mdiStar">
+                                    {{ tt('Best Candidate') }}
+                                </v-chip>
+                                <v-chip color="success" variant="tonal" size="x-small">
+                                    {{ tt('Match Score') }} {{ candidate.matchScore || 0 }}
+                                </v-chip>
+                            </div>
+                        </v-list-item-title>
+                        <v-list-item-subtitle>
+                            {{ formatRecurringCandidateSubtitle(candidate) }}
+                        </v-list-item-subtitle>
+                        <div class="text-caption text-medium-emphasis mt-1"
+                             v-if="isBestRecurringCandidate(candidate) && getRecurringCandidatePrimaryReason(candidate)">
+                            {{ tt('Best Candidate Reason') }}: {{ getRecurringCandidatePrimaryReason(candidate) }}
+                        </div>
+                    </v-list-item>
+                </v-list>
+                <v-alert type="info" variant="tonal" v-else>
+                    {{ tt('No Scheduled Candidates') }}
+                </v-alert>
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4 flex-wrap">
+                <v-btn color="primary"
+                       :disabled="!selectedRecurringCandidateId"
+                       @click="applySelectedRecurringCandidate">
+                    {{ tt('Apply') }}
+                </v-btn>
+                <v-btn color="warning"
+                       variant="tonal"
+                       :disabled="!recurringCandidateTarget || !recurringCandidateTarget.hasRecurringMatch()"
+                       @click="clearRecurringMatchFromDialog">
+                    {{ tt('Clear Scheduled Match') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="closeRecurringCandidateDialog">
+                    {{ tt('Cancel') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- v6.89: 待标注人工处理弹窗 -->
+    <v-dialog width="760" v-model="showAnnotationDialog">
+        <v-card class="pa-4">
+            <v-card-title class="text-center">
+                <h4 class="text-h5">{{ getAnnotationDialogTitle() }}</h4>
+            </v-card-title>
+            <v-card-text>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                    {{ getAnnotationDialogDescription() }}
+                </p>
+                <div class="d-flex flex-wrap ga-2 mb-4" v-if="annotationReasonSummaries.length > 0">
+                    <v-chip v-for="reason in annotationReasonSummaries"
+                            :key="reason.key"
+                            color="warning"
+                            variant="outlined"
+                            size="small">
+                        {{ reason.label }} × {{ getDisplayCount(reason.count) }}
+                    </v-chip>
+                </div>
+                <v-list class="border rounded" lines="two" max-height="360">
+                    <v-list-item v-for="transaction in selectedAnnotationTransactions"
+                                 :key="transaction.index"
+                                 :title="getAnnotationListTitle(transaction)"
+                                 :subtitle="getAnnotationSummary(transaction)">
+                        <template #prepend>
+                            <v-icon color="warning" :icon="mdiMessageAlertOutline" />
+                        </template>
+                    </v-list-item>
+                </v-list>
+            </v-card-text>
+            <v-card-actions class="justify-center gap-4 flex-wrap">
+                <v-btn color="warning" variant="tonal" @click="openBatchCategoryDialogFromAnnotation">
+                    {{ tt('Open Batch Category Editor') }}
+                </v-btn>
+                <v-btn color="warning" variant="tonal" @click="openBatchAccountDialogFromAnnotation">
+                    {{ tt('Open Batch Account Editor') }}
+                </v-btn>
+                <v-btn color="primary" @click="editFirstAnnotationTransaction">
+                    {{ tt('Edit First Transaction') }}
+                </v-btn>
+                <v-btn color="secondary" variant="tonal" @click="showAnnotationDialog = false">
+                    {{ tt('Close') }}
+                </v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -632,6 +914,7 @@ import {
 import {
     getCurrentToken
 } from '@/lib/userstate.ts';
+import { isTransactionFromAIImageRecognitionEnabled } from '@/lib/server_settings.ts';
 import logger from '@/lib/logger.ts';
 
 import {
@@ -647,8 +930,13 @@ import {
     mdiShapePlusOutline,
     mdiTransfer,
     mdiAutoFix,
+    mdiSchoolOutline,
     mdiTagMultiple,
-    mdiWallet
+    mdiWallet,
+    mdiMessageAlertOutline,
+    mdiLightbulbOutline,
+    mdiChartLine,
+    mdiStar
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -666,6 +954,7 @@ interface ImportTransactionCheckDataFilter {
     category: string | null | undefined; // null for 'All Category', undefined for 'Invalid Category'
     account: string | null | undefined; // null for 'All Account', undefined for 'Invalid Account'
     tag: string | null | undefined; // null for 'All Tag', undefined for 'Invalid Tag'
+    annotation: boolean | null; // null for all, true for needs annotation only, false for resolved only
     description: string | null; // null for 'All Description'
 }
 
@@ -682,6 +971,20 @@ interface ImportTransactionCheckDataMenu {
     disabled?: boolean;
     divider?: boolean;
     onClick: () => void;
+}
+
+interface AnnotationReasonSummary {
+    key: string;
+    label: string;
+    count: number;
+}
+
+interface RecurringCandidateItem {
+    id: string;
+    name?: string;
+    matchScore?: number;
+    matchReasons?: string[];
+    matchedOccurrenceDate?: string;
 }
 
 const props = defineProps<{
@@ -735,6 +1038,7 @@ const filters = ref<ImportTransactionCheckDataFilter>({
     category: null,
     account: null,
     tag: null,
+    annotation: null,
     description: null
 });
 
@@ -743,6 +1047,12 @@ const countPerPage = ref<number>(10);
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
+const showAnnotationDialog = ref<boolean>(false);
+const showRecurringCandidateDialog = ref<boolean>(false);
+const recurringCandidateLoading = ref<boolean>(false);
+const recurringCandidateTarget = ref<ImportTransaction | null>(null);
+const recurringCandidates = ref<RecurringCandidateItem[]>([]);
+const selectedRecurringCandidateId = ref<string>('');
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -767,6 +1077,49 @@ const allCategories = computed<Record<number, TransactionCategory[]>>(() => tran
 const allCategoriesMap = computed<Record<string, TransactionCategory>>(() => transactionCategoriesStore.allTransactionCategoriesMap);
 const allTags = computed<TransactionTag[]>(() => transactionTagsStore.allTransactionTags);
 const allTagsMap = computed<Record<string, TransactionTag>>(() => transactionTagsStore.allTransactionTagsMap);
+const aiAnnotationEnabled = computed<boolean>(() => isTransactionFromAIImageRecognitionEnabled());
+
+function getAnnotationTextKey(baseKey: string, aiKey: string): string {
+    return aiAnnotationEnabled.value ? aiKey : baseKey;
+}
+
+function getNeedsAnnotationText(): string {
+    return tt(getAnnotationTextKey('Needs Annotation', 'Needs AI Annotation'));
+}
+
+function getSelectAllAnnotationText(): string {
+    return tt(getAnnotationTextKey('Select All Needs Annotation', 'Select All Needs AI Annotation'));
+}
+
+function getAnnotationActionText(): string {
+    return tt(getAnnotationTextKey('Request Annotation', 'AI Annotation'));
+}
+
+function getAnnotationFilterTitle(): string {
+    return tt(getAnnotationTextKey('Annotation', 'AI Annotation'));
+}
+
+function getNoAnnotationIssuesText(): string {
+    return tt(getAnnotationTextKey('No Annotation Issues', 'No AI Annotation Issues'));
+}
+
+function getAnnotationDialogTitle(): string {
+    return tt(getAnnotationTextKey('Review Annotation Queue', 'Review AI Annotation Queue'));
+}
+
+function getAnnotationDialogDescription(): string {
+    return tt(getAnnotationTextKey(
+        'Selected transactions need manual review before import',
+        'Selected transactions need AI-assisted review before import'
+    ));
+}
+
+function getNoSelectedAnnotationText(): string {
+    return tt(getAnnotationTextKey(
+        'No selected transactions require annotation',
+        'No selected transactions require AI annotation'
+    ));
+}
 
 // 根据交易类型获取对应的分类列表（统一函数，避免多个 v-if 分支导致的 Vue 渲染问题）
 function getCategoriesForType(type: number): TransactionCategory[] {
@@ -830,6 +1183,219 @@ const batchCategoryTypeOptions = computed<NameNumeralValue[]>(() => [
     { name: tt('Investment'), value: TransactionType.Investment }
 ]);
 
+// v6.77: 单行编辑交易类型选项（用于预览表格中的类型编辑）
+const transactionTypeOptions = computed<{ text: string; value: number }[]>(() => [
+    { text: tt('Expense'), value: TransactionType.Expense },
+    { text: tt('Income'), value: TransactionType.Income },
+    { text: tt('Transfer'), value: TransactionType.Transfer },
+    { text: tt('Investment'), value: TransactionType.Investment }
+]);
+
+/**
+ * v6.77: 当交易类型改变时的处理函数
+ * 重置分类ID（因为不同类型对应不同的分类）
+ * @param item 被编辑的交易
+ */
+function onTransactionTypeChange(item: ImportTransaction): void {
+    logger.info(`[类型变更] 交易类型从旧值变更为 ${item.type}，重置分类选择`);
+    // 清空分类ID，因为不同交易类型对应不同的分类列表
+    item.categoryId = '';
+    if (item.hasRecurringMatch()) {
+        item.clearRecurringMatch();
+    }
+}
+
+function clearRecurringMatch(item: ImportTransaction): void {
+    item.clearRecurringMatch(false);
+    logger.info(`[定时匹配] 已清除自动匹配 index=${item.index}`);
+}
+
+function closeRecurringCandidateDialog(): void {
+    showRecurringCandidateDialog.value = false;
+    recurringCandidateLoading.value = false;
+    recurringCandidateTarget.value = null;
+    recurringCandidates.value = [];
+    selectedRecurringCandidateId.value = '';
+}
+
+async function openRecurringCandidateDialog(item: ImportTransaction): Promise<void> {
+    const previewId = (item as { _previewId?: number })._previewId;
+    if (!previewId) {
+        snackbar.value?.showMessage(tt('No preview ID available'));
+        return;
+    }
+
+    recurringCandidateTarget.value = item;
+    recurringCandidates.value = [];
+    selectedRecurringCandidateId.value = item.recurringTemplateId || '';
+    showRecurringCandidateDialog.value = true;
+    recurringCandidateLoading.value = true;
+
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`/api/bills/import/v2/preview-item/${previewId}/recurring-candidates`, {
+            method: 'GET',
+            headers: headers
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Load recurring candidates failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        recurringCandidates.value = (result.result?.candidates || []) as RecurringCandidateItem[];
+        selectedRecurringCandidateId.value = item.recurringTemplateId
+            || String(result.result?.linkedRecurringId || '')
+            || (recurringCandidates.value[0] ? String(recurringCandidates.value[0].id) : '');
+    } catch (error) {
+        logger.error(`[定时候选] 加载失败: ${error}`);
+        snackbar.value?.showMessage(tt('Load Scheduled Candidates Failed'));
+        closeRecurringCandidateDialog();
+    } finally {
+        recurringCandidateLoading.value = false;
+    }
+}
+
+function formatRecurringCandidateSubtitle(candidate: RecurringCandidateItem): string {
+    const reasons = Array.isArray(candidate.matchReasons)
+        ? candidate.matchReasons.join(' | ')
+        : '';
+    return [
+        candidate.matchedOccurrenceDate ? `${tt('Matched Date')}: ${candidate.matchedOccurrenceDate}` : '',
+        reasons ? `${tt('Match Reasons')}: ${reasons}` : ''
+    ].filter(text => !!text).join(' · ');
+}
+
+function isBestRecurringCandidate(candidate: RecurringCandidateItem): boolean {
+    const bestCandidate = recurringCandidates.value[0];
+    if (!bestCandidate) {
+        return false;
+    }
+
+    return String(bestCandidate.id) === String(candidate.id);
+}
+
+function getRecurringCandidatePrimaryReason(candidate: RecurringCandidateItem): string {
+    if (!Array.isArray(candidate.matchReasons) || candidate.matchReasons.length < 1) {
+        return '';
+    }
+
+    return String(candidate.matchReasons[0] || '');
+}
+
+function getPrimaryRecurringReason(item: ImportTransaction): string {
+    if (!item.recurringMatchReasons) {
+        return '';
+    }
+
+    return item.recurringMatchReasons.split('|').map(text => text.trim()).filter(text => !!text)[0] || '';
+}
+
+function applySelectedRecurringCandidate(): void {
+    if (!recurringCandidateTarget.value || !selectedRecurringCandidateId.value) {
+        return;
+    }
+
+    const matchedCandidate = recurringCandidates.value.find(
+        candidate => String(candidate.id) === selectedRecurringCandidateId.value
+    );
+    if (!matchedCandidate) {
+        return;
+    }
+
+    recurringCandidateTarget.value.recurringTemplateId = String(matchedCandidate.id);
+    recurringCandidateTarget.value.recurringTemplateName = matchedCandidate.name || '';
+    recurringCandidateTarget.value.recurringCandidateCount = recurringCandidates.value.length;
+    recurringCandidateTarget.value.recurringMatchScore = Number(matchedCandidate.matchScore || 0);
+    recurringCandidateTarget.value.recurringMatchReasons = Array.isArray(matchedCandidate.matchReasons)
+        ? matchedCandidate.matchReasons.join('|')
+        : '';
+    recurringCandidateTarget.value.recurringMatchedDate = matchedCandidate.matchedOccurrenceDate || '';
+
+    logger.info(`[定时候选] 已切换定时匹配 index=${recurringCandidateTarget.value.index}, recurringId=${matchedCandidate.id}`);
+    closeRecurringCandidateDialog();
+}
+
+function clearRecurringMatchFromDialog(): void {
+    if (!recurringCandidateTarget.value) {
+        return;
+    }
+
+    clearRecurringMatch(recurringCandidateTarget.value);
+    closeRecurringCandidateDialog();
+}
+
+function getRecurringMatchSummary(item: ImportTransaction): string {
+    return [
+        item.recurringTemplateName,
+        item.recurringMatchedDate,
+        item.recurringMatchReasons,
+        item.recurringMatchScore ? `score=${item.recurringMatchScore}` : ''
+    ].filter(text => !!text).join(' | ');
+}
+
+function applySuggestedType(item: ImportTransaction): void {
+    if (!item.hasTransferSuggestion() || !item.suggestedType) {
+        return;
+    }
+
+    item.type = item.suggestedType;
+    onTransactionTypeChange(item);
+    logger.info(
+        `[导入推荐] 应用类型推荐 index=${item.index}, suggestedType=${item.suggestedType}, score=${item.transferSuggestionScore}`
+    );
+}
+
+function getAnnotationIssues(item: ImportTransaction): string[] {
+    const reasons: string[] = [];
+
+    if (item.type !== TransactionType.ModifyBalance && (!item.categoryId || item.categoryId === '0')) {
+        reasons.push(tt('Missing Category'));
+    }
+
+    if (!item.sourceAccountId || item.sourceAccountId === '0') {
+        reasons.push(tt('Missing Source Account'));
+    }
+
+    if (requiresDestinationAccount(item) && (!item.destinationAccountId || item.destinationAccountId === '0')) {
+        reasons.push(tt('Missing Destination Account'));
+    }
+
+    if (requiresDestinationAccount(item)
+        && item.sourceAccountId
+        && item.destinationAccountId
+        && item.sourceAccountId !== '0'
+        && item.destinationAccountId !== '0'
+        && item.sourceAccountId === item.destinationAccountId) {
+        reasons.push(tt('Review Transfer Accounts'));
+    }
+
+    return reasons;
+}
+
+function needsAnnotation(item: ImportTransaction): boolean {
+    return getAnnotationIssues(item).length > 0;
+}
+
+function getAnnotationSummary(item: ImportTransaction): string {
+    return getAnnotationIssues(item).join(' · ');
+}
+
+function getAnnotationListTitle(item: ImportTransaction): string {
+    const description = item.comment || item.counterparty || item.paymentMethod || tt('No description');
+    return `${getDisplayDateTime(item)} · ${description}`;
+}
+
 // 批量编辑分类：根据选中的交易类型获取分类列表
 function getBatchCategoryItems(): TransactionCategory[] {
     return getCategoriesForType(batchCategoryType.value);
@@ -849,6 +1415,11 @@ const availableAccounts = computed<Account[]>(() => allVisibleAccounts.value);
  * 5. 返回更新后的完整预览数据
  */
 async function reclassifySelected(): Promise<void> {
+    if (editingTransaction.value) {
+        editingTransaction.value.tagIds = editingTags.value;
+        updateTransactionData(editingTransaction.value);
+    }
+
     // 检查 session_id 是否存在
     if (!props.sessionId) {
         logger.error('[重新分类] 缺少 sessionId');
@@ -868,10 +1439,15 @@ async function reclassifySelected(): Promise<void> {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
+        const previewUpdates = buildSelectedPreviewUpdates();
+
         // 调用 v6.55 新增的 reclassify API
         const response = await fetch(`/api/bills/import/v2/reclassify/${props.sessionId}`, {
             method: 'POST',
-            headers: headers
+            headers: headers,
+            body: JSON.stringify({
+                preview_updates: previewUpdates
+            })
         });
 
         if (!response.ok) {
@@ -885,7 +1461,8 @@ async function reclassifySelected(): Promise<void> {
             throw new Error(result.error || 'Unknown error');
         }
 
-        logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}`);
+        logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}, ` +
+            `session_samples_saved=${result.data?.session_samples_saved || 0}, annotation_applied=${result.data?.annotation_applied || 0}`);
 
         // 通知父组件使用新数据
         // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
@@ -903,6 +1480,83 @@ async function reclassifySelected(): Promise<void> {
     } catch (error) {
         logger.error(`[重新分类] 失败: ${error}`);
         snackbar.value?.showMessage(`Reclassify failed: ${error}`);
+    }
+}
+
+function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
+    const selectedTransactions = (props.importTransactions || []).filter(transaction => transaction.selected);
+    const typeReverseMap: Record<number, string> = {
+        2: '收入',
+        3: '支出',
+        4: '转账',
+        5: '投资'
+    };
+
+    return selectedTransactions.map(transaction => {
+        return {
+            id: (transaction as { _previewId?: number })._previewId,
+            preview_type: typeReverseMap[transaction.type] || '支出',
+            preview_amount: transaction.sourceAmount / 100,
+            preview_destination_amount: transaction.destinationAmount / 100,
+            preview_source_account_id: transaction.sourceAccountId ? parseInt(transaction.sourceAccountId, 10) : null,
+            preview_destination_account_id: transaction.destinationAccountId ? parseInt(transaction.destinationAccountId, 10) : null,
+            preview_recurring_id: transaction.recurringTemplateId ? parseInt(transaction.recurringTemplateId, 10) : null,
+            preview_recurring_name: transaction.recurringTemplateName || '',
+            preview_recurring_candidate_count: transaction.recurringCandidateCount || 0,
+            preview_recurring_match_score: transaction.recurringMatchScore || 0,
+            preview_recurring_match_reasons: transaction.recurringMatchReasons || '',
+            preview_recurring_matched_date: transaction.recurringMatchedDate || '',
+            category_id: transaction.categoryId ? parseInt(transaction.categoryId, 10) : null,
+            selected: transaction.selected
+        };
+    }).filter(item => !!item.id);
+}
+
+async function promoteSelectedToLongTermLearning(): Promise<void> {
+    if (editingTransaction.value) {
+        editingTransaction.value.tagIds = editingTags.value;
+        updateTransactionData(editingTransaction.value);
+    }
+
+    if (!props.sessionId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const previewUpdates = buildSelectedPreviewUpdates();
+        const response = await fetch(`/api/bills/import/v2/learning/${props.sessionId}/promote`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ preview_updates: previewUpdates })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Promote failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        snackbar.value?.showMessage(
+            tt('Long-term learning saved: {count} rules', {
+                count: result.data?.rules_total || 0
+            })
+        );
+    } catch (error) {
+        logger.error(`[长期学习提升] 失败: ${error}`);
+        snackbar.value?.showMessage(`Promote failed: ${error}`);
     }
 }
 
@@ -1184,6 +1838,26 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
         ]
     },
     {
+        title: getAnnotationFilterTitle(),
+        items: [
+            {
+                title: tt('All'),
+                appendIcon: filters.value.annotation === null ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = null
+            },
+            {
+                title: getNeedsAnnotationText(),
+                appendIcon: filters.value.annotation === true ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = true
+            },
+            {
+                title: getNoAnnotationIssuesText(),
+                appendIcon: filters.value.annotation === false ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = false
+            }
+        ]
+    },
+    {
         title: tt('Description'),
         items: [
             {
@@ -1351,6 +2025,13 @@ const toolMenus = computed<ImportTransactionCheckDataMenu[]>(() => [
         title: tt('Batch Convert Transfer Transaction to Income Transaction'),
         disabled: isEditing.value || selectedTransferTransactionCount.value < 1,
         onClick: () => convertTransactionType(TransactionType.Transfer, TransactionType.Income)
+    },
+    {
+        prependIcon: mdiAutoFix,
+        title: tt('Clear Selected Scheduled Matches'),
+        disabled: isEditing.value || selectedRecurringMatchCount.value < 1,
+        divider: true,
+        onClick: clearSelectedRecurringMatches
     }
 ]);
 
@@ -1488,6 +2169,22 @@ const selectedTransferTransactionCount = computed<number>(() => {
     return count;
 });
 
+const selectedRecurringMatchCount = computed<number>(() => {
+    let count = 0;
+
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return count;
+    }
+
+    for (const importTransaction of props.importTransactions) {
+        if (importTransaction.selected && importTransaction.hasRecurringMatch()) {
+            count++;
+        }
+    }
+
+    return count;
+});
+
 const selectedInvalidTransactionCount = computed<number>(() => {
     let count = 0;
 
@@ -1502,6 +2199,66 @@ const selectedInvalidTransactionCount = computed<number>(() => {
     }
 
     return count;
+});
+
+const annotationTransactionCount = computed<number>(() => {
+    let count = 0;
+
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return count;
+    }
+
+    for (const importTransaction of props.importTransactions) {
+        if (needsAnnotation(importTransaction)) {
+            count++;
+        }
+    }
+
+    return count;
+});
+
+const selectedAnnotationTransactionCount = computed<number>(() => {
+    let count = 0;
+
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return count;
+    }
+
+    for (const importTransaction of props.importTransactions) {
+        if (importTransaction.selected && needsAnnotation(importTransaction)) {
+            count++;
+        }
+    }
+
+    return count;
+});
+
+const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => {
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return [];
+    }
+
+    return props.importTransactions.filter(transaction => transaction.selected && needsAnnotation(transaction));
+});
+
+const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => {
+    const summary: Record<string, AnnotationReasonSummary> = {};
+
+    for (const transaction of selectedAnnotationTransactions.value) {
+        for (const reason of getAnnotationIssues(transaction)) {
+            if (!summary[reason]) {
+                summary[reason] = {
+                    key: reason,
+                    label: reason,
+                    count: 0
+                };
+            }
+
+            summary[reason].count++;
+        }
+    }
+
+    return Object.values(summary).sort((left, right) => right.count - left.count);
 });
 
 const anyButNotAllTransactionSelected = computed<boolean>(() => !!props.importTransactions && selectedImportTransactionCount.value > 0 && selectedImportTransactionCount.value !== props.importTransactions.length);
@@ -1689,6 +2446,10 @@ function isTransactionDisplayed(transaction: ImportTransaction): boolean {
         } else {
             return false;
         }
+    }
+
+    if (filters.value.annotation !== null && needsAnnotation(transaction) !== filters.value.annotation) {
+        return false;
     }
 
     if (isString(filters.value.description)) {
@@ -1931,6 +2692,18 @@ function selectAllInvalid(): void {
     }
 }
 
+function selectAllNeedsAnnotation(): void {
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return;
+    }
+
+    for (const importTransaction of props.importTransactions) {
+        if (needsAnnotation(importTransaction) && isTransactionDisplayed(importTransaction)) {
+            importTransaction.selected = true;
+        }
+    }
+}
+
 function selectAll(): void {
     if (!props.importTransactions || props.importTransactions.length < 1) {
         return;
@@ -1998,6 +2771,36 @@ function editTransaction(transaction: ImportTransaction): void {
         editingTransaction.value = transaction;
         editingTags.value = editingTransaction.value.tagIds;
     }
+}
+
+function openAnnotationDialog(): void {
+    if (selectedAnnotationTransactionCount.value < 1) {
+        snackbar.value?.showMessage(getNoSelectedAnnotationText());
+        return;
+    }
+
+    showAnnotationDialog.value = true;
+}
+
+function openBatchCategoryDialogFromAnnotation(): void {
+    showAnnotationDialog.value = false;
+    showBatchCategoryDialog.value = true;
+}
+
+function openBatchAccountDialogFromAnnotation(): void {
+    showAnnotationDialog.value = false;
+    showBatchAccountDialog.value = true;
+}
+
+function editFirstAnnotationTransaction(): void {
+    const firstTransaction = selectedAnnotationTransactions.value[0];
+
+    if (!firstTransaction) {
+        return;
+    }
+
+    showAnnotationDialog.value = false;
+    editTransaction(firstTransaction);
 }
 
 function updateTransactionData(transaction: ImportTransaction): void {
@@ -2452,6 +3255,29 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
         }
 
         updateTransactionData(importTransaction);
+    }
+}
+
+function clearSelectedRecurringMatches(): void {
+    if (!props.importTransactions || props.importTransactions.length < 1) {
+        return;
+    }
+
+    let updatedCount = 0;
+    for (const importTransaction of props.importTransactions) {
+        if (!importTransaction.selected || !importTransaction.hasRecurringMatch()) {
+            continue;
+        }
+
+        importTransaction.clearRecurringMatch(false);
+        updateTransactionData(importTransaction);
+        updatedCount++;
+    }
+
+    if (updatedCount > 0) {
+        snackbar.value?.showMessage('format.misc.youHaveUpdatedTransactions', {
+            count: getDisplayCount(updatedCount)
+        });
     }
 }
 

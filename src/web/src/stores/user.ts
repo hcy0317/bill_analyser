@@ -150,6 +150,16 @@ export const useUserStore = defineStore('user', () => {
         return userInfo.incomeAmountColor;
     });
 
+    const currentUserCashAccountId = computed<string>(() => {
+        const userInfo = currentUserBasicInfo.value || EMPTY_USER_BASIC_INFO;
+        return userInfo.cashAccountId;
+    });
+
+    const currentUserCashTransferCategoryId = computed<string>(() => {
+        const userInfo = currentUserBasicInfo.value || EMPTY_USER_BASIC_INFO;
+        return userInfo.cashTransferCategoryId;
+    });
+
     function generateNewUserModel(language: string): User {
         return User.createNewUser(language, settingsStore.localeDefaultSettings.currency, settingsStore.localeDefaultSettings.firstDayOfWeek);
     }
@@ -450,6 +460,8 @@ export const useUserStore = defineStore('user', () => {
         currentUserCoordinateDisplayType,
         currentUserExpenseAmountColor,
         currentUserIncomeAmountColor,
+        currentUserCashAccountId,
+        currentUserCashTransferCategoryId,
         // functions
         generateNewUserModel,
         storeUserBasicInfo,

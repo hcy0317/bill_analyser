@@ -191,7 +191,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import IncomeExpenseOverviewCard from './overview/cards/IncomeExpenseOverviewCard.vue';
 import MonthlyIncomeAndExpenseCard, { type MonthlyIncomeAndExpenseCardClickEvent } from './overview/cards/MonthlyIncomeAndExpenseCard.vue';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, onMounted, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTheme } from 'vuetify';
 
@@ -209,6 +209,7 @@ import { type TransactionMonthlyIncomeAndExpenseData, LATEST_12MONTHS_TRANSACTIO
 
 import { getUnixTimeBeforeUnixTime, getUnixTimeAfterUnixTime } from '@/lib/datetime.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
+import logger from '@/lib/logger.ts';
 
 import {
     mdiRefresh,
@@ -249,6 +250,7 @@ const overviewStore = useOverviewStore();
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const loadingOverview = ref<boolean>(true);
+let reloadRequestId = 0;
 
 const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
@@ -301,21 +303,37 @@ const monthlyIncomeAndExpenseData = computed<TransactionMonthlyIncomeAndExpenseD
 });
 
 function reload(force: boolean): void {
+    const currentRequestId = ++reloadRequestId;
     loadingOverview.value = true;
 
-    const promises = [
+    const loadHomeData = () => Promise.all([
         accountsStore.loadAllAccounts({ force: false }),
-        transactionCategoriesStore.loadAllCategories({ force: false }),
         overviewStore.loadTransactionOverview({ force: force, loadLast11Months: true })
-    ];
+    ]);
 
-    Promise.all(promises).then(() => {
+    const promise = force
+        ? accountsStore.syncAllAccountBalances({ refreshAccounts: false }).then(loadHomeData)
+        : loadHomeData();
+
+    promise.then(() => {
+        if (currentRequestId !== reloadRequestId) {
+            return;
+        }
+
         loadingOverview.value = false;
+
+        transactionCategoriesStore.loadAllCategories({ force: false }).catch(error => {
+            logger.error('failed to load category list in background', error);
+        });
 
         if (force) {
             snackbar.value?.showMessage('Data has been updated');
         }
     }).catch(error => {
+        if (currentRequestId !== reloadRequestId) {
+            return;
+        }
+
         loadingOverview.value = false;
 
         if (!error.processed) {
@@ -324,9 +342,11 @@ function reload(force: boolean): void {
     });
 }
 
-if (isUserLogined() && isUserUnlocked()) {
-    reload(false);
-}
+onMounted(() => {
+    if (isUserLogined() && isUserUnlocked()) {
+        reload(false);
+    }
+});
 </script>
 
 <style>

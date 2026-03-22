@@ -18,6 +18,7 @@ export interface PresetCategory {
     readonly name: string;
     readonly categoryIconId: string;
     readonly color: ColorValue;
+    readonly keywords?: string;
     readonly subCategories: PresetSubCategory[];
 }
 
@@ -25,6 +26,7 @@ export interface PresetSubCategory {
     readonly name: string;
     readonly categoryIconId: string;
     readonly color: ColorValue;
+    readonly keywords?: string;
 }
 
 export interface LocalizedPresetCategory {
@@ -32,6 +34,7 @@ export interface LocalizedPresetCategory {
     readonly type: CategoryType;
     readonly icon: string;
     readonly color: ColorValue;
+    readonly keywords?: string;
     readonly subCategories: LocalizedPresetSubCategory[];
 }
 
@@ -40,4 +43,5 @@ export interface LocalizedPresetSubCategory {
     readonly type: CategoryType;
     readonly icon: string;
     readonly color: ColorValue;
+    readonly keywords?: string;
 }

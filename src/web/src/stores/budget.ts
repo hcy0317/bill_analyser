@@ -15,8 +15,11 @@ import {
     Budget,
     BudgetType,
     BudgetPeriodType,
+    BudgetForecastStrategy,
     type BudgetExecutionResponse,
     type BudgetForecastResponse,
+    type BudgetHistoryResponse,
+    type BudgetHistoryRequest,
     type BudgetCategoryExecution,
     type BudgetInfoResponse
 } from '@/models/budget.ts';
@@ -41,11 +44,17 @@ export const useBudgetStore = defineStore('budget', () => {
     /** 当前周期预计 */
     const currentForecast = ref<BudgetForecastResponse | null>(null);
 
+    /** 当前预算历史 */
+    const currentHistory = ref<BudgetHistoryResponse | null>(null);
+
     /** 执行详情加载状态 */
     const executionLoading = ref<boolean>(false);
 
     /** 预计加载状态 */
     const forecastLoading = ref<boolean>(false);
+
+    /** 历史加载状态 */
+    const historyLoading = ref<boolean>(false);
 
     // ============================================================================
     // 计算属性
@@ -218,12 +227,14 @@ export const useBudgetStore = defineStore('budget', () => {
     /**
      * 加载预算执行详情
      */
-    function loadBudgetExecution({ type, periodType, year, month, quarter }: {
+    function loadBudgetExecution({ type, periodType, year, month, quarter, startDate, endDate }: {
         type?: BudgetType,
         periodType?: BudgetPeriodType,
         year?: number,
         month?: number,
-        quarter?: number
+        quarter?: number,
+        startDate?: string,
+        endDate?: string
     } = {}): Promise<BudgetExecutionResponse> {
         return new Promise((resolve, reject) => {
             executionLoading.value = true;
@@ -234,6 +245,8 @@ export const useBudgetStore = defineStore('budget', () => {
             if (year !== undefined) req.year = year;
             if (month !== undefined) req.month = month;
             if (quarter !== undefined) req.quarter = quarter;
+            if (startDate !== undefined) req.startDate = startDate;
+            if (endDate !== undefined) req.endDate = endDate;
 
             services.getBudgetExecution(req).then(response => {
                 const data = response.data;
@@ -259,12 +272,64 @@ export const useBudgetStore = defineStore('budget', () => {
     }
 
     /**
+     * 创建预算历史快照
+     */
+    function createBudgetHistorySnapshot(req: BudgetHistoryRequest = {}): Promise<any> {
+        return new Promise((resolve, reject) => {
+            services.createBudgetHistorySnapshot(req).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success) {
+                    reject({ message: 'Unable to create budget history snapshot' });
+                    return;
+                }
+
+                logger.info('[BudgetStore] Created budget history snapshot');
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('[BudgetStore] Failed to create budget history snapshot', error);
+                reject(error);
+            });
+        });
+    }
+
+    /**
+     * 加载预算历史快照
+     */
+    function loadBudgetHistory(req: BudgetHistoryRequest = {}): Promise<BudgetHistoryResponse> {
+        return new Promise((resolve, reject) => {
+            historyLoading.value = true;
+
+            services.getBudgetHistory(req).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    historyLoading.value = false;
+                    reject({ message: 'Unable to get budget history' });
+                    return;
+                }
+
+                currentHistory.value = data.result;
+                historyLoading.value = false;
+
+                logger.info(`[BudgetStore] Loaded history: ${data.result.items?.length || 0} items`);
+                resolve(data.result);
+            }).catch(error => {
+                historyLoading.value = false;
+                logger.error('[BudgetStore] Failed to load history', error);
+                reject(error);
+            });
+        });
+    }
+
+    /**
      * 加载周期预计
      */
-    function loadBudgetForecast({ type, periodType, monthsHistory }: {
+    function loadBudgetForecast({ type, periodType, monthsHistory, forecastStrategy }: {
         type?: BudgetType,
         periodType?: BudgetPeriodType,
-        monthsHistory?: number
+        monthsHistory?: number,
+        forecastStrategy?: BudgetForecastStrategy
     } = {}): Promise<BudgetForecastResponse> {
         return new Promise((resolve, reject) => {
             forecastLoading.value = true;
@@ -273,6 +338,7 @@ export const useBudgetStore = defineStore('budget', () => {
             if (type !== undefined) req.type = type;
             if (periodType !== undefined) req.periodType = periodType;
             if (monthsHistory !== undefined) req.monthsHistory = monthsHistory;
+            if (forecastStrategy !== undefined) req.forecastStrategy = forecastStrategy;
 
             services.getBudgetForecast(req).then(response => {
                 const data = response.data;
@@ -428,8 +494,10 @@ export const useBudgetStore = defineStore('budget', () => {
         budgetListStateInvalid.value = true;
         currentExecution.value = null;
         currentForecast.value = null;
+        currentHistory.value = null;
         executionLoading.value = false;
         forecastLoading.value = false;
+        historyLoading.value = false;
     }
 
     // ============================================================================
@@ -443,8 +511,10 @@ export const useBudgetStore = defineStore('budget', () => {
         budgetListStateInvalid,
         currentExecution,
         currentForecast,
+        currentHistory,
         executionLoading,
         forecastLoading,
+        historyLoading,
 
         // 计算属性
         expenseBudgets,
@@ -458,6 +528,8 @@ export const useBudgetStore = defineStore('budget', () => {
         loadAllBudgets,
         loadBudgetExecution,
         loadBudgetForecast,
+        createBudgetHistorySnapshot,
+        loadBudgetHistory,
         saveBudget,
         deleteBudget,
         exportBudgets,

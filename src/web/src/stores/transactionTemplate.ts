@@ -20,6 +20,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
     const allTransactionTemplates = ref<Record<number, TransactionTemplate[]>>({});
     const allTransactionTemplatesMap = ref<Record<number, Record<string, TransactionTemplate>>>({});
     const transactionTemplateListStatesInvalid = ref<Record<number, boolean>>({});
+    const loadAllTemplatesPromises = ref<Record<number, Promise<TransactionTemplate[]> | null>>({});
 
     const allVisibleTemplates = computed<Record<number, TransactionTemplate[]>>(() => {
         const allVisibleTemplates: Record<number, TransactionTemplate[]> = {};
@@ -81,21 +82,21 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
         }
     }
 
-    function updateTemplateInTransactionTemplateList(templateType: number, template: TransactionTemplate): void {
+    function updateTemplateInTransactionTemplateList(templateType: number, updatedTemplate: TransactionTemplate): void {
         const templates = allTransactionTemplates.value[templateType];
         const templateMap = allTransactionTemplatesMap.value[templateType];
 
         if (isArray(templates)) {
             for (const [template, index] of itemAndIndex(templates)) {
-                if (template.id === template.id) {
-                    templates.splice(index, 1, template);
+                if (template.id === updatedTemplate.id) {
+                    templates.splice(index, 1, updatedTemplate);
                     break;
                 }
             }
         }
 
         if (isObject(templateMap)) {
-            templateMap[template.id] = template;
+            templateMap[updatedTemplate.id] = updatedTemplate;
         }
     }
 
@@ -145,6 +146,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
         allTransactionTemplates.value = {};
         allTransactionTemplatesMap.value = {};
         transactionTemplateListStatesInvalid.value = {};
+        loadAllTemplatesPromises.value = {};
     }
 
     function loadAllTemplates({ templateType, force }: { templateType: number, force?: boolean }): Promise<TransactionTemplate[]> {
@@ -154,7 +156,11 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
             });
         }
 
-        return new Promise((resolve, reject) => {
+        if (!force && loadAllTemplatesPromises.value[templateType]) {
+            return loadAllTemplatesPromises.value[templateType] as Promise<TransactionTemplate[]>;
+        }
+
+        const promise = new Promise<TransactionTemplate[]>((resolve, reject) => {
             services.getAllTransactionTemplates({ templateType }).then(response => {
                 const data = response.data;
 
@@ -192,13 +198,24 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
                     reject(error);
                 }
             });
+        }).finally(() => {
+            if (loadAllTemplatesPromises.value[templateType] === promise) {
+                loadAllTemplatesPromises.value[templateType] = null;
+            }
         });
+
+        if (!force) {
+            loadAllTemplatesPromises.value[templateType] = promise;
+        }
+
+        return promise;
     }
 
-    function getTemplate({ templateId }: { templateId: string }): Promise<TransactionTemplate> {
+    function getTemplate({ templateId, templateType }: { templateId: string, templateType?: number }): Promise<TransactionTemplate> {
         return new Promise((resolve, reject) => {
             services.getTransactionTemplate({
-                id: templateId
+                id: templateId,
+                templateType: templateType
             }).then(response => {
                 const data = response.data;
 
@@ -325,6 +342,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
 
         return new Promise((resolve, reject) => {
             services.moveTransactionTemplate({
+                templateType: templateType,
                 newDisplayOrders: newDisplayOrders
             }).then(response => {
                 const data = response.data;
@@ -357,6 +375,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
         return new Promise((resolve, reject) => {
             services.hideTransactionTemplate({
                 id: template.id,
+                templateType: template.templateType,
                 hidden: hidden
             }).then(response => {
                 const data = response.data;
@@ -376,7 +395,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
                     hidden: hidden
                 });
 
-                resolve(data.result);
+                resolve(true);
             }).catch(error => {
                 logger.error('failed to change template visibility', error);
 
@@ -398,7 +417,8 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
     function deleteTemplate({ template, beforeResolve }: { template: TransactionTemplate, beforeResolve?: BeforeResolveFunction }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.deleteTransactionTemplate({
-                id: template.id
+                id: template.id,
+                templateType: template.templateType
             }).then(response => {
                 const data = response.data;
 

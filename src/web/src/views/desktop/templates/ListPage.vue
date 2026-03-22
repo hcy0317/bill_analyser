@@ -151,7 +151,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, useTemplateRef, onMounted, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -221,6 +221,16 @@ function init(): void {
             snackbar.value?.showError(error);
         }
     });
+}
+
+function handleInitTypeChange(newType: number): void {
+    if (templateType.value === newType && !loading.value) {
+        return;
+    }
+
+    displayOrderModified.value = false;
+    showHidden.value = false;
+    init();
 }
 
 function reload(): void {
@@ -362,7 +372,13 @@ function onMove(event: { moved: { element: { id: string }, oldIndex: number, new
     });
 }
 
-init();
+onMounted(() => {
+    init();
+});
+
+watch(() => props.initType, (newType) => {
+    handleInitTypeChange(newType);
+});
 </script>
 
 <style>

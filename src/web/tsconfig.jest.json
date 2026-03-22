@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "types": ["jest", "node"],
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": false,
+    "verbatimModuleSyntax": false,
+    "moduleResolution": "node"
+  },
+  "include": [
+    "src/**/*.ts",
+    "jest.config.ts"
+  ]
+}

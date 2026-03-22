@@ -11,6 +11,7 @@ v6.47 更新：
 """
 
 import asyncio
+import atexit
 import logging
 import threading
 import queue
@@ -121,6 +122,7 @@ class AsyncLogger:
         """初始化日志管理器"""
         self.log_dir = Path(__file__).parent.parent.parent / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._stopped = False
 
         # 配置参数
         self.max_log_age_days = 7  # 7天自动清理
@@ -169,7 +171,6 @@ class AsyncLogger:
         )
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(formatter)
-        handlers.append(error_handler)
         handlers.append(error_handler)
 
         # 配置队列监听器
@@ -231,12 +232,47 @@ class AsyncLogger:
 
     def stop(self):
         """停止日志系统"""
+        if getattr(self, '_stopped', False):
+            return
+
+        self._stopped = True
+
         if hasattr(self, 'queue_listener'):
-            self.queue_listener.stop()
+            try:
+                self.queue_listener.stop()
+            except Exception:
+                pass
+
+            for handler in getattr(self.queue_listener, 'handlers', []):
+                try:
+                    handler.flush()
+                    handler.close()
+                except Exception:
+                    pass
+
+        if hasattr(self, 'logger'):
+            try:
+                self.logger.handlers.clear()
+            except Exception:
+                pass
 
 
 # 全局日志实例
 _logger_instance = AsyncLogger()
+
+
+def _shutdown_async_logger():
+    """解释器退出时安全关闭异步日志系统。"""
+    if _logger_instance is None:
+        return
+
+    try:
+        _logger_instance.stop()
+    except Exception:
+        pass
+
+
+atexit.register(_shutdown_async_logger)
 
 # v6.64: 全局开关控制 @log_method 装饰器的详细日志输出
 # 设置为 False 可以禁用方法入口/出口的 DEBUG 日志，大幅减少日志量

@@ -16,7 +16,7 @@
         </div>
 
         <div v-if="groups.length === 0" class="text-center text-caption text-medium-emphasis py-2">
-            {{ tt('No keywords set. Click "Add Condition" to start.') }}
+            {{ tt('No keywords set') }}
         </div>
 
         <div v-for="(group, index) in groups" :key="index" class="d-flex align-start mb-2">
@@ -34,7 +34,7 @@
                 <v-combobox
                     v-model="group.keywords"
                     :label="tt('Keywords')"
-                    placeholder="Type and press Enter"
+                    :placeholder="tt('Type and press Enter')"
                     chips
                     closable-chips
                     multiple
@@ -75,9 +75,9 @@ interface KeywordGroup {
 }
 
 const types = computed(() => [
-    { title: 'OR', value: 'OR' },
-    { title: 'AND', value: 'AND' },
-    { title: 'NOT', value: 'NOT' }
+    { title: tt('OR'), value: 'OR' },
+    { title: tt('AND'), value: 'AND' },
+    { title: tt('NOT'), value: 'NOT' }
 ]);
 
 const groups = ref<KeywordGroup[]>([]);

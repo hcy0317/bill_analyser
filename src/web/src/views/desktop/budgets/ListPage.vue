@@ -4,7 +4,7 @@
             <v-card>
                 <v-layout>
                     <!-- 左侧导航抽屉 -->
-                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav">
+                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav" width="288">
                         <div class="mx-4 my-4">
                             <!-- 视图切换：预算管理 / 周期预计（上下排列）-->
                             <btn-vertical-group class="mb-4 budget-nav-buttons" :disabled="loading" :buttons="[
@@ -24,7 +24,7 @@
                         <v-tabs show-arrows class="my-4" direction="vertical"
                                 :disabled="loading" v-model="activePeriodFilterIndex">
                             <v-tab class="tab-text-truncate" :key="idx" :value="idx"
-                                   v-for="(filter, idx) in allPeriodFilters"
+                                   v-for="(filter, idx) in visiblePeriodFilters"
                                    @click="setPeriodFilter(filter.value)">
                                 <span class="text-truncate">{{ filter.name }}</span>
                             </v-tab>
@@ -77,6 +77,70 @@
                                         </template>
                                         <v-icon :icon="mdiRefresh" size="24" />
                                         <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                    </v-btn>
+
+                                    <v-select v-if="activeViewMode === 'forecast'"
+                                              class="ms-3 budget-forecast-strategy-select"
+                                              density="compact"
+                                              hide-details
+                                              variant="outlined"
+                                              :disabled="loading || forecastLoading"
+                                              :label="tt('Forecast Strategy')"
+                                              :items="forecastStrategies"
+                                              item-title="name"
+                                              item-value="value"
+                                              v-model="forecastStrategy" />
+
+                                    <v-select v-if="activeViewMode === 'forecast'"
+                                              class="ms-2 budget-forecast-history-select"
+                                              density="compact"
+                                              hide-details
+                                              variant="outlined"
+                                              :disabled="loading || forecastLoading"
+                                              :label="tt('History Periods')"
+                                              :items="historyPeriodOptions"
+                                              v-model="forecastMonthsHistory" />
+
+                                    <v-select v-if="activeViewMode === 'forecast'"
+                                              class="ms-2 budget-forecast-sort-select"
+                                              density="compact"
+                                              hide-details
+                                              variant="outlined"
+                                              :disabled="loading || forecastLoading"
+                                              :label="tt('Forecast Sort')"
+                                              :items="forecastSortOptions"
+                                              item-title="name"
+                                              item-value="value"
+                                              v-model="forecastSortBy" />
+
+                                    <v-btn v-if="activeViewMode === 'forecast'"
+                                           class="ms-2"
+                                           density="comfortable"
+                                           :color="forecastOnlyLowConfidence ? 'warning' : 'default'"
+                                           :variant="forecastOnlyLowConfidence ? 'flat' : 'outlined'"
+                                           :disabled="loading || forecastLoading"
+                                           @click="forecastOnlyLowConfidence = !forecastOnlyLowConfidence">
+                                        {{ tt('Low Confidence Only') }}
+                                    </v-btn>
+
+                                    <v-btn v-if="activeViewMode === 'forecast'"
+                                           class="ms-2"
+                                           density="comfortable"
+                                           :color="forecastOnlyOverBudget ? 'error' : 'default'"
+                                           :variant="forecastOnlyOverBudget ? 'flat' : 'outlined'"
+                                           :disabled="loading || forecastLoading"
+                                           @click="forecastOnlyOverBudget = !forecastOnlyOverBudget">
+                                        {{ tt('Over Budget Only') }}
+                                    </v-btn>
+
+                                    <v-btn v-if="activeViewMode === 'forecast' && (forecastOnlyLowConfidence || forecastOnlyOverBudget)"
+                                           class="ms-2"
+                                           density="comfortable"
+                                           color="default"
+                                           variant="text"
+                                           :disabled="loading || forecastLoading"
+                                           @click="clearForecastQuickFilters">
+                                        {{ tt('Clear Forecast Filters') }}
                                     </v-btn>
 
                                     <v-spacer/>
@@ -309,16 +373,16 @@
                                 <div class="d-flex align-center flex-wrap ga-6">
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Total Budget') }}:</span>
-                                        <span class="budget-summary-amount text-expense">{{ formatAmount(currentExecution.totalBudget / 100) }}</span>
+                                        <span class="budget-summary-amount text-expense">{{ formatAmount(filteredSummary.totalBudget / 100) }}</span>
                                     </div>
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Total Spent') }}:</span>
-                                        <span class="budget-summary-amount text-income">{{ formatAmount(currentExecution.totalSpent / 100) }}</span>
+                                        <span class="budget-summary-amount text-income">{{ formatAmount(filteredSummary.totalSpent / 100) }}</span>
                                     </div>
                                     <div class="d-flex align-center">
                                         <span class="budget-summary-label me-2">{{ tt('Overall Execution Rate') }}:</span>
-                                        <span class="budget-summary-amount" :class="getExecutionRateColorClass(currentExecution.totalExecutionRate)">
-                                            {{ currentExecution.totalExecutionRate.toFixed(1) }}%
+                                        <span class="budget-summary-amount" :class="getExecutionRateColorClass(filteredSummary.totalExecutionRate)">
+                                            {{ filteredSummary.totalExecutionRate.toFixed(1) }}%
                                         </span>
                                     </div>
                                 </div>
@@ -349,6 +413,57 @@
                                             <v-chip v-if="budgetAmountFilter" closable size="small" @click:close="budgetAmountFilter = ''">
                                                 {{ getBudgetFilterDisplayName() }}
                                 </v-chip>
+                            </div>
+                        </v-card-text>
+
+                        <!-- 往期预算柱状图（仅“往期预算”标签页显示） -->
+                        <v-card-text class="border-b" v-if="shouldShowHistoricalBudgetChart">
+                            <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
+                                <div class="text-subtitle-2">{{ tt('Expired Budgets') }}</div>
+                                <v-select
+                                    class="budget-history-window-select"
+                                    density="compact"
+                                    hide-details
+                                    variant="outlined"
+                                    :items="historyWindowOptions"
+                                    item-title="name"
+                                    item-value="value"
+                                    v-model="selectedHistoryWindow"
+                                />
+                            </div>
+                            <v-chart
+                                autoresize
+                                class="budget-history-chart"
+                                :option="historicalBudgetChartOptions"
+                                @click="onClickHistoricalBudgetChartItem"
+                            />
+                            <div class="text-caption text-medium-emphasis mt-1">
+                                {{ tt('Click a period bar to view period budget details') }}
+                            </div>
+
+                            <div class="mt-6" v-if="selectedHistoricalPeriodRange && selectedHistoricalPeriodDetailData.labels.length > 0">
+                                <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
+                                    <div>
+                                        <div class="text-subtitle-2">{{ tt('Budget Details by Period') }}</div>
+                                        <div class="text-caption text-medium-emphasis">
+                                            {{ selectedHistoricalPeriodLabel }}
+                                        </div>
+                                    </div>
+                                    <v-btn
+                                        color="default"
+                                        variant="text"
+                                        density="comfortable"
+                                        :disabled="loading"
+                                        @click="clearSelectedHistoricalPeriod"
+                                    >
+                                        {{ tt('Clear Selection') }}
+                                    </v-btn>
+                                </div>
+                                <v-chart
+                                    autoresize
+                                    class="budget-history-detail-chart"
+                                    :option="historicalBudgetDetailChartOptions"
+                                />
                             </div>
                         </v-card-text>
 
@@ -600,9 +715,17 @@
                             </tr>
                             </tbody>
 
-                            <tbody v-if="currentForecast && currentForecast.forecasts.length > 0">
-                            <tr v-for="forecast in currentForecast.forecasts" :key="forecast.categoryId" class="text-sm">
-                                <td>{{ forecast.categoryName }}</td>
+                            <tbody v-if="displayForecasts.length > 0">
+                            <tr v-for="forecast in displayForecasts" :key="forecast.categoryId" class="text-sm">
+                                <td>
+                                    <div>{{ forecast.categoryName }}</div>
+                                    <div class="text-caption text-medium-emphasis" v-if="forecast.strategyExplanation">
+                                        {{ forecast.strategyExplanation }}
+                                    </div>
+                                    <div class="text-caption text-medium-emphasis" v-if="forecast.samplePeriods !== null && forecast.samplePeriods !== undefined">
+                                        {{ tt('Sample Periods') }}: {{ forecast.samplePeriods }}
+                                    </div>
+                                </td>
                                 <td>{{ formatAmount(forecast.historicalAverage / 100) }}</td>
                                 <td>{{ formatAmount(forecast.currentSpent / 100) }}</td>
                                 <td :class="{ 'text-error': forecast.projectedOverBudget }">
@@ -615,12 +738,28 @@
                                     <v-icon v-else :icon="mdiTrendingNeutral" color="grey" size="20" />
                                 </td>
                                 <td>
-                                    <v-chip v-if="forecast.projectedOverBudget" color="error" size="small">
-                                        {{ tt('Over Budget') }}
-                                    </v-chip>
-                                    <v-chip v-else color="success" size="small">
-                                        {{ tt('On Track') }}
-                                    </v-chip>
+                                    <div class="d-flex flex-column ga-1">
+                                        <v-chip v-if="forecast.projectedOverBudget" color="error" size="small">
+                                            {{ tt('Over Budget') }}
+                                        </v-chip>
+                                        <v-chip v-else color="success" size="small">
+                                            {{ tt('On Track') }}
+                                        </v-chip>
+                                        <span class="text-caption text-medium-emphasis" v-if="forecast.backtestMape !== null && forecast.backtestMape !== undefined">
+                                            {{ tt('Backtest MAPE') }}: {{ forecast.backtestMape.toFixed(2) }}%
+                                            <v-icon class="ms-1" :icon="mdiInformationOutline" size="14" />
+                                            <v-tooltip activator="parent" location="top">
+                                                {{ tt('Backtest MAPE Hint') }}
+                                            </v-tooltip>
+                                        </span>
+                                        <span class="text-caption" :class="getForecastConfidenceClass(forecast.confidence)" v-if="forecast.confidence">
+                                            {{ tt('Confidence') }}: {{ tt(getForecastConfidenceLabel(forecast.confidence)) }}
+                                            <v-icon class="ms-1" :icon="mdiInformationOutline" size="14" />
+                                            <v-tooltip activator="parent" location="top">
+                                                {{ tt('Forecast Confidence Hint') }}
+                                            </v-tooltip>
+                                        </span>
+                                    </div>
                                 </td>
                             </tr>
                             </tbody>
@@ -628,6 +767,17 @@
 
                         <!-- 周期信息 -->
                         <v-card-text v-if="currentForecast" class="border-t">
+                            <div class="d-flex align-center flex-wrap ga-2 mb-3" v-if="forecastRiskSummary.totalCount > 0">
+                                <v-chip color="warning" size="small" variant="tonal">
+                                    {{ tt('Low Confidence Count', { count: forecastRiskSummary.lowConfidenceCount }) }}
+                                </v-chip>
+                                <v-chip color="error" size="small" variant="tonal">
+                                    {{ tt('Over Budget Count', { count: forecastRiskSummary.overBudgetCount }) }}
+                                </v-chip>
+                                <v-chip color="info" size="small" variant="tonal" v-if="forecastRiskSummary.filteredCount !== forecastRiskSummary.totalCount">
+                                    {{ tt('Filtered Forecast Count', { visible: forecastRiskSummary.filteredCount, total: forecastRiskSummary.totalCount }) }}
+                                </v-chip>
+                            </div>
                             <div class="d-flex justify-space-between align-center flex-wrap ga-3">
                                 <div>
                                     <span class="text-subtitle-2">{{ tt('Period') }}: </span>
@@ -640,6 +790,22 @@
                                 <div>
                                     <span class="text-subtitle-2">{{ tt('Days Remaining') }}: </span>
                                     <span>{{ currentForecast.daysRemaining }}</span>
+                                </div>
+                                <div>
+                                    <span class="text-subtitle-2">{{ tt('Forecast Strategy') }}: </span>
+                                    <span>{{ tt(currentForecast.forecastStrategy === 'moving_average' ? 'Moving Average Strategy' : 'Historical Average Strategy') }}</span>
+                                </div>
+                                <div>
+                                    <span class="text-subtitle-2">{{ tt('History Periods') }}: </span>
+                                    <span>{{ currentForecast.historyPeriods || forecastMonthsHistory }}</span>
+                                </div>
+                                <div v-if="currentForecast.avgBacktestMape !== null && currentForecast.avgBacktestMape !== undefined">
+                                    <span class="text-subtitle-2">{{ tt('Average Backtest MAPE') }}: </span>
+                                    <span>{{ currentForecast.avgBacktestMape.toFixed(2) }}%</span>
+                                    <v-icon class="ms-1" :icon="mdiInformationOutline" size="14" />
+                                    <v-tooltip activator="parent" location="top">
+                                        {{ tt('Average Backtest MAPE Hint') }}
+                                    </v-tooltip>
                                 </div>
                             </div>
                         </v-card-text>
@@ -711,6 +877,9 @@
 </template>
 
 <script setup lang="ts">
+import type { ECElementEvent } from 'echarts/core';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
+
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import BtnHorizontalGroup from '@/components/desktop/BtnHorizontalGroup.vue';
@@ -722,6 +891,7 @@ import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilte
 import TransactionTagFilterSettingsCard from '@/views/desktop/common/cards/TransactionTagFilterSettingsCard.vue';
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
+import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
 
 import { ref, computed, useTemplateRef, watch, onMounted } from 'vue';
 import { useDisplay, useTheme } from 'vuetify';
@@ -738,13 +908,18 @@ import { TransactionCategory } from '@/models/transaction_category.ts';
 import { AmountFilterType } from '@/core/numeral.ts';
 import { ThemeType } from '@/core/theme.ts';
 import { getCurrentUnixTime, getTodayFirstUnixTime } from '@/lib/datetime.ts';
+import logger from '@/lib/logger.ts';
 
 import {
     Budget,
     BudgetType,
     BudgetPeriodType,
+    BudgetForecastStrategy,
     type BudgetExecutionResponse,
-    type BudgetForecastResponse
+    type BudgetForecastResponse,
+    type BudgetHistoryResponse,
+    type BudgetHistoryItem,
+    type BudgetHistoryRequest
 } from '@/models/budget.ts';
 
 import {
@@ -846,9 +1021,15 @@ const loading = ref<boolean>(false);
 const updating = ref<boolean>(false);
 const searchKeyword = ref<string>('');
 const filterKeyword = ref<string>('');
+const reloadRequestId = ref<number>(0);
 
 // 视图模式：'budget' 或 'forecast'
 const activeViewMode = ref<string>('budget');
+const forecastStrategy = ref<BudgetForecastStrategy>(BudgetForecastStrategy.HistoricalAverage);
+const forecastMonthsHistory = ref<number>(6);
+const forecastSortBy = ref<string>('backtest');
+const forecastOnlyLowConfidence = ref<boolean>(false);
+const forecastOnlyOverBudget = ref<boolean>(false);
 
 // 预算类型：支出或投资
 const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
@@ -954,9 +1135,21 @@ const allPeriodFilters = computed<PeriodFilter[]>(() => [
     { name: tt('Custom Range'), value: 'custom' }
 ]);
 
+const forecastPeriodFilters = computed<PeriodFilter[]>(() => [
+    { name: tt('Monthly Forecast'), value: 'thisMonth' },
+    { name: tt('Quarterly Forecast'), value: 'thisQuarter' },
+    { name: tt('Yearly Forecast'), value: 'thisYear' }
+]);
+
+const visiblePeriodFilters = computed<PeriodFilter[]>(() => {
+    return activeViewMode.value === 'forecast'
+        ? forecastPeriodFilters.value
+        : allPeriodFilters.value;
+});
+
 // 当前选中的周期筛选索引（用于 v-tabs）
 const activePeriodFilterIndex = computed<number>(() => {
-    return allPeriodFilters.value.findIndex(f => f.value === activePeriodFilter.value);
+    return visiblePeriodFilters.value.findIndex(f => f.value === activePeriodFilter.value);
 });
 
 const allBudgets = computed<Budget[]>(() => budgetStore.allBudgets);
@@ -1241,7 +1434,710 @@ const hasActiveFilters = computed<boolean>(() => {
 
 const currentExecution = computed<BudgetExecutionResponse | null>(() => budgetStore.currentExecution);
 const currentForecast = computed<BudgetForecastResponse | null>(() => budgetStore.currentForecast);
+const currentHistory = computed<BudgetHistoryResponse | null>(() => budgetStore.currentHistory);
 const forecastLoading = computed<boolean>(() => budgetStore.forecastLoading);
+const forecastStrategies = computed(() => [
+    { name: tt('Historical Average Strategy'), value: BudgetForecastStrategy.HistoricalAverage },
+    { name: tt('Moving Average Strategy'), value: BudgetForecastStrategy.MovingAverage }
+]);
+const historyPeriodOptions = computed<number[]>(() => [3, 6, 9, 12]);
+const forecastSortOptions = computed(() => [
+    { name: tt('Sort by Backtest MAPE'), value: 'backtest' },
+    { name: tt('Sort by Confidence'), value: 'confidence' },
+    { name: tt('Sort by Projected Total'), value: 'projected_total' },
+    { name: tt('Sort by Category'), value: 'category' }
+]);
+
+const forecastRiskSummary = computed(() => {
+    return summarizeForecastRisks(currentForecast.value?.forecasts || [], displayForecasts.value.length);
+});
+
+const displayForecasts = computed(() => {
+    return filterAndSortForecasts(currentForecast.value?.forecasts || [], {
+        sortBy: forecastSortBy.value as 'backtest' | 'confidence' | 'projected_total' | 'category',
+        onlyLowConfidence: forecastOnlyLowConfidence.value,
+        onlyOverBudget: forecastOnlyOverBudget.value
+    });
+});
+
+const shouldShowHistoricalBudgetChart = computed<boolean>(() => {
+    return activeViewMode.value === 'budget' &&
+        activePeriodFilter.value === 'expired' &&
+        historicalBudgetTrendData.value.labels.length > 0;
+});
+
+/**
+ * 抬头汇总：按当前筛选后的可见分组聚合，避免全量预算总和
+ */
+const filteredSummary = computed(() => {
+    let totalBudget = 0;
+    let totalSpent = 0;
+
+    for (const group of groupedBudgets.value) {
+        totalBudget += group.totalAmount;
+        totalSpent += group.totalSpent;
+    }
+
+    const totalExecutionRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+
+    return {
+        totalBudget,
+        totalSpent,
+        totalExecutionRate
+    };
+});
+
+interface HistoricalBudgetTrendData {
+    labels: string[];
+    spentAmounts: number[];
+    executionRatesNegative: number[];
+    ranges: { startDate: string; endDate: string }[];
+}
+
+interface HistoricalBudgetDetailData {
+    labels: string[];
+    budgetAmounts: number[];
+    spentAmounts: number[];
+}
+
+interface HistoricalPeriodRange {
+    startDate: string;
+    endDate: string;
+}
+
+function buildHistoricalPeriodRange(
+    periodType: BudgetPeriodType,
+    periodKey: string
+): HistoricalPeriodRange | null {
+    if (periodType === BudgetPeriodType.Yearly) {
+        const year = Number(periodKey);
+        if (!year) {
+            return null;
+        }
+
+        return {
+            startDate: `${year}-01-01`,
+            endDate: `${year}-12-31`
+        };
+    }
+
+    if (periodType === BudgetPeriodType.Quarterly) {
+        const matched = periodKey.match(/^(\d{4})-Q([1-4])$/);
+        if (!matched) {
+            return null;
+        }
+
+        const year = Number(matched[1]);
+        const quarter = Number(matched[2]);
+        const startMonth = (quarter - 1) * 3;
+        const startDate = new Date(year, startMonth, 1);
+        const endDate = new Date(year, startMonth + 3, 0);
+
+        return {
+            startDate: formatDateOnly(startDate),
+            endDate: formatDateOnly(endDate)
+        };
+    }
+
+    const matched = periodKey.match(/^(\d{4})-(\d{2})$/);
+    if (!matched) {
+        return null;
+    }
+
+    const year = Number(matched[1]);
+    const month = Number(matched[2]);
+    if (!year || !month) {
+        return null;
+    }
+
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+
+    return {
+        startDate: formatDateOnly(startDate),
+        endDate: formatDateOnly(endDate)
+    };
+}
+
+function getNextHistoricalPeriodKey(
+    periodType: BudgetPeriodType,
+    periodKey: string
+): string | null {
+    if (periodType === BudgetPeriodType.Yearly) {
+        const year = Number(periodKey);
+        return year ? String(year + 1) : null;
+    }
+
+    if (periodType === BudgetPeriodType.Quarterly) {
+        const matched = periodKey.match(/^(\d{4})-Q([1-4])$/);
+        if (!matched) {
+            return null;
+        }
+
+        const year = Number(matched[1]);
+        const quarter = Number(matched[2]);
+        if (quarter >= 4) {
+            return `${year + 1}-Q1`;
+        }
+        return `${year}-Q${quarter + 1}`;
+    }
+
+    const matched = periodKey.match(/^(\d{4})-(\d{2})$/);
+    if (!matched) {
+        return null;
+    }
+
+    const year = Number(matched[1]);
+    const month = Number(matched[2]);
+    const nextMonth = month >= 12 ? 1 : month + 1;
+    const nextYear = month >= 12 ? year + 1 : year;
+    return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+}
+
+function buildContinuousHistoricalPeriodKeys(
+    periodType: BudgetPeriodType,
+    rawKeys: string[]
+): string[] {
+    if (rawKeys.length <= 1) {
+        return rawKeys;
+    }
+
+    const sortedKeys = [...rawKeys].sort();
+    const continuousKeys: string[] = [];
+    let currentKey: string | null = sortedKeys[0] || null;
+    const lastKey = sortedKeys[sortedKeys.length - 1] || null;
+
+    while (currentKey && lastKey) {
+        continuousKeys.push(currentKey);
+        if (currentKey === lastKey) {
+            break;
+        }
+        currentKey = getNextHistoricalPeriodKey(periodType, currentKey);
+    }
+
+    return continuousKeys.length > 0 ? continuousKeys : sortedKeys;
+}
+
+/**
+ * 往期预算趋势数据（上方：执行金额，下方：执行度）
+ */
+const historicalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
+    if (activeViewMode.value === 'budget') {
+        const labels: string[] = [];
+        const spentAmounts: number[] = [];
+        const executionRatesNegative: number[] = [];
+        const ranges: { startDate: string; endDate: string }[] = [];
+
+        if (!currentHistory.value?.items?.length) {
+            return { labels, spentAmounts, executionRatesNegative, ranges };
+        }
+
+        const selectedCategory = categoryFilter.value ? allCategoriesMap.value[categoryFilter.value] : null;
+        const selectedPrimaryCategory = selectedCategory?.parentId
+            ? allCategoriesMap.value[selectedCategory.parentId]
+            : selectedCategory;
+
+        const includedHistoryItems = currentHistory.value.items.filter((item: BudgetHistoryItem) => {
+            if (!selectedCategory) {
+                return true;
+            }
+
+            const selectedName = selectedCategory.name;
+            const selectedPrimaryName = selectedPrimaryCategory?.name || selectedName;
+
+            if (selectedCategory.parentId) {
+                return item.category === selectedPrimaryName && item.subCategory === selectedName;
+            }
+
+            return item.category === selectedPrimaryName;
+        });
+
+        if (includedHistoryItems.length === 0) {
+            return { labels, spentAmounts, executionRatesNegative, ranges };
+        }
+
+        const periodSummaryMap: Record<string, {
+            spentAmount: number;
+            budgetAmount: number;
+            startDate: string;
+            endDate: string;
+        }> = {};
+        const effectivePeriodType = includedHistoryItems[0]?.periodType || getCurrentPeriodType();
+
+        for (const item of includedHistoryItems) {
+            const startDate = item.periodStart || '';
+            const endDate = item.periodEnd || '';
+            let periodKey = startDate.slice(0, 7);
+
+            if (item.periodType === BudgetPeriodType.Quarterly) {
+                const matched = startDate.match(/^(\d{4})-(\d{2})-/);
+                if (matched) {
+                    const year = matched[1];
+                    const month = parseInt(matched[2] || '1', 10);
+                    const quarter = Math.floor((month - 1) / 3) + 1;
+                    periodKey = `${year}-Q${quarter}`;
+                }
+            } else if (item.periodType === BudgetPeriodType.Yearly) {
+                periodKey = startDate.slice(0, 4);
+            }
+
+            if (!periodKey) {
+                continue;
+            }
+
+            if (!periodSummaryMap[periodKey]) {
+                periodSummaryMap[periodKey] = {
+                    spentAmount: 0,
+                    budgetAmount: 0,
+                    startDate,
+                    endDate
+                };
+            }
+
+            const periodSummary = periodSummaryMap[periodKey]!;
+
+            periodSummary.spentAmount += item.spentAmount || 0;
+            periodSummary.budgetAmount += item.budgetAmount || 0;
+
+            if (startDate && (!periodSummary.startDate || startDate < periodSummary.startDate)) {
+                periodSummary.startDate = startDate;
+            }
+            if (endDate && (!periodSummary.endDate || endDate > periodSummary.endDate)) {
+                periodSummary.endDate = endDate;
+            }
+        }
+
+        const sortedPeriods = buildContinuousHistoricalPeriodKeys(
+            effectivePeriodType,
+            Object.keys(periodSummaryMap)
+        );
+        for (const period of sortedPeriods) {
+            const summary = periodSummaryMap[period];
+            const fallbackRange = buildHistoricalPeriodRange(effectivePeriodType, period);
+            const spentAmount = summary?.spentAmount || 0;
+            const budgetAmount = summary?.budgetAmount || 0;
+            const executionRate = budgetAmount > 0 ? (spentAmount / budgetAmount) * 100 : 0;
+
+            labels.push(period);
+            spentAmounts.push(spentAmount / 100);
+            executionRatesNegative.push(-executionRate);
+            ranges.push({
+                startDate: summary?.startDate || fallbackRange?.startDate || '',
+                endDate: summary?.endDate || fallbackRange?.endDate || ''
+            });
+        }
+
+        return { labels, spentAmounts, executionRatesNegative, ranges };
+    }
+
+    const labels: string[] = [];
+    const spentAmounts: number[] = [];
+    const executionRatesNegative: number[] = [];
+    const ranges: { startDate: string; endDate: string }[] = [];
+
+    if (!currentForecast.value?.forecasts?.length) {
+        return { labels, spentAmounts, executionRatesNegative, ranges };
+    }
+
+    const selectedCategory = categoryFilter.value ? allCategoriesMap.value[categoryFilter.value] : null;
+    const selectedPrimaryCategory = selectedCategory?.parentId
+        ? allCategoriesMap.value[selectedCategory.parentId]
+        : selectedCategory;
+
+    const includedForecasts = currentForecast.value.forecasts.filter(forecast => {
+        if (!selectedCategory) {
+            return true;
+        }
+
+        const selectedName = selectedCategory.name;
+        const selectedPrimaryName = selectedPrimaryCategory?.name || selectedName;
+
+        if (selectedCategory.parentId) {
+            return forecast.categoryName === selectedName || forecast.categoryName.endsWith(`-${selectedName}`);
+        }
+
+        return forecast.categoryName === selectedName || forecast.categoryName.startsWith(`${selectedPrimaryName}-`);
+    });
+
+    if (includedForecasts.length === 0) {
+        return { labels, spentAmounts, executionRatesNegative, ranges };
+    }
+
+    const periodSpentMap: Record<string, number> = {};
+    const periodRangeMap: Record<string, { startDate: string; endDate: string }> = {};
+
+    for (const forecast of includedForecasts) {
+        for (const periodItem of forecast.periods || []) {
+            const periodKey = String(periodItem.period || '');
+
+            const matched = periodKey.match(/^(\d{4})-(\d{1,2})$/);
+            if (!matched) {
+                continue;
+            }
+
+            const year = parseInt(matched[1] || '0', 10);
+            const month = parseInt(matched[2] || '0', 10);
+
+            if (!year || !month || month < 1 || month > 12) {
+                continue;
+            }
+
+            periodSpentMap[periodKey] = (periodSpentMap[periodKey] || 0) + (periodItem.amount || 0);
+
+            const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+            const lastDay = new Date(year, month, 0).getDate();
+            const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+            periodRangeMap[periodKey] = { startDate, endDate };
+        }
+    }
+
+    const sortedPeriods = Object.keys(periodSpentMap).sort();
+    if (!sortedPeriods.length) {
+        return { labels, spentAmounts, executionRatesNegative, ranges };
+    }
+
+    const totalBudgetBase = includedForecasts.reduce((sum, forecast) => sum + (forecast.budgetAmount || 0), 0);
+
+    for (const period of sortedPeriods) {
+        const amount = periodSpentMap[period] || 0;
+        const executionRate = totalBudgetBase > 0 ? (amount / totalBudgetBase) * 100 : 0;
+        const range = periodRangeMap[period];
+
+        labels.push(period);
+        spentAmounts.push(amount / 100);
+        executionRatesNegative.push(-executionRate);
+        ranges.push(range || { startDate: '', endDate: '' });
+    }
+
+    return {
+        labels,
+        spentAmounts,
+        executionRatesNegative,
+        ranges
+    };
+});
+
+const selectedHistoryWindow = ref<number>(6);
+const selectedHistoricalPeriodRange = ref<HistoricalPeriodRange | null>(null);
+
+const historyWindowOptions = computed(() => {
+    const total = historicalBudgetTrendData.value.labels.length;
+    const periodType = getCurrentPeriodType();
+    const baseOptions = periodType === BudgetPeriodType.Quarterly
+        ? [
+            { name: tt('Last 4 Quarters'), value: 4 },
+            { name: tt('Last 8 Quarters'), value: 8 }
+        ]
+        : periodType === BudgetPeriodType.Yearly
+            ? [
+                { name: tt('Last 3 Years'), value: 3 },
+                { name: tt('Last 5 Years'), value: 5 }
+            ]
+            : [
+                { name: tt('Last 3 Months'), value: 3 },
+                { name: tt('Last 6 Months'), value: 6 },
+                { name: tt('Last 12 Months'), value: 12 }
+            ];
+
+    const options = baseOptions.filter(option => total === 0 || option.value <= total);
+    options.push({ name: tt('All Periods'), value: -1 });
+    return options;
+});
+
+const displayedHistoricalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
+    const fullData = historicalBudgetTrendData.value;
+    const windowSize = selectedHistoryWindow.value;
+
+    if (windowSize < 0 || fullData.labels.length <= windowSize) {
+        return fullData;
+    }
+
+    const startIndex = Math.max(fullData.labels.length - windowSize, 0);
+    return {
+        labels: fullData.labels.slice(startIndex),
+        spentAmounts: fullData.spentAmounts.slice(startIndex),
+        executionRatesNegative: fullData.executionRatesNegative.slice(startIndex),
+        ranges: fullData.ranges.slice(startIndex)
+    };
+});
+
+const selectedHistoricalPeriodLabel = computed<string>(() => {
+    if (!selectedHistoricalPeriodRange.value) {
+        return '';
+    }
+
+    return `${selectedHistoricalPeriodRange.value.startDate} ~ ${selectedHistoricalPeriodRange.value.endDate}`;
+});
+
+const selectedHistoricalPeriodDetailData = computed<HistoricalBudgetDetailData>(() => {
+    const range = selectedHistoricalPeriodRange.value;
+    const history = currentHistory.value?.items || [];
+
+    if (!range || !history.length) {
+        return {
+            labels: [],
+            budgetAmounts: [],
+            spentAmounts: []
+        };
+    }
+
+    const grouped: Record<string, { budgetAmount: number; spentAmount: number }> = {};
+
+    for (const item of history) {
+        if (item.periodStart != range.startDate || item.periodEnd != range.endDate) {
+            continue;
+        }
+
+        const label = item.subCategory ? `${item.category}-${item.subCategory}` : item.category;
+        if (!label) {
+            continue;
+        }
+
+        if (!grouped[label]) {
+            grouped[label] = {
+                budgetAmount: 0,
+                spentAmount: 0
+            };
+        }
+
+        grouped[label].budgetAmount += item.budgetAmount || 0;
+        grouped[label].spentAmount += item.spentAmount || 0;
+    }
+
+    const sortedLabels = Object.keys(grouped).sort((a, b) => {
+        return (grouped[b]?.spentAmount || 0) - (grouped[a]?.spentAmount || 0);
+    });
+
+    return {
+        labels: sortedLabels,
+        budgetAmounts: sortedLabels.map(label => (grouped[label]?.budgetAmount || 0) / 100),
+        spentAmounts: sortedLabels.map(label => (grouped[label]?.spentAmount || 0) / 100)
+    };
+});
+
+const historicalBudgetChartOptions = computed(() => {
+    const maxAmount = Math.max(...displayedHistoricalBudgetTrendData.value.spentAmounts, 0);
+    const maxRate = Math.max(...displayedHistoricalBudgetTrendData.value.executionRatesNegative.map(v => Math.abs(v)), 0);
+    const axisMax = Math.max(maxAmount, maxRate, 1) * 1.2;
+
+    return {
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: (params: CallbackDataParams[]) => {
+                const lines: string[] = [];
+                lines.push(String(params[0]?.name || ''));
+
+                for (const param of params) {
+                    if (param.seriesId === 'budgetExecutionAmountSeries') {
+                        lines.push(`${tt('Current Spent')}: ¥${Number(param.value || 0).toFixed(2)}`);
+                    } else if (param.seriesId === 'budgetExecutionRateSeries') {
+                        lines.push(`${tt('Execution Rate')}: ${Math.abs(Number(param.value || 0)).toFixed(1)}%`);
+                    }
+                }
+
+                return lines.join('<br/>');
+            }
+        },
+        legend: {
+            bottom: 20,
+            itemWidth: 14,
+            itemHeight: 14,
+            icon: 'circle',
+            data: [tt('Current Spent'), tt('Execution Rate')],
+            textStyle: {
+                color: isDarkMode.value ? '#eee' : '#333'
+            }
+        },
+        grid: {
+            left: '20px',
+            right: '20px',
+            top: '10px',
+            bottom: '100px'
+        },
+        xAxis: {
+            type: 'category',
+            data: displayedHistoricalBudgetTrendData.value.labels,
+            axisLine: {
+                show: false
+            },
+            axisTick: {
+                show: false
+            },
+            axisLabel: {
+                padding: [20, 0, 0, 0]
+            }
+        },
+        yAxis: {
+            type: 'value',
+            min: -axisMax,
+            max: axisMax,
+            axisLabel: {
+                show: false
+            },
+            splitLine: {
+                show: false
+            }
+        },
+        series: [
+            {
+                id: 'budgetExecutionAmountSeries',
+                name: tt('Current Spent'),
+                type: 'bar',
+                data: displayedHistoricalBudgetTrendData.value.spentAmounts,
+                itemStyle: {
+                    color: '#42a5f5',
+                    borderRadius: 16
+                },
+                emphasis: {
+                    focus: 'series'
+                },
+                barMaxWidth: 16
+            },
+            {
+                id: 'budgetExecutionRateSeries',
+                name: tt('Execution Rate'),
+                type: 'bar',
+                data: displayedHistoricalBudgetTrendData.value.executionRatesNegative,
+                itemStyle: {
+                    color: '#ffb74d',
+                    borderRadius: 16
+                },
+                emphasis: {
+                    focus: 'series'
+                },
+                barMaxWidth: 16
+            }
+        ]
+    };
+});
+
+const historicalBudgetDetailChartOptions = computed(() => {
+    return {
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'shadow'
+            },
+            formatter: (params: CallbackDataParams[]) => {
+                const lines: string[] = [String(params[0]?.name || '')];
+
+                for (const param of params) {
+                    if (param.seriesId === 'budgetAmountSeries') {
+                        lines.push(`${tt('Budget Amount')}: ¥${Number(param.value || 0).toFixed(2)}`);
+                    } else if (param.seriesId === 'spentAmountSeries') {
+                        lines.push(`${tt('Current Spent')}: ¥${Number(param.value || 0).toFixed(2)}`);
+                    }
+                }
+
+                return lines.join('<br/>');
+            }
+        },
+        legend: {
+            bottom: 16,
+            itemWidth: 14,
+            itemHeight: 14,
+            icon: 'circle',
+            data: [tt('Budget Amount'), tt('Current Spent')],
+            textStyle: {
+                color: isDarkMode.value ? '#eee' : '#333'
+            }
+        },
+        grid: {
+            left: '20px',
+            right: '20px',
+            top: '10px',
+            bottom: '80px',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'category',
+            data: selectedHistoricalPeriodDetailData.value.labels,
+            axisLine: {
+                show: false
+            },
+            axisTick: {
+                show: false
+            }
+        },
+        yAxis: {
+            type: 'value',
+            axisLine: {
+                show: false
+            },
+            axisTick: {
+                show: false
+            },
+            splitLine: {
+                lineStyle: {
+                    color: isDarkMode.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+                }
+            }
+        },
+        series: [
+            {
+                id: 'budgetAmountSeries',
+                name: tt('Budget Amount'),
+                type: 'bar',
+                barMaxWidth: 18,
+                data: selectedHistoricalPeriodDetailData.value.budgetAmounts,
+                itemStyle: {
+                    color: '#90caf9',
+                    borderRadius: [8, 8, 0, 0]
+                }
+            },
+            {
+                id: 'spentAmountSeries',
+                name: tt('Current Spent'),
+                type: 'bar',
+                barMaxWidth: 18,
+                data: selectedHistoricalPeriodDetailData.value.spentAmounts,
+                itemStyle: {
+                    color: '#42a5f5',
+                    borderRadius: [8, 8, 0, 0]
+                }
+            }
+        ]
+    };
+});
+
+async function loadBudgetHistoryForExpired(requestId: number): Promise<void> {
+    selectedHistoricalPeriodRange.value = null;
+    const historyRange = getBudgetHistoryQueryRange(getCurrentPeriodType());
+    const historyRequest: BudgetHistoryRequest = {
+        type: activeBudgetType.value,
+        periodType: getCurrentPeriodType(),
+        startDate: historyRange.startDate,
+        endDate: historyRange.endDate,
+        categoryId: categoryFilter.value || undefined,
+        accountIds: accountFilter.value.length ? [...accountFilter.value] : undefined,
+        tagIds: tagFilter.value.length ? [...tagFilter.value] : undefined
+    };
+
+    try {
+        await budgetStore.createBudgetHistorySnapshot({
+            ...getCurrentPeriodRequest(),
+            type: activeBudgetType.value,
+            categoryId: categoryFilter.value || undefined,
+            accountIds: accountFilter.value.length ? [...accountFilter.value] : undefined,
+            tagIds: tagFilter.value.length ? [...tagFilter.value] : undefined
+        });
+    } catch (snapshotError) {
+        logger.warn('[Budget List] Failed to create history snapshot during background load', snapshotError);
+    }
+
+    if (requestId !== reloadRequestId.value) {
+        return;
+    }
+
+    try {
+        await budgetStore.loadBudgetHistory(historyRequest);
+    } catch (historyError) {
+        logger.warn('[Budget List] Failed to load budget history during background load', historyError);
+    }
+}
 
 // ============================================================================
 // 方法
@@ -1391,6 +2287,7 @@ function setPeriodFilter(filter: string): void {
         return;
     }
     activePeriodFilter.value = filter;
+    selectedHistoricalPeriodRange.value = null;
     reload(false);
 }
 
@@ -1411,6 +2308,7 @@ function onCustomDateRangeChange(minUnixTime: number, maxUnixTime: number): void
 
     // 设置为自定义模式并关闭对话框
     activePeriodFilter.value = 'custom';
+    selectedHistoricalPeriodRange.value = null;
     showCustomDateDialog.value = false;
     reload(false);
 }
@@ -1847,6 +2745,34 @@ function getGroupExecutionRateText(group: BudgetGroup): string {
 }
 
 /**
+ * 获取预测置信等级文案 key
+ */
+function getForecastConfidenceLabel(confidence?: 'high' | 'medium' | 'low' | null): string {
+    switch (confidence) {
+        case 'high':
+            return 'High Confidence';
+        case 'medium':
+            return 'Medium Confidence';
+        default:
+            return 'Low Confidence';
+    }
+}
+
+/**
+ * 获取预测置信等级颜色
+ */
+function getForecastConfidenceClass(confidence?: 'high' | 'medium' | 'low' | null): string {
+    switch (confidence) {
+        case 'high':
+            return 'text-success';
+        case 'medium':
+            return 'text-warning';
+        default:
+            return 'text-error';
+    }
+}
+
+/**
  * 格式化金额
  */
 function formatAmount(amount: number): string {
@@ -1920,11 +2846,41 @@ function navigateToTransactions(category: string, subCategory: string | null, bu
 }
 
 /**
+ * 点击往期预算图表
+ * - 选择周期，在下方展示该周期预算明细
+ */
+function onClickHistoricalBudgetChartItem(e: ECElementEvent): void {
+    if (e.componentType !== 'series') {
+        return;
+    }
+
+    const dataIndex = Number(e.dataIndex || 0);
+    const range = displayedHistoricalBudgetTrendData.value.ranges[dataIndex];
+
+    if (!range?.startDate || !range?.endDate) {
+        return;
+    }
+
+    selectedHistoricalPeriodRange.value = {
+        startDate: range.startDate,
+        endDate: range.endDate
+    };
+}
+
+function clearSelectedHistoricalPeriod(): void {
+    selectedHistoricalPeriodRange.value = null;
+}
+
+/**
  * 切换视图模式
  */
 function switchViewMode(mode: unknown): void {
     activeViewMode.value = mode as string;
+    selectedHistoricalPeriodRange.value = null;
     if (mode === 'forecast') {
+        if (!['thisMonth', 'thisQuarter', 'thisYear'].includes(activePeriodFilter.value)) {
+            activePeriodFilter.value = 'thisMonth';
+        }
         loadForecast();
     } else {
         reload(false);
@@ -1936,6 +2892,7 @@ function switchViewMode(mode: unknown): void {
  */
 function switchBudgetType(type: unknown): void {
     activeBudgetType.value = type as BudgetType;
+    selectedHistoricalPeriodRange.value = null;
     reload(false);
 }
 
@@ -1953,31 +2910,167 @@ function getCurrentPeriodType(): BudgetPeriodType {
     return BudgetPeriodType.Monthly;
 }
 
+function formatDateOnly(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function getCurrentPeriodRequest(): BudgetHistoryRequest {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const currentQuarter = Math.floor(currentMonth / 3) + 1;
+
+    switch (activePeriodFilter.value) {
+        case 'thisMonth':
+            return {
+                periodType: BudgetPeriodType.Monthly,
+                year: currentYear,
+                month: currentMonth + 1
+            };
+        case 'lastMonth': {
+            const target = new Date(currentYear, currentMonth - 1, 1);
+            return {
+                periodType: BudgetPeriodType.Monthly,
+                year: target.getFullYear(),
+                month: target.getMonth() + 1
+            };
+        }
+        case 'thisQuarter':
+            return {
+                periodType: BudgetPeriodType.Quarterly,
+                year: currentYear,
+                quarter: currentQuarter
+            };
+        case 'lastQuarter': {
+            const target = new Date(currentYear, currentMonth - 3, 1);
+            return {
+                periodType: BudgetPeriodType.Quarterly,
+                year: target.getFullYear(),
+                quarter: Math.floor(target.getMonth() / 3) + 1
+            };
+        }
+        case 'thisYear':
+            return {
+                periodType: BudgetPeriodType.Yearly,
+                year: currentYear
+            };
+        case 'lastYear':
+            return {
+                periodType: BudgetPeriodType.Yearly,
+                year: currentYear - 1
+            };
+        case 'custom':
+            return {
+                periodType: getCurrentPeriodType(),
+                startDate: customStartDate.value || undefined,
+                endDate: customEndDate.value || undefined
+            };
+        default:
+            return {
+                periodType: getCurrentPeriodType()
+            };
+    }
+}
+
+function getBudgetHistoryQueryRange(periodType: BudgetPeriodType): { startDate: string; endDate: string } {
+    const periodRequest = getCurrentPeriodRequest();
+
+    if (periodRequest.startDate && periodRequest.endDate) {
+        return {
+            startDate: periodRequest.startDate,
+            endDate: periodRequest.endDate
+        };
+    }
+
+    const anchorDate = (() => {
+        if (periodRequest.year && periodRequest.month) {
+            return new Date(periodRequest.year, periodRequest.month - 1, 1);
+        }
+        if (periodRequest.year && periodRequest.quarter) {
+            return new Date(periodRequest.year, (periodRequest.quarter - 1) * 3, 1);
+        }
+        if (periodRequest.year) {
+            return new Date(periodRequest.year, 0, 1);
+        }
+        return new Date();
+    })();
+
+    if (periodType === BudgetPeriodType.Quarterly) {
+        const quarterStartMonth = Math.floor(anchorDate.getMonth() / 3) * 3;
+        const endDate = new Date(anchorDate.getFullYear(), quarterStartMonth + 3, 0);
+        const startDate = new Date(anchorDate.getFullYear(), quarterStartMonth - 21, 1);
+        return {
+            startDate: formatDateOnly(startDate),
+            endDate: formatDateOnly(endDate)
+        };
+    }
+
+    if (periodType === BudgetPeriodType.Yearly) {
+        const endDate = new Date(anchorDate.getFullYear(), 11, 31);
+        const startDate = new Date(anchorDate.getFullYear() - 4, 0, 1);
+        return {
+            startDate: formatDateOnly(startDate),
+            endDate: formatDateOnly(endDate)
+        };
+    }
+
+    const endDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0);
+    const startDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - 11, 1);
+    return {
+        startDate: formatDateOnly(startDate),
+        endDate: formatDateOnly(endDate)
+    };
+}
+
 /**
  * 加载预算列表和执行数据
  */
 async function reload(force: boolean): Promise<void> {
+    const requestId = ++reloadRequestId.value;
     loading.value = true;
 
     try {
-        await budgetStore.loadAllBudgets({
-            force,
-            type: activeBudgetType.value,
-            periodType: getCurrentPeriodType()
-        });
+        const periodRequest = getCurrentPeriodRequest();
 
-        // 同时加载执行数据
-        await budgetStore.loadBudgetExecution({
-            type: activeBudgetType.value,
-            periodType: getCurrentPeriodType()
-        });
+        await Promise.all([
+            budgetStore.loadAllBudgets({
+                force,
+                type: activeBudgetType.value,
+                periodType: periodRequest.periodType
+            }),
+            budgetStore.loadBudgetExecution({
+                type: activeBudgetType.value,
+                periodType: periodRequest.periodType,
+                year: periodRequest.year,
+                month: periodRequest.month,
+                quarter: periodRequest.quarter,
+                startDate: periodRequest.startDate,
+                endDate: periodRequest.endDate
+            })
+        ]);
+
+        if (requestId !== reloadRequestId.value) {
+            return;
+        }
+
+        loading.value = false;
+
+        if (activePeriodFilter.value === 'expired') {
+            void loadBudgetHistoryForExpired(requestId);
+        }
+
+        if (activeViewMode.value === 'forecast') {
+            void loadForecast();
+        }
     } catch (error: unknown) {
         const err = error as { isUpToDate?: boolean; message?: string };
         if (!err.isUpToDate) {
             snackbar.value?.showError(err.message || tt('Failed to load budgets'));
         }
     } finally {
-        loading.value = false;
+        if (requestId === reloadRequestId.value) {
+            loading.value = false;
+        }
     }
 }
 
@@ -1988,12 +3081,22 @@ async function loadForecast(): Promise<void> {
     try {
         await budgetStore.loadBudgetForecast({
             type: activeBudgetType.value,
-            periodType: getCurrentPeriodType()
+            periodType: getCurrentPeriodType(),
+            monthsHistory: forecastMonthsHistory.value,
+            forecastStrategy: forecastStrategy.value
         });
     } catch (error: unknown) {
         const err = error as { message?: string };
         snackbar.value?.showError(err.message || tt('Failed to load forecast'));
     }
+}
+
+/**
+ * 清空预算预测快速筛选
+ */
+function clearForecastQuickFilters(): void {
+    forecastOnlyLowConfidence.value = false;
+    forecastOnlyOverBudget.value = false;
 }
 
 /**
@@ -2165,6 +3268,33 @@ onMounted(() => {
     reload(false);
 });
 
+watch([forecastStrategy, forecastMonthsHistory], () => {
+    if (activeViewMode.value === 'forecast') {
+        loadForecast();
+    }
+});
+
+watch(historyWindowOptions, (options) => {
+    if (!options.some(option => option.value === selectedHistoryWindow.value)) {
+        selectedHistoryWindow.value = options[0]?.value || -1;
+    }
+}, { immediate: true });
+
+watch(displayedHistoricalBudgetTrendData, (data) => {
+    const currentRange = selectedHistoricalPeriodRange.value;
+    if (!currentRange) {
+        return;
+    }
+
+    const stillVisible = data.ranges.some(range => {
+        return range.startDate === currentRange.startDate && range.endDate === currentRange.endDate;
+    });
+
+    if (!stillVisible) {
+        selectedHistoricalPeriodRange.value = null;
+    }
+}, { deep: true });
+
 // 监听筛选关键词变化
 watch(filterKeyword, (newVal) => {
     // 实时搜索
@@ -2180,6 +3310,31 @@ watch(filterKeyword, (newVal) => {
 .budget-keyword-filter {
     min-width: 200px;
     max-width: 300px;
+}
+
+.budget-forecast-strategy-select {
+    min-width: 220px;
+    max-width: 220px;
+}
+
+.budget-forecast-history-select {
+    min-width: 170px;
+    max-width: 170px;
+}
+
+.budget-forecast-sort-select {
+    min-width: 220px;
+    max-width: 220px;
+}
+
+.tab-text-truncate {
+    justify-content: flex-start;
+    padding-inline: 12px;
+}
+
+.tab-text-truncate .text-truncate {
+    width: 100%;
+    text-align: left;
 }
 
 .cursor-pointer {
@@ -2327,6 +3482,21 @@ watch(filterKeyword, (newVal) => {
 /* 汇总行样式（参考统计分析页面） */
 .budget-summary-row {
     background-color: transparent;
+}
+
+.budget-history-chart {
+    width: 100%;
+    height: 400px;
+}
+
+.budget-history-detail-chart {
+    width: 100%;
+    height: 360px;
+}
+
+.budget-history-window-select {
+    min-width: 190px;
+    max-width: 190px;
 }
 
 .budget-summary-label {

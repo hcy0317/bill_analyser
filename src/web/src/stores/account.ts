@@ -32,6 +32,19 @@ export const useAccountsStore = defineStore('accounts', () => {
     const allAccountsMap = ref<Record<string, Account>>({});
     const allCategorizedAccountsMap = ref<Record<number, CategorizedAccount>>({});
     const accountListStateInvalid = ref<boolean>(true);
+    let loadAllAccountsPromise: Promise<Account[]> | null = null;
+    let syncAllAccountBalancesPromise: Promise<{
+        totalAccounts: number;
+        syncedAccounts: number;
+        discrepancies: Array<{
+            accountId: number;
+            name: string;
+            oldBalance: number;
+            newBalance: number;
+            diff: number;
+        }>;
+        errors: string[];
+    }> | null = null;
 
     const allPlainAccounts = computed<Account[]>(() => {
         const allAccountsList: Account[] = [];
@@ -760,7 +773,12 @@ export const useAccountsStore = defineStore('accounts', () => {
             });
         }
 
-        return new Promise((resolve, reject) => {
+        if (loadAllAccountsPromise) {
+            logger.info(`[loadAllAccounts] 复用进行中的账户列表请求 (force=${force})`);
+            return loadAllAccountsPromise;
+        }
+
+        loadAllAccountsPromise = new Promise((resolve, reject) => {
             services.getAllAccounts({
                 visibleOnly: false
             }).then(response => {
@@ -769,10 +787,6 @@ export const useAccountsStore = defineStore('accounts', () => {
                 if (!data || !data.success || !data.result) {
                     reject({ message: 'Unable to retrieve account list' });
                     return;
-                }
-
-                if (accountListStateInvalid.value) {
-                    updateAccountListInvalidState(false);
                 }
 
                 const accounts = Account.sortAccounts(Account.ofMulti(data.result));
@@ -785,6 +799,10 @@ export const useAccountsStore = defineStore('accounts', () => {
                 }
 
                 loadAccountList(accounts);
+
+                if (accountListStateInvalid.value) {
+                    updateAccountListInvalidState(false);
+                }
 
                 resolve(accounts);
             }).catch(error => {
@@ -801,8 +819,12 @@ export const useAccountsStore = defineStore('accounts', () => {
                 } else {
                     reject(error);
                 }
+            }).finally(() => {
+                loadAllAccountsPromise = null;
             });
         });
+
+        return loadAllAccountsPromise;
     }
 
     function getAccount({ accountId }: { accountId: string }): Promise<Account> {
@@ -972,7 +994,7 @@ export const useAccountsStore = defineStore('accounts', () => {
 
                 updateAccountVisibilityInAccountList({ account, hidden });
 
-                resolve(data.result);
+                resolve(true);
             }).catch(error => {
                 logger.error('failed to change account visibility', error);
 
@@ -1062,6 +1084,80 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
 
     /**
+     * v6.68: 同步所有账户余额
+     * 根据账单数据重新计算并更新所有账户的余额
+     * @returns Promise<SyncBalancesResult> 同步结果，包含差异报告
+     */
+    function syncAllAccountBalances({ refreshAccounts = true }: { refreshAccounts?: boolean } = {}): Promise<{
+        totalAccounts: number;
+        syncedAccounts: number;
+        discrepancies: Array<{
+            accountId: number;
+            name: string;
+            oldBalance: number;
+            newBalance: number;
+            diff: number;
+        }>;
+        errors: string[];
+    }> {
+        if (syncAllAccountBalancesPromise) {
+            logger.info('[syncAllAccountBalances] 复用进行中的同步请求');
+            return syncAllAccountBalancesPromise;
+        }
+
+        syncAllAccountBalancesPromise = new Promise((resolve, reject) => {
+            logger.info(`[syncAllAccountBalances] 开始同步所有账户余额 (refreshAccounts=${refreshAccounts})`);
+
+            services.syncAllAccountBalances().then(async response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    logger.error('[syncAllAccountBalances] 同步失败: 响应无效');
+                    reject({ message: 'Unable to sync account balances' });
+                    return;
+                }
+
+                const result = data.result;
+                logger.info(
+                    `[syncAllAccountBalances] 同步完成: ${result.synced_accounts}/${result.total_accounts} 账户, ` +
+                    `${result.discrepancies.length} 个差异`
+                );
+
+                if (refreshAccounts) {
+                    await loadAllAccounts({ force: true });
+                }
+
+                resolve({
+                    totalAccounts: result.total_accounts,
+                    syncedAccounts: result.synced_accounts,
+                    discrepancies: result.discrepancies.map(d => ({
+                        accountId: d.account_id,
+                        name: d.name,
+                        oldBalance: d.old_balance,
+                        newBalance: d.new_balance,
+                        diff: d.diff
+                    })),
+                    errors: result.errors
+                });
+            }).catch(error => {
+                logger.error('failed to sync account balances', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to sync account balances' });
+                } else {
+                    reject(error);
+                }
+            }).finally(() => {
+                syncAllAccountBalancesPromise = null;
+            });
+        });
+
+        return syncAllAccountBalancesPromise;
+    }
+
+    /**
      * 展开账户ID列表：将包含子账户的主账户ID展开为所有子账户ID
      * @param accountIds - 账户ID数组（可包含主账户和子账户）
      * @returns 展开后的账户ID数组（仅包含实际交易账户）
@@ -1144,6 +1240,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         updateAccountDisplayOrders,
         hideAccount,
         deleteAccount,
-        deleteSubAccount
+        deleteSubAccount,
+        syncAllAccountBalances
     }
 });

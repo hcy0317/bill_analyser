@@ -687,3 +687,19 @@ export interface AccountShowingIds {
     readonly accounts: Record<number, string>;
     readonly subAccounts: Record<string, string>;
 }
+
+// v6.68: 同步账户余额响应
+export interface SyncBalanceDiscrepancy {
+    readonly account_id: number;
+    readonly name: string;
+    readonly old_balance: number;
+    readonly new_balance: number;
+    readonly diff: number;
+}
+
+export interface SyncBalancesResponse {
+    readonly total_accounts: number;
+    readonly synced_accounts: number;
+    readonly discrepancies: SyncBalanceDiscrepancy[];
+    readonly errors: string[];
+}

@@ -1,20 +1,20 @@
 """
 Accounts API Routes - 账户相关API端点
 
-重构后使用V1AccountAdapter统一处理账户数据格式转换。
+重构后使用统一账户适配器处理账户数据格式转换。
 """
 
 import asyncio
 from flask import Blueprint, request, jsonify
 
 from src.utils.logger import get_logger, log_method
-from src.api.adapters.v1_account_adapter import V1AccountAdapter
+from src.api.adapters.account_adapter import AccountAdapter
 from src.api.middleware.auth import require_auth
 
 logger = get_logger('AccountsAPI')
 
 bp = Blueprint('accounts', __name__)
-account_adapter = V1AccountAdapter()
+account_adapter = AccountAdapter()
 
 
 def get_app_context():
@@ -324,187 +324,11 @@ def delete_account(account_id: int):
         }), 500
 
 
-# ==========================================
-# V1 API 兼容接口 (通过URLRewriteMiddleware映射)
-# ==========================================
-
-@bp.route('/get', methods=['GET'])
+@bp.route('/display-orders', methods=['PUT'])
 @log_method
 @require_auth
-def get_account_v1():
-    """获取账户详情 (V1兼容)"""
-    try:
-        account_id = request.args.get('id')
-        if not account_id:
-            return jsonify({
-                'success': False,
-                'error': 'Missing id parameter'
-            }), 400
-
-        return get_account(int(account_id))
-    except ValueError:
-        return jsonify({
-            'success': False,
-            'error': 'Invalid id parameter'
-        }), 400
-    except Exception as e:
-        logger.error(f"V1获取账户失败: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/modify', methods=['POST'])
-@log_method
-@require_auth
-def modify_account_v1():
-    """修改账户 (V1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Missing id in request body'
-            }), 400
-
-        account_id = int(data['id'])
-        # 移除id字段，剩下的就是更新数据
-        update_data = {k: v for k, v in data.items() if k != 'id'}
-
-        # 调用现有的更新逻辑
-        # 注意：update_account 是路由函数，我们需要直接调用逻辑或重构
-        # 这里为了简单，直接复制逻辑，或者提取公共逻辑
-        # 更好的方式是提取 service 层，但现在直接操作 DB
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        # 特殊处理：V1 API可能会发送 subAccounts，目前后端可能不支持直接更新子账户结构
-        # 这里暂时忽略 subAccounts，只更新当前账户属性
-        if 'subAccounts' in update_data:
-            del update_data['subAccounts']
-
-        result = loop.run_until_complete(db.update_account(account_id, update_data, user_id=request.user_id))
-
-        # 如果成功，返回更新后的账户信息
-        if result:
-            account = loop.run_until_complete(db.get_account_by_id(account_id, user_id=request.user_id))
-            loop.close()
-
-            formatted_account = account_adapter.backend_to_frontend(account)
-            return jsonify({
-                'success': True,
-                'result': formatted_account
-            })
-
-        loop.close()
-        return jsonify({
-            'success': False,
-            'error': 'Account not found'
-        }), 404
-
-    except Exception as e:
-        logger.error(f"V1修改账户失败: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/hide', methods=['POST'])
-@log_method
-@require_auth
-def hide_account_v1():
-    """隐藏/显示账户 (V1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data or 'hidden' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Missing id or hidden parameter'
-            }), 400
-
-        account_id = int(data['id'])
-        hidden = data['hidden']
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        hidden_value = 1 if hidden else 0
-        result = loop.run_until_complete(
-            db.update_account(account_id, {'hidden': hidden_value}, user_id=request.user_id)
-        )
-        loop.close()
-
-        if result:
-            return jsonify({
-                'success': True,
-                'result': True
-            })
-        return jsonify({
-            'success': False,
-            'error': 'Account not found'
-        }), 404
-
-    except Exception as e:
-        logger.error(f"V1隐藏账户失败: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/delete', methods=['POST'])
-@log_method
-@require_auth
-def delete_account_v1():
-    """删除账户 (V1兼容)"""
-    try:
-        data = request.get_json()
-        if not data or 'id' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Missing id parameter'
-            }), 400
-
-        account_id = int(data['id'])
-
-        # 复用 delete_account 逻辑
-        # 注意：delete_account 是路由函数，返回的是 Response 对象
-        # 这里我们直接调用 DB
-
-        db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(db.delete_account(account_id, user_id=request.user_id))
-        loop.close()
-
-        if result:
-            return jsonify({
-                'success': True,
-                'result': True
-            })
-        return jsonify({
-            'success': False,
-            'error': 'Account not found'
-        }), 404
-
-    except Exception as e:
-        logger.error(f"V1删除账户失败: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@bp.route('/move', methods=['POST'])
-@log_method
-@require_auth
-def move_account_v1():
-    """移动账户/排序 (V1兼容)"""
+def update_account_display_orders():
+    """批量更新账户显示顺序 - REST API"""
     try:
         data = request.get_json()
         if not data or 'newDisplayOrders' not in data:
@@ -520,31 +344,282 @@ def move_account_v1():
                 'error': 'newDisplayOrders must be a list'
             }), 400
 
+        logger.info(
+            "[账户排序更新] 开始: user_id=%s, count=%s",
+            request.user_id, len(new_orders)
+        )
+
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         success_count = 0
-        for item in new_orders:
-            if 'id' in item and 'displayOrder' in item:
+        try:
+            for item in new_orders:
+                if 'id' not in item or 'displayOrder' not in item:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Each item must have id and displayOrder'
+                    }), 400
+
                 acc_id = int(item['id'])
                 order = int(item['displayOrder'])
                 update_result = loop.run_until_complete(
-                    db.update_account(acc_id, {'display_order': order}, user_id=request.user_id)
+                    db.update_account(
+                        acc_id,
+                        {'display_order': order},
+                        user_id=request.user_id
+                    )
                 )
                 if update_result:
                     success_count += 1
+        finally:
+            loop.close()
 
-        loop.close()
-
+        logger.info(
+            "[账户排序更新] 完成: user_id=%s, success=%s/%s",
+            request.user_id, success_count, len(new_orders)
+        )
         return jsonify({
             'success': True,
             'result': True
         })
-
     except Exception as e:
-        logger.error(f"V1移动账户失败: {e}")
+        logger.error("[账户排序更新] 失败: %s", e, exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@bp.route('/sync-balances', methods=['POST'])
+@log_method
+@require_auth
+def sync_all_balances():
+    """
+    同步所有账户余额
+
+    v6.68: 新增批量同步所有账户余额的API端点
+
+    该端点会：
+    1. 遍历所有账户
+    2. 根据账单数据计算每个账户的实际余额
+    3. 将计算结果写入账户的balance字段
+    4. 返回同步结果和余额差异报告
+
+    Returns:
+        JSON响应:
+        {
+            'success': True,
+            'result': {
+                'total_accounts': 20,
+                'synced_accounts': 20,
+                'discrepancies': [
+                    {
+                        'account_id': 3,
+                        'name': '农业银行',
+                        'old_balance': 16439.02,
+                        'new_balance': -418.75,
+                        'diff': -16857.77
+                    }
+                ],
+                'errors': []
+            }
+        }
+    """
+    try:
+        logger.info(f"[同步所有账户余额] 开始 user_id={request.user_id}")
+
+        db = get_app_context()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(db.sync_all_account_balances(user_id=request.user_id))
+        loop.close()
+
+        logger.info(
+            f"[同步所有账户余额] 完成: 成功={result['synced_accounts']}/{result['total_accounts']}, "
+            f"差异={len(result['discrepancies'])}个"
+        )
+
+        return jsonify({
+            'success': True,
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"同步所有账户余额失败: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@bp.route('/<int:account_id>/transactions/move', methods=['POST'])
+@log_method
+@require_auth
+def move_all_transactions_rest(account_id: int):
+    """REST - 将账户下所有交易移动到另一个账户。"""
+    try:
+        data = request.get_json() or {}
+        to_account_id = data.get('toAccountId')
+        password = data.get('password')
+
+        if not to_account_id:
+            return jsonify({'success': False, 'error': 'toAccountId is required'}), 400
+
+        if not password:
+            return jsonify({'success': False, 'error': 'password is required'}), 400
+
+        try:
+            to_account_id = int(to_account_id)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Account IDs must be valid integers'}), 400
+
+        if account_id == to_account_id:
+            return jsonify({'success': False, 'error': 'Source and target accounts must be different'}), 400
+
+        db = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            password_valid = loop.run_until_complete(db.verify_operation_password(password))
+            if not password_valid:
+                loop.run_until_complete(
+                    db.create_audit_log(
+                        operation_type='move_transactions',
+                        operation_target='account',
+                        target_id=account_id,
+                        details={'from_account_id': account_id, 'to_account_id': to_account_id},
+                        status='failed',
+                        error_message='Invalid password',
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get('User-Agent')
+                    )
+                )
+                return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+            result = loop.run_until_complete(
+                db.move_all_transactions(account_id, to_account_id, user_id=request.user_id)
+            )
+
+            if not result.get('success'):
+                loop.run_until_complete(
+                    db.create_audit_log(
+                        operation_type='move_transactions',
+                        operation_target='account',
+                        target_id=account_id,
+                        details={'from_account_id': account_id, 'to_account_id': to_account_id},
+                        status='failed',
+                        error_message=result.get('message'),
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get('User-Agent')
+                    )
+                )
+                return jsonify({
+                    'success': False,
+                    'error': result.get('message', 'Failed to move transactions')
+                }), 500
+
+            moved_count = result.get('moved_count', 0)
+            loop.run_until_complete(
+                db.create_audit_log(
+                    operation_type='move_transactions',
+                    operation_target='account',
+                    target_id=account_id,
+                    details={
+                        'from_account_id': account_id,
+                        'to_account_id': to_account_id,
+                        'moved_count': moved_count
+                    },
+                    affected_count=moved_count,
+                    status='success',
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent')
+                )
+            )
+        finally:
+            loop.close()
+
+        return jsonify({'success': True, 'result': True, 'moved_count': moved_count})
+    except Exception as e:
+        logger.error(f"REST移动账户交易失败: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/<int:account_id>/transactions/clear', methods=['POST'])
+@log_method
+@require_auth
+def clear_all_transactions_by_account_rest(account_id: int):
+    """REST - 删除指定账户的所有交易。"""
+    try:
+        data = request.get_json() or {}
+        password = data.get('password')
+
+        if not password:
+            return jsonify({'success': False, 'error': 'password is required'}), 400
+
+        db = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            password_valid = loop.run_until_complete(db.verify_operation_password(password))
+            if not password_valid:
+                loop.run_until_complete(
+                    db.create_audit_log(
+                        operation_type='delete_transactions',
+                        operation_target='account',
+                        target_id=account_id,
+                        details={'account_id': account_id},
+                        status='failed',
+                        error_message='Invalid password',
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get('User-Agent')
+                    )
+                )
+                return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+            result = loop.run_until_complete(
+                db.delete_all_transactions_by_account(account_id, user_id=request.user_id)
+            )
+
+            if not result.get('success'):
+                loop.run_until_complete(
+                    db.create_audit_log(
+                        operation_type='delete_transactions',
+                        operation_target='account',
+                        target_id=account_id,
+                        details={'account_id': account_id},
+                        status='failed',
+                        error_message=result.get('message'),
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get('User-Agent')
+                    )
+                )
+                return jsonify({
+                    'success': False,
+                    'error': result.get('message', 'Failed to delete transactions')
+                }), 500
+
+            deleted_count = result.get('deleted_count', 0)
+            loop.run_until_complete(
+                db.create_audit_log(
+                    operation_type='delete_transactions',
+                    operation_target='account',
+                    target_id=account_id,
+                    details={'account_id': account_id, 'deleted_count': deleted_count},
+                    affected_count=deleted_count,
+                    status='success',
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get('User-Agent')
+                )
+            )
+        finally:
+            loop.close()
+
+        return jsonify({'success': True, 'result': True, 'deleted_count': deleted_count})
+    except Exception as e:
+        logger.error(f"REST删除账户交易失败: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500

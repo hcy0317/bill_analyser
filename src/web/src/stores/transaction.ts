@@ -16,8 +16,8 @@ import { TransactionType, TransactionTagFilterType } from '@/core/transaction.ts
 import { TRANSACTION_MIN_AMOUNT, TRANSACTION_MAX_AMOUNT } from '@/consts/transaction.ts';
 import {
     type TransactionDraft,
-    type TransactionCreateRequest,
     type TransactionInfoResponse,
+    type TransactionImportRequest,
     type TransactionPageWrapper,
     type TransactionReconciliationStatementResponse,
     Transaction,
@@ -28,8 +28,7 @@ import type {
     TransactionPictureInfoBasicResponse
 } from '@/models/transaction_picture_info.ts';
 import {
-    type ImportTransactionResponsePageWrapper,
-    ImportTransaction
+    type ImportTransactionResponsePageWrapper
 } from '@/models/imported_transaction.ts';
 import {
     type ExportTransactionDataRequest
@@ -1128,6 +1127,83 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
+    function saveTransactions({
+        transactions,
+        clientSessionId
+    }: {
+        transactions: Transaction[],
+        clientSessionId: string
+    }): Promise<Transaction[]> {
+        return new Promise((resolve, reject) => {
+            const validTransactions = transactions.filter(transaction =>
+                transaction.type === TransactionType.Expense ||
+                transaction.type === TransactionType.Income ||
+                transaction.type === TransactionType.Transfer ||
+                transaction.type === TransactionType.Investment
+            );
+
+            if (!validTransactions.length) {
+                reject({ message: 'Unable to add transaction' });
+                return;
+            }
+
+            const requestBody: TransactionImportRequest = {
+                transactions: validTransactions.map(transaction => {
+                    const actualTime = getActualUnixTimeForStore(
+                        transaction.time,
+                        transaction.utcOffset,
+                        getBrowserTimezoneOffsetMinutes()
+                    );
+
+                    return transaction.toCreateRequest(clientSessionId, actualTime);
+                }),
+                clientSessionId: clientSessionId
+            };
+
+            services.addTransactions(requestBody).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result?.items) {
+                    reject({ message: 'Unable to add transaction' });
+                    return;
+                }
+
+                const createdTransactions = data.result.items.map(item => Transaction.of(item));
+
+                if (!transactionListStateInvalid.value) {
+                    updateTransactionListInvalidState(true);
+                }
+
+                if (!transactionReconciliationStatementStateInvalid.value) {
+                    updateTransactionReconciliationStatementInvalidState(true);
+                }
+
+                accountsStore.updateAccountListInvalidState(true);
+                accountsStore.loadAllAccounts({ force: true });
+
+                if (!overviewStore.transactionOverviewStateInvalid) {
+                    overviewStore.updateTransactionOverviewInvalidState(true);
+                }
+
+                if (!statisticsStore.transactionStatisticsStateInvalid) {
+                    statisticsStore.updateTransactionStatisticsInvalidState(true);
+                }
+
+                resolve(createdTransactions);
+            }).catch(error => {
+                logger.error('failed to save transactions', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to add transaction' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function moveAllTransactionsBetweenAccounts({ fromAccountId, toAccountId, password }: { fromAccountId: string, toAccountId: string, password: string }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.moveAllTransactionsBetweenAccounts({ fromAccountId, toAccountId, password }).then(response => {
@@ -1266,9 +1342,9 @@ export const useTransactionsStore = defineStore('transactions', () => {
         services.cancelRequest(cancelableUuid);
     }
 
-    function parseImportDsvFile({ fileType, fileEncoding, importFile }: { fileType: string, fileEncoding?: string, importFile: File }): Promise<string[][]> {
+    function parseImportTransaction({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string, delimiter?: string }): Promise<ImportTransactionResponsePageWrapper> {
         return new Promise((resolve, reject) => {
-            services.parseImportDsvFile({ fileType, fileEncoding, importFile }).then(response => {
+            services.parseImportTransaction({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator, delimiter }).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
@@ -1284,93 +1360,6 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to parse import file' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function parseImportTransaction({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator }: { fileType: string, fileEncoding?: string, importFile: File, columnMapping?: Record<number, number>, transactionTypeMapping?: Record<string, TransactionType>, hasHeaderLine?: boolean, timeFormat?: string, timezoneFormat?: string, amountDecimalSeparator?: string, amountDigitGroupingSymbol?: string, geoSeparator?: string, geoOrder?: string, tagSeparator?: string }): Promise<ImportTransactionResponsePageWrapper> {
-        return new Promise((resolve, reject) => {
-            services.parseImportTransaction({ fileType, fileEncoding, importFile, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, geoSeparator, geoOrder, tagSeparator }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to parse import file' });
-                    return;
-                }
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('Unable to parse import file', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to parse import file' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function importTransactions({ transactions, clientSessionId }: { transactions: ImportTransaction[], clientSessionId: string }): Promise<number> {
-        const submitTransactions: TransactionCreateRequest[] = [];
-
-        if (transactions) {
-            for (const transaction of transactions) {
-                const submitTransaction = transaction.toCreateRequest();
-                submitTransactions.push(submitTransaction);
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            services.importTransactions({
-                transactions: submitTransactions,
-                clientSessionId: clientSessionId
-            }).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to import transactions' });
-                    return;
-                }
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('Unable to import transactions', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to import transactions' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function getImportTransactionsProcess({ clientSessionId }: { clientSessionId: string }): Promise<number | null> {
-        return new Promise((resolve, reject) => {
-            services.getImportTransactionsProcess(clientSessionId).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to get transactions import process' });
-                    return;
-                }
-
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('Unable to get transactions import process', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to get transactions import process' });
                 } else {
                     reject(error);
                 }
@@ -1478,14 +1467,12 @@ export const useTransactionsStore = defineStore('transactions', () => {
         getReconciliationStatements,
         getTransaction,
         saveTransaction,
+        saveTransactions,
         moveAllTransactionsBetweenAccounts,
         deleteTransaction,
         recognizeReceiptImage,
         cancelRecognizeReceiptImage,
-        parseImportDsvFile,
         parseImportTransaction,
-        importTransactions,
-        getImportTransactionsProcess,
         uploadTransactionPicture,
         removeUnusedTransactionPicture,
         getTransactionPictureUrl,
