@@ -56,7 +56,7 @@ dev = [
 universal = true
 
 [tool.poe.tasks]
-test = "pytest --cov=src/${REPO_NAME_SNAKE} --cov-report xml --junitxml=./junit.xml -n auto"
+test = "pytest --cov=src/bill_analyser --cov-report xml --junitxml=./junit.xml -n auto"
 bump = "bump-my-version bump"
 show-bump = "bump-my-version show-bump"
 
@@ -134,8 +134,8 @@ replace = "[Unreleased]: \\1v{new_version}...HEAD\n[{new_version}]: \\1v{current
 
 [[tool.bumpversion.files]]
 filename = "uv.lock"
-search = "name = \"${REPO_NAME_KEBAB}\"\nversion = \"{current_version}\""
-replace = "name = \"${REPO_NAME_KEBAB}\"\nversion = \"{new_version}\""
+search = "name = \"bill-analyser\"\nversion = \"{current_version}\""
+replace = "name = \"bill-analyser\"\nversion = \"{new_version}\""
 
 [tool.inline-snapshot]
 format-command = "uv format -- --stdin-filename {filename}"
