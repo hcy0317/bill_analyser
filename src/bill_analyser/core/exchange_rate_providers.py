@@ -6,21 +6,19 @@ Exchange Rate Providers - 汇率数据源提供者
 v6.79: 添加SSL证书支持，修复SSLCertVerificationError问题
 """
 
-import aiohttp
-import asyncio
 import json
 import re
 import ssl
-import certifi
-from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
-from io import StringIO
-from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
+from abc import ABC, abstractmethod
+from datetime import datetime
+from io import StringIO
+
+import aiohttp
+import certifi
 import pandas as pd
 
 from ..utils.logger import get_logger, log_method
-
 
 CHINESE_CURRENCY_NAME_MAP = {
     "人民币": "CNY",
@@ -58,9 +56,9 @@ def _normalize_chinese_currency_name(value: str) -> str:
     return CHINESE_CURRENCY_NAME_MAP.get(text, "")
 
 
-def _extract_numeric_values(values: List[object]) -> List[float]:
+def _extract_numeric_values(values: list[object]) -> list[float]:
     """从表格行中提取数值列。"""
-    numbers: List[float] = []
+    numbers: list[float] = []
 
     for value in values:
         text = str(value or "").strip()
@@ -80,10 +78,10 @@ def _extract_numeric_values(values: List[object]) -> List[float]:
 
 
 def _convert_cny_quote_map_to_rates(
-    quote_map: Dict[str, float], base_currency: str, target_currencies: List[str]
-) -> Dict[str, float]:
+    quote_map: dict[str, float], base_currency: str, target_currencies: list[str]
+) -> dict[str, float]:
     """将“100 外币兑人民币”的报价转换为任意基准币种的汇率。"""
-    result: Dict[str, float] = {}
+    result: dict[str, float] = {}
 
     if base_currency == "CNY":
         for currency in target_currencies:
@@ -119,8 +117,8 @@ class ExchangeRateProvider(ABC):
 
     @abstractmethod
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """
         获取汇率
 
@@ -140,18 +138,18 @@ class ExchangeRateProvider(ABC):
         pass
 
     @abstractmethod
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         """获取支持的货币列表"""
         pass
 
     def _convert_base_currency(
         self,
-        rates: Dict[str, float],
+        rates: dict[str, float],
         original_base: str,
         target_base: str,
-        target_currencies: List[str],
+        target_currencies: list[str],
         rate_format: str = "base_to_target",
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         转换基准货币
 
@@ -253,13 +251,13 @@ class ECBProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "European Central Bank (ECB)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["EUR"] + self.SUPPORTED_CURRENCIES
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从ECB获取汇率"""
         try:
             # ECB的基准货币是EUR
@@ -285,7 +283,7 @@ class ECBProvider(ExchangeRateProvider):
             self.logger.error(f"获取ECB汇率失败: {e}")
             return {}
 
-    def _parse_ecb_xml(self, xml_data: str, target_date: Optional[str] = None) -> Dict[str, float]:
+    def _parse_ecb_xml(self, xml_data: str, target_date: str | None = None) -> dict[str, float]:
         """解析ECB XML数据"""
         rates = {"EUR": 1.0}
 
@@ -324,13 +322,13 @@ class BOCChinaProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "Bank of China (CN)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["CNY"] + sorted(set(CHINESE_CURRENCY_NAME_MAP.values()) - {"CNY"})
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从中国银行页面抓取汇率。"""
         del date
 
@@ -349,9 +347,9 @@ class BOCChinaProvider(ExchangeRateProvider):
             self.logger.error("获取中国银行汇率失败: %s", exc)
             return {}
 
-    def _parse_quote_map(self, html: str) -> Dict[str, float]:
+    def _parse_quote_map(self, html: str) -> dict[str, float]:
         """解析中国银行外汇牌价页面。"""
-        quote_map: Dict[str, float] = {}
+        quote_map: dict[str, float] = {}
 
         try:
             tables = pd.read_html(StringIO(html), flavor="lxml")
@@ -390,13 +388,13 @@ class CMBChinaProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "China Merchants Bank (CMB)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["CNY"] + sorted(set(CHINESE_CURRENCY_NAME_MAP.values()) - {"CNY"})
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从招商银行接口抓取汇率，失败时回退到页面解析。"""
         del date
 
@@ -420,7 +418,7 @@ class CMBChinaProvider(ExchangeRateProvider):
             self.logger.error("获取招商银行汇率失败: %s", exc)
             return {}
 
-    async def _fetch_quote_map_from_api(self, session: aiohttp.ClientSession) -> Dict[str, float]:
+    async def _fetch_quote_map_from_api(self, session: aiohttp.ClientSession) -> dict[str, float]:
         """优先使用招商银行 JSON 接口获取报价。"""
         async with session.get(self.API_URL) as response:
             if response.status != 200:
@@ -436,9 +434,9 @@ class CMBChinaProvider(ExchangeRateProvider):
 
             return self._parse_quote_map_from_api_payload(payload)
 
-    def _parse_quote_map_from_api_payload(self, payload: Dict[str, object]) -> Dict[str, float]:
+    def _parse_quote_map_from_api_payload(self, payload: dict[str, object]) -> dict[str, float]:
         """解析招商银行 JSON 接口返回的报价。"""
-        quote_map: Dict[str, float] = {}
+        quote_map: dict[str, float] = {}
         rows = payload.get("body")
 
         if not isinstance(rows, list):
@@ -453,7 +451,7 @@ class CMBChinaProvider(ExchangeRateProvider):
             if not currency_code or currency_code == "CNY":
                 continue
 
-            quote_candidates: List[float] = []
+            quote_candidates: list[float] = []
             for field_name in ["rthOfr", "rthBid", "rtcOfr", "rtcBid", "rtbBid"]:
                 field_value = row.get(field_name)
                 if field_value in [None, ""]:
@@ -474,7 +472,7 @@ class CMBChinaProvider(ExchangeRateProvider):
         return quote_map
 
     @staticmethod
-    def _extract_currency_code_from_api_row(row: Dict[str, object]) -> str:
+    def _extract_currency_code_from_api_row(row: dict[str, object]) -> str:
         """从招商银行接口单行数据中提取货币代码。"""
         ccy_nbr_eng = str(row.get("ccyNbrEng", "") or "").strip()
         if ccy_nbr_eng:
@@ -484,9 +482,9 @@ class CMBChinaProvider(ExchangeRateProvider):
 
         return _normalize_chinese_currency_name(str(row.get("ccyNbr", "") or ""))
 
-    def _parse_quote_map(self, html: str) -> Dict[str, float]:
+    def _parse_quote_map(self, html: str) -> dict[str, float]:
         """解析招商银行实时汇率页面。"""
-        quote_map: Dict[str, float] = {}
+        quote_map: dict[str, float] = {}
 
         try:
             tables = pd.read_html(StringIO(html), flavor="lxml")
@@ -533,13 +531,13 @@ class BOCProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "Bank of Canada (BOC)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["CAD"] + self.SUPPORTED_CURRENCIES
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从BOC获取汇率"""
         try:
             # BOC API使用特定的系列代码
@@ -600,13 +598,13 @@ class RBAProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "Reserve Bank of Australia (RBA)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["AUD"] + self.SUPPORTED_CURRENCIES
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从RBA获取汇率"""
         try:
             # v6.79: 使用SSL连接器解决证书验证问题
@@ -629,7 +627,7 @@ class RBAProvider(ExchangeRateProvider):
             self.logger.error(f"获取RBA汇率失败: {e}")
             return {}
 
-    def _parse_rba_xml(self, xml_data: str) -> Dict[str, float]:
+    def _parse_rba_xml(self, xml_data: str) -> dict[str, float]:
         """解析RBA XML数据
 
         RBA 使用 RDF/XML 格式，标题格式为 "AU: 0.6602 USD = 1 AUD ..."
@@ -675,13 +673,13 @@ class NBPProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "National Bank of Poland (NBP)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["PLN"] + self.SUPPORTED_CURRENCIES
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从NBP获取汇率"""
         try:
             url = self.BASE_URL
@@ -706,7 +704,7 @@ class NBPProvider(ExchangeRateProvider):
             self.logger.error(f"获取NBP汇率失败: {e}")
             return {}
 
-    def _parse_nbp_json(self, data: List[Dict]) -> Dict[str, float]:
+    def _parse_nbp_json(self, data: list[dict]) -> dict[str, float]:
         """解析NBP JSON数据"""
         rates = {"PLN": 1.0}
 
@@ -735,13 +733,13 @@ class SNBProvider(ExchangeRateProvider):
     def get_name(self) -> str:
         return "Swiss National Bank (SNB)"
 
-    def get_supported_currencies(self) -> List[str]:
+    def get_supported_currencies(self) -> list[str]:
         return ["CHF"] + self.SUPPORTED_CURRENCIES
 
     @log_method
     async def fetch_rates(
-        self, base_currency: str, target_currencies: List[str], date: Optional[str] = None
-    ) -> Dict[str, float]:
+        self, base_currency: str, target_currencies: list[str], date: str | None = None
+    ) -> dict[str, float]:
         """从SNB获取汇率"""
         try:
             # SNB CSV格式较复杂，这里简化处理
@@ -762,7 +760,7 @@ class SNBProvider(ExchangeRateProvider):
             self.logger.error(f"获取SNB汇率失败: {e}")
             return {}
 
-    def _parse_snb_csv(self, csv_data: str, target_date: Optional[str] = None) -> Dict[str, float]:
+    def _parse_snb_csv(self, csv_data: str, target_date: str | None = None) -> dict[str, float]:
         """解析SNB CSV数据"""
         rates = {"CHF": 1.0}
 
@@ -803,7 +801,7 @@ class ExchangeRateManager:
         }
 
     @log_method
-    async def get_rate(self, from_currency: str, to_currency: str, date: Optional[str] = None) -> Optional[float]:
+    async def get_rate(self, from_currency: str, to_currency: str, date: str | None = None) -> float | None:
         """
         获取汇率（优先从数据库，否则从API）
 
@@ -852,8 +850,8 @@ class ExchangeRateManager:
         return rate
 
     async def _fetch_from_providers(
-        self, from_currency: str, to_currency: str, date: Optional[str] = None
-    ) -> Optional[float]:
+        self, from_currency: str, to_currency: str, date: str | None = None
+    ) -> float | None:
         """从提供者获取汇率"""
         # 按优先级尝试各个提供者
         for provider_name, provider in self.providers.items():
@@ -869,7 +867,7 @@ class ExchangeRateManager:
         return None
 
     async def _save_rate(
-        self, from_currency: str, to_currency: str, rate: float, source: str, date: Optional[str] = None
+        self, from_currency: str, to_currency: str, rate: float, source: str, date: str | None = None
     ):
         """保存汇率到数据库"""
         conn = await self.db._get_connection()
@@ -887,7 +885,7 @@ class ExchangeRateManager:
         await conn.commit()
 
     @log_method
-    async def sync_rates(self, currencies: List[str], base_currency: str = "CNY"):
+    async def sync_rates(self, currencies: list[str], base_currency: str = "CNY"):
         """
         同步汇率数据
 
@@ -917,8 +915,8 @@ class ExchangeRateManager:
 
     @log_method
     async def convert_amount(
-        self, amount: float, from_currency: str, to_currency: str, date: Optional[str] = None
-    ) -> Optional[float]:
+        self, amount: float, from_currency: str, to_currency: str, date: str | None = None
+    ) -> float | None:
         """
         转换金额
 

@@ -12,12 +12,12 @@ CMBC Parser - 民生银行账单解析器
 """
 
 import csv
-from typing import Dict, List, Any
+from typing import Any
 
 import pandas as pd
 
-from .base import ParserBase
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class CMBCParser(ParserBase):
@@ -136,7 +136,7 @@ class CMBCParser(ParserBase):
         except Exception:  # pylint: disable=broad-except
             return False
 
-    def _parse_html_xls(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_html_xls(self, file_path: str) -> list[dict[str, Any]]:
         """解析HTML格式伪装的.xls文件（民生银行网银导出格式）"""
         bills = []
 
@@ -251,7 +251,7 @@ class CMBCParser(ParserBase):
         return bills
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析民生银行账单"""
         if not self.validate_file(file_path):
             return []
@@ -262,7 +262,7 @@ class CMBCParser(ParserBase):
             # 读取文件
             if file_path.endswith(".csv"):
                 # CSV格式
-                with open(file_path, "r", encoding="gbk") as f:
+                with open(file_path, encoding="gbk") as f:
                     lines = f.readlines()
 
                     data_start = 0

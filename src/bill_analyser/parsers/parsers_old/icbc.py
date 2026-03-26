@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 工商银行账单解析器
 支持多种格式的工商银行账单解析
 """
 
-from typing import Optional, Dict, Any
 import logging
 import re
+from typing import Any
+
 import pandas as pd
+
 from .base import BaseBankParser
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ class ICBCParser(BaseBankParser):
 
             return is_icbc
 
-        except (IOError, ValueError) as e:
+        except (OSError, ValueError) as e:
             logger.debug("判断工商银行文件失败: %s, 错误: %s", file_path, e)
             return False
 
@@ -134,7 +135,7 @@ class ICBCParser(BaseBankParser):
             logger.warning("未识别的工商银行文件格式: %s", file_path)
             return pd.DataFrame()
 
-        except (IOError, ValueError) as e:
+        except (OSError, ValueError) as e:
             logger.error("解析工商银行账单失败: %s, 错误: %s", file_path, e)
             return pd.DataFrame()
 
@@ -294,7 +295,7 @@ class ICBCParser(BaseBankParser):
         except IndexError, ValueError, TypeError:
             return False
 
-    def _parse_type1_transaction_row(self, row: pd.Series) -> Optional[Dict[str, Any]]:
+    def _parse_type1_transaction_row(self, row: pd.Series) -> dict[str, Any] | None:
         """解析Type1交易行"""
         try:
             transaction = {}
@@ -400,7 +401,7 @@ class ICBCParser(BaseBankParser):
                 if len(parts) > 1:
                     transaction["交易对方"] = parts[1].strip()
 
-    def _parse_type2_transaction_row(self, row: pd.Series) -> Optional[Dict[str, Any]]:
+    def _parse_type2_transaction_row(self, row: pd.Series) -> dict[str, Any] | None:
         """解析Type2交易行"""
         try:
             transaction = {}

@@ -6,8 +6,7 @@ Report Generator Module - 报表生成模块
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-import base64
+from typing import Any
 
 from ..utils.logger import get_logger, log_method
 
@@ -15,7 +14,7 @@ from ..utils.logger import get_logger, log_method
 class ReportGenerator:
     """报表生成器"""
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Path | None = None):
         """
         初始化报表生成器
 
@@ -28,7 +27,7 @@ class ReportGenerator:
 
     @log_method
     def generate_html_report(
-        self, report_data: Dict[str, Any], filename: Optional[str] = None, include_charts: bool = True
+        self, report_data: dict[str, Any], filename: str | None = None, include_charts: bool = True
     ) -> Path:
         """
         生成HTML报告
@@ -58,7 +57,7 @@ class ReportGenerator:
         self.logger.info("HTML报告已生成: %s", filepath)
         return filepath
 
-    def _generate_html_content(self, report_data: Dict[str, Any], include_charts: bool) -> str:
+    def _generate_html_content(self, report_data: dict[str, Any], include_charts: bool) -> str:
         """生成HTML内容"""
         period = report_data.get("period", "month")
         period_name = {"month": "月度", "quarter": "季度", "year": "年度"}.get(period, "周期")
@@ -392,7 +391,7 @@ class ReportGenerator:
         }
         """
 
-    def _generate_type_rows(self, by_type: Dict[str, Dict[str, Any]]) -> str:
+    def _generate_type_rows(self, by_type: dict[str, dict[str, Any]]) -> str:
         """生成交易类型表格行"""
         if not by_type:
             return '<tr><td colspan="4">暂无数据</td></tr>'
@@ -412,7 +411,7 @@ class ReportGenerator:
 
         return "".join(rows)
 
-    def _generate_category_rows(self, by_category: Dict[str, Dict[str, Any]]) -> str:
+    def _generate_category_rows(self, by_category: dict[str, dict[str, Any]]) -> str:
         """生成分类表格行"""
         if not by_category:
             return '<tr><td colspan="5">暂无分类数据</td></tr>'
@@ -447,7 +446,7 @@ class ReportGenerator:
 
         return "".join(rows)
 
-    def _generate_top_expense_rows(self, top_expenses: List[Dict[str, Any]]) -> str:
+    def _generate_top_expense_rows(self, top_expenses: list[dict[str, Any]]) -> str:
         """生成最大支出表格行"""
         if not top_expenses:
             return '<tr><td colspan="5">暂无数据</td></tr>'
@@ -467,7 +466,7 @@ class ReportGenerator:
 
         return "".join(rows)
 
-    def _generate_top_income_section(self, top_income: List[Dict[str, Any]]) -> str:
+    def _generate_top_income_section(self, top_income: list[dict[str, Any]]) -> str:
         """生成最大收入区块"""
         if not top_income:
             return ""
@@ -503,7 +502,7 @@ class ReportGenerator:
         </section>
         """
 
-    def _generate_trend_section(self, trend: List[Dict[str, Any]]) -> str:
+    def _generate_trend_section(self, trend: list[dict[str, Any]]) -> str:
         """生成趋势数据区块"""
         if not trend:
             return ""
@@ -540,7 +539,7 @@ class ReportGenerator:
         </section>
         """
 
-    def _generate_charts_section(self, report_data: Dict[str, Any]) -> str:
+    def _generate_charts_section(self, report_data: dict[str, Any]) -> str:
         """生成图表区块"""
         charts = report_data.get("charts", {})
         if not charts:
@@ -588,7 +587,7 @@ class ReportGenerator:
         return "".join(chart_sections)
 
     @log_method
-    def generate_markdown_report(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Path:
+    def generate_markdown_report(self, report_data: dict[str, Any], filename: str | None = None) -> Path:
         """
         生成Markdown报告
 
@@ -616,7 +615,7 @@ class ReportGenerator:
         self.logger.info("Markdown报告已生成: %s", filepath)
         return filepath
 
-    def _generate_markdown_content(self, report_data: Dict[str, Any]) -> str:
+    def _generate_markdown_content(self, report_data: dict[str, Any]) -> str:
         """生成Markdown内容"""
         period = report_data.get("period", "month")
         period_name = {"month": "月度", "quarter": "季度", "year": "年度"}.get(period, "周期")
@@ -683,7 +682,7 @@ class ReportGenerator:
 _report_generator = ReportGenerator()
 
 
-def generate_html_report(report_data: Dict[str, Any], output_dir: Optional[Path] = None) -> Path:
+def generate_html_report(report_data: dict[str, Any], output_dir: Path | None = None) -> Path:
     """
     生成HTML报告
 
@@ -698,7 +697,7 @@ def generate_html_report(report_data: Dict[str, Any], output_dir: Optional[Path]
     return generator.generate_html_report(report_data)
 
 
-def generate_markdown_report(report_data: Dict[str, Any], output_dir: Optional[Path] = None) -> Path:
+def generate_markdown_report(report_data: dict[str, Any], output_dir: Path | None = None) -> Path:
     """
     生成Markdown报告
 

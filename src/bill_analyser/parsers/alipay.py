@@ -16,10 +16,10 @@ Alipay Parser - 支付宝账单解析器
 """
 
 import csv
-from typing import Dict, List, Any, Optional
+from typing import Any
 
-from .base import ParserBase
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class AlipayParser(ParserBase):
@@ -40,7 +40,7 @@ class AlipayParser(ParserBase):
         """判断是否为支付宝账单"""
         try:
             # 支付宝账单通常是 GBK 编码
-            with open(file_path, "r", encoding="gbk") as f:
+            with open(file_path, encoding="gbk") as f:
                 first_lines = "".join([f.readline() for _ in range(15)])
                 # 支付宝特征
                 alipay_indicators = ["支付宝", "alipay", "支付宝账户", "支付宝（中国）网络技术有限公司"]
@@ -49,7 +49,7 @@ class AlipayParser(ParserBase):
             return False
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析支付宝账单"""
         self.logger.info("[解析开始] 文件: %s", file_path)
 
@@ -77,11 +77,11 @@ class AlipayParser(ParserBase):
 
         return self.post_process(bills)
 
-    def _parse_with_encoding(self, file_path: str, encoding: str) -> List[Dict[str, Any]]:
+    def _parse_with_encoding(self, file_path: str, encoding: str) -> list[dict[str, Any]]:
         """使用指定编码解析文件"""
         bills = []
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             lines = f.readlines()
 
             # 查找数据起始行（包含"交易时间"的行）
@@ -111,7 +111,7 @@ class AlipayParser(ParserBase):
 
         return bills
 
-    def _extract_bill_from_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_row(self, row: dict[str, str]) -> dict[str, Any] | None:
         """从行数据提取账单信息"""
         # 跳过空行和页脚
         time_field = row.get("交易时间") or row.get("交易创建时间") or ""

@@ -12,21 +12,22 @@ Bill Service Module - 账单导入服务
 import asyncio
 import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
 
-from .db import Database
+from ..parsers.factory import ParserFactory
+from ..utils.deduplication import DeduplicationEngine, DeduplicationMode
+from ..utils.logger import get_logger, log_method, log_step
+from ..utils.validator import BillValidator
 from .category_engine import CategoryEngine
+from .db import Database
 from .investment_settings import (
     DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS,
     DEFAULT_INVESTMENT_PLATFORM_ALIASES,
     DEFAULT_INVESTMENT_PRODUCT_PATTERNS,
     build_user_investment_keyword_settings,
 )
-from .smart_dedup import SmartDeduplicationEngine, DeduplicationType
-from ..parsers.factory import ParserFactory
-from ..utils.logger import get_logger, log_method, log_step
-from ..utils.validator import BillValidator
-from ..utils.deduplication import DeduplicationEngine, DeduplicationMode
+from .smart_dedup import DeduplicationType, SmartDeduplicationEngine
+
 # v6.72: 移除 TransactionType 导入，分类类型过滤改为由 match_category() 内部自动处理
 
 
@@ -43,8 +44,8 @@ class BillService:
 
     def __init__(
         self,
-        db: Optional[Database] = None,
-        deduplication_mode: Optional[DeduplicationMode] = None,
+        db: Database | None = None,
+        deduplication_mode: DeduplicationMode | None = None,
         use_smart_dedup: bool = True,
     ):
         """
@@ -89,7 +90,7 @@ class BillService:
     @log_step("导入账单文件")
     async def import_bills(
         self, file_path: str, parser_type: str = "auto", preview_only: bool = False, user_id: int = 1
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         导入账单文件
 
@@ -351,7 +352,7 @@ class BillService:
 
         return result
 
-    def _prepare_preview_data(self, bills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _prepare_preview_data(self, bills: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """准备预览数据，转换datetime为字符串，添加前端期望的字段"""
         preview_bills = []
         for bill in bills:
@@ -364,7 +365,7 @@ class BillService:
 
         return preview_bills
 
-    def _bill_to_preview(self, bill: Dict[str, Any]) -> Dict[str, Any]:
+    def _bill_to_preview(self, bill: dict[str, Any]) -> dict[str, Any]:
         """将账单转换为预览格式，添加前端期望的字段"""
         bill_copy = bill.copy()
 
@@ -398,7 +399,7 @@ class BillService:
         return bill_copy
 
     @log_method
-    async def _match_accounts(self, bills: List[Dict[str, Any]], user_id: int = 1) -> List[Dict[str, Any]]:
+    async def _match_accounts(self, bills: list[dict[str, Any]], user_id: int = 1) -> list[dict[str, Any]]:
         """
         根据账单描述自动匹配账户
 
@@ -697,8 +698,8 @@ class BillService:
         return bills
 
     async def _detect_investment_candidates(
-        self, bills: List[Dict[str, Any]], user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+        self, bills: list[dict[str, Any]], user_id: int = 1
+    ) -> list[dict[str, Any]]:
         """基于平台/产品关键词识别投资账单。
 
         这是 M2 的轻量增强切片：
@@ -737,17 +738,17 @@ class BillService:
         self.logger.info("[投资候选识别] 完成: 命中 %d/%d 条", detected_count, len(bills))
         return bills
 
-    async def _get_investment_keyword_config(self, user_id: int = 1) -> Dict[str, List[str]]:
+    async def _get_investment_keyword_config(self, user_id: int = 1) -> dict[str, list[str]]:
         """获取用户有效的投资识别关键词配置。"""
         user = await self.db.get_user_by_id(user_id)
         return build_user_investment_keyword_settings(user)
 
     def _score_investment_candidate(
         self,
-        bill: Dict[str, Any],
+        bill: dict[str, Any],
         allow_existing_investment: bool = False,
-        keyword_config: Optional[Dict[str, List[str]]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        keyword_config: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any] | None:
         """为单条账单计算投资候选分数。"""
         current_type = str(bill.get("type", "") or "").strip().lower()
         if current_type in ["转账", "transfer", "4"]:
@@ -803,7 +804,7 @@ class BillService:
         if score < 0.55:
             return None
 
-        reason_parts: List[str] = []
+        reason_parts: list[str] = []
         if matched_platforms:
             reason_parts.append("platform:" + "/".join(matched_platforms[:2]))
         if matched_products:
@@ -823,8 +824,8 @@ class BillService:
         }
 
     def _extract_investment_profile(
-        self, text: str, keyword_config: Optional[Dict[str, List[str]]] = None
-    ) -> Dict[str, str]:
+        self, text: str, keyword_config: dict[str, list[str]] | None = None
+    ) -> dict[str, str]:
         """提取投资平台与产品归一信息。"""
         raw_text = str(text or "").strip()
         if not raw_text:
@@ -935,7 +936,7 @@ class BillService:
         return cleaned[:80]
 
     @log_method
-    async def _detect_cash_transfers(self, bills: List[Dict[str, Any]], user_id: int = 1) -> List[Dict[str, Any]]:
+    async def _detect_cash_transfers(self, bills: list[dict[str, Any]], user_id: int = 1) -> list[dict[str, Any]]:
         """
         v6.77: 检测存取转账（用户指定的分类自动转换为转账类型）
 
@@ -1051,7 +1052,7 @@ class BillService:
         return " ".join(text.split())
 
     async def _apply_import_learning_rules(
-        self, bills: List[Dict[str, Any]], user_id: int = 1, type_only: bool = False, record_usage: bool = False
+        self, bills: list[dict[str, Any]], user_id: int = 1, type_only: bool = False, record_usage: bool = False
     ) -> int:
         """应用长期导入学习规则。"""
         if not bills:
@@ -1071,8 +1072,8 @@ class BillService:
             for rule in rules
             if rule.get("match_type") and rule.get("normalized_match_value")
         }
-        category_cache: Dict[int, Optional[Dict[str, Any]]] = {}
-        matched_rule_ids: List[int] = []
+        category_cache: dict[int, dict[str, Any] | None] = {}
+        matched_rule_ids: list[int] = []
         applied_count = 0
 
         for bill in bills:
@@ -1135,15 +1136,15 @@ class BillService:
         return applied_count
 
     async def _build_session_annotation_rule_lookup(
-        self, previews: List[Dict[str, Any]], annotation_samples: List[Dict[str, Any]], user_id: int = 1
-    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        self, previews: list[dict[str, Any]], annotation_samples: list[dict[str, Any]], user_id: int = 1
+    ) -> dict[tuple[str, str], dict[str, Any]]:
         """基于当前会话人工标注构建临时学习规则查找表。"""
         if not previews or not annotation_samples:
             return {}
 
         preview_map = {int(preview["id"]): preview for preview in previews if preview.get("id")}
-        rule_lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        category_cache: Dict[int, Optional[Dict[str, Any]]] = {}
+        rule_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+        category_cache: dict[int, dict[str, Any] | None] = {}
 
         for sample in annotation_samples:
             preview_id = int(sample.get("preview_id", 0) or 0)
@@ -1189,9 +1190,9 @@ class BillService:
 
     @staticmethod
     def _apply_session_annotation_learning_rules(
-        bills: List[Dict[str, Any]],
-        rule_lookup: Dict[Tuple[str, str], Dict[str, Any]],
-        annotation_map: Dict[int, Dict[str, Any]],
+        bills: list[dict[str, Any]],
+        rule_lookup: dict[tuple[str, str], dict[str, Any]],
+        annotation_map: dict[int, dict[str, Any]],
         type_only: bool = False,
     ) -> int:
         """将当前会话人工标注以临时学习规则形式回放到相似账单。"""
@@ -1244,10 +1245,10 @@ class BillService:
 
     @log_method
     async def promote_session_annotations_to_learning(
-        self, session_id: str, preview_updates: Optional[List[Dict[str, Any]]] = None, user_id: int = 1
-    ) -> Dict[str, Any]:
+        self, session_id: str, preview_updates: list[dict[str, Any]] | None = None, user_id: int = 1
+    ) -> dict[str, Any]:
         """将当前会话人工标注提升为长期学习规则。"""
-        preview_ids: List[int] = []
+        preview_ids: list[int] = []
         if preview_updates:
             await self.db.save_import_annotation_samples(session_id, preview_updates, user_id=user_id)
             preview_ids = [int(item["id"]) for item in preview_updates if item.get("id")]
@@ -1262,7 +1263,7 @@ class BillService:
         }
 
     @log_method
-    async def import_multiple_files(self, file_paths: List[str], user_id: int = 1) -> Dict[str, Any]:
+    async def import_multiple_files(self, file_paths: list[str], user_id: int = 1) -> dict[str, Any]:
         """
         批量导入多个文件
 
@@ -1308,7 +1309,7 @@ class BillService:
         return summary
 
     @log_method
-    async def import_preview_confirmed(self, preview_bills: List[Dict[str, Any]], user_id: int = 1) -> Dict[str, Any]:
+    async def import_preview_confirmed(self, preview_bills: list[dict[str, Any]], user_id: int = 1) -> dict[str, Any]:
         """
         确认导入预览的账单
 
@@ -1350,8 +1351,8 @@ class BillService:
 
     @log_method
     async def batch_update_category(
-        self, bill_ids: List[int], main_category: str, sub_category: Optional[str] = None, user_id: int = 1
-    ) -> Dict[str, Any]:
+        self, bill_ids: list[int], main_category: str, sub_category: str | None = None, user_id: int = 1
+    ) -> dict[str, Any]:
         """
         批量更新账单分类
 
@@ -1378,7 +1379,7 @@ class BillService:
                 if success:
                     updated += 1
             except Exception as e:  # pylint: disable=broad-except
-                result["errors"].append(f"Bill {bill_id}: {str(e)}")
+                result["errors"].append(f"Bill {bill_id}: {e!s}")
 
         result["updated"] = updated
         result["success"] = True
@@ -1389,7 +1390,7 @@ class BillService:
 
     @log_method
     async def add_category_keyword(
-        self, main_category: str, sub_category: Optional[str], keyword: str, user_id: int = 1
+        self, main_category: str, sub_category: str | None, keyword: str, user_id: int = 1
     ) -> bool:
         """
         为分类添加关键词
@@ -1435,8 +1436,8 @@ class BillService:
 
     @log_method
     async def refresh_category_for_bills(
-        self, bill_ids: Optional[List[int]] = None, user_id: int = 1
-    ) -> Dict[str, Any]:
+        self, bill_ids: list[int] | None = None, user_id: int = 1
+    ) -> dict[str, Any]:
         """
         刷新账单分类（使用最新的分类规则重新匹配）
 
@@ -1524,7 +1525,7 @@ class BillService:
 
     @log_method
     @log_step("更新账单分类")
-    async def update_categories(self, force: bool = False) -> Dict[str, int]:
+    async def update_categories(self, force: bool = False) -> dict[str, int]:
         """
         重新分类所有账单
 
@@ -1561,8 +1562,8 @@ class BillService:
 
     @log_method
     async def get_bills(
-        self, filters: Optional[Dict[str, Any]] = None, limit: Optional[int] = None, offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        self, filters: dict[str, Any] | None = None, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         """
         查询账单
 
@@ -1596,7 +1597,7 @@ class BillService:
         return await self.db.delete_bill(bill_id)
 
     @log_method
-    async def update_bill(self, bill_id: int, updates: Dict[str, Any]) -> bool:
+    async def update_bill(self, bill_id: int, updates: dict[str, Any]) -> bool:
         """
         更新账单
 
@@ -1626,7 +1627,7 @@ class BillService:
         return await self.db.deduplicate()
 
     @log_method
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """
         获取账单统计信息
 
@@ -1656,7 +1657,7 @@ class BillService:
 
     @log_method
     @log_step("阶段1: 多文件并行解析")
-    async def import_stage1_parse(self, file_paths: List[str], session_id: str, user_id: int = 1) -> Dict[str, Any]:
+    async def import_stage1_parse(self, file_paths: list[str], session_id: str, user_id: int = 1) -> dict[str, Any]:
         """
         阶段1：多文件并行解析
 
@@ -1690,7 +1691,7 @@ class BillService:
         await self.db.create_import_session(session_id, user_id, len(file_paths))
 
         # 定义单文件解析函数（在线程池中执行）
-        def parse_single_file(file_path: str) -> Dict[str, Any]:
+        def parse_single_file(file_path: str) -> dict[str, Any]:
             """解析单个文件（同步，用于线程池）"""
             file_result = {
                 "file": file_path,
@@ -1736,7 +1737,7 @@ class BillService:
         for i, file_result in enumerate(file_results):
             if isinstance(file_result, Exception):
                 result["failed_files"].append(file_paths[i])
-                result["errors"].append(f"{file_paths[i]}: {str(file_result)}")
+                result["errors"].append(f"{file_paths[i]}: {file_result!s}")
                 continue
 
             result["file_results"].append(
@@ -1785,7 +1786,7 @@ class BillService:
 
     @log_method
     @log_step("阶段2: 去重匹配预览")
-    async def import_stage2_dedup(self, session_id: str, user_id: int = 1) -> Dict[str, Any]:
+    async def import_stage2_dedup(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         """
         阶段2：去重、账户匹配、分类匹配，生成预览数据
 
@@ -2041,7 +2042,7 @@ class BillService:
             }
 
             # 标记模板为已处理
-            template_ids: List[int] = []
+            template_ids: list[int] = []
             for t in templates:
                 t_id = t.get("id")
                 if t_id is not None:
@@ -2073,8 +2074,8 @@ class BillService:
         self,
         session_id: str,
         user_id: int = 1,
-        selected_ids: Optional[List[int]] = None,  # v6.56: 改为接收选中的ID列表（可选）
-    ) -> Dict[str, Any]:
+        selected_ids: list[int] | None = None,  # v6.56: 改为接收选中的ID列表（可选）
+    ) -> dict[str, Any]:
         """
         阶段3：确认导入
 
@@ -2141,7 +2142,7 @@ class BillService:
         return result
 
     @log_method
-    async def get_import_preview(self, session_id: str, selected_only: bool = False) -> List[Dict[str, Any]]:
+    async def get_import_preview(self, session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
         """
         获取导入预览数据
 
@@ -2198,7 +2199,7 @@ class BillService:
 
         return result
 
-    def _build_transfer_suggestion_from_preview(self, preview: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_transfer_suggestion_from_preview(self, preview: dict[str, Any]) -> dict[str, Any]:
         """根据预览账单生成疑似转账推荐。
 
         该推荐是一个轻量级 M2 切片：
@@ -2211,7 +2212,7 @@ class BillService:
             return {}
 
         score = 0.0
-        reasons: List[str] = []
+        reasons: list[str] = []
 
         source_account_id = preview.get("preview_source_account_id")
         destination_account_id = preview.get("preview_destination_account_id")
@@ -2284,8 +2285,8 @@ class BillService:
         return {"suggested_preview_type": "转账", "score": round(score, 2), "level": level, "reason": reason_text}
 
     def _build_investment_signal_from_preview(
-        self, preview: Dict[str, Any], keyword_config: Optional[Dict[str, List[str]]] = None
-    ) -> Dict[str, Any]:
+        self, preview: dict[str, Any], keyword_config: dict[str, list[str]] | None = None
+    ) -> dict[str, Any]:
         """为投资类型预览账单生成可解释信号。"""
         preview_type = str(preview.get("preview_type", "") or "").strip().lower()
         if preview_type not in ["投资", "investment", "5"]:
@@ -2326,7 +2327,7 @@ class BillService:
         }
 
     @log_method
-    async def update_preview_selections(self, session_id: str, selections: Dict[int, bool]) -> int:
+    async def update_preview_selections(self, session_id: str, selections: dict[int, bool]) -> int:
         """
         更新预览选中状态
 
@@ -2351,7 +2352,7 @@ class BillService:
         return updated
 
     @log_method
-    async def cancel_import_session(self, session_id: str) -> Dict[str, Any]:
+    async def cancel_import_session(self, session_id: str) -> dict[str, Any]:
         """
         取消导入会话，清理临时数据
 
@@ -2373,8 +2374,8 @@ class BillService:
 
     @log_method
     async def reclassify_preview_bills(
-        self, session_id: str, preview_updates: Optional[List[Dict[str, Any]]] = None, user_id: int = 1
-    ) -> Dict[str, Any]:
+        self, session_id: str, preview_updates: list[dict[str, Any]] | None = None, user_id: int = 1
+    ) -> dict[str, Any]:
         """
         v6.55: 重新分类预览账单
 
@@ -2573,14 +2574,14 @@ class BillService:
 
     @log_method
     async def _apply_session_annotation_samples(
-        self, bills: List[Dict[str, Any]], annotation_map: Dict[int, Dict[str, Any]], user_id: int = 1
+        self, bills: list[dict[str, Any]], annotation_map: dict[int, dict[str, Any]], user_id: int = 1
     ) -> int:
         """将当前会话中的人工标注样本回放到重新分类结果。"""
         if not bills or not annotation_map:
             return 0
 
         applied_count = 0
-        category_cache: Dict[int, Dict[str, Any]] = {}
+        category_cache: dict[int, dict[str, Any]] = {}
 
         for bill in bills:
             bill_id = bill.get("id")

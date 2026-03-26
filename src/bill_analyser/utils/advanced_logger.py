@@ -13,17 +13,18 @@
 日期: 2025-11-16
 """
 
-import sys
-import logging
 import asyncio
-import threading
 import functools
+import logging
+import sys
+import threading
 import traceback
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Any, Callable, Optional
-from logging.handlers import RotatingFileHandler
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any
 
 
 class AsyncLogHandler(logging.Handler):
@@ -72,8 +73,8 @@ class AdvancedLogger:
     def __init__(
         self,
         name: str,
-        log_dir: Optional[str] = None,
-        log_file: Optional[str] = None,
+        log_dir: str | None = None,
+        log_file: str | None = None,
         level: int = logging.INFO,
         max_bytes: int = DEFAULT_MAX_BYTES,
         backup_count: int = DEFAULT_BACKUP_COUNT,
@@ -215,7 +216,7 @@ _logger_cache = {}
 _cache_lock = threading.Lock()
 
 
-def get_logger(name: str, log_dir: Optional[str] = None, level: int = logging.INFO, **kwargs) -> AdvancedLogger:
+def get_logger(name: str, log_dir: str | None = None, level: int = logging.INFO, **kwargs) -> AdvancedLogger:
     """
     获取或创建logger实例
 
@@ -237,7 +238,7 @@ def get_logger(name: str, log_dir: Optional[str] = None, level: int = logging.IN
         return _logger_cache[cache_key]
 
 
-def log_method(func: Optional[Callable] = None, *, log_args: bool = True, log_result: bool = True) -> Callable:
+def log_method(func: Callable | None = None, *, log_args: bool = True, log_result: bool = True) -> Callable:
     """
     方法日志装饰器
 
@@ -474,8 +475,8 @@ def _format_value(value: Any, max_len: int = 200) -> str:
 # 导出主要接口
 __all__ = [
     "AdvancedLogger",
+    "AsyncLogHandler",
     "get_logger",
     "log_method",
     "log_step",
-    "AsyncLogHandler",
 ]

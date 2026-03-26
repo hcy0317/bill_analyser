@@ -9,15 +9,14 @@ Created: 2025-11-21
 """
 
 import math
-from typing import Union
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from .logger import get_logger
 
 logger = get_logger("CurrencyUtils")
 
 
-def cents_to_yuan(cents: Union[int, str, None]) -> float:
+def cents_to_yuan(cents: int | str | None) -> float:
     """将分转换为元
 
     Args:
@@ -53,7 +52,7 @@ def cents_to_yuan(cents: Union[int, str, None]) -> float:
         return 0.0
 
 
-def yuan_to_cents(yuan: Union[float, int, str, None]) -> int:
+def yuan_to_cents(yuan: float | str | None) -> int:
     """将元转换为分
 
     Args:
@@ -89,7 +88,7 @@ def yuan_to_cents(yuan: Union[float, int, str, None]) -> int:
         return 0
 
 
-def format_currency_display(yuan: Union[float, int, None], currency: str = "CNY") -> str:
+def format_currency_display(yuan: float | None, currency: str = "CNY") -> str:
     """格式化货币显示
 
     Args:
@@ -120,7 +119,7 @@ def format_currency_display(yuan: Union[float, int, None], currency: str = "CNY"
 
 
 def validate_amount(
-    amount: Union[float, int, str, None], min_value: float = 0.01, max_value: float = 999999999.99
+    amount: float | str | None, min_value: float = 0.01, max_value: float = 999999999.99
 ) -> bool:
     """验证金额是否合法
 

@@ -16,12 +16,13 @@ ICBC Parser - 工商银行账单解析器
 
 import csv
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
+
 import openpyxl
 import pandas as pd
 
-from .base import ParserBase
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class ICBCParser(ParserBase):
@@ -56,7 +57,7 @@ class ICBCParser(ParserBase):
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV是否为工商银行账单"""
         try:
-            with open(file_path, "r", encoding="gbk") as f:
+            with open(file_path, encoding="gbk") as f:
                 first_lines = "".join([f.readline() for _ in range(10)])
 
             # 工商银行强特征
@@ -91,18 +92,18 @@ class ICBCParser(ParserBase):
             self.logger.debug("检测到标准Excel格式: %s", file_path)
             return False, None
 
-        except (IOError, OSError) as e:
+        except OSError as e:
             return False, str(e)
 
     def _read_html_content(self, file_path: str) -> str:
         """读取HTML格式文件内容，尝试多种编码"""
         for encoding in ["utf-8", "gbk", "gb2312", "gb18030"]:
             try:
-                with open(file_path, "r", encoding=encoding) as f:
+                with open(file_path, encoding=encoding) as f:
                     content = f.read(5000)
                 self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
                 return content
-            except UnicodeDecodeError, IOError:
+            except (OSError, UnicodeDecodeError):
                 continue
         return ""
 
@@ -198,7 +199,7 @@ class ICBCParser(ParserBase):
             return False
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析工商银行账单"""
         if not self.validate_file(file_path):
             return []
@@ -228,7 +229,7 @@ class ICBCParser(ParserBase):
         self.logger.error("不支持的文件格式: %s", file_ext)
         return []
 
-    def _extract_bill_from_html_row(self, row) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_html_row(self, row) -> dict[str, Any] | None:
         """从HTML表格行提取账单信息"""
         try:
             # 提取交易日期
@@ -267,7 +268,7 @@ class ICBCParser(ParserBase):
             return None
 
     @log_method
-    def _parse_html_xls(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_html_xls(self, file_path: str) -> list[dict[str, Any]]:
         """解析HTML格式伪装的xls文件(工商银行导出的格式)"""
         bills = []
 
@@ -321,12 +322,12 @@ class ICBCParser(ParserBase):
         return self.post_process(bills)
 
     @log_method
-    def _parse_csv(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_csv(self, file_path: str) -> list[dict[str, Any]]:
         """解析CSV格式的工商银行账单"""
         bills = []
 
         try:
-            with open(file_path, "r", encoding="gbk") as f:
+            with open(file_path, encoding="gbk") as f:
                 lines = f.readlines()
 
                 # 查找数据起始行
@@ -356,7 +357,7 @@ class ICBCParser(ParserBase):
         return self.post_process(bills)
 
     @log_method
-    def _parse_excel(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_excel(self, file_path: str) -> list[dict[str, Any]]:
         """解析Excel格式的工商银行账单"""
         bills = []
 
@@ -402,7 +403,7 @@ class ICBCParser(ParserBase):
 
         return self.post_process(bills)
 
-    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_csv_row(self, row: dict[str, str]) -> dict[str, Any] | None:
         """从CSV行数据提取账单信息"""
         try:
             # 获取日期字段
@@ -435,7 +436,7 @@ class ICBCParser(ParserBase):
             self.logger.error("提取CSV账单信息失败: %s", e)
             return None
 
-    def _extract_bill_from_excel_row(self, row: tuple, column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_excel_row(self, row: tuple, column_map: dict[str, int]) -> dict[str, Any] | None:
         """从Excel行数据提取账单信息"""
         try:
 

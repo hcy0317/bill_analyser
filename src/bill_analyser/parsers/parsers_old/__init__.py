@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 银行解析器工厂和管理器
 """
 
-from typing import Optional, List
 import logging
-from .base import BaseBankParser
-from .icbc import ICBCParser
+from typing import List, Optional
+
 from .abc import ABCParser
+from .base import BaseBankParser
 from .cmbc import CMBCParser
+from .icbc import ICBCParser
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class BankParserFactory:
             CMBCParser(),
         ]
 
-    def get_parser(self, file_path: str) -> Optional[BaseBankParser]:
+    def get_parser(self, file_path: str) -> BaseBankParser | None:
         """根据文件获取对应的银行解析器"""
         try:
             for parser in self.parsers:
@@ -41,7 +41,7 @@ class BankParserFactory:
             logger.error("获取银行解析器失败: %s, 错误: %s", file_path, e)
             return None
 
-    def get_supported_banks(self) -> List[str]:
+    def get_supported_banks(self) -> list[str]:
         """获取支持的银行列表"""
         return [parser.get_bank_name() for parser in self.parsers]
 

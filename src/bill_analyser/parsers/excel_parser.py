@@ -5,7 +5,7 @@ Excel文件解析器
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import openpyxl
@@ -25,7 +25,7 @@ class ExcelParser(BaseParser):
         if not EXCEL_AVAILABLE:
             raise ImportError("需要安装openpyxl库: pip install openpyxl")
 
-    async def parse(self, file_path: str, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def parse(self, file_path: str, config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """解析Excel文件"""
         config = config or {}
 
@@ -105,7 +105,7 @@ class ExcelParser(BaseParser):
         """Excel文件不需要编码检测"""
         return "utf-8"
 
-    async def preview(self, file_path: str, rows: int = 10) -> Dict[str, Any]:
+    async def preview(self, file_path: str, rows: int = 10) -> dict[str, Any]:
         """预览Excel内容"""
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         sheet = wb.worksheets[0]

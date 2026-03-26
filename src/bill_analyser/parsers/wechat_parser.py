@@ -5,9 +5,10 @@
 """
 
 import csv
-import chardet
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+import chardet
 
 from .base_parser import BaseParser, ParserFactory
 
@@ -27,7 +28,7 @@ class WeChatParser(BaseParser):
         "comment": "备注",
     }
 
-    async def parse(self, file_path: str, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def parse(self, file_path: str, config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """解析微信账单文件"""
         config = config or {}
 
@@ -36,7 +37,7 @@ class WeChatParser(BaseParser):
 
         bills = []
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             lines = f.readlines()
 
             # 找到表头行（通常包含"交易时间"）
@@ -88,7 +89,7 @@ class WeChatParser(BaseParser):
 
             encoding = await self.detect_encoding(file_path)
 
-            with open(file_path, "r", encoding=encoding) as f:
+            with open(file_path, encoding=encoding) as f:
                 content = f.read(1000)
 
                 # 检查是否包含微信特征字段
@@ -115,11 +116,11 @@ class WeChatParser(BaseParser):
 
             return encoding
 
-    async def preview(self, file_path: str, rows: int = 10) -> Dict[str, Any]:
+    async def preview(self, file_path: str, rows: int = 10) -> dict[str, Any]:
         """预览微信账单内容"""
         encoding = await self.detect_encoding(file_path)
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             lines = f.readlines()
 
             # 找到表头行

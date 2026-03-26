@@ -6,8 +6,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..utils.logger import get_logger
 
@@ -19,7 +18,7 @@ class BaseParser(ABC):
         self.logger = get_logger(self.__class__.__name__)
 
     @abstractmethod
-    async def parse(self, file_path: str, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def parse(self, file_path: str, config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
         解析文件并返回标准化的账单数据
 
@@ -59,7 +58,7 @@ class BaseParser(ABC):
         pass
 
     @abstractmethod
-    async def preview(self, file_path: str, rows: int = 10) -> Dict[str, Any]:
+    async def preview(self, file_path: str, rows: int = 10) -> dict[str, Any]:
         """
         预览文件内容
 
@@ -72,7 +71,7 @@ class BaseParser(ABC):
         """
         pass
 
-    def standardize_bill(self, raw_data: Dict[str, Any], field_mapping: Dict[str, str]) -> Dict[str, Any]:
+    def standardize_bill(self, raw_data: dict[str, Any], field_mapping: dict[str, str]) -> dict[str, Any]:
         """
         将原始数据转换为标准账单格式
 
@@ -194,7 +193,7 @@ class BaseParser(ABC):
 class ParserFactory:
     """解析器工厂"""
 
-    _parsers: Dict[str, type] = {}
+    _parsers: dict[str, type] = {}
 
     @classmethod
     def register(cls, format_name: str, parser_class: type):
@@ -225,6 +224,6 @@ class ParserFactory:
         return cls._parsers[format_name]()
 
     @classmethod
-    def get_supported_formats(cls) -> List[str]:
+    def get_supported_formats(cls) -> list[str]:
         """获取支持的格式列表"""
         return list(cls._parsers.keys())

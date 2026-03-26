@@ -6,7 +6,7 @@ Validator Module - 数据验证模块
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .logger import get_logger, log_method
 
@@ -25,7 +25,7 @@ class BillValidator:
         self.logger = get_logger("BillValidator")
 
     @log_method
-    def validate_bill(self, bill: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    def validate_bill(self, bill: dict[str, Any]) -> tuple[bool, list[str]]:
         """
         验证单条账单数据
 
@@ -78,7 +78,7 @@ class BillValidator:
 
         return is_valid, errors
 
-    def _validate_date(self, date_value: Any) -> Tuple[bool, Optional[str]]:
+    def _validate_date(self, date_value: Any) -> tuple[bool, str | None]:
         """验证日期字段"""
         if isinstance(date_value, datetime):
             return True, None
@@ -105,7 +105,7 @@ class BillValidator:
 
         return False, f"日期类型无效: {type(date_value).__name__}"
 
-    def _validate_type(self, type_value: Any) -> Tuple[bool, Optional[str]]:
+    def _validate_type(self, type_value: Any) -> tuple[bool, str | None]:
         """验证交易类型字段"""
         if not isinstance(type_value, str):
             return False, f"交易类型必须是字符串: {type(type_value).__name__}"
@@ -115,7 +115,7 @@ class BillValidator:
 
         return True, None
 
-    def _validate_amount(self, amount_value: Any) -> Tuple[bool, Optional[str]]:
+    def _validate_amount(self, amount_value: Any) -> tuple[bool, str | None]:
         """验证金额字段"""
         # 尝试转换为 Decimal
         try:
@@ -136,7 +136,7 @@ class BillValidator:
         except (InvalidOperation, ValueError, TypeError) as e:
             return False, f"金额格式无效: {amount_value} ({type(e).__name__})"
 
-    def _validate_counterparty(self, counterparty_value: Any) -> Tuple[bool, Optional[str]]:
+    def _validate_counterparty(self, counterparty_value: Any) -> tuple[bool, str | None]:
         """验证对方信息字段"""
         if not isinstance(counterparty_value, str):
             return False, f"对方信息必须是字符串: {type(counterparty_value).__name__}"
@@ -148,7 +148,7 @@ class BillValidator:
 
         return True, None
 
-    def _validate_description(self, description_value: Any) -> Tuple[bool, Optional[str]]:
+    def _validate_description(self, description_value: Any) -> tuple[bool, str | None]:
         """验证描述字段"""
         if not isinstance(description_value, str):
             return False, f"描述必须是字符串: {type(description_value).__name__}"
@@ -159,7 +159,7 @@ class BillValidator:
         return True, None
 
     @log_method
-    def validate_bills(self, bills: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def validate_bills(self, bills: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """
         批量验证账单数据
 
@@ -190,7 +190,7 @@ class BillValidator:
         return valid_bills, invalid_bills
 
     @log_method
-    def normalize_bill(self, bill: Dict[str, Any]) -> Dict[str, Any]:
+    def normalize_bill(self, bill: dict[str, Any]) -> dict[str, Any]:
         """
         规范化账单数据
 
@@ -239,7 +239,7 @@ class BillValidator:
 _validator = BillValidator()
 
 
-def validate_bill(bill: Dict[str, Any]) -> Tuple[bool, List[str]]:
+def validate_bill(bill: dict[str, Any]) -> tuple[bool, list[str]]:
     """
     验证单条账单
 
@@ -252,7 +252,7 @@ def validate_bill(bill: Dict[str, Any]) -> Tuple[bool, List[str]]:
     return _validator.validate_bill(bill)
 
 
-def validate_bills(bills: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def validate_bills(bills: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     批量验证账单
 
@@ -265,7 +265,7 @@ def validate_bills(bills: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], L
     return _validator.validate_bills(bills)
 
 
-def normalize_bill(bill: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_bill(bill: dict[str, Any]) -> dict[str, Any]:
     """
     规范化账单数据
 

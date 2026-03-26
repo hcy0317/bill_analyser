@@ -11,11 +11,11 @@ Deduplication Engine - 账单去重引擎
 - aggressive: 最激进（容易误删）
 """
 
-from datetime import datetime
-from typing import List, Dict, Any, Tuple, Optional
-from enum import Enum
 import difflib
 from collections import defaultdict
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
 from .logger import get_logger, log_method, log_step
 
@@ -54,7 +54,7 @@ class DeduplicationEngine:
             self.time_window_hours = 48
 
     @log_method
-    def deduplicate_all(self, bills: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def deduplicate_all(self, bills: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """
         执行完整去重流程
 
@@ -98,8 +98,8 @@ class DeduplicationEngine:
 
     @log_step("支付宝/微信与银行账单去重")
     def _deduplicate_payment_bank(
-        self, bills: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        self, bills: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """
         去除支付宝/微信中来自银行的交易
 
@@ -174,7 +174,7 @@ class DeduplicationEngine:
 
         return result, removed_bills
 
-    def _merge_bank_info_to_payment(self, payment_bill: Dict[str, Any], bank_bill: Dict[str, Any]) -> None:
+    def _merge_bank_info_to_payment(self, payment_bill: dict[str, Any], bank_bill: dict[str, Any]) -> None:
         """
         将银行账单信息合并到支付工具账单 (v6.32新增)
 
@@ -217,7 +217,7 @@ class DeduplicationEngine:
         )
 
     @log_method
-    def _is_duplicate_payment_bank(self, payment_bill: Dict[str, Any], bank_bill: Dict[str, Any]) -> bool:
+    def _is_duplicate_payment_bank(self, payment_bill: dict[str, Any], bank_bill: dict[str, Any]) -> bool:
         """
         判断支付宝/微信账单是否与银行账单重复
 
@@ -276,7 +276,7 @@ class DeduplicationEngine:
         return False
 
     @log_step("账户间转账去重")
-    def _deduplicate_transfers(self, bills: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _deduplicate_transfers(self, bills: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """
         去除账户间转账记录
 
@@ -351,7 +351,7 @@ class DeduplicationEngine:
         return kept_bills, removed_bills
 
     @log_method
-    def _find_transfer_pairs(self, bills: List[Dict[str, Any]]) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    def _find_transfer_pairs(self, bills: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
         """
         在一组账单中查找转账对
 
@@ -440,7 +440,7 @@ class DeduplicationEngine:
         return transfer_pairs
 
     @staticmethod
-    def _parse_date(date_str: Any) -> Optional[datetime]:
+    def _parse_date(date_str: Any) -> datetime | None:
         """
         解析日期字符串
 
@@ -495,7 +495,7 @@ class DeduplicationEngine:
         return difflib.SequenceMatcher(None, text1, text2).ratio()
 
     @log_method
-    def get_deduplication_report(self, stats: Dict[str, Any]) -> str:
+    def get_deduplication_report(self, stats: dict[str, Any]) -> str:
         """
         生成去重报告
 

@@ -20,11 +20,11 @@ Updated: 2025-12-06
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 
+from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.logic import RuleEngine
-from ..utils.constants import TransactionType
 
 
 @dataclass
@@ -40,9 +40,9 @@ class CompiledRule:
         is_empty: 规则是否为空
     """
 
-    or_blocks: List[List[str]] = field(default_factory=list)
-    not_patterns: List[str] = field(default_factory=list)
-    and_patterns: List[str] = field(default_factory=list)
+    or_blocks: list[list[str]] = field(default_factory=list)
+    not_patterns: list[str] = field(default_factory=list)
+    and_patterns: list[str] = field(default_factory=list)
     is_empty: bool = True
 
 
@@ -65,9 +65,9 @@ class KeywordMatcher:
     def __init__(self):
         self.logger = get_logger("KeywordMatcher")
         # 缓存编译后的正则表达式
-        self._regex_cache: Dict[str, re.Pattern] = {}
+        self._regex_cache: dict[str, re.Pattern] = {}
         # v6.73: 缓存编译后的规则
-        self._compiled_rules_cache: Dict[str, CompiledRule] = {}
+        self._compiled_rules_cache: dict[str, CompiledRule] = {}
 
     def clear_cache(self):
         """清空所有缓存
@@ -105,10 +105,10 @@ class KeywordMatcher:
             return self._compiled_rules_cache[rule]
 
         # 解析规则
-        or_blocks: List[List[str]] = []
-        not_patterns: List[str] = []
-        and_patterns: List[str] = []
-        simple_patterns: List[str] = []
+        or_blocks: list[list[str]] = []
+        not_patterns: list[str] = []
+        and_patterns: list[str] = []
+        simple_patterns: list[str] = []
 
         parts = rule.split("&")
 
@@ -254,7 +254,7 @@ class KeywordMatcher:
         compiled = self.compile_rule(rule)
         return self.match_compiled(text, compiled)
 
-    def extract_positive_keywords(self, rule: str) -> List[str]:
+    def extract_positive_keywords(self, rule: str) -> list[str]:
         """从规则中提取正向关键词（OR和AND，不包含NOT）
 
         用于配对识别时提取可用于匹配的关键词列表。
@@ -311,11 +311,11 @@ class CategoryEngine:
         self.logger = get_logger("CategoryEngine")
         self.rule_engine = RuleEngine()
         self.keyword_matcher = KeywordMatcher()
-        self.rules: List[Dict[str, Any]] = []
+        self.rules: list[dict[str, Any]] = []
         self._initialized = False
         self._current_user_id: int = 1  # 当前加载规则的用户ID
         # v6.73: 预编译的规则缓存（keywords -> CompiledRule）
-        self._compiled_rules: Dict[str, CompiledRule] = {}
+        self._compiled_rules: dict[str, CompiledRule] = {}
         # Lock已移除 - SQLite自带线程安全
 
     def _precompile_rules(self):
@@ -402,7 +402,7 @@ class CategoryEngine:
 
     @log_method
     @log_step("加载分类规则(DB)")
-    async def load_rules_from_db(self, db, user_id: int = 1, types: Optional[List[int]] = None):
+    async def load_rules_from_db(self, db, user_id: int = 1, types: list[int] | None = None):
         """
         从数据库加载分类规则
 
@@ -468,8 +468,8 @@ class CategoryEngine:
 
     @log_method
     def match_category(
-        self, bill: Dict[str, Any], types: Optional[List[int]] = None
-    ) -> Tuple[Optional[str], Optional[str]]:
+        self, bill: dict[str, Any], types: list[int] | None = None
+    ) -> tuple[str | None, str | None]:
         """
         匹配账单分类
 
@@ -666,8 +666,8 @@ class CategoryEngine:
 
     @log_method
     async def batch_match_categories(
-        self, bills: List[Dict[str, Any]], types: Optional[List[int]] = None
-    ) -> List[Dict[str, Any]]:
+        self, bills: list[dict[str, Any]], types: list[int] | None = None
+    ) -> list[dict[str, Any]]:
         """
         批量匹配账单分类
 
@@ -710,7 +710,7 @@ class CategoryEngine:
         return categorized_bills
 
     @log_method
-    def get_categories_tree(self) -> Dict[str, Dict[str, List[str]]]:
+    def get_categories_tree(self) -> dict[str, dict[str, list[str]]]:
         """
         获取分类树结构(用于UI显示)
         按支出/收入/转账/投资分组
@@ -762,7 +762,7 @@ class CategoryEngine:
 _category_engine_v2 = CategoryEngine()
 
 
-async def get_category_engine(db=None, user_id: int = 1, types: Optional[List[int]] = None) -> CategoryEngine:
+async def get_category_engine(db=None, user_id: int = 1, types: list[int] | None = None) -> CategoryEngine:
     """获取分类引擎实例
 
     Args:

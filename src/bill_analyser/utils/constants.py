@@ -8,8 +8,6 @@ Created: 2025-11-21
 """
 
 from enum import IntEnum
-from typing import Dict, List
-
 
 # ==================== 交易类型定义 ====================
 
@@ -24,7 +22,7 @@ class TransactionType(IntEnum):
 
 
 # 前端整数类型 → 后端中文类型
-FRONTEND_TO_BACKEND_TYPE: Dict[int, str] = {
+FRONTEND_TO_BACKEND_TYPE: dict[int, str] = {
     TransactionType.INCOME: "收入",
     TransactionType.EXPENSE: "支出",
     TransactionType.TRANSFER: "转账",
@@ -32,7 +30,7 @@ FRONTEND_TO_BACKEND_TYPE: Dict[int, str] = {
 }
 
 # 后端中文类型 → 前端整数类型
-BACKEND_TO_FRONTEND_TYPE: Dict[str, int] = {
+BACKEND_TO_FRONTEND_TYPE: dict[str, int] = {
     "收入": TransactionType.INCOME,
     "支出": TransactionType.EXPENSE,
     "转账": TransactionType.TRANSFER,
@@ -40,7 +38,7 @@ BACKEND_TO_FRONTEND_TYPE: Dict[str, int] = {
 }
 
 # 类型显示名称(多语言支持)
-TRANSACTION_TYPE_NAMES: Dict[int, Dict[str, str]] = {
+TRANSACTION_TYPE_NAMES: dict[int, dict[str, str]] = {
     TransactionType.INCOME: {"zh-CN": "收入", "zh-TW": "收入", "en-US": "Income"},
     TransactionType.EXPENSE: {"zh-CN": "支出", "zh-TW": "支出", "en-US": "Expense"},
     TransactionType.TRANSFER: {"zh-CN": "转账", "zh-TW": "轉賬", "en-US": "Transfer"},
@@ -74,7 +72,7 @@ class AccountType(IntEnum):
 
 
 # 账户分类显示名称
-ACCOUNT_CATEGORY_NAMES: Dict[int, Dict[str, str]] = {
+ACCOUNT_CATEGORY_NAMES: dict[int, dict[str, str]] = {
     AccountCategory.CASH: {"zh-CN": "现金", "en-US": "Cash"},
     AccountCategory.CHECKING: {"zh-CN": "储蓄账户", "en-US": "Checking"},
     AccountCategory.CREDIT_CARD: {"zh-CN": "信用卡", "en-US": "Credit Card"},
@@ -88,7 +86,7 @@ ACCOUNT_CATEGORY_NAMES: Dict[int, Dict[str, str]] = {
 }
 
 # 资产类账户(正余额为资产)
-ASSET_ACCOUNT_CATEGORIES: List[int] = [
+ASSET_ACCOUNT_CATEGORIES: list[int] = [
     AccountCategory.CASH,
     AccountCategory.CHECKING,
     AccountCategory.DEBIT_CARD,
@@ -98,7 +96,7 @@ ASSET_ACCOUNT_CATEGORIES: List[int] = [
 ]
 
 # 负债类账户(正余额为负债)
-LIABILITY_ACCOUNT_CATEGORIES: List[int] = [AccountCategory.CREDIT_CARD, AccountCategory.LOAN, AccountCategory.PAYABLE]
+LIABILITY_ACCOUNT_CATEGORIES: list[int] = [AccountCategory.CREDIT_CARD, AccountCategory.LOAN, AccountCategory.PAYABLE]
 
 
 # ==================== 分类类型定义 ====================
@@ -191,7 +189,7 @@ class ErrorCode(IntEnum):
     EXTERNAL_SERVICE_ERROR = 502
 
 
-ERROR_MESSAGES: Dict[int, Dict[str, str]] = {
+ERROR_MESSAGES: dict[int, dict[str, str]] = {
     ErrorCode.INVALID_REQUEST: {"zh-CN": "请求参数错误", "en-US": "Invalid request parameters"},
     ErrorCode.UNAUTHORIZED: {"zh-CN": "未授权，请先登录", "en-US": "Unauthorized, please login first"},
     ErrorCode.FORBIDDEN: {"zh-CN": "无权访问此资源", "en-US": "Forbidden to access this resource"},

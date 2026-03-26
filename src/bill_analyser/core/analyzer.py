@@ -6,18 +6,19 @@ Analyzer Module - 数据分析模块
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
+
 import pandas as pd
 
-from .db import Database
-from ..utils.logger import get_logger, log_method, log_step
 from ..utils.charts import ChartGenerator, generate_all_charts
+from ..utils.logger import get_logger, log_method, log_step
+from .db import Database
 
 
 class Analyzer:
     """账单数据分析器"""
 
-    def __init__(self, db: Optional[Database] = None, output_dir: Optional[Path] = None):
+    def __init__(self, db: Database | None = None, output_dir: Path | None = None):
         """
         初始化分析器
 
@@ -27,12 +28,12 @@ class Analyzer:
         """
         self.logger = get_logger("Analyzer")
         self.db = db or Database()
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
         self._cache_timeout = 300  # 缓存5分钟
-        self._cache_timestamps: Dict[str, float] = {}
+        self._cache_timestamps: dict[str, float] = {}
         self.chart_generator = ChartGenerator(output_dir=output_dir)
 
-    def _get_cache_key(self, period: str, filters: Optional[Dict] = None) -> str:
+    def _get_cache_key(self, period: str, filters: dict | None = None) -> str:
         """生成缓存键"""
         filter_str = str(sorted((filters or {}).items()))
         return f"{period}_{filter_str}"
@@ -90,7 +91,7 @@ class Analyzer:
 
     @log_method
     @log_step("生成数据分析报告")
-    async def generate_report(self, period: str = "month", filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def generate_report(self, period: str = "month", filters: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         生成分析报告
 
@@ -149,7 +150,7 @@ class Analyzer:
         self.logger.info("分析报告生成完成")
         return report
 
-    def _empty_report(self) -> Dict[str, Any]:
+    def _empty_report(self) -> dict[str, Any]:
         """返回空报告"""
         return {
             "period": "",
@@ -165,7 +166,7 @@ class Analyzer:
             "generated_at": datetime.now().isoformat(),
         }
 
-    def _calculate_summary(self, df: pd.DataFrame) -> Dict[str, float]:
+    def _calculate_summary(self, df: pd.DataFrame) -> dict[str, float]:
         """计算总体汇总"""
         summary = {"total_income": 0.0, "total_expense": 0.0, "net_income": 0.0}
 
@@ -176,7 +177,7 @@ class Analyzer:
 
         return summary
 
-    def _calculate_by_category(self, df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+    def _calculate_by_category(self, df: pd.DataFrame) -> dict[str, dict[str, Any]]:
         """按分类统计"""
         if "main_category" not in df.columns:
             return {}
@@ -209,7 +210,7 @@ class Analyzer:
 
         return result
 
-    def _calculate_by_type(self, df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+    def _calculate_by_type(self, df: pd.DataFrame) -> dict[str, dict[str, Any]]:
         """按交易类型统计"""
         if "type" not in df.columns:
             return {}
@@ -225,7 +226,7 @@ class Analyzer:
 
         return result
 
-    def _calculate_trend(self, df: pd.DataFrame, period: str) -> List[Dict[str, Any]]:
+    def _calculate_trend(self, df: pd.DataFrame, period: str) -> list[dict[str, Any]]:
         """计算趋势数据"""
         if "date" not in df.columns or "type" not in df.columns:
             return []
@@ -255,7 +256,7 @@ class Analyzer:
 
         return sorted(trend, key=lambda x: x["date"])
 
-    def _get_top_expenses(self, df: pd.DataFrame, limit: int = 10) -> List[Dict[str, Any]]:
+    def _get_top_expenses(self, df: pd.DataFrame, limit: int = 10) -> list[dict[str, Any]]:
         """获取最大支出TOP N"""
         if "type" not in df.columns:
             return []
@@ -273,7 +274,7 @@ class Analyzer:
             for _, row in expenses.iterrows()
         ]
 
-    def _get_top_income(self, df: pd.DataFrame, limit: int = 10) -> List[Dict[str, Any]]:
+    def _get_top_income(self, df: pd.DataFrame, limit: int = 10) -> list[dict[str, Any]]:
         """获取最大收入TOP N"""
         if "type" not in df.columns:
             return []
@@ -300,8 +301,8 @@ class Analyzer:
 
     @log_method
     async def generate_report_with_charts(
-        self, period: str = "month", filters: Optional[Dict[str, Any]] = None, generate_charts: bool = True
-    ) -> Dict[str, Any]:
+        self, period: str = "month", filters: dict[str, Any] | None = None, generate_charts: bool = True
+    ) -> dict[str, Any]:
         """
         生成分析报告（含图表）
 
@@ -326,7 +327,7 @@ class Analyzer:
         return report
 
     @log_method
-    def generate_trend_chart(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Optional[Path]:
+    def generate_trend_chart(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
         """
         生成收支趋势图
 
@@ -349,8 +350,8 @@ class Analyzer:
 
     @log_method
     def generate_category_pie(
-        self, report_data: Dict[str, Any], chart_type: str = "expense", filename: Optional[str] = None
-    ) -> Optional[Path]:
+        self, report_data: dict[str, Any], chart_type: str = "expense", filename: str | None = None
+    ) -> Path | None:
         """
         生成分类饼图
 
@@ -370,8 +371,8 @@ class Analyzer:
 
     @log_method
     def generate_top_expenses_chart(
-        self, report_data: Dict[str, Any], filename: Optional[str] = None
-    ) -> Optional[Path]:
+        self, report_data: dict[str, Any], filename: str | None = None
+    ) -> Path | None:
         """
         生成Top支出排行榜
 
@@ -389,7 +390,7 @@ class Analyzer:
         return self.chart_generator.generate_top_merchants_chart(top_data, filename=filename)
 
     @log_method
-    def generate_comparison_chart(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Optional[Path]:
+    def generate_comparison_chart(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
         """
         生成收支对比图
 
@@ -412,8 +413,8 @@ class Analyzer:
 
     @log_method
     async def generate_heatmap(
-        self, period: str = "month", filters: Optional[Dict[str, Any]] = None, filename: Optional[str] = None
-    ) -> Optional[Path]:
+        self, period: str = "month", filters: dict[str, Any] | None = None, filename: str | None = None
+    ) -> Path | None:
         """
         生成消费热力图
 
@@ -443,7 +444,7 @@ class Analyzer:
         return self.chart_generator.generate_heatmap(bills, filename=filename)
 
     @log_method
-    def generate_dashboard(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Optional[Path]:
+    def generate_dashboard(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
         """
         生成综合仪表盘
 
@@ -459,7 +460,7 @@ class Analyzer:
     # ==================== UI Backend API所需的额外方法 ====================
 
     @log_method
-    async def get_trends(self, period: str = "month", category: Optional[str] = None) -> Dict[str, Any]:
+    async def get_trends(self, period: str = "month", category: str | None = None) -> dict[str, Any]:
         """
         获取趋势数据
 
@@ -511,7 +512,7 @@ class Analyzer:
         return {"trends": trends, "period": period, "category": category}
 
     @log_method
-    async def get_comparison(self, period: str = "month", compare_type: str = "category") -> Dict[str, Any]:
+    async def get_comparison(self, period: str = "month", compare_type: str = "category") -> dict[str, Any]:
         """
         获取对比数据
 
@@ -560,7 +561,7 @@ class Analyzer:
         return {"comparison": comparison, "period": period, "compare_type": compare_type}
 
     @log_method
-    async def analyze_category(self, period: str = "month", main_category: Optional[str] = None) -> Dict[str, Any]:
+    async def analyze_category(self, period: str = "month", main_category: str | None = None) -> dict[str, Any]:
         """
         分析指定分类
 

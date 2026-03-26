@@ -16,16 +16,16 @@ Parser Factory - 解析器工厂
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
 
-from .base import ParserBase
-from .wechat import WeChatParser
-from .alipay import AlipayParser
-from .icbc import ICBCParser
-from .cmbc import CMBCParser
-from .abc import ABCParser
-from .ccb import CCBParser
 from ..utils.logger import get_logger, log_method
+from .abc import ABCParser
+from .alipay import AlipayParser
+from .base import ParserBase
+from .ccb import CCBParser
+from .cmbc import CMBCParser
+from .icbc import ICBCParser
+from .wechat import WeChatParser
 
 
 class ParserFactory:
@@ -41,7 +41,7 @@ class ParserFactory:
 
         # 注册所有解析器（按优先级顺序）
         # 支付平台在前（信息更丰富），银行在后
-        self.parsers: List[ParserBase] = [
+        self.parsers: list[ParserBase] = [
             WeChatParser(),
             AlipayParser(),
             ICBCParser(),
@@ -66,7 +66,7 @@ class ParserFactory:
             ", ".join(p.PARSER_ID for p in self.parsers),
         )
 
-    def get_parser_by_id(self, parser_id: str) -> Optional[ParserBase]:
+    def get_parser_by_id(self, parser_id: str) -> ParserBase | None:
         """根据解析器ID获取解析器实例
 
         Args:
@@ -81,7 +81,7 @@ class ParserFactory:
         return None
 
     @log_method
-    def detect_parser(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def detect_parser(self, file_path: str) -> dict[str, Any] | None:
         """检测文件应该使用哪个解析器
 
         Args:
@@ -110,7 +110,7 @@ class ParserFactory:
         return None
 
     @log_method
-    def get_parser(self, file_path: str, parser_type: Optional[str] = None) -> Optional[ParserBase]:
+    def get_parser(self, file_path: str, parser_type: str | None = None) -> ParserBase | None:
         """
         根据文件特征或指定类型获取合适的解析器
 
@@ -150,7 +150,7 @@ class ParserFactory:
         return None
 
     @log_method
-    def parse(self, file_path: str, parser_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str, parser_type: str | None = None) -> list[dict[str, Any]]:
         """
         自动解析账单文件
 
@@ -177,7 +177,7 @@ class ParserFactory:
             return []
 
     @log_method
-    def parse_multiple(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+    def parse_multiple(self, file_paths: list[str]) -> list[dict[str, Any]]:
         """
         批量解析多个账单文件
 
@@ -199,7 +199,7 @@ class ParserFactory:
 
         return all_bills
 
-    def get_supported_formats(self) -> List[str]:
+    def get_supported_formats(self) -> list[str]:
         """
         获取所有支持的文件格式
 
@@ -211,7 +211,7 @@ class ParserFactory:
             formats.update(parser.supported_extensions)
         return sorted(list(formats))
 
-    def get_parser_info(self) -> List[Dict[str, Any]]:
+    def get_parser_info(self) -> list[dict[str, Any]]:
         """
         获取所有解析器的信息
 
@@ -228,7 +228,7 @@ class ParserFactory:
 _factory = ParserFactory()
 
 
-def get_parser(file_path: str) -> Optional[ParserBase]:
+def get_parser(file_path: str) -> ParserBase | None:
     """
     获取文件解析器
 
@@ -241,7 +241,7 @@ def get_parser(file_path: str) -> Optional[ParserBase]:
     return _factory.get_parser(file_path)
 
 
-def parse_file(file_path: str) -> List[Dict[str, Any]]:
+def parse_file(file_path: str) -> list[dict[str, Any]]:
     """
     解析账单文件
 
@@ -254,7 +254,7 @@ def parse_file(file_path: str) -> List[Dict[str, Any]]:
     return _factory.parse(file_path)
 
 
-def parse_multiple_files(file_paths: List[str]) -> List[Dict[str, Any]]:
+def parse_multiple_files(file_paths: list[str]) -> list[dict[str, Any]]:
     """
     批量解析文件
 
@@ -267,6 +267,6 @@ def parse_multiple_files(file_paths: List[str]) -> List[Dict[str, Any]]:
     return _factory.parse_multiple(file_paths)
 
 
-def get_supported_formats() -> List[str]:
+def get_supported_formats() -> list[str]:
     """获取支持的文件格式"""
     return _factory.get_supported_formats()

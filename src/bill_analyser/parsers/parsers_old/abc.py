@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 中国农业银行账单解析器
@@ -7,7 +6,7 @@
 
 import logging
 import re
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -165,7 +164,7 @@ class ABCParser(BaseBankParser):
 
         return -1
 
-    def _parse_transactions(self, df: pd.DataFrame, start_row: int) -> List[Dict[str, Any]]:
+    def _parse_transactions(self, df: pd.DataFrame, start_row: int) -> list[dict[str, Any]]:
         """解析交易记录"""
         transactions = []
 
@@ -238,7 +237,7 @@ class ABCParser(BaseBankParser):
             logger.debug("清理交易用途失败: %s, 错误: %s", purpose, e)
             return purpose
 
-    def _parse_transaction_row(self, row: pd.Series) -> Optional[Dict[str, Any]]:
+    def _parse_transaction_row(self, row: pd.Series) -> dict[str, Any] | None:
         """解析交易行（支持新旧格式）"""
         try:
             # 检测格式类型
@@ -252,7 +251,7 @@ class ABCParser(BaseBankParser):
             logger.debug("解析中国农业银行交易行失败: %s", e)
             return None
 
-    def _parse_new_format_transaction(self, row: pd.Series) -> Optional[Dict[str, Any]]:
+    def _parse_new_format_transaction(self, row: pd.Series) -> dict[str, Any] | None:
         """解析新格式交易行"""
         try:
             transaction = {}
@@ -308,7 +307,7 @@ class ABCParser(BaseBankParser):
             logger.debug("解析新格式中国农业银行交易行失败: %s", e)
             return None
 
-    def _parse_old_format_transaction(self, row: pd.Series) -> Optional[Dict[str, Any]]:
+    def _parse_old_format_transaction(self, row: pd.Series) -> dict[str, Any] | None:
         """解析旧格式交易行"""
         try:
             transaction = {}

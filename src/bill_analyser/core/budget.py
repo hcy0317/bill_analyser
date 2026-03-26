@@ -4,13 +4,14 @@ Budget Module - 预算管理模块
 预算监控、预警和报告生成。
 """
 
-from enum import Enum
-from typing import Dict, List, Any, Optional, Callable
+from collections.abc import Callable
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
-from .db import Database
-from ..utils.logger import get_logger, log_method, log_step
 from ..utils.config import get_config
+from ..utils.logger import get_logger, log_method, log_step
+from .db import Database
 
 
 class BudgetStatus(Enum):
@@ -25,12 +26,12 @@ class BudgetStatus(Enum):
 class BudgetManager:
     """预算管理器"""
 
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Database | None = None):
         """初始化"""
         self.logger = get_logger("BudgetManager")
         self.db = db or Database()
-        self.budgets: Dict[str, float] = {}
-        self.alert_callbacks: List[Callable] = []
+        self.budgets: dict[str, float] = {}
+        self.alert_callbacks: list[Callable] = []
 
     @log_method
     @log_step("加载预算配置")
@@ -93,7 +94,7 @@ class BudgetManager:
 
     @log_method
     @log_step("生成预算报告")
-    async def get_budget_report(self, period: str = "month") -> Dict[str, Any]:
+    async def get_budget_report(self, period: str = "month") -> dict[str, Any]:
         """
         生成预算报告
 

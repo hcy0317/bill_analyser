@@ -18,12 +18,12 @@ v6.59 更新:
 """
 
 import csv
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
-from .base import ParserBase
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class ABCParser(ParserBase):
@@ -66,7 +66,7 @@ class ABCParser(ParserBase):
             self.logger.debug("[描述聚合] 合并 %d 个字段: %s", len(valid_parts), result[:100])
         return result
 
-    def _get_date_field(self, row_dict: Dict[str, str]) -> str:
+    def _get_date_field(self, row_dict: dict[str, str]) -> str:
         """获取日期字段，合并日期和时间列"""
         date_field = row_dict.get("交易日期") or row_dict.get("交易⽇期") or row_dict.get("记账日期") or ""
         if not date_field.strip() or date_field == "nan":
@@ -78,7 +78,7 @@ class ABCParser(ParserBase):
 
         return date_field.strip()
 
-    def _get_amount_and_type(self, row_dict: Dict[str, str]) -> Tuple[str, str]:
+    def _get_amount_and_type(self, row_dict: dict[str, str]) -> tuple[str, str]:
         """获取金额和交易类型"""
         amount_str = "0"
         transaction_type = "支出"
@@ -114,7 +114,7 @@ class ABCParser(ParserBase):
 
         return amount_str, transaction_type
 
-    def _get_description(self, row_dict: Dict[str, str]) -> str:
+    def _get_description(self, row_dict: dict[str, str]) -> str:
         """获取聚合描述（交易用途 + 交易摘要）"""
         transaction_purpose = (
             row_dict.get("交易用途") or row_dict.get("用途") or row_dict.get("摘要") or row_dict.get("交易附⾔") or ""
@@ -122,7 +122,7 @@ class ABCParser(ParserBase):
         transaction_summary = row_dict.get("交易摘要") or ""
         return self._merge_description_fields(transaction_purpose, transaction_summary)
 
-    def _get_counterparty(self, row_dict: Dict[str, str]) -> str:
+    def _get_counterparty(self, row_dict: dict[str, str]) -> str:
         """获取交易对方"""
         counterparty = (
             row_dict.get("对方户名")
@@ -133,7 +133,7 @@ class ABCParser(ParserBase):
         )
         return counterparty if counterparty != "nan" else ""
 
-    def _parse_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _parse_csv_row(self, row: dict[str, str]) -> dict[str, Any] | None:
         """解析CSV行数据"""
         date_field = self._get_date_field(row)
         if not date_field:
@@ -152,11 +152,11 @@ class ABCParser(ParserBase):
             "channel": "农业银行",
         }
 
-    def _parse_csv(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_csv(self, file_path: str) -> list[dict[str, Any]]:
         """解析CSV格式账单"""
         bills = []
 
-        with open(file_path, "r", encoding="gbk") as f:
+        with open(file_path, encoding="gbk") as f:
             lines = f.readlines()
 
         data_start = 0
@@ -190,7 +190,7 @@ class ABCParser(ParserBase):
                 return i
         return -1
 
-    def _parse_excel_row(self, row_dict: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _parse_excel_row(self, row_dict: dict[str, str]) -> dict[str, Any] | None:
         """解析Excel行数据"""
         date_field = self._get_date_field(row_dict)
         if not date_field:
@@ -209,7 +209,7 @@ class ABCParser(ParserBase):
             "channel": "农业银行",
         }
 
-    def _parse_excel(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_excel(self, file_path: str) -> list[dict[str, Any]]:
         """解析Excel格式账单"""
         bills = []
         df = pd.read_excel(file_path, header=None)
@@ -314,7 +314,7 @@ class ABCParser(ParserBase):
         return is_abc
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析农业银行账单"""
         if not self.validate_file(file_path):
             return []

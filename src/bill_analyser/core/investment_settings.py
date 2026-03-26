@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
-DEFAULT_INVESTMENT_PLATFORM_KEYWORDS: List[str] = [
+DEFAULT_INVESTMENT_PLATFORM_KEYWORDS: list[str] = [
     "蚂蚁财富",
     "天天基金",
     "理财通",
@@ -41,7 +42,7 @@ DEFAULT_INVESTMENT_PLATFORM_KEYWORDS: List[str] = [
     "老虎证券",
 ]
 
-DEFAULT_INVESTMENT_PRODUCT_KEYWORDS: List[str] = [
+DEFAULT_INVESTMENT_PRODUCT_KEYWORDS: list[str] = [
     "基金",
     "理财",
     "定投",
@@ -71,7 +72,7 @@ DEFAULT_INVESTMENT_PRODUCT_KEYWORDS: List[str] = [
     "计划",
 ]
 
-DEFAULT_INVESTMENT_EXCLUDE_KEYWORDS: List[str] = [
+DEFAULT_INVESTMENT_EXCLUDE_KEYWORDS: list[str] = [
     "还款",
     "借呗",
     "花呗",
@@ -88,7 +89,7 @@ DEFAULT_INVESTMENT_EXCLUDE_KEYWORDS: List[str] = [
     "话费",
 ]
 
-DEFAULT_INVESTMENT_PLATFORM_ALIASES: List[Tuple[str, List[str]]] = [
+DEFAULT_INVESTMENT_PLATFORM_ALIASES: list[tuple[str, list[str]]] = [
     ("蚂蚁财富", ["蚂蚁财富", "蚂蚁（杭州）基金销售有限公司", "蚂蚁基金"]),
     ("天天基金", ["天天基金", "上海天天基金销售有限公司"]),
     ("理财通", ["理财通", "微信理财通", "腾讯理财通"]),
@@ -119,7 +120,7 @@ DEFAULT_INVESTMENT_PLATFORM_ALIASES: List[Tuple[str, List[str]]] = [
     ("老虎证券", ["老虎证券", "tiger trade"]),
 ]
 
-DEFAULT_INVESTMENT_PRODUCT_PATTERNS: List[Tuple[str, List[str]]] = [
+DEFAULT_INVESTMENT_PRODUCT_PATTERNS: list[tuple[str, list[str]]] = [
     ("货币基金", ["货币基金"]),
     ("指数基金", ["指数基金", "指数增强", "宽基指数"]),
     ("债券基金", ["债券基金"]),
@@ -143,7 +144,7 @@ DEFAULT_INVESTMENT_PRODUCT_PATTERNS: List[Tuple[str, List[str]]] = [
     ("计划", ["计划", "资管计划"]),
 ]
 
-DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS: List[str] = [
+DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS: list[str] = [
     r"([A-Za-z0-9\u4e00-\u9fa5·（）()]{2,80}(?:基金|ETF|LOF|REITs|REIT|理财(?:产品)?|组合|计划))(?:买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出)",
     r"([A-Za-z0-9\u4e00-\u9fa5·（）()]{2,80}(?:基金|ETF|LOF|REITs|REIT|理财(?:产品)?|资管计划|计划|组合|债券|股票|黄金))",
     r"([A-Za-z0-9\u4e00-\u9fa5·（）()]{2,80}(?:联接A|联接C|A类|C类|D类|E类|F类))",
@@ -152,9 +153,9 @@ DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS: List[str] = [
 ]
 
 
-def _dedupe_keywords(keywords: Sequence[str]) -> List[str]:
+def _dedupe_keywords(keywords: Sequence[str]) -> list[str]:
     """清理并去重关键词列表。"""
-    result: List[str] = []
+    result: list[str] = []
     seen = set()
     for keyword in keywords:
         text = str(keyword or "").strip()
@@ -168,7 +169,7 @@ def _dedupe_keywords(keywords: Sequence[str]) -> List[str]:
     return result
 
 
-def normalize_keyword_list(raw_value: Any, fallback: Optional[Sequence[str]] = None) -> List[str]:
+def normalize_keyword_list(raw_value: Any, fallback: Sequence[str] | None = None) -> list[str]:
     """将任意输入标准化为关键词列表。"""
     if raw_value is None or raw_value == "":
         return _dedupe_keywords(fallback or [])
@@ -203,7 +204,7 @@ def serialize_keyword_list(raw_value: Any) -> str:
     return json.dumps(normalize_keyword_list(raw_value, []), ensure_ascii=False)
 
 
-def build_user_investment_keyword_settings(user: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+def build_user_investment_keyword_settings(user: dict[str, Any] | None) -> dict[str, list[str]]:
     """构建用户有效的投资识别关键词设置。"""
     user = user or {}
     return {

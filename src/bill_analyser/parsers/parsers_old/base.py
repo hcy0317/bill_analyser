@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 银行账单解析器基类
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
 import logging
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,11 @@ class BaseBankParser(ABC):
         """获取银行名称"""
         raise NotImplementedError
 
-    def get_supported_formats(self) -> List[str]:
+    def get_supported_formats(self) -> list[str]:
         """获取支持的文件格式"""
         return self.supported_formats
 
-    def _read_excel_file(self, file_path: str, header=None) -> Optional[pd.DataFrame]:
+    def _read_excel_file(self, file_path: str, header=None) -> pd.DataFrame | None:
         """读取Excel文件"""
         try:
             return pd.read_excel(file_path, header=header)
@@ -49,7 +49,7 @@ class BaseBankParser(ABC):
             logger.error("读取Excel文件失败: %s, 错误: %s", file_path, e)
             return None
 
-    def _find_data_start_row(self, df: pd.DataFrame, indicators: List[str]) -> int:
+    def _find_data_start_row(self, df: pd.DataFrame, indicators: list[str]) -> int:
         """查找数据开始行"""
         for i in range(len(df)):
             for j in range(len(df.columns)):
@@ -130,7 +130,7 @@ class BaseBankParser(ABC):
             logger.debug("解析日期时间失败: %s, %s, 错误: %s", date_str, time_str, e)
             return str(date_str)
 
-    def _standardize_output(self, transactions: List[Dict[str, Any]]) -> pd.DataFrame:
+    def _standardize_output(self, transactions: list[dict[str, Any]]) -> pd.DataFrame:
         """标准化输出格式"""
         if not transactions:
             return pd.DataFrame()

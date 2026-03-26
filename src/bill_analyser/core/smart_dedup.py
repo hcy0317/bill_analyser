@@ -51,7 +51,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from enum import Enum
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -75,9 +75,9 @@ class DuplicateGroup:
     """重复账单组"""
 
     type: DeduplicationType
-    bills: List[Dict[str, Any]]
-    keep_bill: Dict[str, Any]  # 保留的账单
-    remove_bills: List[Dict[str, Any]]  # 移除的账单
+    bills: list[dict[str, Any]]
+    keep_bill: dict[str, Any]  # 保留的账单
+    remove_bills: list[dict[str, Any]]  # 移除的账单
     reason: str  # 去重原因说明
 
 
@@ -89,11 +89,11 @@ class DeduplicationResult:
     """
 
     original_count: int  # 原始账单数
-    kept_bills: List[Dict[str, Any]]  # 保留的账单
+    kept_bills: list[dict[str, Any]]  # 保留的账单
     removed_count: int  # 移除的账单数
-    duplicate_groups: List[DuplicateGroup]  # 重复组详情
-    transfer_pairs: List[Tuple[Dict, Dict]]  # 识别的转账对
-    split_groups: List[Dict]  # 识别的分账单组
+    duplicate_groups: list[DuplicateGroup]  # 重复组详情
+    transfer_pairs: list[tuple[dict, dict]]  # 识别的转账对
+    split_groups: list[dict]  # 识别的分账单组
 
 
 class SmartDeduplicationEngine:
@@ -145,7 +145,7 @@ class SmartDeduplicationEngine:
 
     # ==================== v6.57: Pandas 向量化辅助方法 ====================
 
-    def _bills_to_dataframe(self, bills: List[Dict[str, Any]]) -> pd.DataFrame:
+    def _bills_to_dataframe(self, bills: list[dict[str, Any]]) -> pd.DataFrame:
         """将账单列表转换为 pandas DataFrame，批量解析日期
 
         Args:
@@ -244,7 +244,7 @@ class SmartDeduplicationEngine:
         return close_pairs
 
     @log_method
-    def process(self, bills: List[Dict[str, Any]]) -> DeduplicationResult:
+    def process(self, bills: list[dict[str, Any]]) -> DeduplicationResult:
         """
         处理账单去重（不包含数据库对比）
 
@@ -262,9 +262,9 @@ class SmartDeduplicationEngine:
             DeduplicationResult: 去重结果
         """
         original_count = len(bills)
-        duplicate_groups: List[DuplicateGroup] = []
-        split_groups: List[Dict] = []
-        transfer_pairs: List[Tuple[Dict, Dict]] = []
+        duplicate_groups: list[DuplicateGroup] = []
+        split_groups: list[dict] = []
+        transfer_pairs: list[tuple[dict, dict]] = []
 
         # 为每条账单生成唯一标识和初始化标记
         for bill in bills:
@@ -319,7 +319,7 @@ class SmartDeduplicationEngine:
         return result
 
     @log_method
-    async def process_with_db(self, bills: List[Dict[str, Any]], db, user_id: int = 1) -> DeduplicationResult:
+    async def process_with_db(self, bills: list[dict[str, Any]], db, user_id: int = 1) -> DeduplicationResult:
         """
         处理账单去重（包含数据库对比）
 
@@ -340,9 +340,9 @@ class SmartDeduplicationEngine:
             DeduplicationResult: 去重结果
         """
         original_count = len(bills)
-        duplicate_groups: List[DuplicateGroup] = []
-        split_groups: List[Dict] = []
-        transfer_pairs: List[Tuple[Dict, Dict]] = []
+        duplicate_groups: list[DuplicateGroup] = []
+        split_groups: list[dict] = []
+        transfer_pairs: list[tuple[dict, dict]] = []
 
         # 为每条账单生成唯一标识和初始化标记
         for bill in bills:
@@ -408,7 +408,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 工具方法 ====================
 
-    def _generate_bill_hash(self, bill: Dict[str, Any]) -> str:
+    def _generate_bill_hash(self, bill: dict[str, Any]) -> str:
         """生成账单的唯一哈希值
 
         Args:
@@ -426,7 +426,7 @@ class SmartDeduplicationEngine:
         key_str = "|".join(key_fields)
         return hashlib.md5(key_str.encode("utf-8")).hexdigest()[:12]
 
-    def _parse_datetime(self, date_str: str) -> Optional[datetime]:
+    def _parse_datetime(self, date_str: str) -> datetime | None:
         """解析日期时间字符串
 
         Args:
@@ -572,7 +572,7 @@ class SmartDeduplicationEngine:
         """
         return self.SOURCE_PRIORITY.get(source_id, 100)
 
-    def _merge_bill_fields(self, primary_bill: Dict[str, Any], secondary_bill: Dict[str, Any]) -> Dict[str, Any]:
+    def _merge_bill_fields(self, primary_bill: dict[str, Any], secondary_bill: dict[str, Any]) -> dict[str, Any]:
         """合并两个账单的字段
 
         v6.47更新：
@@ -696,7 +696,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 去重方法1：完全重复 ====================
 
-    def _find_exact_duplicates(self, bills: List[Dict[str, Any]]) -> List[DuplicateGroup]:
+    def _find_exact_duplicates(self, bills: list[dict[str, Any]]) -> list[DuplicateGroup]:
         """查找完全重复的账单
 
         基于账单哈希值识别完全相同的账单。
@@ -708,7 +708,7 @@ class SmartDeduplicationEngine:
             List[DuplicateGroup]: 重复组列表
         """
         groups = []
-        hash_map: Dict[str, List[Dict[str, Any]]] = {}
+        hash_map: dict[str, list[dict[str, Any]]] = {}
 
         for bill in bills:
             if bill.get("_removed"):
@@ -753,7 +753,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 去重方法2：支付平台/银行去重 ====================
 
-    def _get_source_type(self, bill: Dict[str, Any]) -> str:
+    def _get_source_type(self, bill: dict[str, Any]) -> str:
         """获取账单来源类型（解析器标识）
 
         v6.48修复: 优先使用 _parser_id 字段（解析器标识如 alipay, abc），
@@ -776,7 +776,7 @@ class SmartDeduplicationEngine:
 
         return ""
 
-    def _find_platform_bank_duplicates(self, bills: List[Dict[str, Any]]) -> List[DuplicateGroup]:
+    def _find_platform_bank_duplicates(self, bills: list[dict[str, Any]]) -> list[DuplicateGroup]:
         """查找支付平台与银行的重复账单
 
         v6.57优化: 使用pandas向量化操作替代双重循环
@@ -866,7 +866,7 @@ class SmartDeduplicationEngine:
         self.logger.debug("[平台-银行去重] 候选匹配数: %d", len(matched_pairs))
 
         # 处理匹配结果
-        matched_bank_indices: Set[int] = set()
+        matched_bank_indices: set[int] = set()
 
         for _, row in matched_pairs.iterrows():
             p_idx = int(row["_idx_1"])
@@ -928,7 +928,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 去重方法3：类似账单去重 ====================
 
-    def _find_similar_duplicates(self, bills: List[Dict[str, Any]]) -> List[DuplicateGroup]:
+    def _find_similar_duplicates(self, bills: list[dict[str, Any]]) -> list[DuplicateGroup]:
         """基于相似度查找重复账单
 
         v6.72优化: 使用金额+时间分桶替代全量笛卡尔积，内存占用从O(n²)降到O(n)
@@ -945,7 +945,7 @@ class SmartDeduplicationEngine:
         Returns:
             List[DuplicateGroup]: 重复组列表
         """
-        groups: List[DuplicateGroup] = []
+        groups: list[DuplicateGroup] = []
 
         # 只处理未被移除的账单
         active_bills = [b for b in bills if not b.get("_removed")]
@@ -961,7 +961,7 @@ class SmartDeduplicationEngine:
         # v6.72: 使用金额+时间分桶策略替代全量笛卡尔积
         # 分桶策略：按 (金额桶, 方向, 时间桶) 分组，只在同组内比较
         # 这将复杂度从 O(n²) 降低到 O(n * k)，其中 k 是桶内平均元素数
-        buckets: Dict[tuple, List[int]] = defaultdict(list)
+        buckets: dict[tuple, list[int]] = defaultdict(list)
 
         # 时间桶大小：30秒（与TIME_TOLERANCE一致），相邻桶需要交叉检查
         TIME_BUCKET_SECONDS = self.TIME_TOLERANCE
@@ -991,8 +991,8 @@ class SmartDeduplicationEngine:
             buckets[key_prev].append(i)
 
         # 收集候选配对（只比较同桶内的账单）
-        candidate_pairs: List[Tuple[int, int]] = []
-        seen_pairs: Set[Tuple[int, int]] = set()
+        candidate_pairs: list[tuple[int, int]] = []
+        seen_pairs: set[tuple[int, int]] = set()
 
         for bucket_indices in buckets.values():
             if len(bucket_indices) < 2:
@@ -1037,7 +1037,7 @@ class SmartDeduplicationEngine:
         self.logger.debug("[类似账单去重] 时间+金额候选数: %d (分桶数=%d)", len(candidate_pairs), len(buckets))
 
         # 条件3: 相似度计算（需要逐对计算）
-        matched: Set[int] = set()
+        matched: set[int] = set()
 
         for idx1, idx2 in candidate_pairs:
             if idx1 in matched or idx2 in matched:
@@ -1129,7 +1129,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 去重方法4：分账单去重 ====================
 
-    def _find_split_bills(self, bills: List[Dict[str, Any]]) -> List[Dict]:
+    def _find_split_bills(self, bills: list[dict[str, Any]]) -> list[dict]:
         """识别分账单
 
         v6.42去重条件：
@@ -1147,7 +1147,7 @@ class SmartDeduplicationEngine:
             List[Dict]: 分账单组列表
         """
         groups = []
-        matched: Set[int] = set()
+        matched: set[int] = set()
 
         # 只处理未被移除的账单
         active_bills = [
@@ -1172,7 +1172,7 @@ class SmartDeduplicationEngine:
                 continue
 
             # 收集时间接近的账单
-            candidate_bills: List[tuple] = []
+            candidate_bills: list[tuple] = []
             for j in range(i + 1, min(i + 30, n)):  # 最多检查后续30条
                 idx2, bill2 = active_bills[j]
 
@@ -1260,7 +1260,7 @@ class SmartDeduplicationEngine:
 
     # ==================== 转账配对方法 ====================
 
-    def _find_transfer_pairs(self, bills: List[Dict[str, Any]]) -> List[Tuple[Dict, Dict]]:
+    def _find_transfer_pairs(self, bills: list[dict[str, Any]]) -> list[tuple[dict, dict]]:
         """识别账户间转账
 
         v6.57优化: 使用pandas进行初步筛选，减少双重循环开销
@@ -1283,7 +1283,7 @@ class SmartDeduplicationEngine:
         Returns:
             List[Tuple[Dict, Dict]]: 转账配对列表，每对为(转出账单, 转入账单)
         """
-        pairs: List[Tuple[Dict, Dict]] = []
+        pairs: list[tuple[dict, dict]] = []
 
         # 过滤活跃账单（未被移除且金额不为0）
         active_bills = [b for b in bills if not b.get("_removed") and abs(float(b.get("amount", 0))) > 0.001]
@@ -1364,7 +1364,7 @@ class SmartDeduplicationEngine:
         self.logger.debug("[转账配对] 候选匹配数: %d", len(matched_pairs))
 
         # 处理匹配结果
-        matched_indices: Set[int] = set()
+        matched_indices: set[int] = set()
 
         for _, row in matched_pairs.iterrows():
             pos_idx = int(row["_idx_1"])
@@ -1445,8 +1445,8 @@ class SmartDeduplicationEngine:
 
     @log_method
     async def _find_cross_batch_transfer_pairs(
-        self, bills: List[Dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
-    ) -> List[Tuple[Dict, Dict]]:
+        self, bills: list[dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
+    ) -> list[tuple[dict, dict]]:
         """检测新导入账单与数据库已有账单之间的转账关系
 
         当前批次有一笔-100元(支出)的账单，数据库中已有一笔+100元(收入)
@@ -1463,7 +1463,7 @@ class SmartDeduplicationEngine:
         Returns:
             List[Tuple[Dict, Dict]]: 转账对列表 [(新账单, 已有账单), ...]
         """
-        pairs: List[Tuple[Dict, Dict]] = []
+        pairs: list[tuple[dict, dict]] = []
 
         active_bills = [b for b in bills if not b.get("_removed", False)]
         if not active_bills:
@@ -1493,7 +1493,7 @@ class SmartDeduplicationEngine:
             return pairs
 
         # 构建已有账单按 (日期, 金额绝对值) 索引
-        existing_index: Dict[str, List[Dict]] = {}
+        existing_index: dict[str, list[dict]] = {}
         for eb in existing_bills:
             abs_amt = abs(float(eb.get("amount", 0)))
             key = f"{eb.get('date', '')[:10]}_{abs_amt:.2f}"
@@ -1578,8 +1578,8 @@ class SmartDeduplicationEngine:
 
     @log_method
     async def _find_database_duplicates(
-        self, bills: List[Dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
-    ) -> List[DuplicateGroup]:
+        self, bills: list[dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
+    ) -> list[DuplicateGroup]:
         """与数据库已有账单对比，查找重复
 
         Args:
@@ -1591,7 +1591,7 @@ class SmartDeduplicationEngine:
         Returns:
             List[DuplicateGroup]: 重复组列表
         """
-        groups: List[DuplicateGroup] = []
+        groups: list[DuplicateGroup] = []
 
         if not bills:
             return groups
@@ -1627,7 +1627,7 @@ class SmartDeduplicationEngine:
 
         # 构建已有账单的索引（按日期+金额绝对值分组）
         # v6.46: 使用金额绝对值，以便匹配可能符号不同的账单（如平台-银行重复）
-        existing_index: Dict[str, List[Dict]] = {}
+        existing_index: dict[str, list[dict]] = {}
         for eb in existing_bills:
             abs_amt = abs(float(eb.get("amount", 0)))
             key = f"{eb.get('date', '')[:10]}_{abs_amt:.2f}"
@@ -1755,7 +1755,7 @@ class SmartDeduplicationEngine:
 
 # ==================== 便捷函数 ====================
 
-_engine: Optional[SmartDeduplicationEngine] = None
+_engine: SmartDeduplicationEngine | None = None
 
 
 def get_dedup_engine() -> SmartDeduplicationEngine:
@@ -1770,7 +1770,7 @@ def get_dedup_engine() -> SmartDeduplicationEngine:
     return _engine
 
 
-def smart_deduplicate(bills: List[Dict[str, Any]]) -> DeduplicationResult:
+def smart_deduplicate(bills: list[dict[str, Any]]) -> DeduplicationResult:
     """智能去重
 
     Args:

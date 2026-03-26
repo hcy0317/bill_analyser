@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 民生银行账单解析器
@@ -9,7 +8,7 @@
 import logging
 import re
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -198,7 +197,7 @@ class CMBCParser(BaseBankParser):
             self.logger.error(f"解析民生银行账单失败: {file_path}, 错误: {e}")
             return pd.DataFrame()
 
-    def _read_file(self, file_path: str) -> Optional[pd.DataFrame]:
+    def _read_file(self, file_path: str) -> pd.DataFrame | None:
         """读取文件"""
         try:
             if file_path.endswith(".csv"):
@@ -241,7 +240,7 @@ class CMBCParser(BaseBankParser):
             self.logger.error(f"读取文件失败: {file_path}, 错误: {e}")
             return None
 
-    def _extract_headers(self, df: pd.DataFrame, header_row: int) -> List[str]:
+    def _extract_headers(self, df: pd.DataFrame, header_row: int) -> list[str]:
         """提取列名"""
         headers = []
         if header_row < len(df):
@@ -250,7 +249,7 @@ class CMBCParser(BaseBankParser):
                 headers.append(cell_value.strip())
         return headers
 
-    def _parse_transactions(self, df: pd.DataFrame, start_row: int, headers: List[str]) -> List[Dict[str, Any]]:
+    def _parse_transactions(self, df: pd.DataFrame, start_row: int, headers: list[str]) -> list[dict[str, Any]]:
         """解析交易记录"""
         transactions = []
 
@@ -329,7 +328,7 @@ class CMBCParser(BaseBankParser):
         except Exception:
             return False
 
-    def _parse_transaction_row(self, row: pd.Series, headers: List[str]) -> Optional[Dict[str, Any]]:
+    def _parse_transaction_row(self, row: pd.Series, headers: list[str]) -> dict[str, Any] | None:
         """解析交易行"""
         try:
             transaction = {"日期": "", "商品说明": "", "交易对方": "", "金额": 0.0}
@@ -360,7 +359,7 @@ class CMBCParser(BaseBankParser):
             self.logger.debug(f"解析民生银行交易行失败: {e}")
             return None
 
-    def _extract_date(self, row: pd.Series) -> Optional[str]:
+    def _extract_date(self, row: pd.Series) -> str | None:
         """提取日期"""
         for val in row:
             if pd.isna(val):
@@ -429,7 +428,7 @@ class CMBCParser(BaseBankParser):
 
         return None
 
-    def _extract_description(self, row: pd.Series, headers: List[str]) -> Optional[str]:
+    def _extract_description(self, row: pd.Series, headers: list[str]) -> str | None:
         """提取商品说明/摘要"""
         # 新格式优先查找摘要列（可能有两个摘要列，取第一个非空的）
         summary_keywords = ["摘要", "交易摘要", "商品说明", "说明", "用途", "备注", "交易方式"]
@@ -469,7 +468,7 @@ class CMBCParser(BaseBankParser):
 
         return None
 
-    def _extract_amount(self, row: pd.Series, headers: List[str]) -> float:
+    def _extract_amount(self, row: pd.Series, headers: list[str]) -> float:
         """提取金额"""
         # 新格式：优先处理支出金额和存入金额分离的情况
         debit_amount = 0.0  # 支出金额（负数）
@@ -540,7 +539,7 @@ class CMBCParser(BaseBankParser):
         # 返回绝对值最大的金额
         return max(amounts, key=abs) if amounts else 0.0
 
-    def _extract_counterparty(self, row: pd.Series, headers: List[str]) -> Optional[str]:
+    def _extract_counterparty(self, row: pd.Series, headers: list[str]) -> str | None:
         """提取交易对方"""
         # 新格式：优先查找对方名称列，避免匹配到对方账号列
         # 按优先级排序，精确匹配优先

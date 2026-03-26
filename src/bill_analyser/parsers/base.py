@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any
 
 from ..utils.logger import get_logger, log_method
 
@@ -52,7 +52,7 @@ class StandardBill:
     main_category: str = ""
     sub_category: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典格式"""
         return {
             "date": self.date,
@@ -72,7 +72,7 @@ class StandardBill:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StandardBill":
+    def from_dict(cls, data: dict[str, Any]) -> StandardBill:
         """从字典创建实例"""
         return cls(
             date=data.get("date", ""),
@@ -116,7 +116,7 @@ class ParserBase(ABC):
         self.supported_extensions = [".csv", ".xlsx", ".xls"]
 
     @abstractmethod
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """
         解析账单文件
 
@@ -270,7 +270,7 @@ class ParserBase(ABC):
         self.logger.debug(f"未识别的交易类型: {type_str}")
         return "支出"
 
-    def aggregate_description(self, bill: Dict[str, Any]) -> str:
+    def aggregate_description(self, bill: dict[str, Any]) -> str:
         """
         聚合账单的多个字段生成统一的description
 
@@ -318,7 +318,7 @@ class ParserBase(ABC):
         return " | ".join(parts) if parts else ""
 
     @log_method
-    def post_process(self, bills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def post_process(self, bills: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         后处理账单数据，转换为标准格式
 

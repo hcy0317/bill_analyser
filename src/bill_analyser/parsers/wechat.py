@@ -16,11 +16,12 @@ WeChat Parser - 微信账单解析器
 
 import csv
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any
+
 import openpyxl
 
-from .base import ParserBase
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class WeChatParser(ParserBase):
@@ -50,7 +51,7 @@ class WeChatParser(ParserBase):
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV文件是否为微信账单"""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 first_lines = "".join([f.readline() for _ in range(5)])
                 return "微信支付账单" in first_lines or "交易时间" in first_lines
         except Exception:  # pylint: disable=broad-except
@@ -72,7 +73,7 @@ class WeChatParser(ParserBase):
             return False
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析微信账单"""
         self.logger.info("[解析开始] 文件: %s", file_path)
 
@@ -90,12 +91,12 @@ class WeChatParser(ParserBase):
         return []
 
     @log_method
-    def _parse_csv(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_csv(self, file_path: str) -> list[dict[str, Any]]:
         """解析CSV格式的微信账单"""
         bills = []
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 # 跳过头部说明行
                 lines = f.readlines()
                 data_start = 0
@@ -134,7 +135,7 @@ class WeChatParser(ParserBase):
         return self.post_process(bills)
 
     @log_method
-    def _parse_xlsx(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_xlsx(self, file_path: str) -> list[dict[str, Any]]:
         """解析XLSX格式的微信账单"""
         bills = []
 
@@ -189,7 +190,7 @@ class WeChatParser(ParserBase):
 
         return self.post_process(bills)
 
-    def _extract_bill_from_csv_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_csv_row(self, row: dict[str, str]) -> dict[str, Any] | None:
         """从CSV行数据提取账单信息"""
         # 提取所有可能有用的字段
         return {
@@ -207,7 +208,7 @@ class WeChatParser(ParserBase):
             "original_category": row.get("交易类型", ""),
         }
 
-    def _extract_bill_from_xlsx_row(self, row: tuple, column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_xlsx_row(self, row: tuple, column_map: dict[str, int]) -> dict[str, Any] | None:
         """从XLSX行数据提取账单信息"""
         try:
             # 获取列值的辅助函数

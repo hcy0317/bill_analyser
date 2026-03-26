@@ -5,9 +5,10 @@ CSV文件解析器
 """
 
 import csv
-import chardet
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+import chardet
 
 from .base_parser import BaseParser, ParserFactory
 
@@ -15,7 +16,7 @@ from .base_parser import BaseParser, ParserFactory
 class CSVParser(BaseParser):
     """CSV文件解析器"""
 
-    async def parse(self, file_path: str, config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def parse(self, file_path: str, config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """解析CSV文件"""
         config = config or {}
 
@@ -27,7 +28,7 @@ class CSVParser(BaseParser):
 
         bills = []
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             # 跳过指定行数
             for _ in range(skip_rows):
                 next(f)
@@ -66,7 +67,7 @@ class CSVParser(BaseParser):
 
             # 尝试读取前几行
             encoding = await self.detect_encoding(file_path)
-            with open(file_path, "r", encoding=encoding) as f:
+            with open(file_path, encoding=encoding) as f:
                 csv.Sniffer().sniff(f.read(1024))
             return True
 
@@ -81,11 +82,11 @@ class CSVParser(BaseParser):
             result = chardet.detect(raw_data)
             return result["encoding"] or "utf-8"
 
-    async def preview(self, file_path: str, rows: int = 10) -> Dict[str, Any]:
+    async def preview(self, file_path: str, rows: int = 10) -> dict[str, Any]:
         """预览CSV内容"""
         encoding = await self.detect_encoding(file_path)
 
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             # 尝试检测分隔符
             sample = f.read(1024)
             f.seek(0)
@@ -114,7 +115,7 @@ class CSVParser(BaseParser):
                 "sample_data": data,
                 "delimiter": delimiter,
                 "encoding": encoding,
-                "total_rows": sum(1 for _ in open(file_path, "r", encoding=encoding)) - 1,
+                "total_rows": sum(1 for _ in open(file_path, encoding=encoding)) - 1,
             }
 
 

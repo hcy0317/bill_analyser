@@ -11,11 +11,12 @@ CCB Parser - 建设银行账单解析器
 - source_account_id: 'ccb'
 """
 
-import pandas as pd
-from typing import Dict, List, Any, Optional
+from typing import Any
 
-from .base import ParserBase
+import pandas as pd
+
 from ..utils.logger import log_method
+from .base import ParserBase
 
 
 class CCBParser(ParserBase):
@@ -108,7 +109,7 @@ class CCBParser(ParserBase):
             return False
 
     @log_method
-    def parse(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析建设银行账单"""
         if not self.validate_file(file_path):
             return []

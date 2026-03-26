@@ -6,11 +6,11 @@ Charts Module - 图表生成模块
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
+
 import matplotlib
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.patches import Patch
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -58,7 +58,7 @@ CATEGORY_COLORS = [
 class ChartGenerator:
     """图表生成器"""
 
-    def __init__(self, output_dir: Optional[Path] = None, dpi: int = 100):
+    def __init__(self, output_dir: Path | None = None, dpi: int = 100):
         """
         初始化图表生成器
 
@@ -73,7 +73,7 @@ class ChartGenerator:
 
     @log_method
     def generate_trend_chart(
-        self, trend_data: List[Dict[str, Any]], title: str = "收支趋势图", filename: Optional[str] = None
+        self, trend_data: list[dict[str, Any]], title: str = "收支趋势图", filename: str | None = None
     ) -> Path:
         """
         生成收支趋势图
@@ -141,10 +141,10 @@ class ChartGenerator:
     @log_method
     def generate_category_pie_chart(
         self,
-        category_data: Dict[str, Dict[str, Any]],
+        category_data: dict[str, dict[str, Any]],
         chart_type: str = "expense",
-        title: Optional[str] = None,
-        filename: Optional[str] = None,
+        title: str | None = None,
+        filename: str | None = None,
     ) -> Path:
         """
         生成分类占比饼图
@@ -219,7 +219,7 @@ class ChartGenerator:
 
     @log_method
     def generate_top_merchants_chart(
-        self, top_data: List[Dict[str, Any]], title: str = "消费排行榜 Top 10", filename: Optional[str] = None
+        self, top_data: list[dict[str, Any]], title: str = "消费排行榜 Top 10", filename: str | None = None
     ) -> Path:
         """
         生成Top商户/交易对象排行榜
@@ -293,7 +293,7 @@ class ChartGenerator:
 
     @log_method
     def generate_comparison_bar_chart(
-        self, summary_data: Dict[str, float], title: str = "收支对比", filename: Optional[str] = None
+        self, summary_data: dict[str, float], title: str = "收支对比", filename: str | None = None
     ) -> Path:
         """
         生成收支对比柱状图
@@ -370,7 +370,7 @@ class ChartGenerator:
 
     @log_method
     def generate_heatmap(
-        self, bills_data: List[Dict[str, Any]], title: str = "消费热力图", filename: Optional[str] = None
+        self, bills_data: list[dict[str, Any]], title: str = "消费热力图", filename: str | None = None
     ) -> Path:
         """
         生成每日消费热力图
@@ -452,7 +452,7 @@ class ChartGenerator:
 
     @log_method
     def generate_budget_progress_chart(
-        self, budget_data: Dict[str, Any], title: str = "预算执行进度", filename: Optional[str] = None
+        self, budget_data: dict[str, Any], title: str = "预算执行进度", filename: str | None = None
     ) -> Path:
         """
         生成预算执行进度图
@@ -543,7 +543,7 @@ class ChartGenerator:
         return filepath
 
     @log_method
-    def generate_comprehensive_dashboard(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Path:
+    def generate_comprehensive_dashboard(self, report_data: dict[str, Any], filename: str | None = None) -> Path:
         """
         生成综合仪表盘（多图组合）
 
@@ -666,7 +666,7 @@ class ChartGenerator:
 _chart_generator = ChartGenerator()
 
 
-def generate_all_charts(report_data: Dict[str, Any], output_dir: Optional[Path] = None) -> Dict[str, Path]:
+def generate_all_charts(report_data: dict[str, Any], output_dir: Path | None = None) -> dict[str, Path]:
     """
     生成所有图表
 
