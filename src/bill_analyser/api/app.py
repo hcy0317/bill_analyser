@@ -7,40 +7,40 @@ Flask Web API Server - 账单分析系统Web API服务器
 import asyncio
 import sys
 from pathlib import Path
+
 from flask import Flask
 from flask_cors import CORS
 
 # 验证Python解释器路径
-print(f"\n{'='*60}")
+print(f"\n{'=' * 60}")
 print(f"Python解释器: {sys.executable}")
 print(f"Python版本: {sys.version}")
-if '.venv' in sys.executable or 'venv' in sys.executable:
+if ".venv" in sys.executable or "venv" in sys.executable:
     print("[OK] 正在使用虚拟环境")
 else:
     print("[WARN] 未使用虚拟环境!")
     print(f"当前路径: {sys.executable}")
     print(f"应该使用: {Path(__file__).parent.parent.parent / '.venv' / 'Scripts' / 'python.exe'}")
-print(f"{'='*60}\n")
+print(f"{'=' * 60}\n")
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # pylint: disable=wrong-import-position,import-error
-from src.core.db import Database
-from src.core.bill_service import BillService
-from src.core.category_engine import CategoryEngine
-from src.utils.logger import get_logger
-
 # 导入蓝图
-from src.api.routes import bills, categories, statistics, accounts, tags, templates, auth, budgets, backup
+from bill_analyser.api.routes import accounts, auth, backup, bills, budgets, categories, statistics, tags, templates
+from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.category_engine import CategoryEngine
+from bill_analyser.core.db import Database
+from bill_analyser.utils.logger import get_logger
 
 try:
-    from src.api.routes import ml
+    from bill_analyser.api.routes import ml
 except ImportError:  # pylint: disable=import-error
     ml = None
 
-logger = get_logger('WebAPI')
+logger = get_logger("WebAPI")
 
 # 全局实例
 db: Database = None
@@ -58,29 +58,32 @@ def create_app():
     flask_app.url_map.strict_slashes = False
 
     # 配置
-    flask_app.config['JSON_AS_ASCII'] = False
-    flask_app.config['JSON_SORT_KEYS'] = False
+    flask_app.config["JSON_AS_ASCII"] = False
+    flask_app.config["JSON_SORT_KEYS"] = False
 
     # 启用CORS - 修改为特定源，包含自定义请求头
-    CORS(flask_app, resources={
-        r"/api/*": {
-            "origins": ["http://localhost:8081", "http://127.0.0.1:8081"],
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": [
-                "Content-Type", 
-                "Authorization",      # 允许Authorization请求头（关键！）
-                "X-Timezone-Offset",  # 前端时区偏移量（注意大小写）
-                "X-Language",         # 前端语言设置
-                "Accept",             # 允许Accept头
-                "Accept-Language"     # 允许Accept-Language头
-            ],
-            "expose_headers": ["Content-Type", "Authorization"],  # 暴露响应头给前端
-            "supports_credentials": True,
-            "max_age": 3600,  # 预检请求缓存1小时
-            "send_wildcard": False,  # 不使用通配符，明确指定源
-            "always_send": True      # 总是发送CORS头，即使没有预检请求
-        }
-    })
+    CORS(
+        flask_app,
+        resources={
+            r"/api/*": {
+                "origins": ["http://localhost:8081", "http://127.0.0.1:8081"],
+                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                "allow_headers": [
+                    "Content-Type",
+                    "Authorization",  # 允许Authorization请求头（关键！）
+                    "X-Timezone-Offset",  # 前端时区偏移量（注意大小写）
+                    "X-Language",  # 前端语言设置
+                    "Accept",  # 允许Accept头
+                    "Accept-Language",  # 允许Accept-Language头
+                ],
+                "expose_headers": ["Content-Type", "Authorization"],  # 暴露响应头给前端
+                "supports_credentials": True,
+                "max_age": 3600,  # 预检请求缓存1小时
+                "send_wildcard": False,  # 不使用通配符，明确指定源
+                "always_send": True,  # 总是发送CORS头，即使没有预检请求
+            }
+        },
+    )
 
     # 调试日志 - 记录所有请求的关键信息
     @flask_app.before_request
@@ -89,17 +92,15 @@ def create_app():
         from flask import request as flask_request  # pylint: disable=import-outside-toplevel
 
         # v6.72: OPTIONS预检请求改为DEBUG级别，减少日志输出
-        if flask_request.method == 'OPTIONS':
+        if flask_request.method == "OPTIONS":
             logger.debug(f"[CORS Preflight] {flask_request.path}")
             logger.debug(f"[CORS Preflight] Origin: {flask_request.headers.get('Origin', 'N/A')}")
-            access_control_header = flask_request.headers.get(
-                'Access-Control-Request-Headers', 'N/A'
-            )
+            access_control_header = flask_request.headers.get("Access-Control-Request-Headers", "N/A")
             logger.debug(f"[CORS Preflight] Access-Control-Request-Headers: {access_control_header}")
 
         # v6.72: 账户请求调试日志改为DEBUG级别，仅在Authorization头缺失时用WARNING
-        if '/api/accounts' in flask_request.path:
-            auth_header = flask_request.headers.get('Authorization', None)
+        if "/api/accounts" in flask_request.path:
+            auth_header = flask_request.headers.get("Authorization", None)
             logger.debug(f"[Request Debug] {flask_request.method} {flask_request.path}")
             logger.debug(f"[Request Debug] Has Authorization: {bool(auth_header)}")
             if auth_header:
@@ -110,53 +111,41 @@ def create_app():
                 logger.debug(f"[Request Debug] All headers: {dict(flask_request.headers)}")
 
         # v6.72: 记录v1路径请求改为DEBUG级别
-        if '/v1/' in flask_request.path:
+        if "/v1/" in flask_request.path:
             logger.debug(f"v1请求: {flask_request.method} {flask_request.path}")
 
     # 注册认证蓝图（在/api路径下，以匹配前端axios的baseURL配置）
-    flask_app.register_blueprint(auth.bp, url_prefix='/api')
+    flask_app.register_blueprint(auth.bp, url_prefix="/api")
 
     # 注册其他业务蓝图
-    flask_app.register_blueprint(bills.bp, url_prefix='/api/bills')
-    flask_app.register_blueprint(categories.bp, url_prefix='/api/categories')
-    flask_app.register_blueprint(statistics.bp, url_prefix='/api/statistics')
-    flask_app.register_blueprint(accounts.bp, url_prefix='/api/accounts')
-    flask_app.register_blueprint(tags.bp, url_prefix='/api/tags')
-    flask_app.register_blueprint(templates.bp, url_prefix='/api/templates')
-    flask_app.register_blueprint(budgets.bp, url_prefix='/api/budgets')
-    flask_app.register_blueprint(backup.bp, url_prefix='/api/backup')
+    flask_app.register_blueprint(bills.bp, url_prefix="/api/bills")
+    flask_app.register_blueprint(categories.bp, url_prefix="/api/categories")
+    flask_app.register_blueprint(statistics.bp, url_prefix="/api/statistics")
+    flask_app.register_blueprint(accounts.bp, url_prefix="/api/accounts")
+    flask_app.register_blueprint(tags.bp, url_prefix="/api/tags")
+    flask_app.register_blueprint(templates.bp, url_prefix="/api/templates")
+    flask_app.register_blueprint(budgets.bp, url_prefix="/api/budgets")
+    flask_app.register_blueprint(backup.bp, url_prefix="/api/backup")
     if ml is not None:
-        flask_app.register_blueprint(ml.bp, url_prefix='/api/ml')  # v6.88: ML分类器
+        flask_app.register_blueprint(ml.bp, url_prefix="/api/ml")  # v6.88: ML分类器
 
     # 健康检查端点
-    @flask_app.route('/api/health', methods=['GET'])
+    @flask_app.route("/api/health", methods=["GET"])
     def health_check():
         """健康检查"""
-        return {
-            'success': True,
-            'status': 'healthy',
-            'version': '1.0.0'
-        }
+        return {"success": True, "status": "healthy", "version": "1.0.0"}
 
     # 错误处理
     @flask_app.errorhandler(404)
     def not_found(error):
         """404错误处理"""
-        return {
-            'success': False,
-            'error': 'Not Found',
-            'message': str(error)
-        }, 404
+        return {"success": False, "error": "Not Found", "message": str(error)}, 404
 
     @flask_app.errorhandler(500)
     def internal_error(error):
         """500错误处理"""
         logger.error("Internal Server Error: %s", error)
-        return {
-            'success': False,
-            'error': 'Internal Server Error',
-            'message': str(error)
-        }, 500
+        return {"success": False, "error": "Internal Server Error", "message": str(error)}, 500
 
     return flask_app
 
@@ -187,7 +176,7 @@ async def initialize(db_path: str = None):
         db = Database(db_path=db_path)
         await db.init_db()
         # 将数据库实例存储到Flask app配置中
-        app.config['DB_INSTANCE'] = db
+        app.config["DB_INSTANCE"] = db
         logger.info(f"[OK] 数据库初始化完成 (路径: {db.db_path})")
 
         # 创建默认管理员用户（如果不存在）
@@ -197,13 +186,13 @@ async def initialize(db_path: str = None):
         # 初始化分类引擎
         category_engine = CategoryEngine()
         await category_engine.load_rules_from_db(db)
-        app.config['CATEGORY_ENGINE_INSTANCE'] = category_engine
+        app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine
         logger.info("[OK] 分类引擎初始化完成")
 
         # 初始化账单服务
         bill_service = BillService(db=db)
         await bill_service.initialize()
-        app.config['BILL_SERVICE_INSTANCE'] = bill_service
+        app.config["BILL_SERVICE_INSTANCE"] = bill_service
         logger.info("[OK] 账单服务初始化完成")
 
         logger.info("=" * 50)
@@ -216,16 +205,17 @@ async def initialize(db_path: str = None):
 async def create_default_admin_user(database: Database):
     """创建默认管理员用户"""
     import json  # pylint: disable=import-outside-toplevel
+
     import bcrypt  # pylint: disable=import-outside-toplevel
 
     config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = json.load(f)
 
-        default_user_config = config.get('default_user', {})
-        username = default_user_config.get('username', 'admin')
+        default_user_config = config.get("default_user", {})
+        username = default_user_config.get("username", "admin")
 
         # 检查用户是否已存在
         existing_user = await database.get_user_by_username(username)
@@ -233,20 +223,22 @@ async def create_default_admin_user(database: Database):
         if not existing_user:
             logger.info(f"创建默认管理员用户: {username}")
 
-            password = default_user_config.get('password', 'admin123')
-            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            password = default_user_config.get("password", "admin123")
+            password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-            await database.create_user({
-                'username': username,
-                'email': default_user_config.get('email', 'admin@bill-analyser.local'),
-                'password_hash': password_hash,
-                'nickname': default_user_config.get('nickname', '管理员'),
-                'language': default_user_config.get('language', 'zh_Hans'),
-                'default_currency': default_user_config.get('default_currency', 'CNY'),
-                'first_day_of_week': default_user_config.get('first_day_of_week', 1),
-                'is_active': 1,
-                'email_verified': 1
-            })
+            await database.create_user(
+                {
+                    "username": username,
+                    "email": default_user_config.get("email", "admin@bill-analyser.local"),
+                    "password_hash": password_hash,
+                    "nickname": default_user_config.get("nickname", "管理员"),
+                    "language": default_user_config.get("language", "zh_Hans"),
+                    "default_currency": default_user_config.get("default_currency", "CNY"),
+                    "first_day_of_week": default_user_config.get("first_day_of_week", 1),
+                    "is_active": 1,
+                    "email_verified": 1,
+                }
+            )
 
             logger.info(f"[OK] 默认管理员用户创建成功: {username}")
             logger.warning(f"⚠️  默认密码: {password} - 请首次登录后立即修改!")
@@ -260,7 +252,7 @@ async def create_default_admin_user(database: Database):
 app = create_app()
 
 
-if __name__ == '__main__':
+def main():
     # 初始化服务
     asyncio.run(initialize())
 
@@ -271,9 +263,4 @@ if __name__ == '__main__':
     logger.info("API文档: http://127.0.0.1:5000/api/")
     logger.info("=" * 50)
 
-    app.run(
-        host='127.0.0.1',
-        port=5000,
-        debug=False,
-        threaded=True
-    )
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
