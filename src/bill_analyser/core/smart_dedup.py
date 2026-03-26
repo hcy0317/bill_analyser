@@ -61,6 +61,7 @@ from ..utils.logger import get_logger, log_method
 
 class DeduplicationType(Enum):
     """去重类型"""
+
     EXACT = "exact"  # 完全重复
     TRANSFER = "transfer"  # 转账配对
     PLATFORM_BANK = "platform_bank"  # 支付平台与银行重复
@@ -72,6 +73,7 @@ class DeduplicationType(Enum):
 @dataclass
 class DuplicateGroup:
     """重复账单组"""
+
     type: DeduplicationType
     bills: List[Dict[str, Any]]
     keep_bill: Dict[str, Any]  # 保留的账单
@@ -85,6 +87,7 @@ class DeduplicationResult:
 
     v6.42.1修正：恢复transfer_pairs字段用于转账配对
     """
+
     original_count: int  # 原始账单数
     kept_bills: List[Dict[str, Any]]  # 保留的账单
     removed_count: int  # 移除的账单数
@@ -104,18 +107,18 @@ class SmartDeduplicationEngine:
     """
 
     # 支付平台来源
-    PLATFORM_SOURCES = {'wechat', 'alipay'}
+    PLATFORM_SOURCES = {"wechat", "alipay"}
     # 银行来源
-    BANK_SOURCES = {'icbc', 'cmbc', 'abc', 'ccb'}
+    BANK_SOURCES = {"icbc", "cmbc", "abc", "ccb"}
 
     # 支付平台优先级（数值越小优先级越高）
     SOURCE_PRIORITY = {
-        'wechat': 1,
-        'alipay': 2,
-        'icbc': 10,
-        'cmbc': 10,
-        'abc': 10,
-        'ccb': 10,
+        "wechat": 1,
+        "alipay": 2,
+        "icbc": 10,
+        "cmbc": 10,
+        "abc": 10,
+        "ccb": 10,
     }
 
     # 时间容差（秒）- 所有去重机制统一使用30秒
@@ -129,14 +132,14 @@ class SmartDeduplicationEngine:
 
     def __init__(self):
         """初始化去重引擎"""
-        self.logger = get_logger('SmartDedup')
+        self.logger = get_logger("SmartDedup")
         # v6.57: 预编译日期格式列表
         self._date_formats = [
-            '%Y-%m-%d %H:%M:%S',
-            '%Y-%m-%d %H:%M',
-            '%Y-%m-%d',
-            '%Y/%m/%d %H:%M:%S',
-            '%Y/%m/%d',
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d",
         ]
         self.logger.info("[智能去重引擎] v6.57 初始化完成 - pandas向量化优化")
 
@@ -156,51 +159,45 @@ class SmartDeduplicationEngine:
 
         # 构建基础数据
         data = {
-            '_idx': list(range(len(bills))),
-            'date_str': [b.get('date', '') for b in bills],
-            'amount': [float(b.get('amount', 0)) for b in bills],
-            'source_account_id': [str(b.get('source_account_id', '')) for b in bills],
-            'counterparty': [str(b.get('counterparty', '')) for b in bills],
-            'payment_method': [str(b.get('payment_method', '')) for b in bills],
-            'description': [str(b.get('description', '')) for b in bills],
-            '_removed': [b.get('_removed', False) for b in bills],
-            '_parser_id': [b.get('_parser_id', '') or b.get('source', '') for b in bills],
-            '_template_id': [b.get('_template_id') for b in bills],
+            "_idx": list(range(len(bills))),
+            "date_str": [b.get("date", "") for b in bills],
+            "amount": [float(b.get("amount", 0)) for b in bills],
+            "source_account_id": [str(b.get("source_account_id", "")) for b in bills],
+            "counterparty": [str(b.get("counterparty", "")) for b in bills],
+            "payment_method": [str(b.get("payment_method", "")) for b in bills],
+            "description": [str(b.get("description", "")) for b in bills],
+            "_removed": [b.get("_removed", False) for b in bills],
+            "_parser_id": [b.get("_parser_id", "") or b.get("source", "") for b in bills],
+            "_template_id": [b.get("_template_id") for b in bills],
         }
         df = pd.DataFrame(data)
 
         # v6.60: 添加来源标识字段，优先使用 _parser_id，否则回退到 source_account_id
         # 这确保转账配对能够正确识别不同来源的账单
-        df['_source_identifier'] = df.apply(
-            lambda row: row['_parser_id'] if row['_parser_id'] else row['source_account_id'],
-            axis=1
+        df["_source_identifier"] = df.apply(
+            lambda row: row["_parser_id"] if row["_parser_id"] else row["source_account_id"], axis=1
         )
 
         # v6.57: 批量解析日期时间
-        df['datetime'] = pd.to_datetime(df['date_str'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+        df["datetime"] = pd.to_datetime(df["date_str"], format="%Y-%m-%d %H:%M:%S", errors="coerce")
 
         # 对于解析失败的，尝试其他格式
-        mask = df['datetime'].isna()
+        mask = df["datetime"].isna()
         if mask.any():
             for fmt in self._date_formats[1:]:
                 if not mask.any():
                     break
-                df.loc[mask, 'datetime'] = pd.to_datetime(
-                    df.loc[mask, 'date_str'], format=fmt, errors='coerce'
-                )
-                mask = df['datetime'].isna()
+                df.loc[mask, "datetime"] = pd.to_datetime(df.loc[mask, "date_str"], format=fmt, errors="coerce")
+                mask = df["datetime"].isna()
 
         # 添加辅助列
-        df['abs_amount'] = df['amount'].abs()
-        df['is_positive'] = df['amount'] >= 0
+        df["abs_amount"] = df["amount"].abs()
+        df["is_positive"] = df["amount"] >= 0
 
         return df
 
     def _find_time_close_pairs_vectorized(
-        self,
-        df1: pd.DataFrame,
-        df2: pd.DataFrame,
-        tolerance_seconds: int = 30
+        self, df1: pd.DataFrame, df2: pd.DataFrame, tolerance_seconds: int = 30
     ) -> pd.DataFrame:
         """使用向量化操作查找时间接近的账单对
 
@@ -213,41 +210,36 @@ class SmartDeduplicationEngine:
             pd.DataFrame: 匹配的账单对，包含 _idx_1 和 _idx_2 列
         """
         if df1.empty or df2.empty:
-            return pd.DataFrame(columns=['_idx_1', '_idx_2'])
+            return pd.DataFrame(columns=["_idx_1", "_idx_2"])
 
         # 过滤有效日期的账单
-        df1_valid = df1[df1['datetime'].notna() & ~df1['_removed']].copy()
-        df2_valid = df2[df2['datetime'].notna() & ~df2['_removed']].copy()
+        df1_valid = df1[df1["datetime"].notna() & ~df1["_removed"]].copy()
+        df2_valid = df2[df2["datetime"].notna() & ~df2["_removed"]].copy()
 
         if df1_valid.empty or df2_valid.empty:
-            return pd.DataFrame(columns=['_idx_1', '_idx_2'])
+            return pd.DataFrame(columns=["_idx_1", "_idx_2"])
 
         # 使用金额绝对值进行初步分组以减少比较次数
         # 按金额分桶（精确到0.01元）
-        df1_valid['amount_bucket'] = (df1_valid['abs_amount'] * 100).round().astype(int)
-        df2_valid['amount_bucket'] = (df2_valid['abs_amount'] * 100).round().astype(int)
+        df1_valid["amount_bucket"] = (df1_valid["abs_amount"] * 100).round().astype(int)
+        df2_valid["amount_bucket"] = (df2_valid["abs_amount"] * 100).round().astype(int)
 
         # 按日期分桶（精确到分钟）以减少比较范围
-        df1_valid['date_bucket'] = df1_valid['datetime'].dt.floor('1min')
-        df2_valid['date_bucket'] = df2_valid['datetime'].dt.floor('1min')
+        df1_valid["date_bucket"] = df1_valid["datetime"].dt.floor("1min")
+        df2_valid["date_bucket"] = df2_valid["datetime"].dt.floor("1min")
 
         # 在相同金额桶内进行合并
-        merged = df1_valid.merge(
-            df2_valid,
-            on='amount_bucket',
-            suffixes=('_1', '_2'),
-            how='inner'
-        )
+        merged = df1_valid.merge(df2_valid, on="amount_bucket", suffixes=("_1", "_2"), how="inner")
 
         if merged.empty:
-            return pd.DataFrame(columns=['_idx_1', '_idx_2'])
+            return pd.DataFrame(columns=["_idx_1", "_idx_2"])
 
         # v6.57: 向量化计算时间差
-        time_diff = (merged['datetime_1'] - merged['datetime_2']).abs()
+        time_diff = (merged["datetime_1"] - merged["datetime_2"]).abs()
         tolerance = pd.Timedelta(seconds=tolerance_seconds)
 
         # 筛选时间接近的配对
-        close_pairs = merged[time_diff <= tolerance][['_idx_1', '_idx_2']].copy()
+        close_pairs = merged[time_diff <= tolerance][["_idx_1", "_idx_2"]].copy()
 
         return close_pairs
 
@@ -276,9 +268,9 @@ class SmartDeduplicationEngine:
 
         # 为每条账单生成唯一标识和初始化标记
         for bill in bills:
-            bill['_dedup_id'] = self._generate_bill_hash(bill)
-            bill['_removed'] = False
-            bill['_merged_from'] = []
+            bill["_dedup_id"] = self._generate_bill_hash(bill)
+            bill["_removed"] = False
+            bill["_merged_from"] = []
 
         # 执行5种去重机制
         exact_groups = self._find_exact_duplicates(bills)
@@ -295,13 +287,13 @@ class SmartDeduplicationEngine:
         split_groups = self._find_split_bills(bills)
 
         # 收集保留的账单
-        kept_bills = [b for b in bills if not b.get('_removed', False)]
+        kept_bills = [b for b in bills if not b.get("_removed", False)]
 
         # 清理临时字段
         for bill in kept_bills:
-            bill.pop('_dedup_id', None)
-            bill.pop('_removed', None)
-            bill.pop('_merged_from', None)
+            bill.pop("_dedup_id", None)
+            bill.pop("_removed", None)
+            bill.pop("_merged_from", None)
 
         result = DeduplicationResult(
             original_count=original_count,
@@ -309,25 +301,25 @@ class SmartDeduplicationEngine:
             removed_count=original_count - len(kept_bills),
             duplicate_groups=duplicate_groups,
             transfer_pairs=transfer_pairs,
-            split_groups=split_groups
+            split_groups=split_groups,
         )
 
         # v6.62: 合并日志 - 一行汇总所有去重结果
         self.logger.info(
             "[去重] 原始=%d, 保留=%d | 完全=%d, 转账=%d, 平台银行=%d, 相似=%d, 分账=%d",
-            original_count, len(kept_bills), len(exact_groups), len(transfer_pairs),
-            len(platform_bank_groups), len(similar_groups), len(split_groups)
+            original_count,
+            len(kept_bills),
+            len(exact_groups),
+            len(transfer_pairs),
+            len(platform_bank_groups),
+            len(similar_groups),
+            len(split_groups),
         )
 
         return result
 
     @log_method
-    async def process_with_db(
-        self,
-        bills: List[Dict[str, Any]],
-        db,
-        user_id: int = 1
-    ) -> DeduplicationResult:
+    async def process_with_db(self, bills: List[Dict[str, Any]], db, user_id: int = 1) -> DeduplicationResult:
         """
         处理账单去重（包含数据库对比）
 
@@ -354,9 +346,9 @@ class SmartDeduplicationEngine:
 
         # 为每条账单生成唯一标识和初始化标记
         for bill in bills:
-            bill['_dedup_id'] = self._generate_bill_hash(bill)
-            bill['_removed'] = False
-            bill['_merged_from'] = []
+            bill["_dedup_id"] = self._generate_bill_hash(bill)
+            bill["_removed"] = False
+            bill["_merged_from"] = []
 
         # 执行6种去重机制
         exact_groups = self._find_exact_duplicates(bills)
@@ -376,20 +368,18 @@ class SmartDeduplicationEngine:
         duplicate_groups.extend(db_duplicate_groups)
 
         # v6.88: 跨批次转账配对（在数据库中查找金额相反的已有账单）
-        cross_transfer_pairs = await self._find_cross_batch_transfer_pairs(
-            bills, db, user_id
-        )
+        cross_transfer_pairs = await self._find_cross_batch_transfer_pairs(bills, db, user_id)
         transfer_pairs.extend(cross_transfer_pairs)
 
         # 收集保留的账单
-        kept_bills = [b for b in bills if not b.get('_removed', False)]
+        kept_bills = [b for b in bills if not b.get("_removed", False)]
 
         # 清理临时字段
         for bill in kept_bills:
-            bill.pop('_dedup_id', None)
-            bill.pop('_removed', None)
-            bill.pop('_merged_from', None)
-            bill.pop('_duplicate_of_db_id', None)
+            bill.pop("_dedup_id", None)
+            bill.pop("_removed", None)
+            bill.pop("_merged_from", None)
+            bill.pop("_duplicate_of_db_id", None)
 
         result = DeduplicationResult(
             original_count=original_count,
@@ -397,15 +387,21 @@ class SmartDeduplicationEngine:
             removed_count=original_count - len(kept_bills),
             duplicate_groups=duplicate_groups,
             transfer_pairs=transfer_pairs,
-            split_groups=split_groups
+            split_groups=split_groups,
         )
 
         # v6.62: 合并日志 - 一行汇总所有去重结果
         self.logger.info(
             "[去重+DB] 原始=%d, 保留=%d | 完全=%d, 转账=%d(+跨批%d), 平台银行=%d, 相似=%d, 分账=%d, DB重复=%d",
-            original_count, len(kept_bills), len(exact_groups), len(transfer_pairs) - len(cross_transfer_pairs),
+            original_count,
+            len(kept_bills),
+            len(exact_groups),
+            len(transfer_pairs) - len(cross_transfer_pairs),
             len(cross_transfer_pairs),
-            len(platform_bank_groups), len(similar_groups), len(split_groups), len(db_duplicate_groups)
+            len(platform_bank_groups),
+            len(similar_groups),
+            len(split_groups),
+            len(db_duplicate_groups),
         )
 
         return result
@@ -422,13 +418,13 @@ class SmartDeduplicationEngine:
             str: 12位哈希值
         """
         key_fields = [
-            str(bill.get('date', '')),
-            str(bill.get('amount', 0)),
-            str(bill.get('counterparty', '')),
-            str(bill.get('description', '')),
+            str(bill.get("date", "")),
+            str(bill.get("amount", 0)),
+            str(bill.get("counterparty", "")),
+            str(bill.get("description", "")),
         ]
-        key_str = '|'.join(key_fields)
-        return hashlib.md5(key_str.encode('utf-8')).hexdigest()[:12]
+        key_str = "|".join(key_fields)
+        return hashlib.md5(key_str.encode("utf-8")).hexdigest()[:12]
 
     def _parse_datetime(self, date_str: str) -> Optional[datetime]:
         """解析日期时间字符串
@@ -440,11 +436,11 @@ class SmartDeduplicationEngine:
             Optional[datetime]: 解析后的日期时间，失败返回None
         """
         formats = [
-            '%Y-%m-%d %H:%M:%S',
-            '%Y-%m-%d %H:%M',
-            '%Y-%m-%d',
-            '%Y/%m/%d %H:%M:%S',
-            '%Y/%m/%d',
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d",
         ]
         for fmt in formats:
             try:
@@ -472,7 +468,10 @@ class SmartDeduplicationEngine:
         if is_close or log_always:
             self.logger.debug(
                 "[时间比对] %s vs %s, 差=%.1f秒, 结果=%s",
-                dt1.strftime('%H:%M:%S'), dt2.strftime('%H:%M:%S'), diff, is_close
+                dt1.strftime("%H:%M:%S"),
+                dt2.strftime("%H:%M:%S"),
+                diff,
+                is_close,
             )
         return is_close
 
@@ -499,8 +498,7 @@ class SmartDeduplicationEngine:
         # v6.57: 只在匹配成功时记录日志
         if result or log_always:
             self.logger.debug(
-                "[金额比对] %.2f vs %.2f, 绝对值相等=%s, 符号相同=%s, 结果=%s",
-                amt1, amt2, abs_equal, same_sign, result
+                "[金额比对] %.2f vs %.2f, 绝对值相等=%s, 符号相同=%s, 结果=%s", amt1, amt2, abs_equal, same_sign, result
             )
         return result
 
@@ -530,7 +528,11 @@ class SmartDeduplicationEngine:
         if result or log_always:
             self.logger.debug(
                 "[金额相反比对] %.2f vs %.2f, 绝对值相等=%s, 符号相反=%s, 结果=%s",
-                amt1, amt2, abs_equal, opposite_sign, result
+                amt1,
+                amt2,
+                abs_equal,
+                opposite_sign,
+                result,
             )
         return result
 
@@ -547,8 +549,8 @@ class SmartDeduplicationEngine:
             float: 相似度 0.0-1.0
         """
         # 标准化：去除空白、转小写
-        s1 = str(s1 or '').strip().lower()
-        s2 = str(s2 or '').strip().lower()
+        s1 = str(s1 or "").strip().lower()
+        s2 = str(s2 or "").strip().lower()
 
         # 如果都为空，认为相似
         if not s1 and not s2:
@@ -570,11 +572,7 @@ class SmartDeduplicationEngine:
         """
         return self.SOURCE_PRIORITY.get(source_id, 100)
 
-    def _merge_bill_fields(
-        self,
-        primary_bill: Dict[str, Any],
-        secondary_bill: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _merge_bill_fields(self, primary_bill: Dict[str, Any], secondary_bill: Dict[str, Any]) -> Dict[str, Any]:
         """合并两个账单的字段
 
         v6.47更新：
@@ -591,45 +589,44 @@ class SmartDeduplicationEngine:
             Dict: 合并后的账单
         """
         merged = primary_bill.copy()
-        merge_fields = ['counterparty', 'payment_method', 'description']
+        merge_fields = ["counterparty", "payment_method", "description"]
 
         for field in merge_fields:
-            merged[field] = self._merge_field_values(
-                primary_bill.get(field, ''),
-                secondary_bill.get(field, '')
-            )
+            merged[field] = self._merge_field_values(primary_bill.get(field, ""), secondary_bill.get(field, ""))
 
         # 记录合并来源
-        if '_merged_from' not in merged:
-            merged['_merged_from'] = []
-        merged['_merged_from'].append({
-            'source': secondary_bill.get('source_account_id'),
-            'date': secondary_bill.get('date'),
-            'amount': secondary_bill.get('amount'),
-            '_template_id': secondary_bill.get('_template_id')
-        })
+        if "_merged_from" not in merged:
+            merged["_merged_from"] = []
+        merged["_merged_from"].append(
+            {
+                "source": secondary_bill.get("source_account_id"),
+                "date": secondary_bill.get("date"),
+                "amount": secondary_bill.get("amount"),
+                "_template_id": secondary_bill.get("_template_id"),
+            }
+        )
 
         # v6.47: 记录合并的模板ID
-        if '_merged_template_ids' not in merged:
-            merged['_merged_template_ids'] = []
-        if secondary_bill.get('_template_id'):
-            merged['_merged_template_ids'].append(secondary_bill.get('_template_id'))
+        if "_merged_template_ids" not in merged:
+            merged["_merged_template_ids"] = []
+        if secondary_bill.get("_template_id"):
+            merged["_merged_template_ids"].append(secondary_bill.get("_template_id"))
 
         # v6.69: 使用更有意义的日志标识，避免显示空值
         primary_id = (
-            primary_bill.get('_parser_id') or
-            primary_bill.get('source_account_id') or
-            primary_bill.get('date', '')[:10]
+            primary_bill.get("_parser_id") or primary_bill.get("source_account_id") or primary_bill.get("date", "")[:10]
         )
         secondary_id = (
-            secondary_bill.get('_parser_id') or
-            secondary_bill.get('source_account_id') or
-            secondary_bill.get('date', '')[:10]
+            secondary_bill.get("_parser_id")
+            or secondary_bill.get("source_account_id")
+            or secondary_bill.get("date", "")[:10]
         )
         self.logger.debug(
             "[字段合并] 主=%s (金额=%.2f), 次=%s (金额=%.2f)",
-            primary_id, float(primary_bill.get('amount', 0)),
-            secondary_id, float(secondary_bill.get('amount', 0))
+            primary_id,
+            float(primary_bill.get("amount", 0)),
+            secondary_id,
+            float(secondary_bill.get("amount", 0)),
         )
 
         return merged
@@ -650,12 +647,12 @@ class SmartDeduplicationEngine:
         Returns:
             str: 合并后的字符串
         """
-        val1 = str(value1 or '').strip()
-        val2 = str(value2 or '').strip()
+        val1 = str(value1 or "").strip()
+        val2 = str(value2 or "").strip()
 
         # 空值处理
         if not val1 and not val2:
-            return ''
+            return ""
         if not val1:
             return val2
         if not val2:
@@ -673,8 +670,8 @@ class SmartDeduplicationEngine:
 
         # 合并并去重
         # 将已有的和新的都按"|"拆分
-        parts1 = [p.strip() for p in val1.split('|') if p.strip()]
-        parts2 = [p.strip() for p in val2.split('|') if p.strip()]
+        parts1 = [p.strip() for p in val1.split("|") if p.strip()]
+        parts2 = [p.strip() for p in val2.split("|") if p.strip()]
 
         # 使用有序去重
         seen = set()
@@ -695,7 +692,7 @@ class SmartDeduplicationEngine:
                 unique_parts.append(part)
                 seen.add(part)
 
-        return ' | '.join(unique_parts)
+        return " | ".join(unique_parts)
 
     # ==================== 去重方法1：完全重复 ====================
 
@@ -714,9 +711,9 @@ class SmartDeduplicationEngine:
         hash_map: Dict[str, List[Dict[str, Any]]] = {}
 
         for bill in bills:
-            if bill.get('_removed'):
+            if bill.get("_removed"):
                 continue
-            hash_val = bill['_dedup_id']
+            hash_val = bill["_dedup_id"]
             if hash_val not in hash_map:
                 hash_map[hash_val] = []
             hash_map[hash_val].append(bill)
@@ -724,32 +721,32 @@ class SmartDeduplicationEngine:
         for dup_bills in hash_map.values():
             if len(dup_bills) > 1:
                 # 按来源优先级排序，保留优先级最高的
-                dup_bills.sort(
-                    key=lambda b: self._get_source_priority(b.get('source_account_id', ''))
-                )
+                dup_bills.sort(key=lambda b: self._get_source_priority(b.get("source_account_id", "")))
                 keep_bill = dup_bills[0]
                 remove_bills = dup_bills[1:]
 
                 for bill in remove_bills:
-                    bill['_removed'] = True
+                    bill["_removed"] = True
 
                 # v6.69: 使用更有意义的日志标识
                 keep_id = (
-                    keep_bill.get('_parser_id') or
-                    keep_bill.get('source_account_id') or
-                    keep_bill.get('date', '')[:10]
+                    keep_bill.get("_parser_id") or keep_bill.get("source_account_id") or keep_bill.get("date", "")[:10]
                 )
-                groups.append(DuplicateGroup(
-                    type=DeduplicationType.EXACT,
-                    bills=dup_bills,
-                    keep_bill=keep_bill,
-                    remove_bills=remove_bills,
-                    reason=f"完全重复，保留 {keep_id} 来源"
-                ))
+                groups.append(
+                    DuplicateGroup(
+                        type=DeduplicationType.EXACT,
+                        bills=dup_bills,
+                        keep_bill=keep_bill,
+                        remove_bills=remove_bills,
+                        reason=f"完全重复，保留 {keep_id} 来源",
+                    )
+                )
 
                 self.logger.debug(
                     "[完全重复] 保留=%s (金额=%.2f), 移除%d条",
-                    keep_id, float(keep_bill.get('amount', 0)), len(remove_bills)
+                    keep_id,
+                    float(keep_bill.get("amount", 0)),
+                    len(remove_bills),
                 )
 
         return groups
@@ -763,26 +760,23 @@ class SmartDeduplicationEngine:
         而非 source_account_id（已匹配的账户ID如 1, 2, 3...）
         """
         # 优先使用 _parser_id（v6.48新增字段）
-        parser_id = bill.get('_parser_id', '')
+        parser_id = bill.get("_parser_id", "")
         if parser_id:
             return parser_id.lower()
 
         # 兼容旧字段名
-        source = bill.get('source', '')
+        source = bill.get("source", "")
         if source:
             return source.lower()
 
         # 如果source_account_id是字符串形式的解析器标识，也支持
-        source_id = str(bill.get('source_account_id', ''))
+        source_id = str(bill.get("source_account_id", ""))
         if source_id.lower() in self.PLATFORM_SOURCES or source_id.lower() in self.BANK_SOURCES:
             return source_id.lower()
 
-        return ''
+        return ""
 
-    def _find_platform_bank_duplicates(
-        self,
-        bills: List[Dict[str, Any]]
-    ) -> List[DuplicateGroup]:
+    def _find_platform_bank_duplicates(self, bills: List[Dict[str, Any]]) -> List[DuplicateGroup]:
         """查找支付平台与银行的重复账单
 
         v6.57优化: 使用pandas向量化操作替代双重循环
@@ -806,19 +800,16 @@ class SmartDeduplicationEngine:
         bank_bills = []
 
         for i, b in enumerate(bills):
-            if b.get('_removed'):
+            if b.get("_removed"):
                 continue
             source_type = self._get_source_type(b)
-            b['_original_idx'] = i  # 保存原始索引
+            b["_original_idx"] = i  # 保存原始索引
             if source_type in self.PLATFORM_SOURCES:
                 platform_bills.append(b)
             elif source_type in self.BANK_SOURCES:
                 bank_bills.append(b)
 
-        self.logger.debug(
-            "[平台-银行去重] 平台账单=%d, 银行账单=%d",
-            len(platform_bills), len(bank_bills)
-        )
+        self.logger.debug("[平台-银行去重] 平台账单=%d, 银行账单=%d", len(platform_bills), len(bank_bills))
 
         if not platform_bills or not bank_bills:
             return groups
@@ -832,16 +823,14 @@ class SmartDeduplicationEngine:
             return groups
 
         # 筛选有效日期
-        df_platform = df_platform[df_platform['datetime'].notna()].copy()
-        df_bank = df_bank[df_bank['datetime'].notna()].copy()
+        df_platform = df_platform[df_platform["datetime"].notna()].copy()
+        df_bank = df_bank[df_bank["datetime"].notna()].copy()
 
         if df_platform.empty or df_bank.empty:
             return groups
 
         # v6.57: 使用向量化查找时间接近的配对
-        time_close_pairs = self._find_time_close_pairs_vectorized(
-            df_platform, df_bank, self.TIME_TOLERANCE
-        )
+        time_close_pairs = self._find_time_close_pairs_vectorized(df_platform, df_bank, self.TIME_TOLERANCE)
 
         if time_close_pairs.empty:
             self.logger.debug("[平台-银行去重] 无时间接近的配对")
@@ -849,27 +838,26 @@ class SmartDeduplicationEngine:
 
         # 合并原始数据以进行金额比较
         time_close_pairs = time_close_pairs.merge(
-            df_platform[['_idx', 'amount', 'is_positive']].rename(
-                columns={'_idx': '_idx_1', 'amount': 'amt_p', 'is_positive': 'pos_p'}
+            df_platform[["_idx", "amount", "is_positive"]].rename(
+                columns={"_idx": "_idx_1", "amount": "amt_p", "is_positive": "pos_p"}
             ),
-            on='_idx_1'
+            on="_idx_1",
         ).merge(
-            df_bank[['_idx', 'amount', 'is_positive']].rename(
-                columns={'_idx': '_idx_2', 'amount': 'amt_b', 'is_positive': 'pos_b'}
+            df_bank[["_idx", "amount", "is_positive"]].rename(
+                columns={"_idx": "_idx_2", "amount": "amt_b", "is_positive": "pos_b"}
             ),
-            on='_idx_2'
+            on="_idx_2",
         )
 
         # v6.57: 向量化金额比较
         # 条件2：金额绝对值相等且符号相同
-        time_close_pairs['abs_amt_p'] = time_close_pairs['amt_p'].abs()
-        time_close_pairs['abs_amt_b'] = time_close_pairs['amt_b'].abs()
-        time_close_pairs['amount_match'] = (
-            (np.abs(time_close_pairs['abs_amt_p'] - time_close_pairs['abs_amt_b']) <= self.AMOUNT_TOLERANCE) &
-            (time_close_pairs['pos_p'] == time_close_pairs['pos_b'])
-        )
+        time_close_pairs["abs_amt_p"] = time_close_pairs["amt_p"].abs()
+        time_close_pairs["abs_amt_b"] = time_close_pairs["amt_b"].abs()
+        time_close_pairs["amount_match"] = (
+            np.abs(time_close_pairs["abs_amt_p"] - time_close_pairs["abs_amt_b"]) <= self.AMOUNT_TOLERANCE
+        ) & (time_close_pairs["pos_p"] == time_close_pairs["pos_b"])
 
-        matched_pairs = time_close_pairs[time_close_pairs['amount_match']]
+        matched_pairs = time_close_pairs[time_close_pairs["amount_match"]]
 
         if matched_pairs.empty:
             self.logger.debug("[平台-银行去重] 无金额匹配的配对")
@@ -881,8 +869,8 @@ class SmartDeduplicationEngine:
         matched_bank_indices: Set[int] = set()
 
         for _, row in matched_pairs.iterrows():
-            p_idx = int(row['_idx_1'])
-            b_idx = int(row['_idx_2'])
+            p_idx = int(row["_idx_1"])
+            b_idx = int(row["_idx_2"])
 
             if b_idx in matched_bank_indices:
                 continue
@@ -890,48 +878,50 @@ class SmartDeduplicationEngine:
             p_bill = platform_bills[p_idx]
             b_bill = bank_bills[b_idx]
 
-            if p_bill.get('_removed') or b_bill.get('_removed'):
+            if p_bill.get("_removed") or b_bill.get("_removed"):
                 continue
 
             matched_bank_indices.add(b_idx)
-            b_bill['_removed'] = True
+            b_bill["_removed"] = True
 
             # 合并字段
             merged = self._merge_bill_fields(p_bill, b_bill)
             for key, value in merged.items():
-                if not key.startswith('_'):
+                if not key.startswith("_"):
                     p_bill[key] = value
 
             # v6.48修复: 设置去重类型和合并的模板ID列表
-            p_bill['_dedup_type'] = 'platform_bank'
+            p_bill["_dedup_type"] = "platform_bank"
             merged_ids = []
-            if b_bill.get('_template_id'):
-                merged_ids.append(b_bill.get('_template_id'))
-            if p_bill.get('_merged_template_ids'):
-                merged_ids.extend(list(p_bill.get('_merged_template_ids', [])))
-            if b_bill.get('_merged_template_ids'):
-                merged_ids.extend(list(b_bill.get('_merged_template_ids', [])))
+            if b_bill.get("_template_id"):
+                merged_ids.append(b_bill.get("_template_id"))
+            if p_bill.get("_merged_template_ids"):
+                merged_ids.extend(list(p_bill.get("_merged_template_ids", [])))
+            if b_bill.get("_merged_template_ids"):
+                merged_ids.extend(list(b_bill.get("_merged_template_ids", [])))
             if merged_ids:
-                p_bill['_merged_template_ids'] = merged_ids
+                p_bill["_merged_template_ids"] = merged_ids
 
-            p_amt = float(p_bill.get('amount', 0))
-            groups.append(DuplicateGroup(
-                type=DeduplicationType.PLATFORM_BANK,
-                bills=[p_bill, b_bill],
-                keep_bill=p_bill,
-                remove_bills=[b_bill],
-                reason=(
-                    f"支付平台({self._get_source_type(p_bill)})与"
-                    f"银行({self._get_source_type(b_bill)})重复，"
-                    f"金额={p_amt:.2f}，保留平台账单"
+            p_amt = float(p_bill.get("amount", 0))
+            groups.append(
+                DuplicateGroup(
+                    type=DeduplicationType.PLATFORM_BANK,
+                    bills=[p_bill, b_bill],
+                    keep_bill=p_bill,
+                    remove_bills=[b_bill],
+                    reason=(
+                        f"支付平台({self._get_source_type(p_bill)})与"
+                        f"银行({self._get_source_type(b_bill)})重复，"
+                        f"金额={p_amt:.2f}，保留平台账单"
+                    ),
                 )
-            ))
+            )
 
             self.logger.debug(
                 "[平台-银行去重] 匹配: %s ↔ %s, 金额=%.2f",
                 self._get_source_type(p_bill),
                 self._get_source_type(b_bill),
-                p_amt
+                p_amt,
             )
 
         return groups
@@ -958,9 +948,9 @@ class SmartDeduplicationEngine:
         groups: List[DuplicateGroup] = []
 
         # 只处理未被移除的账单
-        active_bills = [b for b in bills if not b.get('_removed')]
+        active_bills = [b for b in bills if not b.get("_removed")]
         for i, b in enumerate(active_bills):
-            b['_temp_idx'] = i
+            b["_temp_idx"] = i
 
         n = len(active_bills)
         self.logger.debug("[类似账单去重] 活跃账单数: %d", n)
@@ -977,11 +967,11 @@ class SmartDeduplicationEngine:
         TIME_BUCKET_SECONDS = self.TIME_TOLERANCE
 
         for i, bill in enumerate(active_bills):
-            dt = self._parse_datetime(bill.get('date', ''))
+            dt = self._parse_datetime(bill.get("date", ""))
             if not dt:
                 continue
 
-            amt = float(bill.get('amount', 0))
+            amt = float(bill.get("amount", 0))
             abs_amt = abs(amt)
             is_positive = amt >= 0
 
@@ -1010,8 +1000,7 @@ class SmartDeduplicationEngine:
 
             # 桶内两两配对
             for i, idx1 in enumerate(bucket_indices):
-                for idx2 in bucket_indices[i + 1:]:
-
+                for idx2 in bucket_indices[i + 1 :]:
                     # 确保 idx1 < idx2 避免重复
                     pair = (min(idx1, idx2), max(idx1, idx2))
                     if pair in seen_pairs:
@@ -1022,22 +1011,22 @@ class SmartDeduplicationEngine:
                     bill2 = active_bills[pair[1]]
 
                     # 条件4: 来源不同
-                    source1 = self._get_source_type(bill1) or str(bill1.get('source_account_id', ''))
-                    source2 = self._get_source_type(bill2) or str(bill2.get('source_account_id', ''))
+                    source1 = self._get_source_type(bill1) or str(bill1.get("source_account_id", ""))
+                    source2 = self._get_source_type(bill2) or str(bill2.get("source_account_id", ""))
                     if source1 == source2 or not source1 or not source2:
                         continue
 
                     # 条件1: 时间30秒内（精确验证）
-                    dt1 = self._parse_datetime(bill1.get('date', ''))
-                    dt2 = self._parse_datetime(bill2.get('date', ''))
+                    dt1 = self._parse_datetime(bill1.get("date", ""))
+                    dt2 = self._parse_datetime(bill2.get("date", ""))
                     if not dt1 or not dt2:
                         continue
                     if abs((dt1 - dt2).total_seconds()) > self.TIME_TOLERANCE:
                         continue
 
                     # 条件2: 金额绝对值相等且方向相同（精确验证）
-                    amt1 = float(bill1.get('amount', 0))
-                    amt2 = float(bill2.get('amount', 0))
+                    amt1 = float(bill1.get("amount", 0))
+                    amt2 = float(bill2.get("amount", 0))
                     if abs(abs(amt1) - abs(amt2)) > self.AMOUNT_TOLERANCE:
                         continue
                     if (amt1 >= 0) != (amt2 >= 0):
@@ -1045,8 +1034,7 @@ class SmartDeduplicationEngine:
 
                     candidate_pairs.append(pair)
 
-        self.logger.debug("[类似账单去重] 时间+金额候选数: %d (分桶数=%d)",
-                          len(candidate_pairs), len(buckets))
+        self.logger.debug("[类似账单去重] 时间+金额候选数: %d (分桶数=%d)", len(candidate_pairs), len(buckets))
 
         # 条件3: 相似度计算（需要逐对计算）
         matched: Set[int] = set()
@@ -1058,14 +1046,14 @@ class SmartDeduplicationEngine:
             bill1 = active_bills[idx1]
             bill2 = active_bills[idx2]
 
-            if bill1.get('_removed') or bill2.get('_removed'):
+            if bill1.get("_removed") or bill2.get("_removed"):
                 continue
 
             # 计算相似度
-            cp1 = str(bill1.get('counterparty', ''))
-            pm1 = str(bill1.get('payment_method', ''))
-            cp2 = str(bill2.get('counterparty', ''))
-            pm2 = str(bill2.get('payment_method', ''))
+            cp1 = str(bill1.get("counterparty", ""))
+            pm1 = str(bill1.get("payment_method", ""))
+            cp2 = str(bill2.get("counterparty", ""))
+            pm2 = str(bill2.get("payment_method", ""))
 
             cp_similarity = self._calculate_similarity(cp1, cp2)
             pm_similarity = self._calculate_similarity(pm1, pm2)
@@ -1077,8 +1065,8 @@ class SmartDeduplicationEngine:
             matched.add(idx1)
             matched.add(idx2)
 
-            source1 = str(bill1.get('source_account_id', ''))
-            source2 = str(bill2.get('source_account_id', ''))
+            source1 = str(bill1.get("source_account_id", ""))
+            source2 = str(bill2.get("source_account_id", ""))
 
             # 确定主账单和次账单（按优先级）
             if self._get_source_priority(source1) <= self._get_source_priority(source2):
@@ -1089,47 +1077,53 @@ class SmartDeduplicationEngine:
             # 合并字段
             merged = self._merge_bill_fields(primary_bill, secondary_bill)
             for key, value in merged.items():
-                if not key.startswith('_'):
+                if not key.startswith("_"):
                     primary_bill[key] = value
 
-            secondary_bill['_removed'] = True
+            secondary_bill["_removed"] = True
 
             # v6.48修复: 设置去重类型和合并的模板ID列表
-            primary_bill['_dedup_type'] = 'similar'
+            primary_bill["_dedup_type"] = "similar"
             merged_ids = []
-            if secondary_bill.get('_template_id'):
-                merged_ids.append(secondary_bill.get('_template_id'))
-            if primary_bill.get('_merged_template_ids'):
-                merged_ids.extend(list(primary_bill.get('_merged_template_ids', [])))
-            if secondary_bill.get('_merged_template_ids'):
-                merged_ids.extend(list(secondary_bill.get('_merged_template_ids', [])))
+            if secondary_bill.get("_template_id"):
+                merged_ids.append(secondary_bill.get("_template_id"))
+            if primary_bill.get("_merged_template_ids"):
+                merged_ids.extend(list(primary_bill.get("_merged_template_ids", [])))
+            if secondary_bill.get("_merged_template_ids"):
+                merged_ids.extend(list(secondary_bill.get("_merged_template_ids", [])))
             if merged_ids:
-                primary_bill['_merged_template_ids'] = merged_ids
+                primary_bill["_merged_template_ids"] = merged_ids
 
             similarity_used = max(cp_similarity, pm_similarity)
-            similarity_type = 'counterparty' if cp_similarity >= pm_similarity else 'payment_method'
+            similarity_type = "counterparty" if cp_similarity >= pm_similarity else "payment_method"
 
-            groups.append(DuplicateGroup(
-                type=DeduplicationType.SIMILAR,
-                bills=[primary_bill, secondary_bill],
-                keep_bill=primary_bill,
-                remove_bills=[secondary_bill],
-                reason=(
-                    f"类似账单去重: {similarity_type}相似度={similarity_used:.0%}, "
-                    f"保留{primary_bill.get('source_account_id')}账单"
+            groups.append(
+                DuplicateGroup(
+                    type=DeduplicationType.SIMILAR,
+                    bills=[primary_bill, secondary_bill],
+                    keep_bill=primary_bill,
+                    remove_bills=[secondary_bill],
+                    reason=(
+                        f"类似账单去重: {similarity_type}相似度={similarity_used:.0%}, "
+                        f"保留{primary_bill.get('source_account_id')}账单"
+                    ),
                 )
-            ))
+            )
 
-            amt1 = float(bill1.get('amount', 0))
+            amt1 = float(bill1.get("amount", 0))
             self.logger.debug(
                 "[类似账单去重] 匹配: %s ↔ %s, 金额=%.2f, %s相似度=%.0f%%",
-                source1, source2, amt1, similarity_type, similarity_used * 100
+                source1,
+                source2,
+                amt1,
+                similarity_type,
+                similarity_used * 100,
             )
 
         # 清理临时索引
         for b in active_bills:
-            if '_temp_idx' in b:
-                del b['_temp_idx']
+            if "_temp_idx" in b:
+                del b["_temp_idx"]
 
         return groups
 
@@ -1157,12 +1151,11 @@ class SmartDeduplicationEngine:
 
         # 只处理未被移除的账单
         active_bills = [
-            (i, b) for i, b in enumerate(bills)
-            if not b.get('_removed') and abs(float(b.get('amount', 0))) > 0
+            (i, b) for i, b in enumerate(bills) if not b.get("_removed") and abs(float(b.get("amount", 0))) > 0
         ]
 
         # 按时间排序
-        active_bills.sort(key=lambda x: x[1].get('date', ''))
+        active_bills.sort(key=lambda x: x[1].get("date", ""))
 
         n = len(active_bills)
         self.logger.debug("[分账单去重] 活跃账单数: %d", n)
@@ -1171,9 +1164,9 @@ class SmartDeduplicationEngine:
             if idx1 in matched:
                 continue
 
-            dt1 = self._parse_datetime(bill1.get('date', ''))
-            amt1 = float(bill1.get('amount', 0))
-            source1 = str(bill1.get('source_account_id', ''))
+            dt1 = self._parse_datetime(bill1.get("date", ""))
+            amt1 = float(bill1.get("amount", 0))
+            source1 = str(bill1.get("source_account_id", ""))
 
             if not dt1 or abs(amt1) < 10:  # 忽略小额账单
                 continue
@@ -1186,9 +1179,9 @@ class SmartDeduplicationEngine:
                 if idx2 in matched:
                     continue
 
-                dt2 = self._parse_datetime(bill2.get('date', ''))
-                amt2 = float(bill2.get('amount', 0))
-                source2 = str(bill2.get('source_account_id', ''))
+                dt2 = self._parse_datetime(bill2.get("date", ""))
+                amt2 = float(bill2.get("amount", 0))
+                source2 = str(bill2.get("source_account_id", ""))
 
                 if not dt2:
                     continue
@@ -1228,45 +1221,46 @@ class SmartDeduplicationEngine:
                     matched.add(idx2)
 
                 # 移除总账单，保留分账单
-                bill1['_removed'] = True
+                bill1["_removed"] = True
 
                 # v6.48修复: 为每个保留的分账单设置去重类型
                 split_bill_list = [c[1] for c in candidate_bills]
-                total_bill_template_id = bill1.get('_template_id')
+                total_bill_template_id = bill1.get("_template_id")
                 for split_bill in split_bill_list:
-                    split_bill['_dedup_type'] = 'split'
+                    split_bill["_dedup_type"] = "split"
                     if total_bill_template_id:
-                        merged_ids = split_bill.get('_merged_template_ids', [])
+                        merged_ids = split_bill.get("_merged_template_ids", [])
                         if not merged_ids:
                             merged_ids = []
                         merged_ids.append(total_bill_template_id)
-                        split_bill['_merged_template_ids'] = merged_ids
+                        split_bill["_merged_template_ids"] = merged_ids
 
-                groups.append({
-                    'total_bill': bill1,
-                    'split_bills': split_bill_list,
-                    'total_amount': amt1,
-                    'source_total': source1,
-                    'source_splits': candidate_source,
-                    'reason': (
-                        f"总账单({source1}, {amt1:.2f})拆分为"
-                        f"{len(candidate_bills)}笔分账单({candidate_source})"
-                    )
-                })
+                groups.append(
+                    {
+                        "total_bill": bill1,
+                        "split_bills": split_bill_list,
+                        "total_amount": amt1,
+                        "source_total": source1,
+                        "source_splits": candidate_source,
+                        "reason": (
+                            f"总账单({source1}, {amt1:.2f})拆分为{len(candidate_bills)}笔分账单({candidate_source})"
+                        ),
+                    }
+                )
 
                 self.logger.debug(
                     "[分账单去重] 总额=%.2f (%s) -> %d笔分账单 (%s)",
-                    amt1, source1, len(candidate_bills), candidate_source
+                    amt1,
+                    source1,
+                    len(candidate_bills),
+                    candidate_source,
                 )
 
         return groups
 
     # ==================== 转账配对方法 ====================
 
-    def _find_transfer_pairs(
-        self,
-        bills: List[Dict[str, Any]]
-    ) -> List[Tuple[Dict, Dict]]:
+    def _find_transfer_pairs(self, bills: List[Dict[str, Any]]) -> List[Tuple[Dict, Dict]]:
         """识别账户间转账
 
         v6.57优化: 使用pandas进行初步筛选，减少双重循环开销
@@ -1292,13 +1286,10 @@ class SmartDeduplicationEngine:
         pairs: List[Tuple[Dict, Dict]] = []
 
         # 过滤活跃账单（未被移除且金额不为0）
-        active_bills = [
-            b for b in bills
-            if not b.get('_removed') and abs(float(b.get('amount', 0))) > 0.001
-        ]
+        active_bills = [b for b in bills if not b.get("_removed") and abs(float(b.get("amount", 0))) > 0.001]
         # 添加临时索引
         for i, b in enumerate(active_bills):
-            b['_temp_idx'] = i
+            b["_temp_idx"] = i
 
         n = len(active_bills)
         self.logger.debug("[转账配对] 活跃账单数: %d", n)
@@ -1308,23 +1299,21 @@ class SmartDeduplicationEngine:
 
         # v6.57: 使用pandas构建DataFrame
         df = self._bills_to_dataframe(active_bills)
-        df = df[df['datetime'].notna()].copy()
+        df = df[df["datetime"].notna()].copy()
 
         if len(df) < 2:
             return pairs
 
         # 分离正负金额账单（转账需要一正一负）
-        df_positive = df[df['amount'] >= 0].copy()
-        df_negative = df[df['amount'] < 0].copy()
+        df_positive = df[df["amount"] >= 0].copy()
+        df_negative = df[df["amount"] < 0].copy()
 
         if df_positive.empty or df_negative.empty:
             self.logger.debug("[转账配对] 无正/负金额配对候选")
             return pairs
 
         # v6.57: 使用向量化查找时间接近的配对
-        time_close_pairs = self._find_time_close_pairs_vectorized(
-            df_positive, df_negative, self.TIME_TOLERANCE
-        )
+        time_close_pairs = self._find_time_close_pairs_vectorized(df_positive, df_negative, self.TIME_TOLERANCE)
 
         if time_close_pairs.empty:
             self.logger.debug("[转账配对] 无时间接近的配对")
@@ -1335,15 +1324,15 @@ class SmartDeduplicationEngine:
         # 这确保无论是阶段2导入场景（有 _parser_id）还是测试场景（只有 source_account_id）
         # 都能正确识别不同来源的账单
         time_close_pairs = time_close_pairs.merge(
-            df_positive[['_idx', 'amount', '_source_identifier']].rename(
-                columns={'_idx': '_idx_1', 'amount': 'amt_pos', '_source_identifier': 'src_pos'}
+            df_positive[["_idx", "amount", "_source_identifier"]].rename(
+                columns={"_idx": "_idx_1", "amount": "amt_pos", "_source_identifier": "src_pos"}
             ),
-            on='_idx_1'
+            on="_idx_1",
         ).merge(
-            df_negative[['_idx', 'amount', '_source_identifier']].rename(
-                columns={'_idx': '_idx_2', 'amount': 'amt_neg', '_source_identifier': 'src_neg'}
+            df_negative[["_idx", "amount", "_source_identifier"]].rename(
+                columns={"_idx": "_idx_2", "amount": "amt_neg", "_source_identifier": "src_neg"}
             ),
-            on='_idx_2'
+            on="_idx_2",
         )
 
         if time_close_pairs.empty:
@@ -1353,21 +1342,21 @@ class SmartDeduplicationEngine:
         # v6.60: 当两个账单的来源标识都为空时，不认为它们来源不同
         # 只有当 src_pos != src_neg 且两者都非空时才配对
         time_close_pairs = time_close_pairs[
-            (time_close_pairs['src_pos'] != time_close_pairs['src_neg']) &
-            (time_close_pairs['src_pos'] != '') &
-            (time_close_pairs['src_neg'] != '')
+            (time_close_pairs["src_pos"] != time_close_pairs["src_neg"])
+            & (time_close_pairs["src_pos"] != "")
+            & (time_close_pairs["src_neg"] != "")
         ]
 
         if time_close_pairs.empty:
             return pairs
 
         # 条件3: 金额绝对值相等
-        time_close_pairs['abs_amt_pos'] = time_close_pairs['amt_pos'].abs()
-        time_close_pairs['abs_amt_neg'] = time_close_pairs['amt_neg'].abs()
-        time_close_pairs['amount_match'] = (
-            (time_close_pairs['abs_amt_pos'] - time_close_pairs['abs_amt_neg']).abs() <= self.AMOUNT_TOLERANCE
-        )
-        matched_pairs = time_close_pairs[time_close_pairs['amount_match']]
+        time_close_pairs["abs_amt_pos"] = time_close_pairs["amt_pos"].abs()
+        time_close_pairs["abs_amt_neg"] = time_close_pairs["amt_neg"].abs()
+        time_close_pairs["amount_match"] = (
+            time_close_pairs["abs_amt_pos"] - time_close_pairs["abs_amt_neg"]
+        ).abs() <= self.AMOUNT_TOLERANCE
+        matched_pairs = time_close_pairs[time_close_pairs["amount_match"]]
 
         if matched_pairs.empty:
             return pairs
@@ -1378,8 +1367,8 @@ class SmartDeduplicationEngine:
         matched_indices: Set[int] = set()
 
         for _, row in matched_pairs.iterrows():
-            pos_idx = int(row['_idx_1'])
-            neg_idx = int(row['_idx_2'])
+            pos_idx = int(row["_idx_1"])
+            neg_idx = int(row["_idx_2"])
 
             if pos_idx in matched_indices or neg_idx in matched_indices:
                 continue
@@ -1387,7 +1376,7 @@ class SmartDeduplicationEngine:
             incoming_bill = active_bills[pos_idx]  # 正金额 = 转入
             outgoing_bill = active_bills[neg_idx]  # 负金额 = 转出
 
-            if incoming_bill.get('_removed') or outgoing_bill.get('_removed'):
+            if incoming_bill.get("_removed") or outgoing_bill.get("_removed"):
                 continue
 
             matched_indices.add(pos_idx)
@@ -1400,55 +1389,55 @@ class SmartDeduplicationEngine:
             # 转入账单（正金额）标记为已移除，不写入预览表
 
             # 获取模板ID用于合并
-            outgoing_template_id = outgoing_bill.get('_template_id')
-            incoming_template_id = incoming_bill.get('_template_id')
+            outgoing_template_id = outgoing_bill.get("_template_id")
+            incoming_template_id = incoming_bill.get("_template_id")
 
             # 设置转出账单为转账类型
-            outgoing_bill['type'] = '转账'
-            outgoing_bill['_dedup_type'] = 'transfer'
+            outgoing_bill["type"] = "转账"
+            outgoing_bill["_dedup_type"] = "transfer"
 
             # 合并模板ID：转出账单包含转入账单的模板ID
-            outgoing_merged = outgoing_bill.get('_merged_template_ids', [])
+            outgoing_merged = outgoing_bill.get("_merged_template_ids", [])
             if incoming_template_id:
                 outgoing_merged.append(incoming_template_id)
-            outgoing_bill['_merged_template_ids'] = outgoing_merged
+            outgoing_bill["_merged_template_ids"] = outgoing_merged
 
             # v6.62: 记录转入账单的解析器信息，用于账户匹配阶段设置目标账户
             # 因为账户匹配是在去重之后执行，此时 source_account_id 可能为空
             # 所以记录 parser_id 和 payment_method，让账户匹配阶段能够找到正确的目标账户
-            outgoing_bill['_destination_parser_id'] = incoming_bill.get('_parser_id', '')
-            outgoing_bill['_destination_payment_method'] = incoming_bill.get('payment_method', '')
-            outgoing_bill['_destination_counterparty'] = incoming_bill.get('counterparty', '')
+            outgoing_bill["_destination_parser_id"] = incoming_bill.get("_parser_id", "")
+            outgoing_bill["_destination_payment_method"] = incoming_bill.get("payment_method", "")
+            outgoing_bill["_destination_counterparty"] = incoming_bill.get("counterparty", "")
 
             # v6.62: 合并描述信息
-            outgoing_desc = outgoing_bill.get('description', '') or ''
-            incoming_desc = incoming_bill.get('description', '') or ''
+            outgoing_desc = outgoing_bill.get("description", "") or ""
+            incoming_desc = incoming_bill.get("description", "") or ""
             if incoming_desc and incoming_desc not in outgoing_desc:
-                merged_desc = f"{outgoing_desc} | {incoming_desc}".strip(' |')
-                outgoing_bill['description'] = merged_desc
+                merged_desc = f"{outgoing_desc} | {incoming_desc}".strip(" |")
+                outgoing_bill["description"] = merged_desc
 
             # v6.62: 转入账单也设置类型为转账（测试需要验证 transfer_pairs 中两个账单的类型）
-            incoming_bill['type'] = '转账'
+            incoming_bill["type"] = "转账"
 
             # v6.62: 将转入账单标记为已移除（避免重复写入预览表）
-            incoming_bill['_removed'] = True
-            incoming_bill['_merged_into'] = outgoing_template_id
+            incoming_bill["_removed"] = True
+            incoming_bill["_merged_into"] = outgoing_template_id
 
-            amt = abs(float(outgoing_bill.get('amount', 0)))
+            amt = abs(float(outgoing_bill.get("amount", 0)))
             # v6.62: 简化日志输出
             self.logger.debug(
                 "[转账配对] 金额=%.2f, 转出=%s -> 转入=%s",
                 amt,
-                outgoing_bill.get('_parser_id', '') or outgoing_bill.get('source_account_id', ''),
-                incoming_bill.get('_parser_id', '') or incoming_bill.get('source_account_id', '')
+                outgoing_bill.get("_parser_id", "") or outgoing_bill.get("source_account_id", ""),
+                incoming_bill.get("_parser_id", "") or incoming_bill.get("source_account_id", ""),
             )
 
             pairs.append((outgoing_bill, incoming_bill))
 
         # 清理临时索引
         for b in active_bills:
-            if '_temp_idx' in b:
-                del b['_temp_idx']
+            if "_temp_idx" in b:
+                del b["_temp_idx"]
 
         return pairs
 
@@ -1456,11 +1445,7 @@ class SmartDeduplicationEngine:
 
     @log_method
     async def _find_cross_batch_transfer_pairs(
-        self,
-        bills: List[Dict[str, Any]],
-        db,
-        user_id: int = 1,
-        time_tolerance_seconds: int = 300
+        self, bills: List[Dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
     ) -> List[Tuple[Dict, Dict]]:
         """检测新导入账单与数据库已有账单之间的转账关系
 
@@ -1480,14 +1465,14 @@ class SmartDeduplicationEngine:
         """
         pairs: List[Tuple[Dict, Dict]] = []
 
-        active_bills = [b for b in bills if not b.get('_removed', False)]
+        active_bills = [b for b in bills if not b.get("_removed", False)]
         if not active_bills:
             return pairs
 
         # 获取日期范围
         dates = []
         for bill in active_bills:
-            dt = self._parse_datetime(bill.get('date', ''))
+            dt = self._parse_datetime(bill.get("date", ""))
             if dt:
                 dates.append(dt)
         if not dates:
@@ -1495,13 +1480,11 @@ class SmartDeduplicationEngine:
 
         min_date = min(dates)
         max_date = max(dates)
-        start_date = (min_date - timedelta(days=1)).strftime('%Y-%m-%d')
-        end_date = (max_date + timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date = (min_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        end_date = (max_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
         try:
-            existing_bills = await db.get_bills_by_date_range(
-                start_date, end_date, user_id=user_id
-            )
+            existing_bills = await db.get_bills_by_date_range(start_date, end_date, user_id=user_id)
         except Exception as e:
             self.logger.error("[跨批次转账] 查询数据库失败: %s", e)
             return pairs
@@ -1512,7 +1495,7 @@ class SmartDeduplicationEngine:
         # 构建已有账单按 (日期, 金额绝对值) 索引
         existing_index: Dict[str, List[Dict]] = {}
         for eb in existing_bills:
-            abs_amt = abs(float(eb.get('amount', 0)))
+            abs_amt = abs(float(eb.get("amount", 0)))
             key = f"{eb.get('date', '')[:10]}_{abs_amt:.2f}"
             if key not in existing_index:
                 existing_index[key] = []
@@ -1522,12 +1505,12 @@ class SmartDeduplicationEngine:
 
         for bill in active_bills:
             # 跳过已经被标记为转账的账单
-            if bill.get('_dedup_type') == 'transfer':
+            if bill.get("_dedup_type") == "transfer":
                 continue
 
-            bill_amt = float(bill.get('amount', 0))
+            bill_amt = float(bill.get("amount", 0))
             bill_abs_amt = abs(bill_amt)
-            bill_dt = self._parse_datetime(bill.get('date', ''))
+            bill_dt = self._parse_datetime(bill.get("date", ""))
             if not bill_dt:
                 continue
 
@@ -1536,16 +1519,16 @@ class SmartDeduplicationEngine:
 
             candidates = existing_index.get(key, [])
             for eb in candidates:
-                if eb.get('id') in matched_db_ids:
+                if eb.get("id") in matched_db_ids:
                     continue
 
-                eb_amt = float(eb.get('amount', 0))
+                eb_amt = float(eb.get("amount", 0))
 
                 # 金额必须相反（一正一负）
                 if not self._amount_opposite(bill_amt, eb_amt):
                     continue
 
-                eb_dt = self._parse_datetime(eb.get('date', ''))
+                eb_dt = self._parse_datetime(eb.get("date", ""))
                 if not eb_dt:
                     continue
 
@@ -1553,13 +1536,13 @@ class SmartDeduplicationEngine:
                 if abs((bill_dt - eb_dt).total_seconds()) > time_tolerance_seconds:
                     continue
 
-                eb_source = str(eb.get('source_account_id', '')).lower()
+                eb_source = str(eb.get("source_account_id", "")).lower()
                 # 来源必须不同
                 if bill_source and eb_source and bill_source == eb_source:
                     continue
 
                 # 配对成功！
-                matched_db_ids.add(eb.get('id'))
+                matched_db_ids.add(eb.get("id"))
 
                 # 确定转出/转入方
                 if bill_amt < 0:
@@ -1570,34 +1553,24 @@ class SmartDeduplicationEngine:
                     outgoing, incoming_db = eb, bill
 
                 # 更新新账单的转账标记
-                bill['type'] = '转账'
-                bill['_dedup_type'] = 'transfer_cross_batch'
-                bill['_cross_batch_db_id'] = eb.get('id')
+                bill["type"] = "转账"
+                bill["_dedup_type"] = "transfer_cross_batch"
+                bill["_cross_batch_db_id"] = eb.get("id")
 
                 # 更新数据库中已有账单（异步更新其type）
                 try:
-                    await db.update_bill(
-                        eb.get('id'),
-                        {'type': '转账'},
-                        user_id=user_id
-                    )
+                    await db.update_bill(eb.get("id"), {"type": "转账"}, user_id=user_id)
                 except Exception as update_err:
-                    self.logger.warning(
-                        "[跨批次转账] 更新已有账单 ID=%s 失败: %s",
-                        eb.get('id'), update_err
-                    )
+                    self.logger.warning("[跨批次转账] 更新已有账单 ID=%s 失败: %s", eb.get("id"), update_err)
 
                 self.logger.debug(
-                    "[跨批次转账] 金额=%.2f, 新账单(%s) ↔ 已有ID=%s",
-                    bill_abs_amt, bill_source, eb.get('id')
+                    "[跨批次转账] 金额=%.2f, 新账单(%s) ↔ 已有ID=%s", bill_abs_amt, bill_source, eb.get("id")
                 )
                 pairs.append((bill, eb))
                 break  # 每条新账单最多配对一条已有账单
 
         if pairs:
-            self.logger.info(
-                "[跨批次转账] 共发现 %d 对跨批次转账", len(pairs)
-            )
+            self.logger.info("[跨批次转账] 共发现 %d 对跨批次转账", len(pairs))
 
         return pairs
 
@@ -1605,11 +1578,7 @@ class SmartDeduplicationEngine:
 
     @log_method
     async def _find_database_duplicates(
-        self,
-        bills: List[Dict[str, Any]],
-        db,
-        user_id: int = 1,
-        time_tolerance_seconds: int = 300
+        self, bills: List[Dict[str, Any]], db, user_id: int = 1, time_tolerance_seconds: int = 300
     ) -> List[DuplicateGroup]:
         """与数据库已有账单对比，查找重复
 
@@ -1630,7 +1599,7 @@ class SmartDeduplicationEngine:
         # 获取待导入账单的日期范围
         dates = []
         for bill in bills:
-            dt = self._parse_datetime(bill.get('date', ''))
+            dt = self._parse_datetime(bill.get("date", ""))
             if dt:
                 dates.append(dt)
 
@@ -1641,14 +1610,12 @@ class SmartDeduplicationEngine:
         max_date = max(dates)
 
         # 扩展日期范围（前后各1天）
-        start_date = (min_date - timedelta(days=1)).strftime('%Y-%m-%d')
-        end_date = (max_date + timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date = (min_date - timedelta(days=1)).strftime("%Y-%m-%d")
+        end_date = (max_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
         # 从数据库获取范围内的账单
         try:
-            existing_bills = await db.get_bills_by_date_range(
-                start_date, end_date, user_id=user_id
-            )
+            existing_bills = await db.get_bills_by_date_range(start_date, end_date, user_id=user_id)
         except Exception as e:
             self.logger.error("[数据库去重] 查询失败: %s", e)
             return groups
@@ -1656,14 +1623,13 @@ class SmartDeduplicationEngine:
         if not existing_bills:
             return groups
 
-        self.logger.debug("[数据库去重] 日期范围 %s~%s, 已有账单 %d 条",
-                         start_date, end_date, len(existing_bills))
+        self.logger.debug("[数据库去重] 日期范围 %s~%s, 已有账单 %d 条", start_date, end_date, len(existing_bills))
 
         # 构建已有账单的索引（按日期+金额绝对值分组）
         # v6.46: 使用金额绝对值，以便匹配可能符号不同的账单（如平台-银行重复）
         existing_index: Dict[str, List[Dict]] = {}
         for eb in existing_bills:
-            abs_amt = abs(float(eb.get('amount', 0)))
+            abs_amt = abs(float(eb.get("amount", 0)))
             key = f"{eb.get('date', '')[:10]}_{abs_amt:.2f}"
             if key not in existing_index:
                 existing_index[key] = []
@@ -1671,11 +1637,11 @@ class SmartDeduplicationEngine:
 
         # 检测重复
         for bill in bills:
-            if bill.get('_removed'):
+            if bill.get("_removed"):
                 continue
 
-            bill_date = bill.get('date', '')
-            bill_amt = float(bill.get('amount', 0))
+            bill_date = bill.get("date", "")
+            bill_amt = float(bill.get("amount", 0))
             bill_abs_amt = abs(bill_amt)
             # v6.46: 使用金额绝对值查找候选，以便匹配可能符号不同的账单
             key = f"{bill_date[:10]}_{bill_abs_amt:.2f}"
@@ -1688,13 +1654,13 @@ class SmartDeduplicationEngine:
             if not bill_dt:
                 continue
 
-            bill_desc = str(bill.get('description', '')).lower()
-            bill_counterparty = str(bill.get('counterparty', '')).lower()
-            bill_source = str(bill.get('source_account_id', '')).lower()
+            bill_desc = str(bill.get("description", "")).lower()
+            bill_counterparty = str(bill.get("counterparty", "")).lower()
+            bill_source = str(bill.get("source_account_id", "")).lower()
             bill_is_platform = bill_source in self.PLATFORM_SOURCES
 
             for eb in candidates:
-                eb_dt = self._parse_datetime(eb.get('date', ''))
+                eb_dt = self._parse_datetime(eb.get("date", ""))
                 if not eb_dt:
                     continue
 
@@ -1702,8 +1668,8 @@ class SmartDeduplicationEngine:
                 if abs((bill_dt - eb_dt).total_seconds()) > time_tolerance_seconds:
                     continue
 
-                eb_amt = float(eb.get('amount', 0))
-                eb_source = str(eb.get('source_account_id', '')).lower()
+                eb_amt = float(eb.get("amount", 0))
+                eb_source = str(eb.get("source_account_id", "")).lower()
                 eb_is_platform = eb_source in self.PLATFORM_SOURCES
 
                 # v6.46: 判断是否为平台-银行对
@@ -1723,20 +1689,27 @@ class SmartDeduplicationEngine:
                     continue
 
                 # 描述或交易对手是否相似
-                eb_desc = str(eb.get('description', '')).lower()
-                eb_counterparty = str(eb.get('counterparty', '')).lower()
+                eb_desc = str(eb.get("description", "")).lower()
+                eb_counterparty = str(eb.get("counterparty", "")).lower()
 
                 # v6.46: 使用相似度判断（更宽松，能匹配部分相似的counterparty）
                 desc_similar = (
-                    bill_desc and eb_desc and
-                    (bill_desc in eb_desc or eb_desc in bill_desc or
-                     self._calculate_similarity(bill_desc, eb_desc) >= 0.5)
+                    bill_desc
+                    and eb_desc
+                    and (
+                        bill_desc in eb_desc
+                        or eb_desc in bill_desc
+                        or self._calculate_similarity(bill_desc, eb_desc) >= 0.5
+                    )
                 )
                 counterparty_similar = (
-                    bill_counterparty and eb_counterparty and
-                    (bill_counterparty in eb_counterparty or
-                     eb_counterparty in bill_counterparty or
-                     self._calculate_similarity(bill_counterparty, eb_counterparty) >= 0.5)
+                    bill_counterparty
+                    and eb_counterparty
+                    and (
+                        bill_counterparty in eb_counterparty
+                        or eb_counterparty in bill_counterparty
+                        or self._calculate_similarity(bill_counterparty, eb_counterparty) >= 0.5
+                    )
                 )
 
                 # 对于平台-银行对，判断条件更宽松
@@ -1745,30 +1718,35 @@ class SmartDeduplicationEngine:
                     match_condition = counterparty_similar or desc_similar
                 else:
                     # 其他情况：保持原来的逻辑
-                    match_condition = (desc_similar or counterparty_similar or
-                                      (not bill_desc and not eb_desc))
+                    match_condition = desc_similar or counterparty_similar or (not bill_desc and not eb_desc)
 
                 if match_condition:
                     # 找到重复
-                    bill['_removed'] = True
-                    bill['_duplicate_of_db_id'] = eb.get('id')
+                    bill["_removed"] = True
+                    bill["_duplicate_of_db_id"] = eb.get("id")
 
                     reason_type = "平台-银行跨文件重复" if is_platform_bank_pair else "与数据库已有账单重复"
-                    groups.append(DuplicateGroup(
-                        type=DeduplicationType.DATABASE_DUPLICATE,
-                        bills=[bill, eb],
-                        keep_bill=eb,
-                        remove_bills=[bill],
-                        reason=(
-                            f"{reason_type} (ID={eb.get('id')}, "
-                            f"日期={eb.get('date')}, 金额={eb.get('amount')})"
+                    groups.append(
+                        DuplicateGroup(
+                            type=DeduplicationType.DATABASE_DUPLICATE,
+                            bills=[bill, eb],
+                            keep_bill=eb,
+                            remove_bills=[bill],
+                            reason=(
+                                f"{reason_type} (ID={eb.get('id')}, 日期={eb.get('date')}, 金额={eb.get('amount')})"
+                            ),
                         )
-                    ))
+                    )
 
                     # v6.62: 改为 DEBUG 级别，减少日志冗余
                     self.logger.debug(
                         "[数据库重复] %s: 新账单 %s/%.2f (%s) 与已有账单 ID=%s (%s)",
-                        reason_type, bill_date, bill_amt, bill_source, eb.get('id'), eb_source
+                        reason_type,
+                        bill_date,
+                        bill_amt,
+                        bill_source,
+                        eb.get("id"),
+                        eb_source,
                     )
                     break
 

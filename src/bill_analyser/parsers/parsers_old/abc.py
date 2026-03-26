@@ -26,7 +26,7 @@ class ABCParser(BaseBankParser):
     def can_parse(self, file_path: str) -> bool:
         """判断是否为中国农业银行账单"""
         try:
-            if not file_path.endswith(('.xlsx', '.xls')):
+            if not file_path.endswith((".xlsx", ".xls")):
                 return False
 
             # 读取文件前几行
@@ -43,20 +43,42 @@ class ABCParser(BaseBankParser):
 
             # 中国农业银行强特征标识（必须包含至少一个）
             abc_strong_indicators = [
-                "中国农业银⾏", "账⼾活期交易明细清单", "账户明细查询"  # 新格式标识
+                "中国农业银⾏",
+                "账⼾活期交易明细清单",
+                "账户明细查询",  # 新格式标识
             ]
 
             # 中国农业银行特有的字段组合（包括新格式字段）
             abc_specific_fields = [
-                "⼾名", "账⼾", "交易⽇期", "交易⾦额", "对⼿信息", "⽇志号", "交易附⾔",
+                "⼾名",
+                "账⼾",
+                "交易⽇期",
+                "交易⾦额",
+                "对⼿信息",
+                "⽇志号",
+                "交易附⾔",
                 # 新格式字段
-                "交易日期", "交易时间", "交易金额", "本次余额", "对方户名", "对方账号",
-                "交易行", "交易渠道", "交易类型", "交易用途", "交易摘要"
+                "交易日期",
+                "交易时间",
+                "交易金额",
+                "本次余额",
+                "对方户名",
+                "对方账号",
+                "交易行",
+                "交易渠道",
+                "交易类型",
+                "交易用途",
+                "交易摘要",
             ]
 
             # 排除其他银行的强特征
             other_bank_strong_indicators = [
-                "工商银行", "ICBC", "中国民生银行", "民生银行股份有限公司", "个人账户对账单", "凭证类型"
+                "工商银行",
+                "ICBC",
+                "中国民生银行",
+                "民生银行股份有限公司",
+                "个人账户对账单",
+                "凭证类型",
             ]
 
             # 检查是否包含中国农业银行强标识
@@ -117,9 +139,16 @@ class ABCParser(BaseBankParser):
         # 寻找表头行（支持旧格式和新格式）
         header_indicators = [
             # 旧格式标识符（特殊编码中文）
-            "交易⽇期", "交易⾦额", "本次余额",
+            "交易⽇期",
+            "交易⾦额",
+            "本次余额",
             # 新格式标识符（正常中文）
-            "交易日期", "交易时间", "交易金额", "对方户名", "交易用途", "交易摘要"
+            "交易日期",
+            "交易时间",
+            "交易金额",
+            "对方户名",
+            "交易用途",
+            "交易摘要",
         ]
 
         for i in range(len(df)):
@@ -162,10 +191,7 @@ class ABCParser(BaseBankParser):
                 return True
 
             # 检查新格式：可能是日期字符串格式，如"2024-08-25"或"20240825"
-            if first_col and (
-                len(first_col) >= 8 and
-                ('20' in first_col[:4] or first_col[:8].isdigit())
-            ):
+            if first_col and (len(first_col) >= 8 and ("20" in first_col[:4] or first_col[:8].isdigit())):
                 return True
 
             # 排除包含警告或结束信息的行
@@ -187,20 +213,20 @@ class ABCParser(BaseBankParser):
             purpose = purpose.strip()
 
             # 模式1: 纯数字开头 (如: 51070025188900180850玉米低氮胁迫机制解析项目绩效)
-            pattern1 = r'^\d+'
-            cleaned = re.sub(pattern1, '', purpose).strip()
+            pattern1 = r"^\d+"
+            cleaned = re.sub(pattern1, "", purpose).strip()
 
             # 模式2: NA开头的复杂编码 (如: NA2025072959653965920531090310207蚂蚁（杭州）基金销售有限公司)
-            pattern2 = r'^NA\d+'
-            cleaned = re.sub(pattern2, '', cleaned).strip()
+            pattern2 = r"^NA\d+"
+            cleaned = re.sub(pattern2, "", cleaned).strip()
 
             # 模式3: UA开头的编码 (如: UA0723a26285553192支付宝-理财-蚂蚁（杭州）基金销售有限公司)
-            pattern3 = r'^UA[0-9a-zA-Z]+'
-            cleaned = re.sub(pattern3, '', cleaned).strip()
+            pattern3 = r"^UA[0-9a-zA-Z]+"
+            cleaned = re.sub(pattern3, "", cleaned).strip()
 
             # 模式4: 其他英文字母数字组合开头
-            pattern4 = r'^[A-Z]+[0-9a-zA-Z]*'
-            cleaned = re.sub(pattern4, '', cleaned).strip()
+            pattern4 = r"^[A-Z]+[0-9a-zA-Z]*"
+            cleaned = re.sub(pattern4, "", cleaned).strip()
 
             # 如果清理后为空或太短，返回原始内容
             if not cleaned or len(cleaned) < 2:
@@ -241,40 +267,40 @@ class ABCParser(BaseBankParser):
                 time_str = ""
                 if len(row) > 1 and not pd.isna(row.iloc[1]):
                     time_str = str(row.iloc[1]).strip()
-                transaction['日期'] = self._parse_datetime(date_str, time_str)
+                transaction["日期"] = self._parse_datetime(date_str, time_str)
 
             # 交易金额 (第3列)
             amount = 0.0
             if len(row) > 2 and not pd.isna(row.iloc[2]):
                 amount_str = str(row.iloc[2])
                 amount = self._clean_amount_string(amount_str)
-            transaction['金额'] = amount
+            transaction["金额"] = amount
 
             # 交易对方 (第5列 - 对方户名)
             if len(row) > 4 and not pd.isna(row.iloc[4]):
                 counterparty = str(row.iloc[4]).strip()
                 if counterparty and counterparty != "--":
-                    transaction['交易对方'] = counterparty
+                    transaction["交易对方"] = counterparty
                 else:
                     # 如果对方户名为空，使用对方账号 (第6列)
                     if len(row) > 5 and not pd.isna(row.iloc[5]):
                         counterparty_account = str(row.iloc[5]).strip()
-                        transaction['交易对方'] = counterparty_account if counterparty_account != "--" else ""
+                        transaction["交易对方"] = counterparty_account if counterparty_account != "--" else ""
                     else:
-                        transaction['交易对方'] = ""
+                        transaction["交易对方"] = ""
             else:
-                transaction['交易对方'] = ""
+                transaction["交易对方"] = ""
 
             # 商品说明 (第10列 - 交易用途，需要清理前缀)
             if len(row) > 9 and not pd.isna(row.iloc[9]):
                 raw_purpose = str(row.iloc[9]).strip()
                 cleaned_purpose = self._clean_transaction_purpose(raw_purpose)
-                transaction['商品说明'] = cleaned_purpose if cleaned_purpose else "未知交易"
+                transaction["商品说明"] = cleaned_purpose if cleaned_purpose else "未知交易"
             elif len(row) > 10 and not pd.isna(row.iloc[10]):
                 # 如果交易用途为空，使用交易摘要 (第11列)
-                transaction['商品说明'] = str(row.iloc[10]).strip()
+                transaction["商品说明"] = str(row.iloc[10]).strip()
             else:
-                transaction['商品说明'] = "未知交易"
+                transaction["商品说明"] = "未知交易"
 
             return transaction
 
@@ -296,13 +322,13 @@ class ABCParser(BaseBankParser):
                     if len(row) > 1 and not pd.isna(row.iloc[1]):
                         time_str = str(row.iloc[1]).strip()
 
-                    transaction['日期'] = self._parse_datetime(date_str, time_str)
+                    transaction["日期"] = self._parse_datetime(date_str, time_str)
 
             # 交易摘要/商品说明 (第3列)
             if len(row) > 2 and not pd.isna(row.iloc[2]):
-                transaction['商品说明'] = str(row.iloc[2]).strip()
+                transaction["商品说明"] = str(row.iloc[2]).strip()
             else:
-                transaction['商品说明'] = "未知交易"
+                transaction["商品说明"] = "未知交易"
 
             # 交易金额 (第4列)
             amount = 0.0
@@ -310,27 +336,27 @@ class ABCParser(BaseBankParser):
                 amount_str = str(row.iloc[3])
                 amount = self._clean_amount_string(amount_str)
 
-            transaction['金额'] = amount
+            transaction["金额"] = amount
 
             # 对手信息/交易对方 (第6列)
             if len(row) > 5 and not pd.isna(row.iloc[5]):
                 counterpart = str(row.iloc[5]).strip()
                 if counterpart and counterpart != "--":
-                    transaction['交易对方'] = counterpart
+                    transaction["交易对方"] = counterpart
                 else:
-                    transaction['交易对方'] = ""
+                    transaction["交易对方"] = ""
             else:
-                transaction['交易对方'] = ""
+                transaction["交易对方"] = ""
 
             # 交易附言 (第9列)
             if len(row) > 8 and not pd.isna(row.iloc[8]):
                 remark = str(row.iloc[8]).strip()
-                if remark and remark != transaction['商品说明']:
+                if remark and remark != transaction["商品说明"]:
                     # 如果附言与摘要不同，将附言添加到商品说明中
-                    if transaction['商品说明'] != "未知交易":
-                        transaction['商品说明'] += f" - {remark}"
+                    if transaction["商品说明"] != "未知交易":
+                        transaction["商品说明"] += f" - {remark}"
                     else:
-                        transaction['商品说明'] = remark
+                        transaction["商品说明"] = remark
 
             return transaction
 

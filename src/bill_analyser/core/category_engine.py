@@ -39,6 +39,7 @@ class CompiledRule:
         and_patterns: AND模式列表，必须全部匹配
         is_empty: 规则是否为空
     """
+
     or_blocks: List[List[str]] = field(default_factory=list)
     not_patterns: List[str] = field(default_factory=list)
     and_patterns: List[str] = field(default_factory=list)
@@ -62,7 +63,7 @@ class KeywordMatcher:
     """
 
     def __init__(self):
-        self.logger = get_logger('KeywordMatcher')
+        self.logger = get_logger("KeywordMatcher")
         # 缓存编译后的正则表达式
         self._regex_cache: Dict[str, re.Pattern] = {}
         # v6.73: 缓存编译后的规则
@@ -82,10 +83,7 @@ class KeywordMatcher:
         regex_count = len(self._regex_cache)
         self._compiled_rules_cache.clear()
         self._regex_cache.clear()
-        self.logger.info(
-            "[KeywordMatcher] 缓存已清空: 规则缓存=%d条, 正则缓存=%d条",
-            cache_count, regex_count
-        )
+        self.logger.info("[KeywordMatcher] 缓存已清空: 规则缓存=%d条, 正则缓存=%d条", cache_count, regex_count)
 
     def compile_rule(self, rule: str) -> CompiledRule:
         """预编译关键词规则
@@ -112,39 +110,37 @@ class KeywordMatcher:
         and_patterns: List[str] = []
         simple_patterns: List[str] = []
 
-        parts = rule.split('&')
+        parts = rule.split("&")
 
         for part in parts:
             part = part.strip()
 
-            if part.upper().startswith('OR:'):
+            if part.upper().startswith("OR:"):
                 # OR逻辑: 每个OR块独立保存
-                keywords = part[3:].split('|')
+                keywords = part[3:].split("|")
                 block = [k.strip().lower() for k in keywords if k.strip()]
                 if block:
                     or_blocks.append(block)
 
-            elif part.upper().startswith('NOT:'):
+            elif part.upper().startswith("NOT:"):
                 # NOT逻辑: 不能包含
-                keywords = part[4:].split('|')
+                keywords = part[4:].split("|")
                 not_patterns.extend([k.strip().lower() for k in keywords if k.strip()])
 
-            elif part.upper().startswith('AND:'):
+            elif part.upper().startswith("AND:"):
                 # AND逻辑: 必须全部包含
-                keywords = part[4:].split('|')
+                keywords = part[4:].split("|")
                 and_patterns.extend([k.strip().lower() for k in keywords if k.strip()])
 
-            elif part.upper().startswith('REGEX:'):
+            elif part.upper().startswith("REGEX:"):
                 # 正则表达式: 作为独立OR块处理
                 regex_pattern = part[6:].strip()
                 if regex_pattern:
-                    or_blocks.append([f'regex:{regex_pattern}'])
+                    or_blocks.append([f"regex:{regex_pattern}"])
                     # 预编译正则表达式
                     try:
                         if regex_pattern not in self._regex_cache:
-                            self._regex_cache[regex_pattern] = re.compile(
-                                regex_pattern, re.IGNORECASE
-                            )
+                            self._regex_cache[regex_pattern] = re.compile(regex_pattern, re.IGNORECASE)
                     except re.error as e:
                         self.logger.warning(f"无效的正则表达式 '{regex_pattern}': {e}")
             else:
@@ -157,10 +153,7 @@ class KeywordMatcher:
             or_blocks.append(simple_patterns)
 
         compiled = CompiledRule(
-            or_blocks=or_blocks,
-            not_patterns=not_patterns,
-            and_patterns=and_patterns,
-            is_empty=False
+            or_blocks=or_blocks, not_patterns=not_patterns, and_patterns=and_patterns, is_empty=False
         )
 
         # 缓存结果
@@ -224,7 +217,7 @@ class KeywordMatcher:
         Returns:
             bool: 是否匹配
         """
-        if pattern.startswith('regex:'):
+        if pattern.startswith("regex:"):
             # 正则表达式匹配
             regex_pattern = pattern[6:]  # 移除 'regex:' 前缀
             try:
@@ -277,30 +270,30 @@ class KeywordMatcher:
             return []
 
         keywords = []
-        parts = rule.split('&')
+        parts = rule.split("&")
 
         for part in parts:
             part = part.strip()
 
-            if part.upper().startswith('OR:'):
+            if part.upper().startswith("OR:"):
                 # OR逻辑: 任意一个
-                kws = part[3:].split('|')
+                kws = part[3:].split("|")
                 keywords.extend([k.strip().lower() for k in kws if k.strip()])
 
-            elif part.upper().startswith('AND:'):
+            elif part.upper().startswith("AND:"):
                 # AND逻辑: 必须全部包含
-                kws = part[4:].split('|')
+                kws = part[4:].split("|")
                 keywords.extend([k.strip().lower() for k in kws if k.strip()])
 
-            elif part.upper().startswith('NOT:'):
+            elif part.upper().startswith("NOT:"):
                 # NOT逻辑: 跳过（排除词不用于正向匹配）
                 pass
 
-            elif part.upper().startswith('REGEX:'):
+            elif part.upper().startswith("REGEX:"):
                 # REGEX逻辑: 以 'regex:' 前缀保留
                 regex_pattern = part[6:].strip()
                 if regex_pattern:
-                    keywords.append(f'regex:{regex_pattern.lower()}')
+                    keywords.append(f"regex:{regex_pattern.lower()}")
 
             else:
                 # 简单关键词
@@ -315,7 +308,7 @@ class CategoryEngine:
 
     def __init__(self):
         """初始化分类引擎"""
-        self.logger = get_logger('CategoryEngine')
+        self.logger = get_logger("CategoryEngine")
         self.rule_engine = RuleEngine()
         self.keyword_matcher = KeywordMatcher()
         self.rules: List[Dict[str, Any]] = []
@@ -347,14 +340,11 @@ class CategoryEngine:
         self._compiled_rules.clear()
 
         for rule in self.rules:
-            keywords = rule.get('keywords', '')
+            keywords = rule.get("keywords", "")
             if keywords and keywords not in self._compiled_rules:
                 self._compiled_rules[keywords] = self.keyword_matcher.compile_rule(keywords)
 
-        self.logger.info(
-            "[分类引擎] 预编译了 %d 条规则关键词",
-            len(self._compiled_rules)
-        )
+        self.logger.info("[分类引擎] 预编译了 %d 条规则关键词", len(self._compiled_rules))
 
     def _match_keywords_fast(self, text: str, keywords: str) -> bool:
         """使用预编译规则快速匹配关键词
@@ -408,19 +398,11 @@ class CategoryEngine:
         cache_count = len(self._compiled_rules)
         self._compiled_rules.clear()
         self.keyword_matcher.clear_cache()
-        self.logger.info(
-            "[分类引擎] 缓存已失效: 规则缓存=%d条",
-            cache_count
-        )
+        self.logger.info("[分类引擎] 缓存已失效: 规则缓存=%d条", cache_count)
 
     @log_method
     @log_step("加载分类规则(DB)")
-    async def load_rules_from_db(
-        self,
-        db,
-        user_id: int = 1,
-        types: Optional[List[int]] = None
-    ):
+    async def load_rules_from_db(self, db, user_id: int = 1, types: Optional[List[int]] = None):
         """
         从数据库加载分类规则
 
@@ -433,7 +415,7 @@ class CategoryEngine:
         """
         try:
             # 获取指定用户的所有分类
-            types_str = str(types) if types else 'all'
+            types_str = str(types) if types else "all"
             self.logger.info(f"从数据库加载分类规则 (user_id={user_id}, types={types_str})")
             categories = await db.get_all_categories(user_id=user_id)
 
@@ -445,21 +427,23 @@ class CategoryEngine:
             valid_rules = []
             for cat in categories:
                 # 只有定义了关键词的分类才作为规则
-                keywords = cat.get('keywords')
+                keywords = cat.get("keywords")
                 if keywords:
-                    rule_type = cat.get('type', TransactionType.EXPENSE)
+                    rule_type = cat.get("type", TransactionType.EXPENSE)
 
                     # v6.53: 如果指定了类型过滤，只加载匹配的类型
                     if types and rule_type not in type_filter:
                         continue
 
-                    valid_rules.append({
-                        'main': cat['main_category'],
-                        'sub': cat['sub_category'],
-                        'priority': cat.get('priority', 999),
-                        'keywords': keywords,
-                        'type': rule_type  # 分类类型
-                    })
+                    valid_rules.append(
+                        {
+                            "main": cat["main_category"],
+                            "sub": cat["sub_category"],
+                            "priority": cat.get("priority", 999),
+                            "keywords": keywords,
+                            "type": rule_type,  # 分类类型
+                        }
+                    )
 
             self.rules = valid_rules
             self._initialized = True
@@ -472,15 +456,11 @@ class CategoryEngine:
             if valid_rules:
                 # 记录前3条规则用于调试
                 for i, rule in enumerate(valid_rules[:3]):
-                    self.logger.debug(
-                        f"规则#{i+1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'"
-                    )
+                    self.logger.debug(f"规则#{i + 1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'")
             if valid_rules:
                 # 记录前3条规则用于调试
                 for i, rule in enumerate(valid_rules[:3]):
-                    self.logger.debug(
-                        f"规则#{i+1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'"
-                    )
+                    self.logger.debug(f"规则#{i + 1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'")
 
         except Exception as e:
             self.logger.error(f"从数据库加载分类规则失败: {e}", exc_info=True)
@@ -488,9 +468,7 @@ class CategoryEngine:
 
     @log_method
     def match_category(
-        self,
-        bill: Dict[str, Any],
-        types: Optional[List[int]] = None
+        self, bill: Dict[str, Any], types: Optional[List[int]] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         匹配账单分类
@@ -528,19 +506,23 @@ class CategoryEngine:
             return None, None
 
         # 获取账单字段用于匹配
-        counterparty = str(bill.get('counterparty', ''))
-        description = str(bill.get('description', ''))
-        original_category = str(bill.get('original_category', ''))
+        counterparty = str(bill.get("counterparty", ""))
+        description = str(bill.get("description", ""))
+        original_category = str(bill.get("original_category", ""))
         combined_text = f"{counterparty} {description} {original_category}"
 
         # 获取金额和原始类型
-        amount = float(bill.get('amount', 0))
-        original_type = str(bill.get('type', '')).strip()
-        dedup_type = str(bill.get('_dedup_type', '')).lower()
+        amount = float(bill.get("amount", 0))
+        original_type = str(bill.get("type", "")).strip()
+        dedup_type = str(bill.get("_dedup_type", "")).lower()
 
         self.logger.debug(
             "[分类匹配] counterparty='%s', description='%s', amount=%.2f, type='%s', dedup_type='%s'",
-            counterparty[:30], description[:30], amount, original_type, dedup_type
+            counterparty[:30],
+            description[:30],
+            amount,
+            original_type,
+            dedup_type,
         )
 
         # v6.75: 智能类型过滤 - 根据账单特征自动选择适用的分类类型
@@ -551,23 +533,23 @@ class CategoryEngine:
             self.logger.debug("[分类匹配] 调用方指定类型过滤: %s", types)
         else:
             # 根据账单特征自动选择类型
-            if dedup_type == 'transfer':
+            if dedup_type == "transfer":
                 # 转账配对的账单只使用转账类规则
                 type_filter = {TransactionType.TRANSFER}
             else:
                 # v6.75: 优先使用 type 字段判断，而不是金额符号
                 # 因为预览表金额使用绝对值（正数），金额符号判断会失效
                 type_str = original_type.lower()
-                if type_str in ['支出', 'expense', '3']:
+                if type_str in ["支出", "expense", "3"]:
                     # 支出账单：使用支出类和投资类规则
                     type_filter = {TransactionType.EXPENSE, TransactionType.INVESTMENT}
-                elif type_str in ['收入', 'income', '2']:
+                elif type_str in ["收入", "income", "2"]:
                     # 收入账单：使用收入类和投资类规则
                     type_filter = {TransactionType.INCOME, TransactionType.INVESTMENT}
-                elif type_str in ['转账', 'transfer', '4']:
+                elif type_str in ["转账", "transfer", "4"]:
                     # 转账账单：使用转账类规则
                     type_filter = {TransactionType.TRANSFER}
-                elif type_str in ['投资', 'investment', '5']:
+                elif type_str in ["投资", "investment", "5"]:
                     # 投资账单：使用投资类规则
                     type_filter = {TransactionType.INVESTMENT}
                 elif amount < 0:
@@ -578,37 +560,36 @@ class CategoryEngine:
                 else:
                     # 金额为0且type无效，使用所有类型
                     type_filter = {
-                        TransactionType.INCOME, TransactionType.EXPENSE,
-                        TransactionType.TRANSFER, TransactionType.INVESTMENT
+                        TransactionType.INCOME,
+                        TransactionType.EXPENSE,
+                        TransactionType.TRANSFER,
+                        TransactionType.INVESTMENT,
                     }
-            self.logger.debug("[分类匹配] 自动类型过滤: %s (type='%s', amount=%.2f)", 
-                            type_filter, original_type, amount)
+            self.logger.debug(
+                "[分类匹配] 自动类型过滤: %s (type='%s', amount=%.2f)", type_filter, original_type, amount
+            )
 
         # ===== 第一步：在对应类型的分类规则中按关键词匹配（优先级排序）=====
         # v6.72: 始终根据类型过滤规则，确保收入账单只匹配收入类规则，支出账单只匹配支出类规则
-        rules_to_match = [r for r in self.rules if r.get('type') in type_filter]
+        rules_to_match = [r for r in self.rules if r.get("type") in type_filter]
         self.logger.debug("[分类匹配] 过滤后规则数: %d/%d", len(rules_to_match), len(self.rules))
 
-        sorted_rules = sorted(
-            rules_to_match,
-            key=lambda r: r.get('priority', 999)
-        )
+        sorted_rules = sorted(rules_to_match, key=lambda r: r.get("priority", 999))
 
         for rule in sorted_rules:
-            keywords = rule.get('keywords')
+            keywords = rule.get("keywords")
             if not keywords:
                 continue
 
             # v6.73: 使用预编译规则进行快速匹配
             if self._match_keywords_fast(combined_text, keywords):
-                rule_type = rule.get('type')
-                main_cat = rule['main']
-                sub_cat = rule['sub']
+                rule_type = rule.get("type")
+                main_cat = rule["main"]
+                sub_cat = rule["sub"]
 
                 # v6.63: 单条匹配日志改为 DEBUG，减少批量导入时的冗余输出
                 self.logger.debug(
-                    "[分类匹配] '%s' -> %s/%s (type=%s)",
-                    combined_text[:30], main_cat, sub_cat, rule_type
+                    "[分类匹配] '%s' -> %s/%s (type=%s)", combined_text[:30], main_cat, sub_cat, rule_type
                 )
 
                 # v6.52: 修复分类匹配逻辑
@@ -617,20 +598,18 @@ class CategoryEngine:
                 # 关键词匹配不应该改变账单的type为转账
 
                 # 获取账单的去重类型
-                dedup_type = str(bill.get('_dedup_type', '')).lower()
+                dedup_type = str(bill.get("_dedup_type", "")).lower()
 
                 # 如果匹配到投资类分类，更新账单type为'投资'
                 if rule_type == TransactionType.INVESTMENT:
-                    bill['type'] = '投资'
+                    bill["type"] = "投资"
                 # 如果匹配到转账类分类，只有 dedup_type='transfer' 时才更新type
                 elif rule_type == TransactionType.TRANSFER:
-                    if dedup_type == 'transfer':
-                        bill['type'] = '转账'
+                    if dedup_type == "transfer":
+                        bill["type"] = "转账"
                     else:
                         # 不更新type，跳过此规则继续查找其他规则
-                        self.logger.debug(
-                            "[分类匹配] 跳过转账规则(dedup_type='%s')", dedup_type
-                        )
+                        self.logger.debug("[分类匹配] 跳过转账规则(dedup_type='%s')", dedup_type)
                         continue
 
                 return main_cat, sub_cat
@@ -640,44 +619,44 @@ class CategoryEngine:
         self.logger.debug("[分类匹配] 关键词未匹配，使用默认类型逻辑")
 
         # 根据金额正负和原始类型确定要匹配的分类类型
-        if original_type in ['转账', '转出', '转入']:
+        if original_type in ["转账", "转出", "转入"]:
             target_types = [TransactionType.TRANSFER]
-        elif original_type in ['投资', '投资理财', '理财']:
+        elif original_type in ["投资", "投资理财", "理财"]:
             target_types = [TransactionType.INVESTMENT]
         elif amount > 0:
             target_types = [TransactionType.INCOME]
         elif amount < 0:
             target_types = [TransactionType.EXPENSE]
         else:
-            target_types = [TransactionType.EXPENSE, TransactionType.INCOME,
-                           TransactionType.TRANSFER, TransactionType.INVESTMENT]
+            target_types = [
+                TransactionType.EXPENSE,
+                TransactionType.INCOME,
+                TransactionType.TRANSFER,
+                TransactionType.INVESTMENT,
+            ]
 
         # 过滤目标类型的规则（此时可能有无关键词的默认分类）
-        filtered_rules = [
-            rule for rule in self.rules
-            if rule.get('type') in target_types
-        ]
+        filtered_rules = [rule for rule in self.rules if rule.get("type") in target_types]
 
         self.logger.debug(
-            "[分类匹配] 默认类型过滤: target_types=%s, 规则数=%d/%d",
-            target_types, len(filtered_rules), len(self.rules)
+            "[分类匹配] 默认类型过滤: target_types=%s, 规则数=%d/%d", target_types, len(filtered_rules), len(self.rules)
         )
 
         # ===== v6.88: ML分类器兜底预测 =====
         # 关键词规则都未命中时，尝试使用机器学习模型预测
         try:
             from .ml_classifier import get_ml_classifier  # pylint: disable=import-outside-toplevel
-            ml_clf = get_ml_classifier(user_id=getattr(self, '_current_user_id', 1))
+
+            ml_clf = get_ml_classifier(user_id=getattr(self, "_current_user_id", 1))
             if ml_clf.is_ready:
                 ml_main, ml_sub, ml_conf = ml_clf.predict(
-                    counterparty=bill.get('counterparty', ''),
-                    description=bill.get('description', ''),
-                    original_category=bill.get('original_category', '')
+                    counterparty=bill.get("counterparty", ""),
+                    description=bill.get("description", ""),
+                    original_category=bill.get("original_category", ""),
                 )
                 if ml_main:
                     self.logger.debug(
-                        "[ML兜底] '%s' -> %s/%s (置信度=%.2f)",
-                        combined_text[:30], ml_main, ml_sub, ml_conf
+                        "[ML兜底] '%s' -> %s/%s (置信度=%.2f)", combined_text[:30], ml_main, ml_sub, ml_conf
                     )
                     return ml_main, ml_sub
         except Exception:  # pylint: disable=broad-except
@@ -687,9 +666,7 @@ class CategoryEngine:
 
     @log_method
     async def batch_match_categories(
-        self,
-        bills: List[Dict[str, Any]],
-        types: Optional[List[int]] = None
+        self, bills: List[Dict[str, Any]], types: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """
         批量匹配账单分类
@@ -707,7 +684,7 @@ class CategoryEngine:
             self.logger.warning("分类引擎未初始化,请先调用 load_rules()")
             return bills
 
-        types_str = str(types) if types else 'all'
+        types_str = str(types) if types else "all"
         self.logger.info(f"开始批量分类 {len(bills)} 条账单 (types={types_str})")
 
         categorized_bills = []
@@ -719,8 +696,8 @@ class CategoryEngine:
 
             # 添加分类信息
             categorized_bill = bill.copy()
-            categorized_bill['main_category'] = main_cat
-            categorized_bill['sub_category'] = sub_cat
+            categorized_bill["main_category"] = main_cat
+            categorized_bill["sub_category"] = sub_cat
 
             categorized_bills.append(categorized_bill)
 
@@ -728,10 +705,7 @@ class CategoryEngine:
                 matched_count += 1
 
         match_rate = (matched_count / len(bills) * 100) if bills else 0
-        self.logger.info(
-            f"批量分类完成: 成功匹配 {matched_count}/{len(bills)} 条 "
-            f"({match_rate:.1f}%)"
-        )
+        self.logger.info(f"批量分类完成: 成功匹配 {matched_count}/{len(bills)} 条 ({match_rate:.1f}%)")
 
         return categorized_bills
 
@@ -750,16 +724,11 @@ class CategoryEngine:
                 "投资": {主分类: [子分类列表]}
             }
         """
-        tree = {
-            "支出": {},
-            "收入": {},
-            "转账": {},
-            "投资": {}
-        }
+        tree = {"支出": {}, "收入": {}, "转账": {}, "投资": {}}
 
         for rule in self.rules:
-            main = rule.get('main')
-            sub = rule.get('sub')
+            main = rule.get("main")
+            sub = rule.get("sub")
 
             if not main or not sub:
                 continue
@@ -793,11 +762,7 @@ class CategoryEngine:
 _category_engine_v2 = CategoryEngine()
 
 
-async def get_category_engine(
-    db=None,
-    user_id: int = 1,
-    types: Optional[List[int]] = None
-) -> CategoryEngine:
+async def get_category_engine(db=None, user_id: int = 1, types: Optional[List[int]] = None) -> CategoryEngine:
     """获取分类引擎实例
 
     Args:

@@ -21,13 +21,13 @@ class ConfigFileHandler(FileSystemEventHandler):
     def __init__(self, config_manager):
         """初始化"""
         self.config_manager = config_manager
-        self.logger = get_logger('ConfigFileHandler')
+        self.logger = get_logger("ConfigFileHandler")
 
     def on_modified(self, event):
         """文件修改事件处理"""
         if isinstance(event, FileModifiedEvent) and not event.is_directory:
             file_path = Path(event.src_path)
-            if file_path.suffix == '.json':
+            if file_path.suffix == ".json":
                 self.logger.info(f"检测到配置文件变化: {file_path.name}")
                 self.config_manager._reload_config(str(file_path))
 
@@ -48,11 +48,11 @@ class ConfigManager:
 
     def __init__(self):
         """初始化配置管理器"""
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
 
         self._initialized = True
-        self.logger = get_logger('ConfigManager')
+        self.logger = get_logger("ConfigManager")
         # 配置目录指向项目根目录的 config 文件夹
         self.config_dir = Path(__file__).parent.parent.parent / "config"
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +96,7 @@ class ConfigManager:
             # 加载配置文件
             try:
                 self.logger.info(f"加载配置文件: {filename}")
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
 
                 # 更新缓存
@@ -149,8 +149,8 @@ class ConfigManager:
             self.logger.info(f"保存配置文件: {filename}")
 
             # 创建临时文件
-            temp_path = config_path.with_suffix('.tmp')
-            with open(temp_path, 'w', encoding='utf-8') as f:
+            temp_path = config_path.with_suffix(".tmp")
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
 
             # 原子性替换
@@ -220,11 +220,7 @@ class ConfigManager:
             # 创建文件监听器
             event_handler = ConfigFileHandler(self)
             self._observer = Observer()
-            self._observer.schedule(
-                event_handler,
-                str(self.config_dir),
-                recursive=False
-            )
+            self._observer.schedule(event_handler, str(self.config_dir), recursive=False)
             self._observer.start()
 
             self._auto_reload_enabled = True

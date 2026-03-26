@@ -15,14 +15,14 @@ class BillValidator:
     """账单数据验证器"""
 
     # 必需字段
-    REQUIRED_FIELDS = ['date', 'type', 'amount', 'counterparty', 'description']
+    REQUIRED_FIELDS = ["date", "type", "amount", "counterparty", "description"]
 
     # 交易类型（包含投资类型）
-    VALID_TYPES = ['收入', '支出', '转账', '退款', '投资']
+    VALID_TYPES = ["收入", "支出", "转账", "退款", "投资"]
 
     def __init__(self):
         """初始化验证器"""
-        self.logger = get_logger('BillValidator')
+        self.logger = get_logger("BillValidator")
 
     @log_method
     def validate_bill(self, bill: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -46,27 +46,27 @@ class BillValidator:
             return False, errors
 
         # 验证日期
-        date_valid, date_error = self._validate_date(bill['date'])
+        date_valid, date_error = self._validate_date(bill["date"])
         if not date_valid:
             errors.append(date_error)
 
         # 验证类型
-        type_valid, type_error = self._validate_type(bill['type'])
+        type_valid, type_error = self._validate_type(bill["type"])
         if not type_valid:
             errors.append(type_error)
 
         # 验证金额
-        amount_valid, amount_error = self._validate_amount(bill['amount'])
+        amount_valid, amount_error = self._validate_amount(bill["amount"])
         if not amount_valid:
             errors.append(amount_error)
 
         # 验证对方信息
-        counterparty_valid, counterparty_error = self._validate_counterparty(bill['counterparty'])
+        counterparty_valid, counterparty_error = self._validate_counterparty(bill["counterparty"])
         if not counterparty_valid:
             errors.append(counterparty_error)
 
         # 验证描述
-        desc_valid, desc_error = self._validate_description(bill['description'])
+        desc_valid, desc_error = self._validate_description(bill["description"])
         if not desc_valid:
             errors.append(desc_error)
 
@@ -86,12 +86,12 @@ class BillValidator:
         if isinstance(date_value, str):
             # 尝试解析常见日期格式
             formats = [
-                '%Y-%m-%d %H:%M:%S',
-                '%Y-%m-%d',
-                '%Y/%m/%d %H:%M:%S',
-                '%Y/%m/%d',
-                '%Y年%m月%d日 %H:%M:%S',
-                '%Y年%m月%d日'
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d",
+                "%Y年%m月%d日 %H:%M:%S",
+                "%Y年%m月%d日",
             ]
 
             for fmt in formats:
@@ -121,14 +121,14 @@ class BillValidator:
         try:
             if isinstance(amount_value, str):
                 # 移除常见的货币符号和逗号
-                amount_value = amount_value.replace('¥', '').replace('$', '').replace(',', '').strip()
+                amount_value = amount_value.replace("¥", "").replace("$", "").replace(",", "").strip()
 
             amount = Decimal(str(amount_value))
 
             # 检查金额范围
-            if amount < Decimal('-999999999'):
+            if amount < Decimal("-999999999"):
                 return False, f"金额过小: {amount}"
-            if amount > Decimal('999999999'):
+            if amount > Decimal("999999999"):
                 return False, f"金额过大: {amount}"
 
             return True, None
@@ -181,13 +181,11 @@ class BillValidator:
                 valid_bills.append(bill)
             else:
                 invalid_bill = bill.copy()
-                invalid_bill['_validation_errors'] = errors
-                invalid_bill['_index'] = i
+                invalid_bill["_validation_errors"] = errors
+                invalid_bill["_index"] = i
                 invalid_bills.append(invalid_bill)
 
-        self.logger.info(
-            f"验证完成: 有效 {len(valid_bills)} 条, 无效 {len(invalid_bills)} 条"
-        )
+        self.logger.info(f"验证完成: 有效 {len(valid_bills)} 条, 无效 {len(invalid_bills)} 条")
 
         return valid_bills, invalid_bills
 
@@ -205,26 +203,32 @@ class BillValidator:
         normalized = bill.copy()
 
         # 规范化日期
-        if isinstance(normalized.get('date'), str):
-            date_str = normalized['date']
-            for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d %H:%M:%S',
-                        '%Y/%m/%d', '%Y年%m月%d日 %H:%M:%S', '%Y年%m月%d日']:
+        if isinstance(normalized.get("date"), str):
+            date_str = normalized["date"]
+            for fmt in [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d",
+                "%Y年%m月%d日 %H:%M:%S",
+                "%Y年%m月%d日",
+            ]:
                 try:
-                    normalized['date'] = datetime.strptime(date_str, fmt).strftime('%Y-%m-%d %H:%M:%S')
+                    normalized["date"] = datetime.strptime(date_str, fmt).strftime("%Y-%m-%d %H:%M:%S")
                     break
                 except ValueError:
                     continue
 
         # 规范化金额
-        if isinstance(normalized.get('amount'), str):
-            amount_str = normalized['amount'].replace('¥', '').replace('$', '').replace(',', '').strip()
+        if isinstance(normalized.get("amount"), str):
+            amount_str = normalized["amount"].replace("¥", "").replace("$", "").replace(",", "").strip()
             try:
-                normalized['amount'] = float(Decimal(amount_str))
-            except (InvalidOperation, ValueError):
+                normalized["amount"] = float(Decimal(amount_str))
+            except InvalidOperation, ValueError:
                 pass
 
         # 去除字符串字段的首尾空白
-        for field in ['type', 'counterparty', 'description']:
+        for field in ["type", "counterparty", "description"]:
             if isinstance(normalized.get(field), str):
                 normalized[field] = normalized[field].strip()
 

@@ -20,7 +20,7 @@ class SyncManager:
 
     def __init__(self):
         """初始化"""
-        self.logger = get_logger('SyncManager')
+        self.logger = get_logger("SyncManager")
         # 数据目录和备份目录都指向项目根目录
         self.data_dir = Path(__file__).parent.parent.parent / "data"
         self.backup_dir = Path(__file__).parent.parent.parent / "backup"
@@ -39,7 +39,7 @@ class SyncManager:
         """
         hasher = hashlib.md5()
 
-        for file_path in sorted(directory.rglob('*')):
+        for file_path in sorted(directory.rglob("*")):
             if file_path.is_file():
                 hasher.update(file_path.name.encode())
                 hasher.update(str(file_path.stat().st_size).encode())
@@ -69,7 +69,7 @@ class SyncManager:
             return None
 
         # 创建备份文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"backup_{timestamp}.zip"
         backup_path = self.backup_dir / backup_filename
 
@@ -85,8 +85,8 @@ class SyncManager:
 
     def _create_backup_zip(self, backup_path: Path):
         """创建备份ZIP文件"""
-        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in self.data_dir.rglob('*'):
+        with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in self.data_dir.rglob("*"):
                 if file_path.is_file():
                     arcname = file_path.relative_to(self.data_dir.parent)
                     zipf.write(file_path, arcname)
@@ -109,7 +109,7 @@ class SyncManager:
         Returns:
             bool: 是否成功
         """
-        provider = cloud_config.get('provider', '').lower()
+        provider = cloud_config.get("provider", "").lower()
 
         if not provider:
             self.logger.error("未指定云服务商")
@@ -127,15 +127,15 @@ class SyncManager:
             backup_file = Path(backup_path)
 
             # 根据不同云服务商上传
-            if provider == 'oss':
+            if provider == "oss":
                 success = await self._upload_to_aliyun_oss(backup_file, cloud_config)
-            elif provider == 's3':
+            elif provider == "s3":
                 success = await self._upload_to_aws_s3(backup_file, cloud_config)
-            elif provider == 'cos':
+            elif provider == "cos":
                 success = await self._upload_to_tencent_cos(backup_file, cloud_config)
-            elif provider == 'azure':
+            elif provider == "azure":
                 success = await self._upload_to_azure_blob(backup_file, cloud_config)
-            elif provider == 'webdav':
+            elif provider == "webdav":
                 success = await self._upload_to_webdav(backup_file, cloud_config)
             else:
                 self.logger.error(f"不支持的云服务商: {provider}")
@@ -160,20 +160,13 @@ class SyncManager:
             self.logger.info("使用阿里云OSS上传")
 
             # 创建认证对象
-            auth = oss2.Auth(
-                config.get('access_key'),
-                config.get('secret_key')
-            )
+            auth = oss2.Auth(config.get("access_key"), config.get("secret_key"))
 
             # 创建Bucket对象
-            bucket = oss2.Bucket(
-                auth,
-                config.get('endpoint'),
-                config.get('bucket')
-            )
+            bucket = oss2.Bucket(auth, config.get("endpoint"), config.get("bucket"))
 
             # 生成对象key
-            prefix = config.get('prefix', 'bill_analyser_backups/')
+            prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
@@ -199,23 +192,19 @@ class SyncManager:
 
             # 创建S3客户端
             s3_client = boto3.client(
-                's3',
-                endpoint_url=config.get('endpoint'),
-                aws_access_key_id=config.get('access_key'),
-                aws_secret_access_key=config.get('secret_key')
+                "s3",
+                endpoint_url=config.get("endpoint"),
+                aws_access_key_id=config.get("access_key"),
+                aws_secret_access_key=config.get("secret_key"),
             )
 
             # 生成对象key
-            prefix = config.get('prefix', 'bill_analyser_backups/')
+            prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
             self.logger.debug(f"上传文件: {object_key}")
-            s3_client.upload_file(
-                str(file_path),
-                config.get('bucket'),
-                object_key
-            )
+            s3_client.upload_file(str(file_path), config.get("bucket"), object_key)
 
             self.logger.info(f"AWS S3上传成功: {object_key}")
             return True
@@ -236,31 +225,24 @@ class SyncManager:
 
             # 解析region
             import re
-            region_match = re.search(r'cos\.([^.]+)\.myqcloud\.com', config.get('endpoint', ''))
-            region = region_match.group(1) if region_match else 'ap-guangzhou'
+
+            region_match = re.search(r"cos\.([^.]+)\.myqcloud\.com", config.get("endpoint", ""))
+            region = region_match.group(1) if region_match else "ap-guangzhou"
 
             # 创建配置对象
-            cos_config = CosConfig(
-                Region=region,
-                SecretId=config.get('access_key'),
-                SecretKey=config.get('secret_key')
-            )
+            cos_config = CosConfig(Region=region, SecretId=config.get("access_key"), SecretKey=config.get("secret_key"))
 
             # 创建客户端
             client = CosS3Client(cos_config)
 
             # 生成对象key
-            prefix = config.get('prefix', 'bill_analyser_backups/')
+            prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
             self.logger.debug(f"上传文件: {object_key}")
-            with open(file_path, 'rb') as fp:
-                client.put_object(
-                    Bucket=config.get('bucket'),
-                    Body=fp,
-                    Key=object_key
-                )
+            with open(file_path, "rb") as fp:
+                client.put_object(Bucket=config.get("bucket"), Body=fp, Key=object_key)
 
             self.logger.info(f"腾讯云COS上传成功: {object_key}")
             return True
@@ -289,16 +271,16 @@ class SyncManager:
 
             # 创建客户端
             blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-            container_client = blob_service_client.get_container_client(config.get('bucket'))
+            container_client = blob_service_client.get_container_client(config.get("bucket"))
 
             # 生成blob名称
-            prefix = config.get('prefix', 'bill_analyser_backups/')
+            prefix = config.get("prefix", "bill_analyser_backups/")
             blob_name = f"{prefix}{file_path.name}"
 
             # 上传文件
             self.logger.debug(f"上传文件: {blob_name}")
             blob_client = container_client.get_blob_client(blob_name)
-            with open(file_path, 'rb') as data:
+            with open(file_path, "rb") as data:
                 blob_client.upload_blob(data, overwrite=True)
 
             self.logger.info(f"Azure Blob上传成功: {blob_name}")
@@ -320,14 +302,14 @@ class SyncManager:
 
             # 创建WebDAV客户端
             options = {
-                'webdav_hostname': config.get('endpoint'),
-                'webdav_login': config.get('access_key'),
-                'webdav_password': config.get('secret_key')
+                "webdav_hostname": config.get("endpoint"),
+                "webdav_login": config.get("access_key"),
+                "webdav_password": config.get("secret_key"),
             }
             client = Client(options)
 
             # 生成远程路径
-            prefix = config.get('prefix', 'bill_analyser_backups/')
+            prefix = config.get("prefix", "bill_analyser_backups/")
             remote_path = f"{prefix}{file_path.name}"
 
             # 确保目录存在
@@ -370,7 +352,7 @@ class SyncManager:
             temp_dir.mkdir(exist_ok=True)
 
             # 解压备份
-            with zipfile.ZipFile(backup_file, 'r') as zipf:
+            with zipfile.ZipFile(backup_file, "r") as zipf:
                 zipf.extractall(temp_dir)
 
             # 替换数据目录

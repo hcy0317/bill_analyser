@@ -24,7 +24,7 @@ from ..utils.logger import log_method
 
 class AlipayParser(ParserBase):
     """支付宝账单解析器"""
-    
+
     # 解析器标识符
     PARSER_ID = "alipay"
     PARSER_NAME = "支付宝"
@@ -32,7 +32,7 @@ class AlipayParser(ParserBase):
     def __init__(self):
         """初始化"""
         super().__init__()
-        self.supported_extensions = ['.csv']
+        self.supported_extensions = [".csv"]
         self.logger.info("支付宝账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
@@ -40,15 +40,10 @@ class AlipayParser(ParserBase):
         """判断是否为支付宝账单"""
         try:
             # 支付宝账单通常是 GBK 编码
-            with open(file_path, 'r', encoding='gbk') as f:
-                first_lines = ''.join([f.readline() for _ in range(15)])
+            with open(file_path, "r", encoding="gbk") as f:
+                first_lines = "".join([f.readline() for _ in range(15)])
                 # 支付宝特征
-                alipay_indicators = [
-                    '支付宝',
-                    'alipay',
-                    '支付宝账户',
-                    '支付宝（中国）网络技术有限公司'
-                ]
+                alipay_indicators = ["支付宝", "alipay", "支付宝账户", "支付宝（中国）网络技术有限公司"]
                 return any(ind.lower() in first_lines.lower() for ind in alipay_indicators)
         except Exception:  # pylint: disable=broad-except
             return False
@@ -57,21 +52,20 @@ class AlipayParser(ParserBase):
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
         """解析支付宝账单"""
         self.logger.info("[解析开始] 文件: %s", file_path)
-        
+
         if not self.validate_file(file_path):
             return []
 
         bills = []
 
         # 支付宝账单通常是 GBK 编码
-        encodings = ['gbk', 'utf-8', 'gb18030']
+        encodings = ["gbk", "utf-8", "gb18030"]
 
         for encoding in encodings:
             try:
                 bills = self._parse_with_encoding(file_path, encoding)
                 if bills:
-                    self.logger.info("[解析完成] 使用编码 %s 成功解析 %d 条账单",
-                                   encoding, len(bills))
+                    self.logger.info("[解析完成] 使用编码 %s 成功解析 %d 条账单", encoding, len(bills))
                     break
             except Exception as e:  # pylint: disable=broad-except
                 self.logger.debug("使用编码 %s 解析失败: %s", encoding, e)
@@ -86,14 +80,14 @@ class AlipayParser(ParserBase):
     def _parse_with_encoding(self, file_path: str, encoding: str) -> List[Dict[str, Any]]:
         """使用指定编码解析文件"""
         bills = []
-        
-        with open(file_path, 'r', encoding=encoding) as f:
+
+        with open(file_path, "r", encoding=encoding) as f:
             lines = f.readlines()
 
             # 查找数据起始行（包含"交易时间"的行）
             data_start = 0
             for i, line in enumerate(lines):
-                if '交易时间' in line and '交易' in line:
+                if "交易时间" in line and "交易" in line:
                     data_start = i
                     break
 
@@ -120,35 +114,35 @@ class AlipayParser(ParserBase):
     def _extract_bill_from_row(self, row: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """从行数据提取账单信息"""
         # 跳过空行和页脚
-        time_field = row.get('交易时间') or row.get('交易创建时间') or ''
+        time_field = row.get("交易时间") or row.get("交易创建时间") or ""
         time_field = time_field.strip()
-        
-        if not time_field or '共' in time_field or time_field == '':
+
+        if not time_field or "共" in time_field or time_field == "":
             return None
-        
+
         # 获取金额并清理
-        amount_str = row.get('金额', '') or row.get('金额(元)', '') or '0'
+        amount_str = row.get("金额", "") or row.get("金额(元)", "") or "0"
         amount_str = amount_str.strip()
-        
+
         # 获取交易类型
-        trans_type = (row.get('收/支', '') or '').strip()
-        
+        trans_type = (row.get("收/支", "") or "").strip()
+
         # 获取原始分类（支付宝有自己的分类，如"投资理财"）
-        original_category = (row.get('交易分类', '') or '').strip()
-        
+        original_category = (row.get("交易分类", "") or "").strip()
+
         # 提取所有可能有用的字段
         return {
-            'date': time_field,
-            'type': trans_type,
-            'counterparty': (row.get('交易对方', '') or row.get('对方', '') or '').strip(),
-            'opponent_account': (row.get('对方账号', '') or '').strip(),
-            'description': (row.get('商品说明', '') or row.get('商品名称', '') or '').strip(),
-            'goods': (row.get('商品说明', '') or row.get('商品名称', '') or '').strip(),
-            'amount': amount_str,
-            'payment_method': (row.get('收/付款方式', '') or '').strip(),
-            'status': (row.get('交易状态', '') or '').strip(),
-            'transaction_id': (row.get('交易订单号', '') or '').strip(),
-            'merchant_id': (row.get('商家订单号', '') or '').strip(),
-            'remark': (row.get('备注', '') or '').strip(),
-            'original_category': original_category,
+            "date": time_field,
+            "type": trans_type,
+            "counterparty": (row.get("交易对方", "") or row.get("对方", "") or "").strip(),
+            "opponent_account": (row.get("对方账号", "") or "").strip(),
+            "description": (row.get("商品说明", "") or row.get("商品名称", "") or "").strip(),
+            "goods": (row.get("商品说明", "") or row.get("商品名称", "") or "").strip(),
+            "amount": amount_str,
+            "payment_method": (row.get("收/付款方式", "") or "").strip(),
+            "status": (row.get("交易状态", "") or "").strip(),
+            "transaction_id": (row.get("交易订单号", "") or "").strip(),
+            "merchant_id": (row.get("商家订单号", "") or "").strip(),
+            "remark": (row.get("备注", "") or "").strip(),
+            "original_category": original_category,
         }

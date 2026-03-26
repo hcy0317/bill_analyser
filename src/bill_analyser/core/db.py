@@ -7,10 +7,11 @@ Database Module - 异步数据库管理模块
 import hashlib
 import json
 import sqlite3
+
 # import threading  # 已移除
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -20,14 +21,14 @@ from ..utils.logger import get_logger, log_method, log_step
 class Database:
     """异步数据库管理器"""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: str | None = None):
         """
         初始化数据库管理器
 
         Args:
             db_path: 数据库文件路径，如果为 None 则使用默认路径
         """
-        self.logger = get_logger('Database')
+        self.logger = get_logger("Database")
 
         if db_path:
             self.db_path = Path(db_path)
@@ -38,7 +39,7 @@ class Database:
         # 确保数据目录存在
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._connection: Optional[aiosqlite.Connection] = None
+        self._connection: aiosqlite.Connection | None = None
         # 使用线程锁而非asyncio.Lock,避免事件循环绑定问题
         # Lock已移除 - SQLite自带线程安全
 
@@ -117,7 +118,7 @@ class Database:
         async with conn.execute("PRAGMA table_info(categories)") as cursor:
             columns = [row[1] for row in await cursor.fetchall()]
 
-            if 'type' not in columns:
+            if "type" not in columns:
                 self.logger.info("添加 type 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN type INTEGER DEFAULT 1")
 
@@ -125,23 +126,23 @@ class Database:
                 await conn.execute("UPDATE categories SET type = 2 WHERE main_category = '收入'")
                 await conn.execute("UPDATE categories SET type = 3 WHERE main_category = '转账'")
 
-            if 'priority' not in columns:
+            if "priority" not in columns:
                 self.logger.info("添加 priority 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN priority INTEGER DEFAULT 0")
 
-            if 'keywords' not in columns:
+            if "keywords" not in columns:
                 self.logger.info("添加 keywords 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN keywords TEXT")
 
-            if 'hidden' not in columns:
+            if "hidden" not in columns:
                 self.logger.info("添加 hidden 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN hidden BOOLEAN DEFAULT 0")
 
-            if 'icon' not in columns:
+            if "icon" not in columns:
                 self.logger.info("添加 icon 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN icon TEXT")
 
-            if 'color' not in columns:
+            if "color" not in columns:
                 self.logger.info("添加 color 字段到 categories 表")
                 await conn.execute("ALTER TABLE categories ADD COLUMN color TEXT")
 
@@ -187,12 +188,12 @@ class Database:
         # 检查 accounts 表是否有 parent_id 列 (用于迁移旧数据库)
         cursor = await conn.execute("PRAGMA table_info(accounts)")
         columns = [row[1] for row in await cursor.fetchall()]
-        if 'parent_id' not in columns:
+        if "parent_id" not in columns:
             self.logger.info("添加 parent_id 列到 accounts 表")
             await conn.execute("ALTER TABLE accounts ADD COLUMN parent_id INTEGER DEFAULT 0")
 
         # 检查 accounts 表是否有 aliases 列 (用于账户别名匹配)
-        if 'aliases' not in columns:
+        if "aliases" not in columns:
             self.logger.info("添加 aliases 列到 accounts 表 (用于账户别名匹配)")
             await conn.execute("ALTER TABLE accounts ADD COLUMN aliases TEXT")
 
@@ -234,7 +235,7 @@ class Database:
         # 检查 tags 表是否有 hidden 列
         async with conn.execute("PRAGMA table_info(tags)") as cursor:
             columns = [row[1] for row in await cursor.fetchall()]
-            if 'hidden' not in columns:
+            if "hidden" not in columns:
                 self.logger.info("添加 hidden 字段到 tags 表")
                 await conn.execute("ALTER TABLE tags ADD COLUMN hidden BOOLEAN DEFAULT 0")
 
@@ -315,23 +316,14 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type)")
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_accounts_hidden ON accounts(hidden)"
-        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_hidden ON accounts(hidden)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_types_user ON account_types(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_types_type ON account_types(type)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_account_transfers_from "
-            "ON account_transfers(from_account_id)"
+            "CREATE INDEX IF NOT EXISTS idx_account_transfers_from ON account_transfers(from_account_id)"
         )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_account_transfers_to "
-            "ON account_transfers(to_account_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_account_transfers_date "
-            "ON account_transfers(transfer_date)"
-        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_transfers_to ON account_transfers(to_account_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_transfers_date ON account_transfers(transfer_date)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_bill ON bill_tags(bill_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_tag ON bill_tags(tag_id)")
@@ -340,8 +332,7 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budget_history_budget ON budget_history(budget_id)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_budget_history_period "
-            "ON budget_history(period_start, period_end)"
+            "CREATE INDEX IF NOT EXISTS idx_budget_history_period ON budget_history(period_start, period_end)"
         )
 
         # 汇率管理表
@@ -379,12 +370,10 @@ class Database:
             "ON user_exchange_rates(from_currency, to_currency)"
         )
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_date "
-            "ON user_exchange_rates(effective_date DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_date ON user_exchange_rates(effective_date DESC)"
         )
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_exchange_rate_sources_enabled "
-            "ON exchange_rate_sources(enabled, priority)"
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rate_sources_enabled ON exchange_rate_sources(enabled, priority)"
         )
 
         # 为accounts表添加currency字段（如果不存在）
@@ -449,8 +438,7 @@ class Database:
         # 创建模板索引
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_templates_user ON bill_templates(user_id)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_templates_favorite "
-            "ON bill_templates(is_favorite, use_count DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_templates_favorite ON bill_templates(is_favorite, use_count DESC)"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_templates_type ON bill_templates(type)")
 
@@ -458,8 +446,7 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_recurring_bills_user ON recurring_bills(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_recurring_bills_next_date ON recurring_bills(next_date)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_recurring_bills_enabled "
-            "ON recurring_bills(enabled, next_date)"
+            "CREATE INDEX IF NOT EXISTS idx_recurring_bills_enabled ON recurring_bills(enabled, next_date)"
         )
 
         # v6.88: 为模板域补齐前端 REST 契约所需字段
@@ -474,7 +461,7 @@ class Database:
             "ALTER TABLE recurring_bills ADD COLUMN display_order INTEGER DEFAULT 0",
             "ALTER TABLE recurring_bills ADD COLUMN hidden INTEGER DEFAULT 0",
             "ALTER TABLE recurring_bills ADD COLUMN utc_offset INTEGER DEFAULT 0",
-            "ALTER TABLE recurring_bills ADD COLUMN scheduled_frequency_type INTEGER DEFAULT 0"
+            "ALTER TABLE recurring_bills ADD COLUMN scheduled_frequency_type INTEGER DEFAULT 0",
         ]
 
         for statement in template_alter_statements:
@@ -661,12 +648,9 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_user ON auth_logs(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_event ON auth_logs(event_type, created_at)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_created ON auth_logs(created_at)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_user_external_auths_type "
-            "ON user_external_auths(external_auth_type)"
+            "CREATE INDEX IF NOT EXISTS idx_user_external_auths_type ON user_external_auths(external_auth_type)"
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_application_cloud_settings_user "
@@ -696,13 +680,9 @@ class Database:
         """)
 
         # 创建审计日志索引
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(operation_type, created_at)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_logs_type "
-            "ON audit_logs(operation_type, created_at)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_logs_target "
-            "ON audit_logs(operation_target, target_id)"
+            "CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(operation_target, target_id)"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status)")
@@ -787,18 +767,9 @@ class Database:
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """)
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_import_sessions_session "
-            "ON import_sessions(session_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_import_sessions_user "
-            "ON import_sessions(user_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_import_sessions_status "
-            "ON import_sessions(status)"
-        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_import_sessions_session ON import_sessions(session_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_import_sessions_user ON import_sessions(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_import_sessions_status ON import_sessions(status)")
 
         # 创建解析器模板表 (阶段1: 解析后的原始数据)
         await conn.execute("""
@@ -822,20 +793,14 @@ class Database:
         )
         """)
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parser_template_session "
-            "ON bills_parser_template(session_id)"
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_session ON bills_parser_template(session_id)"
         )
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parser_template_processed "
-            "ON bills_parser_template(parser_is_processed)"
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_processed ON bills_parser_template(parser_is_processed)"
         )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_parser_template_date ON bills_parser_template(parser_date)")
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parser_template_date "
-            "ON bills_parser_template(parser_date)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_parser_template_parser_id "
-            "ON bills_parser_template(parser_id)"
+            "CREATE INDEX IF NOT EXISTS idx_parser_template_parser_id ON bills_parser_template(parser_id)"
         )
 
         # 创建预览账单表 (阶段2: 去重后待确认的数据)
@@ -868,29 +833,17 @@ class Database:
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """)
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_preview_session "
-            "ON bills_preview(session_id)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_preview_selected "
-            "ON bills_preview(preview_selected)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_preview_type "
-            "ON bills_preview(preview_type)"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_preview_date "
-            "ON bills_preview(preview_date)"
-        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_session ON bills_preview(session_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_selected ON bills_preview(preview_selected)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_type ON bills_preview(preview_type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_date ON bills_preview(preview_date)")
         preview_alter_statements = [
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_id INTEGER",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_name TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_candidate_count INTEGER DEFAULT 0",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_match_score REAL DEFAULT 0",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_match_reasons TEXT",
-            "ALTER TABLE bills_preview ADD COLUMN preview_recurring_matched_date TEXT"
+            "ALTER TABLE bills_preview ADD COLUMN preview_recurring_matched_date TEXT",
         ]
         for alter_stmt in preview_alter_statements:
             try:
@@ -914,12 +867,10 @@ class Database:
         )
         """)
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_annotation_samples_session "
-            "ON import_annotation_samples(session_id)"
+            "CREATE INDEX IF NOT EXISTS idx_annotation_samples_session ON import_annotation_samples(session_id)"
         )
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_annotation_samples_user "
-            "ON import_annotation_samples(user_id)"
+            "CREATE INDEX IF NOT EXISTS idx_annotation_samples_user ON import_annotation_samples(user_id)"
         )
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS import_learning_rules (
@@ -969,8 +920,7 @@ class Database:
             "ON import_learning_rule_logs(user_id, created_at DESC)"
         )
         await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_import_learning_rule_logs_rule "
-            "ON import_learning_rule_logs(rule_id)"
+            "CREATE INDEX IF NOT EXISTS idx_import_learning_rule_logs_rule ON import_learning_rule_logs(rule_id)"
         )
 
         self.logger.info("v6.47: 账单导入三阶段表创建完成")
@@ -978,27 +928,27 @@ class Database:
         # === v6.69: 多用户数据隔离迁移 ===
         # 所有 CREATE TABLE 语句执行完毕后，再为现有表添加 user_id 字段
         # 这样可以避免在表不存在时调用 _migrate_user_id_field 导致的错误
-        await self._migrate_user_id_field(conn, 'bills')
-        await self._migrate_user_id_field(conn, 'categories')
-        await self._migrate_user_id_field(conn, 'account_types')
-        await self._migrate_user_id_field(conn, 'accounts')
-        await self._migrate_user_id_field(conn, 'account_transfers')
-        await self._migrate_user_id_field(conn, 'tags')
-        await self._migrate_user_id_field(conn, 'budgets')
-        await self._migrate_user_id_field(conn, 'budget_history')
-        await self._migrate_user_id_field(conn, 'saved_filters')
-        await self._migrate_user_id_field(conn, 'bill_templates')
-        await self._migrate_user_id_field(conn, 'recurring_bills')
-        await self._migrate_user_id_field(conn, 'import_configs')
-        await self._migrate_user_id_field(conn, 'import_history')
-        await self._migrate_user_id_field(conn, 'user_exchange_rates')
+        await self._migrate_user_id_field(conn, "bills")
+        await self._migrate_user_id_field(conn, "categories")
+        await self._migrate_user_id_field(conn, "account_types")
+        await self._migrate_user_id_field(conn, "accounts")
+        await self._migrate_user_id_field(conn, "account_transfers")
+        await self._migrate_user_id_field(conn, "tags")
+        await self._migrate_user_id_field(conn, "budgets")
+        await self._migrate_user_id_field(conn, "budget_history")
+        await self._migrate_user_id_field(conn, "saved_filters")
+        await self._migrate_user_id_field(conn, "bill_templates")
+        await self._migrate_user_id_field(conn, "recurring_bills")
+        await self._migrate_user_id_field(conn, "import_configs")
+        await self._migrate_user_id_field(conn, "import_history")
+        await self._migrate_user_id_field(conn, "user_exchange_rates")
 
         cursor = await conn.execute("PRAGMA table_info(budget_history)")
         budget_history_columns = [row[1] for row in await cursor.fetchall()]
         budget_history_alters = [
             ("budget_amount", "ALTER TABLE budget_history ADD COLUMN budget_amount REAL DEFAULT 0"),
             ("execution_rate", "ALTER TABLE budget_history ADD COLUMN execution_rate REAL DEFAULT 0"),
-            ("filter_summary", "ALTER TABLE budget_history ADD COLUMN filter_summary TEXT DEFAULT ''")
+            ("filter_summary", "ALTER TABLE budget_history ADD COLUMN filter_summary TEXT DEFAULT ''"),
         ]
         for column_name, alter_sql in budget_history_alters:
             if column_name not in budget_history_columns:
@@ -1047,11 +997,9 @@ class Database:
             cursor = await conn.execute(f"PRAGMA table_info({table_name})")
             columns = [row[1] for row in await cursor.fetchall()]
 
-            if 'user_id' not in columns:
+            if "user_id" not in columns:
                 self.logger.info(f"为 {table_name} 表添加 user_id 字段")
-                await conn.execute(
-                    f"ALTER TABLE {table_name} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1"
-                )
+                await conn.execute(f"ALTER TABLE {table_name} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
                 self.logger.info(f"成功为 {table_name} 表添加 user_id 字段")
             else:
                 self.logger.debug(f"{table_name} 表已有 user_id 字段")
@@ -1061,38 +1009,36 @@ class Database:
     async def _migrate_categories_unique_constraint(self, conn: aiosqlite.Connection) -> None:
         """
         v6.66: 迁移 categories 表的 UNIQUE 约束，添加 user_id
-        
+
         旧约束: UNIQUE(main_category, sub_category) - 导致不同用户无法有相同分类名
         新约束: UNIQUE(user_id, main_category, sub_category) - 允许不同用户有相同分类名
-        
+
         SQLite 不支持直接修改约束，需要重建表
         """
         try:
             # 检查当前约束是否已包含 user_id
-            cursor = await conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'"
-            )
+            cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'")
             row = await cursor.fetchone()
             if not row:
                 self.logger.debug("categories 表不存在，跳过约束迁移")
                 return
-            
+
             table_sql = row[0]
-            
+
             # 如果已经包含正确的约束，跳过迁移
-            if 'UNIQUE(user_id, main_category, sub_category)' in table_sql:
+            if "UNIQUE(user_id, main_category, sub_category)" in table_sql:
                 self.logger.debug("categories 表已有正确的 UNIQUE 约束，跳过迁移")
                 return
-            
+
             # 如果没有旧约束（新建的表），跳过迁移
-            if 'UNIQUE(main_category, sub_category)' not in table_sql:
+            if "UNIQUE(main_category, sub_category)" not in table_sql:
                 self.logger.debug("categories 表无需迁移（可能是新建的表）")
                 return
-            
+
             self.logger.info("开始迁移 categories 表 UNIQUE 约束...")
             self.logger.info("旧约束: UNIQUE(main_category, sub_category)")
             self.logger.info("新约束: UNIQUE(user_id, main_category, sub_category)")
-            
+
             # 1. 创建临时表（使用新约束）
             await conn.execute("""
                 CREATE TABLE categories_new (
@@ -1112,7 +1058,7 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
-            
+
             # 2. 复制数据到新表
             await conn.execute("""
                 INSERT INTO categories_new 
@@ -1123,21 +1069,19 @@ class Database:
                     priority, keywords, hidden, icon, color, created_at
                 FROM categories
             """)
-            
+
             # 3. 删除旧表
             await conn.execute("DROP TABLE categories")
-            
+
             # 4. 重命名新表
             await conn.execute("ALTER TABLE categories_new RENAME TO categories")
-            
+
             # 5. 重建索引
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)"
-            )
-            
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
+
             await conn.commit()
             self.logger.info("categories 表 UNIQUE 约束迁移完成")
-            
+
         except Exception as e:
             self.logger.error(f"categories 表约束迁移失败: {e}", exc_info=True)
             # 尝试回滚
@@ -1150,11 +1094,11 @@ class Database:
     async def _migrate_users_cash_fields(self, conn: aiosqlite.Connection) -> None:
         """
         v6.78: 为 users 表添加现金存取相关字段
-        
+
         新增字段:
         - cash_account_id: 现金账户ID (用于现金存取自动识别)
         - cash_transfer_category_id: 存取分类ID (匹配此分类时自动转换为转账)
-        
+
         这两个字段用于现金存取转账特异检测功能
         """
         try:
@@ -1162,21 +1106,17 @@ class Database:
             columns = [row[1] for row in await cursor.fetchall()]
 
             # 添加 cash_account_id 字段
-            if 'cash_account_id' not in columns:
+            if "cash_account_id" not in columns:
                 self.logger.info("为 users 表添加 cash_account_id 字段")
-                await conn.execute(
-                    "ALTER TABLE users ADD COLUMN cash_account_id INTEGER DEFAULT NULL"
-                )
+                await conn.execute("ALTER TABLE users ADD COLUMN cash_account_id INTEGER DEFAULT NULL")
                 self.logger.info("成功为 users 表添加 cash_account_id 字段")
             else:
                 self.logger.debug("users 表已有 cash_account_id 字段")
 
             # 添加 cash_transfer_category_id 字段
-            if 'cash_transfer_category_id' not in columns:
+            if "cash_transfer_category_id" not in columns:
                 self.logger.info("为 users 表添加 cash_transfer_category_id 字段")
-                await conn.execute(
-                    "ALTER TABLE users ADD COLUMN cash_transfer_category_id INTEGER DEFAULT NULL"
-                )
+                await conn.execute("ALTER TABLE users ADD COLUMN cash_transfer_category_id INTEGER DEFAULT NULL")
                 self.logger.info("成功为 users 表添加 cash_transfer_category_id 字段")
             else:
                 self.logger.debug("users 表已有 cash_transfer_category_id 字段")
@@ -1190,11 +1130,9 @@ class Database:
             cursor = await conn.execute("PRAGMA table_info(users)")
             columns = [row[1] for row in await cursor.fetchall()]
 
-            if 'import_learning_enabled' not in columns:
+            if "import_learning_enabled" not in columns:
                 self.logger.info("为 users 表添加 import_learning_enabled 字段")
-                await conn.execute(
-                    "ALTER TABLE users ADD COLUMN import_learning_enabled INTEGER DEFAULT 1"
-                )
+                await conn.execute("ALTER TABLE users ADD COLUMN import_learning_enabled INTEGER DEFAULT 1")
                 self.logger.info("成功为 users 表添加 import_learning_enabled 字段")
             else:
                 self.logger.debug("users 表已有 import_learning_enabled 字段")
@@ -1202,25 +1140,20 @@ class Database:
         except Exception as e:
             self.logger.error(f"为 users 表添加导入学习字段失败: {e}", exc_info=True)
 
-    async def _migrate_users_investment_keyword_fields(
-        self,
-        conn: aiosqlite.Connection
-    ) -> None:
+    async def _migrate_users_investment_keyword_fields(self, conn: aiosqlite.Connection) -> None:
         """为 users 表添加投资识别关键词配置字段。"""
         try:
             cursor = await conn.execute("PRAGMA table_info(users)")
             columns = [row[1] for row in await cursor.fetchall()]
 
             for column_name in [
-                'investment_platform_keywords',
-                'investment_product_keywords',
-                'investment_exclude_keywords'
+                "investment_platform_keywords",
+                "investment_product_keywords",
+                "investment_exclude_keywords",
             ]:
                 if column_name not in columns:
                     self.logger.info("为 users 表添加 %s 字段", column_name)
-                    await conn.execute(
-                        f"ALTER TABLE users ADD COLUMN {column_name} TEXT DEFAULT NULL"
-                    )
+                    await conn.execute(f"ALTER TABLE users ADD COLUMN {column_name} TEXT DEFAULT NULL")
                     self.logger.info("成功为 users 表添加 %s 字段", column_name)
                 else:
                     self.logger.debug("users 表已有 %s 字段", column_name)
@@ -1232,31 +1165,31 @@ class Database:
     def _normalize_import_learning_text(raw_value: Any) -> str:
         """标准化导入学习文本，用于稳定匹配。"""
         if raw_value is None:
-            return ''
+            return ""
 
         text = str(raw_value).strip().lower()
         if not text:
-            return ''
+            return ""
 
-        parts = [part.strip() for part in text.split('|') if part.strip()]
+        parts = [part.strip() for part in text.split("|") if part.strip()]
         if parts:
-            text = ' | '.join(parts)
+            text = " | ".join(parts)
 
-        return ' '.join(text.split())
+        return " ".join(text.split())
 
     async def _record_import_learning_rule_log(
         self,
         conn: aiosqlite.Connection,
         *,
-        rule_id: Optional[int],
+        rule_id: int | None,
         user_id: int,
         action: str,
         match_type: str,
         match_value: str,
         normalized_match_value: str,
-        session_id: Optional[str] = None,
-        preview_id: Optional[int] = None,
-        payload: Optional[Dict[str, Any]] = None
+        session_id: str | None = None,
+        preview_id: int | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> None:
         """记录导入学习规则审计日志。"""
         await conn.execute(
@@ -1278,7 +1211,7 @@ class Database:
                 preview_id,
                 json.dumps(payload or {}, ensure_ascii=False),
                 datetime.now().isoformat(),
-            )
+            ),
         )
 
     @log_method
@@ -1290,7 +1223,7 @@ class Database:
         return self._connection
 
     @log_method
-    def _calculate_hash(self, bill: Dict[str, Any]) -> str:
+    def _calculate_hash(self, bill: dict[str, Any]) -> str:
         """
         计算账单哈希值用于去重
 
@@ -1302,18 +1235,17 @@ class Database:
         """
         # 使用关键字段生成哈希
         key_fields = [
-        str(bill.get('date', '')),
-        str(bill.get('type', '')),
-        str(bill.get('amount', '')),
-        str(bill.get('counterparty', '')),
-        str(bill.get('description', ''))
+            str(bill.get("date", "")),
+            str(bill.get("type", "")),
+            str(bill.get("amount", "")),
+            str(bill.get("counterparty", "")),
+            str(bill.get("description", "")),
         ]
-        key_string = '|'.join(key_fields)
-        return hashlib.md5(key_string.encode('utf-8')).hexdigest()
+        key_string = "|".join(key_fields)
+        return hashlib.md5(key_string.encode("utf-8")).hexdigest()
 
     @log_method
-    async def insert_bills(self, bills: List[Dict[str, Any]], batch_id: Optional[str] = None,
-                          user_id: int = 1) -> int:
+    async def insert_bills(self, bills: list[dict[str, Any]], batch_id: str | None = None, user_id: int = 1) -> int:
         """
         批量插入账单
 
@@ -1332,14 +1264,14 @@ class Database:
         self.logger.info(f"准备插入 {len(bills)} 条账单 (user_id={user_id})")
 
         if batch_id is None:
-            batch_id = datetime.now().strftime('%Y%m%d%H%M%S')
+            batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
         conn = await self._get_connection()
         inserted_count = 0
 
         # 分批插入
         for i in range(0, len(bills), self.batch_size):
-            batch = bills[i:i + self.batch_size]
-            self.logger.debug(f"插入批次 {i//self.batch_size + 1}: {len(batch)} 条")
+            batch = bills[i : i + self.batch_size]
+            self.logger.debug(f"插入批次 {i // self.batch_size + 1}: {len(batch)} 条")
 
             for bill in batch:
                 try:
@@ -1349,27 +1281,30 @@ class Database:
                     # 准备数据
                     now = datetime.now().isoformat()
 
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO bills (
                             user_id, date, type, amount, counterparty, description,
                             payment_method, main_category, sub_category, batch_id, hash,
                             created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        user_id,
-                        bill.get('date'),
-                        bill.get('type'),
-                        bill.get('amount'),
-                        bill.get('counterparty'),
-                        bill.get('description'),
-                        bill.get('payment_method'),
-                        bill.get('main_category'),
-                        bill.get('sub_category'),
-                        batch_id,
-                        bill_hash,
-                        now,
-                        now
-                    ))
+                    """,
+                        (
+                            user_id,
+                            bill.get("date"),
+                            bill.get("type"),
+                            bill.get("amount"),
+                            bill.get("counterparty"),
+                            bill.get("description"),
+                            bill.get("payment_method"),
+                            bill.get("main_category"),
+                            bill.get("sub_category"),
+                            batch_id,
+                            bill_hash,
+                            now,
+                            now,
+                        ),
+                    )
 
                     inserted_count += 1
 
@@ -1385,7 +1320,7 @@ class Database:
         return inserted_count
 
     @log_method
-    async def insert_bill(self, bill: Dict[str, Any], user_id: int = 1) -> int:
+    async def insert_bill(self, bill: dict[str, Any], user_id: int = 1) -> int:
         """
         插入单条账单
 
@@ -1402,39 +1337,42 @@ class Database:
         bill_hash = self._calculate_hash(bill)
         now = datetime.now().isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
         INSERT INTO bills (
         user_id, date, type, amount, counterparty, description, channel,
         main_category, sub_category, comment, account, tag,
         created_from_template, created_from_recurring, import_history_id,
         hash, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-        user_id,
-        bill.get('date'),
-        bill.get('type'),
-        bill.get('amount'),
-        bill.get('counterparty'),
-        bill.get('description'),
-        bill.get('channel'),
-        bill.get('category'),  # main_category
-        bill.get('sub_category'),
-        bill.get('comment'),
-        bill.get('account'),
-        bill.get('tag'),
-        bill.get('created_from_template'),
-        bill.get('created_from_recurring'),
-        bill.get('import_history_id'),
-        bill_hash,
-        now,
-        now
-        ))
+        """,
+            (
+                user_id,
+                bill.get("date"),
+                bill.get("type"),
+                bill.get("amount"),
+                bill.get("counterparty"),
+                bill.get("description"),
+                bill.get("channel"),
+                bill.get("category"),  # main_category
+                bill.get("sub_category"),
+                bill.get("comment"),
+                bill.get("account"),
+                bill.get("tag"),
+                bill.get("created_from_template"),
+                bill.get("created_from_recurring"),
+                bill.get("import_history_id"),
+                bill_hash,
+                now,
+                now,
+            ),
+        )
 
         await conn.commit()
         return cursor.lastrowid
 
     @log_method
-    async def check_duplicate(self, bill: Dict[str, Any], user_id: int = 1) -> bool:
+    async def check_duplicate(self, bill: dict[str, Any], user_id: int = 1) -> bool:
         """
         检查账单是否重复
 
@@ -1449,21 +1387,19 @@ class Database:
         conn = await self._get_connection()
 
         cursor = await conn.execute(
-        "SELECT COUNT(*) as count FROM bills WHERE user_id = ? AND hash = ?",
-        (user_id, bill_hash,)
+            "SELECT COUNT(*) as count FROM bills WHERE user_id = ? AND hash = ?",
+            (
+                user_id,
+                bill_hash,
+            ),
         )
 
         row = await cursor.fetchone()
-        return row['count'] > 0
+        return row["count"] > 0
 
     @log_method
     @log_method
-    async def get_bills_by_date_range(
-        self,
-        start_date: str,
-        end_date: str,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+    async def get_bills_by_date_range(self, start_date: str, end_date: str, user_id: int = 1) -> list[dict[str, Any]]:
         """按日期范围查询账单（用于去重对比）
 
         Args:
@@ -1485,16 +1421,15 @@ class Database:
               AND date <= ?
             ORDER BY date
         """
-        params = [user_id, start_date, end_date + ' 23:59:59']
+        params = [user_id, start_date, end_date + " 23:59:59"]
 
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_bills(self, filters: Optional[Dict[str, Any]] = None,
-           limit: Optional[int] = None,
-           offset: int = 0,
-           user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_bills(
+        self, filters: dict[str, Any] | None = None, limit: int | None = None, offset: int = 0, user_id: int = 1
+    ) -> list[dict[str, Any]]:
         # pylint: disable=too-many-branches
         """
         查询账单
@@ -1534,84 +1469,86 @@ class Database:
 
         if filters:
             # ID筛选
-            if 'id' in filters:
+            if "id" in filters:
                 query += " AND id = ?"
-                params.append(filters['id'])
+                params.append(filters["id"])
 
             # 日期范围筛选(支持多种参数名)
-            date_from = filters.get('date_from') or filters.get('start_date')
+            date_from = filters.get("date_from") or filters.get("start_date")
             if date_from:
                 query += " AND date >= ?"
                 params.append(date_from)
                 self.logger.debug(f"日期筛选: >= {date_from}")
 
-            date_to = filters.get('date_to') or filters.get('end_date')
+            date_to = filters.get("date_to") or filters.get("end_date")
             if date_to:
                 query += " AND date <= ?"
                 params.append(date_to)
                 self.logger.debug(f"日期筛选: <= {date_to}")
 
             # 类型筛选
-            if 'type' in filters:
+            if "type" in filters:
                 query += " AND type = ?"
-                params.append(filters['type'])
+                params.append(filters["type"])
                 self.logger.debug(f"类型筛选: {filters['type']}")
 
             # 分类筛选
-            if 'main_category' in filters:
+            if "main_category" in filters:
                 query += " AND main_category = ?"
-                params.append(filters['main_category'])
+                params.append(filters["main_category"])
                 self.logger.debug(f"主分类筛选: {filters['main_category']}")
 
-            if 'sub_category' in filters:
+            if "sub_category" in filters:
                 query += " AND sub_category = ?"
-                params.append(filters['sub_category'])
+                params.append(filters["sub_category"])
                 self.logger.debug(f"子分类筛选: {filters['sub_category']}")
 
             # 批次ID筛选
-            if 'batch_id' in filters:
+            if "batch_id" in filters:
                 query += " AND batch_id = ?"
-                params.append(filters['batch_id'])
+                params.append(filters["batch_id"])
 
             # 交易对方模糊匹配
-            if 'counterparty' in filters:
+            if "counterparty" in filters:
                 query += " AND counterparty LIKE ?"
                 params.append(f"%{filters['counterparty']}%")
                 self.logger.debug(f"交易对方筛选: %{filters['counterparty']}%")
 
             # 描述模糊匹配
-            if 'description' in filters:
+            if "description" in filters:
                 query += " AND description LIKE ?"
                 params.append(f"%{filters['description']}%")
                 self.logger.debug(f"描述筛选: %{filters['description']}%")
 
             # 关键词搜索(在描述和交易对方中)
-            if 'keyword' in filters and filters['keyword']:
+            if filters.get("keyword"):
                 query += " AND (description LIKE ? OR counterparty LIKE ?)"
                 keyword_pattern = f"%{filters['keyword']}%"
                 params.extend([keyword_pattern, keyword_pattern])
                 self.logger.debug(f"关键词搜索: {keyword_pattern}")
 
             # 账户筛选 (列表)
-            if 'account_ids' in filters and filters['account_ids']:
-                account_ids = filters['account_ids']
+            if filters.get("account_ids"):
+                account_ids = filters["account_ids"]
                 if isinstance(account_ids, list) and account_ids:
-                    placeholders = ','.join(['?'] * len(account_ids))
+                    placeholders = ",".join(["?"] * len(account_ids))
                     # 只要源账户或目标账户在列表中即可
-                    query += f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                    query += (
+                        f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                    )
                     params.extend(account_ids)
                     params.extend(account_ids)
                     self.logger.debug(f"账户筛选: {account_ids}")
 
             # 分类筛选 (列表 - 包含主分类和子分类的元组或字典)
             # 格式: [{'main': '餐饮', 'sub': '早餐'}, {'main': '交通', 'sub': ''}]
-            if 'categories' in filters and filters['categories']:
-                categories = filters['categories']
+            if filters.get("categories"):
+                categories = filters["categories"]
                 if isinstance(categories, list) and categories:
                     cat_conditions = []
                     for cat in categories:
-                        main = cat.get('main')
-                        sub = cat.get('sub')
+                        main = cat.get("main")
+                        sub = cat.get("sub")
                         if main and sub:
                             cat_conditions.append("(main_category = ? AND sub_category = ?)")
                             params.extend([main, sub])
@@ -1624,74 +1561,74 @@ class Database:
                         self.logger.debug(f"分类列表筛选: {len(categories)}个分类")
 
             # 标签筛选
-            if 'tag_ids' in filters and filters['tag_ids']:
-                tag_ids = filters['tag_ids']
+            if filters.get("tag_ids"):
+                tag_ids = filters["tag_ids"]
                 if isinstance(tag_ids, list) and tag_ids:
-                    placeholders = ','.join(['?'] * len(tag_ids))
+                    placeholders = ",".join(["?"] * len(tag_ids))
                     query += f" AND id IN (SELECT bill_id FROM bill_tags WHERE tag_id IN ({placeholders}))"
                     params.extend(tag_ids)
                     self.logger.debug(f"标签筛选: {tag_ids}")
 
             # 金额范围筛选
-            if 'min_amount' in filters and filters['min_amount'] is not None:
+            if "min_amount" in filters and filters["min_amount"] is not None:
                 query += " AND amount >= ?"
-                params.append(float(filters['min_amount']))
+                params.append(float(filters["min_amount"]))
                 self.logger.debug(f"最小金额筛选: >= {filters['min_amount']}")
 
-            if 'max_amount' in filters and filters['max_amount'] is not None:
+            if "max_amount" in filters and filters["max_amount"] is not None:
                 query += " AND amount <= ?"
-                params.append(float(filters['max_amount']))
+                params.append(float(filters["max_amount"]))
                 self.logger.debug(f"最大金额筛选: <= {filters['max_amount']}")
 
             # 金额过滤器(高级筛选)
             # 格式: "类型:值1[:值2]"
             # 支持类型: eq(等于), ne(不等于), gt(大于), lt(小于), gte(大于等于), lte(小于等于), between(范围)
-            if 'amount_filter' in filters and filters['amount_filter']:
-                amount_filter = filters['amount_filter']
+            if filters.get("amount_filter"):
+                amount_filter = filters["amount_filter"]
                 self.logger.debug(f"金额过滤器: {amount_filter}")
 
-                parts = amount_filter.split(':')
+                parts = amount_filter.split(":")
                 if len(parts) >= 2:
                     filter_type = parts[0].lower()
 
                     try:
-                        if filter_type == 'eq':  # 等于
+                        if filter_type == "eq":  # 等于
                             value = float(parts[1])
                             query += " AND amount = ?"
                             params.append(value)
                             self.logger.debug(f"金额等于: {value}")
 
-                        elif filter_type == 'ne':  # 不等于
+                        elif filter_type == "ne":  # 不等于
                             value = float(parts[1])
                             query += " AND amount != ?"
                             params.append(value)
                             self.logger.debug(f"金额不等于: {value}")
 
-                        elif filter_type == 'gt':  # 大于
+                        elif filter_type == "gt":  # 大于
                             value = float(parts[1])
                             query += " AND amount > ?"
                             params.append(value)
                             self.logger.debug(f"金额大于: {value}")
 
-                        elif filter_type == 'lt':  # 小于
+                        elif filter_type == "lt":  # 小于
                             value = float(parts[1])
                             query += " AND amount < ?"
                             params.append(value)
                             self.logger.debug(f"金额小于: {value}")
 
-                        elif filter_type == 'gte':  # 大于等于
+                        elif filter_type == "gte":  # 大于等于
                             value = float(parts[1])
                             query += " AND amount >= ?"
                             params.append(value)
                             self.logger.debug(f"金额大于等于: {value}")
 
-                        elif filter_type == 'lte':  # 小于等于
+                        elif filter_type == "lte":  # 小于等于
                             value = float(parts[1])
                             query += " AND amount <= ?"
                             params.append(value)
                             self.logger.debug(f"金额小于等于: {value}")
 
-                        elif filter_type == 'between' and len(parts) >= 3:  # 范围
+                        elif filter_type == "between" and len(parts) >= 3:  # 范围
                             value1 = float(parts[1])
                             value2 = float(parts[2])
                             query += " AND amount BETWEEN ? AND ?"
@@ -1720,7 +1657,7 @@ class Database:
         return bills
 
     @log_method
-    async def create_bill(self, bill_data: Dict[str, Any], user_id: int = 1) -> Optional[int]:
+    async def create_bill(self, bill_data: dict[str, Any], user_id: int = 1) -> int | None:
         """
         创建单条账单
 
@@ -1735,19 +1672,19 @@ class Database:
 
         try:
             # 必填字段
-            required_fields = ['date', 'type', 'amount', 'description']
+            required_fields = ["date", "type", "amount", "description"]
             for field in required_fields:
                 if field not in bill_data:
                     self.logger.error(f"缺少必填字段: {field}")
                     return None
 
             # 添加 user_id 到账单数据
-            bill_data['user_id'] = user_id
+            bill_data["user_id"] = user_id
 
             # 构建INSERT语句
             columns = list(bill_data.keys())
-            placeholders = ', '.join(['?' for _ in columns])
-            columns_str = ', '.join(columns)
+            placeholders = ", ".join(["?" for _ in columns])
+            columns_str = ", ".join(columns)
 
             query = f"INSERT INTO bills ({columns_str}) VALUES ({placeholders})"
             values = [bill_data[col] for col in columns]
@@ -1789,7 +1726,7 @@ class Database:
             return False
 
     @log_method
-    async def update_bill(self, bill_id: int, updates: Dict[str, Any], user_id: int = 1) -> bool:
+    async def update_bill(self, bill_id: int, updates: dict[str, Any], user_id: int = 1) -> bool:
         """
         更新账单
 
@@ -1828,12 +1765,7 @@ class Database:
             return False
 
     @log_method
-    async def move_all_transactions(
-        self,
-        from_account_id: int,
-        to_account_id: int,
-        user_id: int = 1
-    ) -> Dict[str, Any]:
+    async def move_all_transactions(self, from_account_id: int, to_account_id: int, user_id: int = 1) -> dict[str, Any]:
         """
         将一个账户的所有交易移动到另一个账户
 
@@ -1853,40 +1785,39 @@ class Database:
             # 先检查两个账户是否存在
             cursor = await conn.execute(
                 "SELECT id, name FROM accounts WHERE user_id = ? AND id IN (?, ?)",
-                (user_id, from_account_id, to_account_id)
+                (user_id, from_account_id, to_account_id),
             )
             accounts = await cursor.fetchall()
 
             if len(accounts) != 2:
                 self.logger.error(
-                    "账户不存在或无权限: from=%s, to=%s, user_id=%s",
-                    from_account_id, to_account_id, user_id
+                    "账户不存在或无权限: from=%s, to=%s, user_id=%s", from_account_id, to_account_id, user_id
                 )
-                return {'success': False, 'message': '账户不存在', 'moved_count': 0}
+                return {"success": False, "message": "账户不存在", "moved_count": 0}
 
             # 查询需要移动的交易数量（source_account_id或destination_account_id匹配）
             cursor = await conn.execute(
                 "SELECT COUNT(*) FROM bills WHERE user_id = ? AND (source_account_id = ? OR destination_account_id = ?)",
-                (user_id, from_account_id, from_account_id)
+                (user_id, from_account_id, from_account_id),
             )
             count = (await cursor.fetchone())[0]
 
             if count == 0:
                 self.logger.info(f"源账户 {from_account_id} 没有交易记录")
-                return {'success': True, 'moved_count': 0}
+                return {"success": True, "moved_count": 0}
 
             # 执行批量更新 - 更新source_account_id
             now = datetime.now().isoformat()
             cursor = await conn.execute(
                 "UPDATE bills SET source_account_id = ?, updated_at = ? WHERE user_id = ? AND source_account_id = ?",
-                (to_account_id, now, user_id, from_account_id)
+                (to_account_id, now, user_id, from_account_id),
             )
             source_updated = cursor.rowcount
 
             # 执行批量更新 - 更新destination_account_id
             cursor = await conn.execute(
                 "UPDATE bills SET destination_account_id = ?, updated_at = ? WHERE user_id = ? AND destination_account_id = ?",
-                (to_account_id, now, user_id, from_account_id)
+                (to_account_id, now, user_id, from_account_id),
             )
             dest_updated = cursor.rowcount
 
@@ -1899,18 +1830,15 @@ class Database:
             )
 
             # 同步源账户和目标账户的余额
-            self.logger.info(
-                f"开始同步账户余额: 源账户={from_account_id}, 目标账户={to_account_id}"
-            )
+            self.logger.info(f"开始同步账户余额: 源账户={from_account_id}, 目标账户={to_account_id}")
 
             # 获取同步前的余额
             cursor = await conn.execute(
                 "SELECT id, name, balance FROM accounts WHERE user_id = ? AND id IN (?, ?)",
-                (user_id, from_account_id, to_account_id)
+                (user_id, from_account_id, to_account_id),
             )
             accounts_before = {
-                row['id']: {'name': row['name'], 'balance': row['balance'] or 0.0}
-                for row in await cursor.fetchall()
+                row["id"]: {"name": row["name"], "balance": row["balance"] or 0.0} for row in await cursor.fetchall()
             }
 
             # 同步源账户余额
@@ -1918,15 +1846,12 @@ class Database:
             if sync_result_from:
                 # 获取同步后的源账户余额
                 cursor = await conn.execute(
-                    "SELECT balance FROM accounts WHERE user_id = ? AND id = ?",
-                    (user_id, from_account_id)
+                    "SELECT balance FROM accounts WHERE user_id = ? AND id = ?", (user_id, from_account_id)
                 )
                 row = await cursor.fetchone()
-                new_balance_from = row['balance'] if row else 0.0
-                old_balance_from = accounts_before.get(from_account_id, {}).get('balance', 0.0)
-                self.logger.info(
-                    f"源账户 {from_account_id} 余额已同步: {old_balance_from} → {new_balance_from}"
-                )
+                new_balance_from = row["balance"] if row else 0.0
+                old_balance_from = accounts_before.get(from_account_id, {}).get("balance", 0.0)
+                self.logger.info(f"源账户 {from_account_id} 余额已同步: {old_balance_from} → {new_balance_from}")
             else:
                 self.logger.warning(f"源账户 {from_account_id} 余额同步失败")
 
@@ -1935,37 +1860,29 @@ class Database:
             if sync_result_to:
                 # 获取同步后的目标账户余额
                 cursor = await conn.execute(
-                    "SELECT balance FROM accounts WHERE user_id = ? AND id = ?",
-                    (user_id, to_account_id)
+                    "SELECT balance FROM accounts WHERE user_id = ? AND id = ?", (user_id, to_account_id)
                 )
                 row = await cursor.fetchone()
-                new_balance_to = row['balance'] if row else 0.0
-                old_balance_to = accounts_before.get(to_account_id, {}).get('balance', 0.0)
-                self.logger.info(
-                    f"目标账户 {to_account_id} 余额已同步: {old_balance_to} → {new_balance_to}"
-                )
+                new_balance_to = row["balance"] if row else 0.0
+                old_balance_to = accounts_before.get(to_account_id, {}).get("balance", 0.0)
+                self.logger.info(f"目标账户 {to_account_id} 余额已同步: {old_balance_to} → {new_balance_to}")
             else:
                 self.logger.warning(f"目标账户 {to_account_id} 余额同步失败")
 
             # 清除账户映射缓存，确保前端获取最新余额
-            self._clear_cache('account_mappings')
+            self._clear_cache("account_mappings")
 
-            return {'success': True, 'moved_count': total_updated}
+            return {"success": True, "moved_count": total_updated}
 
         except Exception as e:
             self.logger.error(
-                "移动交易失败: from=%s, to=%s, user_id=%s, error=%s",
-                from_account_id, to_account_id, user_id, e
+                "移动交易失败: from=%s, to=%s, user_id=%s, error=%s", from_account_id, to_account_id, user_id, e
             )
             await conn.rollback()
-            return {'success': False, 'message': str(e), 'moved_count': 0}
+            return {"success": False, "message": str(e), "moved_count": 0}
 
     @log_method
-    async def delete_all_transactions_by_account(
-        self,
-        account_id: int,
-        user_id: int = 1
-    ) -> Dict[str, Any]:
+    async def delete_all_transactions_by_account(self, account_id: int, user_id: int = 1) -> dict[str, Any]:
         """
         删除指定账户的所有交易
 
@@ -1983,30 +1900,29 @@ class Database:
         try:
             # 先检查账户是否存在
             cursor = await conn.execute(
-                "SELECT id, name FROM accounts WHERE user_id = ? AND id = ?",
-                (user_id, account_id)
+                "SELECT id, name FROM accounts WHERE user_id = ? AND id = ?", (user_id, account_id)
             )
             account = await cursor.fetchone()
 
             if not account:
                 self.logger.error("账户不存在或无权限: account_id=%s, user_id=%s", account_id, user_id)
-                return {'success': False, 'message': '账户不存在', 'deleted_count': 0}
+                return {"success": False, "message": "账户不存在", "deleted_count": 0}
 
             # 查询需要删除的交易数量（source_account_id或destination_account_id匹配）
             cursor = await conn.execute(
                 "SELECT COUNT(*) FROM bills WHERE user_id = ? AND (source_account_id = ? OR destination_account_id = ?)",
-                (user_id, account_id, account_id)
+                (user_id, account_id, account_id),
             )
             count = (await cursor.fetchone())[0]
 
             if count == 0:
                 self.logger.info(f"账户 {account_id} 没有交易记录")
-                return {'success': True, 'deleted_count': 0}
+                return {"success": True, "deleted_count": 0}
 
             # 执行批量删除
             await conn.execute(
                 "DELETE FROM bills WHERE user_id = ? AND (source_account_id = ? OR destination_account_id = ?)",
-                (user_id, account_id, account_id)
+                (user_id, account_id, account_id),
             )
 
             await conn.commit()
@@ -2018,184 +1934,128 @@ class Database:
 
             # 获取同步前的余额
             cursor = await conn.execute(
-                "SELECT name, balance FROM accounts WHERE user_id = ? AND id = ?",
-                (user_id, account_id)
+                "SELECT name, balance FROM accounts WHERE user_id = ? AND id = ?", (user_id, account_id)
             )
             row = await cursor.fetchone()
             if row:
-                account_name = row['name']
-                old_balance = row['balance'] or 0.0
+                account_name = row["name"]
+                old_balance = row["balance"] or 0.0
 
                 # 同步账户余额
                 sync_result = await self.sync_account_balance(account_id)
                 if sync_result:
                     # 获取同步后的余额
                     cursor = await conn.execute(
-                        "SELECT balance FROM accounts WHERE user_id = ? AND id = ?",
-                        (user_id, account_id)
+                        "SELECT balance FROM accounts WHERE user_id = ? AND id = ?", (user_id, account_id)
                     )
                     row = await cursor.fetchone()
-                    new_balance = row['balance'] if row else 0.0
-                    self.logger.info(
-                        f"账户 {account_id} ({account_name}) "
-                        f"余额已同步: {old_balance} → {new_balance}"
-                    )
+                    new_balance = row["balance"] if row else 0.0
+                    self.logger.info(f"账户 {account_id} ({account_name}) 余额已同步: {old_balance} → {new_balance}")
                 else:
                     self.logger.warning(f"账户 {account_id} 余额同步失败")
 
                 # 清除账户映射缓存，确保前端获取最新余额
-                self._clear_cache('account_mappings')
+                self._clear_cache("account_mappings")
             else:
                 self.logger.warning(f"未找到账户 {account_id}，无法同步余额")
 
-            return {'success': True, 'deleted_count': count}
+            return {"success": True, "deleted_count": count}
 
         except Exception as e:
-            self.logger.error(
-                "删除账户交易失败: account_id=%s, user_id=%s, error=%s",
-                account_id, user_id, e
-            )
+            self.logger.error("删除账户交易失败: account_id=%s, user_id=%s, error=%s", account_id, user_id, e)
             await conn.rollback()
-            return {'success': False, 'message': str(e), 'deleted_count': 0}
+            return {"success": False, "message": str(e), "deleted_count": 0}
 
     @log_method
-    async def clear_user_transactions(self, user_id: int = 1) -> Dict[str, Any]:
+    async def clear_user_transactions(self, user_id: int = 1) -> dict[str, Any]:
         """清空指定用户的全部交易数据。"""
         conn = await self._get_connection()
 
         try:
-            cursor = await conn.execute(
-                "SELECT COUNT(*) FROM bills WHERE user_id = ?",
-                (user_id,)
-            )
+            cursor = await conn.execute("SELECT COUNT(*) FROM bills WHERE user_id = ?", (user_id,))
             deleted_count = (await cursor.fetchone())[0]
 
             if deleted_count == 0:
                 self.logger.info("用户 %s 没有可清除的交易数据", user_id)
-                return {'success': True, 'deleted_count': 0}
+                return {"success": True, "deleted_count": 0}
 
             await conn.execute(
-                "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)",
-                (user_id,)
+                "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)", (user_id,)
             )
-            await conn.execute(
-                "DELETE FROM bills WHERE user_id = ?",
-                (user_id,)
-            )
+            await conn.execute("DELETE FROM bills WHERE user_id = ?", (user_id,))
             await conn.commit()
 
             self.logger.info("已清空用户 %s 的 %s 条交易数据", user_id, deleted_count)
 
             await self.sync_all_account_balances(user_id)
-            self._clear_cache('account_mappings')
+            self._clear_cache("account_mappings")
 
-            return {'success': True, 'deleted_count': deleted_count}
+            return {"success": True, "deleted_count": deleted_count}
 
         except Exception as e:
             self.logger.error("清空用户交易失败: user_id=%s, error=%s", user_id, e)
             await conn.rollback()
-            return {'success': False, 'message': str(e), 'deleted_count': 0}
+            return {"success": False, "message": str(e), "deleted_count": 0}
 
     @log_method
-    async def clear_user_data(self, user_id: int = 1) -> Dict[str, Any]:
+    async def clear_user_data(self, user_id: int = 1) -> dict[str, Any]:
         """清空指定用户的业务数据（保留账号本身与登录态）。"""
         conn = await self._get_connection()
 
         try:
             counts = {}
             count_queries = {
-                'bills': "SELECT COUNT(*) FROM bills WHERE user_id = ?",
-                'accounts': "SELECT COUNT(*) FROM accounts WHERE user_id = ?",
-                'categories': "SELECT COUNT(*) FROM categories WHERE user_id = ?",
-                'tags': "SELECT COUNT(*) FROM tags WHERE user_id = ?",
-                'templates': "SELECT COUNT(*) FROM bill_templates WHERE user_id = ?",
-                'recurring_bills': "SELECT COUNT(*) FROM recurring_bills WHERE user_id = ?",
-                'budgets': "SELECT COUNT(*) FROM budgets WHERE user_id = ?",
+                "bills": "SELECT COUNT(*) FROM bills WHERE user_id = ?",
+                "accounts": "SELECT COUNT(*) FROM accounts WHERE user_id = ?",
+                "categories": "SELECT COUNT(*) FROM categories WHERE user_id = ?",
+                "tags": "SELECT COUNT(*) FROM tags WHERE user_id = ?",
+                "templates": "SELECT COUNT(*) FROM bill_templates WHERE user_id = ?",
+                "recurring_bills": "SELECT COUNT(*) FROM recurring_bills WHERE user_id = ?",
+                "budgets": "SELECT COUNT(*) FROM budgets WHERE user_id = ?",
             }
 
             for key, query in count_queries.items():
                 cursor = await conn.execute(query, (user_id,))
                 counts[key] = (await cursor.fetchone())[0]
 
-            await conn.execute(
-                "DELETE FROM bills_preview WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM bills_parser_template WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM import_sessions WHERE user_id = ?",
-                (user_id,)
-            )
+            await conn.execute("DELETE FROM bills_preview WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM bills_parser_template WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM import_sessions WHERE user_id = ?", (user_id,))
 
             await conn.execute(
-                "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)",
-                (user_id,)
+                "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)", (user_id,)
             )
-            await conn.execute(
-                "DELETE FROM bills WHERE user_id = ?",
-                (user_id,)
-            )
+            await conn.execute("DELETE FROM bills WHERE user_id = ?", (user_id,))
 
             await conn.execute(
-                "DELETE FROM budget_history WHERE budget_id IN (SELECT id FROM budgets WHERE user_id = ?)",
-                (user_id,)
+                "DELETE FROM budget_history WHERE budget_id IN (SELECT id FROM budgets WHERE user_id = ?)", (user_id,)
             )
-            await conn.execute(
-                "DELETE FROM budgets WHERE user_id = ?",
-                (user_id,)
-            )
+            await conn.execute("DELETE FROM budgets WHERE user_id = ?", (user_id,))
 
-            await conn.execute(
-                "DELETE FROM recurring_bills WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM bill_templates WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM saved_filters WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM account_transfers WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM tags WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM categories WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM account_types WHERE user_id = ?",
-                (user_id,)
-            )
-            await conn.execute(
-                "DELETE FROM accounts WHERE user_id = ?",
-                (user_id,)
-            )
+            await conn.execute("DELETE FROM recurring_bills WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM bill_templates WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM saved_filters WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM account_transfers WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM tags WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM categories WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM account_types WHERE user_id = ?", (user_id,))
+            await conn.execute("DELETE FROM accounts WHERE user_id = ?", (user_id,))
 
             await conn.commit()
 
-            self._clear_cache('account_mappings')
-            self._clear_cache('category_mappings')
+            self._clear_cache("account_mappings")
+            self._clear_cache("category_mappings")
 
             self.logger.info("已清空用户 %s 的业务数据: %s", user_id, counts)
-            return {'success': True, 'counts': counts}
+            return {"success": True, "counts": counts}
 
         except Exception as e:
             self.logger.error("清空用户业务数据失败: user_id=%s, error=%s", user_id, e)
             await conn.rollback()
-            return {'success': False, 'message': str(e)}
+            return {"success": False, "message": str(e)}
 
     @log_method
-    async def get_user_data_statistics(self, user_id: int = 1) -> Dict[str, int]:
+    async def get_user_data_statistics(self, user_id: int = 1) -> dict[str, int]:
         """获取用户业务数据统计。
 
         使用 COUNT 查询直接返回统计结果，避免数据管理页为了展示数量而全量加载
@@ -2203,14 +2063,14 @@ class Database:
         """
         conn = await self._get_connection()
         count_queries = {
-            'billCount': "SELECT COUNT(*) FROM bills WHERE user_id = ?",
-            'accountCount': "SELECT COUNT(*) FROM accounts WHERE user_id = ?",
-            'categoryCount': "SELECT COUNT(*) FROM categories WHERE user_id = ?",
-            'tagCount': "SELECT COUNT(*) FROM tags WHERE user_id = ?",
-            'templateCount': "SELECT COUNT(*) FROM bill_templates WHERE user_id = ?",
+            "billCount": "SELECT COUNT(*) FROM bills WHERE user_id = ?",
+            "accountCount": "SELECT COUNT(*) FROM accounts WHERE user_id = ?",
+            "categoryCount": "SELECT COUNT(*) FROM categories WHERE user_id = ?",
+            "tagCount": "SELECT COUNT(*) FROM tags WHERE user_id = ?",
+            "templateCount": "SELECT COUNT(*) FROM bill_templates WHERE user_id = ?",
         }
 
-        statistics: Dict[str, int] = {}
+        statistics: dict[str, int] = {}
 
         for key, query in count_queries.items():
             async with conn.execute(query, (user_id,)) as cursor:
@@ -2220,14 +2080,10 @@ class Database:
         return statistics
 
     @log_method
-    async def get_user_custom_exchange_rates(
-        self,
-        base_currency: str,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+    async def get_user_custom_exchange_rates(self, base_currency: str, user_id: int = 1) -> list[dict[str, Any]]:
         """获取用户自定义汇率（按目标币种取最新一条）。"""
         conn = await self._get_connection()
-        normalized_base = (base_currency or 'CNY').upper()
+        normalized_base = (base_currency or "CNY").upper()
 
         query = """
             SELECT r1.*
@@ -2249,22 +2105,18 @@ class Database:
 
     @log_method
     async def upsert_user_custom_exchange_rate(
-        self,
-        base_currency: str,
-        target_currency: str,
-        rate: float,
-        user_id: int = 1
-    ) -> Dict[str, Any]:
+        self, base_currency: str, target_currency: str, rate: float, user_id: int = 1
+    ) -> dict[str, Any]:
         """更新用户自定义汇率。"""
         conn = await self._get_connection()
-        normalized_base = (base_currency or 'CNY').upper()
-        normalized_target = (target_currency or '').upper()
+        normalized_base = (base_currency or "CNY").upper()
+        normalized_target = (target_currency or "").upper()
         now = datetime.now().isoformat()
 
         try:
             await conn.execute(
                 "DELETE FROM user_exchange_rates WHERE user_id = ? AND from_currency = ? AND to_currency = ?",
-                (user_id, normalized_base, normalized_target)
+                (user_id, normalized_base, normalized_target),
             )
             cursor = await conn.execute(
                 """
@@ -2273,64 +2125,50 @@ class Database:
                     effective_date, created_at, updated_at, user_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    normalized_base,
-                    normalized_target,
-                    rate,
-                    'manual',
-                    now,
-                    now,
-                    now,
-                    user_id
-                )
+                (normalized_base, normalized_target, rate, "manual", now, now, now, user_id),
             )
             await conn.commit()
 
             return {
-                'success': True,
-                'id': cursor.lastrowid,
-                'from_currency': normalized_base,
-                'to_currency': normalized_target,
-                'rate': rate,
-                'update_time': int(datetime.fromisoformat(now).timestamp())
+                "success": True,
+                "id": cursor.lastrowid,
+                "from_currency": normalized_base,
+                "to_currency": normalized_target,
+                "rate": rate,
+                "update_time": int(datetime.fromisoformat(now).timestamp()),
             }
         except Exception as e:
             await conn.rollback()
             self.logger.error(
-                "更新用户自定义汇率失败: user_id=%s, %s->%s, error=%s",
-                user_id, normalized_base, normalized_target, e
+                "更新用户自定义汇率失败: user_id=%s, %s->%s, error=%s", user_id, normalized_base, normalized_target, e
             )
-            return {'success': False, 'message': str(e)}
+            return {"success": False, "message": str(e)}
 
     @log_method
     async def delete_user_custom_exchange_rate(
-        self,
-        base_currency: str,
-        target_currency: str,
-        user_id: int = 1
+        self, base_currency: str, target_currency: str, user_id: int = 1
     ) -> bool:
         """删除用户自定义汇率。"""
         conn = await self._get_connection()
-        normalized_base = (base_currency or 'CNY').upper()
-        normalized_target = (target_currency or '').upper()
+        normalized_base = (base_currency or "CNY").upper()
+        normalized_target = (target_currency or "").upper()
 
         try:
             cursor = await conn.execute(
                 "DELETE FROM user_exchange_rates WHERE user_id = ? AND from_currency = ? AND to_currency = ?",
-                (user_id, normalized_base, normalized_target)
+                (user_id, normalized_base, normalized_target),
             )
             await conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
             await conn.rollback()
             self.logger.error(
-                "删除用户自定义汇率失败: user_id=%s, %s->%s, error=%s",
-                user_id, normalized_base, normalized_target, e
+                "删除用户自定义汇率失败: user_id=%s, %s->%s, error=%s", user_id, normalized_base, normalized_target, e
             )
             return False
 
     @log_method
-    async def batch_update_bills(self, bill_ids: List[int], updates: Dict[str, Any]) -> Dict[str, Any]:
+    async def batch_update_bills(self, bill_ids: list[int], updates: dict[str, Any]) -> dict[str, Any]:
         """
         批量更新账单
 
@@ -2343,11 +2181,11 @@ class Database:
         """
         if not bill_ids:
             self.logger.warning("账单ID列表为空")
-            return {'success_count': 0, 'failed_count': 0, 'failed_ids': []}
+            return {"success_count": 0, "failed_count": 0, "failed_ids": []}
 
         if not updates:
             self.logger.warning("更新字段为空")
-            return {'success_count': 0, 'failed_count': 0, 'failed_ids': []}
+            return {"success_count": 0, "failed_count": 0, "failed_ids": []}
 
         self.logger.info(f"准备批量更新 {len(bill_ids)} 条账单")
         self.logger.debug(f"更新字段: {list(updates.keys())}")
@@ -2385,19 +2223,15 @@ class Database:
 
         await conn.commit()
 
-        result = {
-        'success_count': success_count,
-        'failed_count': len(failed_ids),
-        'failed_ids': failed_ids
-        }
+        result = {"success_count": success_count, "failed_count": len(failed_ids), "failed_ids": failed_ids}
 
         self.logger.info(f"批量更新完成: 成功={success_count}, 失败={len(failed_ids)}")
         return result
 
     @log_method
-    async def batch_update_categories(self, bill_ids: List[int],
-                         main_category: str,
-                         sub_category: str) -> Dict[str, Any]:
+    async def batch_update_categories(
+        self, bill_ids: list[int], main_category: str, sub_category: str
+    ) -> dict[str, Any]:
         """
         批量修改账单分类
 
@@ -2411,15 +2245,12 @@ class Database:
         """
         if not bill_ids:
             self.logger.warning("账单ID列表为空")
-            return {'success_count': 0, 'failed_count': 0, 'failed_ids': []}
+            return {"success_count": 0, "failed_count": 0, "failed_ids": []}
 
         self.logger.info(f"准备批量修改 {len(bill_ids)} 条账单的分类")
         self.logger.debug(f"目标分类: {main_category}/{sub_category}")
 
-        updates = {
-            'main_category': main_category,
-            'sub_category': sub_category
-        }
+        updates = {"main_category": main_category, "sub_category": sub_category}
 
         return await self.batch_update_bills(bill_ids, updates)
 
@@ -2452,7 +2283,7 @@ class Database:
         return deleted_count
 
     @log_method
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """
         获取数据库统计信息
 
@@ -2466,7 +2297,7 @@ class Database:
         # 总账单数
         async with conn.execute("SELECT COUNT(*) FROM bills") as cursor:
             row = await cursor.fetchone()
-            stats['total_bills'] = row[0]
+            stats["total_bills"] = row[0]
 
         # 按类型统计
         async with conn.execute("""
@@ -2475,7 +2306,7 @@ class Database:
             GROUP BY type
         """) as cursor:
             rows = await cursor.fetchall()
-            stats['by_type'] = {row[0]: {'count': row[1], 'total': row[2]} for row in rows}
+            stats["by_type"] = {row[0]: {"count": row[1], "total": row[2]} for row in rows}
 
         # 按分类统计
         async with conn.execute("""
@@ -2485,14 +2316,13 @@ class Database:
             GROUP BY main_category
         """) as cursor:
             rows = await cursor.fetchall()
-            stats['by_category'] = {row[0]: {'count': row[1], 'total': row[2]} for row in rows}
+            stats["by_category"] = {row[0]: {"count": row[1], "total": row[2]} for row in rows}
 
         self.logger.info("获取统计信息成功")
         return stats
 
     @log_method
-    async def save_filter(self, name: str, filter_data: Dict[str, Any],
-             description: Optional[str] = None) -> int:
+    async def save_filter(self, name: str, filter_data: dict[str, Any], description: str | None = None) -> int:
         """
         保存筛选条件
 
@@ -2515,10 +2345,13 @@ class Database:
 
         try:
             # 尝试插入
-            cursor = await conn.execute("""
+            cursor = await conn.execute(
+                """
                 INSERT INTO saved_filters (name, filter_data, description, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (name, filter_json, description, now, now))
+            """,
+                (name, filter_json, description, now, now),
+            )
 
             await conn.commit()
             filter_id = cursor.lastrowid
@@ -2528,18 +2361,19 @@ class Database:
         except sqlite3.IntegrityError:
             # 如果名称已存在,则更新
             self.logger.info(f"筛选条件名称已存在,执行更新: {name}")
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE saved_filters
                 SET filter_data = ?, description = ?, updated_at = ?
                 WHERE name = ?
-            """, (filter_json, description, now, name))
+            """,
+                (filter_json, description, now, name),
+            )
 
             await conn.commit()
 
             # 获取ID
-            async with conn.execute(
-                "SELECT id FROM saved_filters WHERE name = ?", (name,)
-            ) as cursor:
+            async with conn.execute("SELECT id FROM saved_filters WHERE name = ?", (name,)) as cursor:
                 row = await cursor.fetchone()
                 filter_id = row[0] if row else 0
 
@@ -2547,7 +2381,7 @@ class Database:
             return filter_id
 
     @log_method
-    async def get_saved_filters(self) -> List[Dict[str, Any]]:
+    async def get_saved_filters(self) -> list[dict[str, Any]]:
         """
         获取所有保存的筛选条件
 
@@ -2569,15 +2403,14 @@ class Database:
         for row in rows:
             filter_dict = dict(row)
             # 将JSON字符串解析为字典
-            filter_dict['filter_data'] = json.loads(filter_dict['filter_data'])
+            filter_dict["filter_data"] = json.loads(filter_dict["filter_data"])
             filters.append(filter_dict)
 
         self.logger.info(f"查询到 {len(filters)} 个保存的筛选条件")
         return filters
 
     @log_method
-    async def get_saved_filter(self, filter_id: Optional[int] = None,
-                  name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def get_saved_filter(self, filter_id: int | None = None, name: str | None = None) -> dict[str, Any] | None:
         """
         获取单个保存的筛选条件
 
@@ -2615,33 +2448,28 @@ class Database:
 
         if row:
             filter_dict = dict(row)
-            filter_dict['filter_data'] = json.loads(filter_dict['filter_data'])
+            filter_dict["filter_data"] = json.loads(filter_dict["filter_data"])
             self.logger.info(f"查询到筛选条件: {filter_dict['name']}")
             return filter_dict
 
         self.logger.info("筛选条件不存在")
         return None
 
-    def _get_first_recurring_occurrence(
-        self,
-        recurring: Dict[str, Any],
-        max_search_days: int = 370
-    ) -> Optional[date]:
+    def _get_first_recurring_occurrence(self, recurring: dict[str, Any], max_search_days: int = 370) -> date | None:
         """获取定时模板的首次计划日期（包含 start_date 当天）。"""
-        start_date = self._parse_date_value(recurring.get('start_date'))
+        start_date = self._parse_date_value(recurring.get("start_date"))
         if not start_date:
-            return self._parse_date_value(recurring.get('next_date'))
+            return self._parse_date_value(recurring.get("next_date"))
 
         for offset in range(0, max_search_days + 1):
             candidate = start_date + timedelta(days=offset)
             if self._is_recurring_due_on_date(recurring, candidate):
                 return candidate
 
-        return self._parse_date_value(recurring.get('next_date'))
+        return self._parse_date_value(recurring.get("next_date"))
 
     @log_method
-    async def delete_saved_filter(self, filter_id: Optional[int] = None,
-                      name: Optional[str] = None) -> bool:
+    async def delete_saved_filter(self, filter_id: int | None = None, name: str | None = None) -> bool:
         """
         删除保存的筛选条件
 
@@ -2698,9 +2526,9 @@ class Database:
     # ==================== UI Backend API所需的额外方法 ====================
 
     @log_method
-    async def query_bills(self, page: int = 1, page_size: int = 20,
-                         filters: Optional[Dict[str, Any]] = None,
-                         user_id: int = 1) -> tuple:
+    async def query_bills(
+        self, page: int = 1, page_size: int = 20, filters: dict[str, Any] | None = None, user_id: int = 1
+    ) -> tuple:
         """
         分页查询账单
 
@@ -2723,41 +2551,43 @@ class Database:
         params = [user_id]
 
         if filters:
-            if 'type' in filters:
+            if "type" in filters:
                 count_query += " AND type = ?"
-                params.append(filters['type'])
-            if 'main_category' in filters:
+                params.append(filters["type"])
+            if "main_category" in filters:
                 count_query += " AND main_category = ?"
-                params.append(filters['main_category'])
-            if 'sub_category' in filters:
+                params.append(filters["main_category"])
+            if "sub_category" in filters:
                 count_query += " AND sub_category = ?"
-                params.append(filters['sub_category'])
-            if 'start_date' in filters:
+                params.append(filters["sub_category"])
+            if "start_date" in filters:
                 count_query += " AND date >= ?"
-                params.append(filters['start_date'])
-            if 'end_date' in filters:
+                params.append(filters["start_date"])
+            if "end_date" in filters:
                 count_query += " AND date <= ?"
-                params.append(filters['end_date'])
-            if 'keyword' in filters:
+                params.append(filters["end_date"])
+            if "keyword" in filters:
                 count_query += " AND (description LIKE ? OR counterparty LIKE ?)"
                 keyword = f"%{filters['keyword']}%"
                 params.extend([keyword, keyword])
 
-            if 'account_ids' in filters and filters['account_ids']:
-                account_ids = filters['account_ids']
+            if filters.get("account_ids"):
+                account_ids = filters["account_ids"]
                 if isinstance(account_ids, list) and account_ids:
-                    placeholders = ','.join(['?'] * len(account_ids))
-                    count_query += f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                    placeholders = ",".join(["?"] * len(account_ids))
+                    count_query += (
+                        f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                    )
                     params.extend(account_ids)
                     params.extend(account_ids)
 
-            if 'categories' in filters and filters['categories']:
-                categories = filters['categories']
+            if filters.get("categories"):
+                categories = filters["categories"]
                 if isinstance(categories, list) and categories:
                     cat_conditions = []
                     for cat in categories:
-                        main = cat.get('main')
-                        sub = cat.get('sub')
+                        main = cat.get("main")
+                        sub = cat.get("sub")
                         if main and sub:
                             cat_conditions.append("(main_category = ? AND sub_category = ?)")
                             params.extend([main, sub])
@@ -2769,69 +2599,69 @@ class Database:
                         count_query += " AND (" + " OR ".join(cat_conditions) + ")"
 
             # 标签筛选
-            if 'tag_ids' in filters and filters['tag_ids']:
-                tag_ids = filters['tag_ids']
+            if filters.get("tag_ids"):
+                tag_ids = filters["tag_ids"]
                 if isinstance(tag_ids, list) and tag_ids:
-                    placeholders = ','.join(['?'] * len(tag_ids))
+                    placeholders = ",".join(["?"] * len(tag_ids))
                     count_query += f" AND id IN (SELECT bill_id FROM bill_tags WHERE tag_id IN ({placeholders}))"
                     params.extend(tag_ids)
 
             # 金额范围筛选
-            if 'min_amount' in filters and filters['min_amount'] is not None:
+            if "min_amount" in filters and filters["min_amount"] is not None:
                 count_query += " AND amount >= ?"
-                params.append(float(filters['min_amount']))
+                params.append(float(filters["min_amount"]))
 
-            if 'max_amount' in filters and filters['max_amount'] is not None:
+            if "max_amount" in filters and filters["max_amount"] is not None:
                 count_query += " AND amount <= ?"
-                params.append(float(filters['max_amount']))
+                params.append(float(filters["max_amount"]))
 
             # 金额过滤器(高级筛选)
-            if 'amount_filter' in filters and filters['amount_filter']:
-                amount_filter = filters['amount_filter']
-                parts = amount_filter.split(':')
+            if filters.get("amount_filter"):
+                amount_filter = filters["amount_filter"]
+                parts = amount_filter.split(":")
                 if len(parts) >= 2:
                     filter_type = parts[0].lower()
                     try:
-                        if filter_type == 'eq':
+                        if filter_type == "eq":
                             value = float(parts[1])
                             count_query += " AND amount = ?"
                             params.append(value)
-                        elif filter_type == 'ne':
+                        elif filter_type == "ne":
                             value = float(parts[1])
                             count_query += " AND amount != ?"
                             params.append(value)
-                        elif filter_type == 'gt':
+                        elif filter_type == "gt":
                             value = float(parts[1])
                             count_query += " AND amount > ?"
                             params.append(value)
-                        elif filter_type == 'lt':
+                        elif filter_type == "lt":
                             value = float(parts[1])
                             count_query += " AND amount < ?"
                             params.append(value)
-                        elif filter_type == 'gte':
+                        elif filter_type == "gte":
                             value = float(parts[1])
                             count_query += " AND amount >= ?"
                             params.append(value)
-                        elif filter_type == 'lte':
+                        elif filter_type == "lte":
                             value = float(parts[1])
                             count_query += " AND amount <= ?"
                             params.append(value)
-                        elif filter_type == 'between' and len(parts) >= 3:
+                        elif filter_type == "between" and len(parts) >= 3:
                             value1 = float(parts[1])
                             value2 = float(parts[2])
                             count_query += " AND amount BETWEEN ? AND ?"
                             params.extend([value1, value2])
-                    except (ValueError, IndexError):
+                    except ValueError, IndexError:
                         pass
 
         async with conn.execute(count_query, params) as cursor:
             row = await cursor.fetchone()
-            total = row['total'] if row else 0
+            total = row["total"] if row else 0
 
         return bills, total
 
     @log_method
-    async def get_bill_by_id(self, bill_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_bill_by_id(self, bill_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """
         根据ID获取账单
 
@@ -2844,15 +2674,12 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM bills WHERE id = ? AND user_id = ?",
-            (bill_id, user_id)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM bills WHERE id = ? AND user_id = ?", (bill_id, user_id)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def batch_delete_bills(self, bill_ids: List[int], user_id: int = 1) -> int:
+    async def batch_delete_bills(self, bill_ids: list[int], user_id: int = 1) -> int:
         """
         批量删除账单
 
@@ -2867,13 +2694,10 @@ class Database:
             return 0
 
         conn = await self._get_connection()
-        placeholders = ','.join(['?' for _ in bill_ids])
+        placeholders = ",".join(["?" for _ in bill_ids])
         params = [*bill_ids, user_id]
 
-        cursor = await conn.execute(
-            f"DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?",
-            params
-        )
+        cursor = await conn.execute(f"DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?", params)
         await conn.commit()
 
         deleted = cursor.rowcount
@@ -2881,7 +2705,7 @@ class Database:
         return deleted
 
     @log_method
-    async def get_all_categories(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_all_categories(self, user_id: int = 1) -> list[dict[str, Any]]:
         """
         获取所有分类 (从 categories 表)
 
@@ -2897,8 +2721,7 @@ class Database:
         # 优先从 categories 表获取 (priority ASC: 优先级越小越靠前)
         self.logger.info(f"[get_all_categories] 查询分类 (user_id={user_id})，排序：priority ASC")
         async with conn.execute(
-            "SELECT * FROM categories WHERE user_id = ? ORDER BY priority ASC, main_category, sub_category",
-            (user_id,)
+            "SELECT * FROM categories WHERE user_id = ? ORDER BY priority ASC, main_category, sub_category", (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             categories = [dict(row) for row in rows]
@@ -2908,7 +2731,7 @@ class Database:
             # 记录前5个分类的排序信息
             for i, cat in enumerate(categories[:5]):
                 self.logger.debug(
-                    f"[get_all_categories] #{i+1} 分类: "
+                    f"[get_all_categories] #{i + 1} 分类: "
                     f"{cat.get('main_category')}/{cat.get('sub_category')}, "
                     f"priority={cat.get('priority', 0)}"
                 )
@@ -2925,20 +2748,23 @@ class Database:
                 # 构造临时分类对象
                 categories = []
                 for row in rows:
-                    categories.append({
-                        'id': 0, # 虚拟ID
-                        'main_category': row[0],
-                        'sub_category': row[1],
-                        'description': '',
-                        'priority': 0,
-                        'keywords': ''
-                    })
+                    categories.append(
+                        {
+                            "id": 0,  # 虚拟ID
+                            "main_category": row[0],
+                            "sub_category": row[1],
+                            "description": "",
+                            "priority": 0,
+                            "keywords": "",
+                        }
+                    )
 
         return categories
 
     @log_method
-    async def get_category_by_name(self, main_category: str, sub_category: str,
-                                   user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_category_by_name(
+        self, main_category: str, sub_category: str, user_id: int = 1
+    ) -> dict[str, Any] | None:
         """根据名称获取分类
 
         Args:
@@ -2949,13 +2775,13 @@ class Database:
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM categories WHERE main_category = ? AND sub_category = ? AND user_id = ?",
-            (main_category, sub_category, user_id)
+            (main_category, sub_category, user_id),
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def create_category(self, category_data: Dict[str, Any], user_id: int = 1) -> Optional[int]:
+    async def create_category(self, category_data: dict[str, Any], user_id: int = 1) -> int | None:
         """
         创建分类
 
@@ -2968,34 +2794,45 @@ class Database:
         """
         conn = await self._get_connection()
 
-        main_cat = category_data.get('main_category')
-        sub_cat = category_data.get('sub_category', '')
+        main_cat = category_data.get("main_category")
+        sub_cat = category_data.get("sub_category", "")
 
         self.logger.info(f"开始创建分类: {main_cat}/{sub_cat} (user_id={user_id})")
 
         try:
-            columns = ['type', 'main_category', 'sub_category', 'description', 'priority', 'keywords', 'hidden', 'icon', 'color', 'created_at', 'user_id']
-            placeholders = ', '.join(['?' for _ in columns])
+            columns = [
+                "type",
+                "main_category",
+                "sub_category",
+                "description",
+                "priority",
+                "keywords",
+                "hidden",
+                "icon",
+                "color",
+                "created_at",
+                "user_id",
+            ]
+            placeholders = ", ".join(["?" for _ in columns])
 
             values = [
-                category_data.get('type', 1),
+                category_data.get("type", 1),
                 main_cat,
                 sub_cat,
-                category_data.get('description', ''),
-                category_data.get('priority', 0),
-                category_data.get('keywords', ''),
-                category_data.get('hidden', False),
-                category_data.get('icon', ''),
-                category_data.get('color', ''),
+                category_data.get("description", ""),
+                category_data.get("priority", 0),
+                category_data.get("keywords", ""),
+                category_data.get("hidden", False),
+                category_data.get("icon", ""),
+                category_data.get("color", ""),
                 datetime.now().isoformat(),
-                user_id
+                user_id,
             ]
 
             self.logger.debug(f"执行插入: columns={columns}, values={values}")
 
             cursor = await conn.execute(
-                f"INSERT INTO categories ({', '.join(columns)}) VALUES ({placeholders})",
-                values
+                f"INSERT INTO categories ({', '.join(columns)}) VALUES ({placeholders})", values
             )
             await conn.commit()
 
@@ -3007,9 +2844,9 @@ class Database:
             return None
         except Exception as e:
             self.logger.error(f"创建分类失败: {type(e).__name__}: {e}", exc_info=True)
-            return None    @log_method
-    async def update_category(self, category_id: int, updates: Dict[str, Any],
-                              user_id: int = 1) -> bool:
+            return None @ log_method
+
+    async def update_category(self, category_id: int, updates: dict[str, Any], user_id: int = 1) -> bool:
         """更新分类
 
         Args:
@@ -3020,7 +2857,17 @@ class Database:
         conn = await self._get_connection()
         try:
             # 过滤掉无效字段
-            valid_fields = ['type', 'main_category', 'sub_category', 'description', 'priority', 'keywords', 'hidden', 'icon', 'color']
+            valid_fields = [
+                "type",
+                "main_category",
+                "sub_category",
+                "description",
+                "priority",
+                "keywords",
+                "hidden",
+                "icon",
+                "color",
+            ]
             safe_updates = {k: v for k, v in updates.items() if k in valid_fields}
 
             if not safe_updates:
@@ -3058,7 +2905,7 @@ class Database:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
                 "SELECT id, main_category, sub_category FROM categories WHERE id = ? AND user_id = ?",
-                (category_id, user_id)
+                (category_id, user_id),
             ) as cursor:
                 category = await cursor.fetchone()
 
@@ -3067,26 +2914,25 @@ class Database:
                 return False
 
             category = dict(category)
-            main_category = category['main_category']
-            sub_category = category['sub_category']
+            main_category = category["main_category"]
+            sub_category = category["sub_category"]
 
             # 判断是否为父级分类（sub_category为空字符串）
-            if sub_category == '' or sub_category is None:
+            if sub_category == "" or sub_category is None:
                 # 父级分类：级联删除所有子分类 (限制user_id)
                 self.logger.info(f"删除父级分类 '{main_category}' 及其所有子分类 (user_id={user_id})")
 
                 # 先查询有多少子分类
                 async with conn.execute(
                     "SELECT COUNT(*) as count FROM categories WHERE main_category = ? AND sub_category != '' AND user_id = ?",
-                    (main_category, user_id)
+                    (main_category, user_id),
                 ) as cursor:
                     result = await cursor.fetchone()
                     child_count = result[0] if result else 0
 
                 # 删除该主分类下的所有记录（包括父级和子级）
                 cursor = await conn.execute(
-                    "DELETE FROM categories WHERE main_category = ? AND user_id = ?",
-                    (main_category, user_id)
+                    "DELETE FROM categories WHERE main_category = ? AND user_id = ?", (main_category, user_id)
                 )
                 deleted_count = cursor.rowcount
                 await conn.commit()
@@ -3097,7 +2943,7 @@ class Database:
                 )
 
                 # 清除缓存
-                self._clear_cache('category_mappings')
+                self._clear_cache("category_mappings")
 
                 return True
             else:
@@ -3107,10 +2953,12 @@ class Database:
                 await conn.execute("DELETE FROM categories WHERE id = ? AND user_id = ?", (category_id, user_id))
                 await conn.commit()
 
-                self.logger.info(f"已删除子分类 '{main_category}/{sub_category}' (ID: {category_id}, user_id={user_id})")
+                self.logger.info(
+                    f"已删除子分类 '{main_category}/{sub_category}' (ID: {category_id}, user_id={user_id})"
+                )
 
                 # 清除缓存
-                self._clear_cache('category_mappings')
+                self._clear_cache("category_mappings")
 
                 return True
 
@@ -3119,7 +2967,7 @@ class Database:
             return False
 
     @log_method
-    async def get_category_by_id(self, category_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_category_by_id(self, category_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """获取单个分类
 
         Args:
@@ -3129,17 +2977,15 @@ class Database:
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
-            "SELECT * FROM categories WHERE id = ? AND user_id = ?",
-            (category_id, user_id)
+            "SELECT * FROM categories WHERE id = ? AND user_id = ?", (category_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def get_category_statistics(self, period: str = 'month',
-                                      start_date: Optional[str] = None,
-                                      end_date: Optional[str] = None,
-                                      user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_category_statistics(
+        self, period: str = "month", start_date: str | None = None, end_date: str | None = None, user_id: int = 1
+    ) -> list[dict[str, Any]]:
         """
         获取分类统计
 
@@ -3185,7 +3031,7 @@ class Database:
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_all_accounts(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_all_accounts(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取所有账户
 
         Args:
@@ -3194,14 +3040,13 @@ class Database:
         conn = await self._get_connection()
 
         async with conn.execute(
-            "SELECT * FROM accounts WHERE user_id = ? ORDER BY display_order, name",
-            (user_id,)
+            "SELECT * FROM accounts WHERE user_id = ? ORDER BY display_order, name", (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_account_by_id(self, account_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_account_by_id(self, account_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """根据ID获取账户
 
         Args:
@@ -3210,15 +3055,12 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM accounts WHERE id = ? AND user_id = ?",
-            (account_id, user_id)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM accounts WHERE id = ? AND user_id = ?", (account_id, user_id)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def get_sub_accounts(self, parent_id: int, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_sub_accounts(self, parent_id: int, user_id: int = 1) -> list[dict[str, Any]]:
         """获取子账户列表
 
         Args:
@@ -3228,14 +3070,13 @@ class Database:
         conn = await self._get_connection()
 
         async with conn.execute(
-            "SELECT * FROM accounts WHERE parent_id = ? AND user_id = ?",
-            (parent_id, user_id)
+            "SELECT * FROM accounts WHERE parent_id = ? AND user_id = ?", (parent_id, user_id)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_account_alias_mapping(self, user_id: int = 1) -> Dict[str, int]:
+    async def get_account_alias_mapping(self, user_id: int = 1) -> dict[str, int]:
         """获取账户别名到账户ID的映射
 
         用于账单导入时根据别名匹配账户。返回一个字典，键为别名（小写），值为账户ID。
@@ -3249,20 +3090,18 @@ class Database:
             例如: {"微信零钱": 1, "支付宝余额": 2, "余额宝": 2}
         """
         import json
+
         conn = await self._get_connection()
 
-        alias_map: Dict[str, int] = {}
+        alias_map: dict[str, int] = {}
 
-        async with conn.execute(
-            "SELECT id, name, aliases FROM accounts WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
+        async with conn.execute("SELECT id, name, aliases FROM accounts WHERE user_id = ?", (user_id,)) as cursor:
             rows = await cursor.fetchall()
 
             for row in rows:
-                account_id = row['id']
-                account_name = row['name']
-                aliases_json = row['aliases']
+                account_id = row["id"]
+                account_name = row["name"]
+                aliases_json = row["aliases"]
 
                 # 账户名称作为默认别名
                 if account_name:
@@ -3288,23 +3127,23 @@ class Database:
     async def get_historical_source_account_suggestion(
         self,
         user_id: int = 1,
-        payment_method: str = '',
-        counterparty: str = '',
-        description: str = '',
-        bill_type: str = ''
-    ) -> Optional[Dict[str, Any]]:
+        payment_method: str = "",
+        counterparty: str = "",
+        description: str = "",
+        bill_type: str = "",
+    ) -> dict[str, Any] | None:
         """基于历史账单为源账户提供建议。"""
         normalized_payment_method = self._normalize_import_learning_text(payment_method)
         normalized_counterparty = self._normalize_import_learning_text(counterparty)
         normalized_description = self._normalize_import_learning_text(description)
-        normalized_type = str(bill_type or '').strip().lower()
+        normalized_type = str(bill_type or "").strip().lower()
 
         if not any([normalized_payment_method, normalized_counterparty, normalized_description]):
             return None
 
         conn = await self._get_connection()
-        clauses: List[str] = []
-        params: List[Any] = [user_id]
+        clauses: list[str] = []
+        params: list[Any] = [user_id]
 
         if normalized_payment_method:
             clauses.append("LOWER(TRIM(COALESCE(payment_method, ''))) = ?")
@@ -3322,7 +3161,7 @@ class Database:
             WHERE user_id = ?
               AND source_account_id IS NOT NULL
               AND source_account_id != 0
-              AND ({' OR '.join(clauses)})
+              AND ({" OR ".join(clauses)})
             ORDER BY date DESC, id DESC
             LIMIT 300
         """
@@ -3330,29 +3169,29 @@ class Database:
         async with conn.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
 
-        score_by_account: Dict[int, Dict[str, Any]] = {}
+        score_by_account: dict[int, dict[str, Any]] = {}
         for row in rows:
-            account_id = int(row['source_account_id'])
+            account_id = int(row["source_account_id"])
             score = 0
-            reasons: List[str] = []
+            reasons: list[str] = []
 
-            row_payment_method = self._normalize_import_learning_text(row['payment_method'])
-            row_counterparty = self._normalize_import_learning_text(row['counterparty'])
-            row_description = self._normalize_import_learning_text(row['description'])
-            row_type = str(row['type'] or '').strip().lower()
+            row_payment_method = self._normalize_import_learning_text(row["payment_method"])
+            row_counterparty = self._normalize_import_learning_text(row["counterparty"])
+            row_description = self._normalize_import_learning_text(row["description"])
+            row_type = str(row["type"] or "").strip().lower()
 
             if normalized_payment_method and row_payment_method == normalized_payment_method:
                 score += 8
-                reasons.append('payment_method')
+                reasons.append("payment_method")
             if normalized_counterparty and row_counterparty == normalized_counterparty:
                 score += 5
-                reasons.append('counterparty')
+                reasons.append("counterparty")
             if normalized_description and row_description == normalized_description:
                 score += 3
-                reasons.append('description')
+                reasons.append("description")
             if normalized_type and row_type == normalized_type:
                 score += 2
-                reasons.append('type')
+                reasons.append("type")
 
             if score <= 0:
                 continue
@@ -3360,26 +3199,26 @@ class Database:
             existing = score_by_account.get(account_id)
             if not existing:
                 score_by_account[account_id] = {
-                    'account_id': account_id,
-                    'score': score,
-                    'reasons': reasons,
-                    'hits': 1,
+                    "account_id": account_id,
+                    "score": score,
+                    "reasons": reasons,
+                    "hits": 1,
                 }
             else:
-                existing['score'] += score
-                existing['hits'] += 1
-                existing['reasons'] = sorted(set(existing['reasons'] + reasons))
+                existing["score"] += score
+                existing["hits"] += 1
+                existing["reasons"] = sorted(set(existing["reasons"] + reasons))
 
         if not score_by_account:
             return None
 
-        best = max(
-            score_by_account.values(),
-            key=lambda item: (item['score'], item['hits'], -item['account_id'])
-        )
+        best = max(score_by_account.values(), key=lambda item: (item["score"], item["hits"], -item["account_id"]))
         self.logger.debug(
-            '[历史源账户建议] user_id=%d -> account_id=%s, score=%s, reasons=%s',
-            user_id, best['account_id'], best['score'], ','.join(best['reasons'])
+            "[历史源账户建议] user_id=%d -> account_id=%s, score=%s, reasons=%s",
+            user_id,
+            best["account_id"],
+            best["score"],
+            ",".join(best["reasons"]),
         )
         return best
 
@@ -3387,24 +3226,24 @@ class Database:
     async def get_historical_destination_account_suggestion(
         self,
         user_id: int = 1,
-        payment_method: str = '',
-        counterparty: str = '',
-        description: str = '',
-        bill_type: str = '',
-        source_account_id: Optional[int] = None
-    ) -> Optional[Dict[str, Any]]:
+        payment_method: str = "",
+        counterparty: str = "",
+        description: str = "",
+        bill_type: str = "",
+        source_account_id: int | None = None,
+    ) -> dict[str, Any] | None:
         """基于历史账单为目标账户提供建议。"""
         normalized_payment_method = self._normalize_import_learning_text(payment_method)
         normalized_counterparty = self._normalize_import_learning_text(counterparty)
         normalized_description = self._normalize_import_learning_text(description)
-        normalized_type = str(bill_type or '').strip().lower()
+        normalized_type = str(bill_type or "").strip().lower()
 
         if not any([normalized_payment_method, normalized_counterparty, normalized_description]):
             return None
 
         conn = await self._get_connection()
-        clauses: List[str] = []
-        params: List[Any] = [user_id]
+        clauses: list[str] = []
+        params: list[Any] = [user_id]
 
         if normalized_payment_method:
             clauses.append("LOWER(TRIM(COALESCE(payment_method, ''))) = ?")
@@ -3422,7 +3261,7 @@ class Database:
             WHERE user_id = ?
               AND destination_account_id IS NOT NULL
               AND destination_account_id != 0
-              AND ({' OR '.join(clauses)})
+              AND ({" OR ".join(clauses)})
             ORDER BY date DESC, id DESC
             LIMIT 300
         """
@@ -3430,32 +3269,32 @@ class Database:
         async with conn.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
 
-        score_by_account: Dict[int, Dict[str, Any]] = {}
+        score_by_account: dict[int, dict[str, Any]] = {}
         for row in rows:
-            account_id = int(row['destination_account_id'])
+            account_id = int(row["destination_account_id"])
             if source_account_id and int(source_account_id) == account_id:
                 continue
 
             score = 0
-            reasons: List[str] = []
+            reasons: list[str] = []
 
-            row_payment_method = self._normalize_import_learning_text(row['payment_method'])
-            row_counterparty = self._normalize_import_learning_text(row['counterparty'])
-            row_description = self._normalize_import_learning_text(row['description'])
-            row_type = str(row['type'] or '').strip().lower()
+            row_payment_method = self._normalize_import_learning_text(row["payment_method"])
+            row_counterparty = self._normalize_import_learning_text(row["counterparty"])
+            row_description = self._normalize_import_learning_text(row["description"])
+            row_type = str(row["type"] or "").strip().lower()
 
             if normalized_payment_method and row_payment_method == normalized_payment_method:
                 score += 6
-                reasons.append('payment_method')
+                reasons.append("payment_method")
             if normalized_counterparty and row_counterparty == normalized_counterparty:
                 score += 6
-                reasons.append('counterparty')
+                reasons.append("counterparty")
             if normalized_description and row_description == normalized_description:
                 score += 4
-                reasons.append('description')
+                reasons.append("description")
             if normalized_type and row_type == normalized_type:
                 score += 2
-                reasons.append('type')
+                reasons.append("type")
 
             if score <= 0:
                 continue
@@ -3463,31 +3302,31 @@ class Database:
             existing = score_by_account.get(account_id)
             if not existing:
                 score_by_account[account_id] = {
-                    'account_id': account_id,
-                    'score': score,
-                    'reasons': reasons,
-                    'hits': 1,
+                    "account_id": account_id,
+                    "score": score,
+                    "reasons": reasons,
+                    "hits": 1,
                 }
             else:
-                existing['score'] += score
-                existing['hits'] += 1
-                existing['reasons'] = sorted(set(existing['reasons'] + reasons))
+                existing["score"] += score
+                existing["hits"] += 1
+                existing["reasons"] = sorted(set(existing["reasons"] + reasons))
 
         if not score_by_account:
             return None
 
-        best = max(
-            score_by_account.values(),
-            key=lambda item: (item['score'], item['hits'], -item['account_id'])
-        )
+        best = max(score_by_account.values(), key=lambda item: (item["score"], item["hits"], -item["account_id"]))
         self.logger.debug(
-            '[历史目标账户建议] user_id=%d -> account_id=%s, score=%s, reasons=%s',
-            user_id, best['account_id'], best['score'], ','.join(best['reasons'])
+            "[历史目标账户建议] user_id=%d -> account_id=%s, score=%s, reasons=%s",
+            user_id,
+            best["account_id"],
+            best["score"],
+            ",".join(best["reasons"]),
         )
         return best
 
     @log_method
-    async def create_account(self, data: Dict[str, Any], user_id: int = 1) -> int:
+    async def create_account(self, data: dict[str, Any], user_id: int = 1) -> int:
         """创建账户
 
         Args:
@@ -3498,36 +3337,39 @@ class Database:
         now = datetime.now().isoformat()
 
         # 提取子账户
-        sub_accounts = data.get('subAccounts', [])
+        sub_accounts = data.get("subAccounts", [])
 
         # 获取 parentId (前端字段) 或 parent_id (后端字段)
-        parent_id = data.get('parentId') or data.get('parent_id', 0)
+        parent_id = data.get("parentId") or data.get("parent_id", 0)
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             INSERT INTO accounts (
                 name, type, category, currency, icon, color,
                 balance, initial_balance, hidden, display_order,
                 comment, aliases, parent_id, created_at, updated_at, user_id
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('name'),
-            data.get('type', 1),
-            data.get('category'),
-            data.get('currency', 'CNY'),
-            data.get('icon'),
-            data.get('color'),
-            data.get('balance', 0.0),
-            data.get('initial_balance', 0.0),
-            1 if data.get('hidden', False) else 0,
-            data.get('display_order', 0),
-            data.get('comment'),
-            data.get('aliases'),  # JSON数组格式存储别名
-            parent_id,
-            now,
-            now,
-            user_id
-        ))
+        """,
+            (
+                data.get("name"),
+                data.get("type", 1),
+                data.get("category"),
+                data.get("currency", "CNY"),
+                data.get("icon"),
+                data.get("color"),
+                data.get("balance", 0.0),
+                data.get("initial_balance", 0.0),
+                1 if data.get("hidden", False) else 0,
+                data.get("display_order", 0),
+                data.get("comment"),
+                data.get("aliases"),  # JSON数组格式存储别名
+                parent_id,
+                now,
+                now,
+                user_id,
+            ),
+        )
 
         account_id = cursor.lastrowid
         await conn.commit()
@@ -3535,15 +3377,14 @@ class Database:
         # 递归创建子账户
         if sub_accounts and isinstance(sub_accounts, list):
             for sub_account in sub_accounts:
-                sub_account['parentId'] = account_id
+                sub_account["parentId"] = account_id
                 # 递归调用（传递user_id）
                 await self.create_account(sub_account, user_id)
 
         return account_id
 
     @log_method
-    async def update_account(self, account_id: int, data: Dict[str, Any],
-                             user_id: int = 1) -> bool:
+    async def update_account(self, account_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
         """更新账户
 
         Args:
@@ -3558,22 +3399,33 @@ class Database:
 
         # 准备更新数据
         update_data = data.copy()
-        update_data['updated_at'] = datetime.now().isoformat()
+        update_data["updated_at"] = datetime.now().isoformat()
 
         # 映射 parentId -> parent_id
-        if 'parentId' in update_data:
-            update_data['parent_id'] = update_data.pop('parentId')
+        if "parentId" in update_data:
+            update_data["parent_id"] = update_data.pop("parentId")
 
         # 移除subAccounts字段（这是嵌套数据，不应该更新到父账户表）
-        if 'subAccounts' in update_data:
+        if "subAccounts" in update_data:
             self.logger.warning(f"账户更新数据包含subAccounts字段，已移除: account_id={account_id}")
-            del update_data['subAccounts']
+            del update_data["subAccounts"]
 
         # 定义允许更新的字段白名单
         valid_columns = {
-            'name', 'type', 'category', 'currency', 'icon', 'color',
-            'balance', 'initial_balance', 'hidden', 'display_order',
-            'comment', 'aliases', 'parent_id', 'updated_at'
+            "name",
+            "type",
+            "category",
+            "currency",
+            "icon",
+            "color",
+            "balance",
+            "initial_balance",
+            "hidden",
+            "display_order",
+            "comment",
+            "aliases",
+            "parent_id",
+            "updated_at",
         }
 
         # 过滤掉不在白名单中的字段
@@ -3584,8 +3436,7 @@ class Database:
             self.logger.warning(f"账户更新数据过滤后为空: account_id={account_id}, 原始字段={list(update_data.keys())}")
             return False
 
-        if 'id' in filtered_data:
-            del filtered_data['id']
+        filtered_data.pop("id", None)
 
         set_clause = ", ".join(f"{key} = ?" for key in filtered_data.keys())
         values = list(filtered_data.values())
@@ -3593,10 +3444,7 @@ class Database:
 
         self.logger.info(f"更新账户: id={account_id}, user_id={user_id}, 字段={list(filtered_data.keys())}")
 
-        cursor = await conn.execute(
-            f"UPDATE accounts SET {set_clause} WHERE id = ? AND user_id = ?",
-            values
-        )
+        cursor = await conn.execute(f"UPDATE accounts SET {set_clause} WHERE id = ? AND user_id = ?", values)
         await conn.commit()
 
         return cursor.rowcount > 0
@@ -3611,16 +3459,13 @@ class Database:
         """
         conn = await self._get_connection()
 
-        cursor = await conn.execute(
-            "DELETE FROM accounts WHERE id = ? AND user_id = ?",
-            (account_id, user_id)
-        )
+        cursor = await conn.execute("DELETE FROM accounts WHERE id = ? AND user_id = ?", (account_id, user_id))
         await conn.commit()
 
         return cursor.rowcount > 0
 
     @log_method
-    async def update_account_balance(self, account_id: int, amount: float, operation: str = 'add') -> bool:
+    async def update_account_balance(self, account_id: int, amount: float, operation: str = "add") -> bool:
         """
         更新账户余额
 
@@ -3636,22 +3481,19 @@ class Database:
             conn = await self._get_connection()
 
             # 获取当前余额
-            async with conn.execute(
-                "SELECT balance FROM accounts WHERE id = ?",
-                (account_id,)
-            ) as cursor:
+            async with conn.execute("SELECT balance FROM accounts WHERE id = ?", (account_id,)) as cursor:
                 row = await cursor.fetchone()
                 if not row:
                     self.logger.warning(f"账户不存在: account_id={account_id}")
                     return False
 
-                current_balance = row['balance'] or 0.0
+                current_balance = row["balance"] or 0.0
 
             # 计算新余额
-            if operation == 'add':
+            if operation == "add":
                 new_balance = current_balance + amount
                 self.logger.info(f"增加余额: account_id={account_id}, 原:{current_balance} + {amount} = {new_balance}")
-            elif operation == 'subtract':
+            elif operation == "subtract":
                 new_balance = current_balance - amount
                 self.logger.info(f"减少余额: account_id={account_id}, 原:{current_balance} - {amount} = {new_balance}")
             else:
@@ -3661,7 +3503,7 @@ class Database:
             # 更新余额
             cursor = await conn.execute(
                 "UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?",
-                (new_balance, datetime.now().isoformat(), account_id)
+                (new_balance, datetime.now().isoformat(), account_id),
             )
             await conn.commit()
 
@@ -3688,23 +3530,17 @@ class Database:
 
             # 如果没有提供账户名称，查询获取
             if not account_name:
-                async with conn.execute(
-                    "SELECT name FROM accounts WHERE id = ?",
-                    (account_id,)
-                ) as cursor:
+                async with conn.execute("SELECT name FROM accounts WHERE id = ?", (account_id,)) as cursor:
                     row = await cursor.fetchone()
                     if not row:
                         self.logger.warning(f"账户不存在: account_id={account_id}")
                         return 0.0
-                    account_name = row['name']
+                    account_name = row["name"]
 
             # 获取初始余额
-            async with conn.execute(
-                "SELECT initial_balance FROM accounts WHERE id = ?",
-                (account_id,)
-            ) as cursor:
+            async with conn.execute("SELECT initial_balance FROM accounts WHERE id = ?", (account_id,)) as cursor:
                 row = await cursor.fetchone()
-                initial_balance = row['initial_balance'] if row else 0.0
+                initial_balance = row["initial_balance"] if row else 0.0
 
             # 计算所有账单的余额变动（基于source_account_id和destination_account_id字段）
             # 收入：增加余额
@@ -3713,7 +3549,8 @@ class Database:
             # 投资：源账户减少，目标账户增加
 
             # 作为源账户的交易（收入增加，支出/转账/投资减少）
-            async with conn.execute("""
+            async with conn.execute(
+                """
                 SELECT
                     SUM(CASE WHEN type = '收入' THEN amount ELSE 0 END) as income,
                     SUM(CASE WHEN type = '支出' THEN amount ELSE 0 END) as expense,
@@ -3721,34 +3558,33 @@ class Database:
                     SUM(CASE WHEN type = '投资' THEN amount ELSE 0 END) as investment_out
                 FROM bills
                 WHERE source_account_id = ?
-            """, (account_id,)) as cursor:
+            """,
+                (account_id,),
+            ) as cursor:
                 row = await cursor.fetchone()
-                income = row['income'] or 0.0
-                expense = row['expense'] or 0.0
-                transfer_out = row['transfer_out'] or 0.0
-                investment_out = row['investment_out'] or 0.0
+                income = row["income"] or 0.0
+                expense = row["expense"] or 0.0
+                transfer_out = row["transfer_out"] or 0.0
+                investment_out = row["investment_out"] or 0.0
 
             # 作为目标账户的交易（转账/投资增加）
-            async with conn.execute("""
+            async with conn.execute(
+                """
                 SELECT
                     SUM(CASE WHEN type = '转账' THEN destination_amount ELSE 0 END) as transfer_in,
                     SUM(CASE WHEN type = '投资' THEN destination_amount ELSE 0 END) as investment_in
                 FROM bills
                 WHERE destination_account_id = ?
-            """, (account_id,)) as cursor:
+            """,
+                (account_id,),
+            ) as cursor:
                 row = await cursor.fetchone()
-                transfer_in = row['transfer_in'] or 0.0
-                investment_in = row['investment_in'] or 0.0
+                transfer_in = row["transfer_in"] or 0.0
+                investment_in = row["investment_in"] or 0.0
 
             # 余额计算: 初始余额 + 收入 - 支出 - 转账转出 + 转账转入 - 投资转出 + 投资转入
             calculated_balance = (
-                initial_balance +
-                income -
-                expense -
-                transfer_out +
-                transfer_in -
-                investment_out +
-                investment_in
+                initial_balance + income - expense - transfer_out + transfer_in - investment_out + investment_in
             )
 
             self.logger.info(
@@ -3780,15 +3616,12 @@ class Database:
             conn = await self._get_connection()
 
             # 获取账户名称
-            async with conn.execute(
-                "SELECT name FROM accounts WHERE id = ?",
-                (account_id,)
-            ) as cursor:
+            async with conn.execute("SELECT name FROM accounts WHERE id = ?", (account_id,)) as cursor:
                 row = await cursor.fetchone()
                 if not row:
                     self.logger.warning(f"账户不存在: account_id={account_id}")
                     return False
-                account_name = row['name']
+                account_name = row["name"]
 
             # 计算实际余额
             calculated_balance = await self.calculate_account_balance(account_id, account_name)
@@ -3796,7 +3629,7 @@ class Database:
             # 更新余额
             cursor = await conn.execute(
                 "UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?",
-                (calculated_balance, datetime.now().isoformat(), account_id)
+                (calculated_balance, datetime.now().isoformat(), account_id),
             )
             await conn.commit()
 
@@ -3809,7 +3642,7 @@ class Database:
             return False
 
     @log_method
-    async def sync_all_account_balances(self, user_id: int = 1) -> Dict[str, Any]:
+    async def sync_all_account_balances(self, user_id: int = 1) -> dict[str, Any]:
         """
         同步所有账户的余额（将计算出的实际余额写入balance字段）
 
@@ -3830,24 +3663,18 @@ class Database:
 
             # 获取所有账户
             async with conn.execute(
-                "SELECT id, name, balance, initial_balance FROM accounts WHERE user_id = ?",
-                (user_id,)
+                "SELECT id, name, balance, initial_balance FROM accounts WHERE user_id = ?", (user_id,)
             ) as cursor:
                 accounts = await cursor.fetchall()
 
-            result = {
-                'total_accounts': len(accounts),
-                'synced_accounts': 0,
-                'discrepancies': [],
-                'errors': []
-            }
+            result = {"total_accounts": len(accounts), "synced_accounts": 0, "discrepancies": [], "errors": []}
 
             self.logger.info(f"[批量同步账户余额] 开始同步 {len(accounts)} 个账户 (user_id={user_id})")
 
             for account in accounts:
-                account_id = account['id']
-                account_name = account['name']
-                old_balance = account['balance'] or 0.0
+                account_id = account["id"]
+                account_name = account["name"]
+                old_balance = account["balance"] or 0.0
 
                 try:
                     # 计算实际余额
@@ -3856,13 +3683,15 @@ class Database:
                     # 如果余额不同，记录差异
                     if abs(old_balance - new_balance) > 0.001:
                         diff = new_balance - old_balance
-                        result['discrepancies'].append({
-                            'account_id': account_id,
-                            'name': account_name,
-                            'old_balance': round(old_balance, 2),
-                            'new_balance': round(new_balance, 2),
-                            'diff': round(diff, 2)
-                        })
+                        result["discrepancies"].append(
+                            {
+                                "account_id": account_id,
+                                "name": account_name,
+                                "old_balance": round(old_balance, 2),
+                                "new_balance": round(new_balance, 2),
+                                "diff": round(diff, 2),
+                            }
+                        )
                         self.logger.info(
                             f"[余额差异] 账户 '{account_name}' (ID={account_id}): "
                             f"旧余额={old_balance:.2f}, 新余额={new_balance:.2f}, 差异={diff:.2f}"
@@ -3871,19 +3700,19 @@ class Database:
                     # 更新余额
                     await conn.execute(
                         "UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?",
-                        (new_balance, datetime.now().isoformat(), account_id)
+                        (new_balance, datetime.now().isoformat(), account_id),
                     )
-                    result['synced_accounts'] += 1
+                    result["synced_accounts"] += 1
 
                 except Exception as e:
-                    error_msg = f"账户 '{account_name}' (ID={account_id}) 同步失败: {str(e)}"
-                    result['errors'].append(error_msg)
+                    error_msg = f"账户 '{account_name}' (ID={account_id}) 同步失败: {e!s}"
+                    result["errors"].append(error_msg)
                     self.logger.error(error_msg, exc_info=True)
 
             await conn.commit()
 
             # 清除账户映射缓存
-            self._clear_cache('account_mappings')
+            self._clear_cache("account_mappings")
 
             self.logger.info(
                 f"[批量同步账户余额完成] 成功={result['synced_accounts']}/{result['total_accounts']}, "
@@ -3894,15 +3723,10 @@ class Database:
 
         except Exception as e:
             self.logger.error(f"批量同步账户余额失败: {e}", exc_info=True)
-            return {
-                'total_accounts': 0,
-                'synced_accounts': 0,
-                'discrepancies': [],
-                'errors': [str(e)]
-            }
+            return {"total_accounts": 0, "synced_accounts": 0, "discrepancies": [], "errors": [str(e)]}
 
     @log_method
-    async def get_all_tags(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_all_tags(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取所有标签
 
         Args:
@@ -3911,14 +3735,13 @@ class Database:
         conn = await self._get_connection()
 
         async with conn.execute(
-            "SELECT * FROM tags WHERE user_id = ? ORDER BY display_order, created_at DESC",
-            (user_id,)
+            "SELECT * FROM tags WHERE user_id = ? ORDER BY display_order, created_at DESC", (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_tag_by_id(self, tag_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_tag_by_id(self, tag_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """根据ID获取标签
 
         Args:
@@ -3927,15 +3750,12 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM tags WHERE id = ? AND user_id = ?",
-            (tag_id, user_id)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM tags WHERE id = ? AND user_id = ?", (tag_id, user_id)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def create_tag(self, data: Dict[str, Any], user_id: int = 1) -> int:
+    async def create_tag(self, data: dict[str, Any], user_id: int = 1) -> int:
         """创建标签
 
         Args:
@@ -3945,24 +3765,27 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             INSERT INTO tags (name, color, icon, hidden, created_at, updated_at, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('name'),
-            data.get('color', '#000000'),
-            data.get('icon', ''),
-            data.get('hidden', False),
-            now, now,
-            user_id
-        ))
+        """,
+            (
+                data.get("name"),
+                data.get("color", "#000000"),
+                data.get("icon", ""),
+                data.get("hidden", False),
+                now,
+                now,
+                user_id,
+            ),
+        )
 
         await conn.commit()
         return cursor.lastrowid
 
     @log_method
-    async def update_tag(self, tag_id: int, data: Dict[str, Any],
-                         user_id: int = 1) -> bool:
+    async def update_tag(self, tag_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
         """更新标签
 
         Args:
@@ -3974,16 +3797,13 @@ class Database:
             return False
 
         conn = await self._get_connection()
-        data['updated_at'] = datetime.now().isoformat()
+        data["updated_at"] = datetime.now().isoformat()
 
         set_clause = ", ".join(f"{key} = ?" for key in data.keys())
         values = list(data.values())
         values.extend([tag_id, user_id])
 
-        cursor = await conn.execute(
-            f"UPDATE tags SET {set_clause} WHERE id = ? AND user_id = ?",
-            values
-        )
+        cursor = await conn.execute(f"UPDATE tags SET {set_clause} WHERE id = ? AND user_id = ?", values)
         await conn.commit()
 
         return cursor.rowcount > 0
@@ -3998,17 +3818,13 @@ class Database:
         """
         conn = await self._get_connection()
 
-        cursor = await conn.execute(
-            "DELETE FROM tags WHERE id = ? AND user_id = ?",
-            (tag_id, user_id)
-        )
+        cursor = await conn.execute("DELETE FROM tags WHERE id = ? AND user_id = ?", (tag_id, user_id))
         await conn.commit()
 
         return cursor.rowcount > 0
 
     @log_method
-    async def update_tag_display_orders(self, orders: List[tuple],
-                                        user_id: int = 1) -> bool:
+    async def update_tag_display_orders(self, orders: list[tuple], user_id: int = 1) -> bool:
         """批量更新标签显示顺序
 
         Args:
@@ -4030,7 +3846,7 @@ class Database:
             for tag_id, display_order in orders:
                 await conn.execute(
                     "UPDATE tags SET display_order = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-                    (display_order, now, tag_id, user_id)
+                    (display_order, now, tag_id, user_id),
                 )
 
             await conn.commit()
@@ -4042,15 +3858,11 @@ class Database:
             return False
 
     @log_method
-    async def get_all_templates(
-        self,
-        user_id: int = 1,
-        template_type: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+    async def get_all_templates(self, user_id: int = 1, template_type: int | None = None) -> list[dict[str, Any]]:
         """获取所有模板（按模板类型统一返回前端 DTO 结构）。"""
         conn = await self._get_connection()
 
-        templates: List[Dict[str, Any]] = []
+        templates: list[dict[str, Any]] = []
 
         if template_type in (None, 1):
             async with conn.execute(
@@ -4059,13 +3871,10 @@ class Database:
                 WHERE user_id = ?
                 ORDER BY COALESCE(display_order, 0), is_favorite DESC, use_count DESC, name
                 """,
-                (user_id,)
+                (user_id,),
             ) as cursor:
                 rows = await cursor.fetchall()
-                templates.extend(
-                    self._serialize_template_row(dict(row), template_type=1)
-                    for row in rows
-                )
+                templates.extend(self._serialize_template_row(dict(row), template_type=1) for row in rows)
 
         if template_type in (None, 2):
             async with conn.execute(
@@ -4074,38 +3883,31 @@ class Database:
                 WHERE user_id = ?
                 ORDER BY COALESCE(display_order, 0), name
                 """,
-                (user_id,)
+                (user_id,),
             ) as cursor:
                 rows = await cursor.fetchall()
-                templates.extend(
-                    self._serialize_template_row(dict(row), template_type=2)
-                    for row in rows
-                )
+                templates.extend(self._serialize_template_row(dict(row), template_type=2) for row in rows)
 
         return templates
 
     @log_method
     async def get_template_by_id(
-        self,
-        template_id: int,
-        user_id: int = 1,
-        template_type: Optional[int] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, template_id: int, user_id: int = 1, template_type: int | None = None
+    ) -> dict[str, Any] | None:
         """根据ID获取模板。"""
         conn = await self._get_connection()
 
         table_candidates = []
         if template_type == 1:
-            table_candidates = [('bill_templates', 1)]
+            table_candidates = [("bill_templates", 1)]
         elif template_type == 2:
-            table_candidates = [('recurring_bills', 2)]
+            table_candidates = [("recurring_bills", 2)]
         else:
-            table_candidates = [('bill_templates', 1), ('recurring_bills', 2)]
+            table_candidates = [("bill_templates", 1), ("recurring_bills", 2)]
 
         for table_name, resolved_type in table_candidates:
             async with conn.execute(
-                f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?",
-                (template_id, user_id)
+                f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (template_id, user_id)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -4114,12 +3916,12 @@ class Database:
         return None
 
     @log_method
-    async def create_template(self, data: Dict[str, Any], user_id: int = 1) -> int:
+    async def create_template(self, data: dict[str, Any], user_id: int = 1) -> int:
         """创建模板。"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        template_type = int(data.get('templateType') or 1)
+        template_type = int(data.get("templateType") or 1)
         display_order = await self._get_next_template_display_order(conn, template_type, user_id)
 
         if template_type == 2:
@@ -4136,30 +3938,30 @@ class Database:
                 (
                     user_id,
                     None,
-                    data.get('name', ''),
-                    data.get('description', ''),
-                    data.get('type'),
-                    data.get('categoryId', ''),
-                    float(data.get('sourceAmount') or 0),
-                    data.get('sourceAccountId', '0'),
-                    data.get('destinationAccountId', '0'),
-                    float(data.get('destinationAmount') or 0),
-                    1 if data.get('hideAmount') else 0,
-                    self._serialize_template_tag_ids(data.get('tagIds')),
-                    data.get('comment', ''),
-                    data.get('scheduledFrequency', ''),
-                    int(data.get('scheduledFrequencyType') or 0),
-                    data.get('scheduledStartDate'),
-                    data.get('scheduledEndDate'),
-                    data.get('scheduledStartDate') or now[:10],
-                    1 if data.get('hidden') else 0,
+                    data.get("name", ""),
+                    data.get("description", ""),
+                    data.get("type"),
+                    data.get("categoryId", ""),
+                    float(data.get("sourceAmount") or 0),
+                    data.get("sourceAccountId", "0"),
+                    data.get("destinationAccountId", "0"),
+                    float(data.get("destinationAmount") or 0),
+                    1 if data.get("hideAmount") else 0,
+                    self._serialize_template_tag_ids(data.get("tagIds")),
+                    data.get("comment", ""),
+                    data.get("scheduledFrequency", ""),
+                    int(data.get("scheduledFrequencyType") or 0),
+                    data.get("scheduledStartDate"),
+                    data.get("scheduledEndDate"),
+                    data.get("scheduledStartDate") or now[:10],
+                    1 if data.get("hidden") else 0,
                     display_order,
-                    int(data.get('utcOffset') or 0),
+                    int(data.get("utcOffset") or 0),
                     1,
                     0,
                     now,
-                    now
-                )
+                    now,
+                ),
             )
         else:
             cursor = await conn.execute(
@@ -4172,24 +3974,24 @@ class Database:
                 """,
                 (
                     user_id,
-                    data.get('name', ''),
-                    data.get('description', ''),
-                    data.get('type'),
-                    data.get('categoryId', ''),
-                    float(data.get('sourceAmount') or 0),
-                    data.get('sourceAccountId', '0'),
-                    data.get('destinationAccountId', '0'),
-                    float(data.get('destinationAmount') or 0),
-                    1 if data.get('hideAmount') else 0,
-                    self._serialize_template_tag_ids(data.get('tagIds')),
-                    data.get('comment', ''),
+                    data.get("name", ""),
+                    data.get("description", ""),
+                    data.get("type"),
+                    data.get("categoryId", ""),
+                    float(data.get("sourceAmount") or 0),
+                    data.get("sourceAccountId", "0"),
+                    data.get("destinationAccountId", "0"),
+                    float(data.get("destinationAmount") or 0),
+                    1 if data.get("hideAmount") else 0,
+                    self._serialize_template_tag_ids(data.get("tagIds")),
+                    data.get("comment", ""),
                     0,
                     display_order,
-                    1 if data.get('hidden') else 0,
-                    int(data.get('utcOffset') or 0),
+                    1 if data.get("hidden") else 0,
+                    int(data.get("utcOffset") or 0),
                     now,
-                    now
-                )
+                    now,
+                ),
             )
 
         await conn.commit()
@@ -4197,11 +3999,7 @@ class Database:
 
     @log_method
     async def update_template(
-        self,
-        template_id: int,
-        data: Dict[str, Any],
-        user_id: int = 1,
-        template_type: Optional[int] = None
+        self, template_id: int, data: dict[str, Any], user_id: int = 1, template_type: int | None = None
     ) -> bool:
         """更新模板。"""
         if not data:
@@ -4209,47 +4007,31 @@ class Database:
 
         conn = await self._get_connection()
         normalized = self._build_template_update_payload(data, template_type)
-        normalized['updated_at'] = datetime.now().isoformat()
+        normalized["updated_at"] = datetime.now().isoformat()
 
         table_name = self._get_template_table(template_type)
         set_clause = ", ".join(f"{key} = ?" for key in normalized.keys())
         values = list(normalized.values())
         values.extend([template_id, user_id])
 
-        cursor = await conn.execute(
-            f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?",
-            values
-        )
+        cursor = await conn.execute(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
         await conn.commit()
 
         return cursor.rowcount > 0
 
     @log_method
-    async def delete_template(
-        self,
-        template_id: int,
-        user_id: int = 1,
-        template_type: Optional[int] = None
-    ) -> bool:
+    async def delete_template(self, template_id: int, user_id: int = 1, template_type: int | None = None) -> bool:
         """删除模板。"""
         conn = await self._get_connection()
 
         table_name = self._get_template_table(template_type)
-        cursor = await conn.execute(
-            f"DELETE FROM {table_name} WHERE id = ? AND user_id = ?",
-            (template_id, user_id)
-        )
+        cursor = await conn.execute(f"DELETE FROM {table_name} WHERE id = ? AND user_id = ?", (template_id, user_id))
         await conn.commit()
 
         return cursor.rowcount > 0
 
     @log_method
-    async def update_template_display_orders(
-        self,
-        orders: List[tuple],
-        template_type: int,
-        user_id: int = 1
-    ) -> bool:
+    async def update_template_display_orders(self, orders: list[tuple], template_type: int, user_id: int = 1) -> bool:
         """批量更新模板显示顺序。"""
         if not orders:
             return True
@@ -4262,7 +4044,7 @@ class Database:
             for template_id, display_order in orders:
                 await conn.execute(
                     f"UPDATE {table_name} SET display_order = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-                    (display_order, now, template_id, user_id)
+                    (display_order, now, template_id, user_id),
                 )
 
             await conn.commit()
@@ -4274,50 +4056,38 @@ class Database:
 
     @log_method
     async def get_recurring_candidates_for_bill(
-        self,
-        bill_id: int,
-        user_id: int = 1,
-        tolerance_days: int = 3
-    ) -> Dict[str, Any]:
+        self, bill_id: int, user_id: int = 1, tolerance_days: int = 3
+    ) -> dict[str, Any]:
         """获取账单可匹配的定时交易候选。"""
         conn = await self._get_connection()
         bill = await self.get_bill_by_id(bill_id, user_id=user_id)
         if not bill:
-            return {
-                'bill': None,
-                'linked_recurring_id': None,
-                'linked_recurring_name': '',
-                'candidates': []
-            }
+            return {"bill": None, "linked_recurring_id": None, "linked_recurring_name": "", "candidates": []}
 
-        linked_recurring_id = bill.get('created_from_recurring')
-        linked_recurring_name = ''
+        linked_recurring_id = bill.get("created_from_recurring")
+        linked_recurring_name = ""
         if linked_recurring_id:
             async with conn.execute(
-                "SELECT name FROM recurring_bills WHERE id = ? AND user_id = ?",
-                (linked_recurring_id, user_id)
+                "SELECT name FROM recurring_bills WHERE id = ? AND user_id = ?", (linked_recurring_id, user_id)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    linked_recurring_name = str(row['name'] or '')
+                    linked_recurring_name = str(row["name"] or "")
 
         recurring_rows = await self.get_enabled_recurring_templates(user_id=user_id)
         candidates = self.build_recurring_candidates_for_bill_data(
-            bill,
-            recurring_rows,
-            linked_recurring_id=linked_recurring_id,
-            tolerance_days=tolerance_days
+            bill, recurring_rows, linked_recurring_id=linked_recurring_id, tolerance_days=tolerance_days
         )
 
         return {
-            'bill': bill,
-            'linked_recurring_id': linked_recurring_id,
-            'linked_recurring_name': linked_recurring_name,
-            'candidates': candidates
+            "bill": bill,
+            "linked_recurring_id": linked_recurring_id,
+            "linked_recurring_name": linked_recurring_name,
+            "candidates": candidates,
         }
 
     @log_method
-    async def get_enabled_recurring_templates(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_enabled_recurring_templates(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取当前用户启用中的定时交易模板。"""
         conn = await self._get_connection()
         async with conn.execute(
@@ -4326,98 +4096,92 @@ class Database:
             WHERE user_id = ? AND enabled = 1
             ORDER BY COALESCE(display_order, 0), name
             """,
-            (user_id,)
+            (user_id,),
         ) as cursor:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
     def build_recurring_candidates_for_bill_data(
         self,
-        bill: Dict[str, Any],
-        recurring_rows: List[Dict[str, Any]],
+        bill: dict[str, Any],
+        recurring_rows: list[dict[str, Any]],
         linked_recurring_id: Any = None,
-        tolerance_days: int = 3
-    ) -> List[Dict[str, Any]]:
+        tolerance_days: int = 3,
+    ) -> list[dict[str, Any]]:
         """基于账单数据构建定时账单候选列表。"""
-        bill_date = self._parse_date_value(bill.get('date'))
+        bill_date = self._parse_date_value(bill.get("date"))
         if not bill_date:
             return []
 
-        bill_type = self._normalize_template_transaction_type(bill.get('type'))
-        bill_amount_cents = int(round(abs(float(bill.get('amount') or 0)) * 100))
-        bill_source_account = str(bill.get('source_account_id') or '0')
-        bill_destination_account = str(bill.get('destination_account_id') or '0')
+        bill_type = self._normalize_template_transaction_type(bill.get("type"))
+        bill_amount_cents = int(round(abs(float(bill.get("amount") or 0)) * 100))
+        bill_source_account = str(bill.get("source_account_id") or "0")
+        bill_destination_account = str(bill.get("destination_account_id") or "0")
 
-        candidates: List[Dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         for recurring in recurring_rows:
-            recurring_type = self._normalize_template_transaction_type(recurring.get('type'))
+            recurring_type = self._normalize_template_transaction_type(recurring.get("type"))
             if recurring_type != bill_type:
                 continue
 
-            recurring_amount_cents = int(round(abs(float(recurring.get('amount') or 0))))
+            recurring_amount_cents = int(round(abs(float(recurring.get("amount") or 0))))
             if recurring_amount_cents != bill_amount_cents:
                 continue
 
             matched_occurrence = self._find_recurring_occurrence_near_date(
-                recurring,
-                bill_date,
-                tolerance_days=tolerance_days
+                recurring, bill_date, tolerance_days=tolerance_days
             )
             if not matched_occurrence:
                 continue
 
             score = 80
-            reasons: List[str] = ['type', 'amount', 'schedule']
-            recurring_source_account = str(recurring.get('account') or '0')
-            recurring_destination_account = str(recurring.get('counterparty') or '0')
+            reasons: list[str] = ["type", "amount", "schedule"]
+            recurring_source_account = str(recurring.get("account") or "0")
+            recurring_destination_account = str(recurring.get("counterparty") or "0")
 
             if recurring_source_account == bill_source_account:
-                reasons.append('source_account')
+                reasons.append("source_account")
                 score += 10
-            if bill_destination_account not in ('', '0') and recurring_destination_account == bill_destination_account:
-                reasons.append('destination_account')
+            if bill_destination_account not in ("", "0") and recurring_destination_account == bill_destination_account:
+                reasons.append("destination_account")
                 score += 10
 
             days_offset = abs((matched_occurrence - bill_date).days)
             score += max(0, 10 - days_offset * 2)
 
             candidate = self._serialize_template_row(recurring, template_type=2)
-            candidate.update({
-                'matchScore': score,
-                'matchReasons': reasons,
-                'matchedOccurrenceDate': matched_occurrence.isoformat(),
-                'matchedDayOffset': days_offset,
-                'linked': int(linked_recurring_id or 0) == int(recurring.get('id') or 0)
-            })
+            candidate.update(
+                {
+                    "matchScore": score,
+                    "matchReasons": reasons,
+                    "matchedOccurrenceDate": matched_occurrence.isoformat(),
+                    "matchedDayOffset": days_offset,
+                    "linked": int(linked_recurring_id or 0) == int(recurring.get("id") or 0),
+                }
+            )
             candidates.append(candidate)
 
         candidates.sort(
             key=lambda item: (
-                -int(item.get('matchScore') or 0),
-                int(item.get('matchedDayOffset') or 999),
-                str(item.get('name') or '')
+                -int(item.get("matchScore") or 0),
+                int(item.get("matchedDayOffset") or 999),
+                str(item.get("name") or ""),
             )
         )
         return candidates
 
     @log_method
-    async def bind_bill_to_recurring(
-        self,
-        bill_id: int,
-        recurring_id: int,
-        user_id: int = 1
-    ) -> Optional[Dict[str, Any]]:
+    async def bind_bill_to_recurring(self, bill_id: int, recurring_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """将账单绑定到定时交易，并推进 next_date。"""
         conn = await self._get_connection()
         bill = await self.get_bill_by_id(bill_id, user_id=user_id)
         if not bill:
             return None
 
-        previous_recurring_id = bill.get('created_from_recurring')
+        previous_recurring_id = bill.get("created_from_recurring")
 
         async with conn.execute(
-            "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?",
-            (recurring_id, user_id)
+            "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?", (recurring_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
             recurring = dict(row) if row else None
@@ -4425,7 +4189,7 @@ class Database:
         if not recurring:
             return None
 
-        bill_date = self._parse_date_value(bill.get('date'))
+        bill_date = self._parse_date_value(bill.get("date"))
         next_occurrence = None
         if bill_date:
             next_date = self._get_next_recurring_occurrence_after(recurring, bill_date)
@@ -4434,11 +4198,11 @@ class Database:
         now = datetime.now().isoformat()
         await conn.execute(
             "UPDATE bills SET created_from_recurring = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-            (recurring_id, now, bill_id, user_id)
+            (recurring_id, now, bill_id, user_id),
         )
         await conn.execute(
             "UPDATE recurring_bills SET next_date = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-            (next_occurrence or recurring.get('next_date'), now, recurring_id, user_id)
+            (next_occurrence or recurring.get("next_date"), now, recurring_id, user_id),
         )
 
         if previous_recurring_id and str(previous_recurring_id) != str(recurring_id):
@@ -4447,22 +4211,17 @@ class Database:
         await conn.commit()
 
         return {
-            'billId': bill_id,
-            'recurringId': recurring_id,
-            'nextScheduledDate': next_occurrence or recurring.get('next_date')
+            "billId": bill_id,
+            "recurringId": recurring_id,
+            "nextScheduledDate": next_occurrence or recurring.get("next_date"),
         }
 
     async def _recalculate_recurring_next_date(
-        self,
-        conn,
-        recurring_id: int,
-        user_id: int,
-        now: Optional[str] = None
+        self, conn, recurring_id: int, user_id: int, now: str | None = None
     ) -> None:
         """根据当前已绑定账单重算定时模板的下一次计划日期。"""
         async with conn.execute(
-            "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?",
-            (recurring_id, user_id)
+            "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?", (recurring_id, user_id)
         ) as recurring_cursor:
             recurring_row = await recurring_cursor.fetchone()
 
@@ -4477,41 +4236,35 @@ class Database:
             ORDER BY date DESC
             LIMIT 1
             """,
-            (user_id, recurring_id)
+            (user_id, recurring_id),
         ) as linked_cursor:
             latest_linked_row = await linked_cursor.fetchone()
 
-        latest_linked_date = self._parse_date_value(
-            latest_linked_row['date'] if latest_linked_row else None
-        )
+        latest_linked_date = self._parse_date_value(latest_linked_row["date"] if latest_linked_row else None)
         if latest_linked_date:
             next_date = self._get_next_recurring_occurrence_after(recurring, latest_linked_date)
         else:
             next_date = self._get_first_recurring_occurrence(recurring)
 
-        next_occurrence = next_date.isoformat() if next_date else recurring.get('next_date')
+        next_occurrence = next_date.isoformat() if next_date else recurring.get("next_date")
         await conn.execute(
             "UPDATE recurring_bills SET next_date = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-            (next_occurrence, now or datetime.now().isoformat(), recurring_id, user_id)
+            (next_occurrence, now or datetime.now().isoformat(), recurring_id, user_id),
         )
 
     @log_method
-    async def unbind_bill_from_recurring(
-        self,
-        bill_id: int,
-        user_id: int = 1
-    ) -> bool:
+    async def unbind_bill_from_recurring(self, bill_id: int, user_id: int = 1) -> bool:
         """取消账单与定时交易的绑定。"""
         conn = await self._get_connection()
         bill = await self.get_bill_by_id(bill_id, user_id=user_id)
         if not bill:
             return False
 
-        recurring_id = bill.get('created_from_recurring')
+        recurring_id = bill.get("created_from_recurring")
         now = datetime.now().isoformat()
         cursor = await conn.execute(
             "UPDATE bills SET created_from_recurring = NULL, updated_at = ? WHERE id = ? AND user_id = ?",
-            (now, bill_id, user_id)
+            (now, bill_id, user_id),
         )
 
         if recurring_id:
@@ -4520,21 +4273,15 @@ class Database:
         await conn.commit()
         return cursor.rowcount > 0
 
-    def _get_template_table(self, template_type: Optional[int]) -> str:
+    def _get_template_table(self, template_type: int | None) -> str:
         """根据模板类型返回表名。"""
-        return 'recurring_bills' if int(template_type or 1) == 2 else 'bill_templates'
+        return "recurring_bills" if int(template_type or 1) == 2 else "bill_templates"
 
-    async def _get_next_template_display_order(
-        self,
-        conn,
-        template_type: int,
-        user_id: int
-    ) -> int:
+    async def _get_next_template_display_order(self, conn, template_type: int, user_id: int) -> int:
         """获取下一显示顺序。"""
         table_name = self._get_template_table(template_type)
         async with conn.execute(
-            f"SELECT COALESCE(MAX(display_order), 0) FROM {table_name} WHERE user_id = ?",
-            (user_id,)
+            f"SELECT COALESCE(MAX(display_order), 0) FROM {table_name} WHERE user_id = ?", (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
             max_order = row[0] if row and row[0] is not None else 0
@@ -4543,69 +4290,65 @@ class Database:
     def _serialize_template_tag_ids(self, tag_ids: Any) -> str:
         """序列化模板标签 ID 列表。"""
         if isinstance(tag_ids, list):
-            return ','.join(str(tag_id) for tag_id in tag_ids if str(tag_id).strip())
-        return str(tag_ids or '')
+            return ",".join(str(tag_id) for tag_id in tag_ids if str(tag_id).strip())
+        return str(tag_ids or "")
 
-    def _deserialize_template_tag_ids(self, raw_value: Any) -> List[str]:
+    def _deserialize_template_tag_ids(self, raw_value: Any) -> list[str]:
         """反序列化模板标签 ID 列表。"""
         if not raw_value:
             return []
         if isinstance(raw_value, list):
             return [str(tag_id) for tag_id in raw_value if str(tag_id).strip()]
-        return [item.strip() for item in str(raw_value).split(',') if item.strip()]
+        return [item.strip() for item in str(raw_value).split(",") if item.strip()]
 
-    def _serialize_template_row(
-        self,
-        row: Dict[str, Any],
-        template_type: int
-    ) -> Dict[str, Any]:
+    def _serialize_template_row(self, row: dict[str, Any], template_type: int) -> dict[str, Any]:
         """将模板表记录统一转换为前端模板 DTO。"""
-        source_amount = float(row.get('amount') or 0)
-        destination_amount = float(row.get('destination_amount') or 0)
-        source_account_id = str(row.get('account') or '0')
-        destination_account_id = str(row.get('counterparty') or '0')
+        source_amount = float(row.get("amount") or 0)
+        destination_amount = float(row.get("destination_amount") or 0)
+        source_account_id = str(row.get("account") or "0")
+        destination_account_id = str(row.get("counterparty") or "0")
 
         return {
-            'id': str(row.get('id')),
-            'timeSequenceId': '',
-            'templateType': template_type,
-            'name': row.get('name', ''),
-            'type': self._normalize_template_transaction_type(row.get('type')),
-            'categoryId': str(row.get('category') or ''),
-            'time': int(row.get('scheduled_at') or 0),
-            'utcOffset': int(row.get('utc_offset') or 0),
-            'sourceAccountId': source_account_id,
-            'destinationAccountId': destination_account_id,
-            'sourceAmount': source_amount,
-            'destinationAmount': destination_amount,
-            'hideAmount': bool(row.get('hide_amount')),
-            'tagIds': self._deserialize_template_tag_ids(row.get('tag')),
-            'comment': row.get('comment', '') or '',
-            'editable': True,
-            'displayOrder': int(row.get('display_order') or 0),
-            'hidden': bool(row.get('hidden')),
-            'scheduledFrequencyType': int(row.get('scheduled_frequency_type') or 0) if template_type == 2 else None,
-            'scheduledFrequency': row.get('frequency') if template_type == 2 else None,
-            'scheduledStartDate': row.get('start_date') if template_type == 2 else None,
-            'scheduledEndDate': row.get('end_date') if template_type == 2 else None,
-            'scheduledAt': None
+            "id": str(row.get("id")),
+            "timeSequenceId": "",
+            "templateType": template_type,
+            "name": row.get("name", ""),
+            "type": self._normalize_template_transaction_type(row.get("type")),
+            "categoryId": str(row.get("category") or ""),
+            "time": int(row.get("scheduled_at") or 0),
+            "utcOffset": int(row.get("utc_offset") or 0),
+            "sourceAccountId": source_account_id,
+            "destinationAccountId": destination_account_id,
+            "sourceAmount": source_amount,
+            "destinationAmount": destination_amount,
+            "hideAmount": bool(row.get("hide_amount")),
+            "tagIds": self._deserialize_template_tag_ids(row.get("tag")),
+            "comment": row.get("comment", "") or "",
+            "editable": True,
+            "displayOrder": int(row.get("display_order") or 0),
+            "hidden": bool(row.get("hidden")),
+            "scheduledFrequencyType": int(row.get("scheduled_frequency_type") or 0) if template_type == 2 else None,
+            "scheduledFrequency": row.get("frequency") if template_type == 2 else None,
+            "scheduledStartDate": row.get("start_date") if template_type == 2 else None,
+            "scheduledEndDate": row.get("end_date") if template_type == 2 else None,
+            "scheduledAt": None,
         }
 
     def _normalize_template_transaction_type(self, raw_value: Any) -> int:
         """将历史模板类型值统一映射到前端数字枚举。"""
         mapping = {
-            '2': 2,
-            '3': 3,
-            '4': 4,
-            '5': 5,
-            'income': 2,
-            'expense': 3,
-            'transfer': 4,
-            'investment': 5,
-            '收入': 2,
-            '支出': 3,
-            '转账': 4,
-            '投资': 5
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5,
+            "income": 2,
+            "expense": 3,
+            "transfer": 4,
+            "investment": 5,
+            "收入": 2,
+            "支出": 3,
+            "转账": 4,
+            "投资": 5,
         }
 
         if raw_value is None:
@@ -4614,7 +4357,7 @@ class Database:
         textual = str(raw_value).strip().lower()
         return mapping.get(textual, 3)
 
-    def _parse_date_value(self, raw_value: Any) -> Optional[date]:
+    def _parse_date_value(self, raw_value: Any) -> date | None:
         """解析 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 格式日期。"""
         if not raw_value:
             return None
@@ -4629,17 +4372,17 @@ class Database:
             pass
 
         try:
-            return datetime.strptime(text[:10], '%Y-%m-%d').date()
+            return datetime.strptime(text[:10], "%Y-%m-%d").date()
         except ValueError:
             return None
 
-    def _parse_schedule_frequency_values(self, raw_value: Any) -> List[int]:
+    def _parse_schedule_frequency_values(self, raw_value: Any) -> list[int]:
         """解析定时频率值，例如 '1,15'。"""
         if not raw_value:
             return []
 
-        values: List[int] = []
-        for item in str(raw_value).split(','):
+        values: list[int] = []
+        for item in str(raw_value).split(","):
             item = item.strip()
             if not item:
                 continue
@@ -4654,10 +4397,10 @@ class Database:
         """将 Python weekday(Monday=0) 转为 Sunday=0。"""
         return (target_date.weekday() + 1) % 7
 
-    def _is_recurring_active_on_date(self, recurring: Dict[str, Any], target_date: date) -> bool:
+    def _is_recurring_active_on_date(self, recurring: dict[str, Any], target_date: date) -> bool:
         """判断定时模板在指定日期是否生效。"""
-        start_date = self._parse_date_value(recurring.get('start_date'))
-        end_date = self._parse_date_value(recurring.get('end_date'))
+        start_date = self._parse_date_value(recurring.get("start_date"))
+        end_date = self._parse_date_value(recurring.get("end_date"))
 
         if start_date and target_date < start_date:
             return False
@@ -4665,15 +4408,15 @@ class Database:
             return False
         return True
 
-    def _is_recurring_due_on_date(self, recurring: Dict[str, Any], target_date: date) -> bool:
+    def _is_recurring_due_on_date(self, recurring: dict[str, Any], target_date: date) -> bool:
         """判断定时模板是否在某天应发生。"""
         if not self._is_recurring_active_on_date(recurring, target_date):
             return False
 
-        frequency_type = int(recurring.get('scheduled_frequency_type') or 0)
-        frequency_values = self._parse_schedule_frequency_values(recurring.get('frequency'))
-        start_date = self._parse_date_value(recurring.get('start_date'))
-        next_date = self._parse_date_value(recurring.get('next_date'))
+        frequency_type = int(recurring.get("scheduled_frequency_type") or 0)
+        frequency_values = self._parse_schedule_frequency_values(recurring.get("frequency"))
+        start_date = self._parse_date_value(recurring.get("start_date"))
+        next_date = self._parse_date_value(recurring.get("next_date"))
 
         if frequency_type == 1:
             if frequency_values:
@@ -4698,14 +4441,11 @@ class Database:
         return bool(start_date and target_date == start_date)
 
     def _find_recurring_occurrence_near_date(
-        self,
-        recurring: Dict[str, Any],
-        target_date: date,
-        tolerance_days: int
-    ) -> Optional[date]:
+        self, recurring: dict[str, Any], target_date: date, tolerance_days: int
+    ) -> date | None:
         """在容差窗口内寻找最近的计划发生日期。"""
-        nearest_date: Optional[date] = None
-        nearest_diff: Optional[int] = None
+        nearest_date: date | None = None
+        nearest_diff: int | None = None
 
         for offset in range(-tolerance_days, tolerance_days + 1):
             current_date = target_date + timedelta(days=offset)
@@ -4720,11 +4460,8 @@ class Database:
         return nearest_date
 
     def _get_next_recurring_occurrence_after(
-        self,
-        recurring: Dict[str, Any],
-        after_date: date,
-        max_search_days: int = 370
-    ) -> Optional[date]:
+        self, recurring: dict[str, Any], after_date: date, max_search_days: int = 370
+    ) -> date | None:
         """获取指定日期后的下一次计划发生日期。"""
         for offset in range(1, max_search_days + 1):
             candidate = after_date + timedelta(days=offset)
@@ -4732,68 +4469,64 @@ class Database:
                 return candidate
         return None
 
-    def _build_template_update_payload(
-        self,
-        data: Dict[str, Any],
-        template_type: Optional[int]
-    ) -> Dict[str, Any]:
+    def _build_template_update_payload(self, data: dict[str, Any], template_type: int | None) -> dict[str, Any]:
         """构建模板更新字段。"""
-        normalized: Dict[str, Any] = {}
+        normalized: dict[str, Any] = {}
 
         field_mapping = {
-            'name': 'name',
-            'type': 'type',
-            'categoryId': 'category',
-            'sourceAccountId': 'account',
-            'destinationAccountId': 'counterparty',
-            'sourceAmount': 'amount',
-            'destinationAmount': 'destination_amount',
-            'hideAmount': 'hide_amount',
-            'comment': 'comment',
-            'hidden': 'hidden',
-            'displayOrder': 'display_order',
-            'utcOffset': 'utc_offset'
+            "name": "name",
+            "type": "type",
+            "categoryId": "category",
+            "sourceAccountId": "account",
+            "destinationAccountId": "counterparty",
+            "sourceAmount": "amount",
+            "destinationAmount": "destination_amount",
+            "hideAmount": "hide_amount",
+            "comment": "comment",
+            "hidden": "hidden",
+            "displayOrder": "display_order",
+            "utcOffset": "utc_offset",
         }
 
         for source_key, target_key in field_mapping.items():
             if source_key in data:
                 value = data[source_key]
-                if source_key in ('hideAmount', 'hidden'):
+                if source_key in ("hideAmount", "hidden"):
                     normalized[target_key] = 1 if value else 0
-                elif source_key in ('sourceAmount', 'destinationAmount'):
+                elif source_key in ("sourceAmount", "destinationAmount"):
                     normalized[target_key] = float(value or 0)
-                elif source_key in ('displayOrder', 'utcOffset'):
+                elif source_key in ("displayOrder", "utcOffset"):
                     normalized[target_key] = int(value or 0)
                 else:
                     normalized[target_key] = value
 
-        if 'tagIds' in data:
-            normalized['tag'] = self._serialize_template_tag_ids(data.get('tagIds'))
+        if "tagIds" in data:
+            normalized["tag"] = self._serialize_template_tag_ids(data.get("tagIds"))
 
         if int(template_type or 1) == 2:
             recurring_mapping = {
-                'scheduledFrequencyType': 'scheduled_frequency_type',
-                'scheduledFrequency': 'frequency',
-                'scheduledStartDate': 'start_date',
-                'scheduledEndDate': 'end_date'
+                "scheduledFrequencyType": "scheduled_frequency_type",
+                "scheduledFrequency": "frequency",
+                "scheduledStartDate": "start_date",
+                "scheduledEndDate": "end_date",
             }
             for source_key, target_key in recurring_mapping.items():
                 if source_key in data:
                     value = data[source_key]
-                    if source_key == 'scheduledFrequencyType':
+                    if source_key == "scheduledFrequencyType":
                         normalized[target_key] = int(value or 0)
                     else:
                         normalized[target_key] = value
 
-            if 'scheduledStartDate' in data:
-                normalized['next_date'] = data.get('scheduledStartDate')
+            if "scheduledStartDate" in data:
+                normalized["next_date"] = data.get("scheduledStartDate")
 
         return normalized
 
     # ==================== 用户认证管理方法 ====================
 
     @log_method
-    async def create_user(self, data: Dict[str, Any]) -> int:
+    async def create_user(self, data: dict[str, Any]) -> int:
         """
         创建用户
 
@@ -4806,25 +4539,29 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             INSERT INTO users (
                 username, email, password_hash, nickname, avatar,
                 language, default_currency, first_day_of_week,
                 is_active, email_verified, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('username'),
-            data.get('email'),
-            data.get('password_hash'),
-            data.get('nickname', data.get('username')),
-            data.get('avatar', ''),
-            data.get('language', 'zh_Hans'),
-            data.get('default_currency', 'CNY'),
-            data.get('first_day_of_week', 1),
-            data.get('is_active', 1),
-            data.get('email_verified', 0),
-            now, now
-        ))
+        """,
+            (
+                data.get("username"),
+                data.get("email"),
+                data.get("password_hash"),
+                data.get("nickname", data.get("username")),
+                data.get("avatar", ""),
+                data.get("language", "zh_Hans"),
+                data.get("default_currency", "CNY"),
+                data.get("first_day_of_week", 1),
+                data.get("is_active", 1),
+                data.get("email_verified", 0),
+                now,
+                now,
+            ),
+        )
 
         await conn.commit()
         user_id = cursor.lastrowid
@@ -4833,65 +4570,53 @@ class Database:
         return user_id
 
     @log_method
-    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         """根据用户名获取用户"""
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM users WHERE username = ?",
-            (username,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM users WHERE username = ?", (username,)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """根据邮箱获取用户"""
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM users WHERE email = ?",
-            (email,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM users WHERE email = ?", (email,)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+    async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         """根据ID获取用户"""
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM users WHERE id = ?",
-            (user_id,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def update_user(self, user_id: int, data: Dict[str, Any]) -> bool:
+    async def update_user(self, user_id: int, data: dict[str, Any]) -> bool:
         """更新用户信息"""
         if not data:
             return False
 
         conn = await self._get_connection()
-        data['updated_at'] = datetime.now().isoformat()
+        data["updated_at"] = datetime.now().isoformat()
 
         set_clause = ", ".join(f"{key} = ?" for key in data.keys())
         values = list(data.values())
         values.append(user_id)
 
-        cursor = await conn.execute(
-            f"UPDATE users SET {set_clause} WHERE id = ?",
-            values
-        )
+        cursor = await conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", values)
         await conn.commit()
 
         self.logger.info(f"更新用户成功: ID={user_id}")
         return cursor.rowcount > 0
 
     @log_method
-    async def create_user_external_auth(self, data: Dict[str, Any]) -> int:
+    async def create_user_external_auth(self, data: dict[str, Any]) -> int:
         """创建或更新用户第三方登录绑定。"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
@@ -4909,26 +4634,24 @@ class Database:
                 updated_at = excluded.updated_at
             """,
             (
-                data.get('user_id'),
-                data.get('external_auth_category'),
-                data.get('external_auth_type'),
-                data.get('external_user_id'),
-                data.get('external_username'),
+                data.get("user_id"),
+                data.get("external_auth_category"),
+                data.get("external_auth_type"),
+                data.get("external_user_id"),
+                data.get("external_username"),
                 now,
                 now,
-            )
+            ),
         )
         await conn.commit()
 
         self.logger.info(
-            "创建或更新用户第三方登录绑定: user_id=%s, type=%s",
-            data.get('user_id'),
-            data.get('external_auth_type')
+            "创建或更新用户第三方登录绑定: user_id=%s, type=%s", data.get("user_id"), data.get("external_auth_type")
         )
         return cursor.lastrowid or 0
 
     @log_method
-    async def get_user_external_auths(self, user_id: int) -> List[Dict[str, Any]]:
+    async def get_user_external_auths(self, user_id: int) -> list[dict[str, Any]]:
         """获取用户第三方登录绑定列表。"""
         conn = await self._get_connection()
 
@@ -4938,17 +4661,13 @@ class Database:
             WHERE user_id = ?
             ORDER BY created_at DESC, id DESC
             """,
-            (user_id,)
+            (user_id,),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_user_external_auth(
-        self,
-        user_id: int,
-        external_auth_type: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_user_external_auth(self, user_id: int, external_auth_type: str) -> dict[str, Any] | None:
         """获取单个用户第三方登录绑定。"""
         conn = await self._get_connection()
 
@@ -4958,7 +4677,7 @@ class Database:
             WHERE user_id = ? AND external_auth_type = ?
             LIMIT 1
             """,
-            (user_id, external_auth_type)
+            (user_id, external_auth_type),
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
@@ -4970,21 +4689,18 @@ class Database:
 
         cursor = await conn.execute(
             "DELETE FROM user_external_auths WHERE user_id = ? AND external_auth_type = ?",
-            (user_id, external_auth_type)
+            (user_id, external_auth_type),
         )
         await conn.commit()
 
         success = cursor.rowcount > 0
         self.logger.info(
-            "删除用户第三方登录绑定: user_id=%s, type=%s, success=%s",
-            user_id,
-            external_auth_type,
-            success
+            "删除用户第三方登录绑定: user_id=%s, type=%s, success=%s", user_id, external_auth_type, success
         )
         return success
 
     @log_method
-    async def get_user_application_cloud_settings(self, user_id: int) -> List[Dict[str, Any]]:
+    async def get_user_application_cloud_settings(self, user_id: int) -> list[dict[str, Any]]:
         """获取用户应用云同步设置。"""
         conn = await self._get_connection()
 
@@ -4995,43 +4711,37 @@ class Database:
             WHERE user_id = ?
             ORDER BY created_at ASC, id ASC
             """,
-            (user_id,)
+            (user_id,),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
     async def update_user_application_cloud_settings(
-        self,
-        user_id: int,
-        settings: List[Dict[str, Any]],
-        full_update: bool = False
+        self, user_id: int, settings: list[dict[str, Any]], full_update: bool = False
     ) -> bool:
         """创建或更新用户应用云同步设置。"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
         normalized_settings = [
             {
-                'setting_key': str(setting.get('setting_key', '') or '').strip(),
-                'setting_value': str(setting.get('setting_value', '') or '')
+                "setting_key": str(setting.get("setting_key", "") or "").strip(),
+                "setting_value": str(setting.get("setting_value", "") or ""),
             }
             for setting in settings
-            if str(setting.get('setting_key', '') or '').strip()
+            if str(setting.get("setting_key", "") or "").strip()
         ]
 
         if full_update:
             if normalized_settings:
-                keep_keys = [setting['setting_key'] for setting in normalized_settings]
-                placeholders = ','.join('?' for _ in keep_keys)
+                keep_keys = [setting["setting_key"] for setting in normalized_settings]
+                placeholders = ",".join("?" for _ in keep_keys)
                 await conn.execute(
                     f"DELETE FROM user_application_cloud_settings WHERE user_id = ? AND setting_key NOT IN ({placeholders})",
-                    [user_id, *keep_keys]
+                    [user_id, *keep_keys],
                 )
             else:
-                await conn.execute(
-                    "DELETE FROM user_application_cloud_settings WHERE user_id = ?",
-                    (user_id,)
-                )
+                await conn.execute("DELETE FROM user_application_cloud_settings WHERE user_id = ?", (user_id,))
 
         for setting in normalized_settings:
             await conn.execute(
@@ -5045,11 +4755,11 @@ class Database:
                 """,
                 (
                     user_id,
-                    setting['setting_key'],
-                    setting['setting_value'],
+                    setting["setting_key"],
+                    setting["setting_value"],
                     now,
                     now,
-                )
+                ),
             )
 
         await conn.commit()
@@ -5057,7 +4767,7 @@ class Database:
             "更新用户应用云同步设置: user_id=%s, count=%s, full_update=%s",
             user_id,
             len(normalized_settings),
-            full_update
+            full_update,
         )
         return True
 
@@ -5065,17 +4775,10 @@ class Database:
     async def delete_user_application_cloud_settings(self, user_id: int) -> bool:
         """禁用用户应用云同步设置。"""
         conn = await self._get_connection()
-        cursor = await conn.execute(
-            "DELETE FROM user_application_cloud_settings WHERE user_id = ?",
-            (user_id,)
-        )
+        cursor = await conn.execute("DELETE FROM user_application_cloud_settings WHERE user_id = ?", (user_id,))
         await conn.commit()
 
-        self.logger.info(
-            "删除用户应用云同步设置: user_id=%s, deleted=%s",
-            user_id,
-            cursor.rowcount
-        )
+        self.logger.info("删除用户应用云同步设置: user_id=%s, deleted=%s", user_id, cursor.rowcount)
         return True
 
     @log_method
@@ -5084,11 +4787,14 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE users
             SET last_login_at = ?, last_login_ip = ?, failed_login_attempts = 0, locked_until = NULL
             WHERE id = ?
-        """, (now, ip_address, user_id))
+        """,
+            (now, ip_address, user_id),
+        )
 
         await conn.commit()
         self.logger.info(f"更新用户最后登录时间: ID={user_id}, IP={ip_address}")
@@ -5099,10 +4805,7 @@ class Database:
         conn = await self._get_connection()
 
         # 获取当前失败次数
-        async with conn.execute(
-            "SELECT failed_login_attempts FROM users WHERE id = ?",
-            (user_id,)
-        ) as cursor:
+        async with conn.execute("SELECT failed_login_attempts FROM users WHERE id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             if not row:
                 return False
@@ -5112,18 +4815,24 @@ class Database:
             # 如果失败次数达到5次，锁定账户
             if failed_attempts >= 5:
                 locked_until = (datetime.now() + timedelta(minutes=lockout_minutes)).isoformat()
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE users
                     SET failed_login_attempts = ?, locked_until = ?
                     WHERE id = ?
-                """, (failed_attempts, locked_until, user_id))
+                """,
+                    (failed_attempts, locked_until, user_id),
+                )
                 self.logger.warning(f"用户账户已锁定: ID={user_id}, 锁定至={locked_until}")
             else:
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE users
                     SET failed_login_attempts = ?
                     WHERE id = ?
-                """, (failed_attempts, user_id))
+                """,
+                    (failed_attempts, user_id),
+                )
 
             await conn.commit()
             return True
@@ -5133,10 +4842,7 @@ class Database:
         """检查用户是否被锁定"""
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT locked_until FROM users WHERE id = ?",
-            (user_id,)
-        ) as cursor:
+        async with conn.execute("SELECT locked_until FROM users WHERE id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             if not row or not row[0]:
                 return False
@@ -5146,40 +4852,46 @@ class Database:
                 return True
 
             # 锁定时间已过，清除锁定状态
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE users
                 SET locked_until = NULL, failed_login_attempts = 0
                 WHERE id = ?
-            """, (user_id,))
+            """,
+                (user_id,),
+            )
             await conn.commit()
 
             return False
 
     @log_method
-    async def create_session(self, data: Dict[str, Any]) -> int:
+    async def create_session(self, data: dict[str, Any]) -> int:
         """创建会话"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             INSERT INTO sessions (
                 user_id, token_hash, refresh_token_hash,
                 expires_at, refresh_expires_at,
                 user_agent, ip_address, is_active,
                 last_activity_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('user_id'),
-            data.get('token_hash'),
-            data.get('refresh_token_hash'),
-            data.get('expires_at'),
-            data.get('refresh_expires_at'),
-            data.get('user_agent'),
-            data.get('ip_address'),
-            1,  # is_active
-            now,  # last_activity_at
-            now   # created_at
-        ))
+        """,
+            (
+                data.get("user_id"),
+                data.get("token_hash"),
+                data.get("refresh_token_hash"),
+                data.get("expires_at"),
+                data.get("refresh_expires_at"),
+                data.get("user_agent"),
+                data.get("ip_address"),
+                1,  # is_active
+                now,  # last_activity_at
+                now,  # created_at
+            ),
+        )
 
         await conn.commit()
         session_id = cursor.lastrowid
@@ -5188,29 +4900,35 @@ class Database:
         return session_id
 
     @log_method
-    async def get_session_by_token_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+    async def get_session_by_token_hash(self, token_hash: str) -> dict[str, Any] | None:
         """根据token哈希获取会话"""
         conn = await self._get_connection()
 
-        async with conn.execute("""
+        async with conn.execute(
+            """
             SELECT s.*, u.username, u.email, u.is_active as user_is_active
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token_hash = ? AND s.is_active = 1
-        """, (token_hash,)) as cursor:
+        """,
+            (token_hash,),
+        ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def get_user_sessions(self, user_id: int) -> List[Dict[str, Any]]:
+    async def get_user_sessions(self, user_id: int) -> list[dict[str, Any]]:
         """获取用户所有活跃会话"""
         conn = await self._get_connection()
 
-        async with conn.execute("""
+        async with conn.execute(
+            """
             SELECT * FROM sessions
             WHERE user_id = ? AND is_active = 1
             ORDER BY created_at DESC
-        """, (user_id,)) as cursor:
+        """,
+            (user_id,),
+        ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
@@ -5220,11 +4938,14 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE sessions
             SET last_activity_at = ?
             WHERE id = ?
-        """, (now, session_id))
+        """,
+            (now, session_id),
+        )
 
         await conn.commit()
 
@@ -5233,11 +4954,14 @@ class Database:
         """使会话失效"""
         conn = await self._get_connection()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             UPDATE sessions
             SET is_active = 0
             WHERE token_hash = ?
-        """, (token_hash,))
+        """,
+            (token_hash,),
+        )
 
         await conn.commit()
         self.logger.info(f"会话已失效: token_hash={token_hash[:16]}...")
@@ -5248,11 +4972,14 @@ class Database:
         """使用户的所有会话失效"""
         conn = await self._get_connection()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             UPDATE sessions
             SET is_active = 0
             WHERE user_id = ?
-        """, (user_id,))
+        """,
+            (user_id,),
+        )
 
         await conn.commit()
         count = cursor.rowcount
@@ -5264,11 +4991,14 @@ class Database:
         """按会话ID使单个用户会话失效。"""
         conn = await self._get_connection()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             UPDATE sessions
             SET is_active = 0
             WHERE id = ? AND user_id = ?
-        """, (session_id, user_id))
+        """,
+            (session_id, user_id),
+        )
 
         await conn.commit()
         success = cursor.rowcount > 0
@@ -5285,11 +5015,14 @@ class Database:
         """使用户除当前会话外的所有会话失效。"""
         conn = await self._get_connection()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             UPDATE sessions
             SET is_active = 0
             WHERE user_id = ? AND id != ? AND is_active = 1
-        """, (user_id, current_session_id))
+        """,
+            (user_id, current_session_id),
+        )
 
         await conn.commit()
         count = cursor.rowcount
@@ -5307,11 +5040,14 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             DELETE FROM sessions
             WHERE expires_at < ? OR
                   (refresh_expires_at IS NOT NULL AND refresh_expires_at < ?)
-        """, (now, now))
+        """,
+            (now, now),
+        )
 
         await conn.commit()
         count = cursor.rowcount
@@ -5319,37 +5055,37 @@ class Database:
         return count
 
     @log_method
-    async def create_auth_log(self, data: Dict[str, Any]):
+    async def create_auth_log(self, data: dict[str, Any]):
         """创建认证日志"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        await conn.execute("""
+        await conn.execute(
+            """
             INSERT INTO auth_logs (
                 user_id, username, event_type, ip_address, user_agent,
                 success, error_message, metadata, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('user_id'),
-            data.get('username'),
-            data.get('event_type'),
-            data.get('ip_address'),
-            data.get('user_agent'),
-            data.get('success', False),
-            data.get('error_message'),
-            data.get('metadata'),
-            now
-        ))
+        """,
+            (
+                data.get("user_id"),
+                data.get("username"),
+                data.get("event_type"),
+                data.get("ip_address"),
+                data.get("user_agent"),
+                data.get("success", False),
+                data.get("error_message"),
+                data.get("metadata"),
+                now,
+            ),
+        )
 
         await conn.commit()
 
     @log_method
     async def get_auth_logs(
-        self,
-        user_id: int = None,
-        event_type: str = None,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
+        self, user_id: int = None, event_type: str = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
         """获取认证日志"""
         conn = await self._get_connection()
 
@@ -5377,10 +5113,13 @@ class Database:
         conn = await self._get_connection()
         cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             DELETE FROM auth_logs
             WHERE created_at < ?
-        """, (cutoff_date,))
+        """,
+            (cutoff_date,),
+        )
 
         await conn.commit()
         count = cursor.rowcount
@@ -5389,8 +5128,7 @@ class Database:
 
     # === 预算管理方法 ===
     @log_method
-    async def get_budgets(self, filters: Dict[str, Any] = None,
-                          user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_budgets(self, filters: dict[str, Any] = None, user_id: int = 1) -> list[dict[str, Any]]:
         """获取预算列表
 
         Args:
@@ -5403,17 +5141,17 @@ class Database:
         params = [user_id]
 
         if filters:
-            if 'period_type' in filters:
+            if "period_type" in filters:
                 query += " AND period_type = ?"
-                params.append(filters['period_type'])
+                params.append(filters["period_type"])
 
-            if 'enabled' in filters:
+            if "enabled" in filters:
                 query += " AND enabled = ?"
-                params.append(1 if filters['enabled'] else 0)
+                params.append(1 if filters["enabled"] else 0)
 
-            if 'category' in filters:
+            if "category" in filters:
                 query += " AND category = ?"
-                params.append(filters['category'])
+                params.append(filters["category"])
 
         query += " ORDER BY created_at DESC"
 
@@ -5422,7 +5160,7 @@ class Database:
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_budget_by_id(self, budget_id: int, user_id: int = 1) -> Optional[Dict[str, Any]]:
+    async def get_budget_by_id(self, budget_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """根据ID获取预算
 
         Args:
@@ -5431,15 +5169,12 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM budgets WHERE id = ? AND user_id = ?",
-            (budget_id, user_id)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
-    async def create_budget(self, data: Dict[str, Any], user_id: int = 1) -> int:
+    async def create_budget(self, data: dict[str, Any], user_id: int = 1) -> int:
         """创建预算
 
         Args:
@@ -5448,38 +5183,37 @@ class Database:
         """
         conn = await self._get_connection()
 
-        cursor = await conn.execute("""
+        cursor = await conn.execute(
+            """
             INSERT INTO budgets (
                 name, category, sub_category, period_type, amount,
                 start_date, end_date, alert_threshold, enabled,
                 created_at, updated_at, user_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data['name'],
-            data.get('category'),
-            data.get('sub_category'),
-            data['period_type'],
-            data['amount'],
-            data['start_date'],
-            data.get('end_date'),
-            data.get('alert_threshold', 80),
-            data.get('enabled', 1),
-            data['created_at'],
-            data['updated_at'],
-            user_id
-        ))
+        """,
+            (
+                data["name"],
+                data.get("category"),
+                data.get("sub_category"),
+                data["period_type"],
+                data["amount"],
+                data["start_date"],
+                data.get("end_date"),
+                data.get("alert_threshold", 80),
+                data.get("enabled", 1),
+                data["created_at"],
+                data["updated_at"],
+                user_id,
+            ),
+        )
 
         await conn.commit()
         return cursor.lastrowid
 
     @log_method
     async def get_primary_category_budget(
-        self,
-        category: str,
-        period_type: str,
-        start_date: str,
-        user_id: int = 1
-    ) -> Optional[Dict[str, Any]]:
+        self, category: str, period_type: str, start_date: str, user_id: int = 1
+    ) -> dict[str, Any] | None:
         """
         获取一级分类预算
 
@@ -5494,26 +5228,24 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute("""
+        async with conn.execute(
+            """
             SELECT * FROM budgets
             WHERE category = ?
               AND (sub_category IS NULL OR sub_category = '')
               AND period_type = ?
               AND start_date = ?
               AND user_id = ?
-        """, (category, period_type, start_date, user_id)) as cursor:
+        """,
+            (category, period_type, start_date, user_id),
+        ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     @log_method
     async def get_budget_by_category(
-        self,
-        category: str,
-        sub_category: str,
-        period_type: str,
-        start_date: str,
-        user_id: int = 1
-    ) -> Optional[Dict[str, Any]]:
+        self, category: str, sub_category: str, period_type: str, start_date: str, user_id: int = 1
+    ) -> dict[str, Any] | None:
         """
         根据分类信息查找预算（用于唯一性检测）
 
@@ -5531,36 +5263,38 @@ class Database:
 
         if sub_category:
             # 查找二级分类预算
-            async with conn.execute("""
+            async with conn.execute(
+                """
                 SELECT * FROM budgets
                 WHERE category = ?
                   AND sub_category = ?
                   AND period_type = ?
                   AND start_date = ?
                   AND user_id = ?
-            """, (category, sub_category, period_type, start_date, user_id)) as cursor:
+            """,
+                (category, sub_category, period_type, start_date, user_id),
+            ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
         else:
             # 查找一级分类预算
-            async with conn.execute("""
+            async with conn.execute(
+                """
                 SELECT * FROM budgets
                 WHERE category = ?
                   AND (sub_category IS NULL OR sub_category = '')
                   AND period_type = ?
                   AND start_date = ?
                   AND user_id = ?
-            """, (category, period_type, start_date, user_id)) as cursor:
+            """,
+                (category, period_type, start_date, user_id),
+            ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
     @log_method
     async def get_sub_category_budgets_total(
-        self,
-        category: str,
-        period_type: str,
-        start_date: str,
-        user_id: int = 1
+        self, category: str, period_type: str, start_date: str, user_id: int = 1
     ) -> float:
         """
         获取某一级分类下所有二级分类预算的总金额
@@ -5576,7 +5310,8 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute("""
+        async with conn.execute(
+            """
             SELECT COALESCE(SUM(amount), 0) as total
             FROM budgets
             WHERE category = ?
@@ -5585,13 +5320,14 @@ class Database:
               AND period_type = ?
               AND start_date = ?
               AND user_id = ?
-        """, (category, period_type, start_date, user_id)) as cursor:
+        """,
+            (category, period_type, start_date, user_id),
+        ) as cursor:
             row = await cursor.fetchone()
-            return row['total'] if row else 0
+            return row["total"] if row else 0
 
     @log_method
-    async def update_budget(self, budget_id: int, data: Dict[str, Any],
-                            user_id: int = 1) -> bool:
+    async def update_budget(self, budget_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
         """更新预算
 
         Args:
@@ -5605,15 +5341,24 @@ class Database:
         fields = []
         values = []
 
-        for key in ['name', 'category', 'sub_category', 'period_type', 'amount',
-                    'start_date', 'end_date', 'alert_threshold', 'enabled']:
+        for key in [
+            "name",
+            "category",
+            "sub_category",
+            "period_type",
+            "amount",
+            "start_date",
+            "end_date",
+            "alert_threshold",
+            "enabled",
+        ]:
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
 
-        if 'updated_at' in data:
+        if "updated_at" in data:
             fields.append("updated_at = ?")
-            values.append(data['updated_at'])
+            values.append(data["updated_at"])
 
         if not fields:
             return False
@@ -5636,10 +5381,7 @@ class Database:
         """
         conn = await self._get_connection()
 
-        cursor = await conn.execute(
-            "DELETE FROM budgets WHERE id = ? AND user_id = ?",
-            (budget_id, user_id)
-        )
+        cursor = await conn.execute("DELETE FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id))
         await conn.commit()
 
         return cursor.rowcount > 0
@@ -5652,10 +5394,10 @@ class Database:
         end_date: str = None,
         budget_id: int = None,
         category_id: int = None,
-        account_ids: List[int] = None,
-        tag_ids: List[int] = None,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+        account_ids: list[int] = None,
+        tag_ids: list[int] = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
         """
         获取预算执行详情
 
@@ -5697,13 +5439,13 @@ class Database:
             cat_info = await self.get_category_by_id(category_id)
             if cat_info:
                 budget_query += " AND category = ?"
-                budget_params.append(cat_info['main_category'])
+                budget_params.append(cat_info["main_category"])
 
         async with conn.execute(budget_query, budget_params) as cursor:
             budgets = [dict(row) for row in await cursor.fetchall()]
 
         # 2. 对每个预算计算实际支出
-        type_name = '支出' if budget_type == 3 else '投资'
+        type_name = "支出" if budget_type == 3 else "投资"
 
         results = []
         for budget in budgets:
@@ -5722,17 +5464,17 @@ class Database:
             bill_params = [type_name, user_id]
 
             # 分类筛选
-            if budget.get('category'):
+            if budget.get("category"):
                 bill_query += " AND main_category = ?"
-                bill_params.append(budget['category'])
+                bill_params.append(budget["category"])
 
-            if budget.get('sub_category'):
+            if budget.get("sub_category"):
                 bill_query += " AND sub_category = ?"
-                bill_params.append(budget['sub_category'])
+                bill_params.append(budget["sub_category"])
 
             # 日期筛选 - 使用预算自身的日期范围
-            budget_start = start_date or budget.get('start_date')
-            budget_end = end_date or budget.get('end_date')
+            budget_start = start_date or budget.get("start_date")
+            budget_end = end_date or budget.get("end_date")
 
             if budget_start:
                 bill_query += " AND date >= ?"
@@ -5744,18 +5486,18 @@ class Database:
 
             # 账户筛选
             if account_ids:
-                placeholders = ','.join('?' * len(account_ids))
-                bill_query += f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                placeholders = ",".join("?" * len(account_ids))
+                bill_query += (
+                    f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
+                )
                 bill_params.extend(account_ids * 2)
 
-            self.logger.debug(
-                f"[get_budget_execution_details] 查询SQL: {bill_query}, 参数: {bill_params}"
-            )
+            self.logger.debug(f"[get_budget_execution_details] 查询SQL: {bill_query}, 参数: {bill_params}")
 
             # 执行查询
             async with conn.execute(bill_query, bill_params) as cursor:
                 row = await cursor.fetchone()
-                spent = abs(row['spent']) if row else 0
+                spent = abs(row["spent"]) if row else 0
 
             self.logger.debug(
                 f"[get_budget_execution_details] 预算 {budget.get('category')}/{budget.get('sub_category')} "
@@ -5763,77 +5505,76 @@ class Database:
             )
 
             # 计算执行度
-            budget_amount = budget.get('amount', 0)
+            budget_amount = budget.get("amount", 0)
             execution_rate = (spent / budget_amount * 100) if budget_amount > 0 else 0
 
             # 获取分类信息（正确匹配一级或二级分类）
             category_info = None
             fallback_sub_category = None  # 用于一级分类没有图标时的fallback
-            if budget.get('category'):
+            if budget.get("category"):
                 categories = await self.get_all_categories(user_id=user_id)
                 for cat in categories:
-                    if budget.get('sub_category'):
+                    if budget.get("sub_category"):
                         # 二级分类预算：匹配完整的主分类+子分类
-                        if (cat['main_category'] == budget['category'] and
-                                cat['sub_category'] == budget['sub_category']):
+                        if cat["main_category"] == budget["category"] and cat["sub_category"] == budget["sub_category"]:
                             category_info = cat
                             break
                     else:
                         # 一级分类预算：匹配主分类（子分类为空）
-                        if (cat['main_category'] == budget['category'] and
-                                not cat['sub_category']):
+                        if cat["main_category"] == budget["category"] and not cat["sub_category"]:
                             category_info = cat
                             # 不要break，继续找一个有icon的子分类作为fallback
-                        elif (cat['main_category'] == budget['category'] and
-                              cat['sub_category'] and cat.get('icon')):
+                        elif cat["main_category"] == budget["category"] and cat["sub_category"] and cat.get("icon"):
                             # 记录第一个有图标的子分类
                             if not fallback_sub_category:
                                 fallback_sub_category = cat
 
                 # 如果一级分类没有图标，使用子分类的图标
-                if category_info and not category_info.get('icon') and fallback_sub_category:
+                if category_info and not category_info.get("icon") and fallback_sub_category:
                     category_info = dict(category_info)  # 复制一份以防止修改原数据
-                    category_info['icon'] = fallback_sub_category.get('icon', '')
-                    if not category_info.get('color') and fallback_sub_category.get('color'):
-                        category_info['color'] = fallback_sub_category['color']
+                    category_info["icon"] = fallback_sub_category.get("icon", "")
+                    if not category_info.get("color") and fallback_sub_category.get("color"):
+                        category_info["color"] = fallback_sub_category["color"]
 
-            results.append({
-                'id': budget['id'],
-                'name': budget['name'],
-                'category': budget.get('category', ''),
-                'sub_category': budget.get('sub_category', ''),
-                'category_info': category_info,
-                'period_type': budget.get('period_type', 'monthly'),
-                'budget_amount': budget_amount,
-                'spent_amount': spent,
-                'remaining_amount': budget_amount - spent,
-                'execution_rate': round(execution_rate, 2),
-                'alert_threshold': budget.get('alert_threshold', 80),
-                'start_date': budget.get('start_date'),
-                'end_date': budget.get('end_date'),
-                'enabled': budget.get('enabled', 1)
-            })
+            results.append(
+                {
+                    "id": budget["id"],
+                    "name": budget["name"],
+                    "category": budget.get("category", ""),
+                    "sub_category": budget.get("sub_category", ""),
+                    "category_info": category_info,
+                    "period_type": budget.get("period_type", "monthly"),
+                    "budget_amount": budget_amount,
+                    "spent_amount": spent,
+                    "remaining_amount": budget_amount - spent,
+                    "execution_rate": round(execution_rate, 2),
+                    "alert_threshold": budget.get("alert_threshold", 80),
+                    "start_date": budget.get("start_date"),
+                    "end_date": budget.get("end_date"),
+                    "enabled": budget.get("enabled", 1),
+                }
+            )
 
         self.logger.info(f"[get_budget_execution_details] 返回{len(results)}条预算执行详情")
         return results
 
     @staticmethod
     def _build_budget_history_filter_summary(
-        budget_type: Optional[int] = None,
-        period_type: Optional[str] = None,
-        budget_id: Optional[int] = None,
-        category_id: Optional[int] = None,
-        account_ids: Optional[List[int]] = None,
-        tag_ids: Optional[List[int]] = None
+        budget_type: int | None = None,
+        period_type: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
     ) -> str:
         """构建预算快照筛选摘要，便于后续历史查询复用相同口径。"""
         summary = {
-            'budget_type': int(budget_type) if budget_type else None,
-            'period_type': period_type or '',
-            'budget_id': int(budget_id) if budget_id else None,
-            'category_id': int(category_id) if category_id else None,
-            'account_ids': sorted(int(item) for item in (account_ids or [])),
-            'tag_ids': sorted(int(item) for item in (tag_ids or []))
+            "budget_type": int(budget_type) if budget_type else None,
+            "period_type": period_type or "",
+            "budget_id": int(budget_id) if budget_id else None,
+            "category_id": int(category_id) if category_id else None,
+            "account_ids": sorted(int(item) for item in (account_ids or [])),
+            "tag_ids": sorted(int(item) for item in (tag_ids or [])),
         }
         return json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
@@ -5841,15 +5582,15 @@ class Database:
     async def create_budget_execution_snapshots(
         self,
         budget_type: int = 3,
-        period_type: str = 'monthly',
+        period_type: str = "monthly",
         start_date: str = None,
         end_date: str = None,
         budget_id: int = None,
         category_id: int = None,
-        account_ids: List[int] = None,
-        tag_ids: List[int] = None,
-        user_id: int = 1
-    ) -> Dict[str, Any]:
+        account_ids: list[int] = None,
+        tag_ids: list[int] = None,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
         """创建预算执行快照。"""
         snapshots = await self.get_budget_execution_details(
             budget_type=budget_type,
@@ -5859,18 +5600,18 @@ class Database:
             category_id=category_id,
             account_ids=account_ids,
             tag_ids=tag_ids,
-            user_id=user_id
+            user_id=user_id,
         )
 
         conn = await self._get_connection()
-        calculated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        calculated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         filter_summary = self._build_budget_history_filter_summary(
             budget_type=budget_type,
             period_type=period_type,
             budget_id=budget_id,
             category_id=category_id,
             account_ids=account_ids,
-            tag_ids=tag_ids
+            tag_ids=tag_ids,
         )
 
         created_count = 0
@@ -5881,16 +5622,10 @@ class Database:
                 WHERE user_id = ? AND budget_id = ? AND period_start = ? AND period_end = ?
                   AND filter_summary = ?
                 """,
-                (
-                    user_id,
-                    snapshot['id'],
-                    start_date,
-                    end_date,
-                    filter_summary
-                )
+                (user_id, snapshot["id"], start_date, end_date, filter_summary),
             )
 
-            status = 'over_budget' if snapshot['spent_amount'] > snapshot['budget_amount'] else 'within_budget'
+            status = "over_budget" if snapshot["spent_amount"] > snapshot["budget_amount"] else "within_budget"
             await conn.execute(
                 """
                 INSERT INTO budget_history (
@@ -5901,42 +5636,42 @@ class Database:
                 """,
                 (
                     user_id,
-                    snapshot['id'],
+                    snapshot["id"],
                     start_date,
                     end_date,
-                    snapshot['budget_amount'],
-                    snapshot['spent_amount'],
-                    snapshot['remaining_amount'],
-                    snapshot['execution_rate'],
+                    snapshot["budget_amount"],
+                    snapshot["spent_amount"],
+                    snapshot["remaining_amount"],
+                    snapshot["execution_rate"],
                     status,
                     filter_summary,
-                    calculated_at
-                )
+                    calculated_at,
+                ),
             )
             created_count += 1
 
         await conn.commit()
         return {
-            'created_count': created_count,
-            'period_start': start_date,
-            'period_end': end_date,
-            'filter_summary': filter_summary,
-            'calculated_at': calculated_at
+            "created_count": created_count,
+            "period_start": start_date,
+            "period_end": end_date,
+            "filter_summary": filter_summary,
+            "calculated_at": calculated_at,
         }
 
     @log_method
     async def get_budget_execution_history(
         self,
         budget_type: int = 3,
-        period_type: str = 'monthly',
+        period_type: str = "monthly",
         start_date: str = None,
         end_date: str = None,
         budget_id: int = None,
         category_id: int = None,
-        account_ids: List[int] = None,
-        tag_ids: List[int] = None,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+        account_ids: list[int] = None,
+        tag_ids: list[int] = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
         """获取预算执行快照历史。"""
         if start_date and end_date:
             history_items = await self._build_budget_execution_history_on_demand(
@@ -5948,7 +5683,7 @@ class Database:
                 category_id=category_id,
                 account_ids=account_ids,
                 tag_ids=tag_ids,
-                user_id=user_id
+                user_id=user_id,
             )
             if history_items:
                 return history_items
@@ -5960,7 +5695,7 @@ class Database:
             budget_id=budget_id,
             category_id=category_id,
             account_ids=account_ids,
-            tag_ids=tag_ids
+            tag_ids=tag_ids,
         )
 
         query = """
@@ -5986,7 +5721,7 @@ class Database:
             INNER JOIN budgets b ON b.id = bh.budget_id
             WHERE bh.user_id = ? AND b.user_id = ?
         """
-        params: List[Any] = [user_id, user_id]
+        params: list[Any] = [user_id, user_id]
 
         if budget_id:
             query += " AND bh.budget_id = ?"
@@ -6010,14 +5745,14 @@ class Database:
         return [dict(row) for row in rows]
 
     @staticmethod
-    def _parse_budget_history_date(date_text: Optional[str]) -> Optional[date]:
+    def _parse_budget_history_date(date_text: str | None) -> date | None:
         """解析预算历史使用的日期字符串。"""
         if not date_text:
             return None
 
         try:
-            return datetime.strptime(str(date_text)[:10], '%Y-%m-%d').date()
-        except (TypeError, ValueError):
+            return datetime.strptime(str(date_text)[:10], "%Y-%m-%d").date()
+        except TypeError, ValueError:
             return None
 
     @staticmethod
@@ -6030,11 +5765,8 @@ class Database:
 
     @classmethod
     def _iter_budget_history_period_ranges(
-        cls,
-        period_type: str,
-        start_date: Optional[str],
-        end_date: Optional[str]
-    ) -> List[Dict[str, str]]:
+        cls, period_type: str, start_date: str | None, end_date: str | None
+    ) -> list[dict[str, str]]:
         """根据周期类型生成历史查询区间。"""
         start = cls._parse_budget_history_date(start_date)
         end = cls._parse_budget_history_date(end_date)
@@ -6042,30 +5774,28 @@ class Database:
         if not start or not end or start > end:
             return []
 
-        period_ranges: List[Dict[str, str]] = []
+        period_ranges: list[dict[str, str]] = []
 
-        if period_type == 'yearly':
+        if period_type == "yearly":
             current_start = date(start.year, 1, 1)
             while current_start <= end:
                 next_start = date(current_start.year + 1, 1, 1)
                 current_end = next_start - timedelta(days=1)
-                period_ranges.append({
-                    'start_date': current_start.strftime('%Y-%m-%d'),
-                    'end_date': current_end.strftime('%Y-%m-%d')
-                })
+                period_ranges.append(
+                    {"start_date": current_start.strftime("%Y-%m-%d"), "end_date": current_end.strftime("%Y-%m-%d")}
+                )
                 current_start = next_start
             return period_ranges
 
-        if period_type == 'quarterly':
+        if period_type == "quarterly":
             quarter_start_month = ((start.month - 1) // 3) * 3 + 1
             current_start = date(start.year, quarter_start_month, 1)
             while current_start <= end:
                 next_start = cls._add_months(current_start, 3)
                 current_end = next_start - timedelta(days=1)
-                period_ranges.append({
-                    'start_date': current_start.strftime('%Y-%m-%d'),
-                    'end_date': current_end.strftime('%Y-%m-%d')
-                })
+                period_ranges.append(
+                    {"start_date": current_start.strftime("%Y-%m-%d"), "end_date": current_end.strftime("%Y-%m-%d")}
+                )
                 current_start = next_start
             return period_ranges
 
@@ -6073,21 +5803,16 @@ class Database:
         while current_start <= end:
             next_start = cls._add_months(current_start, 1)
             current_end = next_start - timedelta(days=1)
-            period_ranges.append({
-                'start_date': current_start.strftime('%Y-%m-%d'),
-                'end_date': current_end.strftime('%Y-%m-%d')
-            })
+            period_ranges.append(
+                {"start_date": current_start.strftime("%Y-%m-%d"), "end_date": current_end.strftime("%Y-%m-%d")}
+            )
             current_start = next_start
 
         return period_ranges
 
     @classmethod
     def _budget_overlaps_period(
-        cls,
-        budget_start: Optional[str],
-        budget_end: Optional[str],
-        period_start: str,
-        period_end: str
+        cls, budget_start: str | None, budget_end: str | None, period_start: str, period_end: str
     ) -> bool:
         """判断预算定义是否覆盖指定历史周期。"""
         parsed_budget_start = cls._parse_budget_history_date(budget_start)
@@ -6110,15 +5835,15 @@ class Database:
     async def _build_budget_execution_history_on_demand(
         self,
         budget_type: int = 3,
-        period_type: str = 'monthly',
+        period_type: str = "monthly",
         start_date: str = None,
         end_date: str = None,
         budget_id: int = None,
         category_id: int = None,
-        account_ids: List[int] = None,
-        tag_ids: List[int] = None,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+        account_ids: list[int] = None,
+        tag_ids: list[int] = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
         """按查询周期动态计算预算历史，避免仅依赖已落库快照。"""
         period_ranges = self._iter_budget_history_period_ranges(period_type, start_date, end_date)
         if not period_ranges:
@@ -6130,18 +5855,21 @@ class Database:
             budget_id=budget_id,
             category_id=category_id,
             account_ids=account_ids,
-            tag_ids=tag_ids
+            tag_ids=tag_ids,
         )
 
-        history_items: List[Dict[str, Any]] = []
+        history_items: list[dict[str, Any]] = []
         self.logger.info(
             "[预算历史] 动态计算区间数=%d, period_type=%s, range=%s~%s",
-            len(period_ranges), period_type, start_date, end_date
+            len(period_ranges),
+            period_type,
+            start_date,
+            end_date,
         )
 
         for period_range in period_ranges:
-            period_start = period_range['start_date']
-            period_end = period_range['end_date']
+            period_start = period_range["start_date"]
+            period_end = period_range["end_date"]
             execution_details = await self.get_budget_execution_details(
                 budget_type=budget_type,
                 start_date=period_start,
@@ -6150,47 +5878,48 @@ class Database:
                 category_id=category_id,
                 account_ids=account_ids,
                 tag_ids=tag_ids,
-                user_id=user_id
+                user_id=user_id,
             )
 
             for detail in execution_details:
                 if not self._budget_overlaps_period(
-                    detail.get('start_date'),
-                    detail.get('end_date'),
-                    period_start,
-                    period_end
+                    detail.get("start_date"), detail.get("end_date"), period_start, period_end
                 ):
                     continue
 
-                history_items.append({
-                    'id': f"{detail.get('id', '')}_{period_start}_{period_end}",
-                    'budget_id': detail.get('id'),
-                    'period_start': period_start,
-                    'period_end': period_end,
-                    'budget_amount': detail.get('budget_amount', 0),
-                    'spent_amount': detail.get('spent_amount', 0),
-                    'remaining_amount': detail.get('remaining_amount', 0),
-                    'execution_rate': detail.get('execution_rate', 0),
-                    'status': 'over_budget' if detail.get('spent_amount', 0) > detail.get('budget_amount', 0) else 'within_budget',
-                    'filter_summary': filter_summary,
-                    'calculated_at': '',
-                    'name': detail.get('name', ''),
-                    'category': detail.get('category', ''),
-                    'sub_category': detail.get('sub_category', ''),
-                    'period_type': detail.get('period_type', period_type),
-                    'alert_threshold': detail.get('alert_threshold', 80),
-                    'enabled': detail.get('enabled', 1)
-                })
+                history_items.append(
+                    {
+                        "id": f"{detail.get('id', '')}_{period_start}_{period_end}",
+                        "budget_id": detail.get("id"),
+                        "period_start": period_start,
+                        "period_end": period_end,
+                        "budget_amount": detail.get("budget_amount", 0),
+                        "spent_amount": detail.get("spent_amount", 0),
+                        "remaining_amount": detail.get("remaining_amount", 0),
+                        "execution_rate": detail.get("execution_rate", 0),
+                        "status": "over_budget"
+                        if detail.get("spent_amount", 0) > detail.get("budget_amount", 0)
+                        else "within_budget",
+                        "filter_summary": filter_summary,
+                        "calculated_at": "",
+                        "name": detail.get("name", ""),
+                        "category": detail.get("category", ""),
+                        "sub_category": detail.get("sub_category", ""),
+                        "period_type": detail.get("period_type", period_type),
+                        "alert_threshold": detail.get("alert_threshold", 80),
+                        "enabled": detail.get("enabled", 1),
+                    }
+                )
 
         history_items.sort(
             key=lambda item: (
-                item.get('period_start', ''),
-                item.get('period_end', ''),
-                str(item.get('category', '')),
-                str(item.get('sub_category', '')),
-                int(item.get('budget_id', 0) or 0)
+                item.get("period_start", ""),
+                item.get("period_end", ""),
+                str(item.get("category", "")),
+                str(item.get("sub_category", "")),
+                int(item.get("budget_id", 0) or 0),
             ),
-            reverse=True
+            reverse=True,
         )
         return history_items
 
@@ -6198,13 +5927,13 @@ class Database:
     async def get_period_forecast(
         self,
         budget_type: int = 3,
-        period_type: str = 'monthly',
+        period_type: str = "monthly",
         start_date: str = None,
         end_date: str = None,
-        forecast_strategy: str = 'historical_average',
+        forecast_strategy: str = "historical_average",
         history_periods: int = 6,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
         """
         获取周期预计（基于历史数据预测）
 
@@ -6224,20 +5953,20 @@ class Database:
         )
 
         conn = await self._get_connection()
-        type_name = '支出' if budget_type == 3 else '投资'
+        type_name = "支出" if budget_type == 3 else "投资"
 
         # 根据周期类型确定分组方式
-        if period_type == 'daily':
-            date_format = '%Y-%m-%d'
+        if period_type == "daily":
+            date_format = "%Y-%m-%d"
             group_by = "date"
-        elif period_type == 'weekly':
-            date_format = '%Y-%W'
+        elif period_type == "weekly":
+            date_format = "%Y-%W"
             group_by = "strftime('%Y-%W', date)"
-        elif period_type == 'monthly':
-            date_format = '%Y-%m'
+        elif period_type == "monthly":
+            date_format = "%Y-%m"
             group_by = "strftime('%Y-%m', date)"
         else:  # yearly
-            date_format = '%Y'
+            date_format = "%Y"
             group_by = "strftime('%Y', date)"
 
         # 查询历史数据
@@ -6265,7 +5994,7 @@ class Database:
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
 
-        normalized_strategy = forecast_strategy or 'historical_average'
+        normalized_strategy = forecast_strategy or "historical_average"
         normalized_history_periods = max(int(history_periods or 0), 1)
 
         # 按分类汇总
@@ -6273,27 +6002,20 @@ class Database:
         period_count = set()
 
         for row in rows:
-            period = row['period']
-            category = row['main_category'] or '未分类'
-            amount = abs(row['total_amount'])
+            period = row["period"]
+            category = row["main_category"] or "未分类"
+            amount = abs(row["total_amount"])
 
             period_count.add(period)
 
             if category not in category_totals:
-                category_totals[category] = {
-                    'total': 0,
-                    'periods': []
-                }
-            category_totals[category]['total'] += amount
-            category_totals[category]['periods'].append({
-                'period': period,
-                'amount': amount
-            })
+                category_totals[category] = {"total": 0, "periods": []}
+            category_totals[category]["total"] += amount
+            category_totals[category]["periods"].append({"period": period, "amount": amount})
 
         categories = await self.get_all_categories(user_id=user_id)
         category_type_map = {
-            (cat.get('main_category') or '未分类'): cat.get('type')
-            for cat in categories if not cat.get('sub_category')
+            (cat.get("main_category") or "未分类"): cat.get("type") for cat in categories if not cat.get("sub_category")
         }
 
         budget_query = """
@@ -6316,41 +6038,40 @@ class Database:
 
         budget_map = {}
         for row in budget_rows:
-            category_name = row['category'] or '未分类'
+            category_name = row["category"] or "未分类"
             if int(category_type_map.get(category_name) or 0) != int(budget_type):
                 continue
-            budget_map.setdefault(category_name, {'primary': 0.0, 'sub_total': 0.0})
-            amount_value = float(row['amount'] or 0)
-            if not row['sub_category']:
-                budget_map[category_name]['primary'] += amount_value
+            budget_map.setdefault(category_name, {"primary": 0.0, "sub_total": 0.0})
+            amount_value = float(row["amount"] or 0)
+            if not row["sub_category"]:
+                budget_map[category_name]["primary"] += amount_value
             else:
-                budget_map[category_name]['sub_total'] += amount_value
+                budget_map[category_name]["sub_total"] += amount_value
 
         # 计算平均值和预测
         num_periods = len(period_count) if period_count else 1
         results = []
 
         for category, data in category_totals.items():
-            sorted_periods = sorted(data['periods'], key=lambda item: item['period'])
+            sorted_periods = sorted(data["periods"], key=lambda item: item["period"])
             recent_periods = sorted_periods[-normalized_history_periods:]
 
             if not recent_periods:
                 continue
 
-            recent_amounts = [float(item['amount']) for item in recent_periods]
+            recent_amounts = [float(item["amount"]) for item in recent_periods]
             avg_amount = sum(recent_amounts) / len(recent_amounts)
             moving_window_size = min(3, len(recent_amounts))
             moving_average_amount = (
-                sum(recent_amounts[-moving_window_size:]) / moving_window_size
-                if moving_window_size > 0 else 0
+                sum(recent_amounts[-moving_window_size:]) / moving_window_size if moving_window_size > 0 else 0
             )
 
-            if normalized_strategy == 'moving_average':
+            if normalized_strategy == "moving_average":
                 forecast_amount = moving_average_amount
-                strategy_explanation = f'基于最近{moving_window_size}个周期的移动平均'
+                strategy_explanation = f"基于最近{moving_window_size}个周期的移动平均"
             else:
                 forecast_amount = avg_amount
-                strategy_explanation = f'基于最近{len(recent_amounts)}个周期的历史均值'
+                strategy_explanation = f"基于最近{len(recent_amounts)}个周期的历史均值"
 
             backtest_errors = []
             for index in range(1, len(recent_amounts)):
@@ -6359,12 +6080,9 @@ class Database:
                     continue
 
                 history_slice = recent_amounts[:index]
-                if normalized_strategy == 'moving_average':
+                if normalized_strategy == "moving_average":
                     window_size = min(3, len(history_slice))
-                    predicted_amount = (
-                        sum(history_slice[-window_size:]) / window_size
-                        if window_size > 0 else 0
-                    )
+                    predicted_amount = sum(history_slice[-window_size:]) / window_size if window_size > 0 else 0
                 else:
                     predicted_amount = sum(history_slice) / len(history_slice)
 
@@ -6372,73 +6090,70 @@ class Database:
 
             backtest_mape = round((sum(backtest_errors) / len(backtest_errors)) * 100, 2) if backtest_errors else None
             if backtest_mape is None:
-                confidence = 'low'
+                confidence = "low"
             elif backtest_mape <= 10:
-                confidence = 'high'
+                confidence = "high"
             elif backtest_mape <= 20:
-                confidence = 'medium'
+                confidence = "medium"
             else:
-                confidence = 'low'
+                confidence = "low"
 
             latest_amount = recent_amounts[-1] if recent_amounts else 0
             if len(recent_amounts) >= 2:
                 baseline_amounts = recent_amounts[:-1]
                 baseline_avg = sum(baseline_amounts) / len(baseline_amounts)
                 if baseline_avg > 0 and latest_amount > baseline_avg * 1.05:
-                    trend = 'up'
+                    trend = "up"
                 elif baseline_avg > 0 and latest_amount < baseline_avg * 0.95:
-                    trend = 'down'
+                    trend = "down"
                 else:
-                    trend = 'stable'
+                    trend = "stable"
             else:
-                trend = 'stable'
+                trend = "stable"
 
             category_info = None
             for cat in categories:
-                if cat['main_category'] == category and not cat['sub_category']:
+                if cat["main_category"] == category and not cat["sub_category"]:
                     category_info = cat
                     break
 
             budget_amount = 0.0
             if category in budget_map:
                 budget_info = budget_map[category]
-                budget_amount = (
-                    budget_info['primary']
-                    if budget_info['primary'] > 0 else budget_info['sub_total']
-                )
+                budget_amount = budget_info["primary"] if budget_info["primary"] > 0 else budget_info["sub_total"]
 
             current_spent = latest_amount
             projected_over_budget = budget_amount > 0 and forecast_amount > budget_amount
 
-            results.append({
-                'category': category,
-                'category_info': category_info,
-                'total_amount': round(sum(recent_amounts), 2),
-                'average_amount': round(avg_amount, 2),
-                'period_count': num_periods,
-                'sample_periods': len(recent_amounts),
-                'current_spent': round(current_spent, 2),
-                'budget_amount': round(budget_amount, 2),
-                'forecast_amount': round(forecast_amount, 2),
-                'projected_over_budget': projected_over_budget,
-                'forecast_strategy': normalized_strategy,
-                'strategy_explanation': strategy_explanation,
-                'backtest_mape': backtest_mape,
-                'confidence': confidence,
-                'trend': trend,
-                'periods': recent_periods
-            })
+            results.append(
+                {
+                    "category": category,
+                    "category_info": category_info,
+                    "total_amount": round(sum(recent_amounts), 2),
+                    "average_amount": round(avg_amount, 2),
+                    "period_count": num_periods,
+                    "sample_periods": len(recent_amounts),
+                    "current_spent": round(current_spent, 2),
+                    "budget_amount": round(budget_amount, 2),
+                    "forecast_amount": round(forecast_amount, 2),
+                    "projected_over_budget": projected_over_budget,
+                    "forecast_strategy": normalized_strategy,
+                    "strategy_explanation": strategy_explanation,
+                    "backtest_mape": backtest_mape,
+                    "confidence": confidence,
+                    "trend": trend,
+                    "periods": recent_periods,
+                }
+            )
 
         # 按预测金额排序
-        results.sort(key=lambda x: x['forecast_amount'], reverse=True)
+        results.sort(key=lambda x: x["forecast_amount"], reverse=True)
 
         self.logger.info(f"[get_period_forecast] 返回{len(results)}条预测数据")
         return results
 
     @log_method
-    async def import_budgets(self,
-                             budgets_data: List[Dict[str, Any]],
-                             user_id: int = 1) -> Dict[str, Any]:
+    async def import_budgets(self, budgets_data: list[dict[str, Any]], user_id: int = 1) -> dict[str, Any]:
         """
         批量导入预算
 
@@ -6451,7 +6166,7 @@ class Database:
         self.logger.info(f"[import_budgets] 开始导入{len(budgets_data)}条预算")
 
         conn = await self._get_connection()
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         created_count = 0
         updated_count = 0
@@ -6461,22 +6176,22 @@ class Database:
         for idx, data in enumerate(budgets_data):
             try:
                 # 检查必填字段
-                if not data.get('name') or not data.get('amount'):
-                    errors.append(f"第{idx+1}条: 缺少必填字段(name或amount)")
+                if not data.get("name") or not data.get("amount"):
+                    errors.append(f"第{idx + 1}条: 缺少必填字段(name或amount)")
                     error_count += 1
                     continue
 
                 # 检查是否存在同名预算
                 existing = None
                 async with conn.execute(
-                    "SELECT id FROM budgets WHERE name = ? AND user_id = ?",
-                    (data['name'], user_id)
+                    "SELECT id FROM budgets WHERE name = ? AND user_id = ?", (data["name"], user_id)
                 ) as cursor:
                     existing = await cursor.fetchone()
 
                 if existing:
                     # 更新现有预算
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE budgets SET
                             category = ?,
                             sub_category = ?,
@@ -6488,65 +6203,63 @@ class Database:
                             enabled = ?,
                             updated_at = ?
                         WHERE id = ? AND user_id = ?
-                    """, (
-                        data.get('category'),
-                        data.get('sub_category'),
-                        data.get('period_type', 'monthly'),
-                        data['amount'],
-                        data.get('start_date'),
-                        data.get('end_date'),
-                        data.get('alert_threshold', 80),
-                        data.get('enabled', 1),
-                        now,
-                        existing['id'],
-                        user_id
-                    ))
+                    """,
+                        (
+                            data.get("category"),
+                            data.get("sub_category"),
+                            data.get("period_type", "monthly"),
+                            data["amount"],
+                            data.get("start_date"),
+                            data.get("end_date"),
+                            data.get("alert_threshold", 80),
+                            data.get("enabled", 1),
+                            now,
+                            existing["id"],
+                            user_id,
+                        ),
+                    )
                     updated_count += 1
                 else:
                     # 创建新预算
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO budgets (
                             name, category, sub_category, period_type, amount,
                             start_date, end_date, alert_threshold, enabled,
                             created_at, updated_at, user_id
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        data['name'],
-                        data.get('category'),
-                        data.get('sub_category'),
-                        data.get('period_type', 'monthly'),
-                        data['amount'],
-                        data.get('start_date'),
-                        data.get('end_date'),
-                        data.get('alert_threshold', 80),
-                        data.get('enabled', 1),
-                        now,
-                        now,
-                        user_id
-                    ))
+                    """,
+                        (
+                            data["name"],
+                            data.get("category"),
+                            data.get("sub_category"),
+                            data.get("period_type", "monthly"),
+                            data["amount"],
+                            data.get("start_date"),
+                            data.get("end_date"),
+                            data.get("alert_threshold", 80),
+                            data.get("enabled", 1),
+                            now,
+                            now,
+                            user_id,
+                        ),
+                    )
                     created_count += 1
 
             except Exception as e:
-                errors.append(f"第{idx+1}条: {str(e)}")
+                errors.append(f"第{idx + 1}条: {e!s}")
                 error_count += 1
                 self.logger.error(f"导入预算失败: {e}")
 
         await conn.commit()
 
-        result = {
-            'created': created_count,
-            'updated': updated_count,
-            'errors': error_count,
-            'error_details': errors
-        }
+        result = {"created": created_count, "updated": updated_count, "errors": error_count, "error_details": errors}
 
-        self.logger.info(
-            f"[import_budgets] 导入完成: 创建={created_count}, 更新={updated_count}, 错误={error_count}"
-        )
+        self.logger.info(f"[import_budgets] 导入完成: 创建={created_count}, 更新={updated_count}, 错误={error_count}")
         return result
 
     @log_method
-    async def export_budgets(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def export_budgets(self, user_id: int = 1) -> list[dict[str, Any]]:
         """
         导出所有预算
 
@@ -6557,14 +6270,18 @@ class Database:
 
         conn = await self._get_connection()
         export_fields = [
-            'name', 'category', 'sub_category', 'period_type', 'amount',
-            'start_date', 'end_date', 'alert_threshold', 'enabled'
+            "name",
+            "category",
+            "sub_category",
+            "period_type",
+            "amount",
+            "start_date",
+            "end_date",
+            "alert_threshold",
+            "enabled",
         ]
 
-        async with conn.execute(
-            "SELECT * FROM budgets WHERE user_id = ? ORDER BY created_at",
-            (user_id,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM budgets WHERE user_id = ? ORDER BY created_at", (user_id,)) as cursor:
             rows = await cursor.fetchall()
             budgets = []
             for row in rows:
@@ -6592,16 +6309,13 @@ class Database:
         """更新主分类名称（级联更新所有子分类）"""
         conn = await self._get_connection()
         try:
-            await conn.execute(
-                "UPDATE categories SET main_category = ? WHERE main_category = ?",
-                (new_name, old_name)
-            )
+            await conn.execute("UPDATE categories SET main_category = ? WHERE main_category = ?", (new_name, old_name))
             await conn.commit()
             self.logger.info(f"已更新主分类名称: {old_name} -> {new_name}")
 
             # 清除缓存
-            self._clear_cache('account_mappings')
-            self._clear_cache('category_mappings')
+            self._clear_cache("account_mappings")
+            self._clear_cache("category_mappings")
 
             return True
         except Exception as e:
@@ -6644,7 +6358,7 @@ class Database:
         return datetime.now() < expiry
 
     @log_method
-    async def get_account_mappings(self) -> Dict[str, Any]:
+    async def get_account_mappings(self) -> dict[str, Any]:
         """获取账户映射(带缓存)
 
         Returns:
@@ -6654,7 +6368,7 @@ class Database:
                 'id_to_name': {id: name}
             }
         """
-        cache_key = 'account_mappings'
+        cache_key = "account_mappings"
 
         # 检查缓存
         if self._is_cache_valid(cache_key):
@@ -6666,9 +6380,9 @@ class Database:
 
         # 构建映射
         mappings = {
-            'id_to_account': {acc['id']: acc for acc in accounts},
-            'name_to_id': {acc['name']: acc['id'] for acc in accounts},
-            'id_to_name': {acc['id']: acc['name'] for acc in accounts}
+            "id_to_account": {acc["id"]: acc for acc in accounts},
+            "name_to_id": {acc["name"]: acc["id"] for acc in accounts},
+            "id_to_name": {acc["id"]: acc["name"] for acc in accounts},
         }
 
         # 更新缓存
@@ -6679,7 +6393,7 @@ class Database:
         return mappings
 
     @log_method
-    async def get_category_mappings(self) -> Dict[str, Any]:
+    async def get_category_mappings(self) -> dict[str, Any]:
         """获取分类映射(带缓存)
 
         Returns:
@@ -6689,7 +6403,7 @@ class Database:
                 'id_to_name': {id: (main, sub)}
             }
         """
-        cache_key = 'category_mappings'
+        cache_key = "category_mappings"
 
         # 检查缓存
         if self._is_cache_valid(cache_key):
@@ -6701,15 +6415,9 @@ class Database:
 
         # 构建映射
         mappings = {
-            'id_to_category': {cat['id']: cat for cat in categories},
-            'name_to_id': {
-                (cat['main_category'], cat['sub_category']): cat['id']
-                for cat in categories
-            },
-            'id_to_name': {
-                cat['id']: (cat['main_category'], cat['sub_category'])
-                for cat in categories
-            }
+            "id_to_category": {cat["id"]: cat for cat in categories},
+            "name_to_id": {(cat["main_category"], cat["sub_category"]): cat["id"] for cat in categories},
+            "id_to_name": {cat["id"]: (cat["main_category"], cat["sub_category"]) for cat in categories},
         }
 
         # 更新缓存
@@ -6720,7 +6428,7 @@ class Database:
         return mappings
 
     @log_method
-    async def get_balances_before_date(self, date_str: str, user_id: int = 1) -> Dict[int, float]:
+    async def get_balances_before_date(self, date_str: str, user_id: int = 1) -> dict[int, float]:
         """
         获取指定日期前所有账户的余额（单位：元）
 
@@ -6737,7 +6445,7 @@ class Database:
         # 1. 收入 (source_account_id)
         async with conn.execute(
             "SELECT source_account_id, SUM(amount) FROM bills WHERE date < ? AND type = '收入' AND user_id = ? GROUP BY source_account_id",
-            (date_str, user_id)
+            (date_str, user_id),
         ) as cursor:
             async for row in cursor:
                 acc_id = row[0]
@@ -6748,7 +6456,7 @@ class Database:
         # 2. 支出 (source_account_id)
         async with conn.execute(
             "SELECT source_account_id, SUM(amount) FROM bills WHERE date < ? AND type = '支出' AND user_id = ? GROUP BY source_account_id",
-            (date_str, user_id)
+            (date_str, user_id),
         ) as cursor:
             async for row in cursor:
                 acc_id = row[0]
@@ -6759,7 +6467,7 @@ class Database:
         # 3. 转出 (source_account_id)
         async with conn.execute(
             "SELECT source_account_id, SUM(amount) FROM bills WHERE date < ? AND type = '转账' AND user_id = ? GROUP BY source_account_id",
-            (date_str, user_id)
+            (date_str, user_id),
         ) as cursor:
             async for row in cursor:
                 acc_id = row[0]
@@ -6770,7 +6478,7 @@ class Database:
         # 4. 转入 (destination_account_id)
         async with conn.execute(
             "SELECT destination_account_id, SUM(destination_amount) FROM bills WHERE date < ? AND type = '转账' AND user_id = ? GROUP BY destination_account_id",
-            (date_str, user_id)
+            (date_str, user_id),
         ) as cursor:
             async for row in cursor:
                 acc_id = row[0]
@@ -6781,7 +6489,7 @@ class Database:
         return balances
 
     @log_method
-    async def add_tags_to_bill(self, bill_id: int, tag_ids: List[int], user_id: int = 1) -> bool:
+    async def add_tags_to_bill(self, bill_id: int, tag_ids: list[int], user_id: int = 1) -> bool:
         """添加标签到账单
 
         Args:
@@ -6802,8 +6510,7 @@ class Database:
             # 批量插入
             values = [(bill_id, tag_id, now) for tag_id in tag_ids]
             await conn.executemany(
-                "INSERT OR IGNORE INTO bill_tags (bill_id, tag_id, created_at) VALUES (?, ?, ?)",
-                values
+                "INSERT OR IGNORE INTO bill_tags (bill_id, tag_id, created_at) VALUES (?, ?, ?)", values
             )
             await conn.commit()
             self.logger.info(f"[add_tags_to_bill] 成功添加{len(tag_ids)}个标签")
@@ -6813,7 +6520,7 @@ class Database:
             return False
 
     @log_method
-    async def get_tags_for_bill(self, bill_id: int, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_tags_for_bill(self, bill_id: int, user_id: int = 1) -> list[dict[str, Any]]:
         """获取账单的所有标签
 
         Args:
@@ -6822,18 +6529,21 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute("""
+        async with conn.execute(
+            """
             SELECT t.*
             FROM tags t
             JOIN bill_tags bt ON t.id = bt.tag_id
             WHERE bt.bill_id = ?
             ORDER BY t.name
-        """, (bill_id,)) as cursor:
+        """,
+            (bill_id,),
+        ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     @log_method
-    async def get_tags_for_bills(self, bill_ids: List[int], user_id: int = 1) -> Dict[int, List[Dict[str, Any]]]:
+    async def get_tags_for_bills(self, bill_ids: list[int], user_id: int = 1) -> dict[int, list[dict[str, Any]]]:
         """批量获取账单标签
 
         Args:
@@ -6844,30 +6554,34 @@ class Database:
             return {}
 
         conn = await self._get_connection()
-        placeholders = ','.join('?' * len(bill_ids))
+        placeholders = ",".join("?" * len(bill_ids))
 
-        async with conn.execute(f"""
+        async with conn.execute(
+            f"""
             SELECT bt.bill_id, t.*
             FROM tags t
             JOIN bill_tags bt ON t.id = bt.tag_id
             WHERE bt.bill_id IN ({placeholders})
             ORDER BY t.name
-        """, bill_ids) as cursor:
+        """,
+            bill_ids,
+        ) as cursor:
             rows = await cursor.fetchall()
 
             result = {}
             for row in rows:
-                bill_id = row['bill_id']
+                bill_id = row["bill_id"]
                 tag = dict(row)
-                del tag['bill_id'] # remove bill_id from tag object
+                del tag["bill_id"]  # remove bill_id from tag object
 
                 if bill_id not in result:
                     result[bill_id] = []
                 result[bill_id].append(tag)
 
             return result
+
     @log_method
-    async def update_bill_tags(self, bill_id: int, tag_ids: List[int], user_id: int = 1) -> bool:
+    async def update_bill_tags(self, bill_id: int, tag_ids: list[int], user_id: int = 1) -> bool:
         """更新账单标签（覆盖）
 
         Args:
@@ -6889,10 +6603,7 @@ class Database:
             if tag_ids:
                 now = datetime.now().isoformat()
                 values = [(bill_id, tag_id, now) for tag_id in tag_ids]
-                await conn.executemany(
-                    "INSERT INTO bill_tags (bill_id, tag_id, created_at) VALUES (?, ?, ?)",
-                    values
-                )
+                await conn.executemany("INSERT INTO bill_tags (bill_id, tag_id, created_at) VALUES (?, ?, ?)", values)
                 self.logger.info(f"[update_bill_tags] 成功添加{len(tag_ids)}个新标签")
             else:
                 self.logger.info("[update_bill_tags] 没有新标签需要添加")
@@ -6911,14 +6622,14 @@ class Database:
         self,
         operation_type: str,
         operation_target: str,
-        target_id: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        target_id: int | None = None,
+        details: dict[str, Any] | None = None,
         affected_count: int = 0,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        session_id: Optional[str] = None,
-        status: str = 'success',
-        error_message: Optional[str] = None
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        session_id: str | None = None,
+        status: str = "success",
+        error_message: str | None = None,
     ) -> int:
         """
         创建操作审计日志
@@ -6952,10 +6663,18 @@ class Database:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                operation_type, operation_target, target_id, details_json,
-                affected_count, ip_address, user_agent, session_id,
-                status, error_message, now
-            )
+                operation_type,
+                operation_target,
+                target_id,
+                details_json,
+                affected_count,
+                ip_address,
+                user_agent,
+                session_id,
+                status,
+                error_message,
+                now,
+            ),
         )
 
         await conn.commit()
@@ -6971,13 +6690,13 @@ class Database:
     @log_method
     async def get_audit_logs(
         self,
-        operation_type: Optional[str] = None,
-        operation_target: Optional[str] = None,
-        target_id: Optional[int] = None,
-        status: Optional[str] = None,
+        operation_type: str | None = None,
+        operation_target: str | None = None,
+        target_id: int | None = None,
+        status: str | None = None,
         limit: int = 100,
-        offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         """
         查询审计日志
 
@@ -7031,9 +6750,9 @@ class Database:
             for row in rows:
                 log_dict = dict(row)
                 # 解析JSON details
-                if log_dict.get('details'):
+                if log_dict.get("details"):
                     try:
-                        log_dict['details'] = json.loads(log_dict['details'])
+                        log_dict["details"] = json.loads(log_dict["details"])
                     except json.JSONDecodeError:
                         pass
                 logs.append(log_dict)
@@ -7042,7 +6761,7 @@ class Database:
     # ==================== 密码验证相关方法 ====================
 
     @log_method
-    async def get_app_setting(self, key: str) -> Optional[str]:
+    async def get_app_setting(self, key: str) -> str | None:
         """
         获取应用配置
 
@@ -7054,13 +6773,10 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT value, is_encrypted FROM app_settings WHERE key = ?",
-            (key,)
-        ) as cursor:
+        async with conn.execute("SELECT value, is_encrypted FROM app_settings WHERE key = ?", (key,)) as cursor:
             row = await cursor.fetchone()
             if row:
-                value = row['value']
+                value = row["value"]
                 # TODO: 如果is_encrypted为True，解密value
                 return value
             return None
@@ -7070,9 +6786,9 @@ class Database:
         self,
         key: str,
         value: str,
-        value_type: str = 'string',
-        description: Optional[str] = None,
-        is_encrypted: bool = False
+        value_type: str = "string",
+        description: str | None = None,
+        is_encrypted: bool = False,
     ) -> bool:
         """
         设置应用配置
@@ -7106,7 +6822,7 @@ class Database:
                     is_encrypted = excluded.is_encrypted,
                     updated_at = excluded.updated_at
                 """,
-                (key, encrypted_value, value_type, description, is_encrypted, now, now)
+                (key, encrypted_value, value_type, description, is_encrypted, now, now),
             )
 
             await conn.commit()
@@ -7132,14 +6848,14 @@ class Database:
         import os
 
         # 1. 首先检查环境变量
-        env_password = os.getenv('BILL_ANALYSER_OPERATION_PASSWORD')
+        env_password = os.getenv("BILL_ANALYSER_OPERATION_PASSWORD")
         if env_password:
             result = password == env_password
             self.logger.info(f"使用环境变量密码验证: {'成功' if result else '失败'}")
             return result
 
         # 2. 从数据库读取配置
-        stored_password = await self.get_app_setting('operation_password')
+        stored_password = await self.get_app_setting("operation_password")
 
         # 3. 如果没有配置密码，默认接受任何密码（开发模式）
         if not stored_password:
@@ -7155,10 +6871,10 @@ class Database:
     def _normalize_import_config_header(value: Any) -> str:
         """标准化导入模板表头文本。"""
         if value is None:
-            return ''
-        return ' '.join(str(value).strip().lower().split())
+            return ""
+        return " ".join(str(value).strip().lower().split())
 
-    def _normalize_import_config_headers(self, headers: Optional[List[Any]]) -> List[str]:
+    def _normalize_import_config_headers(self, headers: list[Any] | None) -> list[str]:
         """标准化表头列表，过滤空值。"""
         if not headers:
             return []
@@ -7171,17 +6887,17 @@ class Database:
 
         return normalized_headers
 
-    def _build_import_config_header_signature(self, headers: Optional[List[Any]]) -> str:
+    def _build_import_config_header_signature(self, headers: list[Any] | None) -> str:
         """构建稳定的表头签名。"""
         normalized_headers = self._normalize_import_config_headers(headers)
         if not normalized_headers:
-            return ''
-        return '||'.join(normalized_headers)
+            return ""
+        return "||".join(normalized_headers)
 
     @staticmethod
-    def _parse_json_object(raw_value: Any, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _parse_json_object(raw_value: Any, default: dict[str, Any] | None = None) -> dict[str, Any]:
         """安全解析 JSON 对象。"""
-        if raw_value in (None, ''):
+        if raw_value in (None, ""):
             return default.copy() if default else {}
 
         if isinstance(raw_value, dict):
@@ -7191,89 +6907,80 @@ class Database:
             parsed = json.loads(raw_value)
             if isinstance(parsed, dict):
                 return parsed
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             pass
 
         return default.copy() if default else {}
 
-    def _serialize_import_config_custom_rules(
-        self,
-        custom_rules: Any,
-        sample_headers: Optional[List[Any]] = None
-    ) -> str:
+    def _serialize_import_config_custom_rules(self, custom_rules: Any, sample_headers: list[Any] | None = None) -> str:
         """序列化导入模板附加规则，并补充表头学习元数据。"""
         custom_rules_data = self._parse_json_object(custom_rules)
         normalized_headers = self._normalize_import_config_headers(sample_headers)
 
         if normalized_headers:
-            custom_rules_data['sample_headers'] = normalized_headers
-            custom_rules_data['header_signature'] = self._build_import_config_header_signature(
-                normalized_headers
-            )
-            custom_rules_data['header_count'] = len(normalized_headers)
+            custom_rules_data["sample_headers"] = normalized_headers
+            custom_rules_data["header_signature"] = self._build_import_config_header_signature(normalized_headers)
+            custom_rules_data["header_count"] = len(normalized_headers)
 
         return json.dumps(custom_rules_data, ensure_ascii=False)
 
-    def _deserialize_import_config_row(self, row: aiosqlite.Row) -> Dict[str, Any]:
+    def _deserialize_import_config_row(self, row: aiosqlite.Row) -> dict[str, Any]:
         """将 import_configs 表行反序列化为前端友好的结构。"""
         result = dict(row)
-        result['field_mappings'] = self._parse_json_object(result.get('field_mappings'))
-        result['custom_rules'] = self._parse_json_object(result.get('custom_rules'))
-        result['sample_headers'] = result['custom_rules'].get('sample_headers', [])
-        result['header_signature'] = result['custom_rules'].get('header_signature', '')
-        result['header_count'] = int(result['custom_rules'].get('header_count', 0) or 0)
-        result['has_header'] = bool(result.get('has_header', 1))
-        result['is_default'] = bool(result.get('is_default', 0))
-        result['description_summary'] = self._build_import_config_description_summary(result)
-        result['default_recommendation'] = False
+        result["field_mappings"] = self._parse_json_object(result.get("field_mappings"))
+        result["custom_rules"] = self._parse_json_object(result.get("custom_rules"))
+        result["sample_headers"] = result["custom_rules"].get("sample_headers", [])
+        result["header_signature"] = result["custom_rules"].get("header_signature", "")
+        result["header_count"] = int(result["custom_rules"].get("header_count", 0) or 0)
+        result["has_header"] = bool(result.get("has_header", 1))
+        result["is_default"] = bool(result.get("is_default", 0))
+        result["description_summary"] = self._build_import_config_description_summary(result)
+        result["default_recommendation"] = False
         return result
 
     @staticmethod
-    def _build_import_config_description_summary(config: Dict[str, Any]) -> str:
+    def _build_import_config_description_summary(config: dict[str, Any]) -> str:
         """基于字段映射和样本表头生成可读摘要，供前端在空描述时回退展示。"""
-        field_mappings = config.get('field_mappings') or {}
-        sample_headers = config.get('sample_headers') or []
+        field_mappings = config.get("field_mappings") or {}
+        sample_headers = config.get("sample_headers") or []
 
         display_labels = {
-            'date': '时间',
-            'type': '类型',
-            'amount': '金额',
-            'description': '描述',
-            'account': '账户',
-            'category': '分类',
-            'counterparty': '交易对方',
-            'paymentMethod': '支付方式',
-            'payment_method': '支付方式'
+            "date": "时间",
+            "type": "类型",
+            "amount": "金额",
+            "description": "描述",
+            "account": "账户",
+            "category": "分类",
+            "counterparty": "交易对方",
+            "paymentMethod": "支付方式",
+            "payment_method": "支付方式",
         }
         display_order = {
-            'date': 1,
-            'type': 2,
-            'amount': 3,
-            'description': 4,
-            'account': 5,
-            'category': 6,
-            'counterparty': 7,
-            'paymentMethod': 8,
-            'payment_method': 8
+            "date": 1,
+            "type": 2,
+            "amount": 3,
+            "description": 4,
+            "account": 5,
+            "category": 6,
+            "counterparty": 7,
+            "paymentMethod": 8,
+            "payment_method": 8,
         }
 
-        summary_parts: List[str] = []
+        summary_parts: list[str] = []
 
         if isinstance(field_mappings, dict) and field_mappings:
             mapped_entries = []
             sorted_items = sorted(
-                field_mappings.items(),
-                key=lambda item: (display_order.get(str(item[0]), 99), str(item[0]))
+                field_mappings.items(), key=lambda item: (display_order.get(str(item[0]), 99), str(item[0]))
             )
 
             for field_name, header_name in sorted_items:
-                header_text = str(header_name or '').strip()
+                header_text = str(header_name or "").strip()
                 if not header_text:
                     continue
 
-                mapped_entries.append(
-                    f"{display_labels.get(str(field_name), str(field_name))}->{header_text}"
-                )
+                mapped_entries.append(f"{display_labels.get(str(field_name), str(field_name))}->{header_text}")
                 if len(mapped_entries) >= 4:
                     break
 
@@ -7282,71 +6989,70 @@ class Database:
 
         normalized_headers = []
         for header in sample_headers[:4]:
-            header_text = str(header or '').strip()
+            header_text = str(header or "").strip()
             if header_text:
                 normalized_headers.append(header_text)
 
         if normalized_headers:
             summary_parts.append(f"表头: {' / '.join(normalized_headers)}")
 
-        return ' | '.join(summary_parts)
+        return " | ".join(summary_parts)
 
     @staticmethod
-    def _mark_import_config_default_recommendation(configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _mark_import_config_default_recommendation(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """在没有默认模板时，为最合适的模板打上默认推荐标记。"""
         if not configs:
             return configs
 
-        if any(bool(config.get('is_default')) for config in configs):
+        if any(bool(config.get("is_default")) for config in configs):
             return configs
 
-        def _sort_key(config: Dict[str, Any]) -> tuple:
-            use_count = int(config.get('use_count', 0) or 0)
-            last_used_at = str(config.get('last_used_at', '') or '')
-            updated_at = str(config.get('updated_at', '') or '')
-            created_at = str(config.get('created_at', '') or '')
+        def _sort_key(config: dict[str, Any]) -> tuple:
+            use_count = int(config.get("use_count", 0) or 0)
+            last_used_at = str(config.get("last_used_at", "") or "")
+            updated_at = str(config.get("updated_at", "") or "")
+            created_at = str(config.get("created_at", "") or "")
             return (use_count, last_used_at, updated_at, created_at)
 
         recommended = max(configs, key=_sort_key)
-        recommended['default_recommendation'] = True
+        recommended["default_recommendation"] = True
         return configs
 
     @log_method
-    async def save_import_config(self, data: Dict[str, Any], user_id: int = 1) -> int:
+    async def save_import_config(self, data: dict[str, Any], user_id: int = 1) -> int:
         """保存导入列映射模板。"""
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        config_id = int(data.get('id', 0) or 0)
-        name = str(data.get('name', '')).strip()
-        file_format = str(data.get('file_format', '')).strip().lower()
-        field_mappings = data.get('field_mappings') or {}
+        config_id = int(data.get("id", 0) or 0)
+        name = str(data.get("name", "")).strip()
+        file_format = str(data.get("file_format", "")).strip().lower()
+        field_mappings = data.get("field_mappings") or {}
 
         if not name:
-            raise ValueError('name is required')
+            raise ValueError("name is required")
         if not file_format:
-            raise ValueError('file_format is required')
+            raise ValueError("file_format is required")
         if not isinstance(field_mappings, dict) or not field_mappings:
-            raise ValueError('field_mappings is required')
+            raise ValueError("field_mappings is required")
 
-        description = str(data.get('description', '') or '').strip()
-        date_format = str(data.get('date_format', '') or '').strip()
-        encoding = str(data.get('encoding', 'utf-8') or 'utf-8').strip()
-        delimiter = data.get('delimiter')
-        skip_rows = int(data.get('skip_rows', 0) or 0)
-        has_header = 1 if bool(data.get('has_header', True)) else 0
-        is_default = 1 if bool(data.get('is_default', False)) else 0
-        sample_headers = data.get('sample_headers') or data.get('headers') or []
+        description = str(data.get("description", "") or "").strip()
+        date_format = str(data.get("date_format", "") or "").strip()
+        encoding = str(data.get("encoding", "utf-8") or "utf-8").strip()
+        delimiter = data.get("delimiter")
+        skip_rows = int(data.get("skip_rows", 0) or 0)
+        has_header = 1 if bool(data.get("has_header", True)) else 0
+        is_default = 1 if bool(data.get("is_default", False)) else 0
+        sample_headers = data.get("sample_headers") or data.get("headers") or []
         custom_rules_json = self._serialize_import_config_custom_rules(
-            data.get('custom_rules'),
-            sample_headers=sample_headers
+            data.get("custom_rules"), sample_headers=sample_headers
         )
         field_mappings_json = json.dumps(field_mappings, ensure_ascii=False)
 
         if is_default:
             await conn.execute(
                 "UPDATE import_configs SET is_default = 0, updated_at = ? WHERE user_id = ? AND file_format = ?",
-                (now, user_id, file_format)
+                (now, user_id, file_format),
             )
 
         if config_id:
@@ -7359,14 +7065,24 @@ class Database:
                 WHERE id = ? AND user_id = ?
                 """,
                 (
-                    name, file_format, description, field_mappings_json,
-                    date_format, encoding, delimiter, skip_rows,
-                    has_header, custom_rules_json, is_default, now,
-                    config_id, user_id
-                )
+                    name,
+                    file_format,
+                    description,
+                    field_mappings_json,
+                    date_format,
+                    encoding,
+                    delimiter,
+                    skip_rows,
+                    has_header,
+                    custom_rules_json,
+                    is_default,
+                    now,
+                    config_id,
+                    user_id,
+                ),
             )
             if cursor.rowcount == 0:
-                raise ValueError('import config not found')
+                raise ValueError("import config not found")
             saved_id = config_id
         else:
             cursor = await conn.execute(
@@ -7378,30 +7094,36 @@ class Database:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    user_id, name, file_format, description, field_mappings_json,
-                    date_format, encoding, delimiter, skip_rows, has_header,
-                    custom_rules_json, is_default, 0, now, now
-                )
+                    user_id,
+                    name,
+                    file_format,
+                    description,
+                    field_mappings_json,
+                    date_format,
+                    encoding,
+                    delimiter,
+                    skip_rows,
+                    has_header,
+                    custom_rules_json,
+                    is_default,
+                    0,
+                    now,
+                    now,
+                ),
             )
             saved_id = int(cursor.lastrowid)
 
         await conn.commit()
-        self.logger.info(
-            "[导入模板] 已保存 config_id=%s, user_id=%s, file_format=%s",
-            saved_id, user_id, file_format
-        )
+        self.logger.info("[导入模板] 已保存 config_id=%s, user_id=%s, file_format=%s", saved_id, user_id, file_format)
         return saved_id
 
     @log_method
     async def get_import_configs(
-        self,
-        user_id: int = 1,
-        file_format: Optional[str] = None,
-        limit: int = 100
-    ) -> List[Dict[str, Any]]:
+        self, user_id: int = 1, file_format: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
         """获取用户的导入列映射模板列表。"""
         conn = await self._get_connection()
-        params: List[Any] = [user_id]
+        params: list[Any] = [user_id]
         query = "SELECT * FROM import_configs WHERE user_id = ?"
 
         if file_format:
@@ -7419,23 +7141,15 @@ class Database:
 
     @log_method
     async def find_matching_import_config(
-        self,
-        file_format: str,
-        headers: List[Any],
-        user_id: int = 1,
-        min_score: float = 0.6
-    ) -> Optional[Dict[str, Any]]:
+        self, file_format: str, headers: list[Any], user_id: int = 1, min_score: float = 0.6
+    ) -> dict[str, Any] | None:
         """根据文件格式与表头，匹配最合适的导入模板。"""
         conn = await self._get_connection()
         normalized_headers = self._normalize_import_config_headers(headers)
         if not normalized_headers:
             return None
 
-        configs = await self.get_import_configs(
-            user_id=user_id,
-            file_format=file_format,
-            limit=200
-        )
+        configs = await self.get_import_configs(user_id=user_id, file_format=file_format, limit=200)
         if not configs:
             return None
 
@@ -7443,20 +7157,20 @@ class Database:
         incoming_set = set(normalized_headers)
         best_match = None
         best_score = 0.0
-        best_reason = ''
+        best_reason = ""
         default_match = None
 
         for config in configs:
-            if config.get('is_default') and default_match is None:
+            if config.get("is_default") and default_match is None:
                 default_match = config
 
-            stored_headers = self._normalize_import_config_headers(config.get('sample_headers'))
-            stored_signature = config.get('header_signature', '')
+            stored_headers = self._normalize_import_config_headers(config.get("sample_headers"))
+            stored_signature = config.get("header_signature", "")
 
             if stored_signature and stored_signature == incoming_signature:
                 best_match = config
                 best_score = 1.0
-                best_reason = 'exact_header_signature'
+                best_reason = "exact_header_signature"
                 break
 
             if not stored_headers:
@@ -7474,16 +7188,16 @@ class Database:
             if overlap_score > best_score:
                 best_match = config
                 best_score = overlap_score
-                best_reason = 'header_overlap'
+                best_reason = "header_overlap"
 
         if not best_match or best_score < min_score:
             if not default_match:
                 return None
 
             matched = dict(default_match)
-            matched['match_score'] = 0.0
-            matched['match_reason'] = 'default_template_fallback'
-            matched['matched_header_count'] = 0
+            matched["match_score"] = 0.0
+            matched["match_reason"] = "default_template_fallback"
+            matched["matched_header_count"] = 0
 
             now = datetime.now().isoformat()
             await conn.execute(
@@ -7494,16 +7208,16 @@ class Database:
                     updated_at = ?
                 WHERE id = ? AND user_id = ?
                 """,
-                (now, now, int(default_match['id']), user_id)
+                (now, now, int(default_match["id"]), user_id),
             )
             await conn.commit()
             return matched
 
         matched = dict(best_match)
-        matched['match_score'] = round(min(best_score, 1.0), 4)
-        matched['match_reason'] = best_reason
-        matched['matched_header_count'] = len(
-            incoming_set & set(self._normalize_import_config_headers(best_match.get('sample_headers')))
+        matched["match_score"] = round(min(best_score, 1.0), 4)
+        matched["match_reason"] = best_reason
+        matched["matched_header_count"] = len(
+            incoming_set & set(self._normalize_import_config_headers(best_match.get("sample_headers")))
         )
 
         now = datetime.now().isoformat()
@@ -7515,7 +7229,7 @@ class Database:
                 updated_at = ?
             WHERE id = ? AND user_id = ?
             """,
-            (now, now, int(best_match['id']), user_id)
+            (now, now, int(best_match["id"]), user_id),
         )
         await conn.commit()
         return matched
@@ -7524,18 +7238,14 @@ class Database:
     async def delete_import_config(self, config_id: int, user_id: int = 1) -> bool:
         """删除导入列映射模板。"""
         conn = await self._get_connection()
-        cursor = await conn.execute(
-            "DELETE FROM import_configs WHERE id = ? AND user_id = ?",
-            (config_id, user_id)
-        )
+        cursor = await conn.execute("DELETE FROM import_configs WHERE id = ? AND user_id = ?", (config_id, user_id))
         await conn.commit()
         return cursor.rowcount > 0
 
     # ==================== v6.47: 账单导入三阶段系统方法 ====================
 
     @log_method
-    async def create_import_session(self, session_id: str, user_id: int = 1,
-                                     file_count: int = 0) -> int:
+    async def create_import_session(self, session_id: str, user_id: int = 1, file_count: int = 0) -> int:
         """
         创建导入会话
 
@@ -7550,8 +7260,7 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        self.logger.info(f"[创建导入会话] session_id={session_id}, user_id={user_id}, "
-                         f"file_count={file_count}")
+        self.logger.info(f"[创建导入会话] session_id={session_id}, user_id={user_id}, file_count={file_count}")
 
         cursor = await conn.execute(
             """
@@ -7561,7 +7270,7 @@ class Database:
                 created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, user_id, 'parsing', file_count, 0, 0, 0, now, now)
+            (session_id, user_id, "parsing", file_count, 0, 0, 0, now, now),
         )
 
         await conn.commit()
@@ -7575,9 +7284,9 @@ class Database:
         self,
         session_id: str,
         status: str,
-        total_parsed: Optional[int] = None,
-        total_preview: Optional[int] = None,
-        total_confirmed: Optional[int] = None
+        total_parsed: int | None = None,
+        total_preview: int | None = None,
+        total_confirmed: int | None = None,
     ) -> bool:
         """
         更新导入会话状态
@@ -7595,9 +7304,11 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        self.logger.info(f"[更新导入会话] session_id={session_id}, status={status}, "
-                         f"parsed={total_parsed}, preview={total_preview}, "
-                         f"confirmed={total_confirmed}")
+        self.logger.info(
+            f"[更新导入会话] session_id={session_id}, status={status}, "
+            f"parsed={total_parsed}, preview={total_preview}, "
+            f"confirmed={total_confirmed}"
+        )
 
         # 构建动态更新语句
         update_parts = ["status = ?", "updated_at = ?"]
@@ -7617,17 +7328,14 @@ class Database:
 
         params.append(session_id)
 
-        await conn.execute(
-            f"UPDATE import_sessions SET {', '.join(update_parts)} WHERE session_id = ?",
-            tuple(params)
-        )
+        await conn.execute(f"UPDATE import_sessions SET {', '.join(update_parts)} WHERE session_id = ?", tuple(params))
 
         await conn.commit()
         self.logger.info(f"[导入会话更新成功] session_id={session_id}")
         return True
 
     @log_method
-    async def get_import_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_import_session(self, session_id: str) -> dict[str, Any] | None:
         """
         获取导入会话信息
 
@@ -7639,10 +7347,7 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            "SELECT * FROM import_sessions WHERE session_id = ?",
-            (session_id,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM import_sessions WHERE session_id = ?", (session_id,)) as cursor:
             row = await cursor.fetchone()
             if row:
                 return dict(row)
@@ -7650,11 +7355,7 @@ class Database:
 
     @log_method
     async def insert_parser_templates(
-        self,
-        session_id: str,
-        bills: List[Dict[str, Any]],
-        parser_id: str,
-        user_id: int = 1
+        self, session_id: str, bills: list[dict[str, Any]], parser_id: str, user_id: int = 1
     ) -> int:
         """
         批量插入解析器模板数据（阶段1）
@@ -7676,26 +7377,27 @@ class Database:
         now = datetime.now().isoformat()
         inserted_count = 0
 
-        self.logger.info(f"[插入解析模板] session={session_id}, parser={parser_id}, "
-                         f"count={len(bills)}, user_id={user_id}")
+        self.logger.info(
+            f"[插入解析模板] session={session_id}, parser={parser_id}, count={len(bills)}, user_id={user_id}"
+        )
 
         # 分批插入
         for i in range(0, len(bills), self.batch_size):
-            batch = bills[i:i + self.batch_size]
-            self.logger.debug(f"[解析模板批次] {i//self.batch_size + 1}: {len(batch)} 条")
+            batch = bills[i : i + self.batch_size]
+            self.logger.debug(f"[解析模板批次] {i // self.batch_size + 1}: {len(batch)} 条")
 
             for bill in batch:
                 try:
                     # 根据金额正负确定类型
-                    amount = float(bill.get('amount', 0))
-                    if bill.get('type'):
-                        bill_type = bill.get('type')
+                    amount = float(bill.get("amount", 0))
+                    if bill.get("type"):
+                        bill_type = bill.get("type")
                     elif amount > 0:
-                        bill_type = '收入'
+                        bill_type = "收入"
                     elif amount < 0:
-                        bill_type = '支出'
+                        bill_type = "支出"
                     else:
-                        bill_type = '其他'
+                        bill_type = "其他"
 
                     await conn.execute(
                         """
@@ -7710,19 +7412,19 @@ class Database:
                         (
                             session_id,
                             user_id,
-                            bill.get('date', ''),
+                            bill.get("date", ""),
                             amount,
                             bill_type,
-                            bill.get('description', ''),
+                            bill.get("description", ""),
                             parser_id,
-                            bill.get('counterparty', ''),
-                            bill.get('payment_method', ''),
-                            bill.get('original_type', ''),
-                            bill.get('original_category', ''),
-                            bill.get('account_id', ''),
-                            '0',  # parser_is_processed默认为"0"
-                            now
-                        )
+                            bill.get("counterparty", ""),
+                            bill.get("payment_method", ""),
+                            bill.get("original_type", ""),
+                            bill.get("original_category", ""),
+                            bill.get("account_id", ""),
+                            "0",  # parser_is_processed默认为"0"
+                            now,
+                        ),
                     )
                     inserted_count += 1
 
@@ -7731,16 +7433,13 @@ class Database:
 
             await conn.commit()
 
-        self.logger.info(f"[解析模板插入完成] session={session_id}, "
-                         f"成功={inserted_count}/{len(bills)}")
+        self.logger.info(f"[解析模板插入完成] session={session_id}, 成功={inserted_count}/{len(bills)}")
         return inserted_count
 
     @log_method
     async def get_parser_templates_by_session(
-        self,
-        session_id: str,
-        processed_only: Optional[bool] = None
-    ) -> List[Dict[str, Any]]:
+        self, session_id: str, processed_only: bool | None = None
+    ) -> list[dict[str, Any]]:
         """
         获取会话的解析模板数据
 
@@ -7774,10 +7473,7 @@ class Database:
 
     @log_method
     async def update_parser_template_status(
-        self,
-        template_ids: List[int],
-        processed: bool = True,
-        account_id: Optional[str] = None
+        self, template_ids: list[int], processed: bool = True, account_id: str | None = None
     ) -> int:
         """
         更新解析模板处理状态
@@ -7795,10 +7491,9 @@ class Database:
 
         conn = await self._get_connection()
 
-        processed_value = '1' if processed else '0'
+        processed_value = "1" if processed else "0"
 
-        self.logger.info(f"[更新解析模板状态] ids={template_ids}, processed={processed}, "
-                         f"account_id={account_id}")
+        self.logger.info(f"[更新解析模板状态] ids={template_ids}, processed={processed}, account_id={account_id}")
 
         # 构建动态更新语句
         update_parts = ["parser_is_processed = ?"]
@@ -7809,13 +7504,11 @@ class Database:
             params.append(account_id)
 
         # 构建IN子句
-        placeholders = ','.join(['?' for _ in template_ids])
+        placeholders = ",".join(["?" for _ in template_ids])
         params.extend(template_ids)
 
         await conn.execute(
-            f"UPDATE bills_parser_template SET {', '.join(update_parts)} "
-            f"WHERE id IN ({placeholders})",
-            tuple(params)
+            f"UPDATE bills_parser_template SET {', '.join(update_parts)} WHERE id IN ({placeholders})", tuple(params)
         )
 
         await conn.commit()
@@ -7826,10 +7519,10 @@ class Database:
     async def insert_preview_bill(
         self,
         session_id: str,
-        preview_data: Dict[str, Any],
+        preview_data: dict[str, Any],
         user_id: int = 1,
-        dedup_type: Optional[str] = None,
-        dedup_source_ids: Optional[List[int]] = None
+        dedup_type: str | None = None,
+        dedup_source_ids: list[int] | None = None,
     ) -> int:
         """
         插入预览账单（阶段2）
@@ -7847,10 +7540,9 @@ class Database:
         conn = await self._get_connection()
         now = datetime.now().isoformat()
 
-        source_ids_str = ','.join(map(str, dedup_source_ids)) if dedup_source_ids else ''
+        source_ids_str = ",".join(map(str, dedup_source_ids)) if dedup_source_ids else ""
 
-        self.logger.debug(f"[插入预览账单] session={session_id}, type={dedup_type}, "
-                          f"source_ids={source_ids_str}")
+        self.logger.debug(f"[插入预览账单] session={session_id}, type={dedup_type}, source_ids={source_ids_str}")
 
         cursor = await conn.execute(
             """
@@ -7869,28 +7561,28 @@ class Database:
             (
                 session_id,
                 user_id,
-                preview_data.get('preview_date', ''),
-                preview_data.get('preview_type', ''),
-                preview_data.get('preview_amount', 0),
-                preview_data.get('preview_destination_amount', 0),
-                preview_data.get('preview_main_category', ''),
-                preview_data.get('preview_sub_category', ''),
-                preview_data.get('preview_source_account_id'),
-                preview_data.get('preview_destination_account_id'),
-                preview_data.get('preview_counterparty', ''),
-                preview_data.get('preview_payment_method', ''),
-                preview_data.get('preview_description', ''),
-                preview_data.get('preview_recurring_id'),
-                preview_data.get('preview_recurring_name', ''),
-                preview_data.get('preview_recurring_candidate_count', 0),
-                preview_data.get('preview_recurring_match_score', 0),
-                preview_data.get('preview_recurring_match_reasons', ''),
-                preview_data.get('preview_recurring_matched_date', ''),
+                preview_data.get("preview_date", ""),
+                preview_data.get("preview_type", ""),
+                preview_data.get("preview_amount", 0),
+                preview_data.get("preview_destination_amount", 0),
+                preview_data.get("preview_main_category", ""),
+                preview_data.get("preview_sub_category", ""),
+                preview_data.get("preview_source_account_id"),
+                preview_data.get("preview_destination_account_id"),
+                preview_data.get("preview_counterparty", ""),
+                preview_data.get("preview_payment_method", ""),
+                preview_data.get("preview_description", ""),
+                preview_data.get("preview_recurring_id"),
+                preview_data.get("preview_recurring_name", ""),
+                preview_data.get("preview_recurring_candidate_count", 0),
+                preview_data.get("preview_recurring_match_score", 0),
+                preview_data.get("preview_recurring_match_reasons", ""),
+                preview_data.get("preview_recurring_matched_date", ""),
                 1,  # preview_selected默认选中
                 dedup_type,
                 source_ids_str,
-                now
-            )
+                now,
+            ),
         )
 
         await conn.commit()
@@ -7901,10 +7593,7 @@ class Database:
 
     @log_method
     async def insert_preview_bills_batch(
-        self,
-        session_id: str,
-        preview_list: List[Dict[str, Any]],
-        user_id: int = 1
+        self, session_id: str, preview_list: list[dict[str, Any]], user_id: int = 1
     ) -> int:
         """
         批量插入预览账单
@@ -7927,14 +7616,14 @@ class Database:
         self.logger.info(f"[批量插入预览账单] session={session_id}, count={len(preview_list)}")
 
         for i in range(0, len(preview_list), self.batch_size):
-            batch = preview_list[i:i + self.batch_size]
+            batch = preview_list[i : i + self.batch_size]
 
             for item in batch:
                 try:
-                    preview_data = item.get('preview_data', item)
-                    dedup_type = item.get('dedup_type', 'remaining')
-                    dedup_source_ids = item.get('dedup_source_ids', [])
-                    source_ids_str = ','.join(map(str, dedup_source_ids)) if dedup_source_ids else ''
+                    preview_data = item.get("preview_data", item)
+                    dedup_type = item.get("dedup_type", "remaining")
+                    dedup_source_ids = item.get("dedup_source_ids", [])
+                    source_ids_str = ",".join(map(str, dedup_source_ids)) if dedup_source_ids else ""
 
                     await conn.execute(
                         """
@@ -7953,28 +7642,28 @@ class Database:
                         (
                             session_id,
                             user_id,
-                            preview_data.get('preview_date', ''),
-                            preview_data.get('preview_type', ''),
-                            preview_data.get('preview_amount', 0),
-                            preview_data.get('preview_destination_amount', 0),
-                            preview_data.get('preview_main_category', ''),
-                            preview_data.get('preview_sub_category', ''),
-                            preview_data.get('preview_source_account_id'),
-                            preview_data.get('preview_destination_account_id'),
-                            preview_data.get('preview_counterparty', ''),
-                            preview_data.get('preview_payment_method', ''),
-                            preview_data.get('preview_description', ''),
-                            preview_data.get('preview_recurring_id'),
-                            preview_data.get('preview_recurring_name', ''),
-                            preview_data.get('preview_recurring_candidate_count', 0),
-                            preview_data.get('preview_recurring_match_score', 0),
-                            preview_data.get('preview_recurring_match_reasons', ''),
-                            preview_data.get('preview_recurring_matched_date', ''),
+                            preview_data.get("preview_date", ""),
+                            preview_data.get("preview_type", ""),
+                            preview_data.get("preview_amount", 0),
+                            preview_data.get("preview_destination_amount", 0),
+                            preview_data.get("preview_main_category", ""),
+                            preview_data.get("preview_sub_category", ""),
+                            preview_data.get("preview_source_account_id"),
+                            preview_data.get("preview_destination_account_id"),
+                            preview_data.get("preview_counterparty", ""),
+                            preview_data.get("preview_payment_method", ""),
+                            preview_data.get("preview_description", ""),
+                            preview_data.get("preview_recurring_id"),
+                            preview_data.get("preview_recurring_name", ""),
+                            preview_data.get("preview_recurring_candidate_count", 0),
+                            preview_data.get("preview_recurring_match_score", 0),
+                            preview_data.get("preview_recurring_match_reasons", ""),
+                            preview_data.get("preview_recurring_matched_date", ""),
                             1,
                             dedup_type,
                             source_ids_str,
-                            now
-                        )
+                            now,
+                        ),
                     )
                     inserted_count += 1
 
@@ -7983,16 +7672,11 @@ class Database:
 
             await conn.commit()
 
-        self.logger.info(f"[批量预览账单插入完成] session={session_id}, "
-                         f"成功={inserted_count}/{len(preview_list)}")
+        self.logger.info(f"[批量预览账单插入完成] session={session_id}, 成功={inserted_count}/{len(preview_list)}")
         return inserted_count
 
     @log_method
-    async def get_preview_by_session(
-        self,
-        session_id: str,
-        selected_only: bool = False
-    ) -> List[Dict[str, Any]]:
+    async def get_preview_by_session(self, session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
         """
         获取会话的预览账单数据
 
@@ -8023,17 +7707,12 @@ class Database:
         return previews
 
     @log_method
-    async def get_preview_bill_by_id(
-        self,
-        preview_id: int,
-        user_id: int = 1
-    ) -> Optional[Dict[str, Any]]:
+    async def get_preview_bill_by_id(self, preview_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """按ID获取单条预览账单。"""
         conn = await self._get_connection()
 
         async with conn.execute(
-            "SELECT * FROM bills_preview WHERE id = ? AND user_id = ?",
-            (preview_id, user_id)
+            "SELECT * FROM bills_preview WHERE id = ? AND user_id = ?", (preview_id, user_id)
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -8041,46 +7720,35 @@ class Database:
 
     @log_method
     async def get_recurring_candidates_for_preview(
-        self,
-        preview_id: int,
-        user_id: int = 1,
-        tolerance_days: int = 3
-    ) -> Dict[str, Any]:
+        self, preview_id: int, user_id: int = 1, tolerance_days: int = 3
+    ) -> dict[str, Any]:
         """获取预览账单可匹配的定时交易候选。"""
         preview = await self.get_preview_bill_by_id(preview_id, user_id=user_id)
         if not preview:
-            return {
-                'preview': None,
-                'linked_recurring_id': None,
-                'candidates': []
-            }
+            return {"preview": None, "linked_recurring_id": None, "candidates": []}
 
         recurring_rows = await self.get_enabled_recurring_templates(user_id=user_id)
         bill_data = {
-            'date': preview.get('preview_date'),
-            'type': preview.get('preview_type'),
-            'amount': preview.get('preview_amount'),
-            'source_account_id': preview.get('preview_source_account_id'),
-            'destination_account_id': preview.get('preview_destination_account_id')
+            "date": preview.get("preview_date"),
+            "type": preview.get("preview_type"),
+            "amount": preview.get("preview_amount"),
+            "source_account_id": preview.get("preview_source_account_id"),
+            "destination_account_id": preview.get("preview_destination_account_id"),
         }
         candidates = self.build_recurring_candidates_for_bill_data(
             bill_data,
             recurring_rows,
-            linked_recurring_id=preview.get('preview_recurring_id'),
-            tolerance_days=tolerance_days
+            linked_recurring_id=preview.get("preview_recurring_id"),
+            tolerance_days=tolerance_days,
         )
         return {
-            'preview': preview,
-            'linked_recurring_id': preview.get('preview_recurring_id'),
-            'candidates': candidates
+            "preview": preview,
+            "linked_recurring_id": preview.get("preview_recurring_id"),
+            "candidates": candidates,
         }
 
     @log_method
-    async def update_preview_selection(
-        self,
-        preview_ids: List[int],
-        selected: bool
-    ) -> int:
+    async def update_preview_selection(self, preview_ids: list[int], selected: bool) -> int:
         """
         更新预览账单选中状态
 
@@ -8099,10 +7767,10 @@ class Database:
 
         self.logger.info(f"[更新预览选中状态] ids={preview_ids}, selected={selected}")
 
-        placeholders = ','.join(['?' for _ in preview_ids])
+        placeholders = ",".join(["?" for _ in preview_ids])
         await conn.execute(
             f"UPDATE bills_preview SET preview_selected = ? WHERE id IN ({placeholders})",
-            tuple([selected_value] + preview_ids)
+            tuple([selected_value] + preview_ids),
         )
 
         await conn.commit()
@@ -8110,10 +7778,7 @@ class Database:
         return len(preview_ids)
 
     @log_method
-    async def reset_session_preview_selection(
-        self,
-        session_id: str
-    ) -> int:
+    async def reset_session_preview_selection(self, session_id: str) -> int:
         """
         重置会话中所有预览账单的选中状态为未选中
 
@@ -8129,10 +7794,7 @@ class Database:
 
         self.logger.info(f"[重置会话预览选中状态] session={session_id}")
 
-        cursor = await conn.execute(
-            "UPDATE bills_preview SET preview_selected = 0 WHERE session_id = ?",
-            (session_id,)
-        )
+        cursor = await conn.execute("UPDATE bills_preview SET preview_selected = 0 WHERE session_id = ?", (session_id,))
         updated_count = cursor.rowcount
 
         await conn.commit()
@@ -8140,11 +7802,7 @@ class Database:
         return updated_count
 
     @log_method
-    async def update_preview_bill(
-        self,
-        preview_id: int,
-        update_data: Dict[str, Any]
-    ) -> bool:
+    async def update_preview_bill(self, preview_id: int, update_data: dict[str, Any]) -> bool:
         """
         更新预览账单数据
 
@@ -8165,24 +7823,24 @@ class Database:
         params = []
 
         field_mapping = {
-            'preview_date': 'preview_date',
-            'preview_type': 'preview_type',
-            'preview_amount': 'preview_amount',
-            'preview_destination_amount': 'preview_destination_amount',
-            'preview_main_category': 'preview_main_category',
-            'preview_sub_category': 'preview_sub_category',
-            'preview_source_account_id': 'preview_source_account_id',
-            'preview_destination_account_id': 'preview_destination_account_id',
-            'preview_counterparty': 'preview_counterparty',
-            'preview_payment_method': 'preview_payment_method',
-            'preview_description': 'preview_description',
-            'preview_recurring_id': 'preview_recurring_id',
-            'preview_recurring_name': 'preview_recurring_name',
-            'preview_recurring_candidate_count': 'preview_recurring_candidate_count',
-            'preview_recurring_match_score': 'preview_recurring_match_score',
-            'preview_recurring_match_reasons': 'preview_recurring_match_reasons',
-            'preview_recurring_matched_date': 'preview_recurring_matched_date',
-            'preview_selected': 'preview_selected',
+            "preview_date": "preview_date",
+            "preview_type": "preview_type",
+            "preview_amount": "preview_amount",
+            "preview_destination_amount": "preview_destination_amount",
+            "preview_main_category": "preview_main_category",
+            "preview_sub_category": "preview_sub_category",
+            "preview_source_account_id": "preview_source_account_id",
+            "preview_destination_account_id": "preview_destination_account_id",
+            "preview_counterparty": "preview_counterparty",
+            "preview_payment_method": "preview_payment_method",
+            "preview_description": "preview_description",
+            "preview_recurring_id": "preview_recurring_id",
+            "preview_recurring_name": "preview_recurring_name",
+            "preview_recurring_candidate_count": "preview_recurring_candidate_count",
+            "preview_recurring_match_score": "preview_recurring_match_score",
+            "preview_recurring_match_reasons": "preview_recurring_match_reasons",
+            "preview_recurring_matched_date": "preview_recurring_matched_date",
+            "preview_selected": "preview_selected",
         }
 
         for key, column in field_mapping.items():
@@ -8197,22 +7855,14 @@ class Database:
 
         self.logger.debug(f"[更新预览账单] id={preview_id}, fields={list(update_data.keys())}")
 
-        await conn.execute(
-            f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?",
-            tuple(params)
-        )
+        await conn.execute(f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?", tuple(params))
 
         await conn.commit()
         self.logger.info(f"[预览账单更新成功] id={preview_id}")
         return True
 
     @log_method
-    async def update_preview_bills_batch(
-        self,
-        session_id: str,
-        updates: List[Dict[str, Any]],
-        user_id: int = 1
-    ) -> int:
+    async def update_preview_bills_batch(self, session_id: str, updates: list[dict[str, Any]], user_id: int = 1) -> int:
         """
         批量更新预览账单数据（阶段3用户编辑后保存）
 
@@ -8230,12 +7880,11 @@ class Database:
         conn = await self._get_connection()
         updated_count = 0
 
-        self.logger.info(f"[批量更新预览] session={session_id}, "
-                         f"count={len(updates)}, user_id={user_id}")
+        self.logger.info(f"[批量更新预览] session={session_id}, count={len(updates)}, user_id={user_id}")
 
         for update_item in updates:
             try:
-                preview_id = update_item.get('id')
+                preview_id = update_item.get("id")
                 if not preview_id:
                     continue
 
@@ -8244,19 +7893,19 @@ class Database:
                 params = []
 
                 field_mapping = {
-                    'preview_type': 'preview_type',
-                    'preview_amount': 'preview_amount',
-                    'preview_destination_amount': 'preview_destination_amount',
-                    'preview_source_account_id': 'preview_source_account_id',
-                    'preview_destination_account_id': 'preview_destination_account_id',
-                    'preview_recurring_id': 'preview_recurring_id',
-                    'preview_recurring_name': 'preview_recurring_name',
-                    'preview_recurring_candidate_count': 'preview_recurring_candidate_count',
-                    'preview_recurring_match_score': 'preview_recurring_match_score',
-                    'preview_recurring_match_reasons': 'preview_recurring_match_reasons',
-                    'preview_recurring_matched_date': 'preview_recurring_matched_date',
-                    'category_id': None,  # 需要特殊处理
-                    'selected': 'preview_selected',
+                    "preview_type": "preview_type",
+                    "preview_amount": "preview_amount",
+                    "preview_destination_amount": "preview_destination_amount",
+                    "preview_source_account_id": "preview_source_account_id",
+                    "preview_destination_account_id": "preview_destination_account_id",
+                    "preview_recurring_id": "preview_recurring_id",
+                    "preview_recurring_name": "preview_recurring_name",
+                    "preview_recurring_candidate_count": "preview_recurring_candidate_count",
+                    "preview_recurring_match_score": "preview_recurring_match_score",
+                    "preview_recurring_match_reasons": "preview_recurring_match_reasons",
+                    "preview_recurring_matched_date": "preview_recurring_matched_date",
+                    "category_id": None,  # 需要特殊处理
+                    "selected": "preview_selected",
                 }
 
                 for key, column in field_mapping.items():
@@ -8265,17 +7914,17 @@ class Database:
 
                     value = update_item[key]
 
-                    if key == 'category_id':
+                    if key == "category_id":
                         # 如果提供了category_id，需要查询对应的分类名称
                         cat_id = value
                         if cat_id:
                             category = await self.get_category_by_id(cat_id)
                             if category:
                                 update_parts.append("preview_main_category = ?")
-                                params.append(category.get('main_category', ''))
+                                params.append(category.get("main_category", ""))
                                 update_parts.append("preview_sub_category = ?")
-                                params.append(category.get('sub_category', ''))
-                    elif key == 'selected':
+                                params.append(category.get("sub_category", ""))
+                    elif key == "selected":
                         update_parts.append("preview_selected = ?")
                         params.append(1 if value else 0)
                     else:
@@ -8285,8 +7934,7 @@ class Database:
                 if update_parts:
                     params.append(preview_id)
                     await conn.execute(
-                        f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?",
-                        tuple(params)
+                        f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ?", tuple(params)
                     )
                     updated_count += 1
 
@@ -8298,11 +7946,7 @@ class Database:
         return updated_count
 
     @log_method
-    async def confirm_preview_to_bills(
-        self,
-        session_id: str,
-        user_id: int = 1
-    ) -> Dict[str, Any]:
+    async def confirm_preview_to_bills(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         """
         将选中的预览账单确认写入正式账单表（阶段3）
 
@@ -8315,18 +7959,12 @@ class Database:
         """
         conn = await self._get_connection()
         now = datetime.now().isoformat()
-        batch_id = datetime.now().strftime('%Y%m%d%H%M%S')
+        batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        self.logger.info(f"[确认预览账单] session={session_id}, user_id={user_id}, "
-                         f"batch_id={batch_id}")
+        self.logger.info(f"[确认预览账单] session={session_id}, user_id={user_id}, batch_id={batch_id}")
 
-        result = {
-            'confirmed_count': 0,
-            'skipped_count': 0,
-            'duplicate_count': 0,
-            'errors': []
-        }
-        recurring_advances: Dict[int, date] = {}
+        result = {"confirmed_count": 0, "skipped_count": 0, "duplicate_count": 0, "errors": []}
+        recurring_advances: dict[int, date] = {}
 
         # 获取选中的预览账单
         previews = await self.get_preview_by_session(session_id, selected_only=True)
@@ -8336,24 +7974,24 @@ class Database:
         for preview in previews:
             try:
                 # 准备账单数据
-                bill_type = preview.get('preview_type', '')
-                amount = abs(float(preview.get('preview_amount', 0)))
+                bill_type = preview.get("preview_type", "")
+                amount = abs(float(preview.get("preview_amount", 0)))
 
                 # 根据类型确定金额符号
-                if bill_type in ['支出', 'expense']:
+                if bill_type in ["支出", "expense"]:
                     amount = -abs(amount)
-                elif bill_type in ['收入', 'income']:
+                elif bill_type in ["收入", "income"]:
                     amount = abs(amount)
-                elif bill_type in ['转账', 'transfer', '投资', 'investment']:
+                elif bill_type in ["转账", "transfer", "投资", "investment"]:
                     amount = abs(amount)
 
                 # 计算哈希用于去重
                 bill_data = {
-                    'date': preview.get('preview_date', ''),
-                    'type': bill_type,
-                    'amount': amount,
-                    'counterparty': preview.get('preview_counterparty', ''),
-                    'description': preview.get('preview_description', '')
+                    "date": preview.get("preview_date", ""),
+                    "type": bill_type,
+                    "amount": amount,
+                    "counterparty": preview.get("preview_counterparty", ""),
+                    "description": preview.get("preview_description", ""),
                 }
                 bill_hash = self._calculate_hash(bill_data)
 
@@ -8369,28 +8007,28 @@ class Database:
                     """,
                     (
                         user_id,
-                        preview.get('preview_date', ''),
+                        preview.get("preview_date", ""),
                         bill_type,
                         amount,
-                        preview.get('preview_counterparty', ''),
-                        preview.get('preview_description', ''),
-                        preview.get('preview_payment_method', ''),
-                        preview.get('preview_main_category', ''),
-                        preview.get('preview_sub_category', ''),
-                        preview.get('preview_source_account_id'),
-                        preview.get('preview_destination_account_id'),
-                        preview.get('preview_destination_amount', 0),
+                        preview.get("preview_counterparty", ""),
+                        preview.get("preview_description", ""),
+                        preview.get("preview_payment_method", ""),
+                        preview.get("preview_main_category", ""),
+                        preview.get("preview_sub_category", ""),
+                        preview.get("preview_source_account_id"),
+                        preview.get("preview_destination_account_id"),
+                        preview.get("preview_destination_amount", 0),
                         batch_id,
                         bill_hash,
-                        preview.get('preview_recurring_id'),
+                        preview.get("preview_recurring_id"),
                         now,
-                        now
-                    )
+                        now,
+                    ),
                 )
-                result['confirmed_count'] += 1
+                result["confirmed_count"] += 1
 
-                recurring_id = preview.get('preview_recurring_id')
-                preview_date = self._parse_date_value(preview.get('preview_date'))
+                recurring_id = preview.get("preview_recurring_id")
+                preview_date = self._parse_date_value(preview.get("preview_date"))
                 if recurring_id and preview_date:
                     recurring_id_int = int(recurring_id)
                     recorded_date = recurring_advances.get(recurring_id_int)
@@ -8399,58 +8037,52 @@ class Database:
 
             except sqlite3.IntegrityError:
                 # 哈希重复，跳过
-                result['duplicate_count'] += 1
+                result["duplicate_count"] += 1
                 self.logger.debug(f"[确认跳过重复] date={preview.get('preview_date')}")
 
             except Exception as e:
-                result['errors'].append(str(e))
+                result["errors"].append(str(e))
                 self.logger.error(f"[确认失败] {e}")
 
         for recurring_id, matched_date in recurring_advances.items():
             async with conn.execute(
-                "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?",
-                (recurring_id, user_id)
+                "SELECT * FROM recurring_bills WHERE id = ? AND user_id = ?", (recurring_id, user_id)
             ) as cursor:
                 recurring_row = await cursor.fetchone()
 
             recurring = dict(recurring_row) if recurring_row else None
             if not recurring:
-                self.logger.warning(
-                    "[确认推进定时账单] 未找到 recurring_id=%s, 跳过推进",
-                    recurring_id
-                )
+                self.logger.warning("[确认推进定时账单] 未找到 recurring_id=%s, 跳过推进", recurring_id)
                 continue
 
             next_date = self._get_next_recurring_occurrence_after(recurring, matched_date)
-            next_occurrence = next_date.isoformat() if next_date else recurring.get('next_date')
+            next_occurrence = next_date.isoformat() if next_date else recurring.get("next_date")
 
             await conn.execute(
                 "UPDATE recurring_bills SET next_date = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-                (next_occurrence, now, recurring_id, user_id)
+                (next_occurrence, now, recurring_id, user_id),
             )
             self.logger.info(
                 "[确认推进定时账单] recurring_id=%s, matched_date=%s, next_date=%s",
                 recurring_id,
                 matched_date.isoformat(),
-                next_occurrence
+                next_occurrence,
             )
 
         await conn.commit()
 
         # 更新会话状态
-        await self.update_import_session_status(
-            session_id,
-            'completed',
-            total_confirmed=result['confirmed_count']
-        )
+        await self.update_import_session_status(session_id, "completed", total_confirmed=result["confirmed_count"])
 
-        self.logger.info(f"[确认完成] session={session_id}, confirmed={result['confirmed_count']}, "
-                         f"duplicate={result['duplicate_count']}, errors={len(result['errors'])}")
+        self.logger.info(
+            f"[确认完成] session={session_id}, confirmed={result['confirmed_count']}, "
+            f"duplicate={result['duplicate_count']}, errors={len(result['errors'])}"
+        )
 
         return result
 
     @log_method
-    async def clear_session_data(self, session_id: str, user_id: int = None) -> Dict[str, int]:
+    async def clear_session_data(self, session_id: str, user_id: int = None) -> dict[str, int]:
         """
         清空会话相关的临时数据
 
@@ -8465,45 +8097,31 @@ class Database:
 
         self.logger.info(f"[清空会话数据] session={session_id}, user_id={user_id}")
 
-        result = {
-            'parser_count': 0,
-            'preview_count': 0,
-            'annotation_count': 0
-        }
+        result = {"parser_count": 0, "preview_count": 0, "annotation_count": 0}
 
         # 删除解析模板数据
-        cursor = await conn.execute(
-            "DELETE FROM bills_parser_template WHERE session_id = ?",
-            (session_id,)
-        )
-        result['parser_count'] = cursor.rowcount
+        cursor = await conn.execute("DELETE FROM bills_parser_template WHERE session_id = ?", (session_id,))
+        result["parser_count"] = cursor.rowcount
 
         # 删除预览数据
-        cursor = await conn.execute(
-            "DELETE FROM bills_preview WHERE session_id = ?",
-            (session_id,)
-        )
-        result['preview_count'] = cursor.rowcount
+        cursor = await conn.execute("DELETE FROM bills_preview WHERE session_id = ?", (session_id,))
+        result["preview_count"] = cursor.rowcount
 
-        cursor = await conn.execute(
-            "DELETE FROM import_annotation_samples WHERE session_id = ?",
-            (session_id,)
-        )
-        result['annotation_count'] = cursor.rowcount
+        cursor = await conn.execute("DELETE FROM import_annotation_samples WHERE session_id = ?", (session_id,))
+        result["annotation_count"] = cursor.rowcount
 
         await conn.commit()
 
-        self.logger.info(f"[会话数据清空完成] session={session_id}, "
-                         f"parser={result['parser_count']}, preview={result['preview_count']}, "
-                         f"annotation={result['annotation_count']}")
+        self.logger.info(
+            f"[会话数据清空完成] session={session_id}, "
+            f"parser={result['parser_count']}, preview={result['preview_count']}, "
+            f"annotation={result['annotation_count']}"
+        )
 
         return result
 
     @log_method
-    async def get_unprocessed_templates_for_dedup(
-        self,
-        session_id: str
-    ) -> List[Dict[str, Any]]:
+    async def get_unprocessed_templates_for_dedup(self, session_id: str) -> list[dict[str, Any]]:
         """
         获取未处理的解析模板用于去重
 
@@ -8525,7 +8143,7 @@ class Database:
             WHERE session_id = ? AND parser_is_processed = '0'
             ORDER BY parser_date ASC, id ASC
             """,
-            (session_id,)
+            (session_id,),
         ) as cursor:
             rows = await cursor.fetchall()
             templates = [dict(row) for row in rows]
@@ -8534,12 +8152,7 @@ class Database:
         return templates
 
     @log_method
-    async def get_existing_bills_for_dedup(
-        self,
-        user_id: int,
-        start_date: str,
-        end_date: str
-    ) -> List[Dict[str, Any]]:
+    async def get_existing_bills_for_dedup(self, user_id: int, start_date: str, end_date: str) -> list[dict[str, Any]]:
         """
         获取指定日期范围内的已有账单用于数据库去重
 
@@ -8553,8 +8166,7 @@ class Database:
         """
         conn = await self._get_connection()
 
-        self.logger.debug(f"[获取已有账单] user_id={user_id}, "
-                          f"range={start_date} ~ {end_date}")
+        self.logger.debug(f"[获取已有账单] user_id={user_id}, range={start_date} ~ {end_date}")
 
         async with conn.execute(
             """
@@ -8567,7 +8179,7 @@ class Database:
               AND date <= ?
             ORDER BY date ASC
             """,
-            (user_id, start_date, end_date + ' 23:59:59')
+            (user_id, start_date, end_date + " 23:59:59"),
         ) as cursor:
             rows = await cursor.fetchall()
             bills = [dict(row) for row in rows]
@@ -8577,10 +8189,7 @@ class Database:
 
     @log_method
     async def save_import_annotation_samples(
-        self,
-        session_id: str,
-        samples: List[Dict[str, Any]],
-        user_id: int = 1
+        self, session_id: str, samples: list[dict[str, Any]], user_id: int = 1
     ) -> int:
         """保存当前导入会话中的人工标注样本。"""
         if not samples:
@@ -8591,7 +8200,7 @@ class Database:
         saved_count = 0
 
         for sample in samples:
-            preview_id = sample.get('preview_id') or sample.get('id')
+            preview_id = sample.get("preview_id") or sample.get("id")
             if not preview_id:
                 continue
 
@@ -8614,27 +8223,22 @@ class Database:
                     session_id,
                     user_id,
                     preview_id,
-                    sample.get('preview_type') or sample.get('annotated_type'),
-                    sample.get('category_id') or sample.get('annotated_category_id'),
-                    sample.get('preview_source_account_id') or sample.get('annotated_source_account_id'),
-                    sample.get('preview_destination_account_id') or sample.get('annotated_destination_account_id'),
+                    sample.get("preview_type") or sample.get("annotated_type"),
+                    sample.get("category_id") or sample.get("annotated_category_id"),
+                    sample.get("preview_source_account_id") or sample.get("annotated_source_account_id"),
+                    sample.get("preview_destination_account_id") or sample.get("annotated_destination_account_id"),
                     now,
                     now,
-                )
+                ),
             )
             saved_count += 1
 
         await conn.commit()
-        self.logger.info("[保存会话标注样本] session=%s, count=%d, user_id=%d",
-                         session_id, saved_count, user_id)
+        self.logger.info("[保存会话标注样本] session=%s, count=%d, user_id=%d", session_id, saved_count, user_id)
         return saved_count
 
     @log_method
-    async def get_import_annotation_samples(
-        self,
-        session_id: str,
-        user_id: int = 1
-    ) -> List[Dict[str, Any]]:
+    async def get_import_annotation_samples(self, session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         """读取当前导入会话中的人工标注样本。"""
         conn = await self._get_connection()
 
@@ -8644,82 +8248,75 @@ class Database:
             WHERE session_id = ? AND user_id = ?
             ORDER BY updated_at ASC, id ASC
             """,
-            (session_id, user_id)
+            (session_id, user_id),
         ) as cursor:
             rows = await cursor.fetchall()
 
         samples = [dict(row) for row in rows]
-        self.logger.info("[读取会话标注样本] session=%s, count=%d, user_id=%d",
-                         session_id, len(samples), user_id)
+        self.logger.info("[读取会话标注样本] session=%s, count=%d, user_id=%d", session_id, len(samples), user_id)
         return samples
 
     @log_method
     async def promote_import_annotation_samples_to_learning(
-        self,
-        session_id: str,
-        preview_ids: Optional[List[int]] = None,
-        user_id: int = 1
-    ) -> Dict[str, int]:
+        self, session_id: str, preview_ids: list[int] | None = None, user_id: int = 1
+    ) -> dict[str, int]:
         """将当前会话标注样本提升为长期导入学习规则。"""
         previews = await self.get_preview_by_session(session_id)
-        preview_map = {int(preview['id']): preview for preview in previews if preview.get('id')}
+        preview_map = {int(preview["id"]): preview for preview in previews if preview.get("id")}
         samples = await self.get_import_annotation_samples(session_id, user_id=user_id)
 
         selected_preview_ids = {int(pid) for pid in (preview_ids or []) if pid}
         if selected_preview_ids:
-            samples = [
-                sample for sample in samples
-                if int(sample.get('preview_id', 0) or 0) in selected_preview_ids
-            ]
+            samples = [sample for sample in samples if int(sample.get("preview_id", 0) or 0) in selected_preview_ids]
 
         if not samples:
             return {
-                'selected_samples': 0,
-                'rules_total': 0,
-                'created': 0,
-                'updated': 0,
+                "selected_samples": 0,
+                "rules_total": 0,
+                "created": 0,
+                "updated": 0,
             }
 
-        pending_rules: Dict[tuple, Dict[str, Any]] = {}
+        pending_rules: dict[tuple, dict[str, Any]] = {}
 
         for sample in samples:
-            preview_id = int(sample.get('preview_id', 0) or 0)
+            preview_id = int(sample.get("preview_id", 0) or 0)
             preview = preview_map.get(preview_id)
             if not preview:
                 continue
 
-            learned_type = sample.get('annotated_type') or preview.get('preview_type')
-            learned_category_id = sample.get('annotated_category_id')
-            learned_source_account_id = sample.get('annotated_source_account_id')
-            learned_destination_account_id = sample.get('annotated_destination_account_id')
+            learned_type = sample.get("annotated_type") or preview.get("preview_type")
+            learned_category_id = sample.get("annotated_category_id")
+            learned_source_account_id = sample.get("annotated_source_account_id")
+            learned_destination_account_id = sample.get("annotated_destination_account_id")
 
             for match_type, match_value in [
-                ('counterparty', preview.get('preview_counterparty', '')),
-                ('description', preview.get('preview_description', '')),
-                ('payment_method', preview.get('preview_payment_method', '')),
+                ("counterparty", preview.get("preview_counterparty", "")),
+                ("description", preview.get("preview_description", "")),
+                ("payment_method", preview.get("preview_payment_method", "")),
             ]:
                 normalized_value = self._normalize_import_learning_text(match_value)
                 if not normalized_value:
                     continue
 
                 pending_rules[(match_type, normalized_value)] = {
-                    'match_type': match_type,
-                    'match_value': str(match_value or '').strip(),
-                    'normalized_match_value': normalized_value,
-                    'learned_type': learned_type,
-                    'learned_category_id': learned_category_id,
-                    'learned_source_account_id': learned_source_account_id,
-                    'learned_destination_account_id': learned_destination_account_id,
-                    'source_session_id': session_id,
-                    'source_preview_id': preview_id,
+                    "match_type": match_type,
+                    "match_value": str(match_value or "").strip(),
+                    "normalized_match_value": normalized_value,
+                    "learned_type": learned_type,
+                    "learned_category_id": learned_category_id,
+                    "learned_source_account_id": learned_source_account_id,
+                    "learned_destination_account_id": learned_destination_account_id,
+                    "source_session_id": session_id,
+                    "source_preview_id": preview_id,
                 }
 
         if not pending_rules:
             return {
-                'selected_samples': len(samples),
-                'rules_total': 0,
-                'created': 0,
-                'updated': 0,
+                "selected_samples": len(samples),
+                "rules_total": 0,
+                "created": 0,
+                "updated": 0,
             }
 
         conn = await self._get_connection()
@@ -8736,9 +8333,9 @@ class Database:
                 """,
                 (
                     user_id,
-                    rule_data['match_type'],
-                    rule_data['normalized_match_value'],
-                )
+                    rule_data["match_type"],
+                    rule_data["normalized_match_value"],
+                ),
             ) as cursor:
                 existing = await cursor.fetchone()
 
@@ -8764,18 +8361,18 @@ class Database:
                 """,
                 (
                     user_id,
-                    rule_data['match_type'],
-                    rule_data['match_value'],
-                    rule_data['normalized_match_value'],
-                    rule_data['learned_type'],
-                    rule_data['learned_category_id'],
-                    rule_data['learned_source_account_id'],
-                    rule_data['learned_destination_account_id'],
-                    rule_data['source_session_id'],
-                    rule_data['source_preview_id'],
+                    rule_data["match_type"],
+                    rule_data["match_value"],
+                    rule_data["normalized_match_value"],
+                    rule_data["learned_type"],
+                    rule_data["learned_category_id"],
+                    rule_data["learned_source_account_id"],
+                    rule_data["learned_destination_account_id"],
+                    rule_data["source_session_id"],
+                    rule_data["source_preview_id"],
                     now,
                     now,
-                )
+                ),
             )
 
             async with conn.execute(
@@ -8786,14 +8383,14 @@ class Database:
                 """,
                 (
                     user_id,
-                    rule_data['match_type'],
-                    rule_data['normalized_match_value'],
-                )
+                    rule_data["match_type"],
+                    rule_data["normalized_match_value"],
+                ),
             ) as cursor:
                 saved_row = await cursor.fetchone()
 
-            rule_id = int(saved_row['id']) if saved_row else None
-            action = 'updated' if existing else 'created'
+            rule_id = int(saved_row["id"]) if saved_row else None
+            action = "updated" if existing else "created"
             if existing:
                 updated_count += 1
             else:
@@ -8804,11 +8401,11 @@ class Database:
                 rule_id=rule_id,
                 user_id=user_id,
                 action=action,
-                match_type=rule_data['match_type'],
-                match_value=rule_data['match_value'],
-                normalized_match_value=rule_data['normalized_match_value'],
+                match_type=rule_data["match_type"],
+                match_value=rule_data["match_value"],
+                normalized_match_value=rule_data["normalized_match_value"],
                 session_id=session_id,
-                preview_id=rule_data['source_preview_id'],
+                preview_id=rule_data["source_preview_id"],
                 payload=rule_data,
             )
 
@@ -8824,24 +8421,20 @@ class Database:
         )
 
         return {
-            'selected_samples': len(samples),
-            'rules_total': len(pending_rules),
-            'created': created_count,
-            'updated': updated_count,
+            "selected_samples": len(samples),
+            "rules_total": len(pending_rules),
+            "created": created_count,
+            "updated": updated_count,
         }
 
     @log_method
     async def get_import_learning_rules(
-        self,
-        user_id: int = 1,
-        enabled_only: bool = False,
-        limit: Optional[int] = 200,
-        offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        self, user_id: int = 1, enabled_only: bool = False, limit: int | None = 200, offset: int = 0
+    ) -> list[dict[str, Any]]:
         """获取导入学习规则列表。"""
         conn = await self._get_connection()
         query = "SELECT * FROM import_learning_rules WHERE user_id = ?"
-        params: List[Any] = [user_id]
+        params: list[Any] = [user_id]
 
         if enabled_only:
             query += " AND enabled = 1"
@@ -8858,15 +8451,11 @@ class Database:
         return [dict(row) for row in rows]
 
     @log_method
-    async def count_import_learning_rules(
-        self,
-        user_id: int = 1,
-        enabled_only: bool = False
-    ) -> int:
+    async def count_import_learning_rules(self, user_id: int = 1, enabled_only: bool = False) -> int:
         """统计导入学习规则总数。"""
         conn = await self._get_connection()
         query = "SELECT COUNT(*) AS total_count FROM import_learning_rules WHERE user_id = ?"
-        params: List[Any] = [user_id]
+        params: list[Any] = [user_id]
 
         if enabled_only:
             query += " AND enabled = 1"
@@ -8877,23 +8466,17 @@ class Database:
         if not row:
             return 0
 
-        return int(row['total_count'] or 0)
+        return int(row["total_count"] or 0)
 
     @log_method
-    async def set_import_learning_rule_enabled(
-        self,
-        rule_id: int,
-        enabled: bool,
-        user_id: int = 1
-    ) -> bool:
+    async def set_import_learning_rule_enabled(self, rule_id: int, enabled: bool, user_id: int = 1) -> bool:
         """启用或禁用导入学习规则。"""
         conn = await self._get_connection()
         enabled_value = 1 if enabled else 0
         now = datetime.now().isoformat()
 
         async with conn.execute(
-            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1",
-            (rule_id, user_id)
+            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1", (rule_id, user_id)
         ) as cursor:
             existing = await cursor.fetchone()
 
@@ -8906,37 +8489,32 @@ class Database:
             SET enabled = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
             """,
-            (enabled_value, now, rule_id, user_id)
+            (enabled_value, now, rule_id, user_id),
         )
 
         await self._record_import_learning_rule_log(
             conn,
             rule_id=rule_id,
             user_id=user_id,
-            action='enabled' if enabled else 'disabled',
-            match_type=existing['match_type'],
-            match_value=existing['match_value'],
-            normalized_match_value=existing['normalized_match_value'],
-            session_id=existing['source_session_id'],
-            preview_id=existing['source_preview_id'],
-            payload={'enabled': enabled_value},
+            action="enabled" if enabled else "disabled",
+            match_type=existing["match_type"],
+            match_value=existing["match_value"],
+            normalized_match_value=existing["normalized_match_value"],
+            session_id=existing["source_session_id"],
+            preview_id=existing["source_preview_id"],
+            payload={"enabled": enabled_value},
         )
 
         await conn.commit()
         return True
 
     @log_method
-    async def delete_import_learning_rule(
-        self,
-        rule_id: int,
-        user_id: int = 1
-    ) -> bool:
+    async def delete_import_learning_rule(self, rule_id: int, user_id: int = 1) -> bool:
         """删除导入学习规则。"""
         conn = await self._get_connection()
 
         async with conn.execute(
-            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1",
-            (rule_id, user_id)
+            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1", (rule_id, user_id)
         ) as cursor:
             existing = await cursor.fetchone()
 
@@ -8947,28 +8525,21 @@ class Database:
             conn,
             rule_id=rule_id,
             user_id=user_id,
-            action='deleted',
-            match_type=existing['match_type'],
-            match_value=existing['match_value'],
-            normalized_match_value=existing['normalized_match_value'],
-            session_id=existing['source_session_id'],
-            preview_id=existing['source_preview_id'],
+            action="deleted",
+            match_type=existing["match_type"],
+            match_value=existing["match_value"],
+            normalized_match_value=existing["normalized_match_value"],
+            session_id=existing["source_session_id"],
+            preview_id=existing["source_preview_id"],
             payload=dict(existing),
         )
 
-        await conn.execute(
-            "DELETE FROM import_learning_rules WHERE id = ? AND user_id = ?",
-            (rule_id, user_id)
-        )
+        await conn.execute("DELETE FROM import_learning_rules WHERE id = ? AND user_id = ?", (rule_id, user_id))
         await conn.commit()
         return True
 
     @log_method
-    async def increment_import_learning_rule_usage(
-        self,
-        rule_ids: List[int],
-        user_id: int = 1
-    ) -> int:
+    async def increment_import_learning_rule_usage(self, rule_ids: list[int], user_id: int = 1) -> int:
         """批量增加导入学习规则命中次数。"""
         unique_ids = [int(rule_id) for rule_id in sorted(set(rule_ids)) if rule_id]
         if not unique_ids:
@@ -8976,7 +8547,7 @@ class Database:
 
         conn = await self._get_connection()
         now = datetime.now().isoformat()
-        placeholders = ','.join(['?' for _ in unique_ids])
+        placeholders = ",".join(["?" for _ in unique_ids])
         cursor = await conn.execute(
             f"""
             UPDATE import_learning_rules
@@ -8985,16 +8556,13 @@ class Database:
                 updated_at = ?
             WHERE user_id = ? AND id IN ({placeholders})
             """,
-            tuple([now, now, user_id] + unique_ids)
+            tuple([now, now, user_id] + unique_ids),
         )
         await conn.commit()
         return cursor.rowcount
 
     @log_method
-    async def batch_update_preview_classification(
-        self,
-        updates: List[Dict[str, Any]]
-    ) -> int:
+    async def batch_update_preview_classification(self, updates: list[dict[str, Any]]) -> int:
         """
         v6.55: 批量更新预览账单的分类和账户信息
 
@@ -9022,7 +8590,7 @@ class Database:
 
         for update_item in updates:
             try:
-                preview_id = update_item.get('id')
+                preview_id = update_item.get("id")
                 if not preview_id:
                     continue
 
@@ -9037,13 +8605,13 @@ class Database:
                     WHERE id = ?
                     """,
                     (
-                        update_item.get('preview_type', ''),
-                        update_item.get('preview_main_category', ''),
-                        update_item.get('preview_sub_category', ''),
-                        update_item.get('preview_source_account_id'),
-                        update_item.get('preview_destination_account_id'),
-                        preview_id
-                    )
+                        update_item.get("preview_type", ""),
+                        update_item.get("preview_main_category", ""),
+                        update_item.get("preview_sub_category", ""),
+                        update_item.get("preview_source_account_id"),
+                        update_item.get("preview_destination_account_id"),
+                        preview_id,
+                    ),
                 )
                 updated_count += 1
 
@@ -9057,7 +8625,7 @@ class Database:
     # ==================== v6.88: ML 训练数据 ====================
 
     @log_method
-    async def get_ml_training_data(self, user_id: int = 1) -> List[Dict[str, Any]]:
+    async def get_ml_training_data(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取用于ML分类器训练的已分类账单数据
 
         只返回有主分类的账单，用于训练文本分类模型。
@@ -9086,10 +8654,5 @@ class Database:
         async with conn.execute(query, (user_id,)) as cursor:
             rows = await cursor.fetchall()
             result = [dict(row) for row in rows]
-            self.logger.info(
-                "[ML训练数据] user_id=%d, 获取 %d 条已分类账单",
-                user_id, len(result)
-            )
+            self.logger.info("[ML训练数据] user_id=%d, 获取 %d 条已分类账单", user_id, len(result))
             return result
-
-

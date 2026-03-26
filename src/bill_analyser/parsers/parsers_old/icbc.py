@@ -29,7 +29,7 @@ class ICBCParser(BaseBankParser):
     def can_parse(self, file_path: str) -> bool:
         """判断是否为工商银行账单"""
         try:
-            if not file_path.endswith(('.xlsx', '.xls')):
+            if not file_path.endswith((".xlsx", ".xls")):
                 return False
 
             # 读取文件前几行
@@ -45,29 +45,50 @@ class ICBCParser(BaseBankParser):
                     content += cell_value + " "
 
             # 工商银行强特征标识 - 必须包含至少一个
-            icbc_strong_indicators = [
-                "工商银行", "ICBC", "中国工商银行"
-            ]
+            icbc_strong_indicators = ["工商银行", "ICBC", "中国工商银行"]
 
             # 工商银行特有的字段组合
-            icbc_specific_fields = [
-                "收入/支出金额", "储种", "对方户名", "对方账号", "历史明细"
-            ]
+            icbc_specific_fields = ["收入/支出金额", "储种", "对方户名", "对方账号", "历史明细"]
 
             # 排除其他银行的强特征
             other_bank_strong_indicators = [
                 # 中国农业银行特征（旧格式）
-                "中国农业银⾏", "账⼾活期交易明细清单", "⼾名", "交易⽇期", "交易⾦额", "对⼿信息", "⽇志号",
+                "中国农业银⾏",
+                "账⼾活期交易明细清单",
+                "⼾名",
+                "交易⽇期",
+                "交易⾦额",
+                "对⼿信息",
+                "⽇志号",
                 # 中国农业银行特征（新格式）
-                "中国农业银行", "账户明细查询", "交易渠道", "交易类型", "交易用途",
+                "中国农业银行",
+                "账户明细查询",
+                "交易渠道",
+                "交易类型",
+                "交易用途",
                 # 民生银行特征
-                "中国民生银行", "民生银行股份有限公司", "个人账户对账单", "凭证类型", "凭证号码", "客户姓名", "客户账号"
+                "中国民生银行",
+                "民生银行股份有限公司",
+                "个人账户对账单",
+                "凭证类型",
+                "凭证号码",
+                "客户姓名",
+                "客户账号",
             ]
 
             # 检查中国农业银行新格式的特殊组合特征
             abc_new_format_indicators = [
-                "交易日期", "交易时间", "交易金额", "本次余额", "对方户名", "对方账号",
-                "交易行", "交易渠道", "交易类型", "交易用途", "交易摘要"
+                "交易日期",
+                "交易时间",
+                "交易金额",
+                "本次余额",
+                "对方户名",
+                "对方账号",
+                "交易行",
+                "交易渠道",
+                "交易类型",
+                "交易用途",
+                "交易摘要",
             ]
             abc_new_format_matches = sum(1 for field in abc_new_format_indicators if field in content)
             is_abc_new_format = abc_new_format_matches >= 8  # 如果匹配8个或以上，很可能是中国农业银行新格式
@@ -79,9 +100,7 @@ class ICBCParser(BaseBankParser):
             has_icbc_fields = sum(1 for field in icbc_specific_fields if field in content) >= 2
 
             # 检查是否包含其他银行强标识
-            has_other_strong = any(
-                indicator in content for indicator in other_bank_strong_indicators
-            )
+            has_other_strong = any(indicator in content for indicator in other_bank_strong_indicators)
 
             # 工商银行判定逻辑：必须有强标识或特有字段组合，且不能有其他银行强标识，也不能是中国农业银行新格式
             is_icbc = (has_icbc_strong or has_icbc_fields) and not has_other_strong and not is_abc_new_format
@@ -147,7 +166,7 @@ class ICBCParser(BaseBankParser):
             return False
 
         next_cells = []
-        for k in range(j+1, min(j+5, len(df.columns))):
+        for k in range(j + 1, min(j + 5, len(df.columns))):
             if not pd.isna(df.iloc[i, k]):
                 next_cells.append(str(df.iloc[i, k]))
 
@@ -247,12 +266,12 @@ class ICBCParser(BaseBankParser):
                 if pd.isna(val):
                     continue
                 cell_str = str(val).strip()
-                if re.match(r'\d{4}-\d{2}-\d{2}', cell_str):
+                if re.match(r"\d{4}-\d{2}-\d{2}", cell_str):
                     return True
 
             return False
 
-        except (IndexError, ValueError, TypeError):
+        except IndexError, ValueError, TypeError:
             return False
 
     def _is_valid_type2_transaction_row(self, row: pd.Series) -> bool:
@@ -267,12 +286,12 @@ class ICBCParser(BaseBankParser):
             for i in range(min(3, len(row))):
                 cell = row.iloc[i] if i < len(row) and not pd.isna(row.iloc[i]) else ""
                 cell_str = str(cell).strip()
-                if re.match(r'\d{4}-\d{2}-\d{2}', cell_str):
+                if re.match(r"\d{4}-\d{2}-\d{2}", cell_str):
                     return True
 
             return False
 
-        except (IndexError, ValueError, TypeError):
+        except IndexError, ValueError, TypeError:
             return False
 
     def _parse_type1_transaction_row(self, row: pd.Series) -> Optional[Dict[str, Any]]:
@@ -307,8 +326,8 @@ class ICBCParser(BaseBankParser):
                 continue
 
             cell_str = str(row.iloc[col_idx]).strip()
-            if re.match(r'\d{4}-\d{2}-\d{2}', cell_str):
-                transaction['日期'] = cell_str
+            if re.match(r"\d{4}-\d{2}-\d{2}", cell_str):
+                transaction["日期"] = cell_str
                 return True
         return False
 
@@ -319,13 +338,15 @@ class ICBCParser(BaseBankParser):
                 continue
 
             cell_str = str(row.iloc[col_idx]).strip()
-            if (len(cell_str) > 2 and
-                not re.match(r'^\d+\.?\d*$', cell_str) and
-                not re.match(r'\d{4}-\d{2}-\d{2}', cell_str)):
-                transaction['商品说明'] = cell_str
+            if (
+                len(cell_str) > 2
+                and not re.match(r"^\d+\.?\d*$", cell_str)
+                and not re.match(r"\d{4}-\d{2}-\d{2}", cell_str)
+            ):
+                transaction["商品说明"] = cell_str
                 return
 
-        transaction['商品说明'] = ""
+        transaction["商品说明"] = ""
 
     def _extract_amount_type1(self, row: pd.Series, transaction: dict) -> None:
         """提取Type1的金额"""
@@ -339,16 +360,16 @@ class ICBCParser(BaseBankParser):
                 amount = self._clean_amount_string(amount_str)
                 if abs(amount) > 0.01:  # 找到有效金额
                     break
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 continue
 
         # 根据交易类型或摘要判断收支类型
-        description = transaction.get('商品说明', '')
+        description = transaction.get("商品说明", "")
 
         # 支出类型关键词（这些通常是支出）
-        expense_keywords = ['转账', '消费', '取现', '提取', '购买', '付款', '缴费', '支付', '汇款转出']
+        expense_keywords = ["转账", "消费", "取现", "提取", "购买", "付款", "缴费", "支付", "汇款转出"]
         # 收入类型关键词
-        income_keywords = ['存入', '转入', '工资', '利息', '股息', '分红', '退款', '汇款转入', '收款']
+        income_keywords = ["存入", "转入", "工资", "利息", "股息", "分红", "退款", "汇款转入", "收款"]
 
         # 根据关键词判断收支类型
         is_expense = any(keyword in description for keyword in expense_keywords)
@@ -365,19 +386,19 @@ class ICBCParser(BaseBankParser):
             # 如果是收入类型但金额为负，转为正数
             amount = abs(amount)
 
-        transaction['金额'] = amount
+        transaction["金额"] = amount
 
     def _extract_counterparty_type1(self, transaction: dict) -> None:
         """提取Type1的交易对方"""
-        transaction['交易对方'] = ""
+        transaction["交易对方"] = ""
 
         # 从摘要中提取商户信息
-        if '商品说明' in transaction:
-            desc = transaction['商品说明']
-            if ':' in desc:
-                parts = desc.split(':', 1)
+        if "商品说明" in transaction:
+            desc = transaction["商品说明"]
+            if ":" in desc:
+                parts = desc.split(":", 1)
                 if len(parts) > 1:
-                    transaction['交易对方'] = parts[1].strip()
+                    transaction["交易对方"] = parts[1].strip()
 
     def _parse_type2_transaction_row(self, row: pd.Series) -> Optional[Dict[str, Any]]:
         """解析Type2交易行"""
@@ -391,8 +412,8 @@ class ICBCParser(BaseBankParser):
                     continue
 
                 cell_str = str(row.iloc[col_idx]).strip()
-                if re.match(r'\d{4}-\d{2}-\d{2}', cell_str):
-                    transaction['日期'] = self._parse_datetime(cell_str)
+                if re.match(r"\d{4}-\d{2}-\d{2}", cell_str):
+                    transaction["日期"] = self._parse_datetime(cell_str)
                     date_found = True
                     break
 
@@ -405,32 +426,32 @@ class ICBCParser(BaseBankParser):
             # 摘要通常在第9列 (索引8)
             if len(row) > 8 and not pd.isna(row.iloc[8]):
                 desc = str(row.iloc[8]).strip()
-                if desc and desc not in ['活期', '人民币', '钞']:
+                if desc and desc not in ["活期", "人民币", "钞"]:
                     description_parts.append(desc)
 
             # 对方户名在第13列 (索引12)
             if len(row) > 12 and not pd.isna(row.iloc[12]):
                 counterparty = str(row.iloc[12]).strip()
-                if counterparty and counterparty != '（空）':
-                    transaction['交易对方'] = counterparty
+                if counterparty and counterparty != "（空）":
+                    transaction["交易对方"] = counterparty
 
-            transaction['商品说明'] = description_parts[0] if description_parts else "转账"
+            transaction["商品说明"] = description_parts[0] if description_parts else "转账"
 
             # 提取金额 - 收入/支出金额在第11列 (索引10)
             amount = 0.0
             if len(row) > 10 and not pd.isna(row.iloc[10]):
                 try:
                     amount = self._clean_amount_string(str(row.iloc[10]))
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pass
 
             # 根据交易类型或摘要判断收支类型
-            description = transaction.get('商品说明', '')
+            description = transaction.get("商品说明", "")
 
             # 支出类型关键词（这些通常是支出）
-            expense_keywords = ['转账', '消费', '取现', '提取', '购买', '付款', '缴费', '支付', '汇款转出', '支取']
+            expense_keywords = ["转账", "消费", "取现", "提取", "购买", "付款", "缴费", "支付", "汇款转出", "支取"]
             # 收入类型关键词
-            income_keywords = ['存入', '转入', '工资', '利息', '股息', '分红', '退款', '汇款转入', '收款', '存款']
+            income_keywords = ["存入", "转入", "工资", "利息", "股息", "分红", "退款", "汇款转入", "收款", "存款"]
 
             # 根据关键词判断收支类型
             is_expense = any(keyword in description for keyword in expense_keywords)
@@ -447,10 +468,10 @@ class ICBCParser(BaseBankParser):
                 # 如果是收入类型但金额为负，转为正数
                 amount = abs(amount)
 
-            transaction['金额'] = amount
+            transaction["金额"] = amount
 
-            if '交易对方' not in transaction:
-                transaction['交易对方'] = ""
+            if "交易对方" not in transaction:
+                transaction["交易对方"] = ""
 
             return transaction if amount != 0 else None
 

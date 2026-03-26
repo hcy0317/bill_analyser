@@ -2,6 +2,7 @@
 解析器工厂模块
 负责根据文件类型选择合适的解析器
 """
+
 import os
 import logging
 
@@ -28,31 +29,33 @@ def get_enhanced_parser(file_path: str, content_preview: str = ""):
         logger.warning("银行解析器检测失败: %s", e)
 
     # 支付宝
-    if ('alipay' in filename or '支付宝' in filename or
-        'alipay_record' in filename):
+    if "alipay" in filename or "支付宝" in filename or "alipay_record" in filename:
         from .enhanced_bill_parser import EnhancedAlipayParser
+
         return EnhancedAlipayParser()
 
     # 微信
-    if ('wechat' in filename or '微信' in filename or
-        '微信支付账单' in filename):
+    if "wechat" in filename or "微信" in filename or "微信支付账单" in filename:
         from .enhanced_bill_parser import EnhancedWechatParser
+
         return EnhancedWechatParser()
 
     # 通过内容判断
     if content_preview:
         content_lower = content_preview.lower()
 
-        if ('alipay' in content_lower or '支付宝' in content_preview):
+        if "alipay" in content_lower or "支付宝" in content_preview:
             from .enhanced_bill_parser import EnhancedAlipayParser
+
             return EnhancedAlipayParser()
 
-        if ('wechat' in content_lower or '微信支付' in content_preview):
+        if "wechat" in content_lower or "微信支付" in content_preview:
             from .enhanced_bill_parser import EnhancedWechatParser
+
             return EnhancedWechatParser()
 
     # 默认根据文件扩展名选择
-    if file_path.endswith(('.xlsx', '.xls')):
+    if file_path.endswith((".xlsx", ".xls")):
         # Excel文件，尝试银行解析器
         try:
             from . import BankParserFactory
@@ -66,8 +69,10 @@ def get_enhanced_parser(file_path: str, content_preview: str = ""):
             pass
         # 如果银行解析器失败，使用支付宝解析器作为后备
         from .enhanced_bill_parser import EnhancedAlipayParser
+
         return EnhancedAlipayParser()
 
     # CSV文件，可能是支付宝或微信，使用支付宝解析器作为默认
     from .enhanced_bill_parser import EnhancedAlipayParser
+
     return EnhancedAlipayParser()

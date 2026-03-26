@@ -66,10 +66,7 @@ class AdvancedLogger:
     DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10MB
     DEFAULT_BACKUP_COUNT = 10
     DEFAULT_RETENTION_DAYS = 30
-    DEFAULT_FORMAT = (
-        "[%(asctime)s] [%(threadName)-10s] [%(levelname)-8s] "
-        "[%(name)s.%(funcName)s] %(message)s"
-    )
+    DEFAULT_FORMAT = "[%(asctime)s] [%(threadName)-10s] [%(levelname)-8s] [%(name)s.%(funcName)s] %(message)s"
     DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(
@@ -82,7 +79,7 @@ class AdvancedLogger:
         backup_count: int = DEFAULT_BACKUP_COUNT,
         retention_days: int = DEFAULT_RETENTION_DAYS,
         enable_async: bool = True,
-        enable_console: bool = True
+        enable_console: bool = True,
     ):
         """
         初始化高级日志记录器
@@ -120,10 +117,7 @@ class AdvancedLogger:
         self.logger.handlers.clear()
 
         # 创建formatter
-        self.formatter = logging.Formatter(
-            self.DEFAULT_FORMAT,
-            datefmt=self.DEFAULT_DATE_FORMAT
-        )
+        self.formatter = logging.Formatter(self.DEFAULT_FORMAT, datefmt=self.DEFAULT_DATE_FORMAT)
 
         # 添加handlers
         self._setup_file_handler()
@@ -139,10 +133,7 @@ class AdvancedLogger:
 
         # 使用RotatingFileHandler实现按大小滚动
         file_handler = RotatingFileHandler(
-            filename=str(log_path),
-            maxBytes=self.max_bytes,
-            backupCount=self.backup_count,
-            encoding="utf-8"
+            filename=str(log_path), maxBytes=self.max_bytes, backupCount=self.backup_count, encoding="utf-8"
         )
         file_handler.setLevel(self.level)
         file_handler.setFormatter(self.formatter)
@@ -164,6 +155,7 @@ class AdvancedLogger:
 
     def _start_cleanup_task(self) -> None:
         """启动日志清理任务"""
+
         def cleanup_worker():
             """清理工作线程"""
             while True:
@@ -175,11 +167,7 @@ class AdvancedLogger:
                 # 每天清理一次
                 threading.Event().wait(86400)  # 24小时
 
-        cleanup_thread = threading.Thread(
-            target=cleanup_worker,
-            daemon=True,
-            name="LogCleanup"
-        )
+        cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True, name="LogCleanup")
         cleanup_thread.start()
 
     def _cleanup_old_logs(self) -> None:
@@ -227,12 +215,7 @@ _logger_cache = {}
 _cache_lock = threading.Lock()
 
 
-def get_logger(
-    name: str,
-    log_dir: Optional[str] = None,
-    level: int = logging.INFO,
-    **kwargs
-) -> AdvancedLogger:
+def get_logger(name: str, log_dir: Optional[str] = None, level: int = logging.INFO, **kwargs) -> AdvancedLogger:
     """
     获取或创建logger实例
 
@@ -249,18 +232,12 @@ def get_logger(
 
     with _cache_lock:
         if cache_key not in _logger_cache:
-            _logger_cache[cache_key] = AdvancedLogger(
-                name=name,
-                log_dir=log_dir,
-                level=level,
-                **kwargs
-            )
+            _logger_cache[cache_key] = AdvancedLogger(name=name, log_dir=log_dir, level=level, **kwargs)
 
         return _logger_cache[cache_key]
 
 
-def log_method(func: Optional[Callable] = None, *, log_args: bool = True,
-               log_result: bool = True) -> Callable:
+def log_method(func: Optional[Callable] = None, *, log_args: bool = True, log_result: bool = True) -> Callable:
     """
     方法日志装饰器
 
@@ -283,14 +260,15 @@ def log_method(func: Optional[Callable] = None, *, log_args: bool = True,
         async def async_function(a, b):
             return a * b
     """
+
     def decorator(f: Callable) -> Callable:
         # 确定logger名称
-        if hasattr(f, '__self__'):
+        if hasattr(f, "__self__"):
             # 实例方法
             logger_name = f.__self__.__class__.__name__
-        elif hasattr(f, '__qualname__') and '.' in f.__qualname__:
+        elif hasattr(f, "__qualname__") and "." in f.__qualname__:
             # 类方法或静态方法
-            logger_name = f.__qualname__.rsplit('.', 1)[0]
+            logger_name = f.__qualname__.rsplit(".", 1)[0]
         else:
             # 普通函数
             logger_name = f.__module__
@@ -321,9 +299,7 @@ def log_method(func: Optional[Callable] = None, *, log_args: bool = True,
                     return result
 
                 except Exception as e:
-                    logger.error(
-                        f"!!! 方法异常: {f.__name__} - {type(e).__name__}: {e}"
-                    )
+                    logger.error(f"!!! 方法异常: {f.__name__} - {type(e).__name__}: {e}")
                     logger.debug(f"异常堆栈: {traceback.format_exc()}")
                     raise
 
@@ -352,9 +328,7 @@ def log_method(func: Optional[Callable] = None, *, log_args: bool = True,
                 return result
 
             except Exception as e:
-                logger.error(
-                    f"!!! 方法异常: {f.__name__} - {type(e).__name__}: {e}"
-                )
+                logger.error(f"!!! 方法异常: {f.__name__} - {type(e).__name__}: {e}")
                 logger.debug(f"异常堆栈: {traceback.format_exc()}")
                 raise
 
@@ -381,11 +355,13 @@ def log_step(step_name: str) -> Callable:
         def check_permission(user_id):
             pass
     """
+
     def decorator(func: Callable) -> Callable:
         logger_name = func.__module__
         logger = get_logger(logger_name)
 
         if asyncio.iscoroutinefunction(func):
+
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
                 logger.info(f"[步骤] {step_name} - 开始")
@@ -497,9 +473,9 @@ def _format_value(value: Any, max_len: int = 200) -> str:
 
 # 导出主要接口
 __all__ = [
-    'AdvancedLogger',
-    'get_logger',
-    'log_method',
-    'log_step',
-    'AsyncLogHandler',
+    "AdvancedLogger",
+    "get_logger",
+    "log_method",
+    "log_step",
+    "AsyncLogHandler",
 ]

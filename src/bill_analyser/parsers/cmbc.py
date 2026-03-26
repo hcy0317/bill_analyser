@@ -30,25 +30,25 @@ class CMBCParser(ParserBase):
     def __init__(self):
         """初始化"""
         super().__init__()
-        self.supported_extensions = ['.csv', '.xlsx', '.xls']
+        self.supported_extensions = [".csv", ".xlsx", ".xls"]
         self.logger.info("民生银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:
         """判断是否为民生银行账单"""
         try:
-            if not file_path.endswith(('.xlsx', '.xls', '.csv')):
+            if not file_path.endswith((".xlsx", ".xls", ".csv")):
                 return False
 
             # 检查文件名（优先级最低）
-            if 'cmbc' in file_path.lower() or '民生' in file_path:
+            if "cmbc" in file_path.lower() or "民生" in file_path:
                 return True
 
             # 尝试读取文件内容进行判断
             try:
-                if file_path.endswith('.csv'):
+                if file_path.endswith(".csv"):
                     # CSV文件，尝试多种编码
-                    for encoding in ['gbk', 'utf-8', 'gb2312']:
+                    for encoding in ["gbk", "utf-8", "gb2312"]:
                         try:
                             df = pd.read_csv(file_path, encoding=encoding, nrows=15)
                             break
@@ -59,7 +59,7 @@ class CMBCParser(ParserBase):
                 else:
                     # Excel文件，先尝试HTML格式
                     try:
-                        tables = pd.read_html(file_path, encoding='utf-8')
+                        tables = pd.read_html(file_path, encoding="utf-8")
                         if tables and len(tables) > 0:
                             df = tables[0].head(15)
                         else:
@@ -78,9 +78,7 @@ class CMBCParser(ParserBase):
                     content += cell_value + " "
 
             # 民生银行强特征标识
-            cmbc_strong_indicators = [
-                "中国民生银行", "民生银行股份有限公司", "个人账户对账单"
-            ]
+            cmbc_strong_indicators = ["中国民生银行", "民生银行股份有限公司", "个人账户对账单"]
 
             # 民生银行特有的列名组合（最关键的识别依据）
             cmbc_column_patterns = [
@@ -90,7 +88,7 @@ class CMBCParser(ParserBase):
                 ["对方开户行", "凭证号码"],
                 # 新格式（HTML导出）
                 ["交易时间", "支出金额", "存入金额", "账户余额"],
-                ["对方账号", "对方名称", "对方开户行"]
+                ["对方账号", "对方名称", "对方开户行"],
             ]
 
             # 排除其他银行的特征
@@ -130,11 +128,11 @@ class CMBCParser(ParserBase):
     def _is_html_file(self, file_path: str) -> bool:
         """检查文件是否为HTML格式（某些银行导出的.xls实际是HTML）"""
         try:
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 first_bytes = f.read(100)
                 # 检查是否以 <html 或 <!DOCTYPE html 开头
-                first_str = first_bytes.decode('utf-8', errors='ignore').lower().strip()
-                return first_str.startswith('<html') or first_str.startswith('<!doctype html')
+                first_str = first_bytes.decode("utf-8", errors="ignore").lower().strip()
+                return first_str.startswith("<html") or first_str.startswith("<!doctype html")
         except Exception:  # pylint: disable=broad-except
             return False
 
@@ -144,7 +142,7 @@ class CMBCParser(ParserBase):
 
         try:
             # 使用pandas的read_html读取HTML表格
-            tables = pd.read_html(file_path, encoding='utf-8')
+            tables = pd.read_html(file_path, encoding="utf-8")
 
             if not tables:
                 self.logger.warning("HTML文件中未找到表格")
@@ -158,8 +156,8 @@ class CMBCParser(ParserBase):
             header_row_idx = None
             for idx in range(min(10, len(df))):
                 row_values = [str(v) for v in df.iloc[idx].tolist() if pd.notna(v)]
-                row_text = ' '.join(row_values)
-                if '交易时间' in row_text:
+                row_text = " ".join(row_values)
+                if "交易时间" in row_text:
                     header_row_idx = idx
                     break
 
@@ -171,7 +169,7 @@ class CMBCParser(ParserBase):
             headers = []
             for val in df.iloc[header_row_idx].tolist():
                 if pd.isna(val):
-                    headers.append('')
+                    headers.append("")
                 else:
                     headers.append(str(val).strip())
 
@@ -185,42 +183,42 @@ class CMBCParser(ParserBase):
                     for col_idx, header in enumerate(headers):
                         if header and col_idx < len(row):
                             val = row.iloc[col_idx]
-                            row_dict[header] = str(val).strip() if pd.notna(val) else ''
+                            row_dict[header] = str(val).strip() if pd.notna(val) else ""
 
                     # 提取交易时间（格式: 20170101\t19:36:56）
-                    date_str = row_dict.get('交易时间', '')
-                    if not date_str or date_str == 'nan' or '交易时间' in date_str:
+                    date_str = row_dict.get("交易时间", "")
+                    if not date_str or date_str == "nan" or "交易时间" in date_str:
                         continue
 
                     # 处理日期格式：20170101\t19:36:56 -> 2017-01-01 19:36:56
-                    date_str = date_str.replace('\\t', ' ').replace('\t', ' ')
+                    date_str = date_str.replace("\\t", " ").replace("\t", " ")
                     if len(date_str) >= 8 and date_str[:8].isdigit():
                         # 格式化日期：20170101 -> 2017-01-01
                         date_part = date_str[:8]
-                        time_part = date_str[8:].strip() if len(date_str) > 8 else ''
+                        time_part = date_str[8:].strip() if len(date_str) > 8 else ""
                         formatted_date = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
                         if time_part:
                             formatted_date += f" {time_part}"
                         date_str = formatted_date
 
                     # 提取金额 - 民生银行有"支出金额"和"存入金额"两列
-                    debit_str = row_dict.get('支出金额', '').strip()
-                    credit_str = row_dict.get('存入金额', '').strip()
+                    debit_str = row_dict.get("支出金额", "").strip()
+                    credit_str = row_dict.get("存入金额", "").strip()
 
                     amount_value = 0.0
-                    transaction_type = '支出'
+                    transaction_type = "支出"
 
-                    if credit_str and credit_str not in ['', 'nan', 'NaN']:
+                    if credit_str and credit_str not in ["", "nan", "NaN"]:
                         try:
-                            amount_value = abs(float(credit_str.replace(',', '')))
-                            transaction_type = '收入'
-                        except (ValueError, TypeError):
+                            amount_value = abs(float(credit_str.replace(",", "")))
+                            transaction_type = "收入"
+                        except ValueError, TypeError:
                             pass
-                    elif debit_str and debit_str not in ['', 'nan', 'NaN']:
+                    elif debit_str and debit_str not in ["", "nan", "NaN"]:
                         try:
-                            amount_value = abs(float(debit_str.replace(',', '')))
-                            transaction_type = '支出'
-                        except (ValueError, TypeError):
+                            amount_value = abs(float(debit_str.replace(",", "")))
+                            transaction_type = "支出"
+                        except ValueError, TypeError:
                             pass
 
                     if amount_value == 0:
@@ -228,14 +226,14 @@ class CMBCParser(ParserBase):
 
                     # 构建账单
                     bill = {
-                        'date': date_str,
-                        'type': transaction_type,
-                        'counterparty': row_dict.get('对方名称', '') or row_dict.get('对方户名', ''),
-                        'description': row_dict.get('摘要', '') or row_dict.get('交易方式', ''),
-                        'amount': str(amount_value),
-                        'channel': '民生银行',
-                        'opponent_account': row_dict.get('对方账号', ''),
-                        'payment_method': row_dict.get('交易方式', ''),
+                        "date": date_str,
+                        "type": transaction_type,
+                        "counterparty": row_dict.get("对方名称", "") or row_dict.get("对方户名", ""),
+                        "description": row_dict.get("摘要", "") or row_dict.get("交易方式", ""),
+                        "amount": str(amount_value),
+                        "channel": "民生银行",
+                        "opponent_account": row_dict.get("对方账号", ""),
+                        "payment_method": row_dict.get("交易方式", ""),
                     }
 
                     bills.append(bill)
@@ -262,14 +260,14 @@ class CMBCParser(ParserBase):
 
         try:
             # 读取文件
-            if file_path.endswith('.csv'):
+            if file_path.endswith(".csv"):
                 # CSV格式
-                with open(file_path, 'r', encoding='gbk') as f:
+                with open(file_path, "r", encoding="gbk") as f:
                     lines = f.readlines()
 
                     data_start = 0
                     for i, line in enumerate(lines):
-                        if '交易日期' in line or '记账日期' in line or '交易时间' in line:
+                        if "交易日期" in line or "记账日期" in line or "交易时间" in line:
                             data_start = i
                             break
 
@@ -281,24 +279,24 @@ class CMBCParser(ParserBase):
 
                     for row in reader:
                         try:
-                            date_field = row.get('交易日期') or row.get('记账日期') or row.get('交易时间') or ''
+                            date_field = row.get("交易日期") or row.get("记账日期") or row.get("交易时间") or ""
                             if not date_field.strip():
                                 continue
 
-                            amount_str = row.get('交易金额') or row.get('金额') or '0'
+                            amount_str = row.get("交易金额") or row.get("金额") or "0"
 
                             # 判断收支
-                            transaction_type = '支出'
-                            if row.get('收/支') == '收入' or float(amount_str.replace(',', '')) > 0:
-                                transaction_type = '收入'
+                            transaction_type = "支出"
+                            if row.get("收/支") == "收入" or float(amount_str.replace(",", "")) > 0:
+                                transaction_type = "收入"
 
                             bill = {
-                                'date': date_field,
-                                'type': transaction_type,
-                                'counterparty': row.get('交易对手') or row.get('对方户名') or row.get('对方名称') or '',
-                                'description': row.get('交易说明') or row.get('摘要') or '',
-                                'amount': amount_str.replace('-', ''),
-                                'channel': '民生银行'
+                                "date": date_field,
+                                "type": transaction_type,
+                                "counterparty": row.get("交易对手") or row.get("对方户名") or row.get("对方名称") or "",
+                                "description": row.get("交易说明") or row.get("摘要") or "",
+                                "amount": amount_str.replace("-", ""),
+                                "channel": "民生银行",
                             }
 
                             bills.append(bill)
@@ -319,11 +317,8 @@ class CMBCParser(ParserBase):
                 header_row = -1
                 for i in range(min(10, len(df))):
                     cols = df.columns
-                    row_text = ' '.join(
-                        str(df.iloc[i, j]) for j in range(len(cols))
-                        if not pd.isna(df.iloc[i, j])
-                    )
-                    if '交易日期' in row_text or '交易时间' in row_text:
+                    row_text = " ".join(str(df.iloc[i, j]) for j in range(len(cols)) if not pd.isna(df.iloc[i, j]))
+                    if "交易日期" in row_text or "交易时间" in row_text:
                         header_row = i
                         break
 
@@ -335,7 +330,7 @@ class CMBCParser(ParserBase):
                 headers = []
                 for j in range(len(df.columns)):
                     val = df.iloc[header_row, j]
-                    headers.append(str(val) if not pd.isna(val) else f'col_{j}')
+                    headers.append(str(val) if not pd.isna(val) else f"col_{j}")
 
                 # 解析数据行
                 for i in range(header_row + 1, len(df)):
@@ -343,53 +338,58 @@ class CMBCParser(ParserBase):
                         row_dict = {}
                         for j, header in enumerate(headers):
                             val = df.iloc[i, j]
-                            row_dict[header] = str(val) if not pd.isna(val) else ''
+                            row_dict[header] = str(val) if not pd.isna(val) else ""
 
                         # 获取日期
-                        date_field = row_dict.get('交易日期') or row_dict.get('交易时间') or row_dict.get('记账日期') or ''
-                        if not date_field.strip() or date_field == 'nan':
+                        date_field = (
+                            row_dict.get("交易日期") or row_dict.get("交易时间") or row_dict.get("记账日期") or ""
+                        )
+                        if not date_field.strip() or date_field == "nan":
                             continue
 
                         # 获取金额 - 新格式可能有支出金额和存入金额分列
-                        amount_str = '0'
-                        transaction_type = '支出'
+                        amount_str = "0"
+                        transaction_type = "支出"
 
-                        if '支出金额' in row_dict and '存入金额' in row_dict:
+                        if "支出金额" in row_dict and "存入金额" in row_dict:
                             # 新格式：分列显示
-                            debit = row_dict.get('支出金额', '').strip()
-                            credit = row_dict.get('存入金额', '').strip()
+                            debit = row_dict.get("支出金额", "").strip()
+                            credit = row_dict.get("存入金额", "").strip()
 
-                            if credit and credit != 'nan' and credit != '':
+                            if credit and credit != "nan" and credit != "":
                                 try:
-                                    amount_str = str(abs(float(credit.replace(',', ''))))
-                                    transaction_type = '收入'
-                                except (ValueError, TypeError):
+                                    amount_str = str(abs(float(credit.replace(",", ""))))
+                                    transaction_type = "收入"
+                                except ValueError, TypeError:
                                     pass
-                            elif debit and debit != 'nan' and debit != '':
+                            elif debit and debit != "nan" and debit != "":
                                 try:
-                                    amount_str = str(abs(float(debit.replace(',', ''))))
-                                    transaction_type = '支出'
-                                except (ValueError, TypeError):
+                                    amount_str = str(abs(float(debit.replace(",", ""))))
+                                    transaction_type = "支出"
+                                except ValueError, TypeError:
                                     pass
                         else:
                             # 旧格式：单列显示
-                            amount_str = row_dict.get('交易金额') or row_dict.get('金额') or '0'
+                            amount_str = row_dict.get("交易金额") or row_dict.get("金额") or "0"
                             try:
-                                if float(amount_str.replace(',', '')) > 0:
-                                    transaction_type = '收入'
-                            except (ValueError, TypeError):
+                                if float(amount_str.replace(",", "")) > 0:
+                                    transaction_type = "收入"
+                            except ValueError, TypeError:
                                 pass
 
-                        if not amount_str or amount_str == '0' or amount_str == 'nan':
+                        if not amount_str or amount_str == "0" or amount_str == "nan":
                             continue
 
                         bill = {
-                            'date': date_field.split()[0] if ' ' in date_field else date_field,  # 去除可能的时间部分
-                            'type': transaction_type,
-                            'counterparty': row_dict.get('对方名称') or row_dict.get('对方户名') or row_dict.get('交易对手') or '',
-                            'description': row_dict.get('摘要') or row_dict.get('交易说明') or '',
-                            'amount': str(abs(float(amount_str.replace(',', '')))),
-                            'channel': '民生银行'
+                            "date": date_field.split()[0] if " " in date_field else date_field,  # 去除可能的时间部分
+                            "type": transaction_type,
+                            "counterparty": row_dict.get("对方名称")
+                            or row_dict.get("对方户名")
+                            or row_dict.get("交易对手")
+                            or "",
+                            "description": row_dict.get("摘要") or row_dict.get("交易说明") or "",
+                            "amount": str(abs(float(amount_str.replace(",", "")))),
+                            "channel": "民生银行",
                         }
 
                         bills.append(bill)

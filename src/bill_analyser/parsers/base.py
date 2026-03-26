@@ -31,6 +31,7 @@ class StandardBill:
     所有解析器的输出都必须转换为这个标准格式，
     便于后续的去重、分类和导入处理。
     """
+
     # 必需字段
     date: str  # YYYY-MM-DD HH:MM:SS 格式
     amount: float  # 带正负号：支出为负，收入为正
@@ -54,40 +55,40 @@ class StandardBill:
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
-            'date': self.date,
-            'amount': self.amount,
-            'type': self.type,
-            'description': self.description,
-            'source_account_id': self.source_account_id,
-            'counterparty': self.counterparty,
-            'payment_method': self.payment_method,
-            'original_type': self.original_type,
-            'original_category': self.original_category,
-            'transaction_id': self.transaction_id,
-            'merchant_id': self.merchant_id,
-            'status': self.status,
-            'main_category': self.main_category,
-            'sub_category': self.sub_category,
+            "date": self.date,
+            "amount": self.amount,
+            "type": self.type,
+            "description": self.description,
+            "source_account_id": self.source_account_id,
+            "counterparty": self.counterparty,
+            "payment_method": self.payment_method,
+            "original_type": self.original_type,
+            "original_category": self.original_category,
+            "transaction_id": self.transaction_id,
+            "merchant_id": self.merchant_id,
+            "status": self.status,
+            "main_category": self.main_category,
+            "sub_category": self.sub_category,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'StandardBill':
+    def from_dict(cls, data: Dict[str, Any]) -> "StandardBill":
         """从字典创建实例"""
         return cls(
-            date=data.get('date', ''),
-            amount=float(data.get('amount', 0)),
-            type=data.get('type', '支出'),
-            description=data.get('description', ''),
-            source_account_id=data.get('source_account_id', ''),
-            counterparty=data.get('counterparty', ''),
-            payment_method=data.get('payment_method', ''),
-            original_type=data.get('original_type', ''),
-            original_category=data.get('original_category', ''),
-            transaction_id=data.get('transaction_id', ''),
-            merchant_id=data.get('merchant_id', ''),
-            status=data.get('status', ''),
-            main_category=data.get('main_category', ''),
-            sub_category=data.get('sub_category', ''),
+            date=data.get("date", ""),
+            amount=float(data.get("amount", 0)),
+            type=data.get("type", "支出"),
+            description=data.get("description", ""),
+            source_account_id=data.get("source_account_id", ""),
+            counterparty=data.get("counterparty", ""),
+            payment_method=data.get("payment_method", ""),
+            original_type=data.get("original_type", ""),
+            original_category=data.get("original_category", ""),
+            transaction_id=data.get("transaction_id", ""),
+            merchant_id=data.get("merchant_id", ""),
+            status=data.get("status", ""),
+            main_category=data.get("main_category", ""),
+            sub_category=data.get("sub_category", ""),
         )
 
 
@@ -112,7 +113,7 @@ class ParserBase(ABC):
     def __init__(self):
         """初始化解析器"""
         self.logger = get_logger(self.__class__.__name__)
-        self.supported_extensions = ['.csv', '.xlsx', '.xls']
+        self.supported_extensions = [".csv", ".xlsx", ".xls"]
 
     @abstractmethod
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
@@ -172,8 +173,7 @@ class ParserBase(ABC):
 
         if path.suffix.lower() not in self.supported_extensions:
             self.logger.warning(
-                f"文件扩展名不支持: {path.suffix}, "
-                f"支持的扩展名: {', '.join(self.supported_extensions)}"
+                f"文件扩展名不支持: {path.suffix}, 支持的扩展名: {', '.join(self.supported_extensions)}"
             )
             return False
 
@@ -191,20 +191,20 @@ class ParserBase(ABC):
         """
         # 常见日期格式
         formats = [
-            '%Y-%m-%d %H:%M:%S',
-            '%Y-%m-%d',
-            '%Y/%m/%d %H:%M:%S',
-            '%Y/%m/%d',
-            '%Y年%m月%d日 %H:%M:%S',
-            '%Y年%m月%d日',
-            '%Y.%m.%d %H:%M:%S',
-            '%Y.%m.%d',
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d",
+            "%Y年%m月%d日 %H:%M:%S",
+            "%Y年%m月%d日",
+            "%Y.%m.%d %H:%M:%S",
+            "%Y.%m.%d",
         ]
 
         for fmt in formats:
             try:
                 dt = datetime.strptime(date_str.strip(), fmt)
-                return dt.strftime('%Y-%m-%d %H:%M:%S')
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
             except ValueError:
                 continue
 
@@ -224,9 +224,7 @@ class ParserBase(ABC):
         """
         try:
             # 移除常见符号
-            cleaned = str(amount_str).replace('¥', '').replace('$', '') \
-                                    .replace(',', '').replace('，', '') \
-                                    .strip()
+            cleaned = str(amount_str).replace("¥", "").replace("$", "").replace(",", "").replace("，", "").strip()
 
             return float(cleaned)
         except (ValueError, AttributeError) as e:
@@ -244,22 +242,22 @@ class ParserBase(ABC):
             str: 规范化的类型（收入/支出/转账/退款）
         """
         type_map = {
-            '收入': '收入',
-            '收款': '收入',
-            '入账': '收入',
-            '支出': '支出',
-            '支付': '支出',
-            '消费': '支出',
-            '付款': '支出',
-            '转账': '转账',
-            '转出': '转账',
-            '转入': '转账',
-            '退款': '退款',
-            '退钱': '退款',
-            '不计收支': '转账',
-            '投资理财': '投资',
-            '投资': '投资',
-            '理财': '投资',
+            "收入": "收入",
+            "收款": "收入",
+            "入账": "收入",
+            "支出": "支出",
+            "支付": "支出",
+            "消费": "支出",
+            "付款": "支出",
+            "转账": "转账",
+            "转出": "转账",
+            "转入": "转账",
+            "退款": "退款",
+            "退钱": "退款",
+            "不计收支": "转账",
+            "投资理财": "投资",
+            "投资": "投资",
+            "理财": "投资",
         }
 
         type_str = str(type_str).strip()
@@ -270,7 +268,7 @@ class ParserBase(ABC):
 
         # 默认根据金额符号判断
         self.logger.debug(f"未识别的交易类型: {type_str}")
-        return '支出'
+        return "支出"
 
     def aggregate_description(self, bill: Dict[str, Any]) -> str:
         """
@@ -287,37 +285,37 @@ class ParserBase(ABC):
         """
         # 可能包含有用信息的字段列表
         description_fields = [
-            'description',
-            'counterparty',
-            'goods',  # 商品
-            'product',  # 商品说明
-            'remark',  # 备注
-            'note',  # 备注
-            'memo',  # 备注
-            'abstract',  # 交易摘要
-            'summary',  # 摘要
-            'payment_method',  # 支付方式
-            'original_category',  # 原始分类
-            'merchant',  # 商户
-            'shop',  # 店铺
-            'transaction_type',  # 交易类型
-            'opponent_account',  # 对方账号
+            "description",
+            "counterparty",
+            "goods",  # 商品
+            "product",  # 商品说明
+            "remark",  # 备注
+            "note",  # 备注
+            "memo",  # 备注
+            "abstract",  # 交易摘要
+            "summary",  # 摘要
+            "payment_method",  # 支付方式
+            "original_category",  # 原始分类
+            "merchant",  # 商户
+            "shop",  # 店铺
+            "transaction_type",  # 交易类型
+            "opponent_account",  # 对方账号
         ]
 
         parts = []
         seen = set()  # 避免重复内容
 
         for field in description_fields:
-            value = bill.get(field, '')
+            value = bill.get(field, "")
             if value and str(value).strip():
                 cleaned = str(value).strip()
                 # 过滤无意义的值
-                if cleaned not in ['/', '-', '无', '空', '', 'nan', 'None']:
+                if cleaned not in ["/", "-", "无", "空", "", "nan", "None"]:
                     if cleaned not in seen:
                         parts.append(cleaned)
                         seen.add(cleaned)
 
-        return ' | '.join(parts) if parts else ''
+        return " | ".join(parts) if parts else ""
 
     @log_method
     def post_process(self, bills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -349,9 +347,9 @@ class ParserBase(ABC):
                 processed_bill = {}
 
                 # 1. 处理交易时间
-                time_value = bill.get('date') or bill.get('trade_time', '')
+                time_value = bill.get("date") or bill.get("trade_time", "")
                 if time_value:
-                    processed_bill['date'] = self.normalize_date(time_value)
+                    processed_bill["date"] = self.normalize_date(time_value)
                 else:
                     self.logger.warning("账单缺少交易时间")
                     continue
@@ -359,64 +357,63 @@ class ParserBase(ABC):
                 # 2. 处理交易类型
                 # v6.36规则: 在智能配对成功之前，所有账单类型只能是收入或支出
                 # 投资/转账类型只在SmartDeduplicationEngine配对成功后设置
-                type_value = bill.get('type', '')
+                type_value = bill.get("type", "")
                 original_type = type_value
-                original_category = bill.get('original_category', '') or bill.get('category', '')
+                original_category = bill.get("original_category", "") or bill.get("category", "")
 
                 # 类型规范化，但不自动设置为投资（即使original_category包含投资理财）
                 if type_value:
                     normalized_type = self.normalize_type(type_value)
                     # 如果normalize_type返回投资/转账，改为根据金额符号判断收入/支出
-                    if normalized_type in ['投资', '转账']:
+                    if normalized_type in ["投资", "转账"]:
                         # 保持原始金额符号判断: 正数=收入, 负数=支出
-                        amount_value = bill.get('amount', 0)
+                        amount_value = bill.get("amount", 0)
                         amount = self.normalize_amount(amount_value)
-                        processed_bill['type'] = '收入' if amount >= 0 else '支出'
+                        processed_bill["type"] = "收入" if amount >= 0 else "支出"
                     else:
-                        processed_bill['type'] = normalized_type
+                        processed_bill["type"] = normalized_type
                 else:
-                    processed_bill['type'] = '支出'
+                    processed_bill["type"] = "支出"
 
                 # 3. 处理金额 - 统一为带符号的数值
-                amount_value = bill.get('amount', 0)
+                amount_value = bill.get("amount", 0)
                 amount = self.normalize_amount(amount_value)
 
                 # 根据类型调整金额符号
-                if processed_bill['type'] == '支出':
-                    processed_bill['amount'] = -abs(amount)  # 支出为负
-                elif processed_bill['type'] in ['收入', '退款']:
-                    processed_bill['amount'] = abs(amount)  # 收入为正
+                if processed_bill["type"] == "支出":
+                    processed_bill["amount"] = -abs(amount)  # 支出为负
+                elif processed_bill["type"] in ["收入", "退款"]:
+                    processed_bill["amount"] = abs(amount)  # 收入为正
                 else:
                     # 转账/投资保持原值
-                    processed_bill['amount'] = amount
+                    processed_bill["amount"] = amount
 
                 # 4. 处理来源账户 - 使用解析器标识
-                processed_bill['source_account_id'] = self.PARSER_ID
+                processed_bill["source_account_id"] = self.PARSER_ID
 
                 # 5. 聚合描述字段
-                processed_bill['description'] = self.aggregate_description(bill)
+                processed_bill["description"] = self.aggregate_description(bill)
 
                 # 6. 保留原始字段
-                processed_bill['counterparty'] = str(bill.get('counterparty', ''))
-                processed_bill['payment_method'] = str(bill.get('payment_method', '') or
-                                                       bill.get('channel', ''))
-                processed_bill['original_type'] = original_type
-                processed_bill['original_category'] = original_category
-                processed_bill['transaction_id'] = str(bill.get('transaction_id', '') or
-                                                       bill.get('order_id', ''))
-                processed_bill['merchant_id'] = str(bill.get('merchant_id', ''))
-                processed_bill['status'] = str(bill.get('status', ''))
+                processed_bill["counterparty"] = str(bill.get("counterparty", ""))
+                processed_bill["payment_method"] = str(bill.get("payment_method", "") or bill.get("channel", ""))
+                processed_bill["original_type"] = original_type
+                processed_bill["original_category"] = original_category
+                processed_bill["transaction_id"] = str(bill.get("transaction_id", "") or bill.get("order_id", ""))
+                processed_bill["merchant_id"] = str(bill.get("merchant_id", ""))
+                processed_bill["status"] = str(bill.get("status", ""))
 
                 # 7. 分类字段初始为空
-                processed_bill['main_category'] = ''
-                processed_bill['sub_category'] = ''
+                processed_bill["main_category"] = ""
+                processed_bill["sub_category"] = ""
 
                 # 验证必需字段
-                if processed_bill['date'] and processed_bill['amount'] != 0:
+                if processed_bill["date"] and processed_bill["amount"] != 0:
                     processed_bills.append(processed_bill)
                 else:
-                    self.logger.warning(f"账单数据不完整: date={processed_bill.get('date')}, "
-                                       f"amount={processed_bill.get('amount')}")
+                    self.logger.warning(
+                        f"账单数据不完整: date={processed_bill.get('date')}, amount={processed_bill.get('amount')}"
+                    )
 
             except Exception as e:  # pylint: disable=broad-except
                 self.logger.error(f"处理账单时出错: {e}")

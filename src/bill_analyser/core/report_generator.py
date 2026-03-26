@@ -22,16 +22,13 @@ class ReportGenerator:
         Args:
             output_dir: 输出目录
         """
-        self.logger = get_logger('ReportGenerator')
-        self.output_dir = output_dir or Path('output/reports')
+        self.logger = get_logger("ReportGenerator")
+        self.output_dir = output_dir or Path("output/reports")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     @log_method
     def generate_html_report(
-        self,
-        report_data: Dict[str, Any],
-        filename: Optional[str] = None,
-        include_charts: bool = True
+        self, report_data: Dict[str, Any], filename: Optional[str] = None, include_charts: bool = True
     ) -> Path:
         """
         生成HTML报告
@@ -45,8 +42,8 @@ class ReportGenerator:
             Path: HTML文件路径
         """
         if filename is None:
-            period = report_data.get('period', 'month')
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            period = report_data.get("period", "month")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"bill_report_{period}_{timestamp}.html"
 
         filepath = self.output_dir / filename
@@ -55,7 +52,7 @@ class ReportGenerator:
         html_content = self._generate_html_content(report_data, include_charts)
 
         # 写入文件
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(html_content)
 
         self.logger.info("HTML报告已生成: %s", filepath)
@@ -63,19 +60,19 @@ class ReportGenerator:
 
     def _generate_html_content(self, report_data: Dict[str, Any], include_charts: bool) -> str:
         """生成HTML内容"""
-        period = report_data.get('period', 'month')
-        period_name = {'month': '月度', 'quarter': '季度', 'year': '年度'}.get(period, '周期')
+        period = report_data.get("period", "month")
+        period_name = {"month": "月度", "quarter": "季度", "year": "年度"}.get(period, "周期")
 
-        start_date = report_data.get('start_date', '')
-        end_date = report_data.get('end_date', '')
-        generated_at = report_data.get('generated_at', datetime.now().isoformat())
+        start_date = report_data.get("start_date", "")
+        end_date = report_data.get("end_date", "")
+        generated_at = report_data.get("generated_at", datetime.now().isoformat())
 
-        summary = report_data.get('summary', {})
-        by_category = report_data.get('by_category', {})
-        by_type = report_data.get('by_type', {})
-        trend = report_data.get('trend', [])
-        top_expenses = report_data.get('top_expenses', [])
-        top_income = report_data.get('top_income', [])
+        summary = report_data.get("summary", {})
+        by_category = report_data.get("by_category", {})
+        by_type = report_data.get("by_type", {})
+        trend = report_data.get("trend", [])
+        top_expenses = report_data.get("top_expenses", [])
+        top_income = report_data.get("top_income", [])
 
         html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -101,25 +98,25 @@ class ReportGenerator:
             <div class="summary-cards">
                 <div class="card income">
                     <h3>总收入</h3>
-                    <p class="amount">¥{summary.get('total_income', 0):,.2f}</p>
+                    <p class="amount">¥{summary.get("total_income", 0):,.2f}</p>
                 </div>
                 <div class="card expense">
                     <h3>总支出</h3>
-                    <p class="amount">¥{summary.get('total_expense', 0):,.2f}</p>
+                    <p class="amount">¥{summary.get("total_expense", 0):,.2f}</p>
                 </div>
                 <div class="card net">
                     <h3>净收入</h3>
-                    <p class="amount">¥{summary.get('net_income', 0):,.2f}</p>
+                    <p class="amount">¥{summary.get("net_income", 0):,.2f}</p>
                 </div>
                 <div class="card total">
                     <h3>账单总数</h3>
-                    <p class="amount">{report_data.get('total_records', 0)}</p>
+                    <p class="amount">{report_data.get("total_records", 0)}</p>
                 </div>
             </div>
         </section>
 
         <!-- 图表 -->
-        {self._generate_charts_section(report_data) if include_charts else ''}
+        {self._generate_charts_section(report_data) if include_charts else ""}
 
         <!-- 按类型统计 -->
         <section class="type-section">
@@ -402,18 +399,18 @@ class ReportGenerator:
 
         rows = []
         for type_name, data in by_type.items():
-            amount_class = 'income-amount' if type_name == '收入' else 'expense-amount'
+            amount_class = "income-amount" if type_name == "收入" else "expense-amount"
             row = f"""
                 <tr>
                     <td>{type_name}</td>
-                    <td>{data.get('count', 0)}</td>
-                    <td class="amount-col {amount_class}">¥{data.get('total', 0):,.2f}</td>
-                    <td class="amount-col">¥{data.get('average', 0):,.2f}</td>
+                    <td>{data.get("count", 0)}</td>
+                    <td class="amount-col {amount_class}">¥{data.get("total", 0):,.2f}</td>
+                    <td class="amount-col">¥{data.get("average", 0):,.2f}</td>
                 </tr>
             """
             rows.append(row)
 
-        return ''.join(rows)
+        return "".join(rows)
 
     def _generate_category_rows(self, by_category: Dict[str, Dict[str, Any]]) -> str:
         """生成分类表格行"""
@@ -427,28 +424,28 @@ class ReportGenerator:
                 <tr>
                     <td><strong>{main_cat}</strong></td>
                     <td>-</td>
-                    <td>{data.get('count', 0)}</td>
-                    <td class="amount-col">¥{data.get('total', 0):,.2f}</td>
-                    <td class="amount-col">¥{data.get('average', 0):,.2f}</td>
+                    <td>{data.get("count", 0)}</td>
+                    <td class="amount-col">¥{data.get("total", 0):,.2f}</td>
+                    <td class="amount-col">¥{data.get("average", 0):,.2f}</td>
                 </tr>
             """
             rows.append(row)
 
             # 子分类行
-            sub_categories = data.get('sub_categories', {})
+            sub_categories = data.get("sub_categories", {})
             for sub_cat, sub_data in sub_categories.items():
                 sub_row = f"""
                     <tr class="sub-category">
                         <td></td>
                         <td>{sub_cat}</td>
-                        <td>{sub_data.get('count', 0)}</td>
-                        <td class="amount-col">¥{sub_data.get('total', 0):,.2f}</td>
+                        <td>{sub_data.get("count", 0)}</td>
+                        <td class="amount-col">¥{sub_data.get("total", 0):,.2f}</td>
                         <td class="amount-col">-</td>
                     </tr>
                 """
                 rows.append(sub_row)
 
-        return ''.join(rows)
+        return "".join(rows)
 
     def _generate_top_expense_rows(self, top_expenses: List[Dict[str, Any]]) -> str:
         """生成最大支出表格行"""
@@ -459,30 +456,30 @@ class ReportGenerator:
         for expense in top_expenses:
             row = f"""
                 <tr>
-                    <td>{expense.get('date', '')}</td>
-                    <td class="amount-col expense-amount">¥{expense.get('amount', 0):,.2f}</td>
-                    <td>{expense.get('counterparty', '')}</td>
-                    <td>{expense.get('category', '-')}</td>
-                    <td>{expense.get('description', '')[:50]}</td>
+                    <td>{expense.get("date", "")}</td>
+                    <td class="amount-col expense-amount">¥{expense.get("amount", 0):,.2f}</td>
+                    <td>{expense.get("counterparty", "")}</td>
+                    <td>{expense.get("category", "-")}</td>
+                    <td>{expense.get("description", "")[:50]}</td>
                 </tr>
             """
             rows.append(row)
 
-        return ''.join(rows)
+        return "".join(rows)
 
     def _generate_top_income_section(self, top_income: List[Dict[str, Any]]) -> str:
         """生成最大收入区块"""
         if not top_income:
-            return ''
+            return ""
 
         rows = []
         for income in top_income:
             row = f"""
                 <tr>
-                    <td>{income.get('date', '')}</td>
-                    <td class="amount-col income-amount">¥{income.get('amount', 0):,.2f}</td>
-                    <td>{income.get('counterparty', '')}</td>
-                    <td>{income.get('description', '')[:50]}</td>
+                    <td>{income.get("date", "")}</td>
+                    <td class="amount-col income-amount">¥{income.get("amount", 0):,.2f}</td>
+                    <td>{income.get("counterparty", "")}</td>
+                    <td>{income.get("description", "")[:50]}</td>
                 </tr>
             """
             rows.append(row)
@@ -500,7 +497,7 @@ class ReportGenerator:
                     </tr>
                 </thead>
                 <tbody>
-                    {''.join(rows)}
+                    {"".join(rows)}
                 </tbody>
             </table>
         </section>
@@ -509,17 +506,17 @@ class ReportGenerator:
     def _generate_trend_section(self, trend: List[Dict[str, Any]]) -> str:
         """生成趋势数据区块"""
         if not trend:
-            return ''
+            return ""
 
         rows = []
         for item in trend[:30]:  # 最多显示30条
-            net_class = 'income-amount' if item.get('net', 0) >= 0 else 'expense-amount'
+            net_class = "income-amount" if item.get("net", 0) >= 0 else "expense-amount"
             row = f"""
                 <tr>
-                    <td>{item.get('date', '')}</td>
-                    <td class="amount-col income-amount">¥{item.get('income', 0):,.2f}</td>
-                    <td class="amount-col expense-amount">¥{item.get('expense', 0):,.2f}</td>
-                    <td class="amount-col {net_class}">¥{item.get('net', 0):,.2f}</td>
+                    <td>{item.get("date", "")}</td>
+                    <td class="amount-col income-amount">¥{item.get("income", 0):,.2f}</td>
+                    <td class="amount-col expense-amount">¥{item.get("expense", 0):,.2f}</td>
+                    <td class="amount-col {net_class}">¥{item.get("net", 0):,.2f}</td>
                 </tr>
             """
             rows.append(row)
@@ -537,7 +534,7 @@ class ReportGenerator:
                     </tr>
                 </thead>
                 <tbody>
-                    {''.join(rows)}
+                    {"".join(rows)}
                 </tbody>
             </table>
         </section>
@@ -545,29 +542,29 @@ class ReportGenerator:
 
     def _generate_charts_section(self, report_data: Dict[str, Any]) -> str:
         """生成图表区块"""
-        charts = report_data.get('charts', {})
+        charts = report_data.get("charts", {})
         if not charts:
-            return ''
+            return ""
 
         chart_sections = []
 
         # 添加仪表盘
-        if 'dashboard' in charts:
+        if "dashboard" in charts:
             chart_sections.append(f"""
                 <section class="charts-section">
                     <h2>📊 数据可视化仪表盘</h2>
                     <div class="chart-container">
-                        <img src="{charts['dashboard']}" alt="综合仪表盘">
+                        <img src="{charts["dashboard"]}" alt="综合仪表盘">
                     </div>
                 </section>
             """)
 
         # 其他图表
         chart_titles = {
-            'trend': '收支趋势图',
-            'category_pie': '分类占比图',
-            'top_expenses': '最大支出排行',
-            'comparison': '收支对比图'
+            "trend": "收支趋势图",
+            "category_pie": "分类占比图",
+            "top_expenses": "最大支出排行",
+            "comparison": "收支对比图",
         }
 
         other_charts = []
@@ -584,18 +581,14 @@ class ReportGenerator:
             chart_sections.append(f"""
                 <section class="charts-section">
                     <h2>📈 详细图表</h2>
-                    {''.join(other_charts)}
+                    {"".join(other_charts)}
                 </section>
             """)
 
-        return ''.join(chart_sections)
+        return "".join(chart_sections)
 
     @log_method
-    def generate_markdown_report(
-        self,
-        report_data: Dict[str, Any],
-        filename: Optional[str] = None
-    ) -> Path:
+    def generate_markdown_report(self, report_data: Dict[str, Any], filename: Optional[str] = None) -> Path:
         """
         生成Markdown报告
 
@@ -607,8 +600,8 @@ class ReportGenerator:
             Path: Markdown文件路径
         """
         if filename is None:
-            period = report_data.get('period', 'month')
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            period = report_data.get("period", "month")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"bill_report_{period}_{timestamp}.md"
 
         filepath = self.output_dir / filename
@@ -617,7 +610,7 @@ class ReportGenerator:
         md_content = self._generate_markdown_content(report_data)
 
         # 写入文件
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(md_content)
 
         self.logger.info("Markdown报告已生成: %s", filepath)
@@ -625,18 +618,18 @@ class ReportGenerator:
 
     def _generate_markdown_content(self, report_data: Dict[str, Any]) -> str:
         """生成Markdown内容"""
-        period = report_data.get('period', 'month')
-        period_name = {'month': '月度', 'quarter': '季度', 'year': '年度'}.get(period, '周期')
+        period = report_data.get("period", "month")
+        period_name = {"month": "月度", "quarter": "季度", "year": "年度"}.get(period, "周期")
 
-        summary = report_data.get('summary', {})
-        by_category = report_data.get('by_category', {})
-        by_type = report_data.get('by_type', {})
-        top_expenses = report_data.get('top_expenses', [])
+        summary = report_data.get("summary", {})
+        by_category = report_data.get("by_category", {})
+        by_type = report_data.get("by_type", {})
+        top_expenses = report_data.get("top_expenses", [])
 
         md = f"""# {period_name}账单分析报告
 
-**分析期间**: {report_data.get('start_date', '')} 至 {report_data.get('end_date', '')}  
-**生成时间**: {report_data.get('generated_at', '')[:19]}
+**分析期间**: {report_data.get("start_date", "")} 至 {report_data.get("end_date", "")}  
+**生成时间**: {report_data.get("generated_at", "")[:19]}
 
 ---
 
@@ -644,10 +637,10 @@ class ReportGenerator:
 
 | 项目 | 金额 |
 |------|------|
-| **总收入** | ¥{summary.get('total_income', 0):,.2f} |
-| **总支出** | ¥{summary.get('total_expense', 0):,.2f} |
-| **净收入** | ¥{summary.get('net_income', 0):,.2f} |
-| **账单总数** | {report_data.get('total_records', 0)} 条 |
+| **总收入** | ¥{summary.get("total_income", 0):,.2f} |
+| **总支出** | ¥{summary.get("total_expense", 0):,.2f} |
+| **净收入** | ¥{summary.get("net_income", 0):,.2f} |
+| **账单总数** | {report_data.get("total_records", 0)} 条 |
 
 ---
 
@@ -668,7 +661,7 @@ class ReportGenerator:
             md += f"- **总金额**: ¥{data.get('total', 0):,.2f}\n"
             md += f"- **平均金额**: ¥{data.get('average', 0):,.2f}\n"
 
-            sub_categories = data.get('sub_categories', {})
+            sub_categories = data.get("sub_categories", {})
             if sub_categories:
                 md += "\n**子分类**:\n\n"
                 for sub_cat, sub_data in sub_categories.items():

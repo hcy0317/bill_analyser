@@ -29,14 +29,14 @@ class CMBCParser(BaseBankParser):
     def can_parse(self, file_path: str) -> bool:
         """判断是否为民生银行账单"""
         try:
-            if not file_path.endswith(('.xlsx', '.xls', '.csv')):
+            if not file_path.endswith((".xlsx", ".xls", ".csv")):
                 return False
 
             # 尝试读取文件内容进行判断
             try:
-                if file_path.endswith('.csv'):
+                if file_path.endswith(".csv"):
                     # CSV文件，尝试多种编码
-                    for encoding in ['gbk', 'utf-8', 'gb2312']:
+                    for encoding in ["gbk", "utf-8", "gb2312"]:
                         try:
                             df = pd.read_csv(file_path, encoding=encoding, nrows=15)
                             break
@@ -50,7 +50,7 @@ class CMBCParser(BaseBankParser):
 
                     # 先尝试作为HTML表格读取（新格式）
                     try:
-                        tables = pd.read_html(file_path, encoding='utf-8')
+                        tables = pd.read_html(file_path, encoding="utf-8")
                         if tables and len(tables) > 0:
                             df = tables[0]  # 取第一个表格
                     except Exception:
@@ -71,14 +71,20 @@ class CMBCParser(BaseBankParser):
                     content += cell_value + " "
 
             # 民生银行强特征标识 - 必须包含至少一个
-            cmbc_strong_indicators = [
-                "中国民生银行", "民生银行股份有限公司", "个人账户对账单"
-            ]
+            cmbc_strong_indicators = ["中国民生银行", "民生银行股份有限公司", "个人账户对账单"]
 
             # 民生银行特有的字段组合（包括新格式字段）
             cmbc_specific_fields = [
-                "凭证类型", "凭证号码", "客户姓名", "客户账号", "账户账号",
-                "支出金额", "存入金额", "对方账号", "对方名称", "对方开户行"
+                "凭证类型",
+                "凭证号码",
+                "客户姓名",
+                "客户账号",
+                "账户账号",
+                "支出金额",
+                "存入金额",
+                "对方账号",
+                "对方名称",
+                "对方开户行",
             ]
 
             # 排除其他银行的强特征 - 只检查前3行避免交易记录中的银行名干扰
@@ -141,7 +147,7 @@ class CMBCParser(BaseBankParser):
                 ["日期", "摘要", "借方发生额", "贷方发生额", "余额"],
                 ["交易时间", "交易类型", "交易金额", "账户余额", "交易摘要"],
                 ["交易时间", "支出金额", "存入金额", "账户余额", "摘要"],  # 新格式特征
-                ["交易时间", "支出金额", "存入金额", "对方账号", "对方名称"]   # 新格式特征
+                ["交易时间", "支出金额", "存入金额", "对方账号", "对方名称"],  # 新格式特征
             ]
 
             data_start_row = -1
@@ -195,9 +201,9 @@ class CMBCParser(BaseBankParser):
     def _read_file(self, file_path: str) -> Optional[pd.DataFrame]:
         """读取文件"""
         try:
-            if file_path.endswith('.csv'):
+            if file_path.endswith(".csv"):
                 # CSV文件，尝试多种编码
-                for encoding in ['gbk', 'utf-8', 'gb2312', 'utf-8-sig']:
+                for encoding in ["gbk", "utf-8", "gb2312", "utf-8-sig"]:
                     try:
                         df = pd.read_csv(file_path, encoding=encoding, header=None)
                         self.logger.debug(f"成功使用{encoding}编码读取CSV文件")
@@ -209,7 +215,7 @@ class CMBCParser(BaseBankParser):
             else:
                 # Excel文件，首先尝试HTML格式（新格式）
                 try:
-                    tables = pd.read_html(file_path, encoding='utf-8')
+                    tables = pd.read_html(file_path, encoding="utf-8")
                     if tables and len(tables) > 0:
                         self.logger.debug(f"成功以HTML格式读取文件: {file_path}")
                         return tables[0]  # 返回第一个表格
@@ -224,7 +230,7 @@ class CMBCParser(BaseBankParser):
                 except Exception as e:
                     # 尝试指定引擎
                     try:
-                        df = pd.read_excel(file_path, header=None, engine='openpyxl')
+                        df = pd.read_excel(file_path, header=None, engine="openpyxl")
                         self.logger.debug(f"成功使用openpyxl引擎读取文件: {file_path}")
                         return df
                     except Exception:
@@ -276,10 +282,12 @@ class CMBCParser(BaseBankParser):
                     continue
                 cell_str = str(val).strip()
                 # 匹配各种日期格式，包括新格式的制表符时间
-                if (re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', cell_str) or
-                    re.match(r'\d{8}', cell_str) or
-                    re.match(r'\d{4}\.\d{2}\.\d{2}', cell_str) or
-                    re.match(r'\d{8}\t\d{2}:\d{2}:\d{2}', cell_str)):  # 新格式时间
+                if (
+                    re.match(r"\d{4}[-/]\d{2}[-/]\d{2}", cell_str)
+                    or re.match(r"\d{8}", cell_str)
+                    or re.match(r"\d{4}\.\d{2}\.\d{2}", cell_str)
+                    or re.match(r"\d{8}\t\d{2}:\d{2}:\d{2}", cell_str)
+                ):  # 新格式时间
                     date_found = True
                     break
 
@@ -293,25 +301,27 @@ class CMBCParser(BaseBankParser):
                     if abs(float_val) > 0.01:  # 金额大于1分钱
                         amount_found = True
                         break
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     # 尝试清理字符串后转换
                     try:
                         cell_str = str(val).strip()
                         # 先排除日期时间格式，避免误判
-                        if (re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', cell_str) or
-                            re.match(r'\d{8}$', cell_str) or
-                            re.match(r'\d{4}\.\d{2}\.\d{2}', cell_str) or
-                            re.match(r'\d{8}\s+\d{2}:\d{2}:\d{2}', cell_str) or
-                            re.match(r'\d{8}\t\d{2}:\d{2}:\d{2}', cell_str)):
+                        if (
+                            re.match(r"\d{4}[-/]\d{2}[-/]\d{2}", cell_str)
+                            or re.match(r"\d{8}$", cell_str)
+                            or re.match(r"\d{4}\.\d{2}\.\d{2}", cell_str)
+                            or re.match(r"\d{8}\s+\d{2}:\d{2}:\d{2}", cell_str)
+                            or re.match(r"\d{8}\t\d{2}:\d{2}:\d{2}", cell_str)
+                        ):
                             continue  # 跳过日期时间格式
 
-                        cleaned = re.sub(r'[^\d.-]', '', cell_str)
+                        cleaned = re.sub(r"[^\d.-]", "", cell_str)
                         if cleaned and len(cleaned) <= 10:  # 避免过长的数字（如日期时间）
                             float_val = float(cleaned)
                             if abs(float_val) > 0.01:
                                 amount_found = True
                                 break
-                    except (ValueError, TypeError):
+                    except ValueError, TypeError:
                         continue
 
             return date_found and amount_found
@@ -322,32 +332,27 @@ class CMBCParser(BaseBankParser):
     def _parse_transaction_row(self, row: pd.Series, headers: List[str]) -> Optional[Dict[str, Any]]:
         """解析交易行"""
         try:
-            transaction = {
-                '日期': '',
-                '商品说明': '',
-                '交易对方': '',
-                '金额': 0.0
-            }
+            transaction = {"日期": "", "商品说明": "", "交易对方": "", "金额": 0.0}
 
             # 解析日期
             date_str = self._extract_date(row)
             if date_str:
                 # 使用基类的时间解析方法，确保时间格式正确
-                transaction['日期'] = self._parse_datetime(date_str)
+                transaction["日期"] = self._parse_datetime(date_str)
             else:
                 return None  # 没有日期的记录无效
 
             # 解析商品说明/摘要
             description = self._extract_description(row, headers)
-            transaction['商品说明'] = description if description else "未知交易"
+            transaction["商品说明"] = description if description else "未知交易"
 
             # 解析金额
             amount = self._extract_amount(row, headers)
-            transaction['金额'] = amount
+            transaction["金额"] = amount
 
             # 解析交易对方（如果有的话）
             counterparty = self._extract_counterparty(row, headers)
-            transaction['交易对方'] = counterparty if counterparty else ""
+            transaction["交易对方"] = counterparty if counterparty else ""
 
             return transaction
 
@@ -363,8 +368,8 @@ class CMBCParser(BaseBankParser):
             cell_str = str(val).strip()
 
             # 新格式：处理包含制表符的时间格式 "YYYYMMDD\tHH:MM:SS"
-            if '\t' in cell_str and re.match(r'\d{8}\t\d{2}:\d{2}:\d{2}', cell_str):
-                parts = cell_str.split('\t', maxsplit=1)
+            if "\t" in cell_str and re.match(r"\d{8}\t\d{2}:\d{2}:\d{2}", cell_str):
+                parts = cell_str.split("\t", maxsplit=1)
                 date_part = parts[0]  # 日期部分
                 time_part = parts[1] if len(parts) > 1 else ""  # 时间部分
                 try:
@@ -372,14 +377,14 @@ class CMBCParser(BaseBankParser):
                     month = date_part[4:6]
                     day = date_part[6:8]
                     # 验证日期有效性
-                    datetime.strptime(f"{year}-{month}-{day}", '%Y-%m-%d')
+                    datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
                     # 返回完整的日期时间格式
                     return f"{year}-{month}-{day} {time_part}" if time_part else f"{year}-{month}-{day} 00:00:00"
                 except ValueError:
                     continue
 
             # 新格式：处理包含空格的时间格式 "YYYYMMDD HH:MM:SS"
-            if ' ' in cell_str and re.match(r'\d{8}\s+\d{2}:\d{2}:\d{2}', cell_str):
+            if " " in cell_str and re.match(r"\d{8}\s+\d{2}:\d{2}:\d{2}", cell_str):
                 parts = cell_str.split(maxsplit=1)
                 date_part = parts[0]  # 日期部分
                 time_part = parts[1] if len(parts) > 1 else ""  # 时间部分
@@ -388,53 +393,53 @@ class CMBCParser(BaseBankParser):
                     month = date_part[4:6]
                     day = date_part[6:8]
                     # 验证日期有效性
-                    datetime.strptime(f"{year}-{month}-{day}", '%Y-%m-%d')
+                    datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
                     # 返回完整的日期时间格式
                     return f"{year}-{month}-{day} {time_part}" if time_part else f"{year}-{month}-{day} 00:00:00"
                 except ValueError:
                     continue
 
             # 标准日期格式 YYYY-MM-DD 或 YYYY/MM/DD
-            if re.match(r'\d{4}[-/]\d{2}[-/]\d{2}', cell_str):
+            if re.match(r"\d{4}[-/]\d{2}[-/]\d{2}", cell_str):
                 # 检查是否已经包含时间
-                if ' ' in cell_str:
-                    return cell_str.replace('/', '-')
+                if " " in cell_str:
+                    return cell_str.replace("/", "-")
                 else:
-                    return cell_str.replace('/', '-') + ' 00:00:00'
+                    return cell_str.replace("/", "-") + " 00:00:00"
 
             # 紧凑格式 YYYYMMDD
-            if re.match(r'\d{8}', cell_str) and len(cell_str) == 8:
+            if re.match(r"\d{8}", cell_str) and len(cell_str) == 8:
                 try:
                     year = cell_str[:4]
                     month = cell_str[4:6]
                     day = cell_str[6:8]
                     # 验证日期有效性
-                    datetime.strptime(f"{year}-{month}-{day}", '%Y-%m-%d')
+                    datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
                     return f"{year}-{month}-{day} 00:00:00"
                 except ValueError:
                     continue
 
             # 点分格式 YYYY.MM.DD
-            if re.match(r'\d{4}\.\d{2}\.\d{2}', cell_str):
+            if re.match(r"\d{4}\.\d{2}\.\d{2}", cell_str):
                 # 检查是否已经包含时间
-                if ' ' in cell_str:
-                    return cell_str.replace('.', '-')
+                if " " in cell_str:
+                    return cell_str.replace(".", "-")
                 else:
-                    return cell_str.replace('.', '-') + ' 00:00:00'
+                    return cell_str.replace(".", "-") + " 00:00:00"
 
         return None
 
     def _extract_description(self, row: pd.Series, headers: List[str]) -> Optional[str]:
         """提取商品说明/摘要"""
         # 新格式优先查找摘要列（可能有两个摘要列，取第一个非空的）
-        summary_keywords = ['摘要', '交易摘要', '商品说明', '说明', '用途', '备注', '交易方式']
+        summary_keywords = ["摘要", "交易摘要", "商品说明", "说明", "用途", "备注", "交易方式"]
 
         descriptions = []
         for i, header in enumerate(headers):
             if any(keyword in header for keyword in summary_keywords):
                 if i < len(row) and not pd.isna(row.iloc[i]):
                     desc = str(row.iloc[i]).strip()
-                    if len(desc) > 1 and not re.match(r'^\d+[-/.]?\d*$', desc):
+                    if len(desc) > 1 and not re.match(r"^\d+[-/.]?\d*$", desc):
                         descriptions.append(desc)
 
         # 如果找到多个描述，选择最长且非重复的
@@ -451,13 +456,15 @@ class CMBCParser(BaseBankParser):
             cell_str = str(val).strip()
 
             # 跳过日期、纯数字、制表符分割的时间等
-            if (len(cell_str) > 2 and
-                not re.match(r'^\d+[-/.]?\d*$', cell_str) and
-                not re.match(r'\d{4}[-/.]\d{2}[-/.]\d{2}', cell_str) and
-                not re.match(r'^\d{8}$', cell_str) and
-                not re.match(r'\d{8}\t\d{2}:\d{2}:\d{2}', cell_str)):  # 排除新格式时间
+            if (
+                len(cell_str) > 2
+                and not re.match(r"^\d+[-/.]?\d*$", cell_str)
+                and not re.match(r"\d{4}[-/.]\d{2}[-/.]\d{2}", cell_str)
+                and not re.match(r"^\d{8}$", cell_str)
+                and not re.match(r"\d{8}\t\d{2}:\d{2}:\d{2}", cell_str)
+            ):  # 排除新格式时间
                 # 排除一些常见的非描述内容
-                if cell_str not in ['收入', '支出', '借', '贷', '成功', '失败']:
+                if cell_str not in ["收入", "支出", "借", "贷", "成功", "失败"]:
                     return cell_str
 
         return None
@@ -479,13 +486,13 @@ class CMBCParser(BaseBankParser):
                 try:
                     if str(cell_value).strip():  # 非空值
                         debit_amount = -abs(self._clean_amount_string(str(cell_value)))
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pass
             elif "存入金额" in header or "收入金额" in header or "存入" in header:
                 try:
                     if str(cell_value).strip():  # 非空值
                         credit_amount = abs(self._clean_amount_string(str(cell_value)))
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pass
 
         # 如果找到了分离的支出/存入金额，返回非零的那个
@@ -495,7 +502,7 @@ class CMBCParser(BaseBankParser):
             return credit_amount
 
         # 原有逻辑：查找其他金额相关列
-        amount_keywords = ['金额', '交易金额', '发生额', '借方', '贷方']
+        amount_keywords = ["金额", "交易金额", "发生额", "借方", "贷方"]
 
         amounts = []
 
@@ -506,13 +513,13 @@ class CMBCParser(BaseBankParser):
                         amount = self._clean_amount_string(str(row.iloc[i]))
                         if abs(amount) > 0:
                             # 根据列名判断正负
-                            if '支出' in header or '借方' in header:
+                            if "支出" in header or "借方" in header:
                                 amounts.append(-abs(amount))
-                            elif '收入' in header or '贷方' in header:
+                            elif "收入" in header or "贷方" in header:
                                 amounts.append(abs(amount))
                             else:
                                 amounts.append(amount)
-                    except (ValueError, TypeError):
+                    except ValueError, TypeError:
                         continue
 
         # 如果找到了特定列的金额，返回绝对值最大的
@@ -527,7 +534,7 @@ class CMBCParser(BaseBankParser):
                 amount = self._clean_amount_string(str(val))
                 if abs(amount) > 0.01:  # 大于1分钱
                     amounts.append(amount)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 continue
 
         # 返回绝对值最大的金额
@@ -538,11 +545,11 @@ class CMBCParser(BaseBankParser):
         # 新格式：优先查找对方名称列，避免匹配到对方账号列
         # 按优先级排序，精确匹配优先
         counterparty_priority_keywords = [
-            '对方名称',      # 最优先：对方名称
-            '对方户名',      # 次优先：对方户名
-            '交易对方',      # 第三：交易对方
-            '收款方',        # 第四：收款方
-            '付款方'         # 第五：付款方
+            "对方名称",  # 最优先：对方名称
+            "对方户名",  # 次优先：对方户名
+            "交易对方",  # 第三：交易对方
+            "收款方",  # 第四：收款方
+            "付款方",  # 第五：付款方
         ]
 
         # 首先尝试精确匹配优先级关键词
@@ -558,9 +565,9 @@ class CMBCParser(BaseBankParser):
         for keyword in counterparty_priority_keywords:
             for i, header in enumerate(headers):
                 header_clean = header.strip()
-                if (keyword in header_clean and
-                    '账号' not in header_clean and
-                    '账户' not in header_clean):  # 排除账号/账户列
+                if (
+                    keyword in header_clean and "账号" not in header_clean and "账户" not in header_clean
+                ):  # 排除账号/账户列
                     if i < len(row) and not pd.isna(row.iloc[i]):
                         counterparty = str(row.iloc[i]).strip()
                         if len(counterparty) > 1:

@@ -26,12 +26,13 @@ import inspect
 
 class SafeStreamHandler(logging.StreamHandler):
     """安全的流处理器，避免写入已关闭的流"""
+
     def emit(self, record):
         try:
-            if hasattr(self.stream, 'closed') and self.stream.closed:
+            if hasattr(self.stream, "closed") and self.stream.closed:
                 return
             super().emit(record)
-        except (ValueError, OSError):
+        except ValueError, OSError:
             # 忽略 I/O operation on closed file 错误
             pass
 
@@ -49,8 +50,7 @@ class DailyFileHandler(logging.FileHandler):
     4. Windows安全：避免多线程/多进程环境中的文件锁定问题
     """
 
-    def __init__(self, log_dir: Path, prefix: str = 'bill_analyser',
-                 encoding: str = 'utf-8'):
+    def __init__(self, log_dir: Path, prefix: str = "bill_analyser", encoding: str = "utf-8"):
         """初始化处理器
 
         Args:
@@ -60,12 +60,12 @@ class DailyFileHandler(logging.FileHandler):
         """
         self.log_dir = log_dir
         self.prefix = prefix
-        self._current_date = datetime.now().strftime('%Y%m%d')
+        self._current_date = datetime.now().strftime("%Y%m%d")
         self._file_lock = threading.Lock()
 
         # 初始化当前日期的日志文件
         log_file = self._get_log_file_path()
-        super().__init__(log_file, mode='a', encoding=encoding, delay=False)
+        super().__init__(log_file, mode="a", encoding=encoding, delay=False)
 
     def _get_log_file_path(self) -> Path:
         """获取当前日期的日志文件路径"""
@@ -73,7 +73,7 @@ class DailyFileHandler(logging.FileHandler):
 
     def _check_date_rollover(self) -> bool:
         """检查是否需要切换到新日期的日志文件"""
-        current_date = datetime.now().strftime('%Y%m%d')
+        current_date = datetime.now().strftime("%Y%m%d")
         if current_date != self._current_date:
             self._current_date = current_date
             return True
@@ -87,7 +87,7 @@ class DailyFileHandler(logging.FileHandler):
                 try:
                     self.stream.flush()
                     self.stream.close()
-                except (OSError, ValueError):
+                except OSError, ValueError:
                     pass
                 self.stream = None
 
@@ -105,9 +105,10 @@ class DailyFileHandler(logging.FileHandler):
             if self._check_date_rollover():
                 self._do_rollover()
             super().emit(record)
-        except (OSError, PermissionError, ValueError):
+        except OSError, PermissionError, ValueError:
             # 静默处理日志错误，避免影响主程序
             pass
+
 
 class AsyncLogger:
     """异步日志管理器
@@ -139,36 +140,27 @@ class AsyncLogger:
         # 创建自定义格式化器
         # 格式：时间戳 | 线程名 | 级别 | 类名.方法名 | 消息
         formatter = logging.Formatter(
-            '%(asctime)s | %(threadName)s | %(levelname)-8s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s | %(threadName)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
 
         # 实际的处理器列表
         handlers = []
 
         # 添加控制台处理器
-        if 'pytest' not in sys.modules:
+        if "pytest" not in sys.modules:
             console_handler = SafeStreamHandler(sys.stdout)
             console_handler.setLevel(logging.INFO)
             console_handler.setFormatter(formatter)
             handlers.append(console_handler)
 
         # 添加文件处理器（使用按日期滚动的处理器，不按大小切割）
-        file_handler = DailyFileHandler(
-            self.log_dir,
-            prefix='bill_analyser',
-            encoding='utf-8'
-        )
+        file_handler = DailyFileHandler(self.log_dir, prefix="bill_analyser", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         handlers.append(file_handler)
 
         # 添加错误日志文件处理器（使用按日期滚动的处理器）
-        error_handler = DailyFileHandler(
-            self.log_dir,
-            prefix='error',
-            encoding='utf-8'
-        )
+        error_handler = DailyFileHandler(self.log_dir, prefix="error", encoding="utf-8")
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(formatter)
         handlers.append(error_handler)
@@ -178,7 +170,7 @@ class AsyncLogger:
         self.queue_listener.start()
 
         # 配置根日志器使用QueueHandler
-        self.logger = logging.getLogger('bill_analyser')
+        self.logger = logging.getLogger("bill_analyser")
         self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False
 
@@ -189,6 +181,7 @@ class AsyncLogger:
 
     def _start_cleanup_task(self):
         """启动日志清理任务"""
+
         def cleanup_worker():
             """清理工作线程"""
             while True:
@@ -200,11 +193,7 @@ class AsyncLogger:
                     # 避免递归记录错误
                     print(f"日志清理任务出错: {e}")
 
-        cleanup_thread = threading.Thread(
-            target=cleanup_worker,
-            name="LogCleanupThread",
-            daemon=True
-        )
+        cleanup_thread = threading.Thread(target=cleanup_worker, name="LogCleanupThread", daemon=True)
         cleanup_thread.start()
 
     def _cleanup_old_logs(self):
@@ -225,32 +214,32 @@ class AsyncLogger:
     def get_logger(self, name: Optional[str] = None) -> logging.Logger:
         """获取日志器"""
         if name:
-            return logging.getLogger(f'bill_analyser.{name}')
+            return logging.getLogger(f"bill_analyser.{name}")
         return self.logger
 
     # 移除旧的 async_log 方法，因为 QueueHandler 已经是异步（非阻塞）的了
 
     def stop(self):
         """停止日志系统"""
-        if getattr(self, '_stopped', False):
+        if getattr(self, "_stopped", False):
             return
 
         self._stopped = True
 
-        if hasattr(self, 'queue_listener'):
+        if hasattr(self, "queue_listener"):
             try:
                 self.queue_listener.stop()
             except Exception:
                 pass
 
-            for handler in getattr(self.queue_listener, 'handlers', []):
+            for handler in getattr(self.queue_listener, "handlers", []):
                 try:
                     handler.flush()
                     handler.close()
                 except Exception:
                     pass
 
-        if hasattr(self, 'logger'):
+        if hasattr(self, "logger"):
             try:
                 self.logger.handlers.clear()
             except Exception:
@@ -298,6 +287,7 @@ def log_method(func):
 
     自动记录方法的入口、出口、参数和返回值
     """
+
     @functools.wraps(func)
     async def async_wrapper(*args, **kwargs):
         # 获取类名和方法名
@@ -313,7 +303,7 @@ def log_method(func):
             bound_args.apply_defaults()
 
             # 过滤掉 self 参数
-            params = {k: v for k, v in bound_args.arguments.items() if k != 'self'}
+            params = {k: v for k, v in bound_args.arguments.items() if k != "self"}
             # 截断过长的参数值
             param_str_parts = []
             for k, v in params.items():
@@ -330,7 +320,7 @@ def log_method(func):
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
-        except (ImportError, Exception):
+        except ImportError, Exception:
             pass
 
         try:
@@ -351,7 +341,7 @@ def log_method(func):
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
-            except (ImportError, Exception):
+            except ImportError, Exception:
                 pass
 
             return result
@@ -375,7 +365,7 @@ def log_method(func):
             bound_args.apply_defaults()
 
             # 过滤掉 self 参数
-            params = {k: v for k, v in bound_args.arguments.items() if k != 'self'}
+            params = {k: v for k, v in bound_args.arguments.items() if k != "self"}
             # 截断过长的参数值
             param_str_parts = []
             for k, v in params.items():
@@ -392,7 +382,7 @@ def log_method(func):
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
-        except (ImportError, Exception):
+        except ImportError, Exception:
             # 忽略解释器关闭时的错误
             pass
 
@@ -414,7 +404,7 @@ def log_method(func):
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
-            except (ImportError, Exception):
+            except ImportError, Exception:
                 pass
 
             return result
@@ -436,6 +426,7 @@ def log_step(step_name: str):
     Args:
         step_name: 步骤名称
     """
+
     def decorator(func):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):

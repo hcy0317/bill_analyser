@@ -34,7 +34,7 @@ class ICBCParser(ParserBase):
     def __init__(self):
         """初始化"""
         super().__init__()
-        self.supported_extensions = ['.csv', '.xlsx', '.xls']
+        self.supported_extensions = [".csv", ".xlsx", ".xls"]
         self.logger.info("工商银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
     @log_method
@@ -43,12 +43,12 @@ class ICBCParser(ParserBase):
         file_ext = Path(file_path).suffix.lower()
 
         # 检查文件名（优先级最低）
-        if 'icbc' in file_path.lower() or '工商' in file_path:
+        if "icbc" in file_path.lower() or "工商" in file_path:
             return True
 
-        if file_ext in ['.xlsx', '.xls']:
+        if file_ext in [".xlsx", ".xls"]:
             return self._can_parse_excel(file_path)
-        if file_ext == '.csv':
+        if file_ext == ".csv":
             return self._can_parse_csv(file_path)
 
         return False
@@ -56,15 +56,15 @@ class ICBCParser(ParserBase):
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV是否为工商银行账单"""
         try:
-            with open(file_path, 'r', encoding='gbk') as f:
-                first_lines = ''.join([f.readline() for _ in range(10)])
+            with open(file_path, "r", encoding="gbk") as f:
+                first_lines = "".join([f.readline() for _ in range(10)])
 
             # 工商银行强特征
-            icbc_indicators = ['工商银行', 'ICBC', '中国工商银行']
+            icbc_indicators = ["工商银行", "ICBC", "中国工商银行"]
             has_icbc = any(indicator in first_lines for indicator in icbc_indicators)
 
             # 排除其他银行
-            other_bank = ['民生银行', '农业银行', '建设银行']
+            other_bank = ["民生银行", "农业银行", "建设银行"]
             has_other = any(bank in first_lines for bank in other_bank)
 
             return has_icbc and not has_other
@@ -78,12 +78,12 @@ class ICBCParser(ParserBase):
             tuple: (is_html_format: bool, error: Optional[str])
         """
         try:
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 header_bytes = f.read(8)
 
             # 检查文件魔数（magic number）
             # HTML格式伪装的xls: 以<html开头
-            if header_bytes.startswith(b'<htm') or header_bytes.startswith(b'<HTM'):
+            if header_bytes.startswith(b"<htm") or header_bytes.startswith(b"<HTM"):
                 self.logger.debug("检测到HTML伪装XLS格式: %s", file_path)
                 return True, None
 
@@ -96,13 +96,13 @@ class ICBCParser(ParserBase):
 
     def _read_html_content(self, file_path: str) -> str:
         """读取HTML格式文件内容，尝试多种编码"""
-        for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
+        for encoding in ["utf-8", "gbk", "gb2312", "gb18030"]:
             try:
-                with open(file_path, 'r', encoding=encoding) as f:
+                with open(file_path, "r", encoding=encoding) as f:
                     content = f.read(5000)
                 self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
                 return content
-            except (UnicodeDecodeError, IOError):
+            except UnicodeDecodeError, IOError:
                 continue
         return ""
 
@@ -138,26 +138,32 @@ class ICBCParser(ParserBase):
             ["交易日期", "交易附言", "对方账号名称"],
             # v6.76: 新增工商银行历史明细格式
             ["储种", "交易日期", "收入/支出金额", "对方户名"],
-            ["账号", "储种", "币种", "摘要", "对方户名"]
+            ["账号", "储种", "币种", "摘要", "对方户名"],
         ]
 
         # 排除其他银行特征
         other_bank_indicators = [
-            "存入金额", "凭证类型",  # v6.76: 移除"支出金额"，因为工商银行使用"收入/支出金额"
-            "⼾名", "账⼾", "对⼿信息",
-            "记账日", "开户机构：", "账户明细查询", "交易用途"
+            "存入金额",
+            "凭证类型",  # v6.76: 移除"支出金额"，因为工商银行使用"收入/支出金额"
+            "⼾名",
+            "账⼾",
+            "对⼿信息",
+            "记账日",
+            "开户机构：",
+            "账户明细查询",
+            "交易用途",
         ]
 
         # v6.76: 先检查工商银行专属列名（优先级最高，直接返回True）
         has_icbc_exclusive = any(col in content for col in icbc_exclusive_columns)
         if has_icbc_exclusive:
-            self.logger.debug("检测到工商银行专属列名特征: %s",
-                              [col for col in icbc_exclusive_columns if col in content])
+            self.logger.debug(
+                "检测到工商银行专属列名特征: %s", [col for col in icbc_exclusive_columns if col in content]
+            )
             return True
 
         has_icbc_strong = any(ind in content for ind in icbc_strong_indicators)
-        has_icbc_columns = any(all(col in content for col in pattern)
-                              for pattern in icbc_column_patterns)
+        has_icbc_columns = any(all(col in content for col in pattern) for pattern in icbc_column_patterns)
         has_other_bank = any(ind in content for ind in other_bank_indicators)
 
         return (has_icbc_strong or has_icbc_columns) and not has_other_bank
@@ -199,17 +205,17 @@ class ICBCParser(ParserBase):
 
         file_ext = Path(file_path).suffix.lower()
 
-        if file_ext == '.csv':
+        if file_ext == ".csv":
             return self._parse_csv(file_path)
 
-        if file_ext in ['.xlsx', '.xls']:
+        if file_ext in [".xlsx", ".xls"]:
             # 检查文件格式（通过魔数判断）
             try:
-                with open(file_path, 'rb') as f:
+                with open(file_path, "rb") as f:
                     header_bytes = f.read(8)
 
                 # HTML格式伪装的xls: 以<html开头
-                if header_bytes.startswith(b'<htm') or header_bytes.startswith(b'<HTM'):
+                if header_bytes.startswith(b"<htm") or header_bytes.startswith(b"<HTM"):
                     self.logger.info("检测到HTML伪装XLS格式，使用HTML解析器")
                     return self._parse_html_xls(file_path)
                 # 真正的Excel格式（XLSX或OLE2 XLS）
@@ -226,35 +232,35 @@ class ICBCParser(ParserBase):
         """从HTML表格行提取账单信息"""
         try:
             # 提取交易日期
-            date_str = str(row.get('交易日期', ''))
-            if not date_str or date_str == 'nan':
+            date_str = str(row.get("交易日期", ""))
+            if not date_str or date_str == "nan":
                 return None
 
             # 提取金额
-            amount_str = str(row.get('收入/支出金额', '') or row.get('金额', ''))
-            if not amount_str or amount_str == 'nan' or amount_str == '0':
+            amount_str = str(row.get("收入/支出金额", "") or row.get("金额", ""))
+            if not amount_str or amount_str == "nan" or amount_str == "0":
                 return None
 
             try:
-                amount_value = float(amount_str.replace(',', ''))
-            except (ValueError, TypeError):
+                amount_value = float(amount_str.replace(",", ""))
+            except ValueError, TypeError:
                 return None
 
             if amount_value == 0:
                 return None
 
             # 判断收支类型
-            transaction_type = '收入' if amount_value > 0 else '支出'
+            transaction_type = "收入" if amount_value > 0 else "支出"
 
             return {
-                'date': date_str,
-                'type': transaction_type,
-                'counterparty': str(row.get('对方户名', '') or row.get('交易对方', '')),
-                'opponent_account': str(row.get('对方账号', '') or ''),
-                'description': str(row.get('摘要', '') or row.get('用途', '')),
-                'abstract': str(row.get('摘要', '') or row.get('交易附言', '')),
-                'amount': str(abs(amount_value)),
-                'transaction_id': str(row.get('交易流水号', '') or ''),
+                "date": date_str,
+                "type": transaction_type,
+                "counterparty": str(row.get("对方户名", "") or row.get("交易对方", "")),
+                "opponent_account": str(row.get("对方账号", "") or ""),
+                "description": str(row.get("摘要", "") or row.get("用途", "")),
+                "abstract": str(row.get("摘要", "") or row.get("交易附言", "")),
+                "amount": str(abs(amount_value)),
+                "transaction_id": str(row.get("交易流水号", "") or ""),
             }
         except Exception as e:  # pylint: disable=broad-except
             self.logger.debug("解析HTML行失败: %s", e)
@@ -269,13 +275,13 @@ class ICBCParser(ParserBase):
             # 尝试多种编码读取HTML表格
             dfs = None
             encoding_used = None
-            for encoding in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
+            for encoding in ["utf-8", "gbk", "gb2312", "gb18030"]:
                 try:
                     dfs = pd.read_html(file_path, encoding=encoding)
                     encoding_used = encoding
                     self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
                     break
-                except (UnicodeDecodeError, ValueError):
+                except UnicodeDecodeError, ValueError:
                     continue
 
             if not dfs:
@@ -285,21 +291,20 @@ class ICBCParser(ParserBase):
             # 通常第一个表格是账单数据
             df = dfs[0]
 
-            self.logger.info("读取到 %d 行数据，列名: %s，编码: %s",
-                           len(df), df.columns.tolist(), encoding_used)
+            self.logger.info("读取到 %d 行数据，列名: %s，编码: %s", len(df), df.columns.tolist(), encoding_used)
 
             # 查找列名(可能在不同行)
             column_row_idx = None
             for idx in range(min(10, len(df))):
                 row_values = df.iloc[idx].tolist()
-                if any('交易日期' in str(v) for v in row_values):
+                if any("交易日期" in str(v) for v in row_values):
                     column_row_idx = idx
                     break
 
             if column_row_idx is not None:
                 # 使用找到的行作为列名
                 df.columns = df.iloc[column_row_idx].tolist()
-                df = df.iloc[column_row_idx + 1:]  # 从下一行开始是数据
+                df = df.iloc[column_row_idx + 1 :]  # 从下一行开始是数据
 
             # 解析每一行
             for _, row in df.iterrows():
@@ -321,13 +326,13 @@ class ICBCParser(ParserBase):
         bills = []
 
         try:
-            with open(file_path, 'r', encoding='gbk') as f:
+            with open(file_path, "r", encoding="gbk") as f:
                 lines = f.readlines()
 
                 # 查找数据起始行
                 data_start = 0
                 for i, line in enumerate(lines):
-                    if '交易日期' in line or '记账日期' in line:
+                    if "交易日期" in line or "记账日期" in line:
                         data_start = i
                         break
 
@@ -401,63 +406,63 @@ class ICBCParser(ParserBase):
         """从CSV行数据提取账单信息"""
         try:
             # 获取日期字段
-            date_field = row.get('交易日期') or row.get('记账日期') or ''
+            date_field = row.get("交易日期") or row.get("记账日期") or ""
             if not date_field or len(date_field.strip()) == 0:
                 return None
 
             # 获取金额和类型
-            amount_str = row.get('交易金额') or row.get('金额') or '0'
-            transaction_type = '支出'
+            amount_str = row.get("交易金额") or row.get("金额") or "0"
+            transaction_type = "支出"
 
             # 判断收支类型
-            if row.get('收/支'):
-                transaction_type = row.get('收/支')
-            elif row.get('借贷标志') == '贷' or 'income' in str(row).lower():
-                transaction_type = '收入'
+            if row.get("收/支"):
+                transaction_type = row.get("收/支")
+            elif row.get("借贷标志") == "贷" or "income" in str(row).lower():
+                transaction_type = "收入"
 
             return {
-                'date': date_field,
-                'type': transaction_type,
-                'counterparty': row.get('对方户名') or row.get('交易对方') or '',
-                'opponent_account': row.get('对方账号') or '',
-                'description': row.get('摘要') or row.get('用途') or '',
-                'abstract': row.get('摘要') or row.get('交易摘要') or '',
-                'amount': str(amount_str).replace('+', '').replace('-', ''),
-                'transaction_id': row.get('交易流水号') or '',
+                "date": date_field,
+                "type": transaction_type,
+                "counterparty": row.get("对方户名") or row.get("交易对方") or "",
+                "opponent_account": row.get("对方账号") or "",
+                "description": row.get("摘要") or row.get("用途") or "",
+                "abstract": row.get("摘要") or row.get("交易摘要") or "",
+                "amount": str(amount_str).replace("+", "").replace("-", ""),
+                "transaction_id": row.get("交易流水号") or "",
             }
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("提取CSV账单信息失败: %s", e)
             return None
 
-    def _extract_bill_from_excel_row(self, row: tuple,
-                                     column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_excel_row(self, row: tuple, column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
         """从Excel行数据提取账单信息"""
         try:
+
             def get_cell(col_name: str) -> str:
                 idx = column_map.get(col_name)
                 if idx is not None and idx < len(row):
                     value = row[idx]
-                    return str(value) if value is not None else ''
-                return ''
+                    return str(value) if value is not None else ""
+                return ""
 
             # 提取交易日期（可能带换行符）
-            date_str = get_cell('交易日期')
+            date_str = get_cell("交易日期")
             if not date_str:
                 return None
 
             # 处理换行符（如 "2016-08-11\n20:15:27"）
-            date_str = date_str.replace('\n', ' ')
+            date_str = date_str.replace("\n", " ")
 
             # 提取金额
-            amount_str = get_cell('收入/支出金额')
-            if not amount_str or amount_str == '0':
+            amount_str = get_cell("收入/支出金额")
+            if not amount_str or amount_str == "0":
                 return None
 
             # 跳过非数字金额(如表头重复行)
             try:
                 amount_value = float(amount_str)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 return None
 
             # 跳过零金额
@@ -465,18 +470,18 @@ class ICBCParser(ParserBase):
                 return None
 
             # 判断收支类型（正数为收入，负数为支出）
-            transaction_type = '收入' if amount_value > 0 else '支出'
+            transaction_type = "收入" if amount_value > 0 else "支出"
             amount_str = str(abs(amount_value))
 
             return {
-                'date': date_str,
-                'type': transaction_type,
-                'counterparty': get_cell('对方户名'),
-                'opponent_account': get_cell('对方账号'),
-                'description': get_cell('摘要'),
-                'abstract': get_cell('摘要') or get_cell('交易附言'),
-                'amount': amount_str,
-                'transaction_id': get_cell('交易流水号'),
+                "date": date_str,
+                "type": transaction_type,
+                "counterparty": get_cell("对方户名"),
+                "opponent_account": get_cell("对方账号"),
+                "description": get_cell("摘要"),
+                "abstract": get_cell("摘要") or get_cell("交易附言"),
+                "amount": amount_str,
+                "transaction_id": get_cell("交易流水号"),
             }
 
         except Exception as e:  # pylint: disable=broad-except

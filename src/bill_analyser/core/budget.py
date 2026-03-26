@@ -15,6 +15,7 @@ from ..utils.config import get_config
 
 class BudgetStatus(Enum):
     """预算状态枚举"""
+
     NORMAL = "normal"  # 正常
     WARNING = "warning"  # 警告（超过80%）
     CRITICAL = "critical"  # 严重（超过90%）
@@ -26,14 +27,14 @@ class BudgetManager:
 
     def __init__(self, db: Optional[Database] = None):
         """初始化"""
-        self.logger = get_logger('BudgetManager')
+        self.logger = get_logger("BudgetManager")
         self.db = db or Database()
         self.budgets: Dict[str, float] = {}
         self.alert_callbacks: List[Callable] = []
 
     @log_method
     @log_step("加载预算配置")
-    async def load_budgets(self, config_file: str = 'budget.json'):
+    async def load_budgets(self, config_file: str = "budget.json"):
         """加载预算配置"""
         budgets = get_config(config_file)
         self.budgets = budgets
@@ -75,8 +76,7 @@ class BudgetManager:
     def _trigger_alert(self, category: str, budget: float, spent: float, status: BudgetStatus):
         """触发警报"""
         self.logger.warning(
-            "预算警报 | 分类=%s, 预算=%.2f, 已花费=%.2f, 状态=%s",
-            category, budget, spent, status.value
+            "预算警报 | 分类=%s, 预算=%.2f, 已花费=%.2f, 状态=%s", category, budget, spent, status.value
         )
 
         # 调用注册的回调函数
@@ -93,7 +93,7 @@ class BudgetManager:
 
     @log_method
     @log_step("生成预算报告")
-    async def get_budget_report(self, period: str = 'month') -> Dict[str, Any]:
+    async def get_budget_report(self, period: str = "month") -> Dict[str, Any]:
         """
         生成预算报告
 
@@ -108,44 +108,44 @@ class BudgetManager:
         analyzer = Analyzer(self.db)
         analysis = await analyzer.generate_report(period)
 
-        by_category = analysis.get('by_category', {})
+        by_category = analysis.get("by_category", {})
 
         report = {
-            'period': period,
-            'categories': {},
-            'summary': {
-                'total_budget': sum(self.budgets.values()),
-                'total_spent': 0,
-                'normal_count': 0,
-                'warning_count': 0,
-                'critical_count': 0,
-                'exceeded_count': 0
+            "period": period,
+            "categories": {},
+            "summary": {
+                "total_budget": sum(self.budgets.values()),
+                "total_spent": 0,
+                "normal_count": 0,
+                "warning_count": 0,
+                "critical_count": 0,
+                "exceeded_count": 0,
             },
-            'generated_at': datetime.now().isoformat()
+            "generated_at": datetime.now().isoformat(),
         }
 
         for category, budget in self.budgets.items():
-            spent = by_category.get(category, {}).get('total', 0.0)
+            spent = by_category.get(category, {}).get("total", 0.0)
             status = self.check_budget_status(category, spent)
 
-            report['categories'][category] = {
-                'budget': budget,
-                'spent': spent,
-                'remaining': budget - spent,
-                'usage_ratio': (spent / budget * 100) if budget > 0 else 0,
-                'status': status.value
+            report["categories"][category] = {
+                "budget": budget,
+                "spent": spent,
+                "remaining": budget - spent,
+                "usage_ratio": (spent / budget * 100) if budget > 0 else 0,
+                "status": status.value,
             }
 
-            report['summary']['total_spent'] += spent
+            report["summary"]["total_spent"] += spent
 
             if status == BudgetStatus.NORMAL:
-                report['summary']['normal_count'] += 1
+                report["summary"]["normal_count"] += 1
             elif status == BudgetStatus.WARNING:
-                report['summary']['warning_count'] += 1
+                report["summary"]["warning_count"] += 1
             elif status == BudgetStatus.CRITICAL:
-                report['summary']['critical_count'] += 1
+                report["summary"]["critical_count"] += 1
             elif status == BudgetStatus.EXCEEDED:
-                report['summary']['exceeded_count'] += 1
+                report["summary"]["exceeded_count"] += 1
 
         self.logger.info("预算报告生成完成")
         return report

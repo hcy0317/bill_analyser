@@ -19,15 +19,15 @@ class CSVParser(BaseParser):
         """解析CSV文件"""
         config = config or {}
 
-        encoding = config.get('encoding') or await self.detect_encoding(file_path)
-        delimiter = config.get('delimiter', ',')
-        skip_rows = config.get('skip_rows', 0)
-        has_header = config.get('has_header', True)
-        field_mapping = config.get('field_mappings', {})
+        encoding = config.get("encoding") or await self.detect_encoding(file_path)
+        delimiter = config.get("delimiter", ",")
+        skip_rows = config.get("skip_rows", 0)
+        has_header = config.get("has_header", True)
+        field_mapping = config.get("field_mappings", {})
 
         bills = []
 
-        with open(file_path, 'r', encoding=encoding) as f:
+        with open(file_path, "r", encoding=encoding) as f:
             # 跳过指定行数
             for _ in range(skip_rows):
                 next(f)
@@ -61,12 +61,12 @@ class CSVParser(BaseParser):
             if not path.exists():
                 return False
 
-            if path.suffix.lower() not in ['.csv', '.txt']:
+            if path.suffix.lower() not in [".csv", ".txt"]:
                 return False
 
             # 尝试读取前几行
             encoding = await self.detect_encoding(file_path)
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, "r", encoding=encoding) as f:
                 csv.Sniffer().sniff(f.read(1024))
             return True
 
@@ -76,16 +76,16 @@ class CSVParser(BaseParser):
 
     async def detect_encoding(self, file_path: str) -> str:
         """检测文件编码"""
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             raw_data = f.read(10000)
             result = chardet.detect(raw_data)
-            return result['encoding'] or 'utf-8'
+            return result["encoding"] or "utf-8"
 
     async def preview(self, file_path: str, rows: int = 10) -> Dict[str, Any]:
         """预览CSV内容"""
         encoding = await self.detect_encoding(file_path)
 
-        with open(file_path, 'r', encoding=encoding) as f:
+        with open(file_path, "r", encoding=encoding) as f:
             # 尝试检测分隔符
             sample = f.read(1024)
             f.seek(0)
@@ -94,7 +94,7 @@ class CSVParser(BaseParser):
                 dialect = csv.Sniffer().sniff(sample)
                 delimiter = dialect.delimiter
             except:
-                delimiter = ','
+                delimiter = ","
 
             reader = csv.reader(f, delimiter=delimiter)
 
@@ -110,13 +110,13 @@ class CSVParser(BaseParser):
                     break
 
             return {
-                'headers': headers,
-                'sample_data': data,
-                'delimiter': delimiter,
-                'encoding': encoding,
-                'total_rows': sum(1 for _ in open(file_path, 'r', encoding=encoding)) - 1
+                "headers": headers,
+                "sample_data": data,
+                "delimiter": delimiter,
+                "encoding": encoding,
+                "total_rows": sum(1 for _ in open(file_path, "r", encoding=encoding)) - 1,
             }
 
 
 # 注册解析器
-ParserFactory.register('csv', CSVParser)
+ParserFactory.register("csv", CSVParser)

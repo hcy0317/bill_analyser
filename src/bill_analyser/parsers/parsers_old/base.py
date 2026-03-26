@@ -20,7 +20,7 @@ class BaseBankParser(ABC):
 
     def __init__(self):
         self.bank_name = ""
-        self.supported_formats = ['.xlsx', '.xls', '.csv']
+        self.supported_formats = [".xlsx", ".xls", ".csv"]
 
     @abstractmethod
     def can_parse(self, file_path: str) -> bool:
@@ -68,16 +68,16 @@ class BaseBankParser(ABC):
         amount_str = str(amount_str).strip()
 
         # 移除逗号、空格等
-        amount_str = re.sub(r'[,\s]', '', amount_str)
+        amount_str = re.sub(r"[,\s]", "", amount_str)
 
         # 处理负号
         is_negative = False
-        if amount_str.startswith('-') or amount_str.startswith('−'):
+        if amount_str.startswith("-") or amount_str.startswith("−"):
             is_negative = True
             amount_str = amount_str[1:]
 
         # 提取数字
-        match = re.search(r'\d+\.?\d*', amount_str)
+        match = re.search(r"\d+\.?\d*", amount_str)
         if match:
             try:
                 amount = float(match.group())
@@ -94,8 +94,8 @@ class BaseBankParser(ABC):
             time_str = str(time_str).strip() if time_str else ""
 
             # 修复：处理包含换行符的日期时间字符串，如 "2024-01-17\n17:30:36"
-            if '\n' in date_str:
-                parts = date_str.split('\n')
+            if "\n" in date_str:
+                parts = date_str.split("\n")
                 if len(parts) >= 2:
                     date_part = parts[0].strip()
                     time_part = parts[1].strip()
@@ -104,27 +104,27 @@ class BaseBankParser(ABC):
 
             # 处理不同的日期格式
             if len(date_str) == 8 and date_str.isdigit():  # 20240101
-                date_obj = datetime.strptime(date_str, '%Y%m%d')
+                date_obj = datetime.strptime(date_str, "%Y%m%d")
             elif len(date_str) >= 10:  # 2024-01-01 或 2024-01-01 21:17:21
-                if ' ' in date_str:
+                if " " in date_str:
                     return date_str  # 已包含时间
-                date_obj = datetime.strptime(date_str[:10], '%Y-%m-%d')
+                date_obj = datetime.strptime(date_str[:10], "%Y-%m-%d")
             else:
                 return date_str  # 返回原始字符串
 
             # 添加时间部分
-            if time_str and ':' in time_str:
+            if time_str and ":" in time_str:
                 try:
                     if len(time_str) == 6 and time_str.isdigit():  # 151732
-                        time_obj = datetime.strptime(time_str, '%H%M%S')
+                        time_obj = datetime.strptime(time_str, "%H%M%S")
                         return f"{date_obj.strftime('%Y-%m-%d')} {time_obj.strftime('%H:%M:%S')}"
-                    if ':' in time_str:
+                    if ":" in time_str:
                         return f"{date_obj.strftime('%Y-%m-%d')} {time_str}"
                 except ValueError:
                     pass
 
             # 修复：对于只有日期没有时间的情况，使用00:00:00而不是当前时间
-            return date_obj.strftime('%Y-%m-%d') + ' 00:00:00'
+            return date_obj.strftime("%Y-%m-%d") + " 00:00:00"
 
         except (ValueError, TypeError) as e:
             logger.debug("解析日期时间失败: %s, %s, 错误: %s", date_str, time_str, e)
@@ -136,7 +136,7 @@ class BaseBankParser(ABC):
             return pd.DataFrame()
 
         # 标准列名
-        standard_columns = ['日期', '商品说明', '交易对方', '收支', '金额', '大类', '小类', '交易状态']
+        standard_columns = ["日期", "商品说明", "交易对方", "收支", "金额", "大类", "小类", "交易状态"]
 
         # 确保所有交易都有标准列
         standardized_transactions = []
@@ -146,33 +146,33 @@ class BaseBankParser(ABC):
 
             # 处理每个标准列
             for col in standard_columns:
-                if col == '金额':
+                if col == "金额":
                     # 确保金额是数值类型，避免DataFrame多列赋值错误
-                    amount_value = transaction.get('金额', 0)
+                    amount_value = transaction.get("金额", 0)
                     if isinstance(amount_value, (list, tuple, pd.Series)):
                         # 如果是列表或Series，取第一个有效值
                         if len(amount_value) > 0:
-                            amount_value = amount_value[0] if hasattr(amount_value, '__getitem__') else 0
+                            amount_value = amount_value[0] if hasattr(amount_value, "__getitem__") else 0
                         else:
                             amount_value = 0
                     try:
                         std_transaction[col] = float(amount_value) if amount_value is not None else 0.0
-                    except (ValueError, TypeError):
+                    except ValueError, TypeError:
                         std_transaction[col] = 0.0
-                elif col == '大类':
-                    std_transaction[col] = transaction.get(col, '其他')
-                elif col == '小类':
-                    std_transaction[col] = transaction.get(col, '其他')
-                elif col == '收支':
+                elif col == "大类":
+                    std_transaction[col] = transaction.get(col, "其他")
+                elif col == "小类":
+                    std_transaction[col] = transaction.get(col, "其他")
+                elif col == "收支":
                     if col in transaction:
                         std_transaction[col] = transaction[col]
                     else:
-                        amount = std_transaction.get('金额', 0)
-                        std_transaction[col] = '收入' if amount > 0 else '支出'
-                elif col == '交易状态':
-                    std_transaction[col] = transaction.get(col, '成功')  # 银行数据默认状态为成功
+                        amount = std_transaction.get("金额", 0)
+                        std_transaction[col] = "收入" if amount > 0 else "支出"
+                elif col == "交易状态":
+                    std_transaction[col] = transaction.get(col, "成功")  # 银行数据默认状态为成功
                 else:
-                    std_transaction[col] = transaction.get(col, '')
+                    std_transaction[col] = transaction.get(col, "")
 
             standardized_transactions.append(std_transaction)
 
@@ -180,13 +180,13 @@ class BaseBankParser(ABC):
         df = pd.DataFrame(standardized_transactions)
 
         # 再次确保金额列是数值型，并处理异常值
-        if '金额' in df.columns and not df.empty:
+        if "金额" in df.columns and not df.empty:
             # 使用 .loc 避免 SettingWithCopyWarning
             df = df.copy()
-            df.loc[:, '金额'] = pd.to_numeric(df['金额'], errors='coerce').fillna(0.0)
+            df.loc[:, "金额"] = pd.to_numeric(df["金额"], errors="coerce").fillna(0.0)
 
         # 过滤掉无效记录
         if not df.empty:
-            df = df[df['金额'] != 0]
+            df = df[df["金额"] != 0]
 
         return df[standard_columns] if not df.empty else pd.DataFrame(columns=standard_columns)

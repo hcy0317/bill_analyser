@@ -86,21 +86,21 @@ class BaseParser(ABC):
         bill = {}
 
         # 必填字段
-        required_fields = ['date', 'type', 'amount', 'description']
+        required_fields = ["date", "type", "amount", "description"]
 
         for std_field, raw_field in field_mapping.items():
             if raw_field and raw_field in raw_data:
                 value = raw_data[raw_field]
 
                 # 类型转换和验证
-                if std_field == 'date':
-                    bill['date'] = self._parse_date(value)
-                elif std_field == 'type':
-                    bill['type'] = self._parse_type(value)
-                elif std_field == 'amount':
-                    bill['amount'] = self._parse_amount(value)
-                elif std_field in ['category', 'account', 'counterparty', 'description', 'comment']:
-                    bill[std_field] = str(value).strip() if value else ''
+                if std_field == "date":
+                    bill["date"] = self._parse_date(value)
+                elif std_field == "type":
+                    bill["type"] = self._parse_type(value)
+                elif std_field == "amount":
+                    bill["amount"] = self._parse_amount(value)
+                elif std_field in ["category", "account", "counterparty", "description", "comment"]:
+                    bill[std_field] = str(value).strip() if value else ""
                 else:
                     bill[std_field] = value
 
@@ -114,7 +114,7 @@ class BaseParser(ABC):
     def _parse_date(self, date_str: Any) -> str:
         """解析日期字符串"""
         if isinstance(date_str, datetime):
-            return date_str.strftime('%Y-%m-%d')
+            return date_str.strftime("%Y-%m-%d")
 
         if not date_str:
             raise ValueError("日期不能为空")
@@ -123,20 +123,20 @@ class BaseParser(ABC):
 
         # 尝试多种日期格式
         date_formats = [
-            '%Y-%m-%d',
-            '%Y/%m/%d',
-            '%Y.%m.%d',
-            '%Y%m%d',
-            '%d/%m/%Y',
-            '%d-%m-%Y',
-            '%m/%d/%Y',
-            '%Y-%m-%d %H:%M:%S',
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%Y.%m.%d",
+            "%Y%m%d",
+            "%d/%m/%Y",
+            "%d-%m-%Y",
+            "%m/%d/%Y",
+            "%Y-%m-%d %H:%M:%S",
         ]
 
         for fmt in date_formats:
             try:
                 dt = datetime.strptime(date_str, fmt)
-                return dt.strftime('%Y-%m-%d')
+                return dt.strftime("%Y-%m-%d")
             except ValueError:
                 continue
 
@@ -145,25 +145,25 @@ class BaseParser(ABC):
     def _parse_type(self, type_str: Any) -> str:
         """解析交易类型"""
         if not type_str:
-            return 'expense'
+            return "expense"
 
         type_str = str(type_str).strip().lower()
 
         # 收入关键词
-        income_keywords = ['收入', 'income', '进账', '入账', '存入', 'credit', '+']
+        income_keywords = ["收入", "income", "进账", "入账", "存入", "credit", "+"]
         # 支出关键词
-        expense_keywords = ['支出', 'expense', '出账', '支取', 'debit', '-']
+        expense_keywords = ["支出", "expense", "出账", "支取", "debit", "-"]
 
         for keyword in income_keywords:
             if keyword in type_str:
-                return 'income'
+                return "income"
 
         for keyword in expense_keywords:
             if keyword in type_str:
-                return 'expense'
+                return "expense"
 
         # 默认为支出
-        return 'expense'
+        return "expense"
 
     def _parse_amount(self, amount: Any) -> float:
         """解析金额"""
@@ -178,12 +178,12 @@ class BaseParser(ABC):
         amount_str = str(amount).strip()
 
         # 移除货币符号和千位分隔符
-        amount_str = amount_str.replace('¥', '').replace('$', '').replace('€', '')
-        amount_str = amount_str.replace(',', '').replace(' ', '')
+        amount_str = amount_str.replace("¥", "").replace("$", "").replace("€", "")
+        amount_str = amount_str.replace(",", "").replace(" ", "")
 
         # 处理括号表示负数的情况
-        if amount_str.startswith('(') and amount_str.endswith(')'):
-            amount_str = '-' + amount_str[1:-1]
+        if amount_str.startswith("(") and amount_str.endswith(")"):
+            amount_str = "-" + amount_str[1:-1]
 
         try:
             return abs(float(amount_str))

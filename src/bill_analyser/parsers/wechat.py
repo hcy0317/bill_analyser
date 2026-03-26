@@ -25,7 +25,7 @@ from ..utils.logger import log_method
 
 class WeChatParser(ParserBase):
     """微信账单解析器"""
-    
+
     # 解析器标识符
     PARSER_ID = "wechat"
     PARSER_NAME = "微信支付"
@@ -33,27 +33,26 @@ class WeChatParser(ParserBase):
     def __init__(self):
         """初始化"""
         super().__init__()
-        self.supported_extensions = ['.csv', '.xlsx']
-        self.logger.info("微信账单解析器已初始化 [ID=%s], 支持格式: %s",
-                        self.PARSER_ID, self.supported_extensions)
+        self.supported_extensions = [".csv", ".xlsx"]
+        self.logger.info("微信账单解析器已初始化 [ID=%s], 支持格式: %s", self.PARSER_ID, self.supported_extensions)
 
     @log_method
     def can_parse(self, file_path: str) -> bool:
         """判断是否为微信账单"""
         file_ext = Path(file_path).suffix.lower()
 
-        if file_ext == '.csv':
+        if file_ext == ".csv":
             return self._can_parse_csv(file_path)
-        if file_ext == '.xlsx':
+        if file_ext == ".xlsx":
             return self._can_parse_xlsx(file_path)
         return False
 
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV文件是否为微信账单"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                first_lines = ''.join([f.readline() for _ in range(5)])
-                return '微信支付账单' in first_lines or '交易时间' in first_lines
+            with open(file_path, "r", encoding="utf-8") as f:
+                first_lines = "".join([f.readline() for _ in range(5)])
+                return "微信支付账单" in first_lines or "交易时间" in first_lines
         except Exception:  # pylint: disable=broad-except
             return False
 
@@ -64,7 +63,7 @@ class WeChatParser(ParserBase):
             ws = wb.active
             # 检查前几行是否包含微信账单特征
             for row in ws.iter_rows(max_row=5, values_only=True):
-                if row[0] and '微信支付账单明细' in str(row[0]):
+                if row[0] and "微信支付账单明细" in str(row[0]):
                     wb.close()
                     return True
             wb.close()
@@ -76,17 +75,17 @@ class WeChatParser(ParserBase):
     def parse(self, file_path: str) -> List[Dict[str, Any]]:
         """解析微信账单"""
         self.logger.info("[解析开始] 文件: %s", file_path)
-        
+
         if not self.validate_file(file_path):
             return []
 
         file_ext = Path(file_path).suffix.lower()
 
-        if file_ext == '.csv':
+        if file_ext == ".csv":
             return self._parse_csv(file_path)
-        if file_ext == '.xlsx':
+        if file_ext == ".xlsx":
             return self._parse_xlsx(file_path)
-        
+
         self.logger.error("不支持的文件格式: %s", file_ext)
         return []
 
@@ -96,13 +95,13 @@ class WeChatParser(ParserBase):
         bills = []
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 # 跳过头部说明行
                 lines = f.readlines()
                 data_start = 0
 
                 for i, line in enumerate(lines):
-                    if '交易时间' in line:
+                    if "交易时间" in line:
                         data_start = i
                         break
 
@@ -116,7 +115,7 @@ class WeChatParser(ParserBase):
                 for row in reader:
                     try:
                         # 跳过空行和统计行
-                        if not row.get('交易时间') or '总计' in str(row.get('交易时间')):
+                        if not row.get("交易时间") or "总计" in str(row.get("交易时间")):
                             continue
 
                         bill = self._extract_bill_from_csv_row(row)
@@ -148,7 +147,7 @@ class WeChatParser(ParserBase):
             header_row_idx = 0
 
             for idx, row in enumerate(ws.iter_rows(values_only=True), 1):
-                if row[0] == '交易时间':
+                if row[0] == "交易时间":
                     header_row = row
                     header_row_idx = idx
                     self.logger.info("找到列名行，位于第 %d 行", idx)
@@ -171,7 +170,7 @@ class WeChatParser(ParserBase):
                         continue
 
                     # 跳过分隔线和统计行
-                    if '----' in str(row[0]) or '注：' in str(row[0]) or '总计' in str(row[0]):
+                    if "----" in str(row[0]) or "注：" in str(row[0]) or "总计" in str(row[0]):
                         continue
 
                     bill = self._extract_bill_from_xlsx_row(row, column_map)
@@ -194,22 +193,21 @@ class WeChatParser(ParserBase):
         """从CSV行数据提取账单信息"""
         # 提取所有可能有用的字段
         return {
-            'date': row.get('交易时间', ''),
-            'type': row.get('收/支', ''),
-            'counterparty': row.get('交易对方', ''),
-            'description': row.get('商品', ''),
-            'goods': row.get('商品', ''),
-            'amount': row.get('金额(元)', '0'),
-            'payment_method': row.get('支付方式', ''),
-            'status': row.get('当前状态', ''),
-            'transaction_id': row.get('交易单号', ''),
-            'merchant_id': row.get('商户单号', ''),
-            'remark': row.get('备注', ''),
-            'original_category': row.get('交易类型', ''),
+            "date": row.get("交易时间", ""),
+            "type": row.get("收/支", ""),
+            "counterparty": row.get("交易对方", ""),
+            "description": row.get("商品", ""),
+            "goods": row.get("商品", ""),
+            "amount": row.get("金额(元)", "0"),
+            "payment_method": row.get("支付方式", ""),
+            "status": row.get("当前状态", ""),
+            "transaction_id": row.get("交易单号", ""),
+            "merchant_id": row.get("商户单号", ""),
+            "remark": row.get("备注", ""),
+            "original_category": row.get("交易类型", ""),
         }
 
-    def _extract_bill_from_xlsx_row(self, row: tuple,
-                                    column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    def _extract_bill_from_xlsx_row(self, row: tuple, column_map: Dict[str, int]) -> Optional[Dict[str, Any]]:
         """从XLSX行数据提取账单信息"""
         try:
             # 获取列值的辅助函数
@@ -217,30 +215,29 @@ class WeChatParser(ParserBase):
                 idx = column_map.get(col_name)
                 if idx is not None and idx < len(row):
                     value = row[idx]
-                    return str(value) if value is not None else ''
-                return ''
+                    return str(value) if value is not None else ""
+                return ""
 
             # 提取金额并去除¥符号
-            amount = get_cell('金额(元)')
-            if amount.startswith('¥'):
+            amount = get_cell("金额(元)")
+            if amount.startswith("¥"):
                 amount = amount[1:]
 
             return {
-                'date': get_cell('交易时间'),
-                'type': get_cell('收/支'),
-                'counterparty': get_cell('交易对方'),
-                'description': get_cell('商品'),
-                'goods': get_cell('商品'),
-                'amount': amount,
-                'payment_method': get_cell('支付方式'),
-                'status': get_cell('当前状态'),
-                'transaction_id': get_cell('交易单号'),
-                'merchant_id': get_cell('商户单号'),
-                'remark': get_cell('备注'),
-                'original_category': get_cell('交易类型'),
+                "date": get_cell("交易时间"),
+                "type": get_cell("收/支"),
+                "counterparty": get_cell("交易对方"),
+                "description": get_cell("商品"),
+                "goods": get_cell("商品"),
+                "amount": amount,
+                "payment_method": get_cell("支付方式"),
+                "status": get_cell("当前状态"),
+                "transaction_id": get_cell("交易单号"),
+                "merchant_id": get_cell("商户单号"),
+                "remark": get_cell("备注"),
+                "original_category": get_cell("交易类型"),
             }
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("提取XLSX账单信息失败: %s", e)
             return None
-
