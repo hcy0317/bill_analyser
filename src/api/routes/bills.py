@@ -2658,39 +2658,64 @@ def list_import_learning_rules():
     """获取当前用户的长期导入学习规则列表。"""
     try:
         db, _, _ = get_app_context()
-        limit = int(request.args.get('limit', 100) or 100)
+        page = max(int(request.args.get('page', 1) or 1), 1)
+        page_size = int(request.args.get('pageSize', request.args.get('limit', 100)) or 100)
         enabled_only = str(request.args.get('enabledOnly', '')).lower() in ('1', 'true', 'yes')
+
+        if page_size == 0:
+            page_size = 100
+
+        page_size = max(min(page_size, 500), -1)
+        limit = page_size if page_size > 0 else None
+        offset = (page - 1) * page_size if page_size > 0 else 0
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         try:
+            total_count = loop.run_until_complete(
+                db.count_import_learning_rules(
+                    user_id=request.user_id,
+                    enabled_only=enabled_only
+                )
+            )
+
             rules = loop.run_until_complete(
                 db.get_import_learning_rules(
                     user_id=request.user_id,
                     enabled_only=enabled_only,
-                    limit=limit
+                    limit=limit,
+                    offset=offset
                 )
             )
 
+            categories = loop.run_until_complete(
+                db.get_all_categories(user_id=request.user_id)
+            )
+            accounts = loop.run_until_complete(
+                db.get_all_accounts(user_id=request.user_id)
+            )
+
+            categories_by_id = {
+                int(category['id']): category
+                for category in categories
+                if category.get('id') is not None
+            }
+            accounts_by_id = {
+                int(account['id']): account
+                for account in accounts
+                if account.get('id') is not None
+            }
+
             result = []
             for rule in rules:
-                learned_category = None
-                source_account = None
-                destination_account = None
+                learned_category_id = rule.get('learned_category_id')
+                learned_source_account_id = rule.get('learned_source_account_id')
+                learned_destination_account_id = rule.get('learned_destination_account_id')
 
-                if rule.get('learned_category_id'):
-                    learned_category = loop.run_until_complete(
-                        db.get_category_by_id(int(rule['learned_category_id']), request.user_id)
-                    )
-                if rule.get('learned_source_account_id'):
-                    source_account = loop.run_until_complete(
-                        db.get_account_by_id(int(rule['learned_source_account_id']), request.user_id)
-                    )
-                if rule.get('learned_destination_account_id'):
-                    destination_account = loop.run_until_complete(
-                        db.get_account_by_id(int(rule['learned_destination_account_id']), request.user_id)
-                    )
+                learned_category = categories_by_id.get(int(learned_category_id)) if learned_category_id else None
+                source_account = accounts_by_id.get(int(learned_source_account_id)) if learned_source_account_id else None
+                destination_account = accounts_by_id.get(int(learned_destination_account_id)) if learned_destination_account_id else None
 
                 result.append({
                     'id': rule.get('id'),
@@ -2715,10 +2740,24 @@ def list_import_learning_rules():
                     'lastAppliedAt': rule.get('last_applied_at', ''),
                 })
 
-            return jsonify({
+            total_pages = 1
+            if page_size > 0:
+                total_pages = max((total_count + page_size - 1) // page_size, 1)
+
+            effective_page = min(page, total_pages) if total_count > 0 else 1
+
+            response = jsonify({
                 'success': True,
-                'result': result
+                'result': result,
+                'totalCount': total_count,
+                'page': effective_page,
+                'pageSize': page_size,
+                'totalPages': total_pages
             })
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
         finally:
             loop.close()
 
@@ -2840,6 +2879,7 @@ def list_import_configs():
                     'name': config.get('name', ''),
                     'fileFormat': config.get('file_format', ''),
                     'description': config.get('description', ''),
+                    'descriptionSummary': config.get('description_summary', ''),
                     'fieldMappings': config.get('field_mappings', {}),
                     'dateFormat': config.get('date_format', ''),
                     'encoding': config.get('encoding', 'utf-8'),
@@ -2850,6 +2890,7 @@ def list_import_configs():
                     'sampleHeaders': config.get('sample_headers', []),
                     'headerSignature': config.get('header_signature', ''),
                     'isDefault': bool(config.get('is_default', False)),
+                    'defaultRecommendation': bool(config.get('default_recommendation', False)),
                     'useCount': int(config.get('use_count', 0) or 0),
                     'lastUsedAt': config.get('last_used_at', ''),
                     'createdAt': config.get('created_at', ''),
@@ -3027,6 +3068,8 @@ def match_import_config():
                     'id': matched.get('id'),
                     'name': matched.get('name', ''),
                     'fileFormat': matched.get('file_format', ''),
+                    'description': matched.get('description', ''),
+                    'descriptionSummary': matched.get('description_summary', ''),
                     'fieldMappings': matched.get('field_mappings', {}),
                     'dateFormat': matched.get('date_format', ''),
                     'encoding': matched.get('encoding', 'utf-8'),
@@ -3035,6 +3078,7 @@ def match_import_config():
                     'hasHeader': bool(matched.get('has_header', True)),
                     'customRules': matched.get('custom_rules', {}),
                     'sampleHeaders': matched.get('sample_headers', []),
+                    'defaultRecommendation': bool(matched.get('default_recommendation', False)),
                     'matchScore': matched.get('match_score', 0),
                     'matchReason': matched.get('match_reason', ''),
                     'matchedHeaderCount': matched.get('matched_header_count', 0),

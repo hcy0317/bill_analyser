@@ -21,6 +21,7 @@ import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
 const exchangeRatesLocalStorageKey = 'ebk_app_exchange_rates';
+const exchangeRatesProviderLocalStorageKey = 'ebk_app_exchange_rates_provider';
 const userDataSourceType = 'user_custom';
 
 interface LatestExchangeRates {
@@ -42,8 +43,21 @@ function clearExchangeRatesFromLocalStorage(): void {
     localStorage.removeItem(exchangeRatesLocalStorageKey);
 }
 
+function getExchangeRatesProviderFromLocalStorage(): string {
+    return localStorage.getItem(exchangeRatesProviderLocalStorageKey) || 'auto';
+}
+
+function setExchangeRatesProviderToLocalStorage(value: string): void {
+    localStorage.setItem(exchangeRatesProviderLocalStorageKey, value || 'auto');
+}
+
 export const useExchangeRatesStore = defineStore('exchangeRates', () => {
     const latestExchangeRates = ref<LatestExchangeRates>(getExchangeRatesFromLocalStorage());
+    const selectedExchangeRateProvider = ref<string>(getExchangeRatesProviderFromLocalStorage());
+    const effectiveRequestedProvider = computed<string>(() => {
+        return selectedExchangeRateProvider.value || 'auto';
+    });
+
 
     const isUserCustomExchangeRates = computed((): boolean => {
         if (!latestExchangeRates.value || !latestExchangeRates.value.data) {
@@ -126,23 +140,31 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
         clearExchangeRatesFromLocalStorage();
     }
 
+    function setSelectedExchangeRateProvider(provider: string): void {
+        selectedExchangeRateProvider.value = provider || 'auto';
+        setExchangeRatesProviderToLocalStorage(selectedExchangeRateProvider.value);
+    }
+
     function getLatestExchangeRates({ silent, force }: { silent: boolean, force: boolean }): Promise<LatestExchangeRateResponse> {
         const currentExchangeRateData = latestExchangeRates.value;
         const now = getCurrentUnixTime();
+        const requestedProvider = effectiveRequestedProvider.value;
+        const cachedRequestedProvider = currentExchangeRateData?.data?.requestedProvider || 'auto';
 
         if (!force) {
-            if (currentExchangeRateData && currentExchangeRateData.time && currentExchangeRateData.data && isUnixTimeYearMonthDayEquals(currentExchangeRateData.data.updateTime, now)) {
+            if (currentExchangeRateData && currentExchangeRateData.time && currentExchangeRateData.data && cachedRequestedProvider === requestedProvider && isUnixTimeYearMonthDayEquals(currentExchangeRateData.data.updateTime, now)) {
                 return Promise.resolve(currentExchangeRateData.data);
             }
 
-            if (currentExchangeRateData && currentExchangeRateData.time && currentExchangeRateData.data && isUnixTimeYearMonthDayHourEquals(currentExchangeRateData.time, now)) {
+            if (currentExchangeRateData && currentExchangeRateData.time && currentExchangeRateData.data && cachedRequestedProvider === requestedProvider && isUnixTimeYearMonthDayHourEquals(currentExchangeRateData.time, now)) {
                 return Promise.resolve(currentExchangeRateData.data);
             }
         }
 
         return new Promise((resolve, reject) => {
             services.getLatestExchangeRates({
-                ignoreError: silent
+                ignoreError: silent,
+                provider: requestedProvider
             }).then(response => {
                 const data = response.data;
 
@@ -278,12 +300,15 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
     return {
         // states
         latestExchangeRates,
+        selectedExchangeRateProvider,
         // computed states
         isUserCustomExchangeRates,
         exchangeRatesLastUpdateTime,
         latestExchangeRateMap,
+        effectiveRequestedProvider,
         // functions
         resetLatestExchangeRates,
+        setSelectedExchangeRateProvider,
         getLatestExchangeRates,
         updateUserCustomExchangeRate,
         deleteUserCustomExchangeRate,

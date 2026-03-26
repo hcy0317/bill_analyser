@@ -88,6 +88,7 @@
                                                    secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                                    :disabled="loading || saving || !allVisibleAccounts.length"
                                                    :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
+                                                   :custom-selection-primary-text="defaultAccountSelectionText"
                                                    :label="tt('Default Account')"
                                                    :placeholder="tt('Default Account')"
                                                    :items="allVisibleCategorizedAccounts"
@@ -107,6 +108,7 @@
                                                    secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                                    :disabled="loading || saving || !allVisibleAccounts.length"
                                                    :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
+                                                   :custom-selection-primary-text="cashAccountSelectionText"
                                                    :label="tt('Cash Account')"
                                                    :placeholder="tt('Cash Account')"
                                                    :items="allVisibleCategorizedAccounts"
@@ -126,74 +128,14 @@
                                                    secondary-hidden-field="hidden"
                                                    :disabled="loading || saving || !hasAvailableTransferCategories"
                                                    :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
+                                                   :show-selection-primary-text="true"
+                                                   :custom-selection-primary-text="cashTransferCategoryPrimaryText"
+                                                   :custom-selection-secondary-text="cashTransferCategorySecondaryText"
                                                    :label="tt('Cash Transfer Category')"
                                                    :placeholder="tt('Cash Transfer Category')"
                                                    :items="allCategories[CategoryType.Transfer] || []"
                                                    v-model="newProfile.cashTransferCategoryId">
                                 </two-column-select>
-                            </v-col>
-
-                            <v-col cols="12" md="6">
-                                <v-switch
-                                    color="primary"
-                                    hide-details
-                                    inset
-                                    :disabled="loading || saving"
-                                    :label="tt('Enable Import Learning')"
-                                    v-model="newProfile.importLearningEnabled"
-                                />
-                            </v-col>
-
-                            <v-col cols="12">
-                                <div class="text-subtitle-2 mb-2">{{ tt('Investment Recognition Settings') }}</div>
-                            </v-col>
-
-                            <v-col cols="12" md="12">
-                                <v-combobox
-                                    color="primary"
-                                    multiple
-                                    chips
-                                    closable-chips
-                                    persistent-placeholder
-                                    persistent-hint
-                                    :disabled="loading || saving"
-                                    :label="tt('Investment Platform Keywords')"
-                                    :placeholder="tt('Enter investment platform keywords')"
-                                    :hint="tt('Press Enter to add investment platform keywords for import recognition')"
-                                    v-model="newProfile.investmentPlatformKeywords"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="12">
-                                <v-combobox
-                                    color="primary"
-                                    multiple
-                                    chips
-                                    closable-chips
-                                    persistent-placeholder
-                                    persistent-hint
-                                    :disabled="loading || saving"
-                                    :label="tt('Investment Product Keywords')"
-                                    :placeholder="tt('Enter investment product keywords')"
-                                    :hint="tt('Press Enter to add investment product keywords for import recognition')"
-                                    v-model="newProfile.investmentProductKeywords"
-                                />
-                            </v-col>
-
-                            <v-col cols="12" md="12">
-                                <v-combobox
-                                    color="primary"
-                                    multiple
-                                    chips
-                                    closable-chips
-                                    persistent-placeholder
-                                    persistent-hint
-                                    :disabled="loading || saving"
-                                    :label="tt('Investment Exclude Keywords')"
-                                    :placeholder="tt('Enter investment exclude keywords')"
-                                    :hint="tt('Press Enter to add keywords that should block investment recognition')"
-                                    v-model="newProfile.investmentExcludeKeywords"
-                                />
                             </v-col>
 
                             <v-col cols="12" md="6">
@@ -515,6 +457,7 @@ import type { TransactionCategory } from '@/models/transaction_category.ts';
 import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 import type { UserProfileResponse } from '@/models/user.ts';
 import { Account } from '@/models/account.ts';
+import { getTransactionPrimaryCategoryName, getTransactionSecondaryCategoryName } from '@/lib/category.ts';
 
 import { generateRandomUUID } from '@/lib/misc.ts';
 import { isUserVerifyEmailEnabled } from '@/lib/server_settings.ts';
@@ -576,6 +519,16 @@ const transactionCategoriesStore = useTransactionCategoriesStore();
 
 const allCategories = computed<Record<number, TransactionCategory[]>>(() => transactionCategoriesStore.allTransactionCategories);
 const hasAvailableTransferCategories = computed<boolean>(() => transactionCategoriesStore.hasAvailableTransferCategories);
+const defaultAccountSelectionText = computed<string>(() => Account.findAccountNameById(allAccounts.value, newProfile.value.defaultAccountId, tt('Unspecified')) || tt('Unspecified'));
+const cashAccountSelectionText = computed<string>(() => Account.findAccountNameById(allAccounts.value, newProfile.value.cashAccountId, tt('Unspecified')) || tt('Unspecified'));
+const cashTransferCategoryPrimaryText = computed<string>(() => getTransactionPrimaryCategoryName(
+    newProfile.value.cashTransferCategoryId,
+    allCategories.value[CategoryType.Transfer] || []
+));
+const cashTransferCategorySecondaryText = computed<string>(() => getTransactionSecondaryCategoryName(
+    newProfile.value.cashTransferCategoryId,
+    allCategories.value[CategoryType.Transfer] || []
+));
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');

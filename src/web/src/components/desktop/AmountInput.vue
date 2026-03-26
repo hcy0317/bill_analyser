@@ -8,9 +8,10 @@
                   :rules="enableRules ? rules : []" v-model="currentValue" v-if="!hide && !formulaMode"
                   @keydown="onKeyUpDown" @keyup="onKeyUpDown" @paste="onPaste" @click="onClick">
         <template #prepend-inner v-if="currency && prependText">
-            <div>{{ prependText }}</div>
+            <div v-if="!compactCurrencyDisplay">{{ prependText }}</div>
         </template>
         <template #append-inner>
+            <div class="text-no-wrap" v-if="currency && compactCurrencyDisplay && compactCurrencyText">{{ compactCurrencyText }}</div>
             <div class="text-no-wrap" v-if="currency && appendText">{{ appendText }}</div>
             <v-tooltip :text="tt('Enter formula mode')">
                 <template v-slot:activator="{ props }">
@@ -29,9 +30,10 @@
                   v-model="currentFormula" v-if="!hide && formulaMode"
                   @keydown.enter="calculateFormula" @click="onClick">
         <template #prepend-inner v-if="currency && prependText">
-            <div>{{ prependText }}</div>
+            <div v-if="!compactCurrencyDisplay">{{ prependText }}</div>
         </template>
         <template #append-inner>
+            <div class="text-no-wrap" v-if="currency && compactCurrencyDisplay && compactCurrencyText">{{ compactCurrencyText }}</div>
             <div class="text-no-wrap" v-if="currency && appendText">{{ appendText }}</div>
             <v-tooltip :text="tt('Calculate formula result')">
                 <template v-slot:activator="{ props }">
@@ -57,10 +59,13 @@
                   :rules="enableRules ? rules : []" v-model="currentValue" v-if="hide"
                   @keydown="onKeyUpDown" @keyup="onKeyUpDown" @paste="onPaste" @click="onClick">
         <template #prepend-inner v-if="currency && prependText">
-            <div>{{ prependText }}</div>
+            <div v-if="!compactCurrencyDisplay">{{ prependText }}</div>
         </template>
         <template #append-inner v-if="currency && appendText">
             <div class="text-no-wrap">{{ appendText }}</div>
+        </template>
+        <template #append-inner v-else-if="currency && compactCurrencyDisplay && compactCurrencyText">
+            <div class="text-no-wrap">{{ compactCurrencyText }}</div>
         </template>
     </v-text-field>
 
@@ -104,6 +109,7 @@ interface DesktopAmountInputProps extends CommonNumberInputProps {
     enableRules?: boolean;
     enableFormula?: boolean;
     flipNegative?: boolean;
+    compactCurrencyDisplay?: boolean;
 }
 
 const props = defineProps<DesktopAmountInputProps>();
@@ -184,6 +190,14 @@ const appendText = computed<string | undefined>(() => {
     return texts.appendText;
 });
 
+const compactCurrencyText = computed<string>(() => {
+    if (!props.currency || !props.showCurrency || !props.compactCurrencyDisplay) {
+        return '';
+    }
+
+    return prependText.value || '';
+});
+
 const extraClass = computed<string>(() => {
     let finalClass = props.class || '';
 
@@ -191,7 +205,7 @@ const extraClass = computed<string>(() => {
         finalClass += ` text-${props.color}`;
     }
 
-    if (props.currency && prependText.value) {
+    if (props.currency && prependText.value && !props.compactCurrencyDisplay) {
         finalClass += ` has-pretend-text`;
     }
 

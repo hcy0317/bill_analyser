@@ -31,7 +31,7 @@
                           <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                               :icon="true" :disabled="loading || submitting || !parsedFileData"
                               v-if="currentStep === 'defineColumn'"
-                           @click="openSaveImportConfigDialog">
+                                    @click="openSaveImportConfigDialog">
                         <v-icon :icon="mdiContentSaveOutline" />
                     </v-btn>
                     <v-btn density="comfortable" color="default" variant="text" class="ms-2"
@@ -230,12 +230,24 @@
                     :disabled="submitting"
                     persistent-placeholder
                 />
+                <v-textarea
+                    v-model="saveImportConfigDescription"
+                    :label="tt('Description')"
+                    :placeholder="tt('Description')"
+                    :disabled="submitting"
+                    rows="2"
+                    auto-grow
+                    persistent-placeholder
+                />
                 <v-checkbox
                     v-model="saveImportConfigIsDefault"
                     :label="tt('Default')"
                     :disabled="submitting"
                     hide-details
                 />
+                <div class="text-caption text-medium-emphasis mt-2" v-if="saveImportConfigRecommended">
+                    {{ tt('No default template yet, recommend setting this template as default') }}
+                </div>
             </v-card-text>
             <v-card-actions class="justify-end gap-2">
                 <v-btn variant="text" :disabled="submitting" @click="showSaveImportConfigDialog = false">
@@ -256,17 +268,35 @@
                         <template #prepend>
                             <v-icon :icon="matchedImportConfig?.id === config.id ? mdiCheck : mdiFolderOpenOutline" />
                         </template>
-                        <v-list-item-title>{{ config.name }}</v-list-item-title>
+                        <v-list-item-title class="d-flex align-center ga-2">
+                            <span>{{ config.name }}</span>
+                            <v-chip
+                                v-if="config.isDefault"
+                                size="x-small"
+                                color="primary"
+                                variant="tonal"
+                            >
+                                {{ tt('Default') }}
+                            </v-chip>
+                            <v-chip
+                                v-else-if="config.defaultRecommendation"
+                                size="x-small"
+                                color="secondary"
+                                variant="tonal"
+                            >
+                                {{ tt('Recommended Default') }}
+                            </v-chip>
+                        </v-list-item-title>
                         <v-list-item-subtitle>
-                            {{ config.sampleHeaders?.join(' / ') || tt('No data to import') }}
+                            {{ getImportConfigDisplayDescription(config) || tt('No data to import') }}
                         </v-list-item-subtitle>
                         <template #append>
                             <div class="d-flex ga-2">
                                 <v-btn size="small" variant="text" color="primary" @click="applyImportConfig(config)">
                                     {{ tt('Apply') }}
                                 </v-btn>
-                                <v-btn size="small" variant="text" color="secondary" @click="openRenameImportConfigDialog(config)">
-                                    {{ tt('Rename') }}
+                                <v-btn size="small" variant="text" color="secondary" @click="openEditImportConfigDialog(config)">
+                                    {{ tt('Edit') }}
                                 </v-btn>
                                 <v-btn size="small" variant="text" color="error" @click="removeImportConfig(config)">
                                     {{ tt('Delete') }}
@@ -284,23 +314,41 @@
             </v-card-actions>
         </v-card>
     </v-dialog>
-    <v-dialog v-model="showRenameImportConfigDialog" max-width="520">
+    <v-dialog v-model="showEditImportConfigDialog" max-width="520">
         <v-card class="pa-4">
-            <v-card-title>{{ tt('Rename Template') }}</v-card-title>
+            <v-card-title>{{ tt('Edit') }}</v-card-title>
             <v-card-text>
                 <v-text-field
-                    v-model="renameImportConfigName"
+                    v-model="editImportConfigName"
                     :label="tt('Template Name')"
                     :placeholder="tt('Template Name')"
                     :disabled="submitting"
                     persistent-placeholder
                 />
+                <v-textarea
+                    v-model="editImportConfigDescription"
+                    :label="tt('Description')"
+                    :placeholder="tt('Description')"
+                    :disabled="submitting"
+                    rows="2"
+                    auto-grow
+                    persistent-placeholder
+                />
+                <v-checkbox
+                    v-model="editImportConfigIsDefault"
+                    :label="tt('Default')"
+                    :disabled="submitting"
+                    hide-details
+                />
+                <div class="text-caption text-medium-emphasis mt-2" v-if="editImportConfigRecommended">
+                    {{ tt('No default template yet, recommend setting this template as default') }}
+                </div>
             </v-card-text>
             <v-card-actions class="justify-end gap-2">
-                <v-btn variant="text" :disabled="submitting" @click="showRenameImportConfigDialog = false">
+                <v-btn variant="text" :disabled="submitting" @click="showEditImportConfigDialog = false">
                     {{ tt('Cancel') }}
                 </v-btn>
-                <v-btn color="primary" :disabled="submitting || !renameImportConfigName.trim()" @click="renameImportConfig">
+                <v-btn color="primary" :disabled="submitting || !editImportConfigName.trim()" @click="saveEditedImportConfig">
                     {{ tt('Save') }}
                 </v-btn>
             </v-card-actions>
@@ -367,6 +415,7 @@ interface ImportConfigMatchResult {
     name: string;
     fileFormat?: string;
     description?: string;
+    descriptionSummary?: string;
     fieldMappings: Record<string, unknown>;
     sampleHeaders?: string[];
     dateFormat?: string;
@@ -376,7 +425,9 @@ interface ImportConfigMatchResult {
     hasHeader?: boolean;
     customRules?: Record<string, unknown>;
     isDefault?: boolean;
+    defaultRecommendation?: boolean;
     matchScore?: number;
+    matchReason?: string;
 }
 
 interface ImportFilePreviewResult {
@@ -441,12 +492,17 @@ const fileSubType = ref<string>('');
 const processDSVMethod = ref<ImportDSVProcessMethod>(ImportDSVProcessMethod.AutoDetect);
 const showSaveImportConfigDialog = ref<boolean>(false);
 const saveImportConfigName = ref<string>('');
+const saveImportConfigDescription = ref<string>('');
 const saveImportConfigIsDefault = ref<boolean>(false);
+const saveImportConfigRecommended = ref<boolean>(false);
 const showManageImportConfigDialog = ref<boolean>(false);
 const importConfigList = ref<ImportConfigMatchResult[]>([]);
-const showRenameImportConfigDialog = ref<boolean>(false);
-const renameImportConfigName = ref<string>('');
-const renamingImportConfig = ref<ImportConfigMatchResult | null>(null);
+const showEditImportConfigDialog = ref<boolean>(false);
+const editImportConfigName = ref<string>('');
+const editImportConfigDescription = ref<string>('');
+const editImportConfigIsDefault = ref<boolean>(false);
+const editImportConfigRecommended = ref<boolean>(false);
+const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
 
 const allSteps = computed<StepBarItem[]>(() => [
     { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
@@ -542,11 +598,16 @@ function open(): Promise<void> {
     matchedImportConfig.value = null;
     showSaveImportConfigDialog.value = false;
     saveImportConfigName.value = '';
+    saveImportConfigDescription.value = '';
     saveImportConfigIsDefault.value = false;
+    saveImportConfigRecommended.value = false;
     showManageImportConfigDialog.value = false;
-    showRenameImportConfigDialog.value = false;
-    renameImportConfigName.value = '';
-    renamingImportConfig.value = null;
+    showEditImportConfigDialog.value = false;
+    editImportConfigName.value = '';
+    editImportConfigDescription.value = '';
+    editImportConfigIsDefault.value = false;
+    editImportConfigRecommended.value = false;
+    editingImportConfig.value = null;
     importConfigList.value = [];
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
@@ -623,6 +684,22 @@ function isGenericImportFile(): boolean {
         lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
 }
 
+function getMatchedImportConfigMessage(config: ImportConfigMatchResult): string {
+    if (config.matchReason === 'default_template_fallback') {
+        return `已自动回退到默认模板：${config.name}`;
+    }
+
+    return `已自动套用模板：${config.name}`;
+}
+
+function getImportConfigDisplayDescription(config: Partial<ImportConfigMatchResult> | null | undefined): string {
+    if (!config) {
+        return '';
+    }
+
+    return config.description || config.descriptionSummary || config.sampleHeaders?.join(' / ') || '';
+}
+
 async function prepareColumnMappingStep(): Promise<void> {
     if (!importFile.value) {
         snackbar.value?.showError('Please select at least one file');
@@ -676,7 +753,7 @@ async function prepareColumnMappingStep(): Promise<void> {
                     includeHeader: result.hasHeader
                 });
             }
-            snackbar.value?.showMessage(`已自动套用模板：${result.name}`);
+            snackbar.value?.showMessage(getMatchedImportConfigMessage(result));
             return;
         }
     } catch (error) {
@@ -709,6 +786,7 @@ async function loadImportConfigList(): Promise<void> {
         name: config.name,
         fileFormat: config.fileFormat,
         description: config.description,
+        descriptionSummary: config.descriptionSummary,
         fieldMappings: config.fieldMappings,
         sampleHeaders: config.sampleHeaders || [],
         dateFormat: config.dateFormat,
@@ -718,6 +796,7 @@ async function loadImportConfigList(): Promise<void> {
         hasHeader: config.hasHeader,
         customRules: config.customRules,
         isDefault: config.isDefault,
+        defaultRecommendation: config.defaultRecommendation,
         matchScore: config.matchScore
     }));
 }
@@ -740,24 +819,27 @@ function applyImportConfig(config: ImportConfigMatchResult): void {
     snackbar.value?.showMessage(`已套用模板：${config.name}`);
 }
 
-function openRenameImportConfigDialog(config: ImportConfigMatchResult): void {
-    renamingImportConfig.value = config;
-    renameImportConfigName.value = config.name || '';
-    showRenameImportConfigDialog.value = true;
+function openEditImportConfigDialog(config: ImportConfigMatchResult): void {
+    editingImportConfig.value = config;
+    editImportConfigName.value = config.name || '';
+    editImportConfigDescription.value = getImportConfigDisplayDescription(config);
+    editImportConfigRecommended.value = !config.isDefault && !!config.defaultRecommendation;
+    editImportConfigIsDefault.value = !!config.isDefault || editImportConfigRecommended.value;
+    showEditImportConfigDialog.value = true;
 }
 
-async function renameImportConfig(): Promise<void> {
-    if (!renamingImportConfig.value || !renameImportConfigName.value.trim()) {
+async function saveEditedImportConfig(): Promise<void> {
+    if (!editingImportConfig.value || !editImportConfigName.value.trim()) {
         return;
     }
 
     try {
-        const targetConfig = renamingImportConfig.value;
+        const targetConfig = editingImportConfig.value;
         const response = await services.saveImportConfig({
             id: targetConfig.id,
-            name: renameImportConfigName.value.trim(),
+            name: editImportConfigName.value.trim(),
             fileFormat: targetConfig.fileFormat || getImportConfigFileFormat(),
-            description: targetConfig.description || '',
+            description: editImportConfigDescription.value.trim(),
             fieldMappings: targetConfig.fieldMappings,
             dateFormat: targetConfig.dateFormat || '',
             encoding: targetConfig.encoding || 'utf-8',
@@ -766,26 +848,28 @@ async function renameImportConfig(): Promise<void> {
             hasHeader: targetConfig.hasHeader ?? true,
             customRules: targetConfig.customRules || {},
             sampleHeaders: targetConfig.sampleHeaders || [],
-            isDefault: targetConfig.isDefault || false
+            isDefault: editImportConfigIsDefault.value
         });
 
         if (!response.data?.success) {
-            throw new Error('rename failed');
+            throw new Error('edit failed');
         }
 
         if (matchedImportConfig.value?.id === targetConfig.id) {
             matchedImportConfig.value = {
                 ...matchedImportConfig.value,
-                name: renameImportConfigName.value.trim()
+                name: editImportConfigName.value.trim(),
+                description: editImportConfigDescription.value.trim(),
+                isDefault: editImportConfigIsDefault.value
             };
         }
 
         await loadImportConfigList();
-        showRenameImportConfigDialog.value = false;
-        snackbar.value?.showMessage('模板已重命名');
+        showEditImportConfigDialog.value = false;
+        snackbar.value?.showMessage('模板已更新');
     } catch (error) {
-        logger.error('failed to rename import config', error);
-        snackbar.value?.showError('Unable to rename saved template');
+        logger.error('failed to update import config', error);
+        snackbar.value?.showError('Unable to update saved template');
     }
 }
 
@@ -865,8 +949,19 @@ function openSaveImportConfigDialog(): void {
 
     saveImportConfigName.value = matchedImportConfig.value?.name ||
         `${importFile.value?.name || 'import'} 模板`;
-    saveImportConfigIsDefault.value = !!matchedImportConfig.value?.hasHeader;
-    showSaveImportConfigDialog.value = true;
+    saveImportConfigDescription.value = getImportConfigDisplayDescription(matchedImportConfig.value);
+    loadImportConfigList().then(() => {
+        const hasDefaultTemplate = importConfigList.value.some(config => !!config.isDefault);
+        const isFirstTemplate = importConfigList.value.length === 0;
+        saveImportConfigRecommended.value = !hasDefaultTemplate && (
+            isFirstTemplate || !!matchedImportConfig.value?.defaultRecommendation
+        );
+        saveImportConfigIsDefault.value = !!matchedImportConfig.value?.isDefault || saveImportConfigRecommended.value;
+        showSaveImportConfigDialog.value = true;
+    }).catch(error => {
+        logger.error('failed to load import config list before saving', error);
+        snackbar.value?.showError('Unable to load saved templates');
+    });
 }
 
 async function saveCurrentImportConfig(): Promise<void> {
@@ -884,6 +979,7 @@ async function saveCurrentImportConfig(): Promise<void> {
             id: matchedImportConfig.value?.id,
             name: saveImportConfigName.value.trim(),
             fileFormat: getImportConfigFileFormat(),
+            description: saveImportConfigDescription.value.trim(),
             fieldMappings: mapping,
             delimiter: parsedFileDelimiter.value,
             hasHeader: mapping.includeHeader,
@@ -896,11 +992,18 @@ async function saveCurrentImportConfig(): Promise<void> {
         matchedImportConfig.value = {
             id: savedId || matchedImportConfig.value?.id || 0,
             name: saveImportConfigName.value.trim(),
+            fileFormat: getImportConfigFileFormat(),
+            description: saveImportConfigDescription.value.trim(),
+            descriptionSummary: saveImportConfigDescription.value.trim(),
             fieldMappings: mapping as unknown as Record<string, unknown>,
+            sampleHeaders: parsedFileData.value[0] || [],
             delimiter: parsedFileDelimiter.value,
             encoding: matchedImportConfig.value?.encoding || 'utf-8',
-            hasHeader: mapping.includeHeader
+            hasHeader: mapping.includeHeader,
+            isDefault: saveImportConfigIsDefault.value,
+            defaultRecommendation: !saveImportConfigIsDefault.value && saveImportConfigRecommended.value
         };
+        await loadImportConfigList();
         showSaveImportConfigDialog.value = false;
         snackbar.value?.showMessage('模板已保存');
     } catch (error) {

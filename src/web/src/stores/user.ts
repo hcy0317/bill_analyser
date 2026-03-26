@@ -13,7 +13,8 @@ import {
     type UserProfileResponse,
     type UserProfileUpdateResponse,
     User,
-    EMPTY_USER_BASIC_INFO
+    EMPTY_USER_BASIC_INFO,
+    normalizeUserBasicInfo
 } from '@/models/user.ts';
 
 import type {
@@ -165,8 +166,9 @@ export const useUserStore = defineStore('user', () => {
     }
 
     function storeUserBasicInfo(userInfo: UserBasicInfo): void {
-        currentUserBasicInfo.value = userInfo;
-        updateCurrentUserInfo(userInfo);
+        const normalizedUserInfo = normalizeUserBasicInfo(userInfo);
+        currentUserBasicInfo.value = normalizedUserInfo;
+        updateCurrentUserInfo(normalizedUserInfo);
     }
 
     function resetUserBasicInfo(): void {
@@ -184,7 +186,7 @@ export const useUserStore = defineStore('user', () => {
                     return;
                 }
 
-                resolve(data.result);
+                resolve(normalizeUserBasicInfo(data.result) as UserProfileResponse);
             }).catch(error => {
                 logger.error('failed to retrieve user profile', error);
 
@@ -372,7 +374,30 @@ export const useUserStore = defineStore('user', () => {
                     return;
                 }
 
-                resolve(data.result);
+                const result = data.result as unknown as Record<string, string | number | undefined>;
+                const normalizeCount = (primaryKey: string, fallbackKey?: string): string => {
+                    const rawValue = result[primaryKey] ?? (fallbackKey ? result[fallbackKey] : undefined);
+
+                    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+                        return String(rawValue);
+                    }
+
+                    if (typeof rawValue === 'string' && rawValue.trim()) {
+                        return rawValue.trim();
+                    }
+
+                    return '0';
+                };
+
+                resolve({
+                    totalTransactionCount: normalizeCount('totalTransactionCount', 'billCount'),
+                    totalAccountCount: normalizeCount('totalAccountCount', 'accountCount'),
+                    totalTransactionCategoryCount: normalizeCount('totalTransactionCategoryCount', 'categoryCount'),
+                    totalTransactionTagCount: normalizeCount('totalTransactionTagCount', 'tagCount'),
+                    totalTransactionPictureCount: normalizeCount('totalTransactionPictureCount', 'pictureCount'),
+                    totalTransactionTemplateCount: normalizeCount('totalTransactionTemplateCount', 'templateCount'),
+                    totalScheduledTransactionCount: normalizeCount('totalScheduledTransactionCount', 'scheduledTransactionCount')
+                });
             }).catch(error => {
                 logger.error('failed to retrieve user statistics data', error);
 

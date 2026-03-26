@@ -13,19 +13,24 @@ export function useDataManagementPageBase() {
 
     const dataStatistics = ref<DataStatisticsResponse | null>(null);
 
+    const normalizeStatisticValue = (value: string | undefined): string => {
+        const parsedValue = Number.parseInt(value ?? '0', 10);
+        return formatNumberToLocalizedNumerals(Number.isNaN(parsedValue) ? 0 : parsedValue);
+    };
+
     const displayDataStatistics = computed<DisplayDataStatistics | null>(() => {
         if (!dataStatistics.value) {
             return null;
         }
 
         return {
-            totalTransactionCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalTransactionCount)),
-            totalAccountCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalAccountCount)),
-            totalTransactionCategoryCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalTransactionCategoryCount)),
-            totalTransactionTagCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalTransactionTagCount)),
-            totalTransactionPictureCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalTransactionPictureCount)),
-            totalTransactionTemplateCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalTransactionTemplateCount)),
-            totalScheduledTransactionCount: formatNumberToLocalizedNumerals(parseInt(dataStatistics.value.totalScheduledTransactionCount))
+            totalTransactionCount: normalizeStatisticValue(dataStatistics.value.totalTransactionCount),
+            totalAccountCount: normalizeStatisticValue(dataStatistics.value.totalAccountCount),
+            totalTransactionCategoryCount: normalizeStatisticValue(dataStatistics.value.totalTransactionCategoryCount),
+            totalTransactionTagCount: normalizeStatisticValue(dataStatistics.value.totalTransactionTagCount),
+            totalTransactionPictureCount: normalizeStatisticValue(dataStatistics.value.totalTransactionPictureCount),
+            totalTransactionTemplateCount: normalizeStatisticValue(dataStatistics.value.totalTransactionTemplateCount),
+            totalScheduledTransactionCount: normalizeStatisticValue(dataStatistics.value.totalScheduledTransactionCount)
         };
     });
 

@@ -194,3 +194,4 @@ Pipfile.lock
 
 # Third party reference code
 ezbookkeeping/
+.vscodecounter/

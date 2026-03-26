@@ -37,16 +37,36 @@ class TransactionAdapter:
         self.account_adapter = AccountAdapter()
         self.category_adapter = CategoryAdapter()
 
+    @staticmethod
+    def _normalize_frontend_unix_time(time_value: Any) -> int:
+        """Normalize frontend unix time to seconds.
+
+        The web client uses unix seconds internally, but some historical code
+        paths may still submit milliseconds. Keep both formats compatible.
+        """
+        if time_value in (None, ''):
+            return 0
+
+        try:
+            normalized = int(time_value)
+        except (TypeError, ValueError):
+            return 0
+
+        if abs(normalized) >= 10**11:
+            return normalized // 1000
+
+        return normalized
+
     def frontend_to_backend(self, frontend_data: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """前端交易 -> 后端账单。"""
         tx_type = frontend_data.get('type')
         backend_type = FRONTEND_TO_BACKEND_TYPE.get(int(tx_type), '支出') if tx_type not in (None, '') else ''
 
-        time_ms = frontend_data.get('time')
+        unix_time = self._normalize_frontend_unix_time(frontend_data.get('time'))
         date_str = ''
-        if time_ms not in (None, ''):
+        if unix_time:
             try:
-                date_str = datetime.fromtimestamp(int(time_ms) / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                date_str = datetime.fromtimestamp(unix_time).strftime('%Y-%m-%d %H:%M:%S')
             except (TypeError, ValueError, OSError):
                 date_str = ''
 
@@ -120,7 +140,7 @@ class TransactionAdapter:
         date_text = str(bill.get('date', '') or '')
         try:
             fmt = '%Y-%m-%d %H:%M:%S' if len(date_text) > 10 else '%Y-%m-%d'
-            time_value = int(datetime.strptime(date_text[:19] if len(date_text) > 19 else date_text, fmt).timestamp() * 1000)
+            time_value = int(datetime.strptime(date_text[:19] if len(date_text) > 19 else date_text, fmt).timestamp())
         except (ValueError, TypeError):
             time_value = 0
 
@@ -166,7 +186,7 @@ class TransactionAdapter:
             result['destinationAccount'] = self.account_adapter.backend_to_frontend(dest_account)
 
         if time_value:
-            dt = datetime.fromtimestamp(time_value / 1000)
+            dt = datetime.fromtimestamp(time_value)
             result['gregorianCalendarYearDashMonthDashDay'] = dt.strftime('%Y-%m-%d')
             result['gregorianCalendarDayOfMonth'] = dt.day
             result['displayDayOfWeek'] = ((dt.weekday() + 1) % 7) + 1

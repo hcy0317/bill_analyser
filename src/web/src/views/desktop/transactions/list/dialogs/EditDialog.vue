@@ -88,7 +88,7 @@
                 <v-window class="d-flex flex-grow-1 disable-tab-transition w-100-window-container ms-md-5"
                           v-model="activeTab">
                     <v-window-item value="basicInfo">
-                        <v-form class="mt-2">
+                        <v-form class="mt-2" :class="{ 'transaction-readonly-form': mode === TransactionEditPageMode.View }">
                             <v-row>
                                 <v-col cols="12" v-if="type === TransactionEditPageType.Template && transaction instanceof TransactionTemplate">
                                     <v-text-field
@@ -1849,6 +1849,15 @@ defineExpose({
 .transaction-type-tabs-readonly .v-tab--selected {
     background-color: rgba(var(--v-theme-on-surface), 0.08) !important;
     color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity)) !important;
+}
+
+.transaction-readonly-form :deep(.v-field) {
+    background-color: rgba(var(--v-theme-on-surface), 0.05) !important;
+    border-radius: 10px;
+}
+
+.transaction-readonly-form :deep(.v-field__overlay) {
+    opacity: 0 !important;
 }
 
 @media (min-height: 630px) {

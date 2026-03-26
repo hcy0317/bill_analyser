@@ -254,6 +254,9 @@ def _build_user_profile_info(user: dict) -> dict:
     email = user.get('email', '')
     nickname = user.get('nickname') or username
     investment_keyword_settings = build_user_investment_keyword_settings(user)
+    default_account_id = user.get('default_account_id')
+    cash_account_id = user.get('cash_account_id')
+    cash_transfer_category_id = user.get('cash_transfer_category_id')
 
     return {
         'username': username,
@@ -261,7 +264,7 @@ def _build_user_profile_info(user: dict) -> dict:
         'nickname': nickname,
         'avatar': user.get('avatar') or '',
         'avatarProvider': 'internal',
-        'defaultAccountId': user.get('default_account_id') or '',
+        'defaultAccountId': str(default_account_id) if default_account_id not in (None, '') else '',
         'transactionEditScope': user.get('transaction_edit_scope', 0),
         'language': user.get('language') or 'zh_Hans',
         'defaultCurrency': user.get('default_currency') or 'CNY',
@@ -282,8 +285,8 @@ def _build_user_profile_info(user: dict) -> dict:
         'coordinateDisplayType': user.get('coordinate_display_type', 0),
         'expenseAmountColor': user.get('expense_amount_color', 0),
         'incomeAmountColor': user.get('income_amount_color', 0),
-        'cashAccountId': user.get('cash_account_id') or '',
-        'cashTransferCategoryId': user.get('cash_transfer_category_id') or '',
+        'cashAccountId': str(cash_account_id) if cash_account_id not in (None, '') else '',
+        'cashTransferCategoryId': str(cash_transfer_category_id) if cash_transfer_category_id not in (None, '') else '',
         'importLearningEnabled': bool(user.get('import_learning_enabled', True)),
         'investmentPlatformKeywords': investment_keyword_settings['platform_keywords'],
         'investmentProductKeywords': investment_keyword_settings['product_keywords'],
@@ -3119,38 +3122,20 @@ def get_user_data_statistics():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # 获取当前用户的数据统计
-        bills = loop.run_until_complete(db.get_bills(user_id=request.user_id))
-        accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
-        categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-        tags = loop.run_until_complete(db.get_all_tags(user_id=request.user_id))
-        templates = loop.run_until_complete(db.get_all_templates(user_id=request.user_id))
+        statistics = loop.run_until_complete(
+            db.get_user_data_statistics(user_id=request.user_id)
+        )
 
         loop.close()
-
-        # 返回统计数据 - 确保所有数值都是有效整数
-        bill_count = len(bills) if bills and isinstance(bills, list) else 0
-        account_count = len(accounts) if accounts and isinstance(accounts, list) else 0
-        category_count = len(categories) if categories and isinstance(categories, list) else 0
-        tag_count = len(tags) if tags and isinstance(tags, list) else 0
-        template_count = len(templates) if templates and isinstance(templates, list) else 0
-
-        statistics = {
-            'billCount': int(bill_count),
-            'accountCount': int(account_count),
-            'categoryCount': int(category_count),
-            'tagCount': int(tag_count),
-            'templateCount': int(template_count)
-        }
 
         logger.info(
             "返回用户数据统计: user_id=%s, bills=%s, accounts=%s, categories=%s, tags=%s, templates=%s",
             request.user_id,
-            bill_count,
-            account_count,
-            category_count,
-            tag_count,
-            template_count,
+            statistics['billCount'],
+            statistics['accountCount'],
+            statistics['categoryCount'],
+            statistics['tagCount'],
+            statistics['templateCount'],
         )
 
         return jsonify({

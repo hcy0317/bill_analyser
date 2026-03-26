@@ -12,6 +12,27 @@
             <f7-list-item
                 class="list-item-with-header-and-title list-item-no-item-after"
                 link="#"
+                :header="tt('Preferred source')"
+                @click="showProviderPopup = true"
+            >
+                <template #title>
+                    <div class="no-padding no-margin">
+                        <span>{{ getProviderDisplayName(selectedProvider) }}</span>
+                    </div>
+                </template>
+                <list-item-selection-popup value-type="item"
+                                           key-field="value" value-field="value"
+                                           title-field="title"
+                                           :title="tt('Preferred source')"
+                                           :items="exchangeRateProviderOptions"
+                                           v-model:show="showProviderPopup"
+                                           v-model="selectedProvider"
+                                           @update:model-value="changeProvider">
+                </list-item-selection-popup>
+            </f7-list-item>
+            <f7-list-item
+                class="list-item-with-header-and-title list-item-no-item-after"
+                link="#"
                 :header="tt('Base Currency')"
                 @click="showBaseCurrencyPopup = true"
             >
@@ -95,6 +116,10 @@
                     <span v-else-if="!isUserCustomExchangeRates && !exchangeRatesData.referenceUrl">{{ exchangeRatesData.dataSource }}</span>
                     <span v-else-if="isUserCustomExchangeRates">{{ tt('User Custom') }}</span>
                 </small>
+            </f7-list-item>
+            <f7-list-item v-if="exchangeRatesData.fallbackUsed">
+                <small>{{ tt('Fallback') }}</small>
+                <small>{{ tt('Selected source is unavailable, automatically switched to an available source') }}</small>
             </f7-list-item>
         </f7-list>
 
@@ -180,6 +205,7 @@ const baseCurrencyChangedTime = ref<number>(getCurrentUnixTime());
 const settingBaseLine = ref<boolean>(false);
 const showMoreActionSheet = ref<boolean>(false);
 const showBaseCurrencyPopup = ref<boolean>(false);
+const showProviderPopup = ref<boolean>(false);
 const showBaseAmountSheet = ref<boolean>(false);
 const customExchangeRateToDelete = ref<LocalizedLatestExchangeRate | null>(null);
 const showDeleteActionSheet = ref<boolean>(false);
@@ -196,6 +222,17 @@ const baseAmountFontSizeClass = computed<string>(() => {
         return 'ebk-large-amount';
     }
 });
+const selectedProvider = computed<string>({
+    get: () => exchangeRatesStore.selectedExchangeRateProvider,
+    set: value => exchangeRatesStore.setSelectedExchangeRateProvider(value)
+});
+const exchangeRateProviderOptions = computed(() => [
+    { title: tt('Automatic (Recommended)'), value: 'auto' },
+    { title: tt('Bank of China (Domestic)'), value: 'boc_cn' },
+    { title: tt('China Merchants Bank (Domestic)'), value: 'cmb_cn' },
+    { title: tt('European Central Bank (International)'), value: 'ecb' },
+    { title: tt('Reserve Bank of Australia (International)'), value: 'rba' }
+]);
 
 function getExchangeRateDomId(exchangeRate: LocalizedLatestExchangeRate): string {
     return 'exchangeRate_' + exchangeRate.currencyCode;
@@ -233,6 +270,16 @@ function reload(done?: () => void): void {
             showToast(error.message || error);
         }
     });
+}
+
+function changeProvider(provider: string): void {
+    exchangeRatesStore.setSelectedExchangeRateProvider(provider);
+    reload();
+}
+
+function getProviderDisplayName(provider: string): string {
+    const found = exchangeRateProviderOptions.value.find(item => item.value === provider);
+    return found?.title || provider;
 }
 
 function update(): void {

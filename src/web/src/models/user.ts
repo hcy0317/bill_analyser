@@ -50,36 +50,38 @@ export class User {
     }
 
     public fillFrom(user: User | UserBasicInfo | UserProfileResponse): void {
-        this.username = user.username;
-        this.email = user.email;
-        this.nickname = user.nickname;
-        this.defaultAccountId = user.defaultAccountId;
-        this.transactionEditScope = user.transactionEditScope;
-        this.language = user.language;
-        this.defaultCurrency = user.defaultCurrency;
-        this.firstDayOfWeek = user.firstDayOfWeek;
-        this.fiscalYearStart = user.fiscalYearStart;
-        this.calendarDisplayType = user.calendarDisplayType;
-        this.dateDisplayType = user.dateDisplayType;
-        this.longDateFormat = user.longDateFormat;
-        this.shortDateFormat = user.shortDateFormat;
-        this.longTimeFormat = user.longTimeFormat;
-        this.shortTimeFormat = user.shortTimeFormat;
-        this.fiscalYearFormat = user.fiscalYearFormat;
-        this.currencyDisplayType = user.currencyDisplayType;
-        this.numeralSystem = user.numeralSystem;
-        this.decimalSeparator = user.decimalSeparator;
-        this.digitGroupingSymbol = user.digitGroupingSymbol;
-        this.digitGrouping = user.digitGrouping;
-        this.coordinateDisplayType = user.coordinateDisplayType;
-        this.expenseAmountColor = user.expenseAmountColor;
-        this.incomeAmountColor = user.incomeAmountColor;
-        this.cashAccountId = user.cashAccountId;
-        this.cashTransferCategoryId = user.cashTransferCategoryId;
-        this.importLearningEnabled = user.importLearningEnabled;
-        this.investmentPlatformKeywords = [...(user.investmentPlatformKeywords || [])];
-        this.investmentProductKeywords = [...(user.investmentProductKeywords || [])];
-        this.investmentExcludeKeywords = [...(user.investmentExcludeKeywords || [])];
+        const normalized = normalizeUserBasicInfo(user);
+
+        this.username = normalized.username;
+        this.email = normalized.email;
+        this.nickname = normalized.nickname;
+        this.defaultAccountId = normalized.defaultAccountId;
+        this.transactionEditScope = normalized.transactionEditScope;
+        this.language = normalized.language;
+        this.defaultCurrency = normalized.defaultCurrency;
+        this.firstDayOfWeek = normalized.firstDayOfWeek;
+        this.fiscalYearStart = normalized.fiscalYearStart;
+        this.calendarDisplayType = normalized.calendarDisplayType;
+        this.dateDisplayType = normalized.dateDisplayType;
+        this.longDateFormat = normalized.longDateFormat;
+        this.shortDateFormat = normalized.shortDateFormat;
+        this.longTimeFormat = normalized.longTimeFormat;
+        this.shortTimeFormat = normalized.shortTimeFormat;
+        this.fiscalYearFormat = normalized.fiscalYearFormat;
+        this.currencyDisplayType = normalized.currencyDisplayType;
+        this.numeralSystem = normalized.numeralSystem;
+        this.decimalSeparator = normalized.decimalSeparator;
+        this.digitGroupingSymbol = normalized.digitGroupingSymbol;
+        this.digitGrouping = normalized.digitGrouping;
+        this.coordinateDisplayType = normalized.coordinateDisplayType;
+        this.expenseAmountColor = normalized.expenseAmountColor;
+        this.incomeAmountColor = normalized.incomeAmountColor;
+        this.cashAccountId = normalized.cashAccountId;
+        this.cashTransferCategoryId = normalized.cashTransferCategoryId;
+        this.importLearningEnabled = normalized.importLearningEnabled;
+        this.investmentPlatformKeywords = [...normalized.investmentPlatformKeywords];
+        this.investmentProductKeywords = [...normalized.investmentProductKeywords];
+        this.investmentExcludeKeywords = [...normalized.investmentExcludeKeywords];
     }
 
     public toRegisterRequest(categories?: LocalizedPresetCategory[]): UserRegisterRequest {
@@ -132,31 +134,32 @@ export class User {
     }
 
     public static of(userInfo: UserBasicInfo): User {
-        const user = new User(userInfo.language, userInfo.defaultCurrency, userInfo.firstDayOfWeek);
-        user.defaultAccountId = userInfo.defaultAccountId;
-        user.transactionEditScope = userInfo.transactionEditScope;
-        user.fiscalYearStart = userInfo.fiscalYearStart;
-        user.calendarDisplayType = userInfo.calendarDisplayType;
-        user.dateDisplayType = userInfo.dateDisplayType;
-        user.longDateFormat = userInfo.longDateFormat;
-        user.shortDateFormat = userInfo.shortDateFormat;
-        user.longTimeFormat = userInfo.longTimeFormat;
-        user.shortTimeFormat = userInfo.shortTimeFormat;
-        user.fiscalYearFormat = userInfo.fiscalYearFormat;
-        user.currencyDisplayType = userInfo.currencyDisplayType;
-        user.numeralSystem = userInfo.numeralSystem;
-        user.decimalSeparator = userInfo.decimalSeparator;
-        user.digitGroupingSymbol = userInfo.digitGroupingSymbol;
-        user.digitGrouping = userInfo.digitGrouping;
-        user.coordinateDisplayType = userInfo.coordinateDisplayType;
-        user.expenseAmountColor = userInfo.expenseAmountColor;
-        user.incomeAmountColor = userInfo.incomeAmountColor;
-        user.cashAccountId = userInfo.cashAccountId;
-        user.cashTransferCategoryId = userInfo.cashTransferCategoryId;
-        user.importLearningEnabled = userInfo.importLearningEnabled;
-        user.investmentPlatformKeywords = [...(userInfo.investmentPlatformKeywords || [])];
-        user.investmentProductKeywords = [...(userInfo.investmentProductKeywords || [])];
-        user.investmentExcludeKeywords = [...(userInfo.investmentExcludeKeywords || [])];
+        const normalized = normalizeUserBasicInfo(userInfo);
+        const user = new User(normalized.language, normalized.defaultCurrency, normalized.firstDayOfWeek);
+        user.defaultAccountId = normalized.defaultAccountId;
+        user.transactionEditScope = normalized.transactionEditScope;
+        user.fiscalYearStart = normalized.fiscalYearStart;
+        user.calendarDisplayType = normalized.calendarDisplayType;
+        user.dateDisplayType = normalized.dateDisplayType;
+        user.longDateFormat = normalized.longDateFormat;
+        user.shortDateFormat = normalized.shortDateFormat;
+        user.longTimeFormat = normalized.longTimeFormat;
+        user.shortTimeFormat = normalized.shortTimeFormat;
+        user.fiscalYearFormat = normalized.fiscalYearFormat;
+        user.currencyDisplayType = normalized.currencyDisplayType;
+        user.numeralSystem = normalized.numeralSystem;
+        user.decimalSeparator = normalized.decimalSeparator;
+        user.digitGroupingSymbol = normalized.digitGroupingSymbol;
+        user.digitGrouping = normalized.digitGrouping;
+        user.coordinateDisplayType = normalized.coordinateDisplayType;
+        user.expenseAmountColor = normalized.expenseAmountColor;
+        user.incomeAmountColor = normalized.incomeAmountColor;
+        user.cashAccountId = normalized.cashAccountId;
+        user.cashTransferCategoryId = normalized.cashTransferCategoryId;
+        user.importLearningEnabled = normalized.importLearningEnabled;
+        user.investmentPlatformKeywords = [...normalized.investmentPlatformKeywords];
+        user.investmentProductKeywords = [...normalized.investmentProductKeywords];
+        user.investmentExcludeKeywords = [...normalized.investmentExcludeKeywords];
 
         return user;
     }
@@ -308,4 +311,25 @@ export const EMPTY_USER_BASIC_INFO: UserBasicInfo = {
     investmentProductKeywords: [],
     investmentExcludeKeywords: [],
     emailVerified: false
+}
+
+function normalizeStringId(value: unknown): string {
+    if (value === null || typeof value === 'undefined' || value === '') {
+        return '';
+    }
+
+    return String(value);
+}
+
+export function normalizeUserBasicInfo(userInfo?: Partial<UserBasicInfo> | null): UserBasicInfo {
+    return {
+        ...EMPTY_USER_BASIC_INFO,
+        ...(userInfo || {}),
+        defaultAccountId: normalizeStringId(userInfo?.defaultAccountId),
+        cashAccountId: normalizeStringId(userInfo?.cashAccountId),
+        cashTransferCategoryId: normalizeStringId(userInfo?.cashTransferCategoryId),
+        investmentPlatformKeywords: [...(userInfo?.investmentPlatformKeywords || [])],
+        investmentProductKeywords: [...(userInfo?.investmentProductKeywords || [])],
+        investmentExcludeKeywords: [...(userInfo?.investmentExcludeKeywords || [])]
+    };
 }

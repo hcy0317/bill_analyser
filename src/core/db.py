@@ -2195,6 +2195,31 @@ class Database:
             return {'success': False, 'message': str(e)}
 
     @log_method
+    async def get_user_data_statistics(self, user_id: int = 1) -> Dict[str, int]:
+        """获取用户业务数据统计。
+
+        使用 COUNT 查询直接返回统计结果，避免数据管理页为了展示数量而全量加载
+        bills、templates 等大表数据，导致页面长期停留在加载状态。
+        """
+        conn = await self._get_connection()
+        count_queries = {
+            'billCount': "SELECT COUNT(*) FROM bills WHERE user_id = ?",
+            'accountCount': "SELECT COUNT(*) FROM accounts WHERE user_id = ?",
+            'categoryCount': "SELECT COUNT(*) FROM categories WHERE user_id = ?",
+            'tagCount': "SELECT COUNT(*) FROM tags WHERE user_id = ?",
+            'templateCount': "SELECT COUNT(*) FROM bill_templates WHERE user_id = ?",
+        }
+
+        statistics: Dict[str, int] = {}
+
+        for key, query in count_queries.items():
+            async with conn.execute(query, (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                statistics[key] = int(row[0] if row else 0)
+
+        return statistics
+
+    @log_method
     async def get_user_custom_exchange_rates(
         self,
         base_currency: str,
@@ -7199,7 +7224,92 @@ class Database:
         result['header_count'] = int(result['custom_rules'].get('header_count', 0) or 0)
         result['has_header'] = bool(result.get('has_header', 1))
         result['is_default'] = bool(result.get('is_default', 0))
+        result['description_summary'] = self._build_import_config_description_summary(result)
+        result['default_recommendation'] = False
         return result
+
+    @staticmethod
+    def _build_import_config_description_summary(config: Dict[str, Any]) -> str:
+        """基于字段映射和样本表头生成可读摘要，供前端在空描述时回退展示。"""
+        field_mappings = config.get('field_mappings') or {}
+        sample_headers = config.get('sample_headers') or []
+
+        display_labels = {
+            'date': '时间',
+            'type': '类型',
+            'amount': '金额',
+            'description': '描述',
+            'account': '账户',
+            'category': '分类',
+            'counterparty': '交易对方',
+            'paymentMethod': '支付方式',
+            'payment_method': '支付方式'
+        }
+        display_order = {
+            'date': 1,
+            'type': 2,
+            'amount': 3,
+            'description': 4,
+            'account': 5,
+            'category': 6,
+            'counterparty': 7,
+            'paymentMethod': 8,
+            'payment_method': 8
+        }
+
+        summary_parts: List[str] = []
+
+        if isinstance(field_mappings, dict) and field_mappings:
+            mapped_entries = []
+            sorted_items = sorted(
+                field_mappings.items(),
+                key=lambda item: (display_order.get(str(item[0]), 99), str(item[0]))
+            )
+
+            for field_name, header_name in sorted_items:
+                header_text = str(header_name or '').strip()
+                if not header_text:
+                    continue
+
+                mapped_entries.append(
+                    f"{display_labels.get(str(field_name), str(field_name))}->{header_text}"
+                )
+                if len(mapped_entries) >= 4:
+                    break
+
+            if mapped_entries:
+                summary_parts.append(f"映射: {' / '.join(mapped_entries)}")
+
+        normalized_headers = []
+        for header in sample_headers[:4]:
+            header_text = str(header or '').strip()
+            if header_text:
+                normalized_headers.append(header_text)
+
+        if normalized_headers:
+            summary_parts.append(f"表头: {' / '.join(normalized_headers)}")
+
+        return ' | '.join(summary_parts)
+
+    @staticmethod
+    def _mark_import_config_default_recommendation(configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """在没有默认模板时，为最合适的模板打上默认推荐标记。"""
+        if not configs:
+            return configs
+
+        if any(bool(config.get('is_default')) for config in configs):
+            return configs
+
+        def _sort_key(config: Dict[str, Any]) -> tuple:
+            use_count = int(config.get('use_count', 0) or 0)
+            last_used_at = str(config.get('last_used_at', '') or '')
+            updated_at = str(config.get('updated_at', '') or '')
+            created_at = str(config.get('created_at', '') or '')
+            return (use_count, last_used_at, updated_at, created_at)
+
+        recommended = max(configs, key=_sort_key)
+        recommended['default_recommendation'] = True
+        return configs
 
     @log_method
     async def save_import_config(self, data: Dict[str, Any], user_id: int = 1) -> int:
@@ -7304,7 +7414,8 @@ class Database:
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
 
-        return [self._deserialize_import_config_row(row) for row in rows]
+        configs = [self._deserialize_import_config_row(row) for row in rows]
+        return self._mark_import_config_default_recommendation(configs)
 
     @log_method
     async def find_matching_import_config(
@@ -7333,8 +7444,12 @@ class Database:
         best_match = None
         best_score = 0.0
         best_reason = ''
+        default_match = None
 
         for config in configs:
+            if config.get('is_default') and default_match is None:
+                default_match = config
+
             stored_headers = self._normalize_import_config_headers(config.get('sample_headers'))
             stored_signature = config.get('header_signature', '')
 
@@ -7362,7 +7477,27 @@ class Database:
                 best_reason = 'header_overlap'
 
         if not best_match or best_score < min_score:
-            return None
+            if not default_match:
+                return None
+
+            matched = dict(default_match)
+            matched['match_score'] = 0.0
+            matched['match_reason'] = 'default_template_fallback'
+            matched['matched_header_count'] = 0
+
+            now = datetime.now().isoformat()
+            await conn.execute(
+                """
+                UPDATE import_configs
+                SET use_count = COALESCE(use_count, 0) + 1,
+                    last_used_at = ?,
+                    updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (now, now, int(default_match['id']), user_id)
+            )
+            await conn.commit()
+            return matched
 
         matched = dict(best_match)
         matched['match_score'] = round(min(best_score, 1.0), 4)
@@ -8700,7 +8835,8 @@ class Database:
         self,
         user_id: int = 1,
         enabled_only: bool = False,
-        limit: int = 200
+        limit: Optional[int] = 200,
+        offset: int = 0
     ) -> List[Dict[str, Any]]:
         """获取导入学习规则列表。"""
         conn = await self._get_connection()
@@ -8710,13 +8846,38 @@ class Database:
         if enabled_only:
             query += " AND enabled = 1"
 
-        query += " ORDER BY updated_at DESC, id DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY updated_at DESC, id DESC"
+
+        if limit is not None and limit > 0:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, max(offset, 0)])
 
         async with conn.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
 
         return [dict(row) for row in rows]
+
+    @log_method
+    async def count_import_learning_rules(
+        self,
+        user_id: int = 1,
+        enabled_only: bool = False
+    ) -> int:
+        """统计导入学习规则总数。"""
+        conn = await self._get_connection()
+        query = "SELECT COUNT(*) AS total_count FROM import_learning_rules WHERE user_id = ?"
+        params: List[Any] = [user_id]
+
+        if enabled_only:
+            query += " AND enabled = 1"
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            return 0
+
+        return int(row['total_count'] or 0)
 
     @log_method
     async def set_import_learning_rule_enabled(

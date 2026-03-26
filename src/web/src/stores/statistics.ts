@@ -872,7 +872,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
         const combinedDataMap: Record<string, WritableTransactionAssetTrendsAnalysisDataItem> = {};
 
         for (const dailyData of assetTrendsDataWithAccountInfo.value) {
-            let dailyTotalAmount: number = 0;
+              let dailyTotalAmount = 0;
+              let dailyOpeningTotalAmount = 0;
 
             for (const item of dailyData.items) {
                 if (!item.primaryAccount || !item.account) {
@@ -926,54 +927,28 @@ export const useStatisticsStore = defineStore('statistics', () => {
                         totalOpeningAmount: openingAmount
                     });
                 } else if (transactionStatisticsFilter.value.chartDataType === ChartDataType.NetWorth.type) {
-                    let data = combinedDataMap['netWorth'];
-
-                    if (data) {
-                        data.totalAmount += amount;
-                        data.totalOpeningAmount = (data.totalOpeningAmount || 0) + openingAmount;
-                    } else {
-                        data = {
-                            name: tt('Net Worth'),
-                            type: 'account',
-                            id: 'netWorth',
-                            icon: 'bank',
-                            color: DEFAULT_CHART_COLORS[0] ?? DEFAULT_ACCOUNT_COLOR,
-                            hidden: false,
-                            displayOrders: [0],
-                            totalAmount: amount,
-                            totalOpeningAmount: openingAmount,
-                            items: []
-                        };
-                        combinedDataMap['netWorth'] = data;
-                    }
-
-                    if (data) {
-                        data.items.push({
-                            year: dailyData.year,
-                            month: dailyData.month,
-                            day: dailyData.day,
-                            totalAmount: amount,
-                            totalOpeningAmount: openingAmount
-                        });
-                    }
+                    dailyTotalAmount += amount;
+                    dailyOpeningTotalAmount += openingAmount;
                 }
             }
 
             if (transactionStatisticsFilter.value.chartDataType === ChartDataType.NetWorth.type) {
-                let data = combinedDataMap['total'];
+                let data = combinedDataMap['netWorth'];
 
                 if (data) {
                     data.totalAmount += dailyTotalAmount;
+                    data.totalOpeningAmount = (data.totalOpeningAmount || 0) + dailyOpeningTotalAmount;
                 } else {
                     data = {
-                        name: ChartDataType.NetWorth.name,
-                        type: 'total',
-                        id: 'total',
-                        icon: '',
-                        color: '',
+                        name: tt('Net Worth'),
+                        type: 'account',
+                        id: 'netWorth',
+                        icon: 'bank',
+                        color: DEFAULT_CHART_COLORS[0] ?? DEFAULT_ACCOUNT_COLOR,
                         hidden: false,
-                        displayOrders: [1],
+                        displayOrders: [0],
                         totalAmount: dailyTotalAmount,
+                        totalOpeningAmount: dailyOpeningTotalAmount,
                         items: []
                     };
                 }
@@ -982,10 +957,11 @@ export const useStatisticsStore = defineStore('statistics', () => {
                     year: dailyData.year,
                     month: dailyData.month,
                     day: dailyData.day,
-                    totalAmount: dailyTotalAmount
+                    totalAmount: dailyTotalAmount,
+                    totalOpeningAmount: dailyOpeningTotalAmount
                 };
                 data.items.push(amountItem);
-                combinedDataMap['total'] = data;
+                combinedDataMap['netWorth'] = data;
             }
         }
 
@@ -1504,8 +1480,13 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
             if (trendChartDateRange) {
                 transactionStatisticsFilter.value.trendChartDateType = trendChartDateRange.dateType;
-                transactionStatisticsFilter.value.trendChartStartYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.minTime);
-                transactionStatisticsFilter.value.trendChartEndYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.maxTime);
+                    if (trendChartDateRange.dateType === DateRange.All.type) {
+                        transactionStatisticsFilter.value.trendChartStartYearMonth = '';
+                        transactionStatisticsFilter.value.trendChartEndYearMonth = '';
+                    } else {
+                        transactionStatisticsFilter.value.trendChartStartYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.minTime);
+                        transactionStatisticsFilter.value.trendChartEndYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.maxTime);
+                    }
             }
         }
 
@@ -1649,8 +1630,13 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 const trendChartDateRange = getDateRangeByDateType(filter.trendChartDateType, userStore.currentUserFirstDayOfWeek, userStore.currentUserFiscalYearStart);
 
                 if (trendChartDateRange) {
-                    transactionStatisticsFilter.value.trendChartStartYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.minTime);
-                    transactionStatisticsFilter.value.trendChartEndYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.maxTime);
+                    if (filter.trendChartDateType === DateRange.All.type) {
+                        transactionStatisticsFilter.value.trendChartStartYearMonth = '';
+                        transactionStatisticsFilter.value.trendChartEndYearMonth = '';
+                    } else {
+                        transactionStatisticsFilter.value.trendChartStartYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.minTime);
+                        transactionStatisticsFilter.value.trendChartEndYearMonth = getGregorianCalendarYearAndMonthFromUnixTime(trendChartDateRange.maxTime);
+                    }
                 }
             }
         }
@@ -1967,9 +1953,11 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
     function loadTrendAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticTrendsResponseItem[]> {
         return new Promise((resolve, reject) => {
+            const isAllDateRange = transactionStatisticsFilter.value.trendChartDateType === DateRange.All.type;
+
             services.getTransactionStatisticsTrends({
-                startYearMonth: transactionStatisticsFilter.value.trendChartStartYearMonth,
-                endYearMonth: transactionStatisticsFilter.value.trendChartEndYearMonth,
+                startYearMonth: isAllDateRange ? '197001' : transactionStatisticsFilter.value.trendChartStartYearMonth,
+                endYearMonth: isAllDateRange ? '197001' : transactionStatisticsFilter.value.trendChartEndYearMonth,
                 tagIds: transactionStatisticsFilter.value.tagIds,
                 tagFilterType: transactionStatisticsFilter.value.tagFilterType,
                 keyword: transactionStatisticsFilter.value.keyword,

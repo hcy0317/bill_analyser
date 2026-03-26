@@ -90,6 +90,9 @@ export function useStatisticsTransactionPageBase() {
         if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
             return formatUnixTimeToLongDateTime(query.value.categoricalChartStartTime);
         } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
+            if (query.value.trendChartDateType === DateRange.All.type || !query.value.trendChartStartYearMonth) {
+                return '';
+            }
             return formatUnixTimeToGregorianLikeLongYearMonth(getYearMonthFirstUnixTime(query.value.trendChartStartYearMonth));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatUnixTimeToLongDateTime(query.value.assetTrendsChartStartTime);
@@ -102,6 +105,9 @@ export function useStatisticsTransactionPageBase() {
         if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
             return formatUnixTimeToLongDateTime(query.value.categoricalChartEndTime);
         } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
+            if (query.value.trendChartDateType === DateRange.All.type || !query.value.trendChartEndYearMonth) {
+                return '';
+            }
             return formatUnixTimeToGregorianLikeLongYearMonth(getYearMonthLastUnixTime(query.value.trendChartEndYearMonth));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatUnixTimeToLongDateTime(query.value.assetTrendsChartEndTime);
@@ -119,6 +125,9 @@ export function useStatisticsTransactionPageBase() {
 
             return formatDateRange(query.value.categoricalChartDateType, query.value.categoricalChartStartTime, query.value.categoricalChartEndTime);
         } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
+            if (query.value.trendChartDateType === DateRange.All.type) {
+                return tt(DateRange.All.name);
+            }
             return formatDateRange(query.value.trendChartDateType, getYearMonthFirstUnixTime(query.value.trendChartStartYearMonth), getYearMonthLastUnixTime(query.value.trendChartEndYearMonth));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatDateRange(query.value.assetTrendsChartDateType, query.value.assetTrendsChartStartTime, query.value.assetTrendsChartEndTime);

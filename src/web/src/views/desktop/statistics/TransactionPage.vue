@@ -1076,8 +1076,8 @@ function setDateFilter(dateType: number): void {
     } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
         changed = statisticsStore.updateTransactionStatisticsFilter({
             trendChartDateType: dateRange.dateType,
-            trendChartStartYearMonth: getGregorianCalendarYearAndMonthFromUnixTime(dateRange.minTime),
-            trendChartEndYearMonth: getGregorianCalendarYearAndMonthFromUnixTime(dateRange.maxTime)
+            trendChartStartYearMonth: dateType === DateRange.All.type ? '' : getGregorianCalendarYearAndMonthFromUnixTime(dateRange.minTime),
+            trendChartEndYearMonth: dateType === DateRange.All.type ? '' : getGregorianCalendarYearAndMonthFromUnixTime(dateRange.maxTime)
         });
     } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
         changed = statisticsStore.updateTransactionStatisticsFilter({
@@ -1156,6 +1156,10 @@ function shiftDateRange(scale: number): void {
             categoricalChartEndTime: newDateRange.maxTime
         });
     } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
+        if (query.value.trendChartDateType === DateRange.All.type) {
+            return;
+        }
+
         const newDateRange = getShiftedDateRangeAndDateType(getYearMonthFirstUnixTime(query.value.trendChartStartYearMonth), getYearMonthLastUnixTime(query.value.trendChartEndYearMonth), scale, firstDayOfWeek.value, fiscalYearStart.value, DateRangeScene.TrendAnalysis);
 
         changed = statisticsStore.updateTransactionStatisticsFilter({

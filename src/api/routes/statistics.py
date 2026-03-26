@@ -17,6 +17,36 @@ logger = get_logger('StatisticsAPI')
 
 bp = Blueprint('statistics', __name__)
 
+EXCHANGE_RATE_PROVIDER_OPTIONS = {
+    'auto': {
+        'label': '自动选择',
+        'reference_url': '',
+        'region': 'mixed'
+    },
+    'boc_cn': {
+        'label': '中国银行外汇牌价',
+        'reference_url': 'https://www.boc.cn/sourcedb/whpj/',
+        'region': 'domestic'
+    },
+    'cmb_cn': {
+        'label': '招商银行实时汇率',
+        'reference_url': 'https://fx.cmbchina.com/hq/',
+        'region': 'domestic'
+    },
+    'ecb': {
+        'label': 'ECB (欧洲央行)',
+        'reference_url': 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml',
+        'region': 'foreign'
+    },
+    'rba': {
+        'label': 'RBA (澳大利亚储备银行)',
+        'reference_url': 'https://www.rba.gov.au/rss/rss-cb-exchange-rates.xml',
+        'region': 'foreign'
+    }
+}
+
+DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER = ['boc_cn', 'cmb_cn', 'ecb', 'rba']
+
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
@@ -66,12 +96,37 @@ def _build_user_custom_exchange_rates_result(
                 logger.debug("忽略非法 effective_date: %s", effective_date)
 
     return {
+        'providerKey': 'user_custom',
+        'requestedProvider': 'auto',
+        'fallbackUsed': False,
         'dataSource': 'user_custom',
         'referenceUrl': '',
         'updateTime': latest_update_time,
         'baseCurrency': base_currency,
         'exchangeRates': exchange_rates_list
     }
+
+
+def _normalize_requested_exchange_rate_provider() -> str:
+    """标准化请求中的汇率 provider 参数。"""
+    provider = (request.args.get('provider') or 'auto').strip().lower()
+    return provider or 'auto'
+
+
+def _build_provider_candidate_order(requested_provider: str) -> List[str]:
+    """根据用户选择构建 provider 尝试顺序。"""
+    if requested_provider == 'auto':
+        return DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER.copy()
+
+    if requested_provider not in EXCHANGE_RATE_PROVIDER_OPTIONS:
+        return []
+
+    candidate_order = [requested_provider]
+    for provider_key in DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER:
+        if provider_key != requested_provider:
+            candidate_order.append(provider_key)
+
+    return candidate_order
 
 
 @bp.route('/overview', methods=['GET'])
@@ -541,7 +596,18 @@ def get_exchange_rates():
 
         # 获取请求参数
         base_currency = _get_request_base_currency(db)
-        logger.debug("[汇率API] 请求参数: base_currency=%s", base_currency)
+        requested_provider = _normalize_requested_exchange_rate_provider()
+        logger.debug(
+            "[汇率API] 请求参数: base_currency=%s, provider=%s",
+            base_currency,
+            requested_provider
+        )
+
+        if requested_provider not in EXCHANGE_RATE_PROVIDER_OPTIONS:
+            return jsonify({
+                'success': False,
+                'error': f'Unsupported exchange rate provider: {requested_provider}'
+            }), 400
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -552,7 +618,7 @@ def get_exchange_rates():
         finally:
             loop.close()
 
-        if custom_rates:
+        if custom_rates and requested_provider == 'auto':
             result = _build_user_custom_exchange_rates_result(base_currency, custom_rates)
             logger.info("[汇率API] 返回用户自定义汇率: user_id=%s, base=%s, count=%d",
                         request.user_id, base_currency, len(result['exchangeRates']))
@@ -578,7 +644,11 @@ def get_exchange_rates():
         try:
             # 尝试从多个数据源获取汇率
             rates_data = loop.run_until_complete(
-                _fetch_exchange_rates_from_providers(base_currency, target_currencies)
+                _fetch_exchange_rates_from_providers(
+                    base_currency,
+                    target_currencies,
+                    requested_provider
+                )
             )
         finally:
             loop.close()
@@ -600,6 +670,9 @@ def get_exchange_rates():
 
         # 构建响应数据
         result = {
+            'providerKey': rates_data['provider_key'],
+            'requestedProvider': requested_provider,
+            'fallbackUsed': rates_data['fallback_used'],
             'dataSource': rates_data['source'],
             'referenceUrl': rates_data['url'],
             'updateTime': update_time,
@@ -733,7 +806,8 @@ def delete_user_custom_exchange_rate(currency: str):
 
 async def _fetch_exchange_rates_from_providers(
     base_currency: str,
-    target_currencies: list
+    target_currencies: list,
+    requested_provider: str = 'auto'
 ) -> dict:
     """
     从多个数据源获取汇率 (v6.79)
@@ -748,25 +822,34 @@ async def _fetch_exchange_rates_from_providers(
         dict: {
             'rates': {currency: rate, ...},
             'source': '数据源名称',
-            'url': '参考URL'
+            'url': '参考URL',
+            'provider_key': 'provider key',
+            'fallback_used': bool
         }
     """
     from src.core.exchange_rate_providers import (
-        ECBProvider, BOCProvider, RBAProvider, NBPProvider, SNBProvider
+        BOCChinaProvider, CMBChinaProvider, ECBProvider, RBAProvider
     )
 
-    # 按优先级排列的数据源（优先选择支持CNY的数据源）
-    providers = [
-        ('ECB (欧洲央行)', ECBProvider(), 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml'),
-        ('BOC (加拿大银行)', BOCProvider(), 'https://www.bankofcanada.ca/valet/observations/group/FX_RATES_DAILY'),
-        ('RBA (澳大利亚储备银行)', RBAProvider(), 'https://www.rba.gov.au/rss/rss-cb-exchange-rates.xml'),
-        ('NBP (波兰国家银行)', NBPProvider(), 'https://api.nbp.pl/api/exchangerates/tables/A'),
-        ('SNB (瑞士国家银行)', SNBProvider(), 'https://data.snb.ch/api/cube/devkum/data/csv/en'),
-    ]
+    provider_instances = {
+        'boc_cn': BOCChinaProvider(),
+        'cmb_cn': CMBChinaProvider(),
+        'ecb': ECBProvider(),
+        'rba': RBAProvider()
+    }
+
+    candidate_order = _build_provider_candidate_order(requested_provider)
+    if not candidate_order:
+        raise RuntimeError(f'Unsupported exchange rate provider: {requested_provider}')
 
     last_error = None
 
-    for source_name, provider, reference_url in providers:
+    for provider_key in candidate_order:
+        provider_meta = EXCHANGE_RATE_PROVIDER_OPTIONS[provider_key]
+        provider = provider_instances[provider_key]
+        source_name = provider_meta['label']
+        reference_url = provider_meta['reference_url']
+
         try:
             logger.info("[汇率API] 尝试从 %s 获取汇率...", source_name)
 
@@ -778,7 +861,9 @@ async def _fetch_exchange_rates_from_providers(
                 return {
                     'rates': rates,
                     'source': source_name,
-                    'url': reference_url
+                    'url': reference_url,
+                    'provider_key': provider_key,
+                    'fallback_used': requested_provider != 'auto' and provider_key != requested_provider
                 }
             else:
                 logger.warning("[汇率API] %s 返回空汇率数据", source_name)
@@ -856,6 +941,9 @@ def _get_fallback_exchange_rates(base_currency: str):
                 })
 
     result = {
+        'providerKey': 'fallback',
+        'requestedProvider': 'auto',
+        'fallbackUsed': True,
         'dataSource': '内置汇率数据 (回退)',
         'referenceUrl': '',
         'updateTime': update_time,
@@ -1504,21 +1592,9 @@ def get_asset_trends():
 
             start_time = min(bill_timestamps)
             end_time = max(bill_timestamps)
-
-            # 与现有接口限制保持一致：最多365天
-            if (end_time - start_time) // 86400 > 365:
-                end_date_dt = datetime.fromtimestamp(end_time)
-                start_date_dt = end_date_dt - timedelta(days=365)
-                start_time = int(start_date_dt.timestamp())
-                logger.warning(
-                    "[资产趋势] 全量模式超过365天，自动裁剪为最近365天: %s ~ %s",
-                    start_date_dt.strftime('%Y-%m-%d'),
-                    end_date_dt.strftime('%Y-%m-%d')
-                )
-            else:
-                logger.info("[资产趋势] 使用全量模式时间范围: %s ~ %s",
-                           datetime.fromtimestamp(start_time).strftime('%Y-%m-%d'),
-                           datetime.fromtimestamp(end_time).strftime('%Y-%m-%d'))
+            logger.info("[资产趋势] 使用全量模式时间范围: %s ~ %s",
+                            datetime.fromtimestamp(start_time).strftime('%Y-%m-%d'),
+                            datetime.fromtimestamp(end_time).strftime('%Y-%m-%d'))
 
         if not is_all_mode and (start_time is None or end_time is None):
             # v6.84: 资产趋势缺少时间参数时，默认使用本月范围（与分类分析接口保持一致）
@@ -1566,7 +1642,7 @@ def get_asset_trends():
         # v6.72: 时间跨度改为DEBUG级别，除非超限
         logger.debug("[资产趋势] 时间跨度: %d天", time_diff_days)
 
-        if time_diff_days > 365:
+        if not is_all_mode and time_diff_days > 365:
             logger.warning("[资产趋势] 时间跨度超过365天限制，拒绝请求: %d天", time_diff_days)
             error_msg = '资产趋势查询最多支持365天范围，请缩小时间范围'
             return jsonify({

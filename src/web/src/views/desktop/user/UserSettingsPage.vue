@@ -19,23 +19,12 @@
             </v-tab>
         </v-tabs>
 
-        <v-window class="mt-4 disable-tab-transition" v-model="activeTab">
-            <v-window-item value="basicSetting">
-                <user-basic-setting-tab/>
-            </v-window-item>
-
-            <v-window-item value="securitySetting">
-                <user-security-setting-tab/>
-            </v-window-item>
-
-            <v-window-item value="twoFactorSetting">
-                <user-two-factor-auth-setting-tab ref="twoFactorSettingTab"/>
-            </v-window-item>
-
-            <v-window-item value="dataManagementSetting">
-                <user-data-management-setting-tab/>
-            </v-window-item>
-        </v-window>
+        <div class="mt-4">
+            <user-basic-setting-tab v-if="activeTab === 'basicSetting'" />
+            <user-security-setting-tab v-else-if="activeTab === 'securitySetting'" />
+            <user-two-factor-auth-setting-tab v-else-if="activeTab === 'twoFactorSetting'" />
+            <user-data-management-setting-tab v-else-if="activeTab === 'dataManagementSetting'" />
+        </div>
     </div>
 </template>
 
@@ -45,8 +34,8 @@ import UserSecuritySettingTab from './settings/tabs/UserSecuritySettingTab.vue';
 import UserTwoFactorAuthSettingTab from './settings/tabs/UserTwoFactorAuthSettingTab.vue';
 import UserDataManagementSettingTab from './settings/tabs/UserDataManagementSettingTab.vue';
 
-import { ref, useTemplateRef, watch } from 'vue';
-import { useRouter, onBeforeRouteUpdate } from 'vue-router';
+import { ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -57,12 +46,11 @@ import {
     mdiDatabaseCogOutline
 } from '@mdi/js';
 
-type TwoFactorSettingTabType = InstanceType<typeof UserTwoFactorAuthSettingTab>;
-
 const props = defineProps<{
     initTab?: string;
 }>();
 
+const route = useRoute();
 const router = useRouter();
 
 const { tt } = useI18n();
@@ -74,33 +62,29 @@ const ALL_TABS: string[] = [
     'dataManagementSetting'
 ];
 
-const twoFactorSettingTab = useTemplateRef<TwoFactorSettingTabType>('twoFactorSettingTab');
+function normalizeTab(value?: string): string {
+    return value && ALL_TABS.indexOf(value) >= 0 ? value : 'basicSetting';
+}
 
-const activeTab = ref<string>((() => {
-    let queryActiveTab = props.initTab || 'basicSetting';
-
-    if (ALL_TABS.indexOf(queryActiveTab) < 0) {
-        queryActiveTab = 'basicSetting';
-    }
-
-    return queryActiveTab;
-})());
+const activeTab = ref<string>(normalizeTab(String(route.query['tab'] || props.initTab || 'basicSetting')));
 
 const pushRouter = (tab: string) => {
-    router.push(`/user/settings?tab=${tab}`);
+    const normalizedTab = normalizeTab(tab);
+
+    if (activeTab.value !== normalizedTab) {
+        activeTab.value = normalizedTab;
+    }
+
+    if (route.query['tab'] !== normalizedTab) {
+        router.replace(`/user/settings?tab=${normalizedTab}`);
+    }
 };
 
-onBeforeRouteUpdate((to) => {
-    if (to.query && to.query['tab'] && ALL_TABS.indexOf(to.query['tab'] as string) >= 0) {
-        activeTab.value = to.query['tab'] as string;
-    } else {
-        activeTab.value = 'basicSetting';
-    }
-});
+watch(() => route.query['tab'], (tabValue) => {
+    const nextTab = normalizeTab(typeof tabValue === 'string' ? tabValue : props.initTab);
 
-watch(activeTab, (newValue, oldValue) => {
-    if (oldValue === 'twoFactorSetting' && newValue !== 'twoFactorSetting') {
-        twoFactorSettingTab.value?.reset();
+    if (activeTab.value !== nextTab) {
+        activeTab.value = nextTab;
     }
-});
+}, { immediate: true });
 </script>

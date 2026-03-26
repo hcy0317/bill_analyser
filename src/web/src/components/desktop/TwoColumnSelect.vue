@@ -99,8 +99,7 @@ import { type CommonTwoColumnListItemSelectionProps, useTwoColumnListItemSelecti
 
 import {
     getFirstVisibleItem,
-    getItemByKeyValue,
-    getNameByKeyValue
+    getItemByKeyValue
 } from '@/lib/common.ts';
 import { type ComponentDensity, type InputVariant, setChildInputFocus, scrollToSelectedItem } from '@/lib/ui/desktop.ts';
 
@@ -188,27 +187,29 @@ const selectedSecondaryItem = computed<unknown>(() => getSelectedSecondaryItem(c
 const noSelectionText = computed<string>(() => props.noItemText ? props.noItemText : tt('None'));
 
 const selectionPrimaryItemText = computed<string>(() => {
-    if (props.primaryValueField && props.primaryTitleField) {
-        if (currentPrimaryValue.value) {
-            return getNameByKeyValue(props.items as Record<string, string>[], currentPrimaryValue.value, props.primaryValueField, props.primaryTitleField, noSelectionText.value) as string;
-        } else {
-            return noSelectionText.value;
-        }
-    } else {
+    if (!props.primaryTitleField) {
         return currentPrimaryValue.value as string;
     }
+
+    if (!selectedPrimaryItem.value) {
+        return noSelectionText.value;
+    }
+
+    const title = (selectedPrimaryItem.value as Record<string, unknown>)[props.primaryTitleField];
+    return ti(title ? String(title) : noSelectionText.value, !!props.primaryTitleI18n);
 });
 
 const selectionSecondaryItemText = computed<string>(() => {
-    if (props.secondaryValueField && props.secondaryTitleField) {
-        if (currentSecondaryValue.value && selectedPrimaryItem.value && (selectedPrimaryItem.value as Record<string, unknown>)[props.primarySubItemsField]) {
-            return getNameByKeyValue((selectedPrimaryItem.value as Record<string, unknown>)[props.primarySubItemsField] as Record<string, string>[], currentSecondaryValue.value, props.secondaryValueField, props.secondaryTitleField, noSelectionText.value) as string;
-        } else {
-            return noSelectionText.value;
-        }
-    } else {
+    if (!props.secondaryTitleField) {
         return currentSecondaryValue.value as string;
     }
+
+    if (!selectedSecondaryItem.value) {
+        return noSelectionText.value;
+    }
+
+    const title = (selectedSecondaryItem.value as Record<string, unknown>)[props.secondaryTitleField];
+    return ti(title ? String(title) : noSelectionText.value, !!props.secondaryTitleI18n);
 });
 
 function isSecondarySelected(subItem: unknown): boolean {

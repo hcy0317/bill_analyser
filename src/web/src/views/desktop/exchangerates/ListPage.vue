@@ -15,6 +15,18 @@
                                     <v-skeleton-loader class="skeleton-no-margin mt-3 mb-4" type="text" :loading="true"></v-skeleton-loader>
                                 </span>
                             </p>
+                            <p class="text-caption text-warning mt-n2 mb-3"
+                               v-if="!loading && exchangeRatesData?.fallbackUsed">
+                                {{ tt('Selected source is unavailable, automatically switched to an available source') }}
+                            </p>
+                            <v-select density="compact" variant="outlined"
+                                      item-title="title" item-value="value"
+                                      :label="tt('Preferred source')"
+                                      :placeholder="tt('Preferred source')"
+                                      :disabled="loading"
+                                      :items="exchangeRateProviderOptions"
+                                      v-model="selectedProvider"
+                                      @update:model-value="changeProvider" />
                             <span class="text-subtitle-2" v-if="exchangeRatesDataUpdateTime || loading">{{ tt('Last Updated') }}</span>
                             <p class="text-body-1 mt-1" v-if="exchangeRatesDataUpdateTime || loading">
                                 <span v-if="!loading">{{ exchangeRatesDataUpdateTime }}</span>
@@ -213,6 +225,17 @@ const alwaysShowNav = ref<boolean>(mdAndUp.value);
 const showNav = ref<boolean>(mdAndUp.value);
 
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
+const selectedProvider = computed<string>({
+    get: () => exchangeRatesStore.selectedExchangeRateProvider,
+    set: value => exchangeRatesStore.setSelectedExchangeRateProvider(value)
+});
+const exchangeRateProviderOptions = computed(() => [
+    { title: tt('Automatic (Recommended)'), value: 'auto' },
+    { title: tt('Bank of China (Domestic)'), value: 'boc_cn' },
+    { title: tt('China Merchants Bank (Domestic)'), value: 'cmb_cn' },
+    { title: tt('European Central Bank (International)'), value: 'ecb' },
+    { title: tt('Reserve Bank of Australia (International)'), value: 'rba' }
+]);
 
 function reload(force: boolean): void {
     loading.value = true;
@@ -247,6 +270,11 @@ function reload(force: boolean): void {
             snackbar.value?.showError(error);
         }
     });
+}
+
+function changeProvider(provider: string): void {
+    exchangeRatesStore.setSelectedExchangeRateProvider(provider);
+    reload(true);
 }
 
 function update(): void {

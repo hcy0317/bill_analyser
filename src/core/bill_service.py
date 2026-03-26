@@ -12,7 +12,7 @@ Bill Service Module - 账单导入服务
 import asyncio
 import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from .db import Database
 from .category_engine import CategoryEngine
@@ -1212,6 +1212,123 @@ class BillService:
                 "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s",
                 user_id, len(bills), applied_count, type_only
             )
+
+        return applied_count
+
+    async def _build_session_annotation_rule_lookup(
+        self,
+        previews: List[Dict[str, Any]],
+        annotation_samples: List[Dict[str, Any]],
+        user_id: int = 1
+    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        """基于当前会话人工标注构建临时学习规则查找表。"""
+        if not previews or not annotation_samples:
+            return {}
+
+        preview_map = {
+            int(preview['id']): preview for preview in previews if preview.get('id')
+        }
+        rule_lookup: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        category_cache: Dict[int, Optional[Dict[str, Any]]] = {}
+
+        for sample in annotation_samples:
+            preview_id = int(sample.get('preview_id', 0) or 0)
+            source_preview = preview_map.get(preview_id)
+            if not source_preview:
+                continue
+
+            learned_category_id = sample.get('annotated_category_id')
+            learned_main_category = ''
+            learned_sub_category = ''
+            if learned_category_id:
+                category_id = int(learned_category_id)
+                if category_id not in category_cache:
+                    category_cache[category_id] = await self.db.get_category_by_id(
+                        category_id, user_id=user_id
+                    )
+                category = category_cache.get(category_id) or {}
+                learned_main_category = category.get('main_category', '')
+                learned_sub_category = category.get('sub_category', '')
+
+            rule_payload = {
+                'preview_id': preview_id,
+                'annotated_type': sample.get('annotated_type', ''),
+                'annotated_category_id': learned_category_id,
+                'annotated_main_category': learned_main_category,
+                'annotated_sub_category': learned_sub_category,
+                'annotated_source_account_id': sample.get('annotated_source_account_id'),
+                'annotated_destination_account_id': sample.get('annotated_destination_account_id'),
+            }
+
+            for match_type, raw_value in [
+                ('counterparty', source_preview.get('preview_counterparty', '')),
+                ('description', source_preview.get('preview_description', '')),
+                ('payment_method', source_preview.get('preview_payment_method', '')),
+            ]:
+                normalized_value = self._normalize_learning_text(raw_value)
+                if not normalized_value:
+                    continue
+                rule_lookup[(match_type, normalized_value)] = rule_payload
+
+        if rule_lookup:
+            self.logger.info(
+                "[会话学习] 构建临时规则 %d 条", len(rule_lookup)
+            )
+
+        return rule_lookup
+
+    @staticmethod
+    def _apply_session_annotation_learning_rules(
+        bills: List[Dict[str, Any]],
+        rule_lookup: Dict[Tuple[str, str], Dict[str, Any]],
+        annotation_map: Dict[int, Dict[str, Any]],
+        type_only: bool = False
+    ) -> int:
+        """将当前会话人工标注以临时学习规则形式回放到相似账单。"""
+        if not bills or not rule_lookup:
+            return 0
+
+        applied_count = 0
+
+        for bill in bills:
+            bill_id = int(bill.get('id', 0) or 0)
+            if bill_id and bill_id in annotation_map:
+                continue
+
+            matched_rule = None
+            for match_type, raw_value in [
+                ('counterparty', bill.get('counterparty', '')),
+                ('description', bill.get('description', '')),
+                ('payment_method', bill.get('payment_method', '')),
+            ]:
+                normalized_value = BillService._normalize_learning_text(raw_value)
+                if not normalized_value:
+                    continue
+
+                matched_rule = rule_lookup.get((match_type, normalized_value))
+                if matched_rule:
+                    bill['_session_annotation_match_type'] = match_type
+                    bill['_session_annotation_source_preview_id'] = matched_rule.get('preview_id')
+                    break
+
+            if not matched_rule:
+                continue
+
+            if matched_rule.get('annotated_type'):
+                bill['type'] = matched_rule.get('annotated_type')
+
+            if not type_only:
+                if matched_rule.get('annotated_main_category'):
+                    bill['main_category'] = matched_rule.get('annotated_main_category', '')
+                    bill['sub_category'] = matched_rule.get('annotated_sub_category', '')
+
+                if matched_rule.get('annotated_source_account_id'):
+                    bill['source_account_id'] = matched_rule.get('annotated_source_account_id')
+
+                if matched_rule.get('annotated_destination_account_id'):
+                    bill['destination_account_id'] = matched_rule.get('annotated_destination_account_id')
+
+            applied_count += 1
 
         return applied_count
 
@@ -2484,6 +2601,7 @@ class BillService:
             'categorized': 0,
             'account_matched': 0,
             'session_samples_saved': 0,
+            'session_suggestion_applied': 0,
             'annotation_applied': 0,
             'errors': []
         }
@@ -2537,11 +2655,28 @@ class BillService:
                 int(sample['preview_id']): sample for sample in annotation_samples
                 if sample.get('preview_id')
             }
+            session_rule_lookup = await self._build_session_annotation_rule_lookup(
+                previews,
+                annotation_samples,
+                user_id=user_id
+            )
 
             for bill in bills_for_category:
                 sample = annotation_map.get(int(bill.get('id', 0))) if bill.get('id') else None
                 if sample and sample.get('annotated_type'):
                     bill['type'] = sample.get('annotated_type')
+
+            result['session_suggestion_applied'] = self._apply_session_annotation_learning_rules(
+                bills_for_category,
+                session_rule_lookup,
+                annotation_map,
+                type_only=True
+            )
+            if result['session_suggestion_applied'] > 0:
+                self.logger.info(
+                    "[重新分类] 会话临时学习类型预填充 %d 条",
+                    result['session_suggestion_applied']
+                )
 
             learned_seed_count = await self._apply_import_learning_rules(
                 bills_for_category,
@@ -2590,6 +2725,18 @@ class BillService:
             if learned_replay_count > 0:
                 self.logger.info("[重新分类] 长期学习结果回放 %d 条", learned_replay_count)
 
+            result['session_suggestion_applied'] += self._apply_session_annotation_learning_rules(
+                matched_bills,
+                session_rule_lookup,
+                annotation_map,
+                type_only=False
+            )
+            if result['session_suggestion_applied'] > 0:
+                self.logger.info(
+                    "[重新分类] 会话临时学习结果回放累计 %d 条",
+                    result['session_suggestion_applied']
+                )
+
             result['annotation_applied'] = await self._apply_session_annotation_samples(
                 matched_bills,
                 annotation_map,
@@ -2636,9 +2783,10 @@ class BillService:
             result['account_matched'] = account_matched_count
 
             self.logger.info(
-                "[重新分类] 完成: 总计 %d, 分类匹配 %d, 账户匹配 %d, 会话样本 %d, 回放 %d",
+                "[重新分类] 完成: 总计 %d, 分类匹配 %d, 账户匹配 %d, 会话样本 %d, 临时学习 %d, 精确回放 %d",
                 result['total'], result['categorized'], result['account_matched'],
-                result['session_samples_saved'], result['annotation_applied']
+                result['session_samples_saved'], result['session_suggestion_applied'],
+                result['annotation_applied']
             )
 
         except Exception as e:

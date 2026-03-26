@@ -55,6 +55,8 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { LineChart, BarChart, PieChart, ScatterChart, CandlestickChart, RadarChart, SankeyChart } from 'echarts/charts';
 import {
     GridComponent,
+    PolarComponent,
+    GraphicComponent,
     TooltipComponent,
     LegendComponent,
 } from 'echarts/components';
@@ -506,6 +508,8 @@ echarts.use([
     RadarChart,
     SankeyChart,
     GridComponent,
+    PolarComponent,
+    GraphicComponent,
     TooltipComponent,
     LegendComponent
 ]);

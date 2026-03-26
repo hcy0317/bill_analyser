@@ -17,6 +17,9 @@ export interface LatestExchangeRate {
 }
 
 export interface LatestExchangeRateResponse {
+    readonly providerKey?: string;
+    readonly requestedProvider?: string;
+    readonly fallbackUsed?: boolean;
     readonly dataSource: string;
     readonly referenceUrl: string;
     updateTime: number;

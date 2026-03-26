@@ -4,31 +4,47 @@
             <v-card>
                 <v-layout>
                     <!-- 左侧导航抽屉 -->
-                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav" width="288">
-                        <div class="mx-4 my-4">
-                            <!-- 视图切换：预算管理 / 周期预计（上下排列）-->
-                            <btn-vertical-group class="mb-4 budget-nav-buttons" :disabled="loading" :buttons="[
-                                { name: tt('Budget Management'), value: 'budget' },
-                                { name: tt('Period Forecast'), value: 'forecast' }
-                            ]" v-model="activeViewMode" @update:model-value="switchViewMode" />
+                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav">
+                        <div class="mx-6 mt-4">
+                            <btn-vertical-group
+                                class="budget-nav-buttons"
+                                :disabled="loading || forecastLoading"
+                                :buttons="viewModeButtons"
+                                v-model="activeViewMode"
+                                @update:model-value="switchViewMode"
+                            />
                         </div>
-                        <v-divider />
-                        <div class="mx-4 mt-4">
+                        <v-divider class="mt-4" />
+                        <div class="mx-6 mt-4">
                             <!-- 类型切换：支出 / 投资（横向排列，宽度与上方按钮一致）-->
                             <btn-horizontal-group class="budget-nav-buttons" :disabled="loading" :buttons="[
                                 { name: tt('Expense'), value: BudgetType.Expense },
                                 { name: tt('Investment'), value: BudgetType.Investment }
                             ]" v-model="activeBudgetType" @update:model-value="switchBudgetType" />
                         </div>
-                        <!-- 时间筛选列表（类似交易列表的月份选择）-->
-                        <v-tabs show-arrows class="my-4" direction="vertical"
-                                :disabled="loading" v-model="activePeriodFilterIndex">
-                            <v-tab class="tab-text-truncate" :key="idx" :value="idx"
-                                   v-for="(filter, idx) in visiblePeriodFilters"
-                                   @click="setPeriodFilter(filter.value)">
-                                <span class="text-truncate">{{ filter.name }}</span>
-                            </v-tab>
-                        </v-tabs>
+                        <template v-if="activeViewMode === 'history'">
+                            <v-divider class="mt-4" />
+                            <div class="mx-6 my-4">
+                                <btn-vertical-group
+                                    class="budget-nav-buttons"
+                                    :disabled="loading"
+                                    :buttons="historicalLevelButtons"
+                                    v-model="historicalBudgetLevel"
+                                />
+                            </div>
+                        </template>
+                        <template v-else>
+                            <v-divider class="mt-4" />
+                            <!-- 时间筛选列表（类似交易列表的月份选择）-->
+                            <v-tabs show-arrows class="my-4" direction="vertical"
+                                    :disabled="loading" v-model="activePeriodFilterIndex">
+                                <v-tab class="tab-text-truncate" :key="idx" :value="idx"
+                                       v-for="(filter, idx) in visiblePeriodFilters"
+                                       @click="setPeriodFilter(filter.value)">
+                                    <span class="text-truncate">{{ filter.name }}</span>
+                                </v-tab>
+                            </v-tabs>
+                        </template>
                     </v-navigation-drawer>
 
                     <!-- 主内容区 -->
@@ -40,7 +56,7 @@
                                            :ripple="false" :icon="true" @click="showNav = !showNav">
                                         <v-icon :icon="mdiMenu" size="24" />
                                     </v-btn>
-                                    <span>{{ activeViewMode === 'budget' ? tt('Budget Management') : tt('Period Forecast') }}</span>
+                                    <span>{{ currentViewTitle }}</span>
                                     <!-- 操作按钮 -->
                                     <v-btn class="ms-3" color="default" variant="outlined"
                                            :disabled="loading || updating" @click="add" v-if="activeViewMode === 'budget'">
@@ -78,6 +94,57 @@
                                         <v-icon :icon="mdiRefresh" size="24" />
                                         <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                     </v-btn>
+
+                                    <v-btn-group v-if="activeViewMode === 'history'" class="ms-4" color="default" density="comfortable" variant="outlined" divided>
+                                        <v-btn class="button-icon-with-direction" :icon="mdiArrowLeft"
+                                               :disabled="loading || !canShiftHistoricalDateRange"
+                                               @click="shiftHistoricalDateRange(-1)"/>
+                                        <v-menu location="bottom">
+                                            <template #activator="{ props }">
+                                                <v-btn :disabled="loading" v-bind="props">{{ historicalDateRangeName }}</v-btn>
+                                            </template>
+                                            <v-list :selected="[historicalDateType]">
+                                                <v-list-item :key="dateRange.type" :value="dateRange.type"
+                                                             :append-icon="(historicalDateType === dateRange.type ? mdiCheck : undefined)"
+                                                             v-for="dateRange in allHistoricalDateRanges">
+                                                    <v-list-item-title class="cursor-pointer"
+                                                                       @click="setHistoricalDateFilter(dateRange.type)">
+                                                        <div class="d-flex align-center">
+                                                            <span>{{ dateRange.displayName }}</span>
+                                                        </div>
+                                                        <div class="statistics-custom-datetime-range smaller"
+                                                             v-if="dateRange.isUserCustomRange && canShowHistoricalCustomDateRange(dateRange.type)">
+                                                            <span>{{ historicalDateStartText }}</span>
+                                                            <span>&nbsp;-&nbsp;</span>
+                                                            <br/>
+                                                            <span>{{ historicalDateEndText }}</span>
+                                                        </div>
+                                                    </v-list-item-title>
+                                                </v-list-item>
+                                            </v-list>
+                                        </v-menu>
+                                        <v-btn class="button-icon-with-direction" :icon="mdiArrowRight"
+                                               :disabled="loading || !canShiftHistoricalDateRange"
+                                               @click="shiftHistoricalDateRange(1)"/>
+                                    </v-btn-group>
+
+                                    <v-menu location="bottom" v-if="activeViewMode === 'history'">
+                                        <template #activator="{ props }">
+                                            <v-btn class="ms-3" color="default" variant="outlined"
+                                                   :prepend-icon="mdiCalendarRangeOutline" :disabled="loading"
+                                                   v-bind="props">{{ historicalAggregationLabel }}</v-btn>
+                                        </template>
+                                        <v-list>
+                                            <v-list-item class="cursor-pointer"
+                                                         :key="aggregation.value"
+                                                         :value="aggregation.value"
+                                                         :append-icon="(historicalAggregationType === aggregation.value ? mdiCheck : undefined)"
+                                                         :title="aggregation.name"
+                                                         v-for="aggregation in historicalAggregationOptions"
+                                                         @click="historicalAggregationType = aggregation.value">
+                                            </v-list-item>
+                                        </v-list>
+                                    </v-menu>
 
                                     <v-select v-if="activeViewMode === 'forecast'"
                                               class="ms-3 budget-forecast-strategy-select"
@@ -146,7 +213,7 @@
                                     <v-spacer/>
 
                                     <!-- 搜索框 -->
-                                    <div class="budget-keyword-filter ms-2">
+                                    <div class="budget-keyword-filter ms-2" v-if="activeViewMode !== 'history'">
                                         <v-text-field density="compact" :disabled="loading"
                                                       :prepend-inner-icon="mdiMagnify"
                                                       :append-inner-icon="filterKeyword !== searchKeyword ? mdiCheck : undefined"
@@ -416,57 +483,6 @@
                             </div>
                         </v-card-text>
 
-                        <!-- 往期预算柱状图（仅“往期预算”标签页显示） -->
-                        <v-card-text class="border-b" v-if="shouldShowHistoricalBudgetChart">
-                            <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
-                                <div class="text-subtitle-2">{{ tt('Expired Budgets') }}</div>
-                                <v-select
-                                    class="budget-history-window-select"
-                                    density="compact"
-                                    hide-details
-                                    variant="outlined"
-                                    :items="historyWindowOptions"
-                                    item-title="name"
-                                    item-value="value"
-                                    v-model="selectedHistoryWindow"
-                                />
-                            </div>
-                            <v-chart
-                                autoresize
-                                class="budget-history-chart"
-                                :option="historicalBudgetChartOptions"
-                                @click="onClickHistoricalBudgetChartItem"
-                            />
-                            <div class="text-caption text-medium-emphasis mt-1">
-                                {{ tt('Click a period bar to view period budget details') }}
-                            </div>
-
-                            <div class="mt-6" v-if="selectedHistoricalPeriodRange && selectedHistoricalPeriodDetailData.labels.length > 0">
-                                <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
-                                    <div>
-                                        <div class="text-subtitle-2">{{ tt('Budget Details by Period') }}</div>
-                                        <div class="text-caption text-medium-emphasis">
-                                            {{ selectedHistoricalPeriodLabel }}
-                                        </div>
-                                    </div>
-                                    <v-btn
-                                        color="default"
-                                        variant="text"
-                                        density="comfortable"
-                                        :disabled="loading"
-                                        @click="clearSelectedHistoricalPeriod"
-                                    >
-                                        {{ tt('Clear Selection') }}
-                                    </v-btn>
-                                </div>
-                                <v-chart
-                                    autoresize
-                                    class="budget-history-detail-chart"
-                                    :option="historicalBudgetDetailChartOptions"
-                                />
-                            </div>
-                        </v-card-text>
-
                         <!-- 预算表格（无表头） -->
                         <v-table class="budget-table" :hover="!loading">
                             <tbody v-if="loading && filteredBudgets.length === 0">
@@ -681,6 +697,35 @@
                         </v-table>
                     </v-window-item>
 
+                    <v-window-item value="history">
+                        <v-card-text class="pt-4">
+                            <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
+                                <div>
+                                    <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budget Execution') }}</div>
+                                    <div class="text-caption text-medium-emphasis">
+                                        {{ historicalLevelDescription }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="loading" class="py-10">
+                                <v-skeleton-loader type="image, article" :loading="true"></v-skeleton-loader>
+                            </div>
+
+                            <div v-else-if="historicalCategoryChartData.categories.length > 0" class="budget-history-panel">
+                                <v-chart
+                                    autoresize
+                                    class="budget-history-chart"
+                                    :option="historicalChartOptions"
+                                />
+                            </div>
+
+                            <div v-else class="d-flex align-center justify-center py-12">
+                                <span class="text-medium-emphasis">{{ tt('No historical budget data') }}</span>
+                            </div>
+                        </v-card-text>
+                    </v-window-item>
+
                     <!-- 周期预计视图 -->
                     <v-window-item value="forecast">
                         <!-- 周期预计表格 -->
@@ -854,6 +899,15 @@
         @error="onDateRangeError"
     />
 
+    <date-range-selection-dialog
+        :title="tt('Select Custom Date Range')"
+        :min-time="historicalMinDatetime"
+        :max-time="historicalMaxDatetime"
+        v-model:show="showHistoricalDateDialog"
+        @dateRange:change="onHistoricalDateRangeChange"
+        @error="onDateRangeError"
+    />
+
     <!-- 保存筛选预设对话框 -->
     <v-dialog v-model="showSavePresetDialog" max-width="400">
         <v-card>
@@ -877,7 +931,6 @@
 </template>
 
 <script setup lang="ts">
-import type { ECElementEvent } from 'echarts/core';
 import type { CallbackDataParams } from 'echarts/types/dist/shared';
 
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
@@ -903,11 +956,20 @@ import { useBudgetStore } from '@/stores/budget.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
+import { useUserStore } from '@/stores/user.ts';
 import { CategoryType } from '@/core/category.ts';
+import { DateRange, DateRangeScene } from '@/core/datetime.ts';
+import { FiscalYearStart } from '@/core/fiscalyear.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import { AmountFilterType } from '@/core/numeral.ts';
 import { ThemeType } from '@/core/theme.ts';
-import { getCurrentUnixTime, getTodayFirstUnixTime } from '@/lib/datetime.ts';
+import {
+    getCurrentUnixTime,
+    getTodayFirstUnixTime,
+    getDateRangeByDateType,
+    getShiftedDateRangeAndDateType,
+    getDateTypeByDateRange
+} from '@/lib/datetime.ts';
 import logger from '@/lib/logger.ts';
 
 import {
@@ -951,7 +1013,10 @@ import {
     mdiBookmark,
     mdiContentSaveOutline,
     mdiClose,
-    mdiInformationOutline
+    mdiInformationOutline,
+    mdiArrowLeft,
+    mdiArrowRight,
+    mdiCalendarRangeOutline
 } from '@mdi/js';
 
 // ============================================================================
@@ -974,6 +1039,38 @@ interface RangeFilter {
     max?: number;
 }
 
+type BudgetViewMode = 'budget' | 'forecast' | 'history';
+type HistoricalBudgetLevel = 'primary' | 'secondary';
+
+function isBudgetViewMode(value: string): value is BudgetViewMode {
+    return value === 'budget' || value === 'forecast' || value === 'history';
+}
+
+interface HistoricalCategoryChartPoint {
+    category: string;
+    primaryCategory: string;
+    secondaryCategory: string;
+    budgetAmount: number;
+    spentAmount: number;
+    executionRate: number;
+    color: string;
+    groupOrder: number;
+    itemOrder: number;
+    isPlaceholder?: boolean;
+    axisLabel?: string;
+}
+
+interface HistoricalPrimaryRingSegment {
+    name: string;
+    color: string;
+    count: number;
+}
+
+const CATEGORY_CHART_PALETTE = [
+    '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+    '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#48b8d0'
+];
+
 // ============================================================================
 // Props
 // ============================================================================
@@ -988,7 +1085,7 @@ const props = defineProps<{
 // 组件引用
 // ============================================================================
 
-const { tt } = useI18n();
+const { tt, getAllDateRanges, formatDateRange } = useI18n();
 const display = useDisplay();
 const theme = useTheme();
 const router = useRouter();
@@ -997,6 +1094,7 @@ const transactionCategoriesStore = useTransactionCategoriesStore();
 const accountsStore = useAccountsStore();
 const transactionTagsStore = useTransactionTagsStore();
 const settingsStore = useSettingsStore();
+const userStore = useUserStore();
 
 // 默认货币
 const defaultCurrency = computed(() => String(settingsStore.appSettings['currency'] || 'CNY'));
@@ -1024,12 +1122,17 @@ const filterKeyword = ref<string>('');
 const reloadRequestId = ref<number>(0);
 
 // 视图模式：'budget' 或 'forecast'
-const activeViewMode = ref<string>('budget');
+const activeViewMode = ref<BudgetViewMode>('budget');
 const forecastStrategy = ref<BudgetForecastStrategy>(BudgetForecastStrategy.HistoricalAverage);
 const forecastMonthsHistory = ref<number>(6);
 const forecastSortBy = ref<string>('backtest');
 const forecastOnlyLowConfidence = ref<boolean>(false);
 const forecastOnlyOverBudget = ref<boolean>(false);
+const historicalBudgetLevel = ref<HistoricalBudgetLevel>('primary');
+const historicalDateType = ref<number>(DateRange.RecentTwelveMonths.type);
+const showHistoricalDateDialog = ref<boolean>(false);
+const historicalMinDatetime = ref<number>(0);
+const historicalMaxDatetime = ref<number>(0);
 
 // 预算类型：支出或投资
 const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
@@ -1436,6 +1539,42 @@ const currentExecution = computed<BudgetExecutionResponse | null>(() => budgetSt
 const currentForecast = computed<BudgetForecastResponse | null>(() => budgetStore.currentForecast);
 const currentHistory = computed<BudgetHistoryResponse | null>(() => budgetStore.currentHistory);
 const forecastLoading = computed<boolean>(() => budgetStore.forecastLoading);
+const firstDayOfWeek = computed(() => userStore.currentUserFirstDayOfWeek);
+const viewModeButtons = computed(() => [
+    { name: tt('Budget Management'), value: 'budget' },
+    { name: tt('Period Forecast'), value: 'forecast' },
+    { name: tt('Expired Budgets'), value: 'history' }
+]);
+const currentViewTitle = computed(() => {
+    if (activeViewMode.value === 'forecast') {
+        return tt('Period Forecast');
+    }
+    if (activeViewMode.value === 'history') {
+        return tt('Historical Budget Execution');
+    }
+    return tt('Budget Management');
+});
+const historicalLevelButtons = computed(() => [
+    { name: tt('Primary Category Budget'), value: 'primary' },
+    { name: tt('Secondary Category Budget'), value: 'secondary' }
+]);
+const historicalLevelDescription = computed(() => {
+    return historicalBudgetLevel.value === 'primary'
+        ? tt('Primary Category Budget')
+        : tt('Secondary Category Budget');
+});
+const allHistoricalDateRanges = computed(() => getAllDateRanges(DateRangeScene.AssetTrends, true, false));
+const historicalDateRangeName = computed(() => {
+    if (!historicalMinDatetime.value || !historicalMaxDatetime.value) {
+        return tt('Recent 12 months');
+    }
+    return formatDateRange(historicalDateType.value, historicalMinDatetime.value, historicalMaxDatetime.value);
+});
+const historicalDateStartText = computed(() => historicalMinDatetime.value ? formatDateOnly(new Date(historicalMinDatetime.value * 1000)) : '');
+const historicalDateEndText = computed(() => historicalMaxDatetime.value ? formatDateOnly(new Date(historicalMaxDatetime.value * 1000)) : '');
+const canShiftHistoricalDateRange = computed(() => {
+    return historicalDateType.value !== DateRange.All.type && !!historicalMinDatetime.value && !!historicalMaxDatetime.value;
+});
 const forecastStrategies = computed(() => [
     { name: tt('Historical Average Strategy'), value: BudgetForecastStrategy.HistoricalAverage },
     { name: tt('Moving Average Strategy'), value: BudgetForecastStrategy.MovingAverage }
@@ -1460,12 +1599,6 @@ const displayForecasts = computed(() => {
     });
 });
 
-const shouldShowHistoricalBudgetChart = computed<boolean>(() => {
-    return activeViewMode.value === 'budget' &&
-        activePeriodFilter.value === 'expired' &&
-        historicalBudgetTrendData.value.labels.length > 0;
-});
-
 /**
  * 抬头汇总：按当前筛选后的可见分组聚合，避免全量预算总和
  */
@@ -1487,256 +1620,197 @@ const filteredSummary = computed(() => {
     };
 });
 
-interface HistoricalBudgetTrendData {
-    labels: string[];
-    spentAmounts: number[];
-    executionRatesNegative: number[];
-    ranges: { startDate: string; endDate: string }[];
-}
+type HistoricalAggregationType = BudgetPeriodType | 'fiscal_year';
 
-interface HistoricalBudgetDetailData {
-    labels: string[];
-    budgetAmounts: number[];
-    spentAmounts: number[];
+interface HistoricalAggregationOption {
+    name: string;
+    value: HistoricalAggregationType;
 }
 
 interface HistoricalPeriodRange {
+    key: string;
+    label: string;
     startDate: string;
     endDate: string;
 }
 
-function buildHistoricalPeriodRange(
-    periodType: BudgetPeriodType,
-    periodKey: string
-): HistoricalPeriodRange | null {
-    if (periodType === BudgetPeriodType.Yearly) {
-        const year = Number(periodKey);
-        if (!year) {
-            return null;
-        }
+/**
+ * 往期预算趋势数据（一级分类）
+ */
+const HISTORICAL_FISCAL_YEAR = 'fiscal_year' as const;
+const historicalAggregationType = ref<HistoricalAggregationType>(BudgetPeriodType.Monthly);
 
-        return {
-            startDate: `${year}-01-01`,
-            endDate: `${year}-12-31`
-        };
-    }
+const fiscalYearStartValue = computed<number>(() => userStore.currentUserFiscalYearStart);
 
-    if (periodType === BudgetPeriodType.Quarterly) {
-        const matched = periodKey.match(/^(\d{4})-Q([1-4])$/);
-        if (!matched) {
-            return null;
-        }
+const fiscalYearStartInfo = computed(() => {
+    return FiscalYearStart.valueOf(fiscalYearStartValue.value) || FiscalYearStart.Default;
+});
 
-        const year = Number(matched[1]);
-        const quarter = Number(matched[2]);
-        const startMonth = (quarter - 1) * 3;
-        const startDate = new Date(year, startMonth, 1);
-        const endDate = new Date(year, startMonth + 3, 0);
+const historicalAggregationOptions = computed<HistoricalAggregationOption[]>(() => [
+    { name: tt('Monthly'), value: BudgetPeriodType.Monthly },
+    { name: tt('Quarterly'), value: BudgetPeriodType.Quarterly },
+    { name: tt('Yearly'), value: BudgetPeriodType.Yearly },
+    { name: tt('FiscalYearly'), value: HISTORICAL_FISCAL_YEAR }
+]);
 
-        return {
-            startDate: formatDateOnly(startDate),
-            endDate: formatDateOnly(endDate)
-        };
-    }
-
-    const matched = periodKey.match(/^(\d{4})-(\d{2})$/);
-    if (!matched) {
+function parseDateOnly(text: string): Date | null {
+    if (!text) {
         return null;
     }
 
-    const year = Number(matched[1]);
-    const month = Number(matched[2]);
-    if (!year || !month) {
-        return null;
-    }
+    const parsed = new Date(`${text}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+function addMonths(sourceDate: Date, months: number): Date {
+    return new Date(sourceDate.getFullYear(), sourceDate.getMonth() + months, 1);
+}
+
+const historicalAggregationLabel = computed(() => {
+    const matched = historicalAggregationOptions.value.find(item => item.value === historicalAggregationType.value);
+    return matched?.name || tt('Monthly');
+});
+
+function getHistoricalBudgetQueryRange(): { startDate: string; endDate: string } {
+    ensureHistoricalDateRangeInitialized();
 
     return {
+        startDate: formatDateOnly(new Date(historicalMinDatetime.value * 1000)),
+        endDate: formatDateOnly(new Date(historicalMaxDatetime.value * 1000))
+    };
+}
+
+function buildFiscalYearPeriod(targetDate: Date): HistoricalPeriodRange {
+    const fiscalStart = fiscalYearStartInfo.value;
+    const currentYearFiscalStart = new Date(targetDate.getFullYear(), fiscalStart.month - 1, fiscalStart.day);
+    const fiscalStartYear = targetDate >= currentYearFiscalStart
+        ? targetDate.getFullYear()
+        : targetDate.getFullYear() - 1;
+    const startDate = new Date(fiscalStartYear, fiscalStart.month - 1, fiscalStart.day);
+    const endDate = new Date(fiscalStartYear + 1, fiscalStart.month - 1, fiscalStart.day - 1);
+    const endYear = endDate.getFullYear();
+
+    return {
+        key: `FY${endYear}`,
+        label: `FY${endYear}`,
         startDate: formatDateOnly(startDate),
         endDate: formatDateOnly(endDate)
     };
 }
 
-function getNextHistoricalPeriodKey(
-    periodType: BudgetPeriodType,
-    periodKey: string
-): string | null {
-    if (periodType === BudgetPeriodType.Yearly) {
-        const year = Number(periodKey);
-        return year ? String(year + 1) : null;
+function buildHistoricalAggregationPeriods(
+    aggregationType: HistoricalAggregationType,
+    startDate: string,
+    endDate: string
+): HistoricalPeriodRange[] {
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
+
+    if (!start || !end || start > end) {
+        return [];
     }
 
-    if (periodType === BudgetPeriodType.Quarterly) {
-        const matched = periodKey.match(/^(\d{4})-Q([1-4])$/);
-        if (!matched) {
-            return null;
-        }
+    const periods: HistoricalPeriodRange[] = [];
 
-        const year = Number(matched[1]);
-        const quarter = Number(matched[2]);
-        if (quarter >= 4) {
-            return `${year + 1}-Q1`;
-        }
-        return `${year}-Q${quarter + 1}`;
-    }
-
-    const matched = periodKey.match(/^(\d{4})-(\d{2})$/);
-    if (!matched) {
-        return null;
-    }
-
-    const year = Number(matched[1]);
-    const month = Number(matched[2]);
-    const nextMonth = month >= 12 ? 1 : month + 1;
-    const nextYear = month >= 12 ? year + 1 : year;
-    return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
-}
-
-function buildContinuousHistoricalPeriodKeys(
-    periodType: BudgetPeriodType,
-    rawKeys: string[]
-): string[] {
-    if (rawKeys.length <= 1) {
-        return rawKeys;
-    }
-
-    const sortedKeys = [...rawKeys].sort();
-    const continuousKeys: string[] = [];
-    let currentKey: string | null = sortedKeys[0] || null;
-    const lastKey = sortedKeys[sortedKeys.length - 1] || null;
-
-    while (currentKey && lastKey) {
-        continuousKeys.push(currentKey);
-        if (currentKey === lastKey) {
-            break;
-        }
-        currentKey = getNextHistoricalPeriodKey(periodType, currentKey);
-    }
-
-    return continuousKeys.length > 0 ? continuousKeys : sortedKeys;
-}
-
-/**
- * 往期预算趋势数据（上方：执行金额，下方：执行度）
- */
-const historicalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
-    if (activeViewMode.value === 'budget') {
-        const labels: string[] = [];
-        const spentAmounts: number[] = [];
-        const executionRatesNegative: number[] = [];
-        const ranges: { startDate: string; endDate: string }[] = [];
-
-        if (!currentHistory.value?.items?.length) {
-            return { labels, spentAmounts, executionRatesNegative, ranges };
-        }
-
-        const selectedCategory = categoryFilter.value ? allCategoriesMap.value[categoryFilter.value] : null;
-        const selectedPrimaryCategory = selectedCategory?.parentId
-            ? allCategoriesMap.value[selectedCategory.parentId]
-            : selectedCategory;
-
-        const includedHistoryItems = currentHistory.value.items.filter((item: BudgetHistoryItem) => {
-            if (!selectedCategory) {
-                return true;
-            }
-
-            const selectedName = selectedCategory.name;
-            const selectedPrimaryName = selectedPrimaryCategory?.name || selectedName;
-
-            if (selectedCategory.parentId) {
-                return item.category === selectedPrimaryName && item.subCategory === selectedName;
-            }
-
-            return item.category === selectedPrimaryName;
-        });
-
-        if (includedHistoryItems.length === 0) {
-            return { labels, spentAmounts, executionRatesNegative, ranges };
-        }
-
-        const periodSummaryMap: Record<string, {
-            spentAmount: number;
-            budgetAmount: number;
-            startDate: string;
-            endDate: string;
-        }> = {};
-        const effectivePeriodType = includedHistoryItems[0]?.periodType || getCurrentPeriodType();
-
-        for (const item of includedHistoryItems) {
-            const startDate = item.periodStart || '';
-            const endDate = item.periodEnd || '';
-            let periodKey = startDate.slice(0, 7);
-
-            if (item.periodType === BudgetPeriodType.Quarterly) {
-                const matched = startDate.match(/^(\d{4})-(\d{2})-/);
-                if (matched) {
-                    const year = matched[1];
-                    const month = parseInt(matched[2] || '1', 10);
-                    const quarter = Math.floor((month - 1) / 3) + 1;
-                    periodKey = `${year}-Q${quarter}`;
-                }
-            } else if (item.periodType === BudgetPeriodType.Yearly) {
-                periodKey = startDate.slice(0, 4);
-            }
-
-            if (!periodKey) {
-                continue;
-            }
-
-            if (!periodSummaryMap[periodKey]) {
-                periodSummaryMap[periodKey] = {
-                    spentAmount: 0,
-                    budgetAmount: 0,
-                    startDate,
-                    endDate
-                };
-            }
-
-            const periodSummary = periodSummaryMap[periodKey]!;
-
-            periodSummary.spentAmount += item.spentAmount || 0;
-            periodSummary.budgetAmount += item.budgetAmount || 0;
-
-            if (startDate && (!periodSummary.startDate || startDate < periodSummary.startDate)) {
-                periodSummary.startDate = startDate;
-            }
-            if (endDate && (!periodSummary.endDate || endDate > periodSummary.endDate)) {
-                periodSummary.endDate = endDate;
-            }
-        }
-
-        const sortedPeriods = buildContinuousHistoricalPeriodKeys(
-            effectivePeriodType,
-            Object.keys(periodSummaryMap)
-        );
-        for (const period of sortedPeriods) {
-            const summary = periodSummaryMap[period];
-            const fallbackRange = buildHistoricalPeriodRange(effectivePeriodType, period);
-            const spentAmount = summary?.spentAmount || 0;
-            const budgetAmount = summary?.budgetAmount || 0;
-            const executionRate = budgetAmount > 0 ? (spentAmount / budgetAmount) * 100 : 0;
-
-            labels.push(period);
-            spentAmounts.push(spentAmount / 100);
-            executionRatesNegative.push(-executionRate);
-            ranges.push({
-                startDate: summary?.startDate || fallbackRange?.startDate || '',
-                endDate: summary?.endDate || fallbackRange?.endDate || ''
+    if (aggregationType === BudgetPeriodType.Monthly) {
+        let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (cursor <= end) {
+            const periodEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+            const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+            periods.push({
+                key,
+                label: key,
+                startDate: formatDateOnly(cursor),
+                endDate: formatDateOnly(periodEnd)
             });
+            cursor = addMonths(cursor, 1);
         }
-
-        return { labels, spentAmounts, executionRatesNegative, ranges };
+        return periods;
     }
 
-    const labels: string[] = [];
-    const spentAmounts: number[] = [];
-    const executionRatesNegative: number[] = [];
-    const ranges: { startDate: string; endDate: string }[] = [];
+    if (aggregationType === BudgetPeriodType.Quarterly) {
+        let cursor = new Date(start.getFullYear(), Math.floor(start.getMonth() / 3) * 3, 1);
+        while (cursor <= end) {
+            const quarter = Math.floor(cursor.getMonth() / 3) + 1;
+            const periodEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 3, 0);
+            const key = `${cursor.getFullYear()}-Q${quarter}`;
+            periods.push({
+                key,
+                label: key,
+                startDate: formatDateOnly(cursor),
+                endDate: formatDateOnly(periodEnd)
+            });
+            cursor = addMonths(cursor, 3);
+        }
+        return periods;
+    }
 
-    if (!currentForecast.value?.forecasts?.length) {
-        return { labels, spentAmounts, executionRatesNegative, ranges };
+    if (aggregationType === BudgetPeriodType.Yearly) {
+        let cursor = new Date(start.getFullYear(), 0, 1);
+        while (cursor <= end) {
+            const periodEnd = new Date(cursor.getFullYear(), 11, 31);
+            const key = `${cursor.getFullYear()}`;
+            periods.push({
+                key,
+                label: key,
+                startDate: formatDateOnly(cursor),
+                endDate: formatDateOnly(periodEnd)
+            });
+            cursor = new Date(cursor.getFullYear() + 1, 0, 1);
+        }
+        return periods;
+    }
+
+    let cursor = parseDateOnly(buildFiscalYearPeriod(start).startDate);
+    while (cursor && cursor <= end) {
+        const fiscalPeriod = buildFiscalYearPeriod(cursor);
+        periods.push(fiscalPeriod);
+        cursor = new Date(cursor.getFullYear() + 1, cursor.getMonth(), cursor.getDate());
+    }
+
+    return periods;
+}
+
+function resolveHistoricalPeriodByDate(
+    aggregationType: HistoricalAggregationType,
+    targetDate: Date
+): HistoricalPeriodRange {
+    if (aggregationType === BudgetPeriodType.Monthly) {
+        const key = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+        return {
+            key,
+            label: key,
+            startDate: formatDateOnly(new Date(targetDate.getFullYear(), targetDate.getMonth(), 1)),
+            endDate: formatDateOnly(new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0))
+        };
+    }
+
+    if (aggregationType === BudgetPeriodType.Quarterly) {
+        const quarterStartMonth = Math.floor(targetDate.getMonth() / 3) * 3;
+        const quarter = Math.floor(targetDate.getMonth() / 3) + 1;
+        return {
+            key: `${targetDate.getFullYear()}-Q${quarter}`,
+            label: `${targetDate.getFullYear()}-Q${quarter}`,
+            startDate: formatDateOnly(new Date(targetDate.getFullYear(), quarterStartMonth, 1)),
+            endDate: formatDateOnly(new Date(targetDate.getFullYear(), quarterStartMonth + 3, 0))
+        };
+    }
+
+    if (aggregationType === BudgetPeriodType.Yearly) {
+        return {
+            key: `${targetDate.getFullYear()}`,
+            label: `${targetDate.getFullYear()}`,
+            startDate: `${targetDate.getFullYear()}-01-01`,
+            endDate: `${targetDate.getFullYear()}-12-31`
+        };
+    }
+
+    return buildFiscalYearPeriod(targetDate);
+}
+
+const filteredHistoricalItems = computed<BudgetHistoryItem[]>(() => {
+    if (!currentHistory.value?.items?.length) {
+        return [];
     }
 
     const selectedCategory = categoryFilter.value ? allCategoriesMap.value[categoryFilter.value] : null;
@@ -1744,7 +1818,7 @@ const historicalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
         ? allCategoriesMap.value[selectedCategory.parentId]
         : selectedCategory;
 
-    const includedForecasts = currentForecast.value.forecasts.filter(forecast => {
+    return currentHistory.value.items.filter((item: BudgetHistoryItem) => {
         if (!selectedCategory) {
             return true;
         }
@@ -1753,362 +1827,596 @@ const historicalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
         const selectedPrimaryName = selectedPrimaryCategory?.name || selectedName;
 
         if (selectedCategory.parentId) {
-            return forecast.categoryName === selectedName || forecast.categoryName.endsWith(`-${selectedName}`);
+            return item.category === selectedPrimaryName && item.subCategory === selectedName;
         }
 
-        return forecast.categoryName === selectedName || forecast.categoryName.startsWith(`${selectedPrimaryName}-`);
+        return item.category === selectedPrimaryName;
     });
+});
 
-    if (includedForecasts.length === 0) {
-        return { labels, spentAmounts, executionRatesNegative, ranges };
+const historicalPeriods = computed<HistoricalPeriodRange[]>(() => {
+    const range = getHistoricalBudgetQueryRange();
+    return buildHistoricalAggregationPeriods(
+        historicalAggregationType.value,
+        range.startDate,
+        range.endDate
+    );
+});
+
+const historicalLevelItems = computed<BudgetHistoryItem[]>(() => {
+    return filteredHistoricalItems.value.filter((item: BudgetHistoryItem) => {
+        return historicalBudgetLevel.value === 'primary' ? !item.subCategory : !!item.subCategory;
+    });
+});
+
+function getHistoricalAmountAxisInterval(maxAmount: number): number {
+    if (maxAmount <= 0) {
+        return 25;
     }
 
-    const periodSpentMap: Record<string, number> = {};
-    const periodRangeMap: Record<string, { startDate: string; endDate: string }> = {};
+    const roughInterval = maxAmount / 3;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(roughInterval)));
+    const normalized = roughInterval / magnitude;
 
-    for (const forecast of includedForecasts) {
-        for (const periodItem of forecast.periods || []) {
-            const periodKey = String(periodItem.period || '');
+    if (normalized <= 1) {
+        return magnitude;
+    }
+    if (normalized <= 2) {
+        return 2 * magnitude;
+    }
+    if (normalized <= 2.5) {
+        return 2.5 * magnitude;
+    }
+    if (normalized <= 5) {
+        return 5 * magnitude;
+    }
 
-            const matched = periodKey.match(/^(\d{4})-(\d{1,2})$/);
-            if (!matched) {
-                continue;
+    return 10 * magnitude;
+}
+
+const historicalCategoryChartData = computed<{
+    categories: string[];
+    points: HistoricalCategoryChartPoint[];
+    primarySegments: HistoricalPrimaryRingSegment[];
+}>(() => {
+    const periods = historicalPeriods.value;
+    const items = historicalLevelItems.value;
+
+    if (!periods.length || !items.length) {
+        return { categories: [], points: [], primarySegments: [] };
+    }
+
+    const periodMap = new Map(periods.map(period => [period.key, period]));
+
+    const categoryColorMap: Record<string, string> = {};
+    const categoryOrderMap: Record<string, number> = {};
+    const subCategoryColorMap: Record<string, string> = {};
+    const subCategoryOrderMap: Record<string, number> = {};
+    for (const cat of budgetPrimaryCategories.value) {
+        if (cat.color) {
+            categoryColorMap[cat.name] = `#${cat.color}`;
+        }
+        categoryOrderMap[cat.name] = cat.displayOrder ?? 0;
+
+        for (const subCategory of cat.subCategories || []) {
+            if (subCategory.color) {
+                subCategoryColorMap[`${cat.name}::${subCategory.name}`] = `#${subCategory.color}`;
             }
-
-            const year = parseInt(matched[1] || '0', 10);
-            const month = parseInt(matched[2] || '0', 10);
-
-            if (!year || !month || month < 1 || month > 12) {
-                continue;
-            }
-
-            periodSpentMap[periodKey] = (periodSpentMap[periodKey] || 0) + (periodItem.amount || 0);
-
-            const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-            const lastDay = new Date(year, month, 0).getDate();
-            const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-            periodRangeMap[periodKey] = { startDate, endDate };
+            subCategoryOrderMap[`${cat.name}::${subCategory.name}`] = subCategory.displayOrder ?? 0;
         }
     }
 
-    const sortedPeriods = Object.keys(periodSpentMap).sort();
-    if (!sortedPeriods.length) {
-        return { labels, spentAmounts, executionRatesNegative, ranges };
-    }
+    const grouped = new Map<string, {
+        displayCategory: string;
+        primaryCategory: string;
+        secondaryCategory: string;
+        budgetAmount: number;
+        spentAmount: number;
+        groupOrder: number;
+        itemOrder: number;
+    }>();
 
-    const totalBudgetBase = includedForecasts.reduce((sum, forecast) => sum + (forecast.budgetAmount || 0), 0);
+    for (const item of items) {
+        const itemDate = parseDateOnly(item.periodStart);
+        if (!itemDate) continue;
 
-    for (const period of sortedPeriods) {
-        const amount = periodSpentMap[period] || 0;
-        const executionRate = totalBudgetBase > 0 ? (amount / totalBudgetBase) * 100 : 0;
-        const range = periodRangeMap[period];
+        const resolvedPeriod = resolveHistoricalPeriodByDate(historicalAggregationType.value, itemDate);
+        if (!periodMap.has(resolvedPeriod.key)) continue;
 
-        labels.push(period);
-        spentAmounts.push(amount / 100);
-        executionRatesNegative.push(-executionRate);
-        ranges.push(range || { startDate: '', endDate: '' });
-    }
+        const primaryCategory = item.category || tt('Uncategorized');
+        const secondaryCategory = item.subCategory || '';
+        const groupKey = historicalBudgetLevel.value === 'primary'
+            ? primaryCategory
+            : `${primaryCategory}::${secondaryCategory || primaryCategory}`;
+        const displayCategory = historicalBudgetLevel.value === 'primary'
+            ? primaryCategory
+            : (secondaryCategory || primaryCategory);
 
-    return {
-        labels,
-        spentAmounts,
-        executionRatesNegative,
-        ranges
-    };
-});
-
-const selectedHistoryWindow = ref<number>(6);
-const selectedHistoricalPeriodRange = ref<HistoricalPeriodRange | null>(null);
-
-const historyWindowOptions = computed(() => {
-    const total = historicalBudgetTrendData.value.labels.length;
-    const periodType = getCurrentPeriodType();
-    const baseOptions = periodType === BudgetPeriodType.Quarterly
-        ? [
-            { name: tt('Last 4 Quarters'), value: 4 },
-            { name: tt('Last 8 Quarters'), value: 8 }
-        ]
-        : periodType === BudgetPeriodType.Yearly
-            ? [
-                { name: tt('Last 3 Years'), value: 3 },
-                { name: tt('Last 5 Years'), value: 5 }
-            ]
-            : [
-                { name: tt('Last 3 Months'), value: 3 },
-                { name: tt('Last 6 Months'), value: 6 },
-                { name: tt('Last 12 Months'), value: 12 }
-            ];
-
-    const options = baseOptions.filter(option => total === 0 || option.value <= total);
-    options.push({ name: tt('All Periods'), value: -1 });
-    return options;
-});
-
-const displayedHistoricalBudgetTrendData = computed<HistoricalBudgetTrendData>(() => {
-    const fullData = historicalBudgetTrendData.value;
-    const windowSize = selectedHistoryWindow.value;
-
-    if (windowSize < 0 || fullData.labels.length <= windowSize) {
-        return fullData;
-    }
-
-    const startIndex = Math.max(fullData.labels.length - windowSize, 0);
-    return {
-        labels: fullData.labels.slice(startIndex),
-        spentAmounts: fullData.spentAmounts.slice(startIndex),
-        executionRatesNegative: fullData.executionRatesNegative.slice(startIndex),
-        ranges: fullData.ranges.slice(startIndex)
-    };
-});
-
-const selectedHistoricalPeriodLabel = computed<string>(() => {
-    if (!selectedHistoricalPeriodRange.value) {
-        return '';
-    }
-
-    return `${selectedHistoricalPeriodRange.value.startDate} ~ ${selectedHistoricalPeriodRange.value.endDate}`;
-});
-
-const selectedHistoricalPeriodDetailData = computed<HistoricalBudgetDetailData>(() => {
-    const range = selectedHistoricalPeriodRange.value;
-    const history = currentHistory.value?.items || [];
-
-    if (!range || !history.length) {
-        return {
-            labels: [],
-            budgetAmounts: [],
-            spentAmounts: []
-        };
-    }
-
-    const grouped: Record<string, { budgetAmount: number; spentAmount: number }> = {};
-
-    for (const item of history) {
-        if (item.periodStart != range.startDate || item.periodEnd != range.endDate) {
-            continue;
-        }
-
-        const label = item.subCategory ? `${item.category}-${item.subCategory}` : item.category;
-        if (!label) {
-            continue;
-        }
-
-        if (!grouped[label]) {
-            grouped[label] = {
+        if (!grouped.has(groupKey)) {
+            grouped.set(groupKey, {
+                displayCategory,
+                primaryCategory,
+                secondaryCategory,
                 budgetAmount: 0,
-                spentAmount: 0
-            };
+                spentAmount: 0,
+                groupOrder: categoryOrderMap[primaryCategory] ?? Number.MAX_SAFE_INTEGER,
+                itemOrder: subCategoryOrderMap[groupKey] ?? 0
+            });
         }
-
-        grouped[label].budgetAmount += item.budgetAmount || 0;
-        grouped[label].spentAmount += item.spentAmount || 0;
+        const summary = grouped.get(groupKey)!;
+        summary.budgetAmount += item.budgetAmount || 0;
+        summary.spentAmount += item.spentAmount || 0;
     }
 
-    const sortedLabels = Object.keys(grouped).sort((a, b) => {
-        return (grouped[b]?.spentAmount || 0) - (grouped[a]?.spentAmount || 0);
+    const summaryEntries = Array.from(grouped.values());
+    summaryEntries.sort((a, b) => {
+        if (a.groupOrder !== b.groupOrder) {
+            return a.groupOrder - b.groupOrder;
+        }
+        if (historicalBudgetLevel.value === 'secondary' && a.itemOrder !== b.itemOrder) {
+            return a.itemOrder - b.itemOrder;
+        }
+        if (a.primaryCategory !== b.primaryCategory) {
+            return a.primaryCategory.localeCompare(b.primaryCategory, 'zh-CN');
+        }
+        return a.displayCategory.localeCompare(b.displayCategory, 'zh-CN');
     });
 
+    const points: HistoricalCategoryChartPoint[] = [];
+    const categories: string[] = [];
+    const primarySegments: HistoricalPrimaryRingSegment[] = [];
+    let colorIdx = 0;
+
+    const buildPoint = (
+        summary: {
+            displayCategory: string;
+            primaryCategory: string;
+            secondaryCategory: string;
+            budgetAmount: number;
+            spentAmount: number;
+            groupOrder: number;
+            itemOrder: number;
+        },
+        slotIndex: number,
+        placeholder: boolean,
+        groupColor: string
+    ): HistoricalCategoryChartPoint => {
+        const budgetAmount = summary.budgetAmount / 100;
+        const spentAmount = summary.spentAmount / 100;
+        const executionRate = summary.budgetAmount > 0
+            ? (summary.spentAmount / summary.budgetAmount) * 100
+            : 0;
+        const subCategoryKey = `${summary.primaryCategory}::${summary.secondaryCategory}`;
+        const color: string = (historicalBudgetLevel.value === 'secondary'
+            ? subCategoryColorMap[subCategoryKey]
+            : undefined)
+            ?? groupColor;
+
+        return {
+            category: summary.displayCategory,
+            primaryCategory: summary.primaryCategory,
+            secondaryCategory: summary.secondaryCategory,
+            budgetAmount: placeholder ? 0 : budgetAmount,
+            spentAmount: placeholder ? 0 : spentAmount,
+            executionRate: placeholder ? 0 : Number(executionRate.toFixed(1)),
+            color,
+            groupOrder: summary.groupOrder,
+            itemOrder: summary.itemOrder,
+            isPlaceholder: placeholder,
+            axisLabel: placeholder ? '' : summary.displayCategory || summary.primaryCategory
+        };
+    };
+
+    if (historicalBudgetLevel.value === 'secondary') {
+        const groupedByPrimary = new Map<string, typeof summaryEntries>();
+        for (const summary of summaryEntries) {
+            if (!groupedByPrimary.has(summary.primaryCategory)) {
+                groupedByPrimary.set(summary.primaryCategory, []);
+            }
+            groupedByPrimary.get(summary.primaryCategory)!.push(summary);
+        }
+
+        const orderedGroups = Array.from(groupedByPrimary.entries()).sort((a, b) => {
+            const firstA = a[1][0];
+            const firstB = b[1][0];
+            if (!firstA || !firstB) {
+                return 0;
+            }
+            if (firstA.groupOrder !== firstB.groupOrder) {
+                return firstA.groupOrder - firstB.groupOrder;
+            }
+            return a[0].localeCompare(b[0], 'zh-CN');
+        });
+
+        const slotCountPerGroup = Math.max(1, ...orderedGroups.map(([, groupItems]) => groupItems.length));
+
+        for (const [primaryCategory, groupItems] of orderedGroups) {
+            const groupColor = categoryColorMap[primaryCategory]
+                ?? CATEGORY_CHART_PALETTE[colorIdx % CATEGORY_CHART_PALETTE.length]
+                ?? '#5470c6';
+            colorIdx++;
+
+            primarySegments.push({
+                name: primaryCategory,
+                color: groupColor,
+                count: slotCountPerGroup
+            });
+
+            groupItems.sort((a, b) => {
+                if (a.itemOrder !== b.itemOrder) {
+                    return a.itemOrder - b.itemOrder;
+                }
+                return a.displayCategory.localeCompare(b.displayCategory, 'zh-CN');
+            });
+
+            for (let slotIndex = 0; slotIndex < slotCountPerGroup; slotIndex++) {
+                const summary = groupItems[slotIndex];
+                const isPlaceholder = !summary;
+                const point = buildPoint(
+                    summary ?? {
+                        displayCategory: '',
+                        primaryCategory,
+                        secondaryCategory: '',
+                        budgetAmount: 0,
+                        spentAmount: 0,
+                        groupOrder: groupItems[0]?.groupOrder ?? Number.MAX_SAFE_INTEGER,
+                        itemOrder: slotIndex
+                    },
+                    slotIndex,
+                    isPlaceholder,
+                    groupColor
+                );
+
+                points.push(point);
+                categories.push(isPlaceholder
+                    ? `__gap__${primaryCategory}__${slotIndex}`
+                    : `${primaryCategory}::${point.axisLabel || slotIndex}`);
+            }
+        }
+    } else {
+        for (const summary of summaryEntries) {
+            const groupColor = categoryColorMap[summary.primaryCategory]
+                ?? CATEGORY_CHART_PALETTE[colorIdx % CATEGORY_CHART_PALETTE.length]
+                ?? '#5470c6';
+            colorIdx++;
+
+            const point = buildPoint(summary, 0, false, groupColor);
+            points.push(point);
+            categories.push(summary.displayCategory);
+            primarySegments.push({
+                name: summary.primaryCategory,
+                color: groupColor,
+                count: 1
+            });
+        }
+    }
+
+    return { categories, points, primarySegments };
+});
+
+const historicalAmountAxisConfig = computed<{ max: number; interval: number }>(() => {
+    const allAmounts = historicalCategoryChartData.value.points.flatMap(p => [p.budgetAmount, p.spentAmount]);
+    const maxAmount = Math.max(0, ...allAmounts);
+    if (maxAmount <= 0) {
+        return { max: 100, interval: 25 };
+    }
+
+    const interval = getHistoricalAmountAxisInterval(maxAmount * 1.1);
     return {
-        labels: sortedLabels,
-        budgetAmounts: sortedLabels.map(label => (grouped[label]?.budgetAmount || 0) / 100),
-        spentAmounts: sortedLabels.map(label => (grouped[label]?.spentAmount || 0) / 100)
+        interval,
+        max: interval * 3
     };
 });
 
-const historicalBudgetChartOptions = computed(() => {
-    const maxAmount = Math.max(...displayedHistoricalBudgetTrendData.value.spentAmounts, 0);
-    const maxRate = Math.max(...displayedHistoricalBudgetTrendData.value.executionRatesNegative.map(v => Math.abs(v)), 0);
-    const axisMax = Math.max(maxAmount, maxRate, 1) * 1.2;
-
-    return {
-        tooltip: {
-            trigger: 'axis',
-            axisPointer: {
-                type: 'shadow'
-            },
-            formatter: (params: CallbackDataParams[]) => {
-                const lines: string[] = [];
-                lines.push(String(params[0]?.name || ''));
-
-                for (const param of params) {
-                    if (param.seriesId === 'budgetExecutionAmountSeries') {
-                        lines.push(`${tt('Current Spent')}: ¥${Number(param.value || 0).toFixed(2)}`);
-                    } else if (param.seriesId === 'budgetExecutionRateSeries') {
-                        lines.push(`${tt('Execution Rate')}: ${Math.abs(Number(param.value || 0)).toFixed(1)}%`);
-                    }
-                }
-
-                return lines.join('<br/>');
-            }
-        },
-        legend: {
-            bottom: 20,
-            itemWidth: 14,
-            itemHeight: 14,
-            icon: 'circle',
-            data: [tt('Current Spent'), tt('Execution Rate')],
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
-            }
-        },
-        grid: {
-            left: '20px',
-            right: '20px',
-            top: '10px',
-            bottom: '100px'
-        },
-        xAxis: {
-            type: 'category',
-            data: displayedHistoricalBudgetTrendData.value.labels,
-            axisLine: {
-                show: false
-            },
-            axisTick: {
-                show: false
-            },
-            axisLabel: {
-                padding: [20, 0, 0, 0]
-            }
-        },
-        yAxis: {
-            type: 'value',
-            min: -axisMax,
-            max: axisMax,
-            axisLabel: {
-                show: false
-            },
-            splitLine: {
-                show: false
-            }
-        },
-        series: [
-            {
-                id: 'budgetExecutionAmountSeries',
-                name: tt('Current Spent'),
-                type: 'bar',
-                data: displayedHistoricalBudgetTrendData.value.spentAmounts,
-                itemStyle: {
-                    color: '#42a5f5',
-                    borderRadius: 16
-                },
-                emphasis: {
-                    focus: 'series'
-                },
-                barMaxWidth: 16
-            },
-            {
-                id: 'budgetExecutionRateSeries',
-                name: tt('Execution Rate'),
-                type: 'bar',
-                data: displayedHistoricalBudgetTrendData.value.executionRatesNegative,
-                itemStyle: {
-                    color: '#ffb74d',
-                    borderRadius: 16
-                },
-                emphasis: {
-                    focus: 'series'
-                },
-                barMaxWidth: 16
-            }
-        ]
-    };
+const historicalExecutionAxisMax = computed<number>(() => {
+    const maxRate = Math.max(0, ...historicalCategoryChartData.value.points.map(p => p.executionRate));
+    return Math.max(100, Math.ceil(maxRate / 10) * 10);
 });
 
-const historicalBudgetDetailChartOptions = computed(() => {
+const historicalAverageExecutionRate = computed<number>(() => {
+    const points = historicalCategoryChartData.value.points;
+    if (!points.length) return 0;
+    const totalRate = points.reduce((sum, p) => sum + p.executionRate, 0);
+    return Number((totalRate / points.length).toFixed(1));
+});
+
+const historicalChartOptions = computed(() => {
+    const { categories, points, primarySegments } = historicalCategoryChartData.value;
+    if (!categories.length) {
+        return {};
+    }
+
+    const accentColor = activeBudgetType.value === BudgetType.Investment ? '#ffb300' : '#5c6bc0';
+
     return {
         tooltip: {
-            trigger: 'axis',
-            axisPointer: {
-                type: 'shadow'
-            },
-            formatter: (params: CallbackDataParams[]) => {
-                const lines: string[] = [String(params[0]?.name || '')];
-
-                for (const param of params) {
-                    if (param.seriesId === 'budgetAmountSeries') {
-                        lines.push(`${tt('Budget Amount')}: ¥${Number(param.value || 0).toFixed(2)}`);
-                    } else if (param.seriesId === 'spentAmountSeries') {
-                        lines.push(`${tt('Current Spent')}: ¥${Number(param.value || 0).toFixed(2)}`);
-                    }
+            trigger: 'item',
+            backgroundColor: isDarkMode.value ? '#333' : '#fff',
+            borderColor: isDarkMode.value ? '#333' : '#fff',
+            textStyle: { color: isDarkMode.value ? '#eee' : '#333' },
+            formatter: (params: CallbackDataParams | CallbackDataParams[]) => {
+                const currentParam = Array.isArray(params) ? params[0] : params;
+                const point = points[currentParam?.dataIndex || 0];
+                if (!point || point.isPlaceholder) {
+                    return '';
                 }
-
-                return lines.join('<br/>');
+                const categoryTitle = point.secondaryCategory
+                    ? `${point.primaryCategory} / ${point.secondaryCategory}`
+                    : point.primaryCategory;
+                return [
+                    `<b>${categoryTitle}</b>`,
+                    `${tt('Budget Amount')}: ${formatAmount(point.budgetAmount)}`,
+                    `${tt('Spent Amount')}: ${formatAmount(point.spentAmount)}`,
+                    `${tt('Execution Rate')}: ${point.executionRate}%`
+                ].join('<br/>');
             }
         },
         legend: {
-            bottom: 16,
-            itemWidth: 14,
-            itemHeight: 14,
-            icon: 'circle',
-            data: [tt('Budget Amount'), tt('Current Spent')],
-            textStyle: {
-                color: isDarkMode.value ? '#eee' : '#333'
+            bottom: 0,
+            data: [tt('Budget Amount'), tt('Spent Amount'), tt('Execution Rate')],
+            textStyle: { color: isDarkMode.value ? '#eee' : '#333' }
+        },
+        polar: [
+            { center: ['50%', '46%'], radius: ['30%', '78%'] },
+            { center: ['50%', '46%'], radius: ['30%', '55%'] }
+        ],
+        angleAxis: [
+            {
+                type: 'category',
+                data: categories,
+                startAngle: 90,
+                clockwise: false,
+                polarIndex: 0,
+                axisLine: { show: false },
+                axisTick: { show: false },
+                boundaryGap: true,
+                axisLabel: {
+                    color: isDarkMode.value ? '#d0d0d0' : '#4f4f4f',
+                    fontSize: 11,
+                    formatter: (value: string, index: number) => {
+                        const point = points[index];
+                        if (!point || point.isPlaceholder) {
+                            return '';
+                        }
+                        return point.axisLabel || value;
+                    }
+                }
+            },
+            {
+                type: 'category',
+                data: categories,
+                startAngle: 90,
+                clockwise: false,
+                polarIndex: 1,
+                show: false
             }
-        },
-        grid: {
-            left: '20px',
-            right: '20px',
-            top: '10px',
-            bottom: '80px',
-            containLabel: true
-        },
-        xAxis: {
-            type: 'category',
-            data: selectedHistoricalPeriodDetailData.value.labels,
-            axisLine: {
-                show: false
+        ],
+        radiusAxis: [
+            {
+                type: 'value',
+                min: 0,
+                max: historicalAmountAxisConfig.value.max,
+                interval: historicalAmountAxisConfig.value.interval,
+                splitNumber: 3,
+                polarIndex: 0,
+                axisLine: { show: false },
+                axisTick: { show: false },
+                axisLabel: {
+                    color: isDarkMode.value ? '#888' : '#666',
+                    align: 'center',
+                    verticalAlign: 'middle',
+                    margin: 6,
+                    showMinLabel: true,
+                    showMaxLabel: true,
+                    formatter: (value: number) => formatAmount(value)
+                },
+                splitLine: {
+                    lineStyle: {
+                        color: isDarkMode.value ? '#4f4f4f' : '#e1e6f2',
+                        type: 'dashed'
+                    }
+                }
             },
-            axisTick: {
-                show: false
+            {
+                type: 'value',
+                min: 0,
+                max: historicalExecutionAxisMax.value,
+                polarIndex: 1,
+                axisLine: { show: false },
+                axisTick: { show: false },
+                axisLabel: { show: false },
+                splitLine: { show: false }
             }
-        },
-        yAxis: {
-            type: 'value',
-            axisLine: {
-                show: false
+        ],
+        graphic: [
+            {
+                type: 'text',
+                left: 'center',
+                top: '39%',
+                style: {
+                    text: `${historicalAverageExecutionRate.value.toFixed(1)}%`,
+                    fill: accentColor,
+                    fontSize: 22,
+                    fontWeight: 700,
+                    textAlign: 'center'
+                }
             },
-            axisTick: {
-                show: false
-            },
-            splitLine: {
-                lineStyle: {
-                    color: isDarkMode.value ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+            {
+                type: 'text',
+                left: 'center',
+                top: '45%',
+                style: {
+                    text: tt('Execution Rate'),
+                    fill: isDarkMode.value ? '#bdbdbd' : '#666',
+                    fontSize: 11,
+                    textAlign: 'center'
                 }
             }
-        },
+        ],
         series: [
             {
-                id: 'budgetAmountSeries',
+                name: tt('Primary Category'),
+                type: 'pie',
+                radius: ['82%', '89%'],
+                center: ['50%', '46%'],
+                startAngle: 90,
+                clockwise: false,
+                silent: true,
+                z: 1,
+                label: {
+                    show: historicalBudgetLevel.value === 'secondary',
+                    position: 'outside',
+                    color: isDarkMode.value ? '#d0d0d0' : '#4f4f4f',
+                    fontSize: 11,
+                    formatter: '{b}'
+                },
+                labelLine: {
+                    show: historicalBudgetLevel.value === 'secondary',
+                    length: 8,
+                    length2: 10,
+                    lineStyle: {
+                        color: isDarkMode.value ? '#787878' : '#999'
+                    }
+                },
+                itemStyle: {
+                    borderWidth: 2,
+                    borderColor: isDarkMode.value ? '#121212' : '#fff'
+                },
+                tooltip: { show: false },
+                data: primarySegments.map(segment => ({
+                    name: segment.name,
+                    value: segment.count,
+                    itemStyle: { color: segment.color }
+                }))
+            },
+            {
                 name: tt('Budget Amount'),
                 type: 'bar',
-                barMaxWidth: 18,
-                data: selectedHistoricalPeriodDetailData.value.budgetAmounts,
-                itemStyle: {
-                    color: '#90caf9',
-                    borderRadius: [8, 8, 0, 0]
-                }
+                coordinateSystem: 'polar',
+                polarIndex: 0,
+                roundCap: true,
+                barWidth: 18,
+                barGap: '-100%',
+                data: points.map(p => ({
+                    value: p.budgetAmount,
+                    itemStyle: {
+                        color: p.isPlaceholder ? 'rgba(0,0,0,0)' : hexToRgba(p.color, 0.25)
+                    }
+                }))
             },
             {
-                id: 'spentAmountSeries',
-                name: tt('Current Spent'),
+                name: tt('Spent Amount'),
                 type: 'bar',
-                barMaxWidth: 18,
-                data: selectedHistoricalPeriodDetailData.value.spentAmounts,
-                itemStyle: {
-                    color: '#42a5f5',
-                    borderRadius: [8, 8, 0, 0]
-                }
+                coordinateSystem: 'polar',
+                polarIndex: 0,
+                roundCap: true,
+                barWidth: 15,
+                z: 2,
+                data: points.map(p => ({
+                    value: p.spentAmount,
+                    itemStyle: {
+                        color: p.isPlaceholder ? 'rgba(0,0,0,0)' : p.color
+                    }
+                }))
+            },
+            {
+                name: tt('Execution Rate'),
+                type: 'line',
+                coordinateSystem: 'polar',
+                polarIndex: 1,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 6,
+                lineStyle: { width: 2.5, color: accentColor },
+                itemStyle: { color: accentColor },
+                connectNulls: false,
+                data: points.map(p => (p.isPlaceholder ? null : p.executionRate))
             }
         ]
     };
 });
 
-async function loadBudgetHistoryForExpired(requestId: number): Promise<void> {
-    selectedHistoricalPeriodRange.value = null;
-    const historyRange = getBudgetHistoryQueryRange(getCurrentPeriodType());
+function ensureHistoricalDateRangeInitialized(): void {
+    if (historicalMinDatetime.value && historicalMaxDatetime.value) {
+        return;
+    }
+
+    const range = getDateRangeByDateType(
+        historicalDateType.value,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value
+    );
+
+    if (!range) {
+        return;
+    }
+
+    historicalDateType.value = range.dateType;
+    historicalMinDatetime.value = range.minTime;
+    historicalMaxDatetime.value = range.maxTime;
+}
+
+function canShowHistoricalCustomDateRange(dateType: number): boolean {
+    return historicalDateType.value === DateRange.Custom.type && dateType === DateRange.Custom.type;
+}
+
+function setHistoricalDateFilter(dateType: number): void {
+    if (dateType === DateRange.Custom.type) {
+        ensureHistoricalDateRangeInitialized();
+        showHistoricalDateDialog.value = true;
+        return;
+    }
+
+    const range = getDateRangeByDateType(dateType, firstDayOfWeek.value, fiscalYearStartValue.value);
+    if (!range) {
+        return;
+    }
+
+    historicalDateType.value = range.dateType;
+    historicalMinDatetime.value = range.minTime;
+    historicalMaxDatetime.value = range.maxTime;
+    reload(false);
+}
+
+function onHistoricalDateRangeChange(minUnixTime: number, maxUnixTime: number): void {
+    historicalDateType.value = getDateTypeByDateRange(
+        minUnixTime,
+        maxUnixTime,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value,
+        DateRangeScene.AssetTrends
+    );
+    historicalMinDatetime.value = minUnixTime;
+    historicalMaxDatetime.value = maxUnixTime;
+    showHistoricalDateDialog.value = false;
+    reload(false);
+}
+
+function shiftHistoricalDateRange(scale: number): void {
+    if (!canShiftHistoricalDateRange.value) {
+        return;
+    }
+
+    const range = getShiftedDateRangeAndDateType(
+        historicalMinDatetime.value,
+        historicalMaxDatetime.value,
+        scale,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value,
+        DateRangeScene.AssetTrends
+    );
+
+    historicalDateType.value = range.dateType;
+    historicalMinDatetime.value = range.minTime;
+    historicalMaxDatetime.value = range.maxTime;
+    reload(false);
+}
+
+async function loadHistoricalBudgetView(requestId: number): Promise<void> {
+    const historyRange = getHistoricalBudgetQueryRange();
     const historyRequest: BudgetHistoryRequest = {
         type: activeBudgetType.value,
-        periodType: getCurrentPeriodType(),
+        periodType: BudgetPeriodType.Monthly,
         startDate: historyRange.startDate,
         endDate: historyRange.endDate,
         categoryId: categoryFilter.value || undefined,
@@ -2118,25 +2426,22 @@ async function loadBudgetHistoryForExpired(requestId: number): Promise<void> {
 
     try {
         await budgetStore.createBudgetHistorySnapshot({
-            ...getCurrentPeriodRequest(),
-            type: activeBudgetType.value,
-            categoryId: categoryFilter.value || undefined,
-            accountIds: accountFilter.value.length ? [...accountFilter.value] : undefined,
-            tagIds: tagFilter.value.length ? [...tagFilter.value] : undefined
+            ...historyRequest,
+            type: activeBudgetType.value
         });
     } catch (snapshotError) {
-        logger.warn('[Budget List] Failed to create history snapshot during background load', snapshotError);
+        logger.warn('[Budget List] Failed to create history snapshot during historical view load', snapshotError);
     }
 
     if (requestId !== reloadRequestId.value) {
         return;
     }
 
-    try {
-        await budgetStore.loadBudgetHistory(historyRequest);
-    } catch (historyError) {
-        logger.warn('[Budget List] Failed to load budget history during background load', historyError);
-    }
+    await budgetStore.loadBudgetHistory(historyRequest);
+}
+
+async function loadBudgetHistoryForExpired(requestId: number): Promise<void> {
+    await loadHistoricalBudgetView(requestId);
 }
 
 // ============================================================================
@@ -2287,7 +2592,6 @@ function setPeriodFilter(filter: string): void {
         return;
     }
     activePeriodFilter.value = filter;
-    selectedHistoricalPeriodRange.value = null;
     reload(false);
 }
 
@@ -2308,7 +2612,6 @@ function onCustomDateRangeChange(minUnixTime: number, maxUnixTime: number): void
 
     // 设置为自定义模式并关闭对话框
     activePeriodFilter.value = 'custom';
-    selectedHistoricalPeriodRange.value = null;
     showCustomDateDialog.value = false;
     reload(false);
 }
@@ -2779,6 +3082,13 @@ function formatAmount(amount: number): string {
     return '¥' + amount.toFixed(2);
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+    const m = hex.replace('#', '').match(/.{2}/g);
+    if (!m) return `rgba(0,0,0,${alpha})`;
+    const [r, g, b] = m.map(x => parseInt(x, 16));
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
 /**
  * 点击进度条跳转到对应分类和时间的账单列表
  * @param category 主分类名称
@@ -2846,37 +3156,10 @@ function navigateToTransactions(category: string, subCategory: string | null, bu
 }
 
 /**
- * 点击往期预算图表
- * - 选择周期，在下方展示该周期预算明细
- */
-function onClickHistoricalBudgetChartItem(e: ECElementEvent): void {
-    if (e.componentType !== 'series') {
-        return;
-    }
-
-    const dataIndex = Number(e.dataIndex || 0);
-    const range = displayedHistoricalBudgetTrendData.value.ranges[dataIndex];
-
-    if (!range?.startDate || !range?.endDate) {
-        return;
-    }
-
-    selectedHistoricalPeriodRange.value = {
-        startDate: range.startDate,
-        endDate: range.endDate
-    };
-}
-
-function clearSelectedHistoricalPeriod(): void {
-    selectedHistoricalPeriodRange.value = null;
-}
-
-/**
  * 切换视图模式
  */
 function switchViewMode(mode: unknown): void {
-    activeViewMode.value = mode as string;
-    selectedHistoricalPeriodRange.value = null;
+    activeViewMode.value = mode as BudgetViewMode;
     if (mode === 'forecast') {
         if (!['thisMonth', 'thisQuarter', 'thisYear'].includes(activePeriodFilter.value)) {
             activePeriodFilter.value = 'thisMonth';
@@ -2892,7 +3175,6 @@ function switchViewMode(mode: unknown): void {
  */
 function switchBudgetType(type: unknown): void {
     activeBudgetType.value = type as BudgetType;
-    selectedHistoricalPeriodRange.value = null;
     reload(false);
 }
 
@@ -2972,56 +3254,6 @@ function getCurrentPeriodRequest(): BudgetHistoryRequest {
     }
 }
 
-function getBudgetHistoryQueryRange(periodType: BudgetPeriodType): { startDate: string; endDate: string } {
-    const periodRequest = getCurrentPeriodRequest();
-
-    if (periodRequest.startDate && periodRequest.endDate) {
-        return {
-            startDate: periodRequest.startDate,
-            endDate: periodRequest.endDate
-        };
-    }
-
-    const anchorDate = (() => {
-        if (periodRequest.year && periodRequest.month) {
-            return new Date(periodRequest.year, periodRequest.month - 1, 1);
-        }
-        if (periodRequest.year && periodRequest.quarter) {
-            return new Date(periodRequest.year, (periodRequest.quarter - 1) * 3, 1);
-        }
-        if (periodRequest.year) {
-            return new Date(periodRequest.year, 0, 1);
-        }
-        return new Date();
-    })();
-
-    if (periodType === BudgetPeriodType.Quarterly) {
-        const quarterStartMonth = Math.floor(anchorDate.getMonth() / 3) * 3;
-        const endDate = new Date(anchorDate.getFullYear(), quarterStartMonth + 3, 0);
-        const startDate = new Date(anchorDate.getFullYear(), quarterStartMonth - 21, 1);
-        return {
-            startDate: formatDateOnly(startDate),
-            endDate: formatDateOnly(endDate)
-        };
-    }
-
-    if (periodType === BudgetPeriodType.Yearly) {
-        const endDate = new Date(anchorDate.getFullYear(), 11, 31);
-        const startDate = new Date(anchorDate.getFullYear() - 4, 0, 1);
-        return {
-            startDate: formatDateOnly(startDate),
-            endDate: formatDateOnly(endDate)
-        };
-    }
-
-    const endDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 0);
-    const startDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth() - 11, 1);
-    return {
-        startDate: formatDateOnly(startDate),
-        endDate: formatDateOnly(endDate)
-    };
-}
-
 /**
  * 加载预算列表和执行数据
  */
@@ -3030,6 +3262,11 @@ async function reload(force: boolean): Promise<void> {
     loading.value = true;
 
     try {
+        if (activeViewMode.value === 'history') {
+            await loadHistoricalBudgetView(requestId);
+            return;
+        }
+
         const periodRequest = getCurrentPeriodRequest();
 
         await Promise.all([
@@ -3258,11 +3495,15 @@ onMounted(() => {
         activePeriodFilter.value = periodMap[props.initPeriodType] || 'thisMonth';
     }
     if (props.initViewMode) {
-        activeViewMode.value = props.initViewMode;
+        if (isBudgetViewMode(props.initViewMode)) {
+            activeViewMode.value = props.initViewMode;
+        }
     }
 
     // 加载筛选预设
     loadPresetsFromStorage();
+
+    ensureHistoricalDateRangeInitialized();
 
     // 初始加载
     reload(false);
@@ -3273,27 +3514,6 @@ watch([forecastStrategy, forecastMonthsHistory], () => {
         loadForecast();
     }
 });
-
-watch(historyWindowOptions, (options) => {
-    if (!options.some(option => option.value === selectedHistoryWindow.value)) {
-        selectedHistoryWindow.value = options[0]?.value || -1;
-    }
-}, { immediate: true });
-
-watch(displayedHistoricalBudgetTrendData, (data) => {
-    const currentRange = selectedHistoricalPeriodRange.value;
-    if (!currentRange) {
-        return;
-    }
-
-    const stillVisible = data.ranges.some(range => {
-        return range.startDate === currentRange.startDate && range.endDate === currentRange.endDate;
-    });
-
-    if (!stillVisible) {
-        selectedHistoricalPeriodRange.value = null;
-    }
-}, { deep: true });
 
 // 监听筛选关键词变化
 watch(filterKeyword, (newVal) => {
@@ -3486,7 +3706,7 @@ watch(filterKeyword, (newVal) => {
 
 .budget-history-chart {
     width: 100%;
-    height: 400px;
+    height: 520px;
 }
 
 .budget-history-detail-chart {
@@ -3494,7 +3714,14 @@ watch(filterKeyword, (newVal) => {
     height: 360px;
 }
 
-.budget-history-window-select {
+.budget-history-panel {
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+    border-radius: 16px;
+    padding: 16px;
+    background-color: rgb(var(--v-theme-surface));
+}
+
+.budget-history-aggregation-select {
     min-width: 190px;
     max-width: 190px;
 }

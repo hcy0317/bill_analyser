@@ -82,6 +82,102 @@
         </v-col>
 
         <v-col cols="12">
+            <v-card :class="{ 'disabled': loadingRecognitionSettings || savingRecognitionSettings }">
+                <template #title>
+                    <div class="d-flex align-center">
+                        <span>{{ tt('Investment Recognition Settings') }}</span>
+                        <v-btn density="compact" color="default" variant="text" size="24"
+                               class="ms-2" :icon="true" :loading="loadingRecognitionSettings"
+                               @click="reloadRecognitionSettings(true)">
+                            <template #loader>
+                                <v-progress-circular indeterminate size="20"/>
+                            </template>
+                            <v-icon :icon="mdiRefresh" size="24" />
+                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                        </v-btn>
+                    </div>
+                </template>
+
+                <v-card-text>
+                    <v-row>
+                        <v-col cols="12" md="6">
+                            <v-switch
+                                color="primary"
+                                hide-details
+                                inset
+                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                                :label="tt('Enable Import Learning')"
+                                v-model="recognitionSettings.importLearningEnabled"
+                            />
+                        </v-col>
+
+                        <v-col cols="12" md="12">
+                            <v-combobox
+                                color="primary"
+                                multiple
+                                chips
+                                closable-chips
+                                persistent-placeholder
+                                persistent-hint
+                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                                :label="tt('Investment Platform Keywords')"
+                                :placeholder="tt('Enter investment platform keywords')"
+                                :hint="tt('Press Enter to add investment platform keywords for import recognition')"
+                                v-model="recognitionSettings.investmentPlatformKeywords"
+                            />
+                        </v-col>
+
+                        <v-col cols="12" md="12">
+                            <v-combobox
+                                color="primary"
+                                multiple
+                                chips
+                                closable-chips
+                                persistent-placeholder
+                                persistent-hint
+                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                                :label="tt('Investment Product Keywords')"
+                                :placeholder="tt('Enter investment product keywords')"
+                                :hint="tt('Press Enter to add investment product keywords for import recognition')"
+                                v-model="recognitionSettings.investmentProductKeywords"
+                            />
+                        </v-col>
+
+                        <v-col cols="12" md="12">
+                            <v-combobox
+                                color="primary"
+                                multiple
+                                chips
+                                closable-chips
+                                persistent-placeholder
+                                persistent-hint
+                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                                :label="tt('Investment Exclude Keywords')"
+                                :placeholder="tt('Enter investment exclude keywords')"
+                                :hint="tt('Press Enter to add keywords that should block investment recognition')"
+                                v-model="recognitionSettings.investmentExcludeKeywords"
+                            />
+                        </v-col>
+                    </v-row>
+                </v-card-text>
+
+                <v-card-actions class="px-4 pb-4">
+                    <v-btn color="primary"
+                           :disabled="loadingRecognitionSettings || savingRecognitionSettings || !recognitionSettingsChanged"
+                           @click="saveRecognitionSettings">
+                        {{ tt('Save Changes') }}
+                        <v-progress-circular indeterminate size="20" class="ms-2" v-if="savingRecognitionSettings" />
+                    </v-btn>
+                    <v-btn color="default" variant="tonal"
+                           :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                           @click="resetRecognitionSettings">
+                        {{ tt('Reset') }}
+                    </v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-col>
+
+        <v-col cols="12">
             <v-card :class="{ 'disabled': loadingImportLearningRules }">
                 <template #title>
                     <div class="d-flex align-center">
@@ -117,6 +213,9 @@
                         />
                         <span class="text-body-2 text-medium-emphasis">
                             {{ tt('Selected import learning rules: {count}', { count: selectedImportLearningRuleIds.length }) }}
+                        </span>
+                        <span class="text-body-2 text-medium-emphasis ms-2">
+                            {{ tt('Showing Count', { visible: importLearningRules.length, total: importLearningRulesTotalCount }) }}
                         </span>
                         <v-btn size="small" density="comfortable" variant="text" color="primary"
                                :disabled="!hasSelectedImportLearningRules || bulkUpdatingImportLearningRules"
@@ -196,6 +295,25 @@
                         </tr>
                     </tbody>
                     </v-table>
+
+                    <v-card-text class="pt-2 pb-4 d-flex align-center flex-wrap gap-2">
+                        <span v-if="importLearningRulesTotalCount > 10">{{ tt('Transactions Per Page') }}</span>
+                        <v-select class="ms-2"
+                                  density="compact"
+                                  max-width="100"
+                                  item-title="name"
+                                  item-value="value"
+                                  :disabled="loadingImportLearningRules || bulkUpdatingImportLearningRules"
+                                  :items="importLearningRulesPageOptions"
+                                  v-model="importLearningRulesCountPerPage"
+                                  v-if="importLearningRulesTotalCount > 10"
+                        />
+                        <pagination-buttons density="compact"
+                                            :disabled="loadingImportLearningRules || bulkUpdatingImportLearningRules"
+                                            :totalPageCount="importLearningRulesTotalPageCount"
+                                            v-model="importLearningRulesCurrentPage"
+                                            v-if="importLearningRulesTotalPageCount > 1" />
+                    </v-card-text>
                 </template>
             </v-card>
         </v-col>
@@ -283,9 +401,10 @@
 
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
+import PaginationButtons from '@/components/desktop/PaginationButtons.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { computed, ref, useTemplateRef } from 'vue';
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useDataManagementPageBase } from '@/views/base/users/DataManagementPageBase.ts';
@@ -297,6 +416,8 @@ import { isEquals } from '@/lib/common.ts';
 import { isDataExportingEnabled } from '@/lib/server_settings.ts';
 import { getCurrentToken } from '@/lib/userstate.ts';
 import { startDownloadFile } from '@/lib/ui/common.ts';
+import type { NameNumeralValue } from '@/core/base.ts';
+import type { UserProfileUpdateRequest } from '@/models/user.ts';
 
 import {
     mdiRefresh,
@@ -325,6 +446,13 @@ interface ImportLearningRuleInfo {
     appliedCount: number;
 }
 
+interface RecognitionSettingsState {
+    importLearningEnabled: boolean;
+    investmentPlatformKeywords: string[];
+    investmentProductKeywords: string[];
+    investmentExcludeKeywords: string[];
+}
+
 const { tt } = useI18n();
 const { dataStatistics, displayDataStatistics, getExportFileName } = useDataManagementPageBase();
 
@@ -342,7 +470,31 @@ const clearingData = ref<boolean>(false);
 const updatingImportLearningRuleId = ref<number>(0);
 const bulkUpdatingImportLearningRules = ref<boolean>(false);
 const importLearningRules = ref<ImportLearningRuleInfo[]>([]);
+const importLearningRulesTotalCount = ref<number>(0);
+const importLearningRulesCurrentPage = ref<number>(1);
+const importLearningRulesCountPerPage = ref<number>(20);
 const selectedImportLearningRuleIds = ref<number[]>([]);
+const loadingRecognitionSettings = ref<boolean>(true);
+const savingRecognitionSettings = ref<boolean>(false);
+const recognitionSettings = ref<RecognitionSettingsState>({
+    importLearningEnabled: false,
+    investmentPlatformKeywords: [],
+    investmentProductKeywords: [],
+    investmentExcludeKeywords: []
+});
+const recognitionSettingsSnapshot = ref<RecognitionSettingsState>({
+    importLearningEnabled: false,
+    investmentPlatformKeywords: [],
+    investmentProductKeywords: [],
+    investmentExcludeKeywords: []
+});
+
+const recognitionSettingsChanged = computed<boolean>(() => {
+    return recognitionSettings.value.importLearningEnabled !== recognitionSettingsSnapshot.value.importLearningEnabled
+        || !isEquals(recognitionSettings.value.investmentPlatformKeywords, recognitionSettingsSnapshot.value.investmentPlatformKeywords)
+        || !isEquals(recognitionSettings.value.investmentProductKeywords, recognitionSettingsSnapshot.value.investmentProductKeywords)
+        || !isEquals(recognitionSettings.value.investmentExcludeKeywords, recognitionSettingsSnapshot.value.investmentExcludeKeywords);
+});
 
 const selectedImportLearningRules = computed<ImportLearningRuleInfo[]>(() => {
     const selectedIdSet = new Set(selectedImportLearningRuleIds.value);
@@ -351,6 +503,21 @@ const selectedImportLearningRules = computed<ImportLearningRuleInfo[]>(() => {
 
 const hasSelectedImportLearningRules = computed<boolean>(() => {
     return selectedImportLearningRuleIds.value.length > 0;
+});
+
+const importLearningRulesPageOptions = computed<NameNumeralValue[]>(() => {
+    return getTablePageOptions(importLearningRulesTotalCount.value);
+});
+
+const importLearningRulesTotalPageCount = computed<number>(() => {
+    const totalCount = importLearningRulesTotalCount.value;
+    const pageSize = importLearningRulesCountPerPage.value;
+
+    if (pageSize <= 0 || totalCount < 1) {
+        return 1;
+    }
+
+    return Math.max(Math.ceil(totalCount / pageSize), 1);
 });
 
 const anyButNotAllImportLearningRulesSelected = computed<boolean>(() => {
@@ -381,6 +548,31 @@ function getImportLearningHeaders(): Record<string, string> {
         headers['Authorization'] = `Bearer ${token}`;
     }
     return headers;
+}
+
+function getDisplayCount(count: number): string {
+    return String(count);
+}
+
+function getTablePageOptions(linesCount?: number): NameNumeralValue[] {
+    const pageOptions: NameNumeralValue[] = [];
+
+    if (!linesCount || linesCount < 1) {
+        pageOptions.push({ value: -1, name: tt('All') });
+        return pageOptions;
+    }
+
+    for (const count of [10, 20, 50, 100]) {
+        if (linesCount < count) {
+            break;
+        }
+
+        pageOptions.push({ value: count, name: getDisplayCount(count) });
+    }
+
+    pageOptions.push({ value: -1, name: tt('All') });
+
+    return pageOptions;
 }
 
 function getImportLearningMatchTypeName(matchType: string): string {
@@ -442,6 +634,16 @@ function syncSelectedImportLearningRules(rules: ImportLearningRuleInfo[]): void 
     selectedImportLearningRuleIds.value = selectedImportLearningRuleIds.value.filter(id => validRuleIds.has(id));
 }
 
+function removeImportLearningRulesFromState(ruleIds: number[]): void {
+    if (!ruleIds.length) {
+        return;
+    }
+
+    const deletedRuleIds = new Set(ruleIds);
+    importLearningRules.value = importLearningRules.value.filter(rule => !deletedRuleIds.has(rule.id));
+    syncSelectedImportLearningRules(importLearningRules.value);
+}
+
 async function updateImportLearningRuleEnabledById(ruleId: number, enabled: boolean): Promise<void> {
     const response = await fetch(`/api/bills/import/learning-rules/${ruleId}`, {
         method: 'PUT',
@@ -471,9 +673,12 @@ async function reloadImportLearningRules(force: boolean): Promise<void> {
     loadingImportLearningRules.value = true;
 
     try {
-        const response = await fetch('/api/bills/import/learning-rules?limit=100', {
+        const page = importLearningRulesCurrentPage.value;
+        const pageSize = importLearningRulesCountPerPage.value;
+        const response = await fetch(`/api/bills/import/learning-rules?page=${page}&pageSize=${pageSize}`, {
             method: 'GET',
-            headers: getImportLearningHeaders()
+            headers: getImportLearningHeaders(),
+            cache: 'no-store'
         });
 
         if (!response.ok) {
@@ -483,6 +688,15 @@ async function reloadImportLearningRules(force: boolean): Promise<void> {
 
         const data = await response.json();
         const newRules = (data.result || []) as ImportLearningRuleInfo[];
+        const totalCount = Number(data.totalCount || 0);
+        const totalPages = Number(data.totalPages || 1);
+        const effectivePage = Number(data.page || 1);
+
+        if (page > totalPages && totalPages > 0) {
+            importLearningRulesCurrentPage.value = totalPages;
+            loadingImportLearningRules.value = false;
+            return;
+        }
 
         if (force) {
             if (isEquals(importLearningRules.value, newRules)) {
@@ -493,6 +707,8 @@ async function reloadImportLearningRules(force: boolean): Promise<void> {
         }
 
         importLearningRules.value = newRules;
+        importLearningRulesTotalCount.value = totalCount;
+        importLearningRulesCurrentPage.value = effectivePage;
         syncSelectedImportLearningRules(newRules);
         loadingImportLearningRules.value = false;
     } catch (error) {
@@ -529,8 +745,8 @@ function deleteImportLearningRule(rule: ImportLearningRuleInfo): void {
 
         try {
             await deleteImportLearningRuleById(rule.id);
-            importLearningRules.value = importLearningRules.value.filter(item => item.id !== rule.id);
-            syncSelectedImportLearningRules(importLearningRules.value);
+            removeImportLearningRulesFromState([rule.id]);
+            await reloadImportLearningRules(false);
             snackbar.value?.showMessage('Import learning rule deleted');
         } catch (error) {
             snackbar.value?.showError(getErrorMessage(error));
@@ -567,9 +783,10 @@ async function setSelectedImportLearningRulesEnabled(enabled: boolean): Promise<
         });
 
         if (successCount > 0) {
-            snackbar.value?.showMessage(enabled
-                ? tt('Enabled selected import learning rules: {count}', { count: successCount })
-                : tt('Disabled selected import learning rules: {count}', { count: successCount }));
+            snackbar.value?.showMessage(
+                enabled ? 'Enabled selected import learning rules: {count}' : 'Disabled selected import learning rules: {count}',
+                { count: successCount }
+            );
         }
 
         if (failedMessages.length > 0 && failedMessages[0]) {
@@ -597,25 +814,22 @@ function deleteSelectedImportLearningRules(): void {
         bulkUpdatingImportLearningRules.value = true;
 
         try {
-            const results = await Promise.allSettled(
-                selectedRules.map(rule => deleteImportLearningRuleById(rule.id))
-            );
-
             const deletedIds = new Set<number>();
             const failedMessages: string[] = [];
 
-            results.forEach((result, index) => {
-                if (result.status === 'fulfilled') {
-                    deletedIds.add(selectedRules[index]!.id);
-                } else {
-                    failedMessages.push(getErrorMessage(result.reason));
+            for (const rule of selectedRules) {
+                try {
+                    await deleteImportLearningRuleById(rule.id);
+                    deletedIds.add(rule.id);
+                } catch (error) {
+                    failedMessages.push(getErrorMessage(error));
                 }
-            });
+            }
 
             if (deletedIds.size > 0) {
-                importLearningRules.value = importLearningRules.value.filter(rule => !deletedIds.has(rule.id));
-                syncSelectedImportLearningRules(importLearningRules.value);
-                snackbar.value?.showMessage(tt('Deleted selected import learning rules: {count}', { count: deletedIds.size }));
+                removeImportLearningRulesFromState(Array.from(deletedIds));
+                await reloadImportLearningRules(false);
+                snackbar.value?.showMessage('Deleted selected import learning rules: {count}', { count: deletedIds.size });
             }
 
             if (failedMessages.length > 0 && failedMessages[0]) {
@@ -643,6 +857,78 @@ function reloadUserDataStatistics(force: boolean): void {
         loadingDataStatistics.value = false;
     }).catch(error => {
         loadingDataStatistics.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+function normalizeRecognitionSettings(profile: {
+    importLearningEnabled?: boolean;
+    investmentPlatformKeywords?: string[];
+    investmentProductKeywords?: string[];
+    investmentExcludeKeywords?: string[];
+}): RecognitionSettingsState {
+    return {
+        importLearningEnabled: !!profile.importLearningEnabled,
+        investmentPlatformKeywords: [...(profile.investmentPlatformKeywords || [])],
+        investmentProductKeywords: [...(profile.investmentProductKeywords || [])],
+        investmentExcludeKeywords: [...(profile.investmentExcludeKeywords || [])]
+    };
+}
+
+function resetRecognitionSettings(): void {
+    recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
+}
+
+function reloadRecognitionSettings(force: boolean): void {
+    loadingRecognitionSettings.value = true;
+
+    userStore.getCurrentUserProfile().then(profile => {
+        const nextState = normalizeRecognitionSettings(profile);
+
+        if (force) {
+            if (isEquals(recognitionSettingsSnapshot.value, nextState)) {
+                snackbar.value?.showMessage('Data is up to date');
+            } else {
+                snackbar.value?.showMessage('Data has been updated');
+            }
+        }
+
+        recognitionSettingsSnapshot.value = nextState;
+        recognitionSettings.value = normalizeRecognitionSettings(nextState);
+        loadingRecognitionSettings.value = false;
+    }).catch(error => {
+        loadingRecognitionSettings.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+function saveRecognitionSettings(): void {
+    if (!recognitionSettingsChanged.value || savingRecognitionSettings.value) {
+        return;
+    }
+
+    savingRecognitionSettings.value = true;
+
+    const request: UserProfileUpdateRequest = {
+        importLearningEnabled: recognitionSettings.value.importLearningEnabled,
+        investmentPlatformKeywords: [...recognitionSettings.value.investmentPlatformKeywords],
+        investmentProductKeywords: [...recognitionSettings.value.investmentProductKeywords],
+        investmentExcludeKeywords: [...recognitionSettings.value.investmentExcludeKeywords]
+    };
+
+    rootStore.updateUserProfile(request).then(response => {
+        recognitionSettingsSnapshot.value = normalizeRecognitionSettings(response.user || recognitionSettings.value);
+        recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
+        savingRecognitionSettings.value = false;
+        snackbar.value?.showMessage('Your profile has been successfully updated');
+    }).catch(error => {
+        savingRecognitionSettings.value = false;
 
         if (!error.processed) {
             snackbar.value?.showError(error);
@@ -731,6 +1017,34 @@ function clearAllData(): void {
     });
 }
 
-reloadUserDataStatistics(false);
-reloadImportLearningRules(false);
+onMounted(() => {
+    reloadUserDataStatistics(false);
+    reloadImportLearningRules(false);
+    reloadRecognitionSettings(false);
+});
+
+watch(importLearningRulesCurrentPage, (newPage, oldPage) => {
+    if (newPage !== oldPage) {
+        reloadImportLearningRules(false);
+    }
+});
+
+watch(importLearningRulesCountPerPage, (newPageSize, oldPageSize) => {
+    if (newPageSize === oldPageSize) {
+        return;
+    }
+
+    if (importLearningRulesCurrentPage.value !== 1) {
+        importLearningRulesCurrentPage.value = 1;
+        return;
+    }
+
+    reloadImportLearningRules(false);
+});
+
+defineExpose({
+    reloadUserDataStatistics,
+    reloadImportLearningRules,
+    reloadRecognitionSettings
+});
 </script>
