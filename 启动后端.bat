@@ -7,24 +7,21 @@ echo.
 
 cd /d "%~dp0"
 
-REM 检查是否已经在运行 (精确匹配端口5000)
-netstat -ano | findstr "LISTENING" | findstr ":5000 " >NUL
-if "%ERRORLEVEL%"=="0" (
-    echo [警告] 端口5000已被占用
-    echo.
-    echo 正在尝试停止旧进程...
-    for /f "tokens=5" %%a in ('netstat -ano ^| findstr "LISTENING" ^| findstr ":5000 "') do (
-        echo 停止进程 PID: %%a
-        taskkill /F /PID %%a >nul 2>&1
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo [启动] 使用 PowerShell Core 启动后端...
+    start "Bill Analyser Backend" pwsh -ExecutionPolicy Bypass -NoExit -File "%~dp0start_backend.ps1"
+) else (
+    where powershell >nul 2>&1
+    if %ERRORLEVEL%==0 (
+        echo [启动] 使用 Windows PowerShell 启动后端...
+        start "Bill Analyser Backend" powershell -ExecutionPolicy Bypass -NoExit -File "%~dp0start_backend.ps1"
+    ) else (
+        echo [错误] 未找到 PowerShell，请安装 PowerShell
+        pause
+        exit /b 1
     )
-    timeout /t 2 >NUL
-    echo 已清理端口，继续启动...
-    echo.
 )
-
-REM 启动后端
-echo [启动] 正在启动后端服务器...
-start "Bill Analyser Backend" powershell -ExecutionPolicy Bypass -NoExit -File "%~dp0start_backend.ps1"
 
 REM 等待启动
 timeout /t 3 >NUL

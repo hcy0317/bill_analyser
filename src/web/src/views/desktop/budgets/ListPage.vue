@@ -1056,14 +1056,6 @@ interface HistoricalCategoryChartPoint {
     color: string;
     groupOrder: number;
     itemOrder: number;
-    isPlaceholder?: boolean;
-    axisLabel?: string;
-}
-
-interface HistoricalPrimaryRingSegment {
-    name: string;
-    color: string;
-    count: number;
 }
 
 const CATEGORY_CHART_PALETTE = [
@@ -1874,16 +1866,12 @@ function getHistoricalAmountAxisInterval(maxAmount: number): number {
     return 10 * magnitude;
 }
 
-const historicalCategoryChartData = computed<{
-    categories: string[];
-    points: HistoricalCategoryChartPoint[];
-    primarySegments: HistoricalPrimaryRingSegment[];
-}>(() => {
+const historicalCategoryChartData = computed<{ categories: string[]; points: HistoricalCategoryChartPoint[] }>(() => {
     const periods = historicalPeriods.value;
     const items = historicalLevelItems.value;
 
     if (!periods.length || !items.length) {
-        return { categories: [], points: [], primarySegments: [] };
+        return { categories: [], points: [] };
     }
 
     const periodMap = new Map(periods.map(period => [period.key, period]));
@@ -1948,39 +1936,10 @@ const historicalCategoryChartData = computed<{
         summary.spentAmount += item.spentAmount || 0;
     }
 
-    const summaryEntries = Array.from(grouped.values());
-    summaryEntries.sort((a, b) => {
-        if (a.groupOrder !== b.groupOrder) {
-            return a.groupOrder - b.groupOrder;
-        }
-        if (historicalBudgetLevel.value === 'secondary' && a.itemOrder !== b.itemOrder) {
-            return a.itemOrder - b.itemOrder;
-        }
-        if (a.primaryCategory !== b.primaryCategory) {
-            return a.primaryCategory.localeCompare(b.primaryCategory, 'zh-CN');
-        }
-        return a.displayCategory.localeCompare(b.displayCategory, 'zh-CN');
-    });
-
     const points: HistoricalCategoryChartPoint[] = [];
-    const categories: string[] = [];
-    const primarySegments: HistoricalPrimaryRingSegment[] = [];
     let colorIdx = 0;
 
-    const buildPoint = (
-        summary: {
-            displayCategory: string;
-            primaryCategory: string;
-            secondaryCategory: string;
-            budgetAmount: number;
-            spentAmount: number;
-            groupOrder: number;
-            itemOrder: number;
-        },
-        slotIndex: number,
-        placeholder: boolean,
-        groupColor: string
-    ): HistoricalCategoryChartPoint => {
+    for (const [, summary] of grouped) {
         const budgetAmount = summary.budgetAmount / 100;
         const spentAmount = summary.spentAmount / 100;
         const executionRate = summary.budgetAmount > 0
@@ -1990,108 +1949,37 @@ const historicalCategoryChartData = computed<{
         const color: string = (historicalBudgetLevel.value === 'secondary'
             ? subCategoryColorMap[subCategoryKey]
             : undefined)
-            ?? groupColor;
+            ?? categoryColorMap[summary.primaryCategory]
+            ?? CATEGORY_CHART_PALETTE[colorIdx % CATEGORY_CHART_PALETTE.length] ?? '#5470c6';
+        colorIdx++;
 
-        return {
+        points.push({
             category: summary.displayCategory,
             primaryCategory: summary.primaryCategory,
             secondaryCategory: summary.secondaryCategory,
-            budgetAmount: placeholder ? 0 : budgetAmount,
-            spentAmount: placeholder ? 0 : spentAmount,
-            executionRate: placeholder ? 0 : Number(executionRate.toFixed(1)),
+            budgetAmount,
+            spentAmount,
+            executionRate: Number(executionRate.toFixed(1)),
             color,
             groupOrder: summary.groupOrder,
-            itemOrder: summary.itemOrder,
-            isPlaceholder: placeholder,
-            axisLabel: placeholder ? '' : summary.displayCategory || summary.primaryCategory
-        };
-    };
-
-    if (historicalBudgetLevel.value === 'secondary') {
-        const groupedByPrimary = new Map<string, typeof summaryEntries>();
-        for (const summary of summaryEntries) {
-            if (!groupedByPrimary.has(summary.primaryCategory)) {
-                groupedByPrimary.set(summary.primaryCategory, []);
-            }
-            groupedByPrimary.get(summary.primaryCategory)!.push(summary);
-        }
-
-        const orderedGroups = Array.from(groupedByPrimary.entries()).sort((a, b) => {
-            const firstA = a[1][0];
-            const firstB = b[1][0];
-            if (!firstA || !firstB) {
-                return 0;
-            }
-            if (firstA.groupOrder !== firstB.groupOrder) {
-                return firstA.groupOrder - firstB.groupOrder;
-            }
-            return a[0].localeCompare(b[0], 'zh-CN');
+            itemOrder: summary.itemOrder
         });
-
-        const slotCountPerGroup = Math.max(1, ...orderedGroups.map(([, groupItems]) => groupItems.length));
-
-        for (const [primaryCategory, groupItems] of orderedGroups) {
-            const groupColor = categoryColorMap[primaryCategory]
-                ?? CATEGORY_CHART_PALETTE[colorIdx % CATEGORY_CHART_PALETTE.length]
-                ?? '#5470c6';
-            colorIdx++;
-
-            primarySegments.push({
-                name: primaryCategory,
-                color: groupColor,
-                count: slotCountPerGroup
-            });
-
-            groupItems.sort((a, b) => {
-                if (a.itemOrder !== b.itemOrder) {
-                    return a.itemOrder - b.itemOrder;
-                }
-                return a.displayCategory.localeCompare(b.displayCategory, 'zh-CN');
-            });
-
-            for (let slotIndex = 0; slotIndex < slotCountPerGroup; slotIndex++) {
-                const summary = groupItems[slotIndex];
-                const isPlaceholder = !summary;
-                const point = buildPoint(
-                    summary ?? {
-                        displayCategory: '',
-                        primaryCategory,
-                        secondaryCategory: '',
-                        budgetAmount: 0,
-                        spentAmount: 0,
-                        groupOrder: groupItems[0]?.groupOrder ?? Number.MAX_SAFE_INTEGER,
-                        itemOrder: slotIndex
-                    },
-                    slotIndex,
-                    isPlaceholder,
-                    groupColor
-                );
-
-                points.push(point);
-                categories.push(isPlaceholder
-                    ? `__gap__${primaryCategory}__${slotIndex}`
-                    : `${primaryCategory}::${point.axisLabel || slotIndex}`);
-            }
-        }
-    } else {
-        for (const summary of summaryEntries) {
-            const groupColor = categoryColorMap[summary.primaryCategory]
-                ?? CATEGORY_CHART_PALETTE[colorIdx % CATEGORY_CHART_PALETTE.length]
-                ?? '#5470c6';
-            colorIdx++;
-
-            const point = buildPoint(summary, 0, false, groupColor);
-            points.push(point);
-            categories.push(summary.displayCategory);
-            primarySegments.push({
-                name: summary.primaryCategory,
-                color: groupColor,
-                count: 1
-            });
-        }
     }
 
-    return { categories, points, primarySegments };
+    points.sort((a, b) => {
+        if (a.groupOrder !== b.groupOrder) {
+            return a.groupOrder - b.groupOrder;
+        }
+        if (historicalBudgetLevel.value === 'secondary' && a.itemOrder !== b.itemOrder) {
+            return a.itemOrder - b.itemOrder;
+        }
+        if (a.primaryCategory !== b.primaryCategory) {
+            return a.primaryCategory.localeCompare(b.primaryCategory, 'zh-CN');
+        }
+        return a.category.localeCompare(b.category, 'zh-CN');
+    });
+
+    return { categories: points.map(p => p.category), points };
 });
 
 const historicalAmountAxisConfig = computed<{ max: number; interval: number }>(() => {
@@ -2121,7 +2009,7 @@ const historicalAverageExecutionRate = computed<number>(() => {
 });
 
 const historicalChartOptions = computed(() => {
-    const { categories, points, primarySegments } = historicalCategoryChartData.value;
+    const { categories, points } = historicalCategoryChartData.value;
     if (!categories.length) {
         return {};
     }
@@ -2137,7 +2025,7 @@ const historicalChartOptions = computed(() => {
             formatter: (params: CallbackDataParams | CallbackDataParams[]) => {
                 const currentParam = Array.isArray(params) ? params[0] : params;
                 const point = points[currentParam?.dataIndex || 0];
-                if (!point || point.isPlaceholder) {
+                if (!point) {
                     return '';
                 }
                 const categoryTitle = point.secondaryCategory
@@ -2175,10 +2063,12 @@ const historicalChartOptions = computed(() => {
                     fontSize: 11,
                     formatter: (value: string, index: number) => {
                         const point = points[index];
-                        if (!point || point.isPlaceholder) {
-                            return '';
+                        if (!point) {
+                            return value;
                         }
-                        return point.axisLabel || value;
+                        return historicalBudgetLevel.value === 'secondary' && point.primaryCategory
+                            ? `${point.primaryCategory}\n${value}`
+                            : value;
                     }
                 }
             },
@@ -2255,41 +2145,6 @@ const historicalChartOptions = computed(() => {
         ],
         series: [
             {
-                name: tt('Primary Category'),
-                type: 'pie',
-                radius: ['82%', '89%'],
-                center: ['50%', '46%'],
-                startAngle: 90,
-                clockwise: false,
-                silent: true,
-                z: 1,
-                label: {
-                    show: historicalBudgetLevel.value === 'secondary',
-                    position: 'outside',
-                    color: isDarkMode.value ? '#d0d0d0' : '#4f4f4f',
-                    fontSize: 11,
-                    formatter: '{b}'
-                },
-                labelLine: {
-                    show: historicalBudgetLevel.value === 'secondary',
-                    length: 8,
-                    length2: 10,
-                    lineStyle: {
-                        color: isDarkMode.value ? '#787878' : '#999'
-                    }
-                },
-                itemStyle: {
-                    borderWidth: 2,
-                    borderColor: isDarkMode.value ? '#121212' : '#fff'
-                },
-                tooltip: { show: false },
-                data: primarySegments.map(segment => ({
-                    name: segment.name,
-                    value: segment.count,
-                    itemStyle: { color: segment.color }
-                }))
-            },
-            {
                 name: tt('Budget Amount'),
                 type: 'bar',
                 coordinateSystem: 'polar',
@@ -2299,9 +2154,7 @@ const historicalChartOptions = computed(() => {
                 barGap: '-100%',
                 data: points.map(p => ({
                     value: p.budgetAmount,
-                    itemStyle: {
-                        color: p.isPlaceholder ? 'rgba(0,0,0,0)' : hexToRgba(p.color, 0.25)
-                    }
+                    itemStyle: { color: hexToRgba(p.color, 0.25) }
                 }))
             },
             {
@@ -2314,9 +2167,7 @@ const historicalChartOptions = computed(() => {
                 z: 2,
                 data: points.map(p => ({
                     value: p.spentAmount,
-                    itemStyle: {
-                        color: p.isPlaceholder ? 'rgba(0,0,0,0)' : p.color
-                    }
+                    itemStyle: { color: p.color }
                 }))
             },
             {
@@ -2329,8 +2180,7 @@ const historicalChartOptions = computed(() => {
                 symbolSize: 6,
                 lineStyle: { width: 2.5, color: accentColor },
                 itemStyle: { color: accentColor },
-                connectNulls: false,
-                data: points.map(p => (p.isPlaceholder ? null : p.executionRate))
+                data: points.map(p => p.executionRate)
             }
         ]
     };

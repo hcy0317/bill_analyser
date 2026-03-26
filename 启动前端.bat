@@ -7,18 +7,21 @@ echo.
 
 cd /d "%~dp0"
 
-REM 检查是否已经在运行
-netstat -ano | findstr "LISTENING" | findstr ":8081" >NUL
-if "%ERRORLEVEL%"=="0" (
-    echo [警告] 端口8081已被占用
-    echo 请先运行 停止服务器.bat
-    pause
-    exit /b 1
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo [启动] 使用 PowerShell Core 启动前端...
+    start "Bill Analyser Frontend" pwsh -ExecutionPolicy Bypass -NoExit -File "%~dp0start_frontend.ps1"
+) else (
+    where powershell >nul 2>&1
+    if %ERRORLEVEL%==0 (
+        echo [启动] 使用 Windows PowerShell 启动前端...
+        start "Bill Analyser Frontend" powershell -ExecutionPolicy Bypass -NoExit -File "%~dp0start_frontend.ps1"
+    ) else (
+        echo [错误] 未找到 PowerShell，请安装 PowerShell
+        pause
+        exit /b 1
+    )
 )
-
-REM 启动前端
-echo [启动] 正在启动前端服务器...
-start "Bill Analyser Frontend" powershell -ExecutionPolicy Bypass -NoExit -File "%~dp0start_frontend.ps1"
 
 REM 等待启动
 timeout /t 5 >NUL

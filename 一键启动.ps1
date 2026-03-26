@@ -23,9 +23,29 @@ function Write-Warn { param($msg) Write-Host $msg -ForegroundColor Yellow }
 function Write-Err { param($msg) Write-Host $msg -ForegroundColor Red }
 function Write-Gray { param($msg) Write-Host $msg -ForegroundColor Gray }
 
+function Get-PreferredShell {
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwshCmd) {
+        return $pwshCmd.Source
+    }
+
+    $powershellCmd = Get-Command powershell -ErrorAction SilentlyContinue
+    if ($powershellCmd) {
+        return $powershellCmd.Source
+    }
+
+    return $null
+}
+
 # 获取项目根目录
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
+$ShellExe = Get-PreferredShell
+
+if (-not $ShellExe) {
+    Write-Err "未找到 PowerShell 可执行文件（pwsh 或 powershell）"
+    exit 1
+}
 
 # 打印横幅
 Write-Host ""
@@ -146,15 +166,15 @@ if (-not $FrontendOnly) {
     $pythonPath = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
     if (-not (Test-Path $pythonPath)) {
         Write-Err "  ✗ 虚拟环境未找到！"
-        Write-Warn "  请运行: python -m venv .venv"
-        Write-Warn "  然后安装依赖: .\.venv\Scripts\pip install -r requirements.txt"
+        Write-Warn "  请运行: py -3.14 -m venv .venv"
+        Write-Warn "  然后安装依赖: .\.venv\Scripts\python.exe -m pip install -e ."
         exit 1
     }
     
     # 启动后端（在新窗口中）
     $backendScript = Join-Path $ProjectRoot "start_backend.ps1"
     if (Test-Path $backendScript) {
-        Start-Process powershell -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $backendScript -WindowStyle Normal
+        Start-Process $ShellExe -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $backendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
         Write-Gray "  后端服务器窗口已启动"
         
         # 等待后端就绪
@@ -197,7 +217,7 @@ if (-not $BackendOnly) {
     # 启动前端（在新窗口中）
     $frontendScript = Join-Path $ProjectRoot "start_frontend.ps1"
     if (Test-Path $frontendScript) {
-        Start-Process powershell -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WindowStyle Normal
+        Start-Process $ShellExe -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $frontendScript -WorkingDirectory $ProjectRoot -WindowStyle Normal
         Write-Gray "  前端服务器窗口已启动"
         
         # 等待前端就绪

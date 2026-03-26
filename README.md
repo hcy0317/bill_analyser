@@ -1,317 +1,259 @@
-# Bill Analyser 账单分析系统
+# Bill Analyser
 
-<p align="center">
-  <img src="src/web/public/img/bill_analyser-192.png" alt="Bill Analyser Logo" width="128" height="128">
-</p>
+Bill Analyser 是一个面向个人与家庭场景的账单分析系统，支持多来源账单导入、智能去重、自动分类、预算管理和统计分析。
 
-<p align="center">
-  <strong>多平台账单智能分析与管理系统</strong>
-</p>
+当前项目以 REST API + Vue 3 前端为主运行链，后端使用 Flask 路由桥接 async 服务，数据库使用 SQLite + aiosqlite。
 
-<p align="center">
-  <a href="#功能特性">功能特性</a> •
-  <a href="#快速开始">快速开始</a> •
-  <a href="#技术栈">技术栈</a> •
-  <a href="#项目结构">项目结构</a> •
-  <a href="#开发指南">开发指南</a>
-</p>
+## 当前状态
 
----
+- 后端入口：`src/bill_analyser/api/app.py`
+- 前端工程：`src/web`
+- 主运行链：`/api/...`
+- Python 要求：3.14+
+- 前端开发端口：`http://127.0.0.1:8081`
+- 后端开发端口：`http://127.0.0.1:5000`
 
-## 📋 功能特性
+## 核心能力
 
-### 账单管理
-- ✅ **多平台导入** - 支持微信、支付宝、工商银行、民生银行、建设银行、农业银行等账单导入
-- ✅ **智能去重** - 自动识别并处理重复账单（跨平台去重）
-- ✅ **智能分类** - 基于关键词的规则引擎，支持 OR/AND/NOT 复杂逻辑
-- ✅ **批量操作** - 批量导入、批量编辑、批量删除
+- 多来源账单导入：微信、支付宝、工商银行、农业银行、建设银行、民生银行等
+- 智能去重：转账配对、平台/银行重复、类似账单、分账单识别
+- 自动分类：支持关键词规则、类型过滤、批量重新分类
+- 账户管理：账户、标签、分类、模板、预算统一管理
+- 统计分析：分类统计、资产趋势、预算执行、汇率支持
+- 多端界面：桌面端和移动端共用同一后端 API
 
-### 预算管理
-- ✅ **预算设置** - 支持月度、季度、年度预算
-- ✅ **执行跟踪** - 实时预算执行率监控
-- ✅ **预警提醒** - 可配置的预算预警阈值
-- ✅ **层级预算** - 支持一级/二级分类预算
+## 技术栈
 
-### 统计分析
-- ✅ **多维度统计** - 按分类、时间、账户等多维度分析
-- ✅ **趋势图表** - ECharts 驱动的可视化图表
-- ✅ **资产走势** - 账户资产变化趋势分析
+### 后端
 
-### 多端支持
-- ✅ **桌面端** - Vuetify 响应式桌面界面
-- ✅ **移动端** - Framework7 移动端适配
-- ✅ **多用户** - 数据隔离的多用户支持
+- Python 3.14+
+- Flask
+- aiosqlite
+- pandas
+- PyJWT / bcrypt
 
----
+### 前端
 
-## 🚀 快速开始
+- Vue 3
+- TypeScript
+- Vite
+- Vuetify
+- Framework7
+- Pinia
+- ECharts
 
-### 环境要求
+### 数据与运行
 
-| 环境 | 版本要求 |
-|------|---------|
-| Python | 3.10+ |
-| Node.js | 18+ (推荐 20+) |
-| npm | 8+ |
+- SQLite（WAL 模式）
+- 本地日志输出到 `logs/`
+- 默认数据库位于 `data/`
 
-### 一键部署
+## 项目结构
 
-#### Windows
-
-```powershell
-# 1. 克隆项目
-git clone https://github.com/your-username/bill_analyser.git
-cd bill_analyser
-
-# 2. 运行安装脚本
-.\scripts\install.ps1
-
-# 3. 启动服务
-.\启动后端.bat    # 后端服务 (端口 5000)
-.\启动前端.bat    # 前端服务 (端口 8081)
+```text
+bill_analyser/
+├── src/
+│   ├── bill_analyser/
+│   │   ├── api/           # Flask 应用、路由、鉴权
+│   │   ├── core/          # 导入、去重、分类、数据库、统计
+│   │   ├── parsers/       # 各账单解析器
+│   │   └── utils/         # 日志、工具函数、常量
+│   └── web/               # Vue 3 + TypeScript 前端
+├── tests/                 # pytest 测试
+├── docs/                  # 项目文档
+├── config/                # 配置文件
+├── data/                  # 本地数据库与数据文件
+├── logs/                  # 运行日志
+├── uploads/               # 上传临时文件
+├── backup/                # 备份文件
+└── mcp-configs/           # MCP 配置与辅助资产
 ```
 
-#### 手动安装
+## 快速开始
 
-**后端安装:**
+### 1. 准备环境
+
+- Python 3.14+
+- Node.js 18+（建议 20+）
+- Windows PowerShell
+
+### 2. 安装后端依赖
 
 ```powershell
-# 创建虚拟环境
-python -m venv .venv
-
-# 激活虚拟环境 (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
-
-# 安装依赖
-pip install -r requirements.txt
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
 ```
 
-**前端安装:**
+### 3. 安装前端依赖
 
 ```powershell
-# 进入前端目录
 cd src\web
-
-# 安装依赖
 npm install
-
-# 返回项目根目录
 cd ..\..
 ```
 
-### 启动服务
+### 4. 启动服务
 
-**方式一：使用启动脚本（推荐）**
+推荐使用一键启动：
 
 ```powershell
-# Windows - 使用 bat 文件
-.\启动后端.bat    # 新窗口启动后端
-.\启动前端.bat    # 新窗口启动前端
+.\一键启动.ps1
+```
 
-# Windows - 使用 PowerShell 脚本
+也可以分别启动：
+
+```powershell
 .\start_backend.ps1
 .\start_frontend.ps1
 ```
 
-**方式二：手动启动**
+### 5. 访问地址
+
+- 前端：`http://127.0.0.1:8081`
+- 后端 API：`http://127.0.0.1:5000/api`
+- 健康检查：`http://127.0.0.1:5000/api/health`
+
+## 手动启动
+
+如果不使用脚本：
 
 ```powershell
-# 终端1 - 启动后端
-.\.venv\Scripts\python.exe src\api\app.py
+# 终端 1
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+.\.venv\Scripts\python.exe -m bill_analyser.api.app
 
-# 终端2 - 启动前端
+# 终端 2
 cd src\web
 npm run dev
 ```
 
-### 访问应用
-
-- **前端界面**: http://127.0.0.1:8081
-- **后端 API**: http://127.0.0.1:5000/api
-- **健康检查**: http://127.0.0.1:5000/api/health
-
----
-
-## 🛠 技术栈
-
-### 后端
-| 技术 | 说明 |
-|------|------|
-| Python 3.10+ | 主要开发语言 |
-| Flask 3.x | Web 框架 |
-| aiosqlite | 异步 SQLite 操作 |
-| Pandas | 数据处理 |
-| PyJWT | JWT 认证 |
-| bcrypt | 密码加密 |
-
-### 前端
-| 技术 | 说明 |
-|------|------|
-| Vue 3 | 前端框架 |
-| TypeScript | 类型安全 |
-| Vuetify 3 | UI 组件库 (桌面端) |
-| Framework7 | UI 组件库 (移动端) |
-| ECharts | 图表库 |
-| Pinia | 状态管理 |
-| Vue Router | 路由管理 |
-
-### 数据库
-| 技术 | 说明 |
-|------|------|
-| SQLite | 轻量级数据库 |
-| WAL 模式 | 并发读写优化 |
-
----
-
-## 📁 项目结构
-
-```
-bill_analyser/
-├── src/                          # 源代码
-│   ├── api/                      # Flask 后端
-│   │   ├── app.py               # 应用入口
-│   │   ├── routes/              # API 路由
-│   │   ├── adapters/            # 数据适配器
-│   │   └── middleware/          # 中间件
-│   ├── core/                     # 核心业务逻辑
-│   │   ├── db.py                # 数据库操作
-│   │   ├── bill_service.py      # 账单服务
-│   │   └── category_engine.py   # 分类引擎
-│   ├── parsers/                  # 账单解析器
-│   │   ├── wechat.py            # 微信解析
-│   │   ├── alipay.py            # 支付宝解析
-│   │   └── ...                  # 其他银行
-│   ├── utils/                    # 工具函数
-│   │   ├── logger.py            # 日志系统
-│   │   └── ...
-│   └── web/                      # Vue 前端
-│       ├── src/
-│       │   ├── views/           # 页面组件
-│       │   ├── components/      # 通用组件
-│       │   ├── stores/          # Pinia 状态
-│       │   ├── models/          # 数据模型
-│       │   └── locales/         # 国际化
-│       └── package.json
-├── config/                       # 配置文件
-├── data/                         # 数据文件 (SQLite)
-├── logs/                         # 日志文件
-├── tests/                        # 测试文件
-├── docs/                         # 文档
-├── requirements.txt              # Python 依赖
-├── start_backend.ps1             # 后端启动脚本
-├── start_frontend.ps1            # 前端启动脚本
-└── README.md                     # 项目说明
-```
-
----
-
-## 📖 开发指南
-
-### 代码规范
-
-- **Python**: 使用 Pylint 检查，目标评分 ≥ 9.0/10
-- **TypeScript**: 使用 ESLint + Vue TSC 检查
-- **提交信息**: 遵循 Conventional Commits 规范
-
-### 运行测试
+## 停止服务
 
 ```powershell
-# 激活虚拟环境
-.\.venv\Scripts\Activate.ps1
-
-# 运行所有测试
-python -m pytest tests/ -v --timeout=60
-
-# 运行特定测试
-python -m pytest tests/test_db.py -v
-
-# 生成覆盖率报告
-python -m pytest tests/ --cov=src --cov-report=html
+.\停止服务器.ps1
 ```
 
-### 代码检查
+不要使用：
 
 ```powershell
-# Python 代码检查
-python -m pylint src/core/*.py src/api/routes/*.py
+taskkill /f /im python.exe
+```
 
-# 前端代码检查
+这会杀掉机器上所有 Python 进程。
+
+## 常用开发命令
+
+### 后端测试
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+### Python 静态检查
+
+```powershell
+.\.venv\Scripts\python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py
+```
+
+### 前端检查
+
+```powershell
 cd src\web
 npm run lint
 ```
 
-### API 文档
+### 前端构建
 
-主要 API 端点:
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/bills/` | GET | 获取交易列表 |
-| `/api/accounts/` | GET | 获取账户列表 |
-| `/api/categories/` | GET | 获取分类列表 |
-| `/api/budgets/` | GET | 获取预算列表 |
-| `/api/statistics/category-statistics` | GET | 获取分类统计 |
-| `/api/statistics/exchange-rates` | GET | 获取最新汇率 |
-| `/api/health` | GET | 健康检查 |
-
-详细 API 文档请参考 `.github/copilot-instructions.md`
-
----
-
-## 🔧 配置说明
-
-### 环境变量
-
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `PYTHONPATH` | Python 模块路径 | 项目根目录 |
-| `FLASK_ENV` | Flask 环境 | `development` |
-| `BILL_ANALYSER_OPERATION_PASSWORD` | 敏感操作密码 | (未设置) |
-
-### 服务器配置
-
-配置文件: `config/server_config.json`
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 5000,
-  "debug": true
-}
+```powershell
+cd src\web
+npm run build
 ```
 
----
+## 导入与处理流程
 
-## 📝 更新日志
+当前账单导入主链为三阶段：
 
-### v6.29 (2025-11-28)
-- ✅ 多用户数据隔离
-- ✅ 深色主题支持
-- ✅ 预算管理优化
-- ✅ 标签系统完善
+1. 解析：识别账单来源并写入临时会话
+2. 去重预览：执行智能去重、分类匹配、账户匹配
+3. 确认导入：用户确认后写入正式账单表
 
-查看完整更新日志: [CHANGELOG.md](docs/CHANGELOG.md)
+核心模块：
 
----
+- `src/bill_analyser/core/bill_service.py`
+- `src/bill_analyser/core/smart_dedup.py`
+- `src/bill_analyser/core/category_engine.py`
 
-## 🤝 贡献指南
+## 重要开发约束
 
-1. Fork 本项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送分支 (`git push origin feature/AmazingFeature`)
-5. 提交 Pull Request
+### REST 优先
 
----
+当前运行态以 REST 为主，不应为新功能重新引入 `/api/v1/*` 作为主链。
 
-## 📄 许可证
+### 异步桥接
 
-本项目基于 MIT 许可证开源 - 查看 [LICENSE](LICENSE) 文件了解详情
+Flask 路由层保持同步入口，但核心服务和数据库访问必须保持 async。
 
----
+### 金额单位
 
-## 🙏 致谢
+- 后端核心通常以元存储
+- 前端和部分 API 交互常用分
+- 修改接口时必须显式确认元/分转换，不要靠隐式约定
 
-- [ezbookkeeping](https://github.com/mayswind/ezbookkeeping) - 前端架构参考
-- [Vue.js](https://vuejs.org/) - 前端框架
-- [Flask](https://flask.palletsprojects.com/) - 后端框架
+## 前端构建产物说明
+
+`src/web/dist` 是 Vite + PWA 构建输出，包含：
+
+- 多入口 HTML
+- hashed JS/CSS 资源
+- `sw.js`
+- `manifest.json`
+- `workbox-*`
+
+这些文件属于部署产物，不是手工维护源码。仓库会额外排除明显的调试文件，例如 `axios-test.html`、`debug-token.html`。
+
+## AI 与仓库自动化资产
+
+以下目录属于仓库级 AI / agent 配置资产，应纳入版本控制：
+
+- `.github/`
+- `.cursor/`
+- `.claude/`
+- `.agents/`
+- `mcp-configs/`
+
+这些目录保存了 agent、skills、rules、commands、prompts 和 MCP 配置，不应被当作本地缓存或垃圾文件处理。
+
+## 常见问题
+
+### 端口被占用
+
+先运行：
+
+```powershell
+.\停止服务器.ps1
+```
+
+再重新启动。
+
+### 数据库锁定
+
+停止所有后端实例和测试进程后重试，避免多个进程同时写 SQLite。
+
+### 导入结果不符合预期
+
+优先检查：
+
+- 对应解析器是否识别正确
+- 分类规则是否匹配到正确类型
+- 账户别名是否完整
+- 金额元/分转换是否一致
+
+## 参考文档
+
+- 项目总览：`docs/PROJECT_OVERVIEW.md`
+- Agent 入口：`AGENTS.md`
+- Copilot 约束：`.github/copilot-instructions.md`
+
+## 许可证
+
+MIT

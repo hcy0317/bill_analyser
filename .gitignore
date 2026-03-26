@@ -1,10 +1,21 @@
-# Bill Analyser - Git Ignore Configuration
-# ==========================================
+# Bill Analyser
+# Keep source, docs, and repository automation assets versioned.
 
-# ============================================
+# Repository automation and documentation assets
+!docs/
+!docs/**
+!.github/
+!.github/**
+!.cursor/
+!.cursor/**
+!.claude/
+!.claude/**
+!.agents/
+!.agents/**
+!mcp-configs/
+!mcp-configs/**
+
 # Python
-# ============================================
-
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,24 +45,16 @@ env/
 env.bak/
 venv.bak/
 
-# ============================================
 # Node.js
-# ============================================
-
-# Dependencies
 node_modules/
 */node_modules/
-
-# Build outputs (keep dist/ for production)
 .vite/
 
-# ============================================
-# IDE and Editors
-# ============================================
-
+# IDE and editors
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json.example
+!.vscode/mcp.json
 .idea/
 *.swp
 *.swo
@@ -59,17 +62,11 @@ node_modules/
 *.sublime-project
 *.sublime-workspace
 
-# ============================================
-# Operating System
-# ============================================
-
-# macOS
+# Operating system junk
 .DS_Store
 .AppleDouble
 .LSOverride
 ._*
-
-# Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
@@ -81,44 +78,25 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 
-# ============================================
-# Project Data Files
-# ============================================
-
-# Database files
+# Runtime data and local user data
 data/
+uploads/
+bills/
+output/
+backup/
+logs/
+src/web/output/
+*.log
+*.log.*
 *.db
 *.db-wal
 *.db-shm
 *.sqlite
 *.sqlite3
-
-# User uploaded files
-uploads/
-
-# Bill files (user data)
-bills/
-
-# Output files
-output/
-
-# Backup files
-backup/
 *.bak
 *.backup
 
-# ============================================
-# Logs
-# ============================================
-
-logs/
-*.log
-*.log.*
-
-# ============================================
-# Testing
-# ============================================
-
+# Test, coverage, and lint caches
 .pytest_cache/
 htmlcov/
 .tox/
@@ -132,31 +110,15 @@ coverage.xml
 *.py,cover
 .hypothesis/
 
-# ============================================
-# Build and Distribution
-# ============================================
-
-*.manifest
-*.spec
-release/
-
-# ============================================
-# Temporary Files
-# ============================================
-
+# Temporary files
 temp/
 tmp/
 *.tmp
 *.temp
 *.cache
-docs/
-.github/
-tests/
-# ============================================
-# Sensitive Configuration
-# ============================================
+tmp_*.py
 
-# Private config files
+# Sensitive local configuration
 config/*_private.json
 config/*_secret.json
 config/user_*.json
@@ -164,32 +126,29 @@ config/user_*.json
 .env.local
 .env.*.local
 
-# ============================================
-# Documentation Build
-# ============================================
-
+# Documentation build output
 docs/_build/
 docs/build/
 site/
 
-# ============================================
-# Archives
-# ============================================
-
+# Archives and profiling artifacts
 *.zip
 *.tar.gz
 *.rar
 *.7z
-
-# ============================================
-# Misc
-# ============================================
-
+*.manifest
+*.spec
+release/
 *.prof
 .matplotlib/
-poetry.lock
-Pipfile.lock
 
-# Third party reference code
+# Frontend build leftovers
+src/web/build_check.log
+src/web/dist/axios-test.html
+src/web/dist/debug-*.html
+src/web/dist/*.map
+src/web/dist/**/*.map
+
+# Third-party reference snapshot
 ezbookkeeping/
 .vscodecounter/

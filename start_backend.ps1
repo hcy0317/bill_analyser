@@ -2,36 +2,47 @@
 # Bill Analyser System
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  Bill Analyser - Backend Server" -ForegroundColor Cyan  
+Write-Host "  Bill Analyser - Backend Server" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Get project root directory
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SrcRoot = Join-Path $ProjectRoot "src"
+$BackendEntry = Join-Path $ProjectRoot "src\bill_analyser\api\app.py"
+$PythonExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+
 Set-Location $ProjectRoot
 
-# Check virtual environment
-if (-not (Test-Path ".venv\Scripts\python.exe")) {
+if (-not (Test-Path $PythonExe)) {
     Write-Host "Error: Virtual environment not found" -ForegroundColor Red
-    Write-Host "Please run: python -m venv .venv" -ForegroundColor Yellow
-    Write-Host "Then install dependencies: .\.venv\Scripts\pip install -r requirements.txt" -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
+    Write-Host "Please run: py -3.14 -m venv .venv" -ForegroundColor Yellow
+    Write-Host "Then install dependencies: .\.venv\Scripts\python.exe -m pip install -e ." -ForegroundColor Yellow
     exit 1
 }
 
-# Check Flask dependency
-Write-Host "Checking Flask..." -ForegroundColor Yellow
-.\.venv\Scripts\pip show Flask >$null 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Installing Flask..." -ForegroundColor Yellow
-    .\.venv\Scripts\pip install Flask Flask-CORS -q
+if (-not (Test-Path $BackendEntry)) {
+    Write-Host "Error: Backend entry not found: $BackendEntry" -ForegroundColor Red
+    exit 1
 }
 
-# Set PYTHONPATH to project root
-$env:PYTHONPATH = $ProjectRoot
-Write-Host "PYTHONPATH set to: $ProjectRoot" -ForegroundColor Gray
+$pythonVersion = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error: Failed to inspect Python version" -ForegroundColor Red
+    exit 1
+}
 
-# Start server
+if ([version]$pythonVersion -lt [version]"3.14") {
+    Write-Host "Error: Python 3.14+ is required, current version is $pythonVersion" -ForegroundColor Red
+    Write-Host "Please recreate the virtual environment with Python 3.14." -ForegroundColor Yellow
+    exit 1
+}
+
+$env:PYTHONPATH = $SrcRoot
+
+Write-Host "Python: $PythonExe" -ForegroundColor Gray
+Write-Host "PYTHONPATH: $SrcRoot" -ForegroundColor Gray
+Write-Host "Command: .\.venv\Scripts\python.exe -m bill_analyser.api.app" -ForegroundColor Gray
+Write-Host ""
 Write-Host "Starting backend server..." -ForegroundColor Green
 Write-Host "Listening on: http://127.0.0.1:5000" -ForegroundColor Cyan
 Write-Host "Health check: http://127.0.0.1:5000/api/health" -ForegroundColor Cyan
@@ -39,4 +50,4 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop server" -ForegroundColor Yellow
 Write-Host ""
 
-.\.venv\Scripts\python.exe src\api\app.py
+& $PythonExe -m bill_analyser.api.app
