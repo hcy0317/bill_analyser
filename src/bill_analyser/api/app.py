@@ -6,10 +6,11 @@ Flask Web API Server - 账单分析系统Web API服务器
 
 import asyncio
 import sys
-from pathlib import Path
 
 from flask import Flask
 from flask_cors import CORS
+
+from bill_analyser.constants import PROJECT_ROOT
 
 # 验证Python解释器路径
 print(f"\n{'=' * 60}")
@@ -20,12 +21,9 @@ if ".venv" in sys.executable or "venv" in sys.executable:
 else:
     print("[WARN] 未使用虚拟环境!")
     print(f"当前路径: {sys.executable}")
-    print(f"应该使用: {Path(__file__).parent.parent.parent / '.venv' / 'Scripts' / 'python.exe'}")
+    print(f"应该使用: {PROJECT_ROOT / '.venv' / 'Scripts' / 'python.exe'}")
 print(f"{'=' * 60}\n")
 
-# 添加项目根目录到路径
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 # pylint: disable=wrong-import-position,import-error
 # 导入蓝图
@@ -208,7 +206,7 @@ async def create_default_admin_user(database: Database):
 
     import bcrypt  # pylint: disable=import-outside-toplevel
 
-    config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+    config_path = PROJECT_ROOT / "config" / "server_config.json"
 
     try:
         with open(config_path, encoding="utf-8") as f:

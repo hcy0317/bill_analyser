@@ -6,8 +6,11 @@ Report Module - 报告导出模块
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
 import matplotlib
+
+from bill_analyser.constants import PROJECT_ROOT
 
 matplotlib.use("Agg")  # 使用非交互式后端
 import matplotlib.pyplot as plt
@@ -19,7 +22,7 @@ from ..utils.logger import get_logger, log_method, log_step
 class ReportGenerator:
     """报告生成器"""
 
-    def __init__(self, output_dir: Optional[str] = None):
+    def __init__(self, output_dir: str | None = None):
         """初始化"""
         self.logger = get_logger("ReportGenerator")
 
@@ -27,7 +30,7 @@ class ReportGenerator:
             self.output_dir = Path(output_dir)
         else:
             # 输出目录指向项目根目录的 output 文件夹
-            self.output_dir = Path(__file__).parent.parent.parent / "output"
+            self.output_dir = PROJECT_ROOT / "output"
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -42,7 +45,7 @@ class ReportGenerator:
 
     @log_method
     @log_step("生成收支趋势图")
-    def _generate_trend_chart(self, data: Dict[str, Any], ax):
+    def _generate_trend_chart(self, data: dict[str, Any], ax):
         """生成趋势图"""
         trend = data.get("trend", [])
         if not trend:
@@ -65,7 +68,7 @@ class ReportGenerator:
 
     @log_method
     @log_step("生成分类饼图")
-    def _generate_category_pie(self, data: Dict[str, Any], ax):
+    def _generate_category_pie(self, data: dict[str, Any], ax):
         """生成分类饼图"""
         by_category = data.get("by_category", {})
         if not by_category:
@@ -80,7 +83,7 @@ class ReportGenerator:
 
     @log_method
     @log_step("生成类型对比图")
-    def _generate_type_bar(self, data: Dict[str, Any], ax):
+    def _generate_type_bar(self, data: dict[str, Any], ax):
         """生成类型对比柱状图"""
         by_type = data.get("by_type", {})
         if not by_type:
@@ -109,9 +112,7 @@ class ReportGenerator:
 
     @log_method
     @log_step("导出报告")
-    async def export_report(
-        self, data: Dict[str, Any], format_type: str = "pdf", filename: Optional[str] = None
-    ) -> str:
+    async def export_report(self, data: dict[str, Any], format_type: str = "pdf", filename: str | None = None) -> str:
         """
         导出报告
 
@@ -137,7 +138,7 @@ class ReportGenerator:
             self.logger.error("不支持的格式: %s", format_type)
             raise ValueError(f"不支持的格式: {format_type}")
 
-    async def _export_pdf(self, data: Dict[str, Any], filename: str) -> str:
+    async def _export_pdf(self, data: dict[str, Any], filename: str) -> str:
         """导出为PDF"""
         output_path = self.output_dir / f"{filename}.pdf"
 
@@ -176,7 +177,7 @@ class ReportGenerator:
         self.logger.info("PDF报告已生成: %s", output_path)
         return str(output_path)
 
-    async def _export_excel(self, data: Dict[str, Any], filename: str) -> str:
+    async def _export_excel(self, data: dict[str, Any], filename: str) -> str:
         """导出为Excel"""
         output_path = self.output_dir / f"{filename}.xlsx"
 
@@ -203,7 +204,7 @@ class ReportGenerator:
         self.logger.info("Excel报告已生成: %s", output_path)
         return str(output_path)
 
-    async def _export_html(self, data: Dict[str, Any], filename: str) -> str:
+    async def _export_html(self, data: dict[str, Any], filename: str) -> str:
         """导出为HTML"""
         output_path = self.output_dir / f"{filename}.html"
 

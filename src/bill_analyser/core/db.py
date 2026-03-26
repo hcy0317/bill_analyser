@@ -15,6 +15,8 @@ from typing import Any
 
 import aiosqlite
 
+from bill_analyser.constants import PROJECT_ROOT
+
 from ..utils.logger import get_logger, log_method, log_step
 
 
@@ -34,7 +36,7 @@ class Database:
             self.db_path = Path(db_path)
         else:
             # 数据库路径指向项目根目录的 data 文件夹
-            self.db_path = Path(__file__).parent.parent.parent / "data" / "bills.db"
+            self.db_path = PROJECT_ROOT / "data" / "bills.db"
 
         # 确保数据目录存在
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

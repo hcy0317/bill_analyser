@@ -12,6 +12,7 @@ from functools import wraps
 import jwt
 from flask import jsonify, request
 
+from bill_analyser.constants import PROJECT_ROOT
 from bill_analyser.utils.logger import get_logger, log_method
 
 logger = get_logger("AuthMiddleware")
@@ -19,9 +20,8 @@ logger = get_logger("AuthMiddleware")
 
 def get_auth_config():
     """获取认证配置"""
-    from pathlib import Path
 
-    config_path = Path(__file__).parent.parent.parent.parent / "config" / "server_config.json"
+    config_path = PROJECT_ROOT / "config" / "server_config.json"
 
     try:
         with open(config_path, encoding="utf-8") as f:

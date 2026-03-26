@@ -12,16 +12,17 @@ v6.47 更新：
 
 import asyncio
 import atexit
+import functools
+import inspect
 import logging
-import threading
 import queue
 import sys
+import threading
 from datetime import datetime, timedelta
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
-from typing import Optional
-import functools
-import inspect
+
+from bill_analyser.constants import PROJECT_ROOT
 
 
 class SafeStreamHandler(logging.StreamHandler):
@@ -121,7 +122,7 @@ class AsyncLogger:
 
     def __init__(self):
         """初始化日志管理器"""
-        self.log_dir = Path(__file__).parent.parent.parent / "logs"
+        self.log_dir = PROJECT_ROOT / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._stopped = False
 
@@ -211,7 +212,7 @@ class AsyncLogger:
         except Exception as e:
             self.logger.error(f"清理日志目录失败: {e}")
 
-    def get_logger(self, name: Optional[str] = None) -> logging.Logger:
+    def get_logger(self, name: str | None = None) -> logging.Logger:
         """获取日志器"""
         if name:
             return logging.getLogger(f"bill_analyser.{name}")
@@ -268,7 +269,7 @@ atexit.register(_shutdown_async_logger)
 LOG_METHOD_VERBOSE = False
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     获取日志器
 
@@ -347,7 +348,7 @@ def log_method(func):
             return result
         except Exception as e:
             # 记录异常
-            logger.error(f"方法异常 | 错误: {type(e).__name__}: {str(e)}")
+            logger.error(f"方法异常 | 错误: {type(e).__name__}: {e!s}")
             raise
 
     @functools.wraps(func)
@@ -410,7 +411,7 @@ def log_method(func):
             return result
         except Exception as e:
             # 记录异常
-            logger.error(f"方法异常 | 错误: {type(e).__name__}: {str(e)}")
+            logger.error(f"方法异常 | 错误: {type(e).__name__}: {e!s}")
             raise
 
     # 判断是否为异步函数
@@ -441,7 +442,7 @@ def log_step(step_name: str):
                 logger.info(f"完成步骤: {step_name}")
                 return result
             except Exception as e:
-                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {str(e)}")
+                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {e!s}")
                 raise
 
         @functools.wraps(func)
@@ -457,7 +458,7 @@ def log_step(step_name: str):
                 logger.info(f"完成步骤: {step_name}")
                 return result
             except Exception as e:
-                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {str(e)}")
+                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {e!s}")
                 raise
 
         if asyncio.iscoroutinefunction(func):

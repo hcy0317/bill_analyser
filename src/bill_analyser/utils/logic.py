@@ -10,15 +10,7 @@ Enhanced Logic Parser - 增强的逻辑表达式解析器
 
 import re
 
-try:
-    from .logger import get_logger
-except ImportError:
-    # 测试时使用
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from bill_analyser.utils.logger import get_logger
+from bill_analyser.utils.logger import get_logger
 
 
 class EnhancedLogicParser:

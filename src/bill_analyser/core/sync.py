@@ -10,7 +10,8 @@ import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
+from bill_analyser.constants import PROJECT_ROOT
 
 from ..utils.logger import get_logger, log_method, log_step
 
@@ -22,10 +23,10 @@ class SyncManager:
         """初始化"""
         self.logger = get_logger("SyncManager")
         # 数据目录和备份目录都指向项目根目录
-        self.data_dir = Path(__file__).parent.parent.parent / "data"
-        self.backup_dir = Path(__file__).parent.parent.parent / "backup"
+        self.data_dir = PROJECT_ROOT / "data"
+        self.backup_dir = PROJECT_ROOT / "backup"
         self.backup_dir.mkdir(parents=True, exist_ok=True)
-        self._last_backup_hash: Optional[str] = None
+        self._last_backup_hash: str | None = None
 
     def _calculate_directory_hash(self, directory: Path) -> str:
         """
@@ -49,7 +50,7 @@ class SyncManager:
 
     @log_method
     @log_step("本地备份")
-    async def backup_local(self) -> Optional[str]:
+    async def backup_local(self) -> str | None:
         """
         备份数据到本地
 

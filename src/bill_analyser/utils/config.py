@@ -8,9 +8,12 @@ import asyncio
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
+from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+
+from bill_analyser.constants import PROJECT_ROOT
 
 from .logger import get_logger, log_method
 
@@ -54,22 +57,22 @@ class ConfigManager:
         self._initialized = True
         self.logger = get_logger("ConfigManager")
         # 配置目录指向项目根目录的 config 文件夹
-        self.config_dir = Path(__file__).parent.parent.parent / "config"
+        self.config_dir = PROJECT_ROOT / "config"
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         # 配置缓存
-        self._cache: Dict[str, Dict[str, Any]] = {}
-        self._cache_timestamps: Dict[str, float] = {}
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._cache_timestamps: dict[str, float] = {}
         self._cache_lock = threading.RLock()
 
         # 文件监听器
-        self._observer: Optional[Observer] = None
+        self._observer: Observer | None = None
         self._auto_reload_enabled = False
 
         self.logger.info("配置管理器初始化完成")
 
     @log_method
-    def load_config(self, filename: str, use_cache: bool = True) -> Dict[str, Any]:
+    def load_config(self, filename: str, use_cache: bool = True) -> dict[str, Any]:
         """
         加载配置文件
 
@@ -96,7 +99,7 @@ class ConfigManager:
             # 加载配置文件
             try:
                 self.logger.info(f"加载配置文件: {filename}")
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     config = json.load(f)
 
                 # 更新缓存
@@ -117,7 +120,7 @@ class ConfigManager:
                 return {}
 
     @log_method
-    async def async_load_config(self, filename: str, use_cache: bool = True) -> Dict[str, Any]:
+    async def async_load_config(self, filename: str, use_cache: bool = True) -> dict[str, Any]:
         """
         异步加载配置文件
 
@@ -132,7 +135,7 @@ class ConfigManager:
         return await loop.run_in_executor(None, self.load_config, filename, use_cache)
 
     @log_method
-    def save_config(self, filename: str, config: Dict[str, Any]) -> bool:
+    def save_config(self, filename: str, config: dict[str, Any]) -> bool:
         """
         保存配置文件
 
@@ -169,7 +172,7 @@ class ConfigManager:
             return False
 
     @log_method
-    async def async_save_config(self, filename: str, config: Dict[str, Any]) -> bool:
+    async def async_save_config(self, filename: str, config: dict[str, Any]) -> bool:
         """
         异步保存配置文件
 
@@ -267,7 +270,7 @@ class ConfigManager:
 _config_manager = ConfigManager()
 
 
-def get_config(filename: str, use_cache: bool = True) -> Dict[str, Any]:
+def get_config(filename: str, use_cache: bool = True) -> dict[str, Any]:
     """
     获取配置
 
@@ -281,7 +284,7 @@ def get_config(filename: str, use_cache: bool = True) -> Dict[str, Any]:
     return _config_manager.load_config(filename, use_cache)
 
 
-async def async_get_config(filename: str, use_cache: bool = True) -> Dict[str, Any]:
+async def async_get_config(filename: str, use_cache: bool = True) -> dict[str, Any]:
     """
     异步获取配置
 
@@ -295,7 +298,7 @@ async def async_get_config(filename: str, use_cache: bool = True) -> Dict[str, A
     return await _config_manager.async_load_config(filename, use_cache)
 
 
-def save_config(filename: str, config: Dict[str, Any]) -> bool:
+def save_config(filename: str, config: dict[str, Any]) -> bool:
     """
     保存配置
 
@@ -309,7 +312,7 @@ def save_config(filename: str, config: Dict[str, Any]) -> bool:
     return _config_manager.save_config(filename, config)
 
 
-async def async_save_config(filename: str, config: Dict[str, Any]) -> bool:
+async def async_save_config(filename: str, config: dict[str, Any]) -> bool:
     """
     异步保存配置
 

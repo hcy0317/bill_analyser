@@ -20,6 +20,8 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
+from bill_analyser.constants import PROJECT_ROOT
+
 try:
     import openpyxl
 except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
@@ -37,7 +39,7 @@ logger = get_logger("BillsAPI")
 bp = Blueprint("bills", __name__)
 
 # 上传文件配置 - 指向项目根目录的 uploads 文件夹
-UPLOAD_FOLDER = Path(__file__).parent.parent.parent.parent / "uploads"
+UPLOAD_FOLDER = PROJECT_ROOT / "uploads"
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "txt"}
 ALLOWED_PICTURE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB

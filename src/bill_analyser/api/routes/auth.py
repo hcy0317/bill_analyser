@@ -13,7 +13,6 @@ import json
 import mimetypes
 import secrets
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import bcrypt
@@ -24,6 +23,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from bill_analyser import __version__
 from bill_analyser.api.middleware.auth import require_auth
+from bill_analyser.constants import PROJECT_ROOT
 from bill_analyser.core.investment_settings import (
     build_user_investment_keyword_settings,
     serialize_keyword_list,
@@ -76,7 +76,7 @@ TWO_FACTOR_RECOVERY_CODES: dict[int, list[str]] = {}
 
 def load_auth_config():
     """加载认证配置"""
-    config_path = Path(__file__).parent.parent.parent.parent / "config" / "server_config.json"
+    config_path = PROJECT_ROOT / "config" / "server_config.json"
 
     try:
         with open(config_path, encoding="utf-8") as f:
