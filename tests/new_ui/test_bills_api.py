@@ -86,6 +86,31 @@ def _ensure_test_expense_category(client, auth_headers):
     return create_response.get_json()['result']
 
 
+def _build_isolated_auth_headers(client, prefix: str) -> dict[str, str]:
+    """为易受共享状态影响的用例创建独立用户。"""
+    username = f'{prefix}_{int(time.time() * 1000)}'
+    password = 'Test123456!'
+
+    register_response = client.post('/api/auth/register', json={
+        'username': username,
+        'email': f'{username}@example.com',
+        'password': password,
+        'nickname': username,
+    })
+    assert register_response.status_code in (200, 201, 409), register_response.get_data(as_text=True)
+
+    login_response = client.post('/api/auth/login', json={
+        'loginName': username,
+        'password': password,
+    })
+    assert login_response.status_code == 200, login_response.get_data(as_text=True)
+
+    result = (login_response.get_json() or {}).get('result') or {}
+    token = result.get('token')
+    assert token, login_response.get_data(as_text=True)
+    return {'Authorization': f'Bearer {token}'}
+
+
 def _create_test_recurring_template(client, auth_headers, *, name, account_id, category_id,
                                     amount_cents, start_date, frequency_type, frequency):
     """创建测试用定时交易模板。"""
@@ -572,6 +597,56 @@ class TestBillsAPI:
         assert second_item['sourceAmount'] == 8800
         assert second_item['comment'] == '基金买入'
 
+    def test_parse_import_with_column_mapping_detects_header_row_after_preamble(self, client, auth_headers):
+        """测试通用表格列映射导入可自动跳过前置说明行并识别真正表头。"""
+        csv_content = (
+            '账单导出说明,,,,,\n'
+            '统计周期,2025-01-01 至 2025-01-31,,,,\n'
+            '交易时间,交易类型,金额,账户,分类,备注\n'
+            '2025-01-01 08:30:00,支出,12.34,支付宝,餐饮,早餐\n'
+            '2025-01-02 10:00:00,收入,88.00,农业银行,工资,工资发放\n'
+        ).encode('utf-8')
+
+        response = client.post(
+            '/api/bills/parse_import',
+            data={
+                'fileType': 'csv',
+                'columnMapping': json.dumps({
+                    '1': 0,
+                    '3': 1,
+                    '4': 4,
+                    '6': 3,
+                    '8': 2,
+                    '14': 5
+                }),
+                'transactionTypeMapping': json.dumps({
+                    '支出': 3,
+                    '收入': 2
+                }),
+                'hasHeaderLine': 'true',
+                'timeFormat': '%Y-%m-%d %H:%M:%S',
+                'amountDecimalSeparator': '.',
+                'tagSeparator': ';',
+                'delimiter': ',',
+                'file': (BytesIO(csv_content), 'pytest_import_with_preamble.csv')
+            },
+            headers=auth_headers,
+            content_type='multipart/form-data'
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['result']['totalCount'] == 2
+        first_item = data['result']['items'][0]
+        second_item = data['result']['items'][1]
+        assert first_item['type'] == 3
+        assert first_item['sourceAmount'] == 1234
+        assert first_item['comment'] == '早餐'
+        assert second_item['type'] == 2
+        assert second_item['sourceAmount'] == 8800
+        assert second_item['comment'] == '工资发放'
+
     def test_suggest_import_config_with_headers(self, client, auth_headers):
         """测试基于表头和样本行自动建议列映射。"""
         response = client.post('/api/bills/import/configs/suggest', json={
@@ -679,6 +754,35 @@ class TestBillsAPI:
         assert len(result['sampleData']) >= 3
         assert result['sampleData'][1][0] == '2025-01-01 08:30:00'
 
+    def test_preview_import_file_auto_detects_header_row_after_preamble(self, client, auth_headers):
+        """测试预览接口会自动跳过说明区并返回真正表头。"""
+        csv_content = (
+            '账单导出说明,,,,,\n'
+            '统计周期,2025-01-01 至 2025-01-31,,,,\n'
+            '交易时间,交易类型,金额,账户,分类,备注\n'
+            '2025-01-01 08:30:00,支出,12.34,支付宝,餐饮,早餐\n'
+            '2025-01-02 10:00:00,收入,88.00,农业银行,工资,工资发放\n'
+        ).encode('utf-8')
+
+        response = client.post(
+            '/api/bills/import/preview',
+            data={
+                'delimiter': ',',
+                'file': (BytesIO(csv_content), 'pytest_preview_with_preamble.csv')
+            },
+            headers=auth_headers,
+            content_type='multipart/form-data'
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        result = data['result']
+        assert result['headers'] == ['交易时间', '交易类型', '金额', '账户', '分类', '备注']
+        assert result['totalRows'] == 2
+        assert result['sampleData'][0] == ['交易时间', '交易类型', '金额', '账户', '分类', '备注']
+        assert result['sampleData'][1][0] == '2025-01-01 08:30:00'
+
     def test_get_bills_default(self, client, auth_headers):
         """测试获取账单列表（默认参数）"""
         response = client.get('/api/bills/', headers=auth_headers)
@@ -704,7 +808,7 @@ class TestBillsAPI:
         items = data['result']['items']
         if items:
             for item in items:
-                assert item.get('type') == '支出'
+                assert item.get('type') == 3
 
     def test_get_bills_pagination(self, client, auth_headers):
         """测试分页功能"""
@@ -1060,30 +1164,34 @@ class TestBillsAPI:
 
     def test_import_preview_auto_links_recurring_match(self, client, auth_headers):
         """测试三阶段导入预览会自动附带定时账单匹配结果，并在确认导入时写入正式账单。"""
-        current_user_id = _get_current_user_id(client, auth_headers)
-        source_account = _ensure_test_account(client, auth_headers)
-        category = _ensure_test_expense_category(client, auth_headers)
-        bill_comment = f'pytest recurring import preview bill {int(time.time() * 1000)}'
+        isolated_auth_headers = _build_isolated_auth_headers(client, 'test_bills_api_recurring_auto')
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        source_account = _ensure_test_account(client, isolated_auth_headers)
+        category = _ensure_test_expense_category(client, isolated_auth_headers)
+        unique_suffix = int(time.time() * 1000)
+        recurring_amount_cents = 5097
+        bill_comment = f'pytest recurring import preview bill {unique_suffix}'
+        recurring_counterparty = f'pytest landlord {unique_suffix}'
 
         recurring = _create_test_recurring_template(
             client,
-            auth_headers,
-            name='pytest导入定时宽表匹配',
+            isolated_auth_headers,
+            name=f'pytest导入定时宽表匹配-{unique_suffix}',
             account_id=source_account['id'],
             category_id=category['id'],
-            amount_cents=5000,
+            amount_cents=recurring_amount_cents,
             start_date='2026-03-01',
             frequency_type=2,
             frequency='8'
         )
 
-        session_id = f'pytest-import-recurring-{int(time.time())}'
+        session_id = f'pytest-import-recurring-{unique_suffix}'
         parser_bills = [{
             'date': '2026-03-08 09:00:00',
-            'amount': -50.0,
+            'amount': -(recurring_amount_cents / 100.0),
             'type': '支出',
             'description': bill_comment,
-            'counterparty': 'pytest landlord',
+            'counterparty': recurring_counterparty,
             'payment_method': 'pytest recurring account',
             'source_account_id': source_account['id']
         }]
@@ -1093,7 +1201,7 @@ class TestBillsAPI:
             '/api/bills/import/v2/dedup',
             data=json.dumps({'session_id': session_id}),
             content_type='application/json',
-            headers=auth_headers
+            headers=isolated_auth_headers
         )
         assert dedup_response.status_code == 200
 
@@ -1104,7 +1212,7 @@ class TestBillsAPI:
         preview_item = preview_items[0]
         assert str(preview_item['preview_recurring_id']) == str(recurring['id'])
         assert preview_item['preview_recurring_candidate_count'] >= 1
-        assert preview_item['preview_recurring_name'] == 'pytest导入定时宽表匹配'
+        assert preview_item['preview_recurring_name'] == f'pytest导入定时宽表匹配-{unique_suffix}'
         assert 'schedule' in str(preview_item['preview_recurring_match_reasons'])
 
         confirm_response = client.post(
@@ -1118,7 +1226,7 @@ class TestBillsAPI:
                 }]
             }),
             content_type='application/json',
-            headers=auth_headers
+            headers=isolated_auth_headers
         )
         assert confirm_response.status_code == 200
         confirm_data = confirm_response.get_json()
@@ -1134,14 +1242,15 @@ class TestBillsAPI:
 
     def test_import_preview_recurring_candidates_and_clear_match(self, client, auth_headers):
         """测试导入预览可查询多个定时候选，并可在确认导入前清除定时匹配。"""
-        current_user_id = _get_current_user_id(client, auth_headers)
-        source_account = _ensure_test_account(client, auth_headers)
-        category = _ensure_test_expense_category(client, auth_headers)
+        isolated_auth_headers = _build_isolated_auth_headers(client, 'test_bills_api_recurring_preview')
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        source_account = _ensure_test_account(client, isolated_auth_headers)
+        category = _ensure_test_expense_category(client, isolated_auth_headers)
         bill_comment = f'pytest recurring import preview clear bill {int(time.time() * 1000)}'
 
         recurring_one = _create_test_recurring_template(
             client,
-            auth_headers,
+            isolated_auth_headers,
             name='pytest预览定时候选一',
             account_id=source_account['id'],
             category_id=category['id'],
@@ -1152,7 +1261,7 @@ class TestBillsAPI:
         )
         recurring_two = _create_test_recurring_template(
             client,
-            auth_headers,
+            isolated_auth_headers,
             name='pytest预览定时候选二',
             account_id=source_account['id'],
             category_id=category['id'],
@@ -1178,7 +1287,7 @@ class TestBillsAPI:
             '/api/bills/import/v2/dedup',
             data=json.dumps({'session_id': session_id}),
             content_type='application/json',
-            headers=auth_headers
+            headers=isolated_auth_headers
         )
         assert dedup_response.status_code == 200
 
@@ -1188,7 +1297,7 @@ class TestBillsAPI:
 
         candidates_response = client.get(
             f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-candidates?toleranceDays=3",
-            headers=auth_headers
+            headers=isolated_auth_headers
         )
         assert candidates_response.status_code == 200
         candidates_data = candidates_response.get_json()
@@ -1216,7 +1325,7 @@ class TestBillsAPI:
                 }]
             }),
             content_type='application/json',
-            headers=auth_headers
+            headers=isolated_auth_headers
         )
         assert confirm_response.status_code == 200
         confirm_data = confirm_response.get_json()

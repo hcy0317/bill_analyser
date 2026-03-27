@@ -32,6 +32,24 @@ class CCBParser(ParserBase):
         self.supported_extensions = [".xlsx", ".xls"]
         self.logger.info("建设银行账单解析器已初始化 [ID=%s]", self.PARSER_ID)
 
+    def _build_trade_time(self, row_dict: dict[str, str]) -> str:
+        """合并建设银行的日期与时间字段。"""
+        date_str = (row_dict.get("交易日期") or row_dict.get("记账日") or "").strip()
+        time_str = (row_dict.get("交易时间") or "").strip()
+
+        if not date_str or date_str == "nan":
+            return ""
+
+        if len(date_str) == 8 and date_str.isdigit():
+            date_str = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+
+        if time_str and time_str != "nan":
+            if len(time_str) == 6 and time_str.isdigit():
+                time_str = f"{time_str[0:2]}:{time_str[2:4]}:{time_str[4:6]}"
+            return f"{date_str} {time_str}"
+
+        return date_str
+
     @log_method
     def can_parse(self, file_path: str) -> bool:
         """判断是否为建设银行账单"""
@@ -102,12 +120,6 @@ class CCBParser(ParserBase):
             self.logger.debug(f"判断建设银行文件失败: {file_path}, 错误: {e}")
             return False
 
-            return is_ccb
-
-        except Exception as e:  # pylint: disable=broad-except
-            self.logger.debug(f"判断建设银行文件失败: {file_path}, 错误: {e}")
-            return False
-
     @log_method
     def parse(self, file_path: str) -> list[dict[str, Any]]:
         """解析建设银行账单"""
@@ -147,14 +159,10 @@ class CCBParser(ParserBase):
                         val = df.iloc[i, j]
                         row_dict[header] = str(val) if not pd.isna(val) else ""
 
-                    # 获取交易日期
-                    date_str = row_dict.get("交易日期") or row_dict.get("记账日") or ""
-                    if not date_str or date_str == "nan":
+                    # 获取交易日期与时间
+                    trade_time = self._build_trade_time(row_dict)
+                    if not trade_time:
                         continue
-
-                    # 格式化日期 (20211210 -> 2021-12-10)
-                    if len(date_str) == 8 and date_str.isdigit():
-                        date_str = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
 
                     # 获取收支金额
                     debit_str = row_dict.get("支出", "0").strip()
@@ -191,7 +199,7 @@ class CCBParser(ParserBase):
                         counterparty = description  # 使用摘要作为对方
 
                     bill = {
-                        "date": date_str,
+                        "date": trade_time,
                         "type": transaction_type,
                         "counterparty": counterparty,
                         "description": description,

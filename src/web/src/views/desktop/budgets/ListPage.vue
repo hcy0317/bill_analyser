@@ -712,12 +712,78 @@
                                 <v-skeleton-loader type="image, article" :loading="true"></v-skeleton-loader>
                             </div>
 
-                            <div v-else-if="historicalCategoryChartData.categories.length > 0" class="budget-history-panel">
-                                <v-chart
-                                    autoresize
-                                    class="budget-history-chart"
-                                    :option="historicalChartOptions"
-                                />
+                            <div v-else-if="historicalLegendGroups.length > 0" class="budget-history-panel">
+                                <div class="budget-history-chart-shell">
+                                    <v-chart
+                                        v-if="historicalChartModel.primaryBands.length > 0"
+                                        autoresize
+                                        class="budget-history-chart"
+                                        :option="historicalChartOptions"
+                                    />
+
+                                    <div v-else class="d-flex align-center justify-center budget-history-chart budget-history-empty-state">
+                                        <span class="text-medium-emphasis">{{ tt('All categories hidden') }}</span>
+                                    </div>
+
+                                    <svg
+                                        v-if="historicalChartModel.primaryLabelGlyphs.length > 0"
+                                        class="budget-history-label-overlay"
+                                        viewBox="0 0 100 100"
+                                        preserveAspectRatio="xMidYMid meet"
+                                        aria-hidden="true"
+                                    >
+                                        <g v-for="glyph in historicalChartModel.primaryLabelGlyphs" :key="glyph.key">
+                                            <text
+                                                :x="glyph.x"
+                                                :y="glyph.y"
+                                                :fill="glyph.color"
+                                                :font-size="glyph.fontSize"
+                                                font-weight="600"
+                                                text-anchor="middle"
+                                                dominant-baseline="middle"
+                                                :transform="`rotate(${glyph.rotate} ${glyph.x} ${glyph.y})`"
+                                            >
+                                                {{ glyph.character }}
+                                            </text>
+                                        </g>
+                                    </svg>
+                                </div>
+
+                                <div v-if="historicalLegendGroups.length > 0" class="budget-history-legend">
+                                    <div v-for="group in historicalLegendGroups" :key="group.primaryKey" class="budget-history-legend-group">
+                                        <button
+                                            type="button"
+                                            class="budget-history-legend-item budget-history-legend-item--primary"
+                                            :class="{
+                                                'is-inactive': group.state === 'none',
+                                                'is-partial': group.state === 'partial'
+                                            }"
+                                            :aria-pressed="group.state !== 'none'"
+                                            @click="toggleHistoricalPrimaryLegend(group.primaryKey)"
+                                        >
+                                            <span class="budget-history-legend-swatch" :style="{ backgroundColor: group.color }"></span>
+                                            <span class="budget-history-legend-label">{{ group.primaryLabel }}</span>
+                                            <span class="budget-history-legend-count">
+                                                {{ group.secondaryItems.filter(item => item.selected).length }}/{{ group.secondaryItems.length }}
+                                            </span>
+                                        </button>
+
+                                        <div class="budget-history-legend-secondary-list">
+                                            <button
+                                                v-for="item in group.secondaryItems"
+                                                :key="item.key"
+                                                type="button"
+                                                class="budget-history-legend-item budget-history-legend-item--secondary"
+                                                :class="{ 'is-inactive': !item.selected }"
+                                                :aria-pressed="item.selected"
+                                                @click="toggleHistoricalSecondaryLegend(item.key)"
+                                            >
+                                                <span class="budget-history-legend-swatch" :style="{ backgroundColor: item.color }"></span>
+                                                <span class="budget-history-legend-label">{{ item.label }}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <div v-else class="d-flex align-center justify-center py-12">
@@ -931,8 +997,6 @@
 </template>
 
 <script setup lang="ts">
-import type { CallbackDataParams } from 'echarts/types/dist/shared';
-
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import BtnHorizontalGroup from '@/components/desktop/BtnHorizontalGroup.vue';
@@ -945,6 +1009,15 @@ import TransactionTagFilterSettingsCard from '@/views/desktop/common/cards/Trans
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
+import {
+    buildHistoricalPolarChartModel,
+    buildHistoricalPolarChartOption,
+    syncHistoricalLegendSelection,
+    toggleHistoricalPrimarySelection,
+    toggleHistoricalSecondarySelection,
+    type HistoricalCategoryChartPoint,
+    type HistoricalLegendSelection
+} from './historyPolarChart.ts';
 
 import { ref, computed, useTemplateRef, watch, onMounted } from 'vue';
 import { useDisplay, useTheme } from 'vuetify';
@@ -1046,18 +1119,6 @@ function isBudgetViewMode(value: string): value is BudgetViewMode {
     return value === 'budget' || value === 'forecast' || value === 'history';
 }
 
-interface HistoricalCategoryChartPoint {
-    category: string;
-    primaryCategory: string;
-    secondaryCategory: string;
-    budgetAmount: number;
-    spentAmount: number;
-    executionRate: number;
-    color: string;
-    groupOrder: number;
-    itemOrder: number;
-}
-
 const CATEGORY_CHART_PALETTE = [
     '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
     '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#48b8d0'
@@ -1120,7 +1181,8 @@ const forecastMonthsHistory = ref<number>(6);
 const forecastSortBy = ref<string>('backtest');
 const forecastOnlyLowConfidence = ref<boolean>(false);
 const forecastOnlyOverBudget = ref<boolean>(false);
-const historicalBudgetLevel = ref<HistoricalBudgetLevel>('primary');
+const historicalBudgetLevel = ref<HistoricalBudgetLevel>('secondary');
+const historicalLegendSelection = ref<HistoricalLegendSelection>({});
 const historicalDateType = ref<number>(DateRange.RecentTwelveMonths.type);
 const showHistoricalDateDialog = ref<boolean>(false);
 const historicalMinDatetime = ref<number>(0);
@@ -1835,40 +1897,9 @@ const historicalPeriods = computed<HistoricalPeriodRange[]>(() => {
     );
 });
 
-const historicalLevelItems = computed<BudgetHistoryItem[]>(() => {
-    return filteredHistoricalItems.value.filter((item: BudgetHistoryItem) => {
-        return historicalBudgetLevel.value === 'primary' ? !item.subCategory : !!item.subCategory;
-    });
-});
-
-function getHistoricalAmountAxisInterval(maxAmount: number): number {
-    if (maxAmount <= 0) {
-        return 25;
-    }
-
-    const roughInterval = maxAmount / 3;
-    const magnitude = Math.pow(10, Math.floor(Math.log10(roughInterval)));
-    const normalized = roughInterval / magnitude;
-
-    if (normalized <= 1) {
-        return magnitude;
-    }
-    if (normalized <= 2) {
-        return 2 * magnitude;
-    }
-    if (normalized <= 2.5) {
-        return 2.5 * magnitude;
-    }
-    if (normalized <= 5) {
-        return 5 * magnitude;
-    }
-
-    return 10 * magnitude;
-}
-
 const historicalCategoryChartData = computed<{ categories: string[]; points: HistoricalCategoryChartPoint[] }>(() => {
     const periods = historicalPeriods.value;
-    const items = historicalLevelItems.value;
+    const items = filteredHistoricalItems.value;
 
     if (!periods.length || !items.length) {
         return { categories: [], points: [] };
@@ -1894,14 +1925,20 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
         }
     }
 
-    const grouped = new Map<string, {
-        displayCategory: string;
+    const groupedByPeriodAndPrimary = new Map<string, {
         primaryCategory: string;
-        secondaryCategory: string;
-        budgetAmount: number;
-        spentAmount: number;
         groupOrder: number;
-        itemOrder: number;
+        primaryBudgetAmount: number;
+        primarySpentAmount: number;
+        secondaryBudgetAmount: number;
+        secondarySpentAmount: number;
+        secondaryItems: Map<string, {
+            displayCategory: string;
+            secondaryCategory: string;
+            budgetAmount: number;
+            spentAmount: number;
+            itemOrder: number;
+        }>;
     }>();
 
     for (const item of items) {
@@ -1913,27 +1950,100 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
 
         const primaryCategory = item.category || tt('Uncategorized');
         const secondaryCategory = item.subCategory || '';
-        const groupKey = historicalBudgetLevel.value === 'primary'
-            ? primaryCategory
-            : `${primaryCategory}::${secondaryCategory || primaryCategory}`;
-        const displayCategory = historicalBudgetLevel.value === 'primary'
-            ? primaryCategory
-            : (secondaryCategory || primaryCategory);
+        const periodPrimaryKey = `${resolvedPeriod.key}::${primaryCategory}`;
 
-        if (!grouped.has(groupKey)) {
-            grouped.set(groupKey, {
-                displayCategory,
+        if (!groupedByPeriodAndPrimary.has(periodPrimaryKey)) {
+            groupedByPeriodAndPrimary.set(periodPrimaryKey, {
                 primaryCategory,
+                groupOrder: categoryOrderMap[primaryCategory] ?? Number.MAX_SAFE_INTEGER,
+                primaryBudgetAmount: 0,
+                primarySpentAmount: 0,
+                secondaryBudgetAmount: 0,
+                secondarySpentAmount: 0,
+                secondaryItems: new Map()
+            });
+        }
+
+        const summary = groupedByPeriodAndPrimary.get(periodPrimaryKey)!;
+
+        if (!secondaryCategory) {
+            summary.primaryBudgetAmount += item.budgetAmount || 0;
+            summary.primarySpentAmount += item.spentAmount || 0;
+            continue;
+        }
+
+        const secondaryKey = `${primaryCategory}::${secondaryCategory}`;
+        if (!summary.secondaryItems.has(secondaryKey)) {
+            summary.secondaryItems.set(secondaryKey, {
+                displayCategory: secondaryCategory,
                 secondaryCategory,
                 budgetAmount: 0,
                 spentAmount: 0,
-                groupOrder: categoryOrderMap[primaryCategory] ?? Number.MAX_SAFE_INTEGER,
-                itemOrder: subCategoryOrderMap[groupKey] ?? 0
+                itemOrder: subCategoryOrderMap[secondaryKey] ?? 0
             });
         }
-        const summary = grouped.get(groupKey)!;
-        summary.budgetAmount += item.budgetAmount || 0;
-        summary.spentAmount += item.spentAmount || 0;
+
+        const secondarySummary = summary.secondaryItems.get(secondaryKey)!;
+        secondarySummary.budgetAmount += item.budgetAmount || 0;
+        secondarySummary.spentAmount += item.spentAmount || 0;
+        summary.secondaryBudgetAmount += item.budgetAmount || 0;
+        summary.secondarySpentAmount += item.spentAmount || 0;
+    }
+
+    const grouped = new Map<string, {
+        displayCategory: string;
+        primaryCategory: string;
+        secondaryCategory: string;
+        budgetAmount: number;
+        spentAmount: number;
+        groupOrder: number;
+        itemOrder: number;
+    }>();
+
+    for (const summary of groupedByPeriodAndPrimary.values()) {
+        if (historicalBudgetLevel.value === 'primary') {
+            const groupKey = summary.primaryCategory;
+            const hasPrimaryBudget = summary.primaryBudgetAmount > 0;
+            const budgetAmount = hasPrimaryBudget ? summary.primaryBudgetAmount : summary.secondaryBudgetAmount;
+            const spentAmount = hasPrimaryBudget
+                ? (summary.primarySpentAmount > 0 ? summary.primarySpentAmount : summary.secondarySpentAmount)
+                : summary.secondarySpentAmount;
+
+            if (!grouped.has(groupKey)) {
+                grouped.set(groupKey, {
+                    displayCategory: summary.primaryCategory,
+                    primaryCategory: summary.primaryCategory,
+                    secondaryCategory: '',
+                    budgetAmount: 0,
+                    spentAmount: 0,
+                    groupOrder: summary.groupOrder,
+                    itemOrder: 0
+                });
+            }
+
+            const primarySummary = grouped.get(groupKey)!;
+            primarySummary.budgetAmount += budgetAmount;
+            primarySummary.spentAmount += spentAmount;
+            continue;
+        }
+
+        for (const [secondaryKey, secondarySummary] of summary.secondaryItems) {
+            if (!grouped.has(secondaryKey)) {
+                grouped.set(secondaryKey, {
+                    displayCategory: secondarySummary.displayCategory,
+                    primaryCategory: summary.primaryCategory,
+                    secondaryCategory: secondarySummary.secondaryCategory,
+                    budgetAmount: 0,
+                    spentAmount: 0,
+                    groupOrder: summary.groupOrder,
+                    itemOrder: secondarySummary.itemOrder
+                });
+            }
+
+            const groupedSecondarySummary = grouped.get(secondaryKey)!;
+            groupedSecondarySummary.budgetAmount += secondarySummary.budgetAmount;
+            groupedSecondarySummary.spentAmount += secondarySummary.spentAmount;
+        }
     }
 
     const points: HistoricalCategoryChartPoint[] = [];
@@ -1982,209 +2092,60 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
     return { categories: points.map(p => p.category), points };
 });
 
-const historicalAmountAxisConfig = computed<{ max: number; interval: number }>(() => {
-    const allAmounts = historicalCategoryChartData.value.points.flatMap(p => [p.budgetAmount, p.spentAmount]);
-    const maxAmount = Math.max(0, ...allAmounts);
-    if (maxAmount <= 0) {
-        return { max: 100, interval: 25 };
-    }
+watch(
+    () => historicalCategoryChartData.value.points.map(point => `${point.primaryCategory}::${point.secondaryCategory || point.category}`).join('|'),
+    () => {
+        historicalLegendSelection.value = syncHistoricalLegendSelection(
+            historicalCategoryChartData.value.points,
+            historicalLegendSelection.value
+        );
+    },
+    { immediate: true }
+);
 
-    const interval = getHistoricalAmountAxisInterval(maxAmount * 1.1);
-    return {
-        interval,
-        max: interval * 3
-    };
+watch([activeBudgetType, historicalBudgetLevel], () => {
+    historicalLegendSelection.value = {};
 });
 
-const historicalExecutionAxisMax = computed<number>(() => {
-    const maxRate = Math.max(0, ...historicalCategoryChartData.value.points.map(p => p.executionRate));
-    return Math.max(100, Math.ceil(maxRate / 10) * 10);
+const historicalChartModel = computed(() => {
+    return buildHistoricalPolarChartModel(
+        historicalCategoryChartData.value.points,
+        historicalLegendSelection.value
+    );
 });
 
-const historicalAverageExecutionRate = computed<number>(() => {
-    const points = historicalCategoryChartData.value.points;
-    if (!points.length) return 0;
-    const totalRate = points.reduce((sum, p) => sum + p.executionRate, 0);
-    return Number((totalRate / points.length).toFixed(1));
-});
+const historicalLegendGroups = computed(() => historicalChartModel.value.legendGroups);
 
 const historicalChartOptions = computed(() => {
-    const { categories, points } = historicalCategoryChartData.value;
-    if (!categories.length) {
+    if (!historicalChartModel.value.primaryBands.length) {
         return {};
     }
 
     const accentColor = activeBudgetType.value === BudgetType.Investment ? '#ffb300' : '#5c6bc0';
-
-    return {
-        tooltip: {
-            trigger: 'item',
-            backgroundColor: isDarkMode.value ? '#333' : '#fff',
-            borderColor: isDarkMode.value ? '#333' : '#fff',
-            textStyle: { color: isDarkMode.value ? '#eee' : '#333' },
-            formatter: (params: CallbackDataParams | CallbackDataParams[]) => {
-                const currentParam = Array.isArray(params) ? params[0] : params;
-                const point = points[currentParam?.dataIndex || 0];
-                if (!point) {
-                    return '';
-                }
-                const categoryTitle = point.secondaryCategory
-                    ? `${point.primaryCategory} / ${point.secondaryCategory}`
-                    : point.primaryCategory;
-                return [
-                    `<b>${categoryTitle}</b>`,
-                    `${tt('Budget Amount')}: ${formatAmount(point.budgetAmount)}`,
-                    `${tt('Spent Amount')}: ${formatAmount(point.spentAmount)}`,
-                    `${tt('Execution Rate')}: ${point.executionRate}%`
-                ].join('<br/>');
-            }
-        },
-        legend: {
-            bottom: 0,
-            data: [tt('Budget Amount'), tt('Spent Amount'), tt('Execution Rate')],
-            textStyle: { color: isDarkMode.value ? '#eee' : '#333' }
-        },
-        polar: [
-            { center: ['50%', '46%'], radius: ['30%', '78%'] },
-            { center: ['50%', '46%'], radius: ['30%', '55%'] }
-        ],
-        angleAxis: [
-            {
-                type: 'category',
-                data: categories,
-                startAngle: 90,
-                clockwise: false,
-                polarIndex: 0,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                boundaryGap: true,
-                axisLabel: {
-                    color: isDarkMode.value ? '#d0d0d0' : '#4f4f4f',
-                    fontSize: 11,
-                    formatter: (value: string, index: number) => {
-                        const point = points[index];
-                        if (!point) {
-                            return value;
-                        }
-                        return historicalBudgetLevel.value === 'secondary' && point.primaryCategory
-                            ? `${point.primaryCategory}\n${value}`
-                            : value;
-                    }
-                }
-            },
-            {
-                type: 'category',
-                data: categories,
-                startAngle: 90,
-                clockwise: false,
-                polarIndex: 1,
-                show: false
-            }
-        ],
-        radiusAxis: [
-            {
-                type: 'value',
-                min: 0,
-                max: historicalAmountAxisConfig.value.max,
-                interval: historicalAmountAxisConfig.value.interval,
-                splitNumber: 3,
-                polarIndex: 0,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: {
-                    color: isDarkMode.value ? '#888' : '#666',
-                    align: 'center',
-                    verticalAlign: 'middle',
-                    margin: 6,
-                    showMinLabel: true,
-                    showMaxLabel: true,
-                    formatter: (value: number) => formatAmount(value)
-                },
-                splitLine: {
-                    lineStyle: {
-                        color: isDarkMode.value ? '#4f4f4f' : '#e1e6f2',
-                        type: 'dashed'
-                    }
-                }
-            },
-            {
-                type: 'value',
-                min: 0,
-                max: historicalExecutionAxisMax.value,
-                polarIndex: 1,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: { show: false },
-                splitLine: { show: false }
-            }
-        ],
-        graphic: [
-            {
-                type: 'text',
-                left: 'center',
-                top: '39%',
-                style: {
-                    text: `${historicalAverageExecutionRate.value.toFixed(1)}%`,
-                    fill: accentColor,
-                    fontSize: 22,
-                    fontWeight: 700,
-                    textAlign: 'center'
-                }
-            },
-            {
-                type: 'text',
-                left: 'center',
-                top: '45%',
-                style: {
-                    text: tt('Execution Rate'),
-                    fill: isDarkMode.value ? '#bdbdbd' : '#666',
-                    fontSize: 11,
-                    textAlign: 'center'
-                }
-            }
-        ],
-        series: [
-            {
-                name: tt('Budget Amount'),
-                type: 'bar',
-                coordinateSystem: 'polar',
-                polarIndex: 0,
-                roundCap: true,
-                barWidth: 18,
-                barGap: '-100%',
-                data: points.map(p => ({
-                    value: p.budgetAmount,
-                    itemStyle: { color: hexToRgba(p.color, 0.25) }
-                }))
-            },
-            {
-                name: tt('Spent Amount'),
-                type: 'bar',
-                coordinateSystem: 'polar',
-                polarIndex: 0,
-                roundCap: true,
-                barWidth: 15,
-                z: 2,
-                data: points.map(p => ({
-                    value: p.spentAmount,
-                    itemStyle: { color: p.color }
-                }))
-            },
-            {
-                name: tt('Execution Rate'),
-                type: 'line',
-                coordinateSystem: 'polar',
-                polarIndex: 1,
-                smooth: true,
-                symbol: 'circle',
-                symbolSize: 6,
-                lineStyle: { width: 2.5, color: accentColor },
-                itemStyle: { color: accentColor },
-                data: points.map(p => p.executionRate)
-            }
-        ]
-    };
+    return buildHistoricalPolarChartOption(historicalChartModel.value, {
+        isDarkMode: isDarkMode.value,
+        accentColor,
+        budgetAmountLabel: tt('Budget Amount'),
+        spentAmountLabel: tt('Spent Amount'),
+        executionRateLabel: tt('Execution Rate'),
+        formatAmount
+    });
 });
+
+function toggleHistoricalPrimaryLegend(primaryKey: string): void {
+    historicalLegendSelection.value = toggleHistoricalPrimarySelection(
+        historicalLegendSelection.value,
+        historicalChartModel.value,
+        primaryKey
+    );
+}
+
+function toggleHistoricalSecondaryLegend(secondaryKey: string): void {
+    historicalLegendSelection.value = toggleHistoricalSecondarySelection(
+        historicalLegendSelection.value,
+        secondaryKey
+    );
+}
 
 function ensureHistoricalDateRangeInitialized(): void {
     if (historicalMinDatetime.value && historicalMaxDatetime.value) {
@@ -2932,13 +2893,6 @@ function formatAmount(amount: number): string {
     return '¥' + amount.toFixed(2);
 }
 
-function hexToRgba(hex: string, alpha: number): string {
-    const m = hex.replace('#', '').match(/.{2}/g);
-    if (!m) return `rgba(0,0,0,${alpha})`;
-    const [r, g, b] = m.map(x => parseInt(x, 16));
-    return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /**
  * 点击进度条跳转到对应分类和时间的账单列表
  * @param category 主分类名称
@@ -3557,6 +3511,86 @@ watch(filterKeyword, (newVal) => {
 .budget-history-chart {
     width: 100%;
     height: 520px;
+}
+
+.budget-history-chart-shell {
+    position: relative;
+}
+
+.budget-history-label-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.budget-history-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.budget-history-legend-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.budget-history-legend-secondary-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-left: 12px;
+}
+
+.budget-history-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+    border-radius: 999px;
+    background-color: rgba(var(--v-theme-surface), 0.92);
+    color: rgba(var(--v-theme-on-surface), 0.88);
+    cursor: pointer;
+    padding: 6px 12px;
+    transition: all 0.18s ease;
+}
+
+.budget-history-legend-item:hover {
+    border-color: rgba(var(--v-theme-primary), 0.32);
+    transform: translateY(-1px);
+}
+
+.budget-history-legend-item--primary {
+    align-self: flex-start;
+    font-weight: 600;
+}
+
+.budget-history-legend-item--primary.is-partial {
+    border-style: dashed;
+}
+
+.budget-history-legend-item.is-inactive {
+    opacity: 0.46;
+}
+
+.budget-history-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.budget-history-legend-label {
+    line-height: 1.2;
+}
+
+.budget-history-legend-count {
+    color: rgba(var(--v-theme-on-surface), 0.6);
+    font-size: 0.75rem;
 }
 
 .budget-history-detail-chart {

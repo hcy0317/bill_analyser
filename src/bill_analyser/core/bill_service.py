@@ -392,9 +392,10 @@ class BillService:
             bill_copy["paymentMethod"] = bill_copy.get("payment_method", "")
 
         self.logger.debug(
-            f"[预览数据] time={bill_copy.get('time', '')}, "
-            f"counterparty={bill_copy.get('counterparty', '')[:20]}, "
-            f"paymentMethod={bill_copy.get('paymentMethod', '')[:20]}"
+            "[预览数据] time=%s, counterparty=%s, paymentMethod=%s",
+            bill_copy.get("time", ""),
+            bill_copy.get("counterparty", "")[:20],
+            bill_copy.get("paymentMethod", "")[:20],
         )
         return bill_copy
 
@@ -1720,7 +1721,7 @@ class BillService:
 
                 self.logger.info("[阶段1] 文件解析完成: %s, parser=%s, count=%d", file_path, parser_type, len(bills))
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 file_result["error"] = str(e)
                 self.logger.error("[阶段1] 文件解析失败: %s, error=%s", file_path, e, exc_info=True)
 
@@ -2061,7 +2062,7 @@ class BillService:
                 matched_account_count,
             )
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self.logger.error("[阶段2] 处理失败: %s", e, exc_info=True)
             result["errors"].append(str(e))
             await self.db.update_import_session_status(session_id, "failed")
@@ -2134,7 +2135,7 @@ class BillService:
                 result["duplicate_count"],
             )
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self.logger.error("[阶段3] 确认失败: %s", e, exc_info=True)
             result["errors"].append(str(e))
             await self.db.update_import_session_status(session_id, "failed")

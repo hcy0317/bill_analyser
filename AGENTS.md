@@ -1,5 +1,7 @@
 # Bill Analyser Agent Guide
 
+This file is the cross-tool entry map for agent assets. The canonical workspace-level project rules live in [.github/copilot-instructions.md](.github/copilot-instructions.md).
+
 This repository uses multiple layers of agent customization:
 
 1. Project-specific rules in [.github/copilot-instructions.md](.github/copilot-instructions.md)
@@ -11,11 +13,8 @@ The ECC-derived directories listed below describe the repository's retained asse
 ## Precedence
 
 - Repository-specific instructions for Bill Analyser take priority over generic ECC guidance when they conflict.
-- Keep existing architecture constraints intact:
-  - Flask routes bridge async services with a dedicated event loop per request.
-  - Database operations stay async with aiosqlite.
-  - REST is the primary runtime API chain.
-  - Money units must be handled explicitly: backend stores yuan, many frontend APIs use cents.
+- Apply [.github/copilot-instructions.md](.github/copilot-instructions.md) first.
+- Use this file as the asset map and tool-entry index, then load tool-specific files only when they add something the workspace instructions do not already define.
 
 ## Imported ECC Assets
 
@@ -41,11 +40,21 @@ The ECC-derived directories listed below describe the repository's retained asse
 - Use security and review agents before risky refactors or merges.
 - Do not enable every MCP server at once. Prefer a small set relevant to the current task.
 - Keep the retained ECC layer focused on Python, TypeScript, testing, API work, and project-specific maintenance.
-- Cursor users should rely on the trimmed `.cursor` layer only: agents, commands, skills, rules, and a minimal MCP config.
+- After applying [.github/copilot-instructions.md](.github/copilot-instructions.md), Cursor users should rely on the trimmed `.cursor` layer only for tool-specific compatibility behavior.
 - Cursor hooks and the ECC runtime were intentionally removed to avoid restoring the full upstream package.
-- Codex users should start from [AGENTS.md](AGENTS.md), then apply [.codex/AGENTS.md](.codex/AGENTS.md).
-- Claude Code users should start from [CLAUDE.md](CLAUDE.md), then follow [AGENTS.md](AGENTS.md) and [.github/copilot-instructions.md](.github/copilot-instructions.md).
+- Codex users should apply [.github/copilot-instructions.md](.github/copilot-instructions.md) first, then [.codex/AGENTS.md](.codex/AGENTS.md).
+- Claude Code users should apply [.github/copilot-instructions.md](.github/copilot-instructions.md) first, then [CLAUDE.md](CLAUDE.md) for Claude-specific additions.
 
-## Project-Specific Reminder
+## Reviewer Diff Contract
 
-When editing this repository, always read and follow [.github/copilot-instructions.md](.github/copilot-instructions.md).
+Across Copilot, Cursor, and Claude-compatible reviewer assets, treat review scope as an explicit input instead of an implicit side effect.
+
+- Pass a compact `Review Context` bundle with `base_ref`, `head_ref`, `changed_files`, and `diff_text` (or representative hunks) whenever invoking `code-reviewer`, `python-reviewer`, or `security-reviewer`.
+- If the diff is too large, pass the critical hunks plus refs that let the reviewer recover the rest.
+- If neither diff text nor usable refs are available, the reviewer should stop and report a blocked scope instead of pretending to review the whole repository.
+
+## Practical Rule
+
+- Put project-wide coding behavior in [.github/copilot-instructions.md](.github/copilot-instructions.md).
+- Use this file to explain where agent assets live and which tool-specific entrypoints matter.
+- Prefer linking to existing docs instead of copying project rules into multiple agent files.

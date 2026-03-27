@@ -5,7 +5,8 @@
 """
 
 import pytest
-from src.core.category_engine import CategoryEngine, KeywordMatcher
+from bill_analyser.core.category_engine import CategoryEngine, KeywordMatcher
+from bill_analyser.utils.constants import TransactionType
 
 
 class TestKeywordMatcherCache:
@@ -72,7 +73,7 @@ class TestCategoryEngineInvalidation:
         """测试 invalidate_cache 方法"""
         engine = CategoryEngine()
         engine.rules = [
-            {'main_category': '交通', 'sub_category': '打车', 'keywords': 'OR:滴滴|快的', 'type': 3}
+            {'main': '交通', 'sub': '打车', 'keywords': 'OR:滴滴|快的', 'type': TransactionType.EXPENSE}
         ]
         
         # 预编译规则
@@ -95,26 +96,22 @@ class TestCategoryEngineInvalidation:
         
         # 第一组规则
         engine.rules = [
-            {'main_category': '交通', 'sub_category': '打车', 'keywords': 'OR:滴滴|快的', 'type': 3}
+            {'main': '交通', 'sub': '打车', 'keywords': 'OR:滴滴|快的', 'type': TransactionType.EXPENSE}
         ]
         engine._precompile_rules()
         
-        # 获取第一次编译的规则
-        first_compiled = engine._compiled_rules.copy()
-        first_cache = engine.keyword_matcher._compiled_rules_cache.copy()
-        
         # 修改规则
         engine.rules = [
-            {'main_category': '餐饮', 'sub_category': '外卖', 'keywords': 'OR:美团|饿了么', 'type': 3}
+            {'main': '餐饮', 'sub': '外卖', 'keywords': 'OR:美团|饿了么', 'type': TransactionType.EXPENSE}
         ]
         
         # 重新预编译（应该清除旧缓存）
         engine._precompile_rules()
         
         # 验证旧规则已清除
-        assert '交通_打车' not in engine._compiled_rules
+        assert 'OR:滴滴|快的' not in engine._compiled_rules
         # 验证新规则已编译
-        assert '餐饮_外卖' in engine._compiled_rules
+        assert 'OR:美团|饿了么' in engine._compiled_rules
         
     def test_rule_update_reflected_after_precompile(self):
         """测试规则更新后重新预编译能反映新规则"""
@@ -122,26 +119,26 @@ class TestCategoryEngineInvalidation:
         
         # 初始规则
         engine.rules = [
-            {'main_category': '交通', 'sub_category': '打车', 'keywords': '滴滴', 'type': 3}
+            {'main': '交通', 'sub': '打车', 'keywords': '滴滴', 'type': TransactionType.EXPENSE}
         ]
         engine._precompile_rules()
         
         # 验证初始匹配
         text = "滴滴出行"
-        assert engine._match_keywords_fast(text, engine.rules[0])
+        assert engine._match_keywords_fast(text, engine.rules[0]['keywords'])
         
         text2 = "曹操专车"
-        assert not engine._match_keywords_fast(text2, engine.rules[0])
+        assert not engine._match_keywords_fast(text2, engine.rules[0]['keywords'])
         
         # 修改规则关键词
         engine.rules = [
-            {'main_category': '交通', 'sub_category': '打车', 'keywords': 'OR:滴滴|曹操', 'type': 3}
+            {'main': '交通', 'sub': '打车', 'keywords': 'OR:滴滴|曹操', 'type': TransactionType.EXPENSE}
         ]
         engine._precompile_rules()
         
         # 验证新规则生效
-        assert engine._match_keywords_fast(text, engine.rules[0])
-        assert engine._match_keywords_fast(text2, engine.rules[0])
+        assert engine._match_keywords_fast(text, engine.rules[0]['keywords'])
+        assert engine._match_keywords_fast(text2, engine.rules[0]['keywords'])
 
 
 class TestCacheInvalidationIntegration:
@@ -153,9 +150,10 @@ class TestCacheInvalidationIntegration:
         
         # 1. 初始加载规则
         engine.rules = [
-            {'main_category': '餐饮', 'sub_category': '外卖', 'keywords': '美团外卖', 'type': 3, 'priority': 1}
+            {'main': '餐饮', 'sub': '外卖', 'keywords': '美团外卖', 'type': TransactionType.EXPENSE, 'priority': 1}
         ]
         engine._precompile_rules()
+        engine._initialized = True
         
         # 2. 创建测试账单
         bill = {
@@ -172,9 +170,10 @@ class TestCacheInvalidationIntegration:
         
         # 4. 模拟用户添加新关键词
         engine.rules = [
-            {'main_category': '餐饮', 'sub_category': '外卖', 'keywords': 'OR:美团外卖|饿了么', 'type': 3, 'priority': 1}
+            {'main': '餐饮', 'sub': '外卖', 'keywords': 'OR:美团外卖|饿了么', 'type': TransactionType.EXPENSE, 'priority': 1}
         ]
         engine._precompile_rules()  # 重新预编译
+        engine._initialized = True
         
         # 5. 测试新关键词
         bill2 = {
@@ -193,6 +192,7 @@ class TestCacheInvalidationIntegration:
         engine = CategoryEngine()
         engine.rules = []
         engine._precompile_rules()
+        engine._initialized = True
         
         bill = {
             'counterparty': '测试',

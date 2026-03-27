@@ -40,7 +40,7 @@ class DeduplicationEngine:
         """
         self.mode = mode
         self.logger = get_logger(self.__class__.__name__)
-        self.logger.info(f"去重引擎已初始化 | 模式: {mode.value}")
+        self.logger.info("去重引擎已初始化 | 模式: %s", mode.value)
 
         # 配置参数
         self.amount_tolerance = 0.01  # 金额容差（元）
@@ -64,7 +64,7 @@ class DeduplicationEngine:
         Returns:
             (去重后的账单列表, 统计信息)
         """
-        self.logger.info(f"开始去重 | 原始账单数: {len(bills)}")
+        self.logger.info("开始去重 | 原始账单数: %s", len(bills))
 
         # 统计信息
         stats = {
@@ -88,10 +88,11 @@ class DeduplicationEngine:
         stats["final_count"] = len(bills)
 
         self.logger.info(
-            f"去重完成 | 原始: {stats['original_count']}, "
-            f"支付工具重复: {stats['payment_bank_duplicates']}, "
-            f"转账重复: {stats['transfer_duplicates']}, "
-            f"最终: {stats['final_count']}"
+            "去重完成 | 原始: %s, 支付工具重复: %s, 转账重复: %s, 最终: %s",
+            stats["original_count"],
+            stats["payment_bank_duplicates"],
+            stats["transfer_duplicates"],
+            stats["final_count"],
         )
 
         return bills, stats
@@ -127,7 +128,10 @@ class DeduplicationEngine:
                 other_bills.append(bill)
 
         self.logger.info(
-            f"账单分类 | 支付工具: {len(payment_bills)}, 银行: {len(bank_bills)}, 其他: {len(other_bills)}"
+            "账单分类 | 支付工具: %s, 银行: %s, 其他: %s",
+            len(payment_bills),
+            len(bank_bills),
+            len(other_bills),
         )
 
         # 如果没有支付宝/微信账单或没有银行账单，则无需去重
@@ -149,10 +153,13 @@ class DeduplicationEngine:
 
                 if self._is_duplicate_payment_bank(payment_bill, bank_bill):
                     self.logger.debug(
-                        f"发现重复 | 支付工具账单: {payment_bill.get('date')} "
-                        f"{payment_bill.get('amount')} {payment_bill.get('description', '')[:20]} "
-                        f"<-> 银行账单(将被合并): {bank_bill.get('date')} "
-                        f"{bank_bill.get('amount')} {bank_bill.get('description', '')[:20]}"
+                        "发现重复 | 支付工具账单: %s %s %s <-> 银行账单(将被合并): %s %s %s",
+                        payment_bill.get("date"),
+                        payment_bill.get("amount"),
+                        payment_bill.get("description", "")[:20],
+                        bank_bill.get("date"),
+                        bank_bill.get("amount"),
+                        bank_bill.get("description", "")[:20],
                     )
 
                     # v6.32: 合并银行账单信息到支付工具账单
@@ -170,7 +177,7 @@ class DeduplicationEngine:
         # 合并结果: 保留的银行账单 + 所有支付工具账单(已合并银行信息) + 其他账单
         result = kept_bank_bills + payment_bills + other_bills
 
-        self.logger.info(f"支付工具-银行去重完成 | 合并银行账单: {len(removed_bills)}, 保留总数: {len(result)}")
+        self.logger.info("支付工具-银行去重完成 | 合并银行账单: %s, 保留总数: %s", len(removed_bills), len(result))
 
         return result, removed_bills
 
@@ -193,11 +200,11 @@ class DeduplicationEngine:
 
         if not payment_counterparty and bank_counterparty:
             payment_bill["counterparty"] = bank_counterparty
-            self.logger.debug(f"合并counterparty: 使用银行账单的 '{bank_counterparty}'")
+            self.logger.debug("合并counterparty: 使用银行账单的 '%s'", bank_counterparty)
         elif payment_counterparty and bank_counterparty and payment_counterparty != bank_counterparty:
             # 两者都有且不同，追加银行的（用括号标注来源）
             payment_bill["counterparty"] = f"{payment_counterparty} ({bank_counterparty})"
-            self.logger.debug(f"合并counterparty: '{payment_counterparty}' + 银行 '({bank_counterparty})'")
+            self.logger.debug("合并counterparty: '%s' + 银行 '(%s)'", payment_counterparty, bank_counterparty)
 
         # 2. 合并payment_method - 附加银行渠道信息
         payment_method = payment_bill.get("payment_method", "").strip()
@@ -208,12 +215,14 @@ class DeduplicationEngine:
                 payment_bill["payment_method"] = f"{payment_method} → {bank_source}"
             else:
                 payment_bill["payment_method"] = str(bank_source)
-            self.logger.debug(f"合并payment_method: '{payment_bill['payment_method']}'")
+            self.logger.debug("合并payment_method: '%s'", payment_bill["payment_method"])
 
         self.logger.info(
-            f"账单合并完成 | 支付工具: {payment_bill.get('date')} ¥{payment_bill.get('amount')} "
-            f"counterparty='{payment_bill.get('counterparty', '')}' "
-            f"payment_method='{payment_bill.get('payment_method', '')}'"
+            "账单合并完成 | 支付工具: %s ¥%s counterparty='%s' payment_method='%s'",
+            payment_bill.get("date"),
+            payment_bill.get("amount"),
+            payment_bill.get("counterparty", ""),
+            payment_bill.get("payment_method", ""),
         )
 
     @log_method
@@ -316,7 +325,7 @@ class DeduplicationEngine:
             transfer_pairs = self._find_transfer_pairs(group_bills)
 
             if transfer_pairs:
-                self.logger.debug(f"发现转账对 | 日期: {date}, 金额: {amount}, 转账对数: {len(transfer_pairs)}")
+                self.logger.debug("发现转账对 | 日期: %s, 金额: %s, 转账对数: %s", date, amount, len(transfer_pairs))
 
                 # 标记为转账的账单
                 transfer_bill_ids = set()
@@ -346,7 +355,7 @@ class DeduplicationEngine:
                 # 没有转账对，全部保留
                 kept_bills.extend(group_bills)
 
-        self.logger.info(f"转账去重完成 | 移除: {len(removed_bills)}, 保留: {len(kept_bills)}")
+        self.logger.info("转账去重完成 | 移除: %s, 保留: %s", len(removed_bills), len(kept_bills))
 
         return kept_bills, removed_bills
 

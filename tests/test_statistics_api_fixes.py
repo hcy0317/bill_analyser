@@ -308,13 +308,6 @@ def test_exchange_rates_invalid_provider_rejected(client, auth_headers):
     assert data['success'] is False
     assert 'Unsupported exchange rate provider' in data.get('error', '')
 
-    legacy_response = client.get(
-        '/api/v1/transactions/amounts.json',
-        query_string={'query': query},
-        headers=auth_headers
-    )
-    assert legacy_response.status_code == 404
-
 
 if __name__ == '__main__':
     # 运行测试

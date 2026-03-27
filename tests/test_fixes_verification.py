@@ -38,7 +38,7 @@ class TestFixesVerification:
             'amount': 100.0,
             'description': '测试账单',
             'counterparty': '测试商户',  # 添加必填字段
-            'channel': '测试账户',
+            'payment_method': '测试账户',
             'source_account_id': account_id,
             'main_category': '餐饮',
             'sub_category': '正餐'
@@ -112,7 +112,7 @@ class TestFixesVerification:
             'amount': 200.0,
             'description': '工资',
             'counterparty': '公司',  # 添加必填字段
-            'channel': '测试账户',
+            'payment_method': '测试账户',
             'source_account_id': account_id,
             'main_category': '工资',
             'sub_category': '月薪'

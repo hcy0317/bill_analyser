@@ -27,6 +27,11 @@ try:
 except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
     openpyxl = None
 
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
+    pd = None
+
 from bill_analyser.api.adapters.transaction_adapter import TransactionAdapter
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.utils.constants import BACKEND_TO_FRONTEND_TYPE
@@ -79,7 +84,7 @@ async def _apply_common_transaction_filters(args, filters, db, user_id: int):
             if account_ids:
                 filters["account_ids"] = account_ids
         except ValueError:
-            logger.warning(f"无效的account_ids参数: {account_ids_str}")
+            logger.warning("无效的account_ids参数: %s", account_ids_str)
 
     category_ids_str = _get_query_arg(args, "categoryIds", "category_ids", default="")
     if category_ids_str:
@@ -97,7 +102,7 @@ async def _apply_common_transaction_filters(args, filters, db, user_id: int):
                     # 主蓝图 - 现代RESTful API
                     filters["categories"] = target_categories
         except ValueError:
-            logger.warning(f"无效的category_ids参数: {category_ids_str}")
+            logger.warning("无效的category_ids参数: %s", category_ids_str)
 
     tag_ids_str = _get_query_arg(args, "tagIds", "tag_ids", default="")
     if tag_ids_str:
@@ -106,7 +111,7 @@ async def _apply_common_transaction_filters(args, filters, db, user_id: int):
             if tag_ids:
                 filters["tag_ids"] = tag_ids
         except ValueError:
-            logger.warning(f"无效的tag_ids参数: {tag_ids_str}")
+            logger.warning("无效的tag_ids参数: %s", tag_ids_str)
 
     amount_filter = _get_query_arg(args, "amountFilter", "amount_filter", default="")
     if amount_filter:
@@ -121,13 +126,24 @@ def allowed_file(filename):
 IMPORT_COLUMN_TYPE_KEYWORDS = {
     1: ["交易时间", "入账时间", "记账时间", "发生时间", "交易日期", "时间", "日期", "datetime", "date", "time"],
     2: ["时区", "timezone", "tz"],
-    3: ["交易类型", "收支类型", "类型", "类别", "type"],
+    3: ["交易类型", "收支类型", "收支", "收/支", "类型", "类别", "type"],
     4: ["分类", "一级分类", "主分类", "category"],
     5: ["子分类", "二级分类", "次分类", "subcategory", "subcategoryname"],
     6: ["账户", "账户名", "账户名称", "账号", "付款账户", "支付账户", "account"],
     7: ["币种", "货币", "currency"],
     8: ["金额", "交易金额", "发生金额", "收支金额", "amount", "money"],
-    9: ["对方账户", "相关账户", "转入账户", "目标账户", "收款账户", "destinationaccount", "relatedaccount"],
+    9: [
+        "对方账户",
+        "对方账号",
+        "对方名称",
+        "对方户名",
+        "相关账户",
+        "转入账户",
+        "目标账户",
+        "收款账户",
+        "destinationaccount",
+        "relatedaccount",
+    ],
     10: ["对方币种", "目标币种", "转入币种", "destinationcurrency", "relatedcurrency"],
     11: ["对方金额", "目标金额", "转入金额", "收款金额", "destinationamount", "relatedamount"],
     12: ["地理位置", "位置", "经纬度", "坐标", "location", "geolocation"],
@@ -160,6 +176,8 @@ LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE = {
 AUTO_TRANSACTION_TYPE_MAPPING = {
     "支出": 3,
     "收入": 2,
+    "支": 3,
+    "收": 2,
     "转账": 4,
     "投资": 5,
     "退款": 2,
@@ -168,6 +186,11 @@ AUTO_TRANSACTION_TYPE_MAPPING = {
     "transfer": 4,
     "investment": 5,
 }
+
+GENERIC_IMPORT_DATE_HEADERS = ["交易日期", "日期", "入账日期", "记账日期"]
+GENERIC_IMPORT_TIME_HEADERS = ["交易时间", "入账时间", "记账时间", "发生时间", "时间"]
+GENERIC_IMPORT_INCOME_AMOUNT_HEADERS = ["收入金额", "存入金额", "贷方金额", "入账金额", "收款金额", "收入"]
+GENERIC_IMPORT_EXPENSE_AMOUNT_HEADERS = ["支出金额", "借方金额", "出账金额", "付款金额", "付出金额", "支出"]
 
 
 def _normalize_import_suggestion_text(value: Any) -> str:
@@ -178,6 +201,17 @@ def _normalize_import_suggestion_text(value: Any) -> str:
 
 def _score_header_keyword_match(normalized_header: str, column_type: int) -> float:
     """根据关键词规则计算表头与导入列类型的匹配分。"""
+    if column_type == 3:
+        if normalized_header in {"收支", "收/支", "收支类型", "借贷标志", "借贷"}:
+            return 12.0
+        if normalized_header in {"交易类型", "交易分类", "类别", "类型"}:
+            return 8.0
+
+    if column_type == 6 and "余额" in normalized_header:
+        return 0.0
+    if column_type == 6 and any(token in normalized_header for token in ["对方", "对手", "目标", "收款", "相关"]):
+        return 0.0
+
     best_score = 0.0
     for keyword in IMPORT_COLUMN_TYPE_KEYWORDS.get(column_type, []):
         normalized_keyword = _normalize_import_suggestion_text(keyword)
@@ -187,6 +221,18 @@ def _score_header_keyword_match(normalized_header: str, column_type: int) -> flo
             best_score = max(best_score, 10.0)
         elif normalized_keyword in normalized_header or normalized_header in normalized_keyword:
             best_score = max(best_score, 6.0)
+
+    if column_type == 4 and normalized_header in {"交易分类", "原始分类"}:
+        best_score = max(best_score, 10.0)
+
+    if column_type == 6 and any(token in normalized_header for token in ["支付方式", "付款方式", "收付款方式", "支付渠道"]):
+        best_score = max(best_score, 9.0)
+
+    if column_type == 9 and any(token in normalized_header for token in ["户名", "名称"]):
+        best_score = max(best_score, 9.5)
+
+    if column_type == 14 and any(token in normalized_header for token in ["商品说明", "商品", "交易摘要"]):
+        best_score = max(best_score, 9.0)
 
     if column_type == 9 and any(token in normalized_header for token in ["对方", "转入", "目标", "收款"]):
         best_score = max(best_score, 8.0)
@@ -314,6 +360,118 @@ def _build_import_mapping_suggestion(
     }
 
 
+def _is_generic_import_data_like_cell(value: Any) -> bool:
+    """判断单元格内容是否更像数据而非表头。"""
+    text = str(value or "").strip()
+    if not text:
+        return False
+
+    normalized = _normalize_import_suggestion_text(text)
+    if normalized in AUTO_TRANSACTION_TYPE_MAPPING:
+        return True
+
+    amount_candidate = text.replace("¥", "").replace("￥", "").replace(",", "")
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", amount_candidate):
+        return True
+
+    if re.fullmatch(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?", text):
+        return True
+
+    if re.fullmatch(r"\d{1,2}[-/.]\d{1,2}[-/.]\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?", text):
+        return True
+
+    return False
+
+
+def _score_generic_import_header_row(row: list[Any]) -> tuple[float, set[int]]:
+    """为候选表头行打分。"""
+    non_empty_cells = [str(cell or "").strip() for cell in row if str(cell or "").strip()]
+    if len(non_empty_cells) < 2:
+        return -1.0, set()
+
+    matched_types: set[int] = set()
+    total_score = 0.0
+    data_like_count = 0
+
+    for cell in non_empty_cells:
+        normalized = _normalize_import_suggestion_text(cell)
+        if not normalized:
+            continue
+
+        best_column_type = None
+        best_score = 0.0
+        for column_type in IMPORT_COLUMN_TYPE_KEYWORDS:
+            score = _score_header_keyword_match(normalized, column_type)
+            if score > best_score:
+                best_score = score
+                best_column_type = column_type
+
+        if best_column_type is not None and best_score >= 5.0:
+            total_score += best_score + (2.5 if best_column_type not in matched_types else 0.5)
+            matched_types.add(best_column_type)
+            continue
+
+        if _is_generic_import_data_like_cell(cell):
+            data_like_count += 1
+
+    total_score += len(matched_types) * 3.0
+    total_score += min(len(non_empty_cells), 6) * 0.5
+    total_score -= data_like_count * 2.0
+
+    if len(matched_types) < 2:
+        total_score -= 6.0
+
+    return total_score, matched_types
+
+
+def _score_generic_import_data_row(row: list[Any]) -> float:
+    """为候选数据行打分，用于辅助判断上一行是否为表头。"""
+    non_empty_cells = [str(cell or "").strip() for cell in row if str(cell or "").strip()]
+    if not non_empty_cells:
+        return 0.0
+
+    data_like_count = sum(1 for cell in non_empty_cells if _is_generic_import_data_like_cell(cell))
+    return float(data_like_count) + (0.5 if len(non_empty_cells) >= 3 else 0.0)
+
+
+def _detect_generic_import_header_row_index(rows: list[list[Any]]) -> int:
+    """自动识别通用导入文件的表头行位置。"""
+    if not rows:
+        return 0
+
+    best_index = 0
+    best_score = float("-inf")
+    scan_limit = min(len(rows), 30)
+
+    for index, row in enumerate(rows[:scan_limit]):
+        header_score, matched_types = _score_generic_import_header_row(row)
+        if len(matched_types) < 2 and header_score < 8.0:
+            continue
+
+        next_row_score = 0.0
+        if index + 1 < len(rows):
+            next_row_score = _score_generic_import_data_row(rows[index + 1])
+
+        candidate_score = header_score + min(next_row_score, 4.0) * 1.5
+        if candidate_score > best_score:
+            best_index = index
+            best_score = candidate_score
+
+    if best_score < 10.0:
+        return 0
+
+    return best_index
+
+
+def _trim_generic_import_rows_to_header(rows: list[list[Any]]) -> tuple[list[list[Any]], int]:
+    """将二维表裁剪到自动识别出的表头行起始位置。"""
+    if not rows:
+        return rows, 0
+
+    header_row_index = _detect_generic_import_header_row_index(rows)
+    return rows[header_row_index:], header_row_index
+
+
 def allowed_picture_file(filename):
     """检查图片扩展名是否允许。"""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_PICTURE_EXTENSIONS
@@ -386,7 +544,7 @@ def _load_generic_import_rows(
         rows = [[str(cell).strip() for cell in row] for row in reader]
         return rows, actual_encoding, actual_delimiter
 
-    if suffix in (".xlsx", ".xls"):
+    if suffix == ".xlsx":
         if openpyxl is None:
             raise ImportError("需要安装 openpyxl 以支持 Excel 导入")
 
@@ -400,6 +558,35 @@ def _load_generic_import_rows(
         finally:
             workbook.close()
 
+    if suffix == ".xls":
+        if pd is None:
+            raise ImportError("需要安装 pandas 以支持旧版 xls 导入")
+
+        html_error: Exception | None = None
+        try:
+            tables = pd.read_html(file_path)
+            if not tables:
+                raise ValueError("未在 xls 文件中找到可读取的表格")
+
+            table = tables[0].fillna("")
+            rows = []
+            for record in table.itertuples(index=False, name=None):
+                rows.append([str(cell).strip() for cell in record])
+            return rows, "utf-8", ""
+        except (ImportError, ValueError) as exc:
+            html_error = exc
+
+        try:
+            table = pd.read_excel(file_path, header=None).fillna("")
+            rows = []
+            for record in table.itertuples(index=False, name=None):
+                rows.append([str(cell).strip() for cell in record])
+            return rows, "utf-8", ""
+        except Exception as exc:
+            if html_error is not None:
+                raise ValueError(f"未能读取 xls 文件: {file_path.name}") from html_error
+            raise exc
+
     raise ValueError(f"Unsupported file format for generic import: {suffix}")
 
 
@@ -411,7 +598,7 @@ def _parse_generic_import_time(raw_value: Any, time_format: str = "") -> int:
     if isinstance(raw_value, datetime):
         return int(raw_value.timestamp())
 
-    value = str(raw_value).strip()
+    value = re.sub(r"\s+", " ", str(raw_value).replace("\t", " ")).strip()
     if not value:
         return int(datetime.now().timestamp())
 
@@ -426,6 +613,9 @@ def _parse_generic_import_time(raw_value: Any, time_format: str = "") -> int:
             "%Y/%m/%d %H:%M",
             "%Y-%m-%d",
             "%Y/%m/%d",
+            "%Y%m%d %H:%M:%S",
+            "%Y%m%d %H:%M",
+            "%Y%m%d",
             "%Y.%m.%d %H:%M:%S",
             "%Y.%m.%d",
             "%d/%m/%Y %H:%M:%S",
@@ -478,6 +668,36 @@ def _parse_generic_import_amount(
         return 0.0
 
 
+def _parse_generic_import_signed_amount(
+    raw_value: Any, decimal_separator: str = ".", grouping_symbol: str | None = None
+) -> float | None:
+    """解析保留正负号的金额。"""
+    if raw_value in (None, ""):
+        return None
+
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+
+    value = str(raw_value).strip()
+    if not value:
+        return None
+
+    if grouping_symbol:
+        value = value.replace(grouping_symbol, "")
+    if decimal_separator and decimal_separator != ".":
+        value = value.replace(decimal_separator, ".")
+    value = value.replace("¥", "").replace("￥", "").replace(",", "")
+
+    if value.startswith("(") and value.endswith(")"):
+        value = "-" + value[1:-1]
+
+    try:
+        return float(value)
+    except ValueError:
+        logger.debug("[通用导入] 无法解析带符号金额: %s", raw_value)
+        return None
+
+
 def _frontend_type_number_to_backend_label(raw_type: Any) -> str:
     """前端数字类型转后端中文类型。"""
     type_value = str(raw_type).strip()
@@ -495,7 +715,9 @@ def _frontend_type_number_to_backend_label(raw_type: Any) -> str:
         "modifybalance": "余额调整",
         "余额调整": "余额调整",
         "收入": "收入",
+        "收": "收入",
         "支出": "支出",
+        "支": "支出",
         "转账": "转账",
         "投资": "投资",
         "退款": "收入",
@@ -535,6 +757,257 @@ def _get_mapped_cell(row: list[str], column_mapping: dict[str, Any], column_type
     return str(row[column_index]).strip()
 
 
+def _infer_generic_import_type_from_context(row: list[str], headers: list[str]) -> str | None:
+    """根据上下文字段推断收入/支出类型。"""
+    if not row:
+        return None
+
+    context_values = [str(cell or "").strip() for cell in row if str(cell or "").strip()]
+
+    for header_candidates in (
+        ["交易摘要", "摘要", "备注", "附言", "说明", "detail", "description", "note"],
+        ["交易用途", "用途", "业务摘要", "业务说明", "purpose"],
+    ):
+        column_index = _find_generic_import_header_index(headers, header_candidates)
+        if column_index is not None and column_index < len(row):
+            value = str(row[column_index] or "").strip()
+            if value:
+                context_values.append(value)
+
+    normalized_context = " ".join(context_values)
+    if not normalized_context:
+        return None
+
+    income_keywords = ["入账", "转入", "来账", "收款", "工资", "补发", "退款", "退汇", "利息", "存入", "代发"]
+    expense_keywords = ["转出", "支出", "付款", "消费", "提现", "扣款", "扣费", "缴费", "支付", "还款", "购买"]
+
+    has_income_keyword = any(keyword in normalized_context for keyword in income_keywords)
+    has_expense_keyword = any(keyword in normalized_context for keyword in expense_keywords)
+
+    if has_income_keyword and not has_expense_keyword:
+        return "收入"
+    if has_expense_keyword and not has_income_keyword:
+        return "支出"
+    return None
+
+
+def _find_generic_import_header_index(headers: list[str], candidates: list[str], exclude: set[int] | None = None) -> int | None:
+    """根据候选关键字查找表头索引。"""
+    excluded_indices = exclude or set()
+
+    best_index = None
+    best_score = 0.0
+    for index, header in enumerate(headers):
+        if index in excluded_indices:
+            continue
+
+        normalized_header = _normalize_import_suggestion_text(header)
+        if not normalized_header:
+            continue
+
+        for candidate in candidates:
+            normalized_candidate = _normalize_import_suggestion_text(candidate)
+            if not normalized_candidate:
+                continue
+
+            score = 0.0
+            if normalized_header == normalized_candidate:
+                score = 10.0
+            elif normalized_candidate in normalized_header or normalized_header in normalized_candidate:
+                score = 6.0
+
+            if score > best_score:
+                best_score = score
+                best_index = index
+
+    return best_index if best_score > 0 else None
+
+
+def _build_generic_import_trade_time(
+    row: list[str], headers: list[str], column_mapping: dict[str, Any], raw_time_value: str
+) -> str:
+    """构建通用导入的交易时间文本，必要时合并日期列与时间列。"""
+    normalized_time = re.sub(r"\s+", " ", str(raw_time_value or "").replace("\t", " ")).strip()
+
+    mapped_time_index = column_mapping.get("1")
+    try:
+        mapped_time_index_int = int(mapped_time_index) if mapped_time_index is not None else None
+    except (TypeError, ValueError):
+        mapped_time_index_int = None
+
+    if normalized_time and ":" in normalized_time:
+        return normalized_time
+
+    if not headers:
+        return normalized_time
+
+    time_index = _find_generic_import_header_index(headers, GENERIC_IMPORT_TIME_HEADERS, exclude={mapped_time_index_int} if mapped_time_index_int is not None else None)
+    date_index = _find_generic_import_header_index(headers, GENERIC_IMPORT_DATE_HEADERS)
+
+    date_text = normalized_time
+    if not date_text and date_index is not None and date_index < len(row):
+        date_text = re.sub(r"\s+", " ", str(row[date_index] or "").replace("\t", " ")).strip()
+
+    time_text = ""
+    if time_index is not None and time_index < len(row):
+        time_text = re.sub(r"\s+", " ", str(row[time_index] or "").replace("\t", " ")).strip()
+
+    if date_text and time_text and ":" in time_text and ":" not in date_text:
+        return f"{date_text} {time_text}"
+
+    return date_text or time_text
+
+
+def _is_generic_import_repeated_header_row(row: list[str], headers: list[str]) -> bool:
+    """判断数据行是否为重复出现的表头行。"""
+    comparable_length = min(len(row), len(headers))
+    if comparable_length == 0:
+        return False
+
+    matched_count = 0
+    non_empty_count = 0
+    for index in range(comparable_length):
+        normalized_cell = _normalize_import_suggestion_text(row[index])
+        normalized_header = _normalize_import_suggestion_text(headers[index])
+        if not normalized_cell or not normalized_header:
+            continue
+        non_empty_count += 1
+        if normalized_cell == normalized_header:
+            matched_count += 1
+
+    return matched_count >= 3 and matched_count == non_empty_count
+
+
+def _generic_import_amount_column_has_signed_values(rows: list[list[str]], column_mapping: dict[str, Any]) -> bool:
+    """判断金额列是否使用带符号单列来区分收入和支出。"""
+    amount_index = column_mapping.get("8")
+    try:
+        amount_index_int = int(amount_index) if amount_index is not None else None
+    except (TypeError, ValueError):
+        amount_index_int = None
+
+    if amount_index_int is None:
+        return False
+
+    has_positive = False
+    has_negative = False
+    for row in rows[:200]:
+        if amount_index_int >= len(row):
+            continue
+        signed_amount = _parse_generic_import_signed_amount(row[amount_index_int], decimal_separator=".")
+        if signed_amount is None:
+            continue
+        if signed_amount > 0:
+            has_positive = True
+        elif signed_amount < 0:
+            has_negative = True
+        if has_positive and has_negative:
+            return True
+
+    return False
+
+
+def _resolve_generic_import_type_and_amount(
+    row: list[str],
+    headers: list[str],
+    column_mapping: dict[str, Any],
+    transaction_type_mapping: dict[str, Any],
+    amount_decimal_separator: str,
+    amount_digit_grouping_symbol: str,
+    amount_column_has_signed_values: bool = False,
+) -> tuple[str, float, str]:
+    """解析通用导入的交易类型与金额，并兼容借贷双金额列。"""
+    raw_type_value = _get_mapped_cell(row, column_mapping, 3)
+    raw_amount_value = _get_mapped_cell(row, column_mapping, 8)
+    mapped_type_index = column_mapping.get("3")
+    try:
+        int(mapped_type_index) if mapped_type_index is not None else None
+    except (TypeError, ValueError):
+        pass
+
+    def _parse_optional_amount(raw_value: Any) -> tuple[str, float]:
+        amount_text = str(raw_value or "").strip()
+        if not amount_text:
+            return "", 0.0
+
+        return amount_text, _parse_generic_import_amount(
+            amount_text,
+            decimal_separator=amount_decimal_separator or ".",
+            grouping_symbol=amount_digit_grouping_symbol or None,
+        )
+
+    if headers:
+        income_amount_index = _find_generic_import_header_index(headers, GENERIC_IMPORT_INCOME_AMOUNT_HEADERS)
+        expense_amount_index = _find_generic_import_header_index(headers, GENERIC_IMPORT_EXPENSE_AMOUNT_HEADERS)
+
+        income_amount_value = (
+            str(row[income_amount_index]).strip()
+            if income_amount_index is not None and income_amount_index < len(row)
+            else ""
+        )
+        expense_amount_value = (
+            str(row[expense_amount_index]).strip()
+            if expense_amount_index is not None and expense_amount_index < len(row)
+            else ""
+        )
+        raw_amount_text, raw_amount = _parse_optional_amount(raw_amount_value)
+        income_amount_text, income_amount = _parse_optional_amount(income_amount_value)
+        expense_amount_text, expense_amount = _parse_optional_amount(expense_amount_value)
+
+        has_income_amount = bool(income_amount_text) and abs(income_amount) > 0
+        has_expense_amount = bool(expense_amount_text) and abs(expense_amount) > 0
+
+        if not raw_type_value:
+            direction_index = _find_generic_import_header_index(
+                headers,
+                ["收/支", "收支", "收支类型", "借贷标志", "借贷"],
+            )
+            if direction_index is not None and direction_index < len(row):
+                raw_type_value = str(row[direction_index] or "").strip()
+
+        if not raw_amount_text or (abs(raw_amount) == 0 and (has_income_amount or has_expense_amount)):
+            if has_expense_amount:
+                raw_amount_value = expense_amount_value
+            elif has_income_amount:
+                raw_amount_value = income_amount_value
+
+        if not raw_type_value:
+            if has_income_amount and not has_expense_amount:
+                raw_type_value = "收入"
+            elif has_expense_amount and not has_income_amount:
+                raw_type_value = "支出"
+
+    type_name = _map_generic_import_type(raw_type_value, transaction_type_mapping)
+    raw_amount_text = str(raw_amount_value or "").strip()
+    normalized_amount_text = raw_amount_text.replace("\t", " ").strip()
+    signed_amount = _parse_generic_import_signed_amount(
+        normalized_amount_text,
+        decimal_separator=amount_decimal_separator or ".",
+        grouping_symbol=amount_digit_grouping_symbol or None,
+    )
+
+    if not str(raw_type_value or "").strip():
+        if normalized_amount_text.startswith("+"):
+            type_name = "收入"
+        elif normalized_amount_text.startswith("-"):
+            type_name = "支出"
+        elif amount_column_has_signed_values and signed_amount is not None and signed_amount != 0:
+            type_name = "收入" if signed_amount > 0 else "支出"
+
+    if type_name == "转账":
+        inferred_type_name = _infer_generic_import_type_from_context(row, headers)
+        if inferred_type_name in {"收入", "支出"}:
+            type_name = inferred_type_name
+
+    amount = _parse_generic_import_amount(
+        normalized_amount_text,
+        decimal_separator=amount_decimal_separator or ".",
+        grouping_symbol=amount_digit_grouping_symbol or None,
+    )
+
+    return type_name, amount, raw_type_value
+
+
 def _build_original_category(main_category: str, sub_category: str) -> str:
     """构建原始分类展示文本。"""
     if main_category and sub_category:
@@ -562,7 +1035,8 @@ def _convert_bill_to_import_item(bill: dict[str, Any]) -> dict[str, Any]:
     item = {
         "type": frontend_type,
         "categoryId": "",
-        "originalCategoryName": _build_original_category(main_category, sub_category),
+        "originalCategoryName": _build_original_category(main_category, sub_category)
+        or str(bill.get("original_category") or "").strip(),
         "time": time_value,
         "utcOffset": 0,
         "sourceAccountId": "",
@@ -619,26 +1093,63 @@ def _build_category_mapping_payload(categories: list[dict[str, Any]]) -> dict[st
     }
 
 
-async def _apply_learning_to_column_mapping_bills(
+def _safe_int_identifier(raw_value: Any) -> int | None:
+    """安全地将字符串标识转换为整数。"""
+    try:
+        text = str(raw_value or "").strip()
+        if not text or not text.isdigit():
+            return None
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _prepare_import_review_bills(
     bills: list[dict[str, Any]], db, bill_service, user_id: int
-) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], int]:
-    """为通用列映射导入结果应用长期学习规则。"""
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, int]]:
+    """为导入检查页准备统一的学习、分类和账户匹配结果。"""
     enriched_bills = [dict(bill) for bill in bills]
-    applied_count = 0
+    stats = {"learning_seeded": 0, "learning_replayed": 0}
+    accounts = await db.get_all_accounts(user_id=user_id) if db else []
+    categories = await db.get_all_categories(user_id=user_id) if db else []
+    known_category_pairs = {
+        (str(cat.get("main_category") or "").strip(), str(cat.get("sub_category") or "").strip())
+        for cat in categories
+        if str(cat.get("main_category") or "").strip()
+    }
 
     if enriched_bills and bill_service:
+        for bill in enriched_bills:
+            if not bill.get("date") and bill.get("trade_time"):
+                bill["date"] = bill["trade_time"]
+
         original_snapshots = [
             {
                 "type": str(bill.get("type", "") or "").strip(),
                 "main_category": str(bill.get("main_category", "") or "").strip(),
                 "sub_category": str(bill.get("sub_category", "") or "").strip(),
+                "original_category": str(bill.get("original_category", "") or "").strip(),
                 "has_explicit_type": bool(bill.get("_import_has_explicit_type")),
                 "has_explicit_category": bool(bill.get("_import_has_explicit_category")),
             }
             for bill in enriched_bills
         ]
 
-        applied_count = await bill_service._apply_import_learning_rules(  # pylint: disable=protected-access
+        await bill_service.category_engine.load_rules_from_db(db, user_id=user_id)
+
+        stats["learning_seeded"] = await bill_service._apply_import_learning_rules(  # pylint: disable=protected-access
+            enriched_bills, user_id=user_id, type_only=True, record_usage=False
+        )
+        enriched_bills = await bill_service.category_engine.batch_match_categories(enriched_bills, types=None)
+        enriched_bills = await bill_service._detect_investment_candidates(  # pylint: disable=protected-access
+            enriched_bills, user_id=user_id
+        )
+        enriched_bills = await bill_service._match_accounts(enriched_bills, user_id)  # pylint: disable=protected-access
+        enriched_bills = await bill_service._detect_cash_transfers(  # pylint: disable=protected-access
+            enriched_bills, user_id=user_id
+        )
+
+        stats["learning_replayed"] = await bill_service._apply_import_learning_rules(  # pylint: disable=protected-access
             enriched_bills, user_id=user_id, type_only=False, record_usage=False
         )
 
@@ -646,17 +1157,22 @@ async def _apply_learning_to_column_mapping_bills(
             if snapshot["has_explicit_type"] and snapshot["type"]:
                 bill["type"] = snapshot["type"]
             if snapshot["has_explicit_category"]:
-                bill["main_category"] = snapshot["main_category"]
-                bill["sub_category"] = snapshot["sub_category"]
-
-    accounts = await db.get_all_accounts(user_id=user_id) if db else []
-    categories = await db.get_all_categories(user_id=user_id) if db else []
+                explicit_pair = (snapshot["main_category"], snapshot["sub_category"])
+                if explicit_pair in known_category_pairs:
+                    bill["main_category"] = snapshot["main_category"]
+                    bill["sub_category"] = snapshot["sub_category"]
+                else:
+                    bill["main_category"] = ""
+                    bill["sub_category"] = ""
+                    bill["original_category"] = snapshot["original_category"] or _build_original_category(
+                        snapshot["main_category"], snapshot["sub_category"]
+                    )
 
     return (
         enriched_bills,
         _build_account_mapping_payload(accounts),
         _build_category_mapping_payload(categories),
-        applied_count,
+        stats,
     )
 
 
@@ -689,7 +1205,7 @@ def _convert_bill_to_import_item_with_mappings(
         id_to_account = account_mappings.get("id_to_account", {})
 
         if source_account_id not in (None, "", 0, "0"):
-            source_account = id_to_account.get(int(source_account_id))
+            source_account = id_to_account.get(_safe_int_identifier(source_account_id))
             if source_account:
                 item["accountName"] = str(source_account.get("name") or item.get("accountName") or "").strip()
                 item["originalSourceAccountName"] = item.get("originalSourceAccountName") or item["accountName"]
@@ -699,7 +1215,7 @@ def _convert_bill_to_import_item_with_mappings(
                 )
 
         if destination_account_id not in (None, "", 0, "0"):
-            destination_account = id_to_account.get(int(destination_account_id))
+            destination_account = id_to_account.get(_safe_int_identifier(destination_account_id))
             if destination_account:
                 item["originalDestinationAccountName"] = (
                     item.get("originalDestinationAccountName") or str(destination_account.get("name") or "").strip()
@@ -733,24 +1249,33 @@ def _parse_import_file_with_column_mapping(
     if not rows:
         return [], actual_encoding, actual_delimiter
 
-    start_index = 1 if has_header_line else 0
+    header_row_index = _detect_generic_import_header_row_index(rows) if has_header_line else -1
+    start_index = header_row_index + 1 if has_header_line else 0
+    headers = rows[header_row_index] if has_header_line and 0 <= header_row_index < len(rows) else []
     normalized_bills = []
+    amount_column_has_signed_values = _generic_import_amount_column_has_signed_values(rows[start_index:], column_mapping)
 
-    for row_index, row in enumerate(rows[start_index:], start=1):
+    for row_index, row in enumerate(rows[start_index:], start=start_index + 1):
+        if headers and _is_generic_import_repeated_header_row(row, headers):
+            logger.debug("[通用导入] 跳过重复表头行: row=%s", row_index)
+            continue
+
         date_value = _get_mapped_cell(row, column_mapping, 1)
-        type_value = _get_mapped_cell(row, column_mapping, 3)
-        amount_value = _get_mapped_cell(row, column_mapping, 8)
 
-        if not date_value and not type_value and not amount_value:
+        type_name, amount, raw_type_value = _resolve_generic_import_type_and_amount(
+            row,
+            headers=headers,
+            column_mapping=column_mapping,
+            transaction_type_mapping=transaction_type_mapping,
+            amount_decimal_separator=amount_decimal_separator,
+            amount_digit_grouping_symbol=amount_digit_grouping_symbol,
+            amount_column_has_signed_values=amount_column_has_signed_values,
+        )
+
+        if not date_value and not raw_type_value and not amount:
             continue
 
         try:
-            type_name = _map_generic_import_type(type_value, transaction_type_mapping)
-            amount = _parse_generic_import_amount(
-                amount_value,
-                decimal_separator=amount_decimal_separator or ".",
-                grouping_symbol=amount_digit_grouping_symbol or None,
-            )
             related_amount_raw = _get_mapped_cell(row, column_mapping, 11)
             related_amount = _parse_generic_import_amount(
                 related_amount_raw,
@@ -758,8 +1283,12 @@ def _parse_import_file_with_column_mapping(
                 grouping_symbol=amount_digit_grouping_symbol or None,
             )
 
+            if amount == 0 and related_amount == 0:
+                continue
+
             main_category = _get_mapped_cell(row, column_mapping, 4)
             sub_category = _get_mapped_cell(row, column_mapping, 5)
+            original_category = _build_original_category(main_category, sub_category)
             raw_tags = _get_mapped_cell(row, column_mapping, 13)
             original_tag_names = []
             if raw_tags:
@@ -767,7 +1296,12 @@ def _parse_import_file_with_column_mapping(
                 original_tag_names = [item.strip() for item in raw_tags.split(separator) if item.strip()]
 
             normalized_bill = {
-                "trade_time": datetime.fromtimestamp(_parse_generic_import_time(date_value, time_format)).strftime(
+                "trade_time": datetime.fromtimestamp(
+                    _parse_generic_import_time(
+                        _build_generic_import_trade_time(row, headers, column_mapping, date_value),
+                        time_format,
+                    )
+                ).strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
                 "type": type_name,
@@ -780,10 +1314,11 @@ def _parse_import_file_with_column_mapping(
                 "description": _get_mapped_cell(row, column_mapping, 14),
                 "main_category": main_category,
                 "sub_category": sub_category,
+                "original_category": original_category,
                 "counterparty": _get_mapped_cell(row, column_mapping, 9),
                 "payment_method": _get_mapped_cell(row, column_mapping, 6),
                 "original_tag_names": original_tag_names,
-                "_import_has_explicit_type": bool(str(type_value or "").strip()),
+                "_import_has_explicit_type": bool(str(raw_type_value or "").strip()),
                 "_import_has_explicit_category": bool(main_category or sub_category),
             }
 
@@ -792,6 +1327,42 @@ def _parse_import_file_with_column_mapping(
             logger.warning("[通用导入] 解析第 %s 行失败: %s", row_index, row_error)
 
     return normalized_bills, actual_encoding, actual_delimiter
+
+
+def _parse_import_file_with_auto_mapping(
+    file_path: Path,
+    configs: list[dict[str, Any]],
+    requested_encoding: str = "",
+    delimiter: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str, str]:
+    """为未显式配置列映射的文件自动推断通用解析配置。"""
+    rows, actual_encoding, actual_delimiter = _load_generic_import_rows(
+        file_path, requested_encoding=requested_encoding, delimiter=delimiter
+    )
+    trimmed_rows, _ = _trim_generic_import_rows_to_header(rows)
+    if not trimmed_rows:
+        return [], {"columnMapping": {}, "transactionTypeMapping": {}}, actual_encoding, actual_delimiter
+
+    headers = trimmed_rows[0]
+    sample_rows = trimmed_rows[1:11] if len(trimmed_rows) > 1 else []
+    suggestion = _build_import_mapping_suggestion(headers, configs, sample_rows)
+    column_mapping = suggestion.get("columnMapping") or {}
+    if not column_mapping:
+        return [], suggestion, actual_encoding, actual_delimiter
+
+    bills, actual_encoding, actual_delimiter = _parse_import_file_with_column_mapping(
+        file_path,
+        column_mapping=column_mapping,
+        transaction_type_mapping=suggestion.get("transactionTypeMapping") or {},
+        has_header_line=True,
+        time_format="",
+        amount_decimal_separator=".",
+        amount_digit_grouping_symbol="",
+        tag_separator=";",
+        file_encoding=requested_encoding,
+        delimiter=actual_delimiter or delimiter,
+    )
+    return bills, suggestion, actual_encoding, actual_delimiter
 
 
 def _build_picture_data_url(file_path: Path) -> str:
@@ -848,16 +1419,16 @@ async def sync_balances_for_bill(db, bill_data):
         source_id = bill_data.get("source_account_id")
         if source_id:
             await db.sync_account_balance(int(source_id))
-            logger.info(f"已同步源账户余额: {source_id}")
+            logger.info("已同步源账户余额: %s", source_id)
 
         # 同步目标账户 (转账/投资)
         dest_id = bill_data.get("destination_account_id")
         if dest_id:
             await db.sync_account_balance(int(dest_id))
-            logger.info(f"已同步目标账户余额: {dest_id}")
+            logger.info("已同步目标账户余额: %s", dest_id)
 
-    except Exception as e:
-        logger.error(f"同步账户余额失败: {e}", exc_info=True)
+    except Exception as error:
+        logger.error("同步账户余额失败: %s", error, exc_info=True)
 
 
 def get_category_id_from_names(main_category: str, sub_category: str, db, user_id: int = 1) -> str:
@@ -907,8 +1478,8 @@ def parse_bill_date(date_str):
     # 回退到只有日期的格式
     try:
         return datetime.strptime(date_str, "%Y-%m-%d")
-    except ValueError as e:
-        logger.error(f"无法解析日期字符串: {date_str}, 错误: {e}")
+    except ValueError as error:
+        logger.error("无法解析日期字符串: %s, 错误: %s", date_str, error)
         return datetime.now()  # 返回当前时间作为默认值
 
 
@@ -949,7 +1520,7 @@ def get_bills():
                 if type_int in type_mapping:
                     filters["type"] = type_mapping[type_int]
                 elif type_int != 0:
-                    logger.warning(f"未知的type参数: {type_int}, 已忽略")
+                    logger.warning("未知的type参数: %s, 已忽略", type_int)
             except ValueError:
                 # 如果不是数字，认为是中文类型名，直接使用
                 filters["type"] = type_param
@@ -1283,12 +1854,12 @@ def modify_bill():
                 backend_data["description"] = data["comment"]
             # 保持原类型
             backend_data["type"] = old_bill["type"]
-            logger.info(f"简单更新模式：只更新 description={backend_data.get('description')}")
+            logger.info("简单更新模式：只更新 description=%s", backend_data.get("description"))
 
         # **保持原类型：如果前端没有传type，使用原账单的类型**
         if "type" not in backend_data or not backend_data["type"]:
             backend_data["type"] = old_bill["type"]
-            logger.info(f"保持原类型: {old_bill['type']}")
+            logger.info("保持原类型: %s", old_bill["type"])
 
         # source_account_id已经在adapter中设置，无需额外查询
         # 保持原有的source_account_id
@@ -1311,7 +1882,7 @@ def modify_bill():
         for field in ["destination_account_id", "destination_amount"]:
             if field not in backend_data and field in old_bill:
                 backend_data[field] = old_bill[field]
-                logger.info(f"保持原字段 {field}: {old_bill[field]}")
+                logger.info("保持原字段 %s: %s", field, old_bill[field])
 
         # 更新账单
         result = loop.run_until_complete(db.update_bill(bill_id, backend_data, user_id=request.user_id))
@@ -1679,7 +2250,7 @@ def update_bill(bill_id: int):
         if not frontend_data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        logger.info(f"更新账单 {bill_id}, 收到前端数据: {frontend_data}")
+        logger.info("更新账单 %s, 收到前端数据: %s", bill_id, frontend_data)
 
         db, _, category_engine, adapter = get_app_context_with_adapter()
 
@@ -1700,7 +2271,7 @@ def update_bill(bill_id: int):
             # source_account_id已在adapter中处理，无需额外查询
             # 验证source_account_id是否有效即可
             if metadata.get("source_account_id"):
-                logger.info(f"源账户ID: {metadata['source_account_id']}")
+                logger.info("源账户ID: %s", metadata["source_account_id"])
 
             # 查询分类名称
             if metadata.get("category_id"):
@@ -1711,9 +2282,13 @@ def update_bill(bill_id: int):
                     if category:
                         backend_data["main_category"] = category.get("main_category", "")
                         backend_data["sub_category"] = category.get("sub_category", "")
-                        logger.info(f"查询到分类: {backend_data['main_category']} - {backend_data['sub_category']}")
+                        logger.info(
+                            "查询到分类: %s - %s",
+                            backend_data["main_category"],
+                            backend_data["sub_category"],
+                        )
                 except ValueError:
-                    logger.error(f"无效的分类ID: {metadata['category_id']}")
+                    logger.error("无效的分类ID: %s", metadata["category_id"])
         else:
             # 后端格式,直接使用
             backend_data = frontend_data
@@ -1730,7 +2305,7 @@ def update_bill(bill_id: int):
 
         backend_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        logger.info(f"准备更新的后端数据: {backend_data}")
+        logger.info("准备更新的后端数据: %s", backend_data)
 
         # 更新账单
         result = loop.run_until_complete(db.update_bill(bill_id, backend_data, user_id=request.user_id))
@@ -1739,7 +2314,7 @@ def update_bill(bill_id: int):
             # **处理标签更新**
             if "tag_ids" in metadata:
                 tag_ids = metadata["tag_ids"]
-                logger.info(f"[更新账单] 更新标签: {tag_ids}")
+                logger.info("[更新账单] 更新标签: %s", tag_ids)
                 loop.run_until_complete(db.update_bill_tags(bill_id, tag_ids, user_id=request.user_id))
             else:
                 logger.debug("[更新账单] 未提供标签数据，保持现有标签")
@@ -1749,7 +2324,7 @@ def update_bill(bill_id: int):
 
             # 获取标签
             tags = loop.run_until_complete(db.get_tags_for_bill(bill_id, user_id=request.user_id))
-            logger.info(f"[更新账单] 获取到标签: {tags}")
+            logger.info("[更新账单] 获取到标签: %s", tags)
 
             # **同步账户余额**
             # 1. 同步旧账单关联的账户 (回滚旧金额)
@@ -1777,7 +2352,7 @@ def update_bill(bill_id: int):
         return jsonify({"success": False, "error": "Bill not found or update failed"}), 404
 
     except Exception as e:
-        logger.error(f"更新账单失败: {e}", exc_info=True)
+        logger.error("更新账单失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -1811,7 +2386,7 @@ def delete_bill(bill_id: int):
                 }
                 loop.run_until_complete(sync_balances_for_bill(db, sync_data))
             except Exception as e:
-                logger.error(f"删除账单后同步余额失败: {e}", exc_info=True)
+                logger.error("删除账单后同步余额失败: %s", e, exc_info=True)
                 # 不阻断删除成功的响应
 
             loop.close()
@@ -1844,7 +2419,7 @@ def import_bills_batch():
         return jsonify({"success": result["success"], "result": result})
 
     except Exception as e:
-        logger.error(f"批量导入账单失败: {e}")
+        logger.error("批量导入账单失败: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -1903,7 +2478,7 @@ def upload_and_import():
         file_path = UPLOAD_FOLDER / unique_filename
 
         file.save(str(file_path))
-        logger.info(f"文件已保存: {file_path}")
+        logger.info("文件已保存: %s", file_path)
 
         # 导入账单
         _, bill_service, _ = get_app_context()
@@ -1927,16 +2502,18 @@ def upload_and_import():
         if not preview_only and result.get("success"):
             try:
                 os.remove(file_path)
-                logger.info(f"临时文件已删除: {file_path}")
-            except Exception as e:
-                logger.warning(f"删除临时文件失败: {e}")
+                logger.info("临时文件已删除: %s", file_path)
+            except Exception as error:  # pylint: disable=broad-except
+                logger.warning("删除临时文件失败: %s", error)
 
         # 日志记录返回数据
         preview_count = len(result.get("preview", []))
         logger.info(
-            f"[导入API返回] success={result.get('success')}, "
-            f"preview_count={preview_count}, "
-            f"total={result.get('total')}, valid={result.get('valid')}"
+            "[导入API返回] success=%s, preview_count=%s, total=%s, valid=%s",
+            result.get("success"),
+            preview_count,
+            result.get("total"),
+            result.get("valid"),
         )
 
         # 前端期望格式: { success, data: { preview: [...] } }
@@ -1957,9 +2534,9 @@ def upload_and_import():
             }
         )
 
-    except Exception as e:
-        logger.error(f"上传并导入账单失败: {e}", exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as error:
+        logger.error("上传并导入账单失败: %s", error, exc_info=True)
+        return jsonify({"success": False, "error": str(error)}), 500
 
 
 @bp.route("/import/parsers", methods=["GET"])
@@ -2028,7 +2605,7 @@ def get_available_parsers():
         return jsonify({"success": True, "result": parsers})
 
     except Exception as e:
-        logger.error(f"获取解析器列表失败: {e}")
+        logger.error("获取解析器列表失败: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2080,7 +2657,7 @@ def reclassify_transactions():
         if not isinstance(transactions, list):
             return jsonify({"success": False, "error": "transactions必须是数组"}), 400
 
-        logger.info(f"[重新分类] 收到 {len(transactions)} 条交易")
+        logger.info("[重新分类] 收到 %s 条交易", len(transactions))
 
         # 获取分类引擎和数据库
         db, _, category_engine = get_app_context()
@@ -2146,7 +2723,7 @@ def reclassify_transactions():
 
                 results.append(result)
 
-            logger.info(f"[重新分类] 完成 {len(results)} 条交易的重新分类")
+            logger.info("[重新分类] 完成 %s 条交易的重新分类", len(results))
 
             return jsonify({"success": True, "result": results})
 
@@ -2154,7 +2731,7 @@ def reclassify_transactions():
             loop.close()
 
     except Exception as e:
-        logger.error(f"重新分类失败: {e}", exc_info=True)
+        logger.error("重新分类失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2226,7 +2803,7 @@ def reclassify_preview_session(session_id: str):
         }
     """
     try:
-        logger.info(f"[v2重新分类] session_id={session_id}, user_id={request.user_id}")
+        logger.info("[v2重新分类] session_id=%s, user_id=%s", session_id, request.user_id)
 
         data = request.get_json(silent=True) or {}
         preview_updates = data.get("preview_updates") or []
@@ -2257,10 +2834,11 @@ def reclassify_preview_session(session_id: str):
             preview_data = loop.run_until_complete(bill_service.get_import_preview(session_id))
 
             logger.info(
-                f"[v2重新分类] 完成 session={session_id}, "
-                f"total={reclassify_result.get('total')}, "
-                f"categorized={reclassify_result.get('categorized')}, "
-                f"account_matched={reclassify_result.get('account_matched')}"
+                "[v2重新分类] 完成 session=%s, total=%s, categorized=%s, account_matched=%s",
+                session_id,
+                reclassify_result.get("total"),
+                reclassify_result.get("categorized"),
+                reclassify_result.get("account_matched"),
             )
 
             return jsonify(
@@ -2282,7 +2860,7 @@ def reclassify_preview_session(session_id: str):
             loop.close()
 
     except Exception as e:
-        logger.error(f"[v2重新分类] 失败: {e}", exc_info=True)
+        logger.error("[v2重新分类] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2607,6 +3185,7 @@ def preview_import_file():
         rows, actual_encoding, actual_delimiter = _load_generic_import_rows(
             temp_file_path, requested_encoding=requested_encoding, delimiter=requested_delimiter
         )
+        rows, detected_header_row = _trim_generic_import_rows_to_header(rows)
 
         headers = rows[0] if rows else []
         sample_rows = rows[1:11] if len(rows) > 1 else []
@@ -2621,6 +3200,7 @@ def preview_import_file():
                     "totalRows": max(len(rows) - 1, 0),
                     "encoding": actual_encoding,
                     "delimiter": actual_delimiter,
+                    "detectedHeaderRow": detected_header_row,
                 },
             }
         )
@@ -2792,7 +3372,7 @@ def confirm_import():
         return jsonify({"success": result.get("success", False), "result": result})
 
     except Exception as e:
-        logger.error(f"确认导入失败: {e}", exc_info=True)
+        logger.error("确认导入失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2847,7 +3427,7 @@ def quick_add_category_keyword():
             return jsonify({"success": False, "error": "Failed to add keyword"}), 400
 
     except Exception as e:
-        logger.error(f"添加关键词失败: {e}", exc_info=True)
+        logger.error("添加关键词失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2891,7 +3471,7 @@ def refresh_bill_categories():
         return jsonify({"success": result.get("success", False), "result": result})
 
     except Exception as e:
-        logger.error(f"刷新分类失败: {e}", exc_info=True)
+        logger.error("刷新分类失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2919,7 +3499,7 @@ def batch_update_bills():
         return jsonify({"success": True, "result": {"updated_count": result}})
 
     except Exception as e:
-        logger.error(f"批量更新账单失败: {e}")
+        logger.error("批量更新账单失败: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2951,25 +3531,25 @@ def batch_delete_bills():
                     if bill.get("destination_account_id"):
                         affected_accounts.add(int(bill["destination_account_id"]))
             except Exception as e:
-                logger.warning(f"获取账单信息失败 (ID: {bill_id}): {e}")
+                logger.warning("获取账单信息失败 (ID: %s): %s", bill_id, e)
 
         result = loop.run_until_complete(db.batch_delete_bills(data["ids"], user_id=request.user_id))
 
         # **同步余额**
         if result > 0:
-            logger.info(f"批量删除成功，开始同步 {len(affected_accounts)} 个账户的余额")
+            logger.info("批量删除成功，开始同步 %s 个账户的余额", len(affected_accounts))
             for account_id in affected_accounts:
                 try:
                     loop.run_until_complete(db.sync_account_balance(account_id))
                 except Exception as e:
-                    logger.error(f"同步账户余额失败 (ID: {account_id}): {e}")
+                    logger.error("同步账户余额失败 (ID: %s): %s", account_id, e)
 
         loop.close()
 
         return jsonify({"success": True, "result": {"deleted_count": result}})
 
     except Exception as e:
-        logger.error(f"批量删除账单失败: {e}")
+        logger.error("批量删除账单失败: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3010,9 +3590,10 @@ def parse_import_file():
             return jsonify({"success": False, "error": "No file selected"}), 400
 
         # 获取解析器类型
-        requested_file_type = request.form.get("fileType", "auto")
+        requested_file_type = str(request.form.get("fileType", "auto") or "auto").strip().lower()
+        force_generic_parser = requested_file_type == "generic"
         parser_type = requested_file_type
-        if parser_type == "auto":
+        if parser_type in ("auto", "generic"):
             parser_type = None  # None表示自动检测
 
         # v6.89: 支持前端列映射通用表格解析
@@ -3027,11 +3608,16 @@ def parse_import_file():
         delimiter = str(request.form.get("delimiter", "") or "").strip() or None
         use_column_mapping = isinstance(column_mapping, dict) and bool(column_mapping)
 
-        logger.info(f"文件: {file.filename}, 解析器类型: {parser_type or '自动检测'}")
+        logger.info(
+            "文件: %s, 请求解析器类型: %s, force_generic=%s",
+            file.filename,
+            requested_file_type,
+            force_generic_parser,
+        )
 
         # 检查文件扩展名
         if not allowed_file(file.filename):
-            logger.error(f"不支持的文件类型: {file.filename}")
+            logger.error("不支持的文件类型: %s", file.filename)
             return jsonify(
                 {"success": False, "error": f"File type not allowed. Supported: {', '.join(ALLOWED_EXTENSIONS)}"}
             ), 400
@@ -3046,40 +3632,90 @@ def parse_import_file():
         file_path = UPLOAD_FOLDER / unique_filename
 
         file.save(str(file_path))
-        logger.info(f"临时文件已保存: {file_path}")
+        logger.info("临时文件已保存: %s", file_path)
 
         items = []
+        normalized_bills: list[dict[str, Any]] = []
+        resolved_parser_type = "generic"
+        detected_parser_type = ""
+        detected_parser_name = ""
 
-        if use_column_mapping:
-            logger.info("[通用导入] 使用列映射解析: file_type=%s, has_header=%s", requested_file_type, has_header_line)
-            normalized_bills, actual_encoding, actual_delimiter = _parse_import_file_with_column_mapping(
-                file_path,
-                column_mapping=column_mapping,
-                transaction_type_mapping=transaction_type_mapping,
-                has_header_line=has_header_line,
-                time_format=time_format,
-                amount_decimal_separator=amount_decimal_separator,
-                amount_digit_grouping_symbol=amount_digit_grouping_symbol,
-                tag_separator=tag_separator,
-                file_encoding=file_encoding,
-                delimiter=delimiter,
-            )
-            logger.info(
-                "[通用导入] 解析完成: %s 条记录, encoding=%s, delimiter=%s",
-                len(normalized_bills),
-                actual_encoding,
-                actual_delimiter,
-            )
+        db, bill_service, _ = get_app_context(user_id=request.user_id)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-            db, bill_service, _ = get_app_context(user_id=request.user_id)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                normalized_bills, account_mappings, category_mappings, learning_applied = loop.run_until_complete(
-                    _apply_learning_to_column_mapping_bills(normalized_bills, db, bill_service, request.user_id)
+        try:
+            from bill_analyser.parsers.factory import ParserFactory
+
+            parser_factory = ParserFactory()
+            detected_parser_info = parser_factory.detect_parser(str(file_path))
+            detected_parser_type = detected_parser_info.get("id", "") if detected_parser_info else ""
+            detected_parser_name = str(
+                (detected_parser_info or {}).get("name") or (detected_parser_info or {}).get("parser_name") or ""
+            ).strip()
+
+            if detected_parser_info and not force_generic_parser:
+                resolved_parser_type = parser_type or detected_parser_type
+                if use_column_mapping:
+                    logger.info(
+                        "[导入解析] 已识别专用解析器 %s，优先使用专用解析器并忽略通用列映射",
+                        resolved_parser_type,
+                    )
+                else:
+                    logger.info("[导入解析] 已识别专用解析器 %s，走 parser-first 主链", resolved_parser_type)
+                normalized_bills = parser_factory.parse(str(file_path), parser_type=resolved_parser_type)
+
+            if not normalized_bills:
+                configs = loop.run_until_complete(
+                    db.get_import_configs(
+                        user_id=request.user_id,
+                        file_format=file_path.suffix.lower().lstrip('.'),
+                        limit=200,
+                    )
                 )
-            finally:
-                loop.close()
+
+                if use_column_mapping:
+                    logger.info("[通用导入] 使用列映射解析: file_type=%s, has_header=%s", requested_file_type, has_header_line)
+                    normalized_bills, actual_encoding, actual_delimiter = _parse_import_file_with_column_mapping(
+                        file_path,
+                        column_mapping=column_mapping,
+                        transaction_type_mapping=transaction_type_mapping,
+                        has_header_line=has_header_line,
+                        time_format=time_format,
+                        amount_decimal_separator=amount_decimal_separator,
+                        amount_digit_grouping_symbol=amount_digit_grouping_symbol,
+                        tag_separator=tag_separator,
+                        file_encoding=file_encoding,
+                        delimiter=delimiter,
+                    )
+                else:
+                    logger.info("[通用导入] 未命中专用解析器，使用自动列映射兜底解析")
+                    normalized_bills, auto_suggestion, actual_encoding, actual_delimiter = _parse_import_file_with_auto_mapping(
+                        file_path,
+                        configs=configs,
+                        requested_encoding=file_encoding,
+                        delimiter=delimiter,
+                    )
+                    if auto_suggestion.get("columnMapping"):
+                        logger.info("[通用导入] 自动建议列映射: %s", auto_suggestion.get("columnMapping"))
+
+                resolved_parser_type = "generic"
+                logger.info(
+                    "[通用导入] 解析完成: %s 条记录, encoding=%s, delimiter=%s",
+                    len(normalized_bills),
+                    actual_encoding,
+                    actual_delimiter,
+                )
+
+            if detected_parser_type:
+                for bill in normalized_bills:
+                    bill.setdefault("_parser_id", detected_parser_type)
+                    if not str(bill.get("payment_method") or "").strip():
+                        bill["payment_method"] = detected_parser_name or detected_parser_type
+
+            normalized_bills, account_mappings, category_mappings, review_stats = loop.run_until_complete(
+                _prepare_import_review_bills(normalized_bills, db, bill_service, request.user_id)
+            )
 
             items = [
                 _convert_bill_to_import_item_with_mappings(
@@ -3087,28 +3723,30 @@ def parse_import_file():
                 )
                 for bill in normalized_bills
             ]
-            logger.info("[通用导入] 长期学习命中: %s 条", learning_applied)
-        else:
-            # 使用ParserFactory解析银行/平台原生账单
-            from bill_analyser.parsers.factory import ParserFactory
-
-            parser_factory = ParserFactory()
-
-            logger.debug("开始解析文件...")
-            bills = parser_factory.parse(str(file_path), parser_type=parser_type)
-            logger.info(f"解析完成: {len(bills)} 条记录")
-            items = [_convert_bill_to_import_item(bill) for bill in bills]
+            logger.info("[导入解析] 预览后处理完成: %s", review_stats)
+        finally:
+            loop.close()
 
         # 删除临时文件
         try:
             os.remove(file_path)
-            logger.debug(f"临时文件已删除: {file_path}")
+            logger.debug("临时文件已删除: %s", file_path)
         except Exception as e:
-            logger.warning(f"删除临时文件失败: {e}")
+            logger.warning("删除临时文件失败: %s", e)
 
         logger.info("=" * 50)
 
-        return jsonify({"success": True, "result": {"items": items, "totalCount": len(items)}})
+        return jsonify(
+            {
+                "success": True,
+                "result": {
+                    "items": items,
+                    "totalCount": len(items),
+                    "parserType": resolved_parser_type,
+                    "detectedParserType": detected_parser_type,
+                },
+            }
+        )
 
     except Exception as e:
         logger.error("解析导入文件失败: %s", e, exc_info=True)
@@ -3240,9 +3878,14 @@ def get_reconciliation_statements():
             logger.info("[get_reconciliation_statements] 原始账单列表（前5条）:")
             for i, bill in enumerate(bills[:5], 1):
                 logger.info(
-                    f"  #{i}: ID={bill['id']}, Date={bill.get('date')}, "
-                    f"Type={bill.get('type')}, Amount={bill.get('amount')}, "
-                    f"Source={bill.get('source_account_id')}, Dest={bill.get('destination_account_id')}"
+                    "  #%s: ID=%s, Date=%s, Type=%s, Amount=%s, Source=%s, Dest=%s",
+                    i,
+                    bill["id"],
+                    bill.get("date"),
+                    bill.get("type"),
+                    bill.get("amount"),
+                    bill.get("source_account_id"),
+                    bill.get("destination_account_id"),
                 )
 
             # 重要：数据库返回的是按时间倒序（最新在前），需要反转为正序进行余额计算
@@ -3251,7 +3894,7 @@ def get_reconciliation_statements():
             # 记录排序后的顺序
             logger.info("[get_reconciliation_statements] 排序后的账单顺序（按时间正序）:")
             for i, bill in enumerate(bills_sorted, 1):
-                logger.info(f"  #{i}: ID={bill['id']}, Date={bill.get('date')}, Amount={bill.get('amount')}")
+                logger.info("  #%s: ID=%s, Date=%s, Amount=%s", i, bill["id"], bill.get("date"), bill.get("amount"))
 
             # 计算期初余额（查询开始时间之前的所有账单余额）
             opening_balance = 0.0
@@ -3351,8 +3994,13 @@ def get_reconciliation_statements():
                     "closing": current_balance,  # 交易后余额
                 }
                 logger.info(
-                    f"[get_reconciliation_statements] ID={bill['id']}, Date={bill.get('date')}, "
-                    f"Type={bill_type}, Amount={amount} → Opening={transaction_opening_balance}, Closing={current_balance}"
+                    "[get_reconciliation_statements] ID=%s, Date=%s, Type=%s, Amount=%s → Opening=%s, Closing=%s",
+                    bill["id"],
+                    bill.get("date"),
+                    bill_type,
+                    amount,
+                    transaction_opening_balance,
+                    current_balance,
                 )
 
             # 更新最终的期末余额
@@ -3417,11 +4065,13 @@ def get_reconciliation_statements():
                 logger.info("[get_reconciliation_statements] 前3笔交易详情（验证accountOpeningBalance）:")
                 for i, txn in enumerate(transactions[:3], 1):
                     logger.info(
-                        f"  #{i}: ID={txn.get('id')}, "
-                        f"Date={txn.get('gregorianCalendarYearDashMonthDashDay')}, "
-                        f"accountOpeningBalance={txn.get('accountOpeningBalance')}, "
-                        f"accountClosingBalance={txn.get('accountClosingBalance')}, "
-                        f"amount={txn.get('amount')}"
+                        "  #%s: ID=%s, Date=%s, accountOpeningBalance=%s, accountClosingBalance=%s, amount=%s",
+                        i,
+                        txn.get("id"),
+                        txn.get("gregorianCalendarYearDashMonthDashDay"),
+                        txn.get("accountOpeningBalance"),
+                        txn.get("accountClosingBalance"),
+                        txn.get("amount"),
                     )
 
             return jsonify({"success": True, "result": result})
@@ -3495,9 +4145,9 @@ def import_stage1_parse():
                 file_path = UPLOAD_FOLDER / unique_filename
                 file.save(str(file_path))
                 saved_files.append({"path": str(file_path), "original_name": file.filename})
-                logger.info(f"[阶段1-解析] 文件已保存: {file_path}")
+                logger.info("[阶段1-解析] 文件已保存: %s", file_path)
             else:
-                logger.warning(f"[阶段1-解析] 跳过不支持的文件: {file.filename}")
+                logger.warning("[阶段1-解析] 跳过不支持的文件: %s", file.filename)
 
         if not saved_files:
             logger.error("[阶段1-解析] 没有有效的文件")
@@ -3505,7 +4155,7 @@ def import_stage1_parse():
 
         # 生成session_id
         session_id = str(uuid.uuid4())
-        logger.info(f"[阶段1-解析] 生成会话ID: {session_id}")
+        logger.info("[阶段1-解析] 生成会话ID: %s", session_id)
 
         # 调用阶段1解析
         loop = asyncio.new_event_loop()
@@ -3515,7 +4165,11 @@ def import_stage1_parse():
             file_paths = [f["path"] for f in saved_files]
             result = loop.run_until_complete(bill_service.import_stage1_parse(file_paths, session_id, user_id))
 
-            logger.info(f"[阶段1-解析] 完成: session={result.get('session_id')}, 总数={result.get('total_parsed', 0)}")
+            logger.info(
+                "[阶段1-解析] 完成: session=%s, 总数=%s",
+                result.get("session_id"),
+                result.get("total_parsed", 0),
+            )
 
             return jsonify(
                 {
@@ -3535,12 +4189,12 @@ def import_stage1_parse():
             for f in saved_files:
                 try:
                     os.remove(f["path"])
-                    logger.debug(f"[阶段1-解析] 临时文件已删除: {f['path']}")
+                    logger.debug("[阶段1-解析] 临时文件已删除: %s", f["path"])
                 except Exception as e:
-                    logger.warning(f"[阶段1-解析] 删除临时文件失败: {e}")
+                    logger.warning("[阶段1-解析] 删除临时文件失败: %s", e)
 
     except Exception as e:
-        logger.error(f"[阶段1-解析] 失败: {e}", exc_info=True)
+        logger.error("[阶段1-解析] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3602,10 +4256,11 @@ def import_stage2_dedup():
                 preview_data = loop.run_until_complete(bill_service.get_import_preview(session_id, selected_only=False))
 
             logger.info(
-                f"[阶段2-去重] 完成: session={session_id}, "
-                f"原始={result.get('template_count', 0)}, "
-                f"去重后={result.get('preview_count', 0)}, "
-                f"预览数据={len(preview_data)}条"
+                "[阶段2-去重] 完成: session=%s, 原始=%s, 去重后=%s, 预览数据=%s条",
+                session_id,
+                result.get("template_count", 0),
+                result.get("preview_count", 0),
+                len(preview_data),
             )
 
             return jsonify(
@@ -3626,7 +4281,7 @@ def import_stage2_dedup():
             loop.close()
 
     except Exception as e:
-        logger.error(f"[阶段2-去重] 失败: {e}", exc_info=True)
+        logger.error("[阶段2-去重] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3681,18 +4336,18 @@ def import_stage3_confirm():
             if preview_updates:
                 # 第一步：重置该会话所有账单的选中状态为未选中
                 reset_count = loop.run_until_complete(db.reset_session_preview_selection(session_id))
-                logger.info(f"[阶段3-确认] 已重置 {reset_count} 条账单的选中状态")
+                logger.info("[阶段3-确认] 已重置 %s 条账单的选中状态", reset_count)
 
                 # 第二步：更新前端传入的选中账单
-                logger.info(f"[阶段3-确认] 更新 {len(preview_updates)} 条预览数据")
+                logger.info("[阶段3-确认] 更新 %s 条预览数据", len(preview_updates))
                 loop.run_until_complete(db.update_preview_bills_batch(session_id, preview_updates, user_id))
                 # 从preview_updates中提取选中的ID
                 selected_ids = [u["id"] for u in preview_updates if u.get("selected", True) and u.get("id")]
-                logger.info(f"[阶段3-确认] 选中的账单ID数: {len(selected_ids)}")
+                logger.info("[阶段3-确认] 选中的账单ID数: %s", len(selected_ids))
 
             result = loop.run_until_complete(bill_service.import_stage3_confirm(session_id, user_id, selected_ids))
 
-            logger.info(f"[阶段3-确认] 完成: session={session_id}, 导入={result.get('imported_count', 0)}")
+            logger.info("[阶段3-确认] 完成: session=%s, 导入=%s", session_id, result.get("imported_count", 0))
 
             return jsonify(
                 {
@@ -3709,7 +4364,7 @@ def import_stage3_confirm():
             loop.close()
 
     except Exception as e:
-        logger.error(f"[阶段3-确认] 失败: {e}", exc_info=True)
+        logger.error("[阶段3-确认] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3763,7 +4418,7 @@ def get_import_session(session_id: str):
             loop.close()
 
     except Exception as e:
-        logger.error(f"[获取会话] 失败: {e}", exc_info=True)
+        logger.error("[获取会话] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3792,7 +4447,7 @@ def cancel_import_session(session_id: str):
             loop.close()
 
     except Exception as e:
-        logger.error(f"[取消会话] 失败: {e}", exc_info=True)
+        logger.error("[取消会话] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3868,7 +4523,7 @@ def get_import_preview(session_id: str):
             loop.close()
 
     except Exception as e:
-        logger.error(f"[获取预览] 失败: {e}", exc_info=True)
+        logger.error("[获取预览] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3930,7 +4585,7 @@ def update_preview_bill(session_id: str):
         preview_id = data["id"]
 
         # 使用session_id验证预览账单归属（可选的安全检查）
-        logger.debug(f"[更新预览] session_id={session_id}, preview_id={preview_id}")
+        logger.debug("[更新预览] session_id=%s, preview_id=%s", session_id, preview_id)
 
         updates = {
             "preview_type": data.get("type"),
@@ -3960,5 +4615,5 @@ def update_preview_bill(session_id: str):
             loop.close()
 
     except Exception as e:
-        logger.error(f"[更新预览] 失败: {e}", exc_info=True)
+        logger.error("[更新预览] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500

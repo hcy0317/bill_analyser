@@ -1,12 +1,16 @@
 """
 测试配置和Fixtures
 """
+from collections import defaultdict
+import uuid
 import pytest
 import pytest_asyncio
 import sys
 import asyncio
 import time
 from pathlib import Path
+
+from tests.real_sample_support import extract_real_sample_family
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -60,35 +64,36 @@ def client(app):
     return app.test_client()
 
 
-@pytest.fixture(scope="session")
-def auth_context(client):
-    """返回可复用的测试认证上下文。"""
-    username = 'admin'
-    password = 'admin123'
+@pytest.fixture
+def auth_identity(client):
+    """为每个测试返回独立的测试认证身份信息。"""
+    suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    username = f'test_new_ui_{suffix}'
+    password = 'Test123456!'
 
-    login_response = client.post('/api/auth/login', json={
-        'loginName': username,
-        'password': password
+    register_response = client.post('/api/auth/register', json={
+        'username': username,
+        'email': f'{username}@example.com',
+        'password': password,
+        'nickname': username
     })
+    assert register_response.status_code in [200, 201, 409], (
+        f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
+    )
 
-    if login_response.status_code != 200:
-        suffix = int(time.time())
-        username = f'test_new_ui_{suffix}'
-        password = 'Test123456!'
-        register_response = client.post('/api/auth/register', json={
-            'username': username,
-            'email': f'{username}@example.com',
-            'password': password,
-            'nickname': username
-        })
-        assert register_response.status_code in [200, 409], (
-            f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
-        )
+    return {
+        'username': username,
+        'password': password,
+    }
 
-        login_response = client.post('/api/auth/login', json={
-            'loginName': username,
-            'password': password
-        })
+
+@pytest.fixture
+def auth_context(client, auth_identity):
+    """为每个测试生成新的认证上下文，避免共享 token 被其他用例作废。"""
+    login_response = client.post('/api/auth/login', json={
+        'loginName': auth_identity['username'],
+        'password': auth_identity['password']
+    })
 
     assert login_response.status_code == 200, (
         f"登录失败: {login_response.status_code}, {login_response.get_data(as_text=True)}"
@@ -99,8 +104,8 @@ def auth_context(client):
     assert token, f"登录响应缺少token: {data}"
 
     return {
-        'username': username,
-        'password': password,
+        'username': auth_identity['username'],
+        'password': auth_identity['password'],
         'token': token,
         'refresh_token': result.get('refreshToken'),
         'headers': {'Authorization': f'Bearer {token}'},
@@ -108,7 +113,7 @@ def auth_context(client):
     }
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def auth_headers(auth_context):
     """返回可复用的认证请求头。"""
     return auth_context['headers']
@@ -126,3 +131,32 @@ def category_engine(initialize_app):
     """获取分类引擎实例"""
     from src.api.app import category_engine
     return category_engine
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """输出真实样本回归按文件族统计的通过率。"""
+    family_stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for outcome in ('passed', 'failed', 'skipped', 'xfailed', 'xpassed'):
+        for report in terminalreporter.stats.get(outcome, []):
+            if getattr(report, 'when', 'call') != 'call':
+                continue
+            family = extract_real_sample_family(report.nodeid)
+            if not family:
+                continue
+            family_stats[family][outcome] += 1
+
+    if not family_stats:
+        return
+
+    terminalreporter.section('真实样本文件族通过率')
+    for family in sorted(family_stats):
+        stats = family_stats[family]
+        passed = stats.get('passed', 0) + stats.get('xpassed', 0)
+        failed = stats.get('failed', 0)
+        skipped = stats.get('skipped', 0) + stats.get('xfailed', 0)
+        total = passed + failed
+        pass_rate = 100.0 if total == 0 else (passed / total) * 100.0
+        terminalreporter.write_line(
+            f'{family}: {passed}/{total} 通过 ({pass_rate:.1f}%), 失败={failed}, 跳过={skipped}'
+        )

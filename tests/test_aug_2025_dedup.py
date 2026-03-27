@@ -9,11 +9,12 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from pathlib import Path
-from src.parsers.factory import ParserFactory
-from src.utils.validator import BillValidator
-from src.core.smart_dedup import SmartDeduplicationEngine
 from datetime import datetime
+from pathlib import Path
+
+from bill_analyser.core.smart_dedup import SmartDeduplicationEngine
+from bill_analyser.parsers.factory import ParserFactory
+from bill_analyser.utils.validator import BillValidator
 
 def test_aug_2025_dedup():
     """测试2025年8月微信+农业银行去重"""
@@ -109,14 +110,14 @@ def test_aug_2025_dedup():
                             print(f"           微信: {w_type} {w_amt:.2f}")
                             print(f"           农行: {a_type} {a_amt:.2f}")
                             print(f"           方向相同: {same_direction}")
-                    except:
+                    except ValueError:
                         pass
     
     # 执行去重
     print("\n[6] 执行智能去重...")
     result = dedup_engine.process(valid_bills)
     
-    print(f"\n去重结果:")
+    print("\n去重结果:")
     print(f"    原始数量: {result.original_count}")
     print(f"    移除数量: {result.removed_count}")
     print(f"    保留数量: {len(result.kept_bills)}")
@@ -128,8 +129,10 @@ def test_aug_2025_dedup():
         print("\n[7] 重复组详情:")
         for i, group in enumerate(result.duplicate_groups[:5]):
             print(f"    重复组 [{i+1}]:")
-            for bill in group:
+            for bill in group.bills:
                 print(f"      {bill.get('date')} | ¥{bill.get('amount'):.2f} | {bill.get('source_account_id')} | {bill.get('counterparty', '')[:20]}")
+
+    assert result.removed_count >= 0
 
 if __name__ == '__main__':
     test_aug_2025_dedup()

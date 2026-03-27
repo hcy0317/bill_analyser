@@ -83,8 +83,8 @@ def load_auth_config():
             config = json.load(f)
             logger.info("认证配置加载成功")
             return config
-    except Exception as e:
-        logger.error(f"加载配置文件失败: {e}")
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        logger.error("加载配置文件失败: %s", error)
         # 返回默认配置
         return {
             "jwt_secret": "default_secret_key_change_in_production",
@@ -428,6 +428,11 @@ def _datetime_to_unix_millis(value: str) -> int:
     if not value:
         return 0
 
+    try:
+        return int(datetime.fromisoformat(value).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return 0
+
 
 def _parse_comma_separated_ints(raw_value: str) -> list[int]:
     """解析逗号分隔的整数列表。"""
@@ -563,10 +568,6 @@ def _render_bills_export(
         )
 
     return output.getvalue()
-    try:
-        return int(datetime.fromisoformat(value).timestamp() * 1000)
-    except TypeError, ValueError:
-        return 0
 
 
 def generate_jwt_token(user_id: int, username: str, config: dict) -> dict:
@@ -861,7 +862,7 @@ async def _save_register_categories(db, user_id: int, categories: list[dict[str,
                     },
                     user_id=user_id,
                 )
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             success = False
             logger.exception("保存注册预设分类失败: user_id=%s, category=%s", user_id, item)
 
@@ -898,7 +899,7 @@ async def _create_register_default_accounts(db, user_id: int, language: str) -> 
                     "cash_account_id": result["cash_account_id"],
                 },
             )
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
         result["success"] = False
         logger.exception("创建注册默认账户失败: user_id=%s", user_id)
 
@@ -953,13 +954,13 @@ def login():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        logger.info(f"查找用户: login_name={login_name}")
+        logger.info("查找用户: login_name=%s", login_name)
         user = loop.run_until_complete(db.get_user_by_username(login_name))
         if not user:
             user = loop.run_until_complete(db.get_user_by_email(login_name))
 
         if not user:
-            logger.warning(f"登录失败: 用户不存在 - {login_name}")
+            logger.warning("登录失败: 用户不存在 - %s", login_name)
 
             # 记录失败日志
             loop.run_until_complete(
@@ -981,10 +982,10 @@ def login():
             ), 401
 
         # 检查账户是否被锁定
-        logger.info(f"检查账户锁定状态: user_id={user['id']}")
+        logger.info("检查账户锁定状态: user_id=%s", user["id"])
         is_locked = loop.run_until_complete(db.is_user_locked(user["id"]))
         if is_locked:
-            logger.warning(f"登录失败: 账户被锁定 - user_id={user['id']}")
+            logger.warning("登录失败: 账户被锁定 - user_id=%s", user["id"])
 
             loop.run_until_complete(
                 db.create_auth_log(
@@ -1010,10 +1011,10 @@ def login():
             ), 403
 
         # 验证密码
-        logger.info(f"验证密码: user_id={user['id']}")
+        logger.info("验证密码: user_id=%s", user["id"])
         password_hash = user["password_hash"]
         if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
-            logger.warning(f"登录失败: 密码错误 - user_id={user['id']}")
+            logger.warning("登录失败: 密码错误 - user_id=%s", user["id"])
 
             # 增加失败次数
             lockout_minutes = config.get("lockout_duration_minutes", 15)
@@ -1040,7 +1041,7 @@ def login():
 
         # 检查账户是否激活
         if not user.get("is_active"):
-            logger.warning(f"登录失败: 账户未激活 - user_id={user['id']}")
+            logger.warning("登录失败: 账户未激活 - user_id=%s", user["id"])
 
             loop.run_until_complete(
                 db.create_auth_log(
@@ -1083,7 +1084,7 @@ def login():
             return jsonify({"success": True, "result": {"token": pending_token, "need2FA": True}})
 
         # 生成JWT令牌
-        logger.info(f"生成JWT令牌: user_id={user['id']}")
+        logger.info("生成JWT令牌: user_id=%s", user["id"])
         tokens = generate_jwt_token(user["id"], user["username"], config)
 
         # 计算令牌哈希
@@ -1091,7 +1092,7 @@ def login():
         refresh_token_hash = calculate_token_hash(tokens["refresh_token"])
 
         # 创建会话
-        logger.info(f"创建会话: user_id={user['id']}")
+        logger.info("创建会话: user_id=%s", user["id"])
         session_id = loop.run_until_complete(
             db.create_session(
                 {
@@ -1130,27 +1131,31 @@ def login():
 
         # 构建用户信息响应
         logger.info(
-            f"[login] 数据库用户记录: id={user['id']}, username={user['username']}, "
-            f"fiscal_year_start={user.get('fiscal_year_start', 'NOT_SET')}"
+            "[login] 数据库用户记录: id=%s, username=%s, fiscal_year_start=%s",
+            user["id"],
+            user["username"],
+            user.get("fiscal_year_start", "NOT_SET"),
         )
 
         user_info = _build_user_profile_info(user)
         user_info["id"] = user["id"]
 
-        logger.info(f"登录成功: user_id={user['id']}, username={user['username']}, ip={ip_address}")
+        logger.info("登录成功: user_id=%s, username=%s, ip=%s", user["id"], user["username"], ip_address)
         logger.info(
-            f"[login] 返回给前端的user_info: id={user_info['id']}, "
-            f"username={user_info['username']}, fiscalYearStart={user_info['fiscalYearStart']} "
-            f"(0x{user_info['fiscalYearStart']:x})"
+            "[login] 返回给前端的user_info: id=%s, username=%s, fiscalYearStart=%s (0x%x)",
+            user_info["id"],
+            user_info["username"],
+            user_info["fiscalYearStart"],
+            user_info["fiscalYearStart"],
         )
 
         return jsonify(
             {"success": True, "result": _build_auth_success_result(user_info, tokens, application_cloud_settings)}
         )
 
-    except Exception as e:
-        logger.error(f"登录过程发生错误: {e}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+    except Exception as error:
+        logger.error("登录过程发生错误: %s", error, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error", "message": str(error)}), 500
 
 
 @bp.route("/auth/register", methods=["POST"])
@@ -1200,10 +1205,10 @@ def register():
             ), 403
 
         # 验证密码强度
-        logger.info(f"验证密码强度: username={username}")
+        logger.info("验证密码强度: username=%s", username)
         is_valid, error_msg = validate_password(password, config)
         if not is_valid:
-            logger.warning(f"注册失败: 密码不符合要求 - {error_msg}")
+            logger.warning("注册失败: 密码不符合要求 - %s", error_msg)
             return jsonify({"success": False, "error": "Invalid password", "message": error_msg}), 400
 
         db = get_app_context()
@@ -1214,10 +1219,10 @@ def register():
         asyncio.set_event_loop(loop)
 
         # 检查用户名是否已存在
-        logger.info(f"检查用户名: username={username}")
+        logger.info("检查用户名: username=%s", username)
         existing_user = loop.run_until_complete(db.get_user_by_username(username))
         if existing_user:
-            logger.warning(f"注册失败: 用户名已存在 - {username}")
+            logger.warning("注册失败: 用户名已存在 - %s", username)
 
             loop.run_until_complete(
                 db.create_auth_log(
@@ -1236,10 +1241,10 @@ def register():
             return jsonify({"success": False, "error": "Username exists", "message": "Username already exists"}), 409
 
         # 检查邮箱是否已存在
-        logger.info(f"检查邮箱: email={email}")
+        logger.info("检查邮箱: email=%s", email)
         existing_email = loop.run_until_complete(db.get_user_by_email(email))
         if existing_email:
-            logger.warning(f"注册失败: 邮箱已存在 - {email}")
+            logger.warning("注册失败: 邮箱已存在 - %s", email)
 
             loop.run_until_complete(
                 db.create_auth_log(
@@ -1262,7 +1267,7 @@ def register():
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
         # 创建用户
-        logger.info(f"创建用户: username={username}, email={email}")
+        logger.info("创建用户: username=%s, email=%s", username, email)
         user_id = loop.run_until_complete(
             db.create_user(
                 {
@@ -1301,7 +1306,7 @@ def register():
 
         loop.close()
 
-        logger.info(f"注册成功: user_id={user_id}, username={username}, email={email}")
+        logger.info("注册成功: user_id=%s, username=%s, email=%s", user_id, username, email)
 
         return jsonify(
             {
@@ -1318,9 +1323,9 @@ def register():
             }
         )
 
-    except Exception as e:
-        logger.error(f"注册过程发生错误: {e}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+    except Exception as error:
+        logger.error("注册过程发生错误: %s", error, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error", "message": str(error)}), 500
 
 
 @bp.route("/auth/email/verify", methods=["POST"])
@@ -1634,7 +1639,7 @@ def logout():
 
         if session:
             # 使会话失效
-            logger.info(f"使会话失效: session_id={session['id']}")
+            logger.info("使会话失效: session_id=%s", session["id"])
             loop.run_until_complete(db.invalidate_session(token_hash))
 
             # 记录登出日志
@@ -1651,9 +1656,9 @@ def logout():
                 )
             )
 
-            logger.info(f"登出成功: user_id={session['id']}, username={session['username']}")
+            logger.info("登出成功: user_id=%s, username=%s", session["id"], session["username"])
         else:
-            logger.warning(f"登出时未找到会话: token_hash={token_hash[:16]}...")
+            logger.warning("登出时未找到会话: token_hash=%s...", token_hash[:16])
 
         loop.close()
 
@@ -1666,9 +1671,9 @@ def logout():
             }
         )
 
-    except Exception as e:
-        logger.error(f"登出过程发生错误: {e}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+    except Exception as error:
+        logger.error("登出过程发生错误: %s", error, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error", "message": str(error)}), 500
 
 
 @bp.route("/tokens/refresh", methods=["POST"])
@@ -1709,7 +1714,7 @@ def refresh_token():
             return jsonify({"success": False, "error": "Invalid token", "message": "Invalid refresh token"}), 401
 
         # 生成新的访问令牌
-        logger.info(f"生成新令牌: user_id={user_id}")
+        logger.info("生成新令牌: user_id=%s", user_id)
         tokens = generate_jwt_token(user_id, username, config)
 
         db = get_app_context()
@@ -1748,7 +1753,7 @@ def refresh_token():
 
         loop.close()
 
-        logger.info(f"令牌刷新成功: user_id={user_id}, username={username}")
+        logger.info("令牌刷新成功: user_id=%s, username=%s", user_id, username)
 
         return jsonify(
             {
@@ -1763,9 +1768,9 @@ def refresh_token():
             }
         )
 
-    except Exception as e:
-        logger.error(f"刷新令牌过程发生错误: {e}", exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+    except Exception as error:
+        logger.error("刷新令牌过程发生错误: %s", error, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error", "message": str(error)}), 500
 
 
 @bp.route("/profile", methods=["GET", "PUT"])
@@ -1795,11 +1800,13 @@ def profile():
             user_info = _build_user_profile_info(user)
 
             logger.info(
-                f"返回用户资料: user_id={request.user_id}, username={user_info['username']}, "
-                f"calendarDisplayType={user_info['calendarDisplayType']}, "
-                f"fiscalYearStart={user_info['fiscalYearStart']}"
+                "返回用户资料: user_id=%s, username=%s, calendarDisplayType=%s, fiscalYearStart=%s",
+                request.user_id,
+                user_info["username"],
+                user_info["calendarDisplayType"],
+                user_info["fiscalYearStart"],
             )
-            logger.debug(f"完整用户资料数据: {user_info}")
+            logger.debug("完整用户资料数据: %s", user_info)
 
             return jsonify({"success": True, "result": user_info})
 
@@ -1874,8 +1881,8 @@ def profile():
         if "investmentExcludeKeywords" in data:
             update_data["investment_exclude_keywords"] = serialize_keyword_list(data["investmentExcludeKeywords"])
 
-        logger.info(f"将更新用户资料: user_id={request.user_id}, fields={list(update_data.keys())}")
-        logger.debug(f"更新数据详情: {update_data}")
+        logger.info("将更新用户资料: user_id=%s, fields=%s", request.user_id, list(update_data.keys()))
+        logger.debug("更新数据详情: %s", update_data)
 
         if update_data:
             success = loop.run_until_complete(db.update_user(request.user_id, update_data))
@@ -1884,7 +1891,7 @@ def profile():
                 return jsonify(
                     {"success": False, "error": "Update failed", "message": "Failed to update user profile"}
                 ), 500
-            logger.info(f"用户资料更新成功: user_id={request.user_id}")
+            logger.info("用户资料更新成功: user_id=%s", request.user_id)
 
         # 返回更新后的用户信息
         user = loop.run_until_complete(db.get_user_by_id(request.user_id))
@@ -1895,8 +1902,8 @@ def profile():
 
         user_info = _build_user_profile_info(user)
 
-        logger.info(f"用户资料更新并返回: user_id={request.user_id}, updated_fields={len(update_data)}")
-        logger.debug(f"返回的用户资料: {user_info}")
+        logger.info("用户资料更新并返回: user_id=%s, updated_fields=%s", request.user_id, len(update_data))
+        logger.debug("返回的用户资料: %s", user_info)
 
         # v6.79: 前端 updateUserProfile() 期望 result.user 格式
         # 见 index.ts 第 606 行: if (data.result.user && isObject(data.result.user))
@@ -1905,7 +1912,7 @@ def profile():
     except Exception as e:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"处理用户资料失败: {e}", exc_info=True)
+        logger.error("处理用户资料失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
 
 
@@ -1943,7 +1950,7 @@ def update_profile_avatar():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"更新用户头像失败: {exc}", exc_info=True)
+        logger.error("更新用户头像失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -1972,7 +1979,7 @@ def remove_profile_avatar():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"删除用户头像失败: {exc}", exc_info=True)
+        logger.error("删除用户头像失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2043,7 +2050,7 @@ def resend_profile_verification_email():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"重发验证邮件失败: {exc}", exc_info=True)
+        logger.error("重发验证邮件失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2091,7 +2098,7 @@ def list_profile_external_auths():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"获取第三方登录列表失败: {exc}", exc_info=True)
+        logger.error("获取第三方登录列表失败: %s", exc, exc_info=True)
         return jsonify(
             {"success": False, "error": "Internal Server Error", "message": str(exc), "errorMessage": str(exc)}
         ), 500
@@ -2186,7 +2193,7 @@ def unlink_profile_external_auth():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"解绑第三方登录失败: {exc}", exc_info=True)
+        logger.error("解绑第三方登录失败: %s", exc, exc_info=True)
         return jsonify(
             {"success": False, "error": "Internal Server Error", "message": str(exc), "errorMessage": str(exc)}
         ), 500
@@ -2397,14 +2404,14 @@ def list_tokens():
                 }
             )
 
-        logger.info(f"返回会话列表: user_id={request.user_id}, count={len(tokens)}")
+        logger.info("返回会话列表: user_id=%s, count=%s", request.user_id, len(tokens))
 
         return jsonify({"success": True, "result": tokens})
 
     except Exception as e:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"获取令牌列表失败: {e}", exc_info=True)
+        logger.error("获取令牌列表失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
 
 
@@ -2473,7 +2480,7 @@ def get_2fa_status():
     except Exception as e:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"获取2FA状态失败: {e}", exc_info=True)
+        logger.error("获取2FA状态失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
 
 
@@ -2488,7 +2495,7 @@ def enable_2fa_request():
 
         return jsonify({"success": True, "result": {"secret": secret, "qrcode": qrcode_data}})
     except Exception as exc:
-        logger.error(f"请求启用2FA失败: {exc}", exc_info=True)
+        logger.error("请求启用2FA失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2538,7 +2545,7 @@ def profile_cloud_settings():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"处理用户应用云同步设置失败: {exc}", exc_info=True)
+        logger.error("处理用户应用云同步设置失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2595,7 +2602,7 @@ def enable_2fa_confirm():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"确认启用2FA失败: {exc}", exc_info=True)
+        logger.error("确认启用2FA失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2639,7 +2646,7 @@ def disable_2fa():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"禁用2FA失败: {exc}", exc_info=True)
+        logger.error("禁用2FA失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2680,7 +2687,7 @@ def regenerate_2fa_recovery_codes():
     except Exception as exc:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"重新生成2FA恢复码失败: {exc}", exc_info=True)
+        logger.error("重新生成2FA恢复码失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
 
 
@@ -2853,7 +2860,7 @@ def get_user_data_statistics():
     except Exception as e:
         if loop and not loop.is_closed():
             loop.close()
-        logger.error(f"获取用户数据统计失败: {e}", exc_info=True)
+        logger.error("获取用户数据统计失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
 
 

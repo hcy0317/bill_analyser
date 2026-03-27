@@ -26,6 +26,7 @@ The Feature Implementation Workflow describes the development pipeline: planning
 
 3. **Code Review**
    - Use **code-reviewer** agent immediately after writing code
+   - Pass a `Review Context` bundle with `base_ref`, `head_ref`, `changed_files`, and `diff_text` instead of assuming the reviewer can infer scope automatically
    - Address CRITICAL and HIGH issues
    - Fix MEDIUM issues when possible
 

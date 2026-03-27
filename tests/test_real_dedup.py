@@ -11,9 +11,10 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from pathlib import Path
-from src.parsers.factory import ParserFactory
-from src.utils.validator import BillValidator
-from src.core.smart_dedup import SmartDeduplicationEngine
+
+from bill_analyser.core.smart_dedup import SmartDeduplicationEngine
+from bill_analyser.parsers.factory import ParserFactory
+from bill_analyser.utils.validator import BillValidator
 
 def test_real_dedup():
     """测试真实的微信+农业银行去重场景"""
@@ -115,14 +116,14 @@ def test_real_dedup():
                         if time_diff <= 60:  # 1分钟内
                             print(f"        ⚠️ 时间接近! 微信: {w.get('date')}, 农行: {a.get('date')}, 差: {time_diff:.1f}秒")
                             print(f"           微信方向: {w.get('type')}, 农行方向: {a.get('type')}")
-                    except:
+                    except ValueError:
                         pass
     
     # 执行去重
     print("\n[6] 执行智能去重...")
     result = dedup_engine.process(valid_bills)
     
-    print(f"\n去重结果:")
+    print("\n去重结果:")
     print(f"    原始数量: {result.original_count}")
     print(f"    移除数量: {result.removed_count}")
     print(f"    保留数量: {len(result.kept_bills)}")
@@ -130,11 +131,15 @@ def test_real_dedup():
     print(f"    分账组: {len(result.split_groups)} 组")
     print(f"    重复组: {len(result.duplicate_groups)} 组")
     
+    removed_bills = [bill for group in result.duplicate_groups for bill in group.remove_bills]
+
     # 如果有被移除的账单，显示详情
-    if result.removed_bills:
-        print(f"\n[7] 被移除的账单详情 (前10条):")
-        for i, bill in enumerate(result.removed_bills[:10]):
+    if removed_bills:
+        print("\n[7] 被移除的账单详情 (前10条):")
+        for i, bill in enumerate(removed_bills[:10]):
             print(f"    [{i+1}] {bill.get('date')} | ¥{bill.get('amount'):.2f} | {bill.get('source_account_id')} | {bill.get('_removal_reason', 'unknown')}")
+
+    assert result.removed_count >= 0
 
 if __name__ == '__main__':
     test_real_dedup()

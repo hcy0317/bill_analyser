@@ -1673,23 +1673,32 @@ class Database:
         conn = await self._get_connection()
 
         try:
+            bill_payload = dict(bill_data)
+
+            if "payment_method" not in bill_payload and bill_payload.get("channel") not in (None, ""):
+                bill_payload["payment_method"] = bill_payload.pop("channel")
+
+            now = datetime.now().isoformat()
+            bill_payload.setdefault("created_at", now)
+            bill_payload.setdefault("updated_at", now)
+
             # 必填字段
             required_fields = ["date", "type", "amount", "description"]
             for field in required_fields:
-                if field not in bill_data:
+                if field not in bill_payload:
                     self.logger.error(f"缺少必填字段: {field}")
                     return None
 
             # 添加 user_id 到账单数据
-            bill_data["user_id"] = user_id
+            bill_payload["user_id"] = user_id
 
             # 构建INSERT语句
-            columns = list(bill_data.keys())
+            columns = list(bill_payload.keys())
             placeholders = ", ".join(["?" for _ in columns])
             columns_str = ", ".join(columns)
 
             query = f"INSERT INTO bills ({columns_str}) VALUES ({placeholders})"
-            values = [bill_data[col] for col in columns]
+            values = [bill_payload[col] for col in columns]
 
             cursor = await conn.execute(query, values)
             await conn.commit()
@@ -3341,6 +3350,13 @@ class Database:
         # 提取子账户
         sub_accounts = data.get("subAccounts", [])
 
+        aliases_value = data.get("aliases")
+        if isinstance(aliases_value, list):
+            aliases_value = json.dumps(
+                [str(alias).strip() for alias in aliases_value if str(alias).strip()],
+                ensure_ascii=False,
+            )
+
         # 获取 parentId (前端字段) 或 parent_id (后端字段)
         parent_id = data.get("parentId") or data.get("parent_id", 0)
 
@@ -3365,7 +3381,7 @@ class Database:
                 1 if data.get("hidden", False) else 0,
                 data.get("display_order", 0),
                 data.get("comment"),
-                data.get("aliases"),  # JSON数组格式存储别名
+                aliases_value,  # JSON数组格式存储别名
                 parent_id,
                 now,
                 now,

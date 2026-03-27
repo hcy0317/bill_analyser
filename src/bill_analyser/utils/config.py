@@ -31,8 +31,8 @@ class ConfigFileHandler(FileSystemEventHandler):
         if isinstance(event, FileModifiedEvent) and not event.is_directory:
             file_path = Path(event.src_path)
             if file_path.suffix == ".json":
-                self.logger.info(f"检测到配置文件变化: {file_path.name}")
-                self.config_manager._reload_config(str(file_path))
+                self.logger.info("检测到配置文件变化: %s", file_path.name)
+                self.config_manager.reload_config(str(file_path))
 
 
 class ConfigManager:
@@ -93,12 +93,12 @@ class ConfigManager:
                 cached_mtime = self._cache_timestamps.get(filename, 0)
 
                 if current_mtime <= cached_mtime:
-                    self.logger.debug(f"使用缓存的配置: {filename}")
+                    self.logger.debug("使用缓存的配置: %s", filename)
                     return self._cache[filename].copy()
 
             # 加载配置文件
             try:
-                self.logger.info(f"加载配置文件: {filename}")
+                self.logger.info("加载配置文件: %s", filename)
                 with open(config_path, encoding="utf-8") as f:
                     config = json.load(f)
 
@@ -106,17 +106,17 @@ class ConfigManager:
                 self._cache[filename] = config
                 self._cache_timestamps[filename] = config_path.stat().st_mtime
 
-                self.logger.info(f"配置文件加载成功: {filename}")
+                self.logger.info("配置文件加载成功: %s", filename)
                 return config.copy()
 
             except FileNotFoundError:
-                self.logger.error(f"配置文件不存在: {filename}")
+                self.logger.error("配置文件不存在: %s", filename)
                 return {}
             except json.JSONDecodeError as e:
-                self.logger.error(f"配置文件JSON格式错误 {filename}: {e}")
+                self.logger.error("配置文件JSON格式错误 %s: %s", filename, e)
                 return {}
-            except Exception as e:
-                self.logger.error(f"加载配置文件失败 {filename}: {e}")
+            except Exception as e:  # pylint: disable=broad-except
+                self.logger.error("加载配置文件失败 %s: %s", filename, e)
                 return {}
 
     @log_method
@@ -149,7 +149,7 @@ class ConfigManager:
         config_path = self.config_dir / filename
 
         try:
-            self.logger.info(f"保存配置文件: {filename}")
+            self.logger.info("保存配置文件: %s", filename)
 
             # 创建临时文件
             temp_path = config_path.with_suffix(".tmp")
@@ -164,11 +164,11 @@ class ConfigManager:
                 self._cache[filename] = config.copy()
                 self._cache_timestamps[filename] = config_path.stat().st_mtime
 
-            self.logger.info(f"配置文件保存成功: {filename}")
+            self.logger.info("配置文件保存成功: %s", filename)
             return True
 
-        except Exception as e:
-            self.logger.error(f"保存配置文件失败 {filename}: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("保存配置文件失败 %s: %s", filename, e)
             return False
 
     @log_method
@@ -185,6 +185,10 @@ class ConfigManager:
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.save_config, filename, config)
+
+    def reload_config(self, file_path: str):
+        """对外暴露的配置重载入口，供文件监听器调用。"""
+        self._reload_config(file_path)
 
     def _reload_config(self, file_path: str):
         """
@@ -205,10 +209,10 @@ class ConfigManager:
 
             # 重新加载
             self.load_config(filename, use_cache=False)
-            self.logger.info(f"配置文件已重新加载: {filename}")
+            self.logger.info("配置文件已重新加载: %s", filename)
 
-        except Exception as e:
-            self.logger.error(f"重新加载配置文件失败 {file_path}: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("重新加载配置文件失败 %s: %s", file_path, e)
 
     @log_method
     def enable_auto_reload(self):
@@ -229,8 +233,8 @@ class ConfigManager:
             self._auto_reload_enabled = True
             self.logger.info("配置文件自动重载已启用")
 
-        except Exception as e:
-            self.logger.error(f"启用自动重载失败: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("启用自动重载失败: %s", e)
 
     @log_method
     def disable_auto_reload(self):
@@ -249,8 +253,8 @@ class ConfigManager:
             self._auto_reload_enabled = False
             self.logger.info("配置文件自动重载已禁用")
 
-        except Exception as e:
-            self.logger.error(f"禁用自动重载失败: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("禁用自动重载失败: %s", e)
 
     @log_method
     def clear_cache(self):
@@ -259,7 +263,7 @@ class ConfigManager:
             count = len(self._cache)
             self._cache.clear()
             self._cache_timestamps.clear()
-            self.logger.info(f"已清除 {count} 个配置文件缓存")
+            self.logger.info("已清除 %s 个配置文件缓存", count)
 
     def __del__(self):
         """析构函数"""

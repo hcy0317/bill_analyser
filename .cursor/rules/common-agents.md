@@ -28,6 +28,20 @@ No user prompt needed:
 3. Bug fix or new feature - Use **tdd-guide** agent
 4. Architectural decision - Use **architect** agent
 
+## Reviewer Invocation Contract
+
+When invoking `code-reviewer`, `python-reviewer`, or `security-reviewer`, do not assume the subagent can recover the correct patch on its own.
+
+Before launching a reviewer subagent, assemble and pass a compact `Review Context` block that includes:
+
+- `base_ref`
+- `head_ref`
+- `changed_files`
+- `diff_text` or representative patch hunks
+- relevant test, lint, or scanner output when available
+
+If the diff is too large, pass the changed file list, the most relevant hunks, and the refs needed to recover the rest. If you cannot supply either diff text or usable refs, do not launch the reviewer blindly; report that review is blocked by missing scope.
+
 ## Parallel Task Execution
 
 ALWAYS use parallel Task execution for independent operations:

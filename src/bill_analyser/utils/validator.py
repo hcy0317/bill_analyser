@@ -72,9 +72,9 @@ class BillValidator:
 
         is_valid = len(errors) == 0
         if is_valid:
-            self.logger.debug(f"账单验证通过: {bill.get('date', 'unknown')}")
+            self.logger.debug("账单验证通过: %s", bill.get("date", "unknown"))
         else:
-            self.logger.warning(f"账单验证失败: {', '.join(errors)}")
+            self.logger.warning("账单验证失败: %s", ", ".join(errors))
 
         return is_valid, errors
 
@@ -172,7 +172,7 @@ class BillValidator:
         valid_bills = []
         invalid_bills = []
 
-        self.logger.info(f"开始批量验证 {len(bills)} 条账单")
+        self.logger.info("开始批量验证 %s 条账单", len(bills))
 
         for i, bill in enumerate(bills):
             is_valid, errors = self.validate_bill(bill)
@@ -185,7 +185,7 @@ class BillValidator:
                 invalid_bill["_index"] = i
                 invalid_bills.append(invalid_bill)
 
-        self.logger.info(f"验证完成: 有效 {len(valid_bills)} 条, 无效 {len(invalid_bills)} 条")
+        self.logger.info("验证完成: 有效 %s 条, 无效 %s 条", len(valid_bills), len(invalid_bills))
 
         return valid_bills, invalid_bills
 

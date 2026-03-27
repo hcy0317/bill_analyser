@@ -190,7 +190,7 @@ class AsyncLogger:
                     self._cleanup_old_logs()
                     # 每天清理一次
                     threading.Event().wait(86400)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     # 避免递归记录错误
                     print(f"日志清理任务出错: {e}")
 
@@ -206,11 +206,11 @@ class AsyncLogger:
                 try:
                     if log_file.stat().st_mtime < cutoff_date.timestamp():
                         log_file.unlink()
-                        self.logger.info(f"已删除过期日志: {log_file.name}")
-                except Exception as e:
-                    self.logger.error(f"删除日志文件失败 {log_file}: {e}")
-        except Exception as e:
-            self.logger.error(f"清理日志目录失败: {e}")
+                        self.logger.info("已删除过期日志: %s", log_file.name)
+                except Exception as e:  # pylint: disable=broad-except
+                    self.logger.error("删除日志文件失败 %s: %s", log_file, e)
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.error("清理日志目录失败: %s", e)
 
     def get_logger(self, name: str | None = None) -> logging.Logger:
         """获取日志器"""
@@ -230,20 +230,20 @@ class AsyncLogger:
         if hasattr(self, "queue_listener"):
             try:
                 self.queue_listener.stop()
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
             for handler in getattr(self.queue_listener, "handlers", []):
                 try:
                     handler.flush()
                     handler.close()
-                except Exception:
+                except Exception:  # pylint: disable=broad-except
                     pass
 
         if hasattr(self, "logger"):
             try:
                 self.logger.handlers.clear()
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
 
@@ -258,7 +258,7 @@ def _shutdown_async_logger():
 
     try:
         _logger_instance.stop()
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
         pass
 
 
@@ -313,15 +313,15 @@ def log_method(func):
                     v_str = v_str[:100] + "..."
                 param_str_parts.append(f"{k}={v_str}")
             param_str = ", ".join(param_str_parts)
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             param_str = "无法解析参数"
 
         # 记录方法入口
         start_time = datetime.now()
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
-                logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
-        except ImportError, Exception:
+                logger.debug("进入方法 | 参数: %s", param_str if param_str else "无")
+        except ImportError, Exception:  # pylint: disable=broad-except
             pass
 
         try:
@@ -336,19 +336,19 @@ def log_method(func):
                 result_str = repr(result) if result is not None else "None"
                 if len(result_str) > 200:
                     result_str = result_str[:200] + "..."
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 result_str = "无法解析返回值"
 
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
-                    logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
-            except ImportError, Exception:
+                    logger.debug("退出方法 | 耗时: %.2fms | 返回值: %s", duration, result_str)
+            except ImportError, Exception:  # pylint: disable=broad-except
                 pass
 
             return result
         except Exception as e:
             # 记录异常
-            logger.error(f"方法异常 | 错误: {type(e).__name__}: {e!s}")
+            logger.error("方法异常 | 错误: %s: %s", type(e).__name__, e)
             raise
 
     @functools.wraps(func)
@@ -375,15 +375,15 @@ def log_method(func):
                     v_str = v_str[:100] + "..."
                 param_str_parts.append(f"{k}={v_str}")
             param_str = ", ".join(param_str_parts)
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             param_str = "无法解析参数"
 
         # 记录方法入口
         start_time = datetime.now()
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
-                logger.debug(f"进入方法 | 参数: {param_str if param_str else '无'}")
-        except ImportError, Exception:
+                logger.debug("进入方法 | 参数: %s", param_str if param_str else "无")
+        except ImportError, Exception:  # pylint: disable=broad-except
             # 忽略解释器关闭时的错误
             pass
 
@@ -399,19 +399,19 @@ def log_method(func):
                 result_str = repr(result) if result is not None else "None"
                 if len(result_str) > 200:
                     result_str = result_str[:200] + "..."
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 result_str = "无法解析返回值"
 
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
-                    logger.debug(f"退出方法 | 耗时: {duration:.2f}ms | 返回值: {result_str}")
-            except ImportError, Exception:
+                    logger.debug("退出方法 | 耗时: %.2fms | 返回值: %s", duration, result_str)
+            except ImportError, Exception:  # pylint: disable=broad-except
                 pass
 
             return result
         except Exception as e:
             # 记录异常
-            logger.error(f"方法异常 | 错误: {type(e).__name__}: {e!s}")
+            logger.error("方法异常 | 错误: %s: %s", type(e).__name__, e)
             raise
 
     # 判断是否为异步函数
@@ -436,13 +436,13 @@ def log_step(step_name: str):
             logger_name = f"{class_name}.{method_name}"
             logger = get_logger(logger_name)
 
-            logger.info(f"开始步骤: {step_name}")
+            logger.info("开始步骤: %s", step_name)
             try:
                 result = await func(*args, **kwargs)
-                logger.info(f"完成步骤: {step_name}")
+                logger.info("完成步骤: %s", step_name)
                 return result
             except Exception as e:
-                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {e!s}")
+                logger.error("步骤失败: %s | 错误: %s: %s", step_name, type(e).__name__, e)
                 raise
 
         @functools.wraps(func)
@@ -452,13 +452,13 @@ def log_step(step_name: str):
             logger_name = f"{class_name}.{method_name}"
             logger = get_logger(logger_name)
 
-            logger.info(f"开始步骤: {step_name}")
+            logger.info("开始步骤: %s", step_name)
             try:
                 result = func(*args, **kwargs)
-                logger.info(f"完成步骤: {step_name}")
+                logger.info("完成步骤: %s", step_name)
                 return result
             except Exception as e:
-                logger.error(f"步骤失败: {step_name} | 错误: {type(e).__name__}: {e!s}")
+                logger.error("步骤失败: %s | 错误: %s: %s", step_name, type(e).__name__, e)
                 raise
 
         if asyncio.iscoroutinefunction(func):

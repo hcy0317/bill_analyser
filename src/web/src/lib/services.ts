@@ -713,7 +713,9 @@ axios.interceptors.response.use((response: any) => {
         });
     }
 
-    if ('cancelableUuid' in error.response.config && error.response.config.cancelableUuid && cancelableRequests[error.response.config.cancelableUuid]) {
+    if (error.response?.config && 'cancelableUuid' in error.response.config
+        && error.response.config.cancelableUuid
+        && cancelableRequests[error.response.config.cancelableUuid]) {
         logger.debug('Response canceled by user request, url: ' + error.response.config.url + ', cancelableUuid: ' + error.response.config.cancelableUuid);
         delete cancelableRequests[error.response.config.cancelableUuid];
         return Promise.reject({ canceled: true });
@@ -1186,8 +1188,8 @@ export default {
             textualTransactionTypeMapping = JSON.stringify(transactionTypeMapping);
         }
 
-        if (hasHeaderLine) {
-            textualHasHeaderLine = 'true';
+        if (hasHeaderLine !== undefined) {
+            textualHasHeaderLine = hasHeaderLine ? 'true' : 'false';
         }
 
         return axios.postForm<ApiResponse<ImportTransactionResponsePageWrapper>>('bills/parse_import', {

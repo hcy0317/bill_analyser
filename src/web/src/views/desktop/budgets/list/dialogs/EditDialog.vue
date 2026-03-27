@@ -215,6 +215,7 @@
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 import DateOnlySelect from '@/components/desktop/DateOnlySelect.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
+import { findBudgetCategoryIdByNames, resolveBudgetCategorySelection } from '../../categorySelection.ts';
 
 import { ref, computed, watch } from 'vue';
 
@@ -326,31 +327,14 @@ const allCategoriesMap = computed<Record<string, TransactionCategory>>(() => {
 const selectedPrimaryCategoryName = computed<string>(() => {
     if (!budget.value.categoryId) return '';
 
-    const selectedCategory = allCategoriesMap.value[budget.value.categoryId];
-    if (!selectedCategory) return '';
-
-    // 如果选中的是子分类，找到其父分类
-    if (selectedCategory.parentId) {
-        const parentCategory = allCategoriesMap.value[selectedCategory.parentId];
-        return parentCategory?.name || '';
-    }
-
-    return selectedCategory.name;
+    return resolveBudgetCategorySelection(availableCategories.value, budget.value.categoryId)?.primaryCategoryName || '';
 });
 
 // 选中的子分类名称
 const selectedSecondaryCategoryName = computed<string>(() => {
     if (!budget.value.categoryId) return '';
 
-    const selectedCategory = allCategoriesMap.value[budget.value.categoryId];
-    if (!selectedCategory) return '';
-
-    // 如果选中的是子分类，返回子分类名称
-    if (selectedCategory.parentId) {
-        return selectedCategory.name;
-    }
-
-    return '';
+    return resolveBudgetCategorySelection(availableCategories.value, budget.value.categoryId)?.secondaryCategoryName || '';
 });
 
 // ============================================================================
@@ -427,26 +411,7 @@ function open({ budget: budgetData, type, usePrimaryCategoryOnly: usePrimaryOnly
  * 根据分类名称查找分类ID
  */
 function findCategoryIdByName(category: string, subCategory?: string): string {
-    const categories = availableCategories.value;
-
-    for (const cat of categories) {
-        if (cat.name === category) {
-            // 如果没有子分类，返回主分类ID
-            if (!subCategory) {
-                return cat.id;
-            }
-            // 查找子分类
-            if (cat.subCategories) {
-                for (const subCat of cat.subCategories) {
-                    if (subCat.name === subCategory) {
-                        return subCat.id;
-                    }
-                }
-            }
-        }
-    }
-
-    return '';
+    return findBudgetCategoryIdByNames(availableCategories.value, category, subCategory);
 }
 
 /**
@@ -470,41 +435,24 @@ function onCategoryChange(categoryId: string | unknown): void {
     logger.info(`[Budget] Current budgetType: ${budget.value.type}, categoryTypeValue: ${categoryTypeValue.value}`);
     logger.info(`[Budget] availableCategories count: ${availableCategories.value.length}`);
     logger.info(`[Budget] allCategoriesMap keys count: ${Object.keys(allCategoriesMap.value).length}`);
-    
+
     if (catId) {
         budget.value.categoryId = catId;
     }
 
-    // 更新category和subCategory字段
     const selectedCategory = allCategoriesMap.value[catId];
     logger.info(`[Budget] selectedCategory from allCategoriesMap:`, selectedCategory ? { id: selectedCategory.id, name: selectedCategory.name, parentId: selectedCategory.parentId } : 'not found');
-    
-    if (selectedCategory) {
-        if (selectedCategory.parentId && selectedCategory.parentId !== '0') {
-            // 选中的是子分类
-            const parentCategory = allCategoriesMap.value[selectedCategory.parentId];
-            budget.value.category = parentCategory?.name || '';
-            budget.value.subCategory = selectedCategory.name;
-            logger.info(`[Budget] Set as subCategory: category=${budget.value.category}, subCategory=${budget.value.subCategory}`);
-        } else {
-            // 选中的是主分类（parentId为空或'0'）
-            budget.value.category = selectedCategory.name;
-            budget.value.subCategory = '';
-            logger.info(`[Budget] Set as primaryCategory: category=${budget.value.category}`);
-        }
+
+    const resolvedSelection = resolveBudgetCategorySelection(availableCategories.value, catId);
+
+    if (resolvedSelection) {
+        budget.value.category = resolvedSelection.primaryCategoryName;
+        budget.value.subCategory = resolvedSelection.secondaryCategoryName;
+        logger.info(`[Budget] Resolved category selection: category=${budget.value.category}, subCategory=${budget.value.subCategory}`);
     } else if (catId) {
-        // 【修复】如果在allCategoriesMap中找不到，直接从availablePrimaryCategories中查找
-        const primaryCategory = availablePrimaryCategories.value.find(c => c.id === catId);
-        logger.info(`[Budget] Fallback: Looking in availablePrimaryCategories:`, primaryCategory ? { id: primaryCategory.id, name: primaryCategory.name } : 'not found');
-        if (primaryCategory) {
-            budget.value.category = primaryCategory.name;
-            budget.value.subCategory = '';
-            logger.info(`[Budget] Fallback Set as primaryCategory: category=${budget.value.category}`);
-        } else {
-            logger.warn(`[Budget] Category not found anywhere for id: "${catId}"`);
-            logger.info(`[Budget] Available keys in allCategoriesMap:`, Object.keys(allCategoriesMap.value).slice(0, 10));
-            logger.info(`[Budget] availablePrimaryCategories:`, availablePrimaryCategories.value.map(c => ({ id: c.id, name: c.name })).slice(0, 5));
-        }
+        logger.warn(`[Budget] Category not found anywhere for id: "${catId}"`);
+        logger.info(`[Budget] Available keys in allCategoriesMap:`, Object.keys(allCategoriesMap.value).slice(0, 10));
+        logger.info(`[Budget] availablePrimaryCategories:`, availablePrimaryCategories.value.map(c => ({ id: c.id, name: c.name })).slice(0, 5));
     }
 }
 

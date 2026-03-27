@@ -133,11 +133,16 @@ def get_overview():
         data = loop.run_until_complete(analyzer.generate_report(period=period, filters=filters if filters else None))
         loop.close()
 
+        summary_data = data.get("summary", {})
+        total_income = round(float(summary_data.get("total_income", 0) or 0), 2)
+        total_expense = round(abs(float(summary_data.get("total_expense", 0) or 0)), 2)
+        net_income = round(total_income - total_expense, 2)
+
         # 提取summary字段到顶层以符合测试预期
         result = {
-            "total_income": data.get("summary", {}).get("total_income", 0),
-            "total_expense": data.get("summary", {}).get("total_expense", 0),
-            "net_income": data.get("summary", {}).get("net_income", 0),
+            "total_income": total_income,
+            "total_expense": total_expense,
+            "net_income": net_income,
             "bill_count": data.get("total_records", 0),
             "by_category": data.get("by_category", {}),
             "by_type": data.get("by_type", {}),

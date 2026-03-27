@@ -143,7 +143,7 @@ class RuleEngineV2:
         """
         self.rules = rules_dict
         total_count = sum(len(subs) for subs in rules_dict.values())
-        self.logger.info(f"加载了 {len(rules_dict)} 个主分类, {total_count} 条规则")
+        self.logger.info("加载了 %s 个主分类, %s 条规则", len(rules_dict), total_count)
 
     def classify(self, counterparty: str, description: str) -> dict[str, str] | None:
         """

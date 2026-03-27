@@ -11,9 +11,9 @@ from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.parsers.factory import ParserFactory
-from src.utils.validator import BillValidator
-from src.core.smart_dedup import SmartDeduplicationEngine
+from bill_analyser.core.smart_dedup import SmartDeduplicationEngine
+from bill_analyser.parsers.factory import ParserFactory
+from bill_analyser.utils.validator import BillValidator
 
 
 def test_alipay_abc_dedup():
@@ -111,8 +111,8 @@ def test_alipay_abc_dedup():
     if result.duplicate_groups:
         print('\n重复组详情:')
         for i, group in enumerate(result.duplicate_groups):
-            kept = group.get('kept', {})
-            removed = group.get('removed', [])
+            kept = group.keep_bill
+            removed = group.remove_bills
             print(f'\n  组 {i+1}: 保留1条，移除{len(removed)}条')
             print(f'    保留: {kept.get("date")} | {kept.get("source_account_id")} | ¥{abs(kept.get("amount", 0)):.2f} | {kept.get("counterparty", "")[:30]}')
             for r in removed:
