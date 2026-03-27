@@ -641,7 +641,7 @@ def _parse_generic_import_time(raw_value: Any, time_format: str = "") -> int:
 def _parse_generic_import_amount(
     raw_value: Any, decimal_separator: str = ".", grouping_symbol: str | None = None
 ) -> float:
-    """解析导入金额。"""
+    """解析导入金额。自动识别格式当未显式指定分隔符时。"""
     if raw_value in (None, ""):
         return 0.0
 
@@ -652,20 +652,100 @@ def _parse_generic_import_amount(
     if not value:
         return 0.0
 
-    if grouping_symbol:
-        value = value.replace(grouping_symbol, "")
-    if decimal_separator and decimal_separator != ".":
-        value = value.replace(decimal_separator, ".")
-    value = value.replace("¥", "").replace("￥", "").replace(",", "")
+    # 去除货币符号
+    value = value.replace("¥", "").replace("￥", "").replace("$", "").replace("€", "").strip()
 
+    # 处理括号表示负数
     if value.startswith("(") and value.endswith(")"):
         value = "-" + value[1:-1]
+
+    # 自动检测小数/千位分隔符（仅当使用默认设定时）
+    if decimal_separator == "." and not grouping_symbol:
+        value = _auto_detect_and_normalize_amount(value)
+    else:
+        if grouping_symbol:
+            value = value.replace(grouping_symbol, "")
+        if decimal_separator and decimal_separator != ".":
+            value = value.replace(decimal_separator, ".")
+        # 移除可能残留的逗号（千位分隔符）
+        value = value.replace(",", "")
 
     try:
         return abs(float(value))
     except ValueError:
         logger.debug("[通用导入] 无法解析金额，使用0: %s", raw_value)
         return 0.0
+
+
+def _auto_detect_and_normalize_amount(value: str) -> str:
+    """自动检测金额字符串的小数/千位分隔符格式并标准化为 Python float 可解析的格式。
+
+    支持的格式：
+    - 1234.56 / 1,234.56 / 1,234,567.89  (英式：逗号千位，点小数)
+    - 1234,56 / 1.234,56 / 1.234.567,89  (欧式：点千位，逗号小数)
+    - 1234 / 1,234 / 1.234               (纯整数或带千位)
+    """
+    # 去除空格
+    cleaned = value.replace(" ", "").lstrip("+")
+
+    # 提取符号
+    sign = ""
+    if cleaned.startswith("-"):
+        sign = "-"
+        cleaned = cleaned[1:]
+
+    # 计数逗号和点
+    comma_count = cleaned.count(",")
+    dot_count = cleaned.count(".")
+
+    if comma_count == 0 and dot_count == 0:
+        # 纯数字
+        return sign + cleaned
+    elif comma_count == 0 and dot_count == 1:
+        # "1234.56" 或 "1.234" — 通过小数部分长度判断
+        parts = cleaned.split(".")
+        if len(parts[1]) == 3 and len(parts[0]) <= 3:
+            # 可能是千位分隔符（如 "1.234"），但也可能是正常小数（如 "0.123"）
+            # 如果整数部分是 0 或有前导零，视为小数
+            if parts[0] == "0" or (len(parts[0]) > 1 and parts[0].startswith("0")):
+                return sign + cleaned  # 保持原样，"." 是小数点
+            # 否则视为千位分隔符
+            return sign + cleaned.replace(".", "")
+        # 正常小数
+        return sign + cleaned
+    elif comma_count == 1 and dot_count == 0:
+        # "1234,56" 或 "1,234" — 通过逗号后长度判断
+        parts = cleaned.split(",")
+        if len(parts[1]) == 3 and len(parts[0]) <= 3:
+            # "1,234" — 千位分隔符
+            return sign + cleaned.replace(",", "")
+        # "1234,56" — 逗号是小数分隔符
+        return sign + cleaned.replace(",", ".")
+    elif dot_count >= 1 and comma_count == 1:
+        # "1,234.56" 或 "1.234,56"
+        last_comma = cleaned.rfind(",")
+        last_dot = cleaned.rfind(".")
+        if last_comma > last_dot:
+            # "1.234,56" — 逗号是小数分隔符
+            return sign + cleaned.replace(".", "").replace(",", ".")
+        else:
+            # "1,234.56" — 点是小数分隔符
+            return sign + cleaned.replace(",", "")
+    elif comma_count >= 2 and dot_count == 0:
+        # "1,234,567" — 逗号是千位分隔符
+        return sign + cleaned.replace(",", "")
+    elif dot_count >= 2 and comma_count == 0:
+        # "1.234.567" — 点是千位分隔符
+        return sign + cleaned.replace(".", "")
+    elif comma_count >= 2 and dot_count == 1:
+        # "1,234,567.89" — 逗号千位，点小数
+        return sign + cleaned.replace(",", "")
+    elif dot_count >= 2 and comma_count == 1:
+        # "1.234.567,89" — 点千位，逗号小数
+        return sign + cleaned.replace(".", "").replace(",", ".")
+    else:
+        # 无法确定，尝试去掉所有非数字/点字符
+        return sign + cleaned.replace(",", "")
 
 
 def _parse_generic_import_signed_amount(
@@ -682,14 +762,21 @@ def _parse_generic_import_signed_amount(
     if not value:
         return None
 
-    if grouping_symbol:
-        value = value.replace(grouping_symbol, "")
-    if decimal_separator and decimal_separator != ".":
-        value = value.replace(decimal_separator, ".")
-    value = value.replace("¥", "").replace("￥", "").replace(",", "")
+    # 去除货币符号
+    value = value.replace("¥", "").replace("￥", "").replace("$", "").replace("€", "").strip()
 
+    # 处理括号表示负数
     if value.startswith("(") and value.endswith(")"):
         value = "-" + value[1:-1]
+
+    if decimal_separator == "." and not grouping_symbol:
+        value = _auto_detect_and_normalize_amount(value)
+    else:
+        if grouping_symbol:
+            value = value.replace(grouping_symbol, "")
+        if decimal_separator and decimal_separator != ".":
+            value = value.replace(decimal_separator, ".")
+        value = value.replace(",", "")
 
     try:
         return float(value)
@@ -1061,6 +1148,14 @@ def _convert_bill_to_import_item(bill: dict[str, Any]) -> dict[str, Any]:
         "accountName": str(bill.get("account", "") or "").strip(),
         "amount": abs(float(bill.get("amount", 0) or 0)),
         "description": str(bill.get("description", "") or "").strip(),
+        "parserSource": str(
+            bill.get("parserSource") or bill.get("_parser_id") or bill.get("parser_id") or ""
+        ).strip(),
+        "isManuallyAnnotated": bool(
+            bill.get("isManuallyAnnotated")
+            or bill.get("is_manually_annotated")
+            or bill.get("preview_is_manually_annotated")
+        ),
     }
 
     return item
@@ -2939,6 +3034,13 @@ def list_import_learning_rules():
                 learned_category_id = rule.get("learned_category_id")
                 learned_source_account_id = rule.get("learned_source_account_id")
                 learned_destination_account_id = rule.get("learned_destination_account_id")
+                match_features = {}
+                try:
+                    raw_match_features = rule.get("match_features_json")
+                    if raw_match_features:
+                        match_features = json.loads(raw_match_features)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    match_features = {}
 
                 learned_category = categories_by_id.get(int(learned_category_id)) if learned_category_id else None
                 source_account = (
@@ -2953,6 +3055,7 @@ def list_import_learning_rules():
                         "id": rule.get("id"),
                         "matchType": rule.get("match_type", ""),
                         "matchValue": rule.get("match_value", ""),
+                        "matchFeatures": match_features,
                         "learnedType": rule.get("learned_type", ""),
                         "learnedCategoryId": rule.get("learned_category_id") or "",
                         "learnedCategoryName": (
@@ -3161,24 +3264,36 @@ def save_import_config():
 @log_method
 @require_auth
 def preview_import_file():
-    """预览通用表格导入文件内容。"""
+    """预览通用表格导入文件内容。支持上传文件或从服务端临时路径预览。"""
     temp_file_path = None
+    should_delete_temp = True
     try:
-        if "file" not in request.files:
-            return jsonify({"success": False, "error": "No file provided"}), 400
-
-        file = request.files["file"]
-        if not file or not file.filename:
-            return jsonify({"success": False, "error": "No file selected"}), 400
-        if not allowed_file(file.filename):
-            return jsonify(
-                {"success": False, "error": f"File type not allowed. Supported: {', '.join(ALLOWED_EXTENSIONS)}"}
-            ), 400
-
-        filename = secure_filename(file.filename)
-        unique_filename = f"preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-        temp_file_path = UPLOAD_FOLDER / unique_filename
-        file.save(str(temp_file_path))
+        # 支持两种模式：1) 上传文件  2) 从服务端temp_path读取（不删除临时文件）
+        server_temp_path = request.form.get("temp_path", "").strip()
+        if server_temp_path:
+            # 从服务端临时路径预览（由 v2/parse 返回的 unmatched_files）
+            candidate = Path(server_temp_path)
+            # 安全检查：只允许 UPLOAD_FOLDER 下的文件
+            if not candidate.resolve().is_relative_to(UPLOAD_FOLDER.resolve()):
+                return jsonify({"success": False, "error": "Invalid temp_path"}), 400
+            if not candidate.exists():
+                return jsonify({"success": False, "error": "Temp file not found"}), 404
+            temp_file_path = candidate
+            should_delete_temp = False  # 不删除，后续 parse_generic 还要用
+        elif "file" in request.files:
+            file = request.files["file"]
+            if not file or not file.filename:
+                return jsonify({"success": False, "error": "No file selected"}), 400
+            if not allowed_file(file.filename):
+                return jsonify(
+                    {"success": False, "error": f"File type not allowed. Supported: {', '.join(ALLOWED_EXTENSIONS)}"}
+                ), 400
+            filename = secure_filename(file.filename)
+            unique_filename = f"preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            temp_file_path = UPLOAD_FOLDER / unique_filename
+            file.save(str(temp_file_path))
+        else:
+            return jsonify({"success": False, "error": "No file or temp_path provided"}), 400
 
         requested_encoding = str(request.form.get("fileEncoding", "") or "").strip()
         requested_delimiter = str(request.form.get("delimiter", "") or "").strip() or None
@@ -3208,7 +3323,7 @@ def preview_import_file():
         logger.error("[导入文件预览] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
-        if temp_file_path and temp_file_path.exists():
+        if should_delete_temp and temp_file_path and temp_file_path.exists():
             try:
                 os.remove(temp_file_path)
             except OSError:
@@ -3707,9 +3822,10 @@ def parse_import_file():
                     actual_delimiter,
                 )
 
+            for bill in normalized_bills:
+                bill.setdefault("_parser_id", detected_parser_type or resolved_parser_type or "generic")
             if detected_parser_type:
                 for bill in normalized_bills:
-                    bill.setdefault("_parser_id", detected_parser_type)
                     if not str(bill.get("payment_method") or "").strip():
                         bill["payment_method"] = detected_parser_name or detected_parser_type
 
@@ -4157,7 +4273,7 @@ def import_stage1_parse():
         session_id = str(uuid.uuid4())
         logger.info("[阶段1-解析] 生成会话ID: %s", session_id)
 
-        # 调用阶段1解析
+        # 调用阶段1解析（仅处理特定解析器能识别的文件）
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -4171,13 +4287,48 @@ def import_stage1_parse():
                 result.get("total_parsed", 0),
             )
 
+            # 区分已匹配和未匹配的文件
+            unmatched_files = []
+            matched_files_to_clean = []
+            file_results = result.get("file_results", [])
+
+            for saved_file in saved_files:
+                file_path = saved_file["path"]
+                original_name = saved_file["original_name"]
+                # 查找此文件是否被成功解析
+                matched = False
+                for fr in file_results:
+                    if fr.get("file") == file_path and fr.get("success"):
+                        matched = True
+                        break
+                if matched:
+                    matched_files_to_clean.append(saved_file)
+                else:
+                    # 未匹配文件需要保留供后续列映射使用
+                    unmatched_files.append({
+                        "original_name": original_name,
+                        "temp_path": file_path,
+                    })
+
+            # 仅清理已匹配文件的临时文件；未匹配文件保留
+            for f in matched_files_to_clean:
+                try:
+                    os.remove(f["path"])
+                    logger.debug("[阶段1-解析] 临时文件已删除: %s", f["path"])
+                except Exception as e:
+                    logger.warning("[阶段1-解析] 删除临时文件失败: %s", e)
+
+            # 即使有未匹配文件，只要 session 已创建就算成功
+            success = result.get("success", False) or len(unmatched_files) > 0
+
             return jsonify(
                 {
-                    "success": result.get("success", False),
+                    "success": success,
                     "data": {
                         "session_id": result.get("session_id"),
                         "parsed_count": result.get("total_parsed", 0),
-                        "files": result.get("file_results", []),
+                        "files": file_results,
+                        "unmatched_files": unmatched_files,
                         "errors": result.get("errors", []),
                     },
                 }
@@ -4185,16 +4336,111 @@ def import_stage1_parse():
 
         finally:
             loop.close()
-            # 清理临时文件
-            for f in saved_files:
-                try:
-                    os.remove(f["path"])
-                    logger.debug("[阶段1-解析] 临时文件已删除: %s", f["path"])
-                except Exception as e:
-                    logger.warning("[阶段1-解析] 删除临时文件失败: %s", e)
 
     except Exception as e:
         logger.error("[阶段1-解析] 失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route("/import/v2/parse_generic", methods=["POST"])
+@log_method
+@require_auth
+def import_parse_generic_into_session():
+    """
+    三阶段导入 - 为未匹配的文件通过列映射解析并追加到已有会话。
+
+    Request:
+        JSON:
+            - session_id: 已有的导入会话ID
+            - temp_path: 后端保留的临时文件路径
+            - column_mapping: 列映射 {columnType: columnIndex}
+            - transaction_type_mapping: 类型映射
+            - has_header_line: 是否含表头
+            - time_format: 时间格式
+            - amount_decimal_separator: 小数分隔符
+            - amount_digit_grouping_symbol: 千分位符
+            - tag_separator: 标签分隔符
+            - file_encoding: 文件编码
+            - delimiter: CSV分隔符
+    """
+    try:
+        data = request.get_json(force=True)
+        session_id = data.get("session_id", "").strip()
+        temp_path = data.get("temp_path", "").strip()
+        column_mapping = data.get("column_mapping") or {}
+        transaction_type_mapping = data.get("transaction_type_mapping") or {}
+        has_header_line = data.get("has_header_line", True)
+        time_format = data.get("time_format", "")
+        amount_decimal_separator = data.get("amount_decimal_separator", ".")
+        amount_digit_grouping_symbol = data.get("amount_digit_grouping_symbol", "")
+        tag_separator = data.get("tag_separator", ";")
+        file_encoding = data.get("file_encoding", "")
+        delimiter = data.get("delimiter", "")
+
+        if not session_id:
+            return jsonify({"success": False, "error": "Missing session_id"}), 400
+        if not temp_path:
+            return jsonify({"success": False, "error": "Missing temp_path"}), 400
+
+        # 安全校验: 临时文件必须位于 UPLOAD_FOLDER 内
+        temp_file_path = Path(temp_path).resolve()
+        upload_folder_resolved = UPLOAD_FOLDER.resolve()
+        if not str(temp_file_path).startswith(str(upload_folder_resolved)):
+            logger.warning("[阶段1-通用解析] 路径安全校验失败: %s", temp_path)
+            return jsonify({"success": False, "error": "Invalid file path"}), 400
+        if not temp_file_path.exists():
+            return jsonify({"success": False, "error": "Temp file not found"}), 404
+
+        # 使用列映射解析
+        bills, _actual_encoding, _actual_delimiter = _parse_import_file_with_column_mapping(
+            temp_file_path,
+            column_mapping=column_mapping,
+            transaction_type_mapping=transaction_type_mapping,
+            has_header_line=has_header_line,
+            time_format=time_format,
+            amount_decimal_separator=amount_decimal_separator,
+            amount_digit_grouping_symbol=amount_digit_grouping_symbol,
+            tag_separator=tag_separator,
+            file_encoding=file_encoding,
+            delimiter=delimiter,
+        )
+
+        if not bills:
+            # 清理临时文件
+            try:
+                os.remove(str(temp_file_path))
+            except OSError:
+                pass
+            return jsonify({"success": True, "data": {"parsed_count": 0}})
+
+        # 获取服务实例
+        _, bill_service, _ = get_app_context()
+        user_id = getattr(request, "user_id", 1)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # 验证
+            valid_bills, _invalid_bills = bill_service.validator.validate_bills(bills)
+            # 写入 bills_parser_template
+            inserted = 0
+            if valid_bills:
+                inserted = loop.run_until_complete(
+                    bill_service.db.insert_parser_templates(session_id, valid_bills, "generic", user_id)
+                )
+            logger.info("[阶段1-通用解析] session=%s, 写入 %d 条通用解析模板", session_id, inserted)
+
+            return jsonify({"success": True, "data": {"parsed_count": inserted}})
+        finally:
+            loop.close()
+            # 清理临时文件
+            try:
+                os.remove(str(temp_file_path))
+            except OSError:
+                pass
+
+    except Exception as e:
+        logger.error("[阶段1-通用解析] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

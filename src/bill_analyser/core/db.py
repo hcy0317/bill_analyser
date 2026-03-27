@@ -822,6 +822,7 @@ class Database:
             preview_counterparty TEXT,
             preview_payment_method TEXT,
             preview_description TEXT,
+            preview_parser_id TEXT,
             preview_recurring_id INTEGER,
             preview_recurring_name TEXT,
             preview_recurring_candidate_count INTEGER DEFAULT 0,
@@ -840,6 +841,7 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_type ON bills_preview(preview_type)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_date ON bills_preview(preview_date)")
         preview_alter_statements = [
+            "ALTER TABLE bills_preview ADD COLUMN preview_parser_id TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_id INTEGER",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_name TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_candidate_count INTEGER DEFAULT 0",
@@ -888,6 +890,7 @@ class Database:
             enabled INTEGER NOT NULL DEFAULT 1,
             source_session_id TEXT,
             source_preview_id INTEGER,
+            match_features_json TEXT,
             applied_count INTEGER NOT NULL DEFAULT 0,
             last_applied_at TEXT,
             created_at TEXT NOT NULL,
@@ -982,6 +985,9 @@ class Database:
 
         # v2026-03-07: 为 users 表添加投资识别关键词配置字段
         await self._migrate_users_investment_keyword_fields(conn)
+
+        # v7: 为 import_learning_rules 表添加复合匹配字段
+        await self._migrate_learning_rules_composite_fields(conn)
 
         await conn.commit()
 
@@ -1163,6 +1169,32 @@ class Database:
         except Exception as e:
             self.logger.error(f"为 users 表添加投资识别关键词字段失败: {e}", exc_info=True)
 
+    async def _migrate_learning_rules_composite_fields(self, conn: aiosqlite.Connection) -> None:
+        """为 import_learning_rules 表添加复合匹配字段。"""
+        try:
+            cursor = await conn.execute("PRAGMA table_info(import_learning_rules)")
+            columns = [row[1] for row in await cursor.fetchall()]
+
+            for col_name, col_def in [
+                ("parser_id", "TEXT DEFAULT NULL"),
+                ("composite_match_hash", "TEXT DEFAULT NULL"),
+                ("match_features_json", "TEXT DEFAULT NULL"),
+            ]:
+                if col_name not in columns:
+                    self.logger.info("为 import_learning_rules 表添加 %s 字段", col_name)
+                    await conn.execute(
+                        f"ALTER TABLE import_learning_rules ADD COLUMN {col_name} {col_def}"
+                    )
+
+            # 为复合匹配哈希创建索引
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_learning_rules_composite_hash "
+                "ON import_learning_rules(user_id, composite_match_hash) "
+                "WHERE composite_match_hash IS NOT NULL"
+            )
+        except Exception as e:
+            self.logger.error("为 import_learning_rules 添加复合匹配字段失败: %s", e, exc_info=True)
+
     @staticmethod
     def _normalize_import_learning_text(raw_value: Any) -> str:
         """标准化导入学习文本，用于稳定匹配。"""
@@ -1178,6 +1210,59 @@ class Database:
             text = " | ".join(parts)
 
         return " ".join(text.split())
+
+    @staticmethod
+    def build_composite_match_hash(
+        parser_id: str,
+        counterparty: str,
+        description: str,
+        payment_method: str,
+    ) -> str | None:
+        """构建复合匹配哈希键。
+
+        至少需要两个非空字段才生成复合键，否则返回 None。
+        """
+        features = Database.build_composite_match_features(
+            parser_id=parser_id,
+            counterparty=counterparty,
+            description=description,
+            payment_method=payment_method,
+        )
+        if not features:
+            return None
+
+        key_aliases = {
+            "parser_id": "p",
+            "counterparty": "c",
+            "description": "d",
+            "payment_method": "m",
+        }
+        # 按 key 排序确保稳定
+        return "|".join(f"{key_aliases[k]}={v}" for k, v in sorted(features.items()))
+
+    @staticmethod
+    def build_composite_match_features(
+        parser_id: str,
+        counterparty: str,
+        description: str,
+        payment_method: str,
+    ) -> dict[str, str] | None:
+        """构建用于复合学习和后续 ML 演进的结构化特征。
+
+        仅保留稳定字段，明确排除时间等高唯一性字段。
+        至少需要两个非空特征才返回。
+        """
+        norm = Database._normalize_import_learning_text
+        features = {
+            "parser_id": norm(parser_id),
+            "counterparty": norm(counterparty),
+            "description": norm(description),
+            "payment_method": norm(payment_method),
+        }
+        non_empty = {key: value for key, value in features.items() if value}
+        if len(non_empty) < 2:
+            return None
+        return non_empty
 
     async def _record_import_learning_rule_log(
         self,
@@ -7651,11 +7736,12 @@ class Database:
                             preview_main_category, preview_sub_category,
                             preview_source_account_id, preview_destination_account_id,
                             preview_counterparty, preview_payment_method, preview_description,
+                            preview_parser_id,
                             preview_recurring_id, preview_recurring_name,
                             preview_recurring_candidate_count, preview_recurring_match_score,
                             preview_recurring_match_reasons, preview_recurring_matched_date,
                             preview_selected, dedup_type, dedup_source_ids, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -7671,6 +7757,7 @@ class Database:
                             preview_data.get("preview_counterparty", ""),
                             preview_data.get("preview_payment_method", ""),
                             preview_data.get("preview_description", ""),
+                            preview_data.get("preview_parser_id", ""),
                             preview_data.get("preview_recurring_id"),
                             preview_data.get("preview_recurring_name", ""),
                             preview_data.get("preview_recurring_candidate_count", 0),
@@ -8308,25 +8395,33 @@ class Database:
             learned_source_account_id = sample.get("annotated_source_account_id")
             learned_destination_account_id = sample.get("annotated_destination_account_id")
 
-            for match_type, match_value in [
-                ("counterparty", preview.get("preview_counterparty", "")),
-                ("description", preview.get("preview_description", "")),
-                ("payment_method", preview.get("preview_payment_method", "")),
-            ]:
-                normalized_value = self._normalize_import_learning_text(match_value)
-                if not normalized_value:
-                    continue
-
-                pending_rules[(match_type, normalized_value)] = {
-                    "match_type": match_type,
-                    "match_value": str(match_value or "").strip(),
-                    "normalized_match_value": normalized_value,
+            # 仅保留复合匹配规则，避免生成过于宽松的单字段长期学习。
+            composite_hash = self.build_composite_match_hash(
+                parser_id=preview.get("preview_parser_id", ""),
+                counterparty=preview.get("preview_counterparty", ""),
+                description=preview.get("preview_description", ""),
+                payment_method=preview.get("preview_payment_method", ""),
+            )
+            match_features = self.build_composite_match_features(
+                parser_id=preview.get("preview_parser_id", ""),
+                counterparty=preview.get("preview_counterparty", ""),
+                description=preview.get("preview_description", ""),
+                payment_method=preview.get("preview_payment_method", ""),
+            )
+            if composite_hash and match_features:
+                pending_rules[("composite", composite_hash)] = {
+                    "match_type": "composite",
+                    "match_value": composite_hash,
+                    "normalized_match_value": composite_hash,
                     "learned_type": learned_type,
                     "learned_category_id": learned_category_id,
                     "learned_source_account_id": learned_source_account_id,
                     "learned_destination_account_id": learned_destination_account_id,
                     "source_session_id": session_id,
                     "source_preview_id": preview_id,
+                    "parser_id": preview.get("preview_parser_id", ""),
+                    "composite_match_hash": composite_hash,
+                    "match_features_json": json.dumps(match_features, ensure_ascii=False, sort_keys=True),
                 }
 
         if not pending_rules:
@@ -8364,8 +8459,9 @@ class Database:
                     learned_type, learned_category_id,
                     learned_source_account_id, learned_destination_account_id,
                     enabled, source_session_id, source_preview_id,
+                    parser_id, composite_match_hash, match_features_json,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, match_type, normalized_match_value) DO UPDATE SET
                     match_value = excluded.match_value,
                     learned_type = excluded.learned_type,
@@ -8375,6 +8471,9 @@ class Database:
                     enabled = 1,
                     source_session_id = excluded.source_session_id,
                     source_preview_id = excluded.source_preview_id,
+                    parser_id = excluded.parser_id,
+                    composite_match_hash = excluded.composite_match_hash,
+                    match_features_json = excluded.match_features_json,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -8388,6 +8487,9 @@ class Database:
                     rule_data["learned_destination_account_id"],
                     rule_data["source_session_id"],
                     rule_data["source_preview_id"],
+                    rule_data.get("parser_id"),
+                    rule_data.get("composite_match_hash"),
+                    rule_data.get("match_features_json"),
                     now,
                     now,
                 ),

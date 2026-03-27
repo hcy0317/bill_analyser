@@ -1227,6 +1227,42 @@ export default {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
     },
+    previewImportFileFromTemp: ({ tempPath, fileEncoding, delimiter }: { tempPath: string, fileEncoding?: string, delimiter?: string }): ApiResponsePromise<any> => {
+        return axios.postForm<ApiResponse<any>>('bills/import/preview', {
+            temp_path: tempPath,
+            fileEncoding: fileEncoding,
+            delimiter: delimiter
+        }, {
+            timeout: DEFAULT_UPLOAD_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
+    parseGenericIntoSession: ({ sessionId, tempPath, columnMapping, transactionTypeMapping, hasHeaderLine, timeFormat, timezoneFormat, amountDecimalSeparator, amountDigitGroupingSymbol, delimiter }: {
+        sessionId: string;
+        tempPath: string;
+        columnMapping: Record<string, number>;
+        transactionTypeMapping?: Record<string, number>;
+        hasHeaderLine?: boolean;
+        timeFormat?: string;
+        timezoneFormat?: string;
+        amountDecimalSeparator?: string;
+        amountDigitGroupingSymbol?: string;
+        delimiter?: string;
+    }): ApiResponsePromise<any> => {
+        return axios.post<ApiResponse<any>>('bills/import/v2/parse_generic', {
+            session_id: sessionId,
+            temp_path: tempPath,
+            column_mapping: columnMapping,
+            transaction_type_mapping: transactionTypeMapping,
+            has_header_line: hasHeaderLine,
+            time_format: timeFormat,
+            timezone_format: timezoneFormat,
+            amount_decimal_separator: amountDecimalSeparator,
+            amount_digit_grouping_symbol: amountDigitGroupingSymbol,
+            delimiter: delimiter
+        }, {
+            timeout: DEFAULT_UPLOAD_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
     matchImportConfig: ({ fileFormat, headers }: { fileFormat: string, headers: string[] }): ApiResponsePromise<any | null> => {
         return axios.post<ApiResponse<any | null>>('bills/import/configs/match', {
             fileFormat,

@@ -10,11 +10,14 @@ Bill Service Module - 账单导入服务
 """
 
 import asyncio
+import json
 import re
+from difflib import SequenceMatcher
 from datetime import datetime
 from typing import Any
 
 from ..parsers.factory import ParserFactory
+from ..utils.constants import TransactionType
 from ..utils.deduplication import DeduplicationEngine, DeduplicationMode
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.validator import BillValidator
@@ -27,8 +30,6 @@ from .investment_settings import (
     build_user_investment_keyword_settings,
 )
 from .smart_dedup import DeduplicationType, SmartDeduplicationEngine
-
-# v6.72: 移除 TransactionType 导入，分类类型过滤改为由 match_category() 内部自动处理
 
 
 class BillService:
@@ -1036,6 +1037,51 @@ class BillService:
 
         return bills
 
+    async def _validate_type_category_consistency(
+        self, bills: list[dict[str, Any]], user_id: int = 1
+    ) -> list[dict[str, Any]]:
+        """验证类型/分类一致性，清除不匹配的分类。
+
+        当账单 type 为支出/收入但分类属于转账类型时，清除该分类，
+        避免出现 "type=支出 + category=转账" 的不一致状态。
+        """
+        if not bills:
+            return bills
+
+        # 构建转账类分类名称集合（从加载的规则中获取）
+        transfer_category_names: set[tuple[str, str]] = set()
+        if self.category_engine.is_initialized:
+            for rule in self.category_engine.rules:
+                if rule.get("type") == TransactionType.TRANSFER:
+                    transfer_category_names.add((rule.get("main", ""), rule.get("sub", "")))
+
+        if not transfer_category_names:
+            return bills
+
+        fixed_count = 0
+        for bill in bills:
+            bill_type = str(bill.get("type", "")).strip().lower()
+            if bill_type in ["转账", "transfer", "4"]:
+                continue  # 转账类型分配转账分类是正确的
+
+            main_cat = bill.get("main_category", "")
+            sub_cat = bill.get("sub_category", "")
+            if (main_cat, sub_cat) in transfer_category_names:
+                self.logger.debug(
+                    "[一致性检查] 清除不一致分类: type='%s', category='%s/%s'",
+                    bill.get("type"),
+                    main_cat,
+                    sub_cat,
+                )
+                bill["main_category"] = ""
+                bill["sub_category"] = ""
+                fixed_count += 1
+
+        if fixed_count > 0:
+            self.logger.info("[一致性检查] 修复 %d 条类型/分类不一致账单", fixed_count)
+
+        return bills
+
     @staticmethod
     def _normalize_learning_text(raw_value: Any) -> str:
         """标准化长期学习匹配文本。"""
@@ -1055,7 +1101,10 @@ class BillService:
     async def _apply_import_learning_rules(
         self, bills: list[dict[str, Any]], user_id: int = 1, type_only: bool = False, record_usage: bool = False
     ) -> int:
-        """应用长期导入学习规则。"""
+        """应用长期导入学习规则。
+
+        匹配优先级: 复合匹配 > 交易对方 > 描述 > 支付方式
+        """
         if not bills:
             return 0
 
@@ -1068,31 +1117,59 @@ class BillService:
         if not rules:
             return 0
 
-        rule_lookup = {
-            (rule.get("match_type", ""), rule.get("normalized_match_value", "")): rule
+        # 新生成的长期学习规则仅保留复合规则；这里兼容历史单字段规则，
+        # 避免升级后老用户既有学习规则静默失效。
+        composite_lookup: dict[str, dict[str, Any]] = {
+            str(rule.get("composite_match_hash") or ""): rule
             for rule in rules
-            if rule.get("match_type") and rule.get("normalized_match_value")
+            if rule.get("match_type") == "composite" and str(rule.get("composite_match_hash") or "")
         }
+        single_lookup: dict[tuple[str, str], dict[str, Any]] = {
+            (str(rule.get("match_type") or ""), str(rule.get("normalized_match_value") or "")): rule
+            for rule in rules
+            if rule.get("match_type") in {"counterparty", "description", "payment_method"}
+            and str(rule.get("normalized_match_value") or "")
+        }
+        if not composite_lookup and not single_lookup:
+            return 0
+
         category_cache: dict[int, dict[str, Any] | None] = {}
         matched_rule_ids: list[int] = []
         applied_count = 0
 
         for bill in bills:
             matched_rule = None
-            for match_type, raw_value in [
-                ("counterparty", bill.get("counterparty", "")),
-                ("description", bill.get("description", "")),
-                ("payment_method", bill.get("payment_method", "")),
-            ]:
-                normalized_value = self._normalize_learning_text(raw_value)
-                if not normalized_value:
-                    continue
 
-                matched_rule = rule_lookup.get((match_type, normalized_value))
-                if matched_rule:
-                    bill["_import_learning_match_type"] = match_type
-                    bill["_import_learning_rule_id"] = matched_rule.get("id")
-                    break
+            # 优先尝试复合匹配
+            if composite_lookup:
+                composite_hash = self.db.build_composite_match_hash(
+                    parser_id=bill.get("_parser_id", ""),
+                    counterparty=bill.get("counterparty", ""),
+                    description=bill.get("description", ""),
+                    payment_method=bill.get("payment_method", ""),
+                )
+                if composite_hash:
+                    matched_rule = composite_lookup.get(composite_hash)
+                    if matched_rule:
+                        bill["_import_learning_match_type"] = "composite"
+                        bill["_import_learning_rule_id"] = matched_rule.get("id")
+
+            # 兼容历史单字段长期学习规则。
+            if not matched_rule and single_lookup:
+                for match_type, raw_value in [
+                    ("counterparty", bill.get("counterparty", "")),
+                    ("description", bill.get("description", "")),
+                    ("payment_method", bill.get("payment_method", "")),
+                ]:
+                    normalized_value = self._normalize_learning_text(raw_value)
+                    if not normalized_value:
+                        continue
+
+                    matched_rule = single_lookup.get((match_type, normalized_value))
+                    if matched_rule:
+                        bill["_import_learning_match_type"] = match_type
+                        bill["_import_learning_rule_id"] = matched_rule.get("id")
+                        break
 
             if not matched_rule:
                 continue
@@ -1127,11 +1204,13 @@ class BillService:
 
         if applied_count > 0:
             self.logger.info(
-                "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s",
+                "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s, composite_rules=%d, legacy_single_rules=%d",
                 user_id,
                 len(bills),
                 applied_count,
                 type_only,
+                len(composite_lookup),
+                len(single_lookup),
             )
 
         return applied_count
@@ -1139,7 +1218,10 @@ class BillService:
     async def _build_session_annotation_rule_lookup(
         self, previews: list[dict[str, Any]], annotation_samples: list[dict[str, Any]], user_id: int = 1
     ) -> dict[tuple[str, str], dict[str, Any]]:
-        """基于当前会话人工标注构建临时学习规则查找表。"""
+        """基于当前会话人工标注构建临时学习规则查找表。
+
+        包含复合匹配规则（match_type='composite'）和单字段规则。
+        """
         if not previews or not annotation_samples:
             return {}
 
@@ -1174,6 +1256,7 @@ class BillService:
                 "annotated_destination_account_id": sample.get("annotated_destination_account_id"),
             }
 
+            # 单字段规则
             for match_type, raw_value in [
                 ("counterparty", source_preview.get("preview_counterparty", "")),
                 ("description", source_preview.get("preview_description", "")),
@@ -1183,6 +1266,16 @@ class BillService:
                 if not normalized_value:
                     continue
                 rule_lookup[(match_type, normalized_value)] = rule_payload
+
+            # 复合匹配规则
+            composite_hash = self.db.build_composite_match_hash(
+                parser_id=source_preview.get("preview_parser_id", ""),
+                counterparty=source_preview.get("preview_counterparty", ""),
+                description=source_preview.get("preview_description", ""),
+                payment_method=source_preview.get("preview_payment_method", ""),
+            )
+            if composite_hash:
+                rule_lookup[("composite", composite_hash)] = rule_payload
 
         if rule_lookup:
             self.logger.info("[会话学习] 构建临时规则 %d 条", len(rule_lookup))
@@ -1196,7 +1289,10 @@ class BillService:
         annotation_map: dict[int, dict[str, Any]],
         type_only: bool = False,
     ) -> int:
-        """将当前会话人工标注以临时学习规则形式回放到相似账单。"""
+        """将当前会话人工标注以临时学习规则形式回放到相似账单。
+
+        匹配优先级: 复合匹配 > 交易对方 > 描述 > 支付方式
+        """
         if not bills or not rule_lookup:
             return 0
 
@@ -1208,20 +1304,36 @@ class BillService:
                 continue
 
             matched_rule = None
-            for match_type, raw_value in [
-                ("counterparty", bill.get("counterparty", "")),
-                ("description", bill.get("description", "")),
-                ("payment_method", bill.get("payment_method", "")),
-            ]:
-                normalized_value = BillService._normalize_learning_text(raw_value)
-                if not normalized_value:
-                    continue
 
-                matched_rule = rule_lookup.get((match_type, normalized_value))
+            # 优先尝试复合匹配
+            composite_hash = Database.build_composite_match_hash(
+                parser_id=bill.get("_parser_id", ""),
+                counterparty=bill.get("counterparty", ""),
+                description=bill.get("description", ""),
+                payment_method=bill.get("payment_method", ""),
+            )
+            if composite_hash:
+                matched_rule = rule_lookup.get(("composite", composite_hash))
                 if matched_rule:
-                    bill["_session_annotation_match_type"] = match_type
+                    bill["_session_annotation_match_type"] = "composite"
                     bill["_session_annotation_source_preview_id"] = matched_rule.get("preview_id")
-                    break
+
+            # 回退到单字段匹配
+            if not matched_rule:
+                for match_type, raw_value in [
+                    ("counterparty", bill.get("counterparty", "")),
+                    ("description", bill.get("description", "")),
+                    ("payment_method", bill.get("payment_method", "")),
+                ]:
+                    normalized_value = BillService._normalize_learning_text(raw_value)
+                    if not normalized_value:
+                        continue
+
+                    matched_rule = rule_lookup.get((match_type, normalized_value))
+                    if matched_rule:
+                        bill["_session_annotation_match_type"] = match_type
+                        bill["_session_annotation_source_preview_id"] = matched_rule.get("preview_id")
+                        break
 
             if not matched_rule:
                 continue
@@ -1931,6 +2043,9 @@ class BillService:
             if learning_replay_count > 0:
                 self.logger.info("[阶段2] 长期学习结果回放 %d 条", learning_replay_count)
 
+            # 7.5 类型/分类一致性验证 — 防止支出/收入类型账单被错误分配到转账分类
+            matched_bills = await self._validate_type_category_consistency(matched_bills, user_id)
+
             # 8. 生成预览数据并写入 bills_preview 表
             self.logger.info("[阶段2] 生成预览数据...")
             preview_list = []
@@ -2013,6 +2128,7 @@ class BillService:
                     "preview_counterparty": bill.get("counterparty", ""),
                     "preview_payment_method": preview_payment_method,
                     "preview_description": bill.get("description", ""),
+                    "preview_parser_id": bill.get("_parser_id", ""),
                     "preview_recurring_id": top_recurring_candidate.get("id") if top_recurring_candidate else None,
                     "preview_recurring_name": top_recurring_candidate.get("name", "")
                     if top_recurring_candidate
@@ -2155,14 +2271,52 @@ class BillService:
             List[Dict]: 预览账单列表
         """
         previews = await self.db.get_preview_by_session(session_id, selected_only)
-        preview_user_id = previews[0].get("user_id", 1) if previews else 1
+        if not previews:
+            return []
+
+        preview_user_id = int(previews[0].get("user_id") or 0)
+        annotation_samples = (
+            await self.db.get_import_annotation_samples(session_id, user_id=preview_user_id)
+            if preview_user_id > 0
+            else []
+        )
+        manually_annotated_preview_ids = {
+            int(sample["preview_id"]) for sample in annotation_samples if sample.get("preview_id")
+        }
         keyword_config = await self._get_investment_keyword_config(int(preview_user_id or 1))
+        learning_rules = (
+            await self.db.get_import_learning_rules(user_id=preview_user_id, enabled_only=True, limit=1000)
+            if preview_user_id > 0
+            else []
+        )
+        composite_learning_rules = [
+            rule
+            for rule in learning_rules
+            if rule.get("match_type") == "composite" and rule.get("match_features_json")
+        ]
+        learning_categories_by_id: dict[int, dict[str, Any]] = {}
+        learning_accounts_by_id: dict[int, dict[str, Any]] = {}
+        if composite_learning_rules and preview_user_id > 0:
+            learning_categories = await self.db.get_all_categories(user_id=preview_user_id)
+            learning_accounts = await self.db.get_all_accounts(user_id=preview_user_id)
+            learning_categories_by_id = {
+                int(category["id"]): category for category in learning_categories if category.get("id") is not None
+            }
+            learning_accounts_by_id = {
+                int(account["id"]): account for account in learning_accounts if account.get("id") is not None
+            }
 
         # 转换为前端期望的格式 (v6.51: 保持preview_前缀与前端字段名匹配)
         result = []
         for preview in previews:
             transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
             investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
+            learning_recommendation = self._build_learning_similarity_signal_from_preview(
+                preview,
+                composite_learning_rules,
+                categories_by_id=learning_categories_by_id,
+                accounts_by_id=learning_accounts_by_id,
+            )
             item = {
                 "id": preview.get("id"),
                 # v6.51: 前端 convertPreviewToImportTransaction 期望 preview_date/preview_amount 等字段
@@ -2177,6 +2331,7 @@ class BillService:
                 "preview_counterparty": preview.get("preview_counterparty", ""),
                 "preview_payment_method": preview.get("preview_payment_method", ""),
                 "preview_description": preview.get("preview_description", ""),
+                "preview_parser_id": preview.get("preview_parser_id", ""),
                 "preview_recurring_id": preview.get("preview_recurring_id"),
                 "preview_recurring_name": preview.get("preview_recurring_name", ""),
                 "preview_recurring_candidate_count": preview.get("preview_recurring_candidate_count", 0),
@@ -2184,6 +2339,7 @@ class BillService:
                 "preview_recurring_match_reasons": preview.get("preview_recurring_match_reasons", ""),
                 "preview_recurring_matched_date": preview.get("preview_recurring_matched_date", ""),
                 "preview_selected": bool(preview.get("preview_selected", 1)),
+                "preview_is_manually_annotated": int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
                 "dedup_type": preview.get("dedup_type", ""),
                 "dedup_source_ids": preview.get("dedup_source_ids", ""),
                 "suggested_preview_type": transfer_suggestion.get("suggested_preview_type", ""),
@@ -2195,10 +2351,249 @@ class BillService:
                 "investment_signal_reason": investment_signal.get("reason", ""),
                 "investment_platform": investment_signal.get("platform", ""),
                 "investment_product": investment_signal.get("product", ""),
+                "learning_recommendation_rule_id": learning_recommendation.get("rule_id"),
+                "learning_recommendation_score": learning_recommendation.get("score", 0.0),
+                "learning_recommendation_level": learning_recommendation.get("level", ""),
+                "learning_recommendation_reason": learning_recommendation.get("reason", ""),
+                "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
+                "learning_recommendation_summary": learning_recommendation.get("summary", ""),
             }
             result.append(item)
 
         return result
+
+    @staticmethod
+    def _deserialize_learning_match_features(rule: dict[str, Any]) -> dict[str, str]:
+        """读取长期学习规则中的结构化匹配特征。"""
+        raw_payload = rule.get("match_features_json")
+        if not raw_payload:
+            return {}
+
+        try:
+            payload = json.loads(raw_payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+
+        if not isinstance(payload, dict):
+            return {}
+
+        normalized_payload: dict[str, str] = {}
+        for key, value in payload.items():
+            normalized_value = BillService._normalize_learning_text(value)
+            if normalized_value:
+                normalized_payload[str(key)] = normalized_value
+
+        return normalized_payload
+
+    @staticmethod
+    def _calculate_learning_feature_similarity(field: str, preview_value: str, rule_value: str) -> float:
+        """计算单字段相似度分数。"""
+        if not preview_value or not rule_value:
+            return 0.0
+
+        if preview_value == rule_value:
+            return 1.0
+
+        if field == "parser_id":
+            return 0.0
+
+        if preview_value in rule_value or rule_value in preview_value:
+            return 0.92
+
+        delimiter_pattern = r"[\s|,，/、_\-]+"
+        preview_parts = {part for part in re.split(delimiter_pattern, preview_value) if part}
+        rule_parts = {part for part in re.split(delimiter_pattern, rule_value) if part}
+
+        overlap_score = 0.0
+        if preview_parts and rule_parts:
+            union = preview_parts | rule_parts
+            overlap_score = len(preview_parts & rule_parts) / len(union) if union else 0.0
+
+        sequence_score = SequenceMatcher(None, preview_value, rule_value).ratio()
+        return max(overlap_score, sequence_score)
+
+    @staticmethod
+    def _score_learning_rule_similarity(
+        preview_features: dict[str, str], rule_features: dict[str, str]
+    ) -> dict[str, Any] | None:
+        """使用加权规则为长期学习候选生成相似度分数。"""
+        feature_weights = {
+            "parser_id": 0.35,
+            "counterparty": 0.30,
+            "description": 0.20,
+            "payment_method": 0.15,
+        }
+        preview_feature_keys = [field for field in feature_weights if preview_features.get(field)]
+        if len(preview_feature_keys) < 2:
+            return None
+
+        total_possible_weight = sum(feature_weights[field] for field in preview_feature_keys)
+        weighted_score = 0.0
+        matched_fields: list[str] = []
+        reason_parts: list[str] = []
+
+        for field in preview_feature_keys:
+            preview_value = preview_features.get(field, "")
+            rule_value = rule_features.get(field, "")
+            if not rule_value:
+                continue
+
+            similarity = BillService._calculate_learning_feature_similarity(field, preview_value, rule_value)
+            if similarity <= 0:
+                continue
+
+            weighted_score += feature_weights[field] * similarity
+            if similarity >= 0.8:
+                matched_fields.append(field)
+                match_label = "exact" if similarity >= 0.999 else f"similar({similarity:.2f})"
+                reason_parts.append(f"{field}:{match_label}")
+
+        if len(matched_fields) < 2 or total_possible_weight <= 0:
+            return None
+
+        return {
+            "score": round(weighted_score / total_possible_weight, 2),
+            "matched_fields": matched_fields,
+            "reason_parts": reason_parts,
+        }
+
+    @staticmethod
+    def _build_learning_rule_result_summary(
+        rule: dict[str, Any], categories_by_id: dict[int, dict[str, Any]], accounts_by_id: dict[int, dict[str, Any]]
+    ) -> str:
+        """构建长期学习推荐结果摘要。"""
+        parts: list[str] = []
+
+        learned_type = str(rule.get("learned_type") or "").strip()
+        if learned_type:
+            parts.append(learned_type)
+
+        learned_category_id = rule.get("learned_category_id")
+        category = categories_by_id.get(int(learned_category_id)) if learned_category_id else None
+        if category:
+            main_category = str(category.get("main_category") or "").strip()
+            sub_category = str(category.get("sub_category") or "").strip()
+            if main_category and sub_category:
+                parts.append(f"{main_category}/{sub_category}")
+            elif main_category:
+                parts.append(main_category)
+
+        learned_source_account_id = rule.get("learned_source_account_id")
+        learned_destination_account_id = rule.get("learned_destination_account_id")
+        source_account = accounts_by_id.get(int(learned_source_account_id)) if learned_source_account_id else None
+        destination_account = accounts_by_id.get(int(learned_destination_account_id)) if learned_destination_account_id else None
+        if source_account or destination_account:
+            parts.append(
+                f"{source_account.get('name', '-') if source_account else '-'} → "
+                f"{destination_account.get('name', '-') if destination_account else '-'}"
+            )
+
+        return " | ".join(parts)
+
+    def _build_learning_similarity_signal_from_preview(
+        self,
+        preview: dict[str, Any],
+        learning_rules: list[dict[str, Any]],
+        *,
+        categories_by_id: dict[int, dict[str, Any]],
+        accounts_by_id: dict[int, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """基于长期学习规则为预览账单生成相似度推荐信号。"""
+        if not learning_rules:
+            return {}
+
+        preview_features = self.db.build_composite_match_features(
+            parser_id=preview.get("preview_parser_id", ""),
+            counterparty=preview.get("preview_counterparty", ""),
+            description=preview.get("preview_description", ""),
+            payment_method=preview.get("preview_payment_method", ""),
+        )
+        if not preview_features:
+            return {}
+
+        preview_composite_hash = self.db.build_composite_match_hash(
+            parser_id=preview.get("preview_parser_id", ""),
+            counterparty=preview.get("preview_counterparty", ""),
+            description=preview.get("preview_description", ""),
+            payment_method=preview.get("preview_payment_method", ""),
+        )
+        if preview_composite_hash and any(
+            str(rule.get("composite_match_hash") or "") == preview_composite_hash for rule in learning_rules
+        ):
+            return {}
+
+        candidates: list[dict[str, Any]] = []
+        preview_parser_id = preview_features.get("parser_id", "")
+        for rule in learning_rules:
+            rule_features = self._deserialize_learning_match_features(rule)
+            if not rule_features:
+                continue
+
+            rule_parser_id = rule_features.get("parser_id", "")
+            if preview_parser_id and rule_parser_id and preview_parser_id != rule_parser_id:
+                continue
+
+            score_payload = self._score_learning_rule_similarity(preview_features, rule_features)
+            if not score_payload:
+                continue
+
+            candidates.append(
+                {
+                    "rule": rule,
+                    "score": score_payload["score"],
+                    "matched_fields": score_payload["matched_fields"],
+                    "reason_parts": score_payload["reason_parts"],
+                }
+            )
+
+        if not candidates:
+            return {}
+
+        candidates.sort(
+            key=lambda candidate: (
+                float(candidate["score"]),
+                len(candidate["matched_fields"]),
+                int(candidate["rule"].get("applied_count", 0) or 0),
+                int(candidate["rule"].get("id", 0) or 0),
+            ),
+            reverse=True,
+        )
+        best_candidate = candidates[0]
+        second_score = float(candidates[1]["score"]) if len(candidates) > 1 else 0.0
+        margin = round(float(best_candidate["score"]) - second_score, 2)
+
+        if float(best_candidate["score"]) < 0.72:
+            return {}
+        if len(candidates) > 1 and margin < 0.08:
+            return {}
+
+        if float(best_candidate["score"]) >= 0.9:
+            level = "high"
+        elif float(best_candidate["score"]) >= 0.82:
+            level = "medium"
+        else:
+            level = "low"
+
+        best_rule = best_candidate["rule"]
+        summary = self._build_learning_rule_result_summary(best_rule, categories_by_id, accounts_by_id)
+        reason_parts = [*best_candidate["reason_parts"], f"margin:{margin:.2f}"]
+
+        self.logger.debug(
+            "[长期学习相似推荐] preview_id=%s, rule_id=%s, score=%.2f, level=%s, reasons=%s",
+            preview.get("id"),
+            best_rule.get("id"),
+            float(best_candidate["score"]),
+            level,
+            ", ".join(reason_parts),
+        )
+        return {
+            "rule_id": best_rule.get("id"),
+            "score": float(best_candidate["score"]),
+            "level": level,
+            "reason": ", ".join(reason_parts),
+            "recommended_type": str(best_rule.get("learned_type") or "").strip(),
+            "summary": summary,
+        }
 
     def _build_transfer_suggestion_from_preview(self, preview: dict[str, Any]) -> dict[str, Any]:
         """根据预览账单生成疑似转账推荐。
@@ -2443,6 +2838,7 @@ class BillService:
                     "counterparty": preview.get("preview_counterparty", ""),
                     "payment_method": preview.get("preview_payment_method", ""),
                     "description": preview.get("preview_description", ""),
+                    "_parser_id": preview.get("preview_parser_id", ""),
                     "_dedup_type": preview.get("dedup_type", "remaining"),
                     # 保留原有账户ID用于后续更新
                     "source_account_id": preview.get("preview_source_account_id"),

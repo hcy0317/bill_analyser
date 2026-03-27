@@ -267,7 +267,7 @@
                             </td>
                             <td>{{ getImportLearningMatchTypeName(rule.matchType) }}</td>
                             <td style="max-width: 260px">
-                                <div class="text-truncate" :title="rule.matchValue">{{ rule.matchValue }}</div>
+                                <div class="text-truncate" :title="getImportLearningMatchValue(rule)">{{ getImportLearningMatchValue(rule) }}</div>
                             </td>
                             <td style="max-width: 320px">
                                 <div class="text-truncate" :title="getImportLearningRuleSummary(rule)">
@@ -438,6 +438,7 @@ interface ImportLearningRuleInfo {
     id: number;
     matchType: string;
     matchValue: string;
+    matchFeatures?: Record<string, string>;
     learnedType: string;
     learnedCategoryName: string;
     learnedSourceAccountName: string;
@@ -576,6 +577,9 @@ function getTablePageOptions(linesCount?: number): NameNumeralValue[] {
 }
 
 function getImportLearningMatchTypeName(matchType: string): string {
+    if (matchType === 'composite') {
+        return tt('Composite Rule');
+    }
     if (matchType === 'counterparty') {
         return tt('Counterparty');
     }
@@ -586,6 +590,26 @@ function getImportLearningMatchTypeName(matchType: string): string {
         return tt('Description');
     }
     return matchType;
+}
+
+function getImportLearningMatchValue(rule: ImportLearningRuleInfo): string {
+    if (rule.matchType !== 'composite' || !rule.matchFeatures) {
+        return rule.matchValue;
+    }
+
+    const labelMap: Record<string, string> = {
+        parser_id: tt('Parser'),
+        counterparty: tt('Counterparty'),
+        description: tt('Description'),
+        payment_method: tt('Payment Method')
+    };
+
+    const orderedKeys = ['parser_id', 'counterparty', 'description', 'payment_method'];
+    const parts = orderedKeys
+        .filter(key => !!rule.matchFeatures?.[key])
+        .map(key => `${labelMap[key] || key}: ${rule.matchFeatures?.[key] || ''}`);
+
+    return parts.length > 0 ? parts.join(' | ') : rule.matchValue;
 }
 
 function getImportLearningRuleSummary(rule: ImportLearningRuleInfo): string {

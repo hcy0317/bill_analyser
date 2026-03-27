@@ -30,6 +30,11 @@ export class ImportTransaction implements ImportTransactionResponse {
     public investmentSignalScore: number;
     public investmentSignalLevel: string;
     public investmentSignalReason: string;
+    public learningRecommendationScore: number;
+    public learningRecommendationLevel: string;
+    public learningRecommendationReason: string;
+    public learningRecommendationType: string;
+    public learningRecommendationSummary: string;
     public investmentPlatform: string;
     public investmentProduct: string;
     public recurringTemplateId: string;
@@ -38,6 +43,12 @@ export class ImportTransaction implements ImportTransactionResponse {
     public recurringMatchScore: number;
     public recurringMatchReasons: string;
     public recurringMatchedDate: string;
+
+    // v7: 解析器来源标识
+    public parserSource: string;
+
+    // v7: 标记用户是否已人工标注
+    public isManuallyAnnotated: boolean;
 
     public actualCategoryName: string;
     public actualSourceAccountName: string;
@@ -74,6 +85,11 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.investmentSignalScore = response.investmentSignalScore || 0;
         this.investmentSignalLevel = response.investmentSignalLevel || '';
         this.investmentSignalReason = response.investmentSignalReason || '';
+        this.learningRecommendationScore = response.learningRecommendationScore || 0;
+        this.learningRecommendationLevel = response.learningRecommendationLevel || '';
+        this.learningRecommendationReason = response.learningRecommendationReason || '';
+        this.learningRecommendationType = response.learningRecommendationType || '';
+        this.learningRecommendationSummary = response.learningRecommendationSummary || '';
         this.investmentPlatform = response.investmentPlatform || '';
         this.investmentProduct = response.investmentProduct || '';
         this.recurringTemplateId = response.recurringTemplateId || '';
@@ -82,6 +98,9 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.recurringMatchScore = response.recurringMatchScore || 0;
         this.recurringMatchReasons = response.recurringMatchReasons || '';
         this.recurringMatchedDate = response.recurringMatchedDate || '';
+
+        this.parserSource = response.parserSource || '';
+        this.isManuallyAnnotated = !!response.isManuallyAnnotated;
 
         this.actualCategoryName = response.originalCategoryName;
         this.actualSourceAccountName = response.originalSourceAccountName;
@@ -107,6 +126,10 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public hasInvestmentSignal(): boolean {
         return this.type === TransactionType.Investment && this.investmentSignalScore > 0;
+    }
+
+    public hasLearningRecommendation(): boolean {
+        return this.learningRecommendationScore > 0;
     }
 
     public getInvestmentProfileText(): string {
@@ -226,6 +249,11 @@ export interface ImportTransactionResponse {
     readonly investmentSignalScore?: number;
     readonly investmentSignalLevel?: string;
     readonly investmentSignalReason?: string;
+    readonly learningRecommendationScore?: number;
+    readonly learningRecommendationLevel?: string;
+    readonly learningRecommendationReason?: string;
+    readonly learningRecommendationType?: string;
+    readonly learningRecommendationSummary?: string;
     readonly investmentPlatform?: string;
     readonly investmentProduct?: string;
     readonly recurringTemplateId?: string;
@@ -234,6 +262,8 @@ export interface ImportTransactionResponse {
     readonly recurringMatchScore?: number;
     readonly recurringMatchReasons?: string;
     readonly recurringMatchedDate?: string;
+    readonly parserSource?: string;
+    readonly isManuallyAnnotated?: boolean;
 }
 
 export interface ImportTransactionResponsePageWrapper {

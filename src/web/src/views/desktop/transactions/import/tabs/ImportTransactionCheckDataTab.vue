@@ -128,6 +128,20 @@
                         {{ item.getInvestmentProfileText() }}
                     </div>
                 </div>
+                <div class="mt-1" v-if="item.hasLearningRecommendation()">
+                    <v-chip
+                        color="secondary"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiSchoolOutline"
+                        :title="item.learningRecommendationReason">
+                        {{ tt('Learning Suggestion') }}
+                    </v-chip>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.learningRecommendationSummary">
+                        {{ item.learningRecommendationSummary }}
+                    </div>
+                </div>
                 <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
                     <v-chip
                         v-if="item.hasRecurringMatch()"
@@ -201,6 +215,10 @@
                 <div class="text-caption text-medium-emphasis mt-1"
                      v-if="item.hasInvestmentSignal() && item.getInvestmentProfileText()">
                     {{ item.getInvestmentProfileText() }}
+                </div>
+                <div class="text-caption text-medium-emphasis mt-1"
+                     v-if="item.hasLearningRecommendation() && item.learningRecommendationSummary">
+                    {{ item.learningRecommendationSummary }}
                 </div>
                 <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
                     <v-chip
@@ -431,6 +449,12 @@
                               :disabled="!!disabled"
                               v-model="item.paymentMethod" />
             </div>
+        </template>
+        <template #item.parserSource="{ item }">
+            <v-chip v-if="item.parserSource" size="x-small" :color="getParserColor(item.parserSource)">
+                {{ getParserLabel(item.parserSource) }}
+            </v-chip>
+            <span v-else>-</span>
         </template>
         <template #item.comment="{ item }">
             <!-- 非编辑状态：显示备注 -->
@@ -954,7 +978,7 @@ interface ImportTransactionCheckDataFilter {
     category: string | null | undefined; // null for 'All Category', undefined for 'Invalid Category'
     account: string | null | undefined; // null for 'All Account', undefined for 'Invalid Account'
     tag: string | null | undefined; // null for 'All Tag', undefined for 'Invalid Tag'
-    annotation: boolean | null; // null for all, true for needs annotation only, false for resolved only
+    annotation: string | null; // null=all, 'pending'=needs annotation, 'annotated'=manually annotated, 'no-issues'=no issues
     description: string | null; // null for 'All Description'
 }
 
@@ -1101,6 +1125,10 @@ function getAnnotationFilterTitle(): string {
 
 function getNoAnnotationIssuesText(): string {
     return tt(getAnnotationTextKey('No Annotation Issues', 'No AI Annotation Issues'));
+}
+
+function getManuallyAnnotatedText(): string {
+    return tt('Manually Annotated');
 }
 
 function getAnnotationDialogTitle(): string {
@@ -1354,6 +1382,34 @@ function applySuggestedType(item: ImportTransaction): void {
     logger.info(
         `[导入推荐] 应用类型推荐 index=${item.index}, suggestedType=${item.suggestedType}, score=${item.transferSuggestionScore}`
     );
+}
+
+const PARSER_LABELS: Record<string, string> = {
+    wechat: '微信',
+    alipay: '支付宝',
+    icbc: '工商银行',
+    cmbc: '招商银行',
+    abc: '农业银行',
+    ccb: '建设银行',
+    generic: '通用',
+};
+
+const PARSER_COLORS: Record<string, string> = {
+    wechat: 'green',
+    alipay: 'blue',
+    icbc: 'red',
+    cmbc: 'orange',
+    abc: 'teal',
+    ccb: 'indigo',
+    generic: 'grey',
+};
+
+function getParserLabel(parserId: string): string {
+    return PARSER_LABELS[parserId] || parserId;
+}
+
+function getParserColor(parserId: string): string {
+    return PARSER_COLORS[parserId] || 'grey';
 }
 
 function getAnnotationIssues(item: ImportTransaction): string[] {
@@ -1662,6 +1718,7 @@ function applyBatchCategory(): void {
             importTransaction.originalCategoryName = category.name;
         }
 
+        importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
         updatedCount++;
     }
@@ -1695,6 +1752,7 @@ function applyBatchAccount(): void {
             importTransaction.originalSourceAccountName = account.name;
         }
 
+        importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
         updatedCount++;
     }
@@ -1847,13 +1905,18 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
             },
             {
                 title: getNeedsAnnotationText(),
-                appendIcon: filters.value.annotation === true ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = true
+                appendIcon: filters.value.annotation === 'pending' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'pending'
+            },
+            {
+                title: getManuallyAnnotatedText(),
+                appendIcon: filters.value.annotation === 'annotated' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'annotated'
             },
             {
                 title: getNoAnnotationIssuesText(),
-                appendIcon: filters.value.annotation === false ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = false
+                appendIcon: filters.value.annotation === 'no-issues' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'no-issues'
             }
         ]
     },
@@ -2056,6 +2119,7 @@ const importTransactionHeaders = computed<object[]>(() => {
         // v6.33: 交易对方和支付方式列移到标签列之后
         { value: 'counterparty', title: tt('Counterparty'), sortable: true, nowrap: true },
         { value: 'paymentMethod', title: tt('Payment Method'), sortable: true, nowrap: true },
+        { value: 'parserSource', title: '解析器', sortable: true, nowrap: true },
         { value: 'comment', title: tt('Description'), sortable: true, nowrap: true },
     ];
 });
@@ -2448,8 +2512,16 @@ function isTransactionDisplayed(transaction: ImportTransaction): boolean {
         }
     }
 
-    if (filters.value.annotation !== null && needsAnnotation(transaction) !== filters.value.annotation) {
-        return false;
+    if (filters.value.annotation !== null) {
+        if (filters.value.annotation === 'pending' && (!needsAnnotation(transaction) || transaction.isManuallyAnnotated)) {
+            return false;
+        }
+        if (filters.value.annotation === 'annotated' && !transaction.isManuallyAnnotated) {
+            return false;
+        }
+        if (filters.value.annotation === 'no-issues' && needsAnnotation(transaction)) {
+            return false;
+        }
     }
 
     if (isString(filters.value.description)) {
@@ -2762,6 +2834,7 @@ function editTransaction(transaction: ImportTransaction): void {
     if (editingTransaction.value) {
         editingTransaction.value.tagIds = editingTags.value;
         updateTransactionData(editingTransaction.value);
+        editingTransaction.value.isManuallyAnnotated = true;
     }
 
     if (editingTransaction.value === transaction) {
@@ -2897,6 +2970,7 @@ function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagIt
 
                 if (updated) {
                     updatedCount++;
+                    importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                 }
             }
@@ -2960,6 +3034,7 @@ function showBatchAddDialog(type: BatchReplaceDialogDataType): void {
 
                 if (updated) {
                     updatedCount++;
+                    importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                 }
             }
@@ -3060,6 +3135,7 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
 
                 if (updated) {
                     updatedCount++;
+                    importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                 }
             }
@@ -3137,6 +3213,7 @@ function showReplaceAllTypesDialog(): void {
 
                 if (updated) {
                     updatedCount++;
+                    importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                 }
             }
@@ -3207,6 +3284,7 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
 
                 if (updated) {
                     updatedCount++;
+                    importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
                 }
             }
@@ -3254,6 +3332,7 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
             importTransaction.destinationAmount = 0;
         }
 
+        importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
     }
 }
@@ -3300,6 +3379,7 @@ function reset(): void {
     filters.value.category = null;
     filters.value.account = null;
     filters.value.tag = null;
+    filters.value.annotation = null;
     filters.value.description = null;
     currentPage.value = 1;
     countPerPage.value = 10;

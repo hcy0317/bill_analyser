@@ -488,6 +488,14 @@ const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
+// v7: 未匹配文件的逐文件列映射队列
+interface UnmatchedFileInfo {
+    originalName: string;
+    tempPath: string;
+}
+const unmatchedFilesQueue = ref<UnmatchedFileInfo[]>([]);
+const currentUnmatchedIndex = ref<number>(0);
+
 const fileSubType = ref<string>('');
 const processDSVMethod = ref<ImportDSVProcessMethod>(ImportDSVProcessMethod.AutoDetect);
 const showSaveImportConfigDialog = ref<boolean>(false);
@@ -504,13 +512,18 @@ const editImportConfigIsDefault = ref<boolean>(false);
 const editImportConfigRecommended = ref<boolean>(false);
 const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
 
-const allSteps = computed<StepBarItem[]>(() => [
-    { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
-    { name: 'defineColumn', title: tt('Define Columns'), subTitle: tt('Map columns to fields') },
-    { name: 'executeCustomScript', title: tt('Custom Script'), subTitle: tt('Execute Custom Script') },
-    { name: 'checkData', title: tt('Check Data'), subTitle: tt('Verify and edit data') },
-    { name: 'finalResult', title: tt('Import Result'), subTitle: tt('View import result') }
-]);
+const allSteps = computed<StepBarItem[]>(() => {
+    const defineColumnSubTitle = unmatchedFilesQueue.value.length > 0
+        ? `${unmatchedFilesQueue.value[currentUnmatchedIndex.value]?.originalName || ''} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`
+        : tt('Map columns to fields');
+    return [
+        { name: 'uploadFile', title: tt('Select File'), subTitle: tt('Select the file to import') },
+        { name: 'defineColumn', title: tt('Define Columns'), subTitle: defineColumnSubTitle },
+        { name: 'executeCustomScript', title: tt('Custom Script'), subTitle: tt('Execute Custom Script') },
+        { name: 'checkData', title: tt('Check Data'), subTitle: tt('Verify and edit data') },
+        { name: 'finalResult', title: tt('Import Result'), subTitle: tt('View import result') }
+    ];
+});
 
 const fileType = computed<string>(() => {
     const type = selectedFileTypes.value[0];
@@ -543,13 +556,6 @@ const importFile = computed<File | undefined>(() => {
 const importedCount = ref<number | null>(null);
 const loading = ref<boolean>(true);
 const submitting = ref<boolean>(false);
-
-const shouldUseColumnMapping = computed<boolean>(() => {
-    return importFiles.value.length === 1 &&
-        isGenericImportFile() &&
-        (processDSVMethod.value === ImportDSVProcessMethod.ColumnMapping ||
-            processDSVMethod.value === ImportDSVProcessMethod.AutoDetect);
-});
 
 let resolveFunc: (() => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
@@ -596,6 +602,8 @@ function open(): Promise<void> {
     parsedFileData.value = undefined;
     parsedFileDelimiter.value = '';
     matchedImportConfig.value = null;
+    unmatchedFilesQueue.value = [];
+    currentUnmatchedIndex.value = 0;
     showSaveImportConfigDialog.value = false;
     saveImportConfigName.value = '';
     saveImportConfigDescription.value = '';
@@ -678,12 +686,6 @@ function getImportConfigFileFormat(): string {
     return 'csv';
 }
 
-function isGenericImportFile(): boolean {
-    const lowerName = importFile.value?.name.toLowerCase() || '';
-    return lowerName.endsWith('.csv') || lowerName.endsWith('.txt') ||
-        lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
-}
-
 function getMatchedImportConfigMessage(config: ImportConfigMatchResult): string {
     if (config.matchReason === 'default_template_fallback') {
         return `已自动回退到默认模板：${config.name}`;
@@ -698,82 +700,6 @@ function getImportConfigDisplayDescription(config: Partial<ImportConfigMatchResu
     }
 
     return config.description || config.descriptionSummary || config.sampleHeaders?.join(' / ') || '';
-}
-
-async function prepareColumnMappingStep(): Promise<void> {
-    if (!importFile.value) {
-        snackbar.value?.showError('Please select at least one file');
-        return;
-    }
-
-    if (importFiles.value.length !== 1) {
-        snackbar.value?.showError('Column mapping currently supports one file at a time');
-        return;
-    }
-
-    const previewResponse = await services.previewImportFile({
-        importFile: importFile.value,
-        delimiter: parsedFileDelimiter.value || undefined,
-        fileEncoding: matchedImportConfig.value?.encoding || undefined
-    });
-    const preview = previewResponse.data?.result as ImportFilePreviewResult | undefined;
-    const rows = preview?.sampleData || [];
-
-    if (!rows.length) {
-        snackbar.value?.showError('No data to import');
-        return;
-    }
-
-    parsedFileDelimiter.value = preview?.delimiter || parsedFileDelimiter.value;
-    parsedFileData.value = rows.slice(0, 300);
-    currentStep.value = 'defineColumn';
-
-    await nextTick();
-    importTransactionDefineColumnTab.value?.reset();
-
-    const headers = rows[0] || [];
-    if (!headers.length) {
-        return;
-    }
-
-    try {
-        const response = await services.matchImportConfig({
-            fileFormat: getImportConfigFileFormat(),
-            headers
-        });
-        const result = response.data?.result;
-
-        if (response.data?.success && result?.fieldMappings) {
-            matchedImportConfig.value = result;
-            parsedFileDelimiter.value = result.delimiter || parsedFileDelimiter.value;
-            importTransactionDefineColumnTab.value?.applyFieldMappings(result.fieldMappings);
-            if (typeof result.hasHeader === 'boolean' && result.hasHeader !== undefined) {
-                importTransactionDefineColumnTab.value?.applyFieldMappings({
-                    ...result.fieldMappings,
-                    includeHeader: result.hasHeader
-                });
-            }
-            snackbar.value?.showMessage(getMatchedImportConfigMessage(result));
-            return;
-        }
-    } catch (error) {
-        logger.warn('failed to match import config', error);
-    }
-
-    try {
-        const suggestionResponse = await services.suggestImportConfig({
-            fileFormat: getImportConfigFileFormat(),
-            headers,
-            sampleRows: rows.slice(1, 21)
-        });
-        const suggestion = suggestionResponse.data?.result as ImportConfigSuggestionResult | undefined;
-        if (suggestion?.columnMapping && Object.keys(suggestion.columnMapping).length > 0) {
-            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as any);
-            snackbar.value?.showMessage('已自动建议列映射');
-        }
-    } catch (error) {
-        logger.warn('failed to suggest import config', error);
-    }
 }
 
 async function loadImportConfigList(): Promise<void> {
@@ -894,23 +820,9 @@ function removeImportConfig(config: ImportConfigMatchResult): void {
     });
 }
 
-function buildImportTransactionsFromParsedItems(items: ImportTransaction[] | undefined): ImportTransaction[] | undefined {
-    if (!items) {
-        return undefined;
-    }
-
-    for (const transaction of items) {
-        if (transaction.valid) {
-            transaction.selected = true;
-        }
-    }
-
-    return items;
-}
-
 async function executeColumnMappingImport(): Promise<void> {
-    if (!importFile.value || !importTransactionDefineColumnTab.value) {
-        snackbar.value?.showError('Please select at least one file');
+    if (!importTransactionDefineColumnTab.value) {
+        snackbar.value?.showError('Column mapping tab not ready');
         return;
     }
 
@@ -919,27 +831,43 @@ async function executeColumnMappingImport(): Promise<void> {
         return;
     }
 
-    const parseResult = await transactionsStore.parseImportTransaction({
-        fileType: getImportConfigFileFormat(),
-        importFile: importFile.value,
-        columnMapping: mapping.columnMapping,
-        transactionTypeMapping: mapping.transactionTypeMapping,
+    const currentFile = unmatchedFilesQueue.value[currentUnmatchedIndex.value];
+    if (!currentFile) {
+        snackbar.value?.showError('No unmatched file to process');
+        return;
+    }
+
+    // 使用新的 v2/parse_generic 接口，将通用解析结果写入同一个 session
+    const response = await services.parseGenericIntoSession({
+        sessionId: serverSessionId.value,
+        tempPath: currentFile.tempPath,
+        columnMapping: mapping.columnMapping as Record<string, number>,
+        transactionTypeMapping: mapping.transactionTypeMapping as Record<string, number> | undefined,
         hasHeaderLine: mapping.includeHeader,
         timeFormat: mapping.timeFormat,
         timezoneFormat: mapping.timezoneFormat,
         amountDecimalSeparator: mapping.amountDecimalSeparator,
         amountDigitGroupingSymbol: mapping.amountDigitGroupingSymbol,
-        geoSeparator: mapping.geoLocationSeparator,
-        geoOrder: mapping.geoLocationOrder,
-        tagSeparator: mapping.tagSeparator,
-        delimiter: parsedFileDelimiter.value
+        delimiter: parsedFileDelimiter.value || undefined
     });
 
-    importTransactions.value = buildImportTransactionsFromParsedItems(
-        parseResult.items.map((item, idx) => ImportTransaction.of(item, idx))
-    );
-    serverSessionId.value = '';
-    currentStep.value = 'checkData';
+    if (!response.data?.success) {
+        throw new Error((response.data as any)?.error || `解析文件 ${currentFile.originalName} 失败`);
+    }
+
+    logger.info(`[列映射导入] 文件 ${currentFile.originalName} 解析完成, parsed_count=${response.data?.result?.parsed_count || 0}`);
+
+    // 检查是否还有更多未匹配文件
+    const nextIndex = currentUnmatchedIndex.value + 1;
+    if (nextIndex < unmatchedFilesQueue.value.length) {
+        // 还有下一个未匹配文件，准备列映射
+        currentUnmatchedIndex.value = nextIndex;
+        await prepareColumnMappingForUnmatchedFile(unmatchedFilesQueue.value[nextIndex]!);
+        return;
+    }
+
+    // 所有列映射都完成了，进入阶段2去重
+    await executeStage2Dedup();
 }
 
 function openSaveImportConfigDialog(): void {
@@ -1013,27 +941,120 @@ async function saveCurrentImportConfig(): Promise<void> {
 }
 
 /**
- * v6.48: 三阶段导入 - 解析并去重
- *
- * 阶段1: 上传所有文件到后端，写入 bills_parser_template 表
- * 阶段2: 执行去重处理，结果写入 bills_preview 表，返回预览数据
+ * v7: 为未匹配的服务端临时文件准备列映射界面
  */
-async function parseData(): Promise<void> {
-    if (currentStep.value === 'uploadFile' && shouldUseColumnMapping.value) {
-        try {
-            await prepareColumnMappingStep();
-        } catch (error) {
-            logger.error('failed to prepare column mapping step', error);
-            snackbar.value?.showError('Unable to prepare column mapping data');
-        }
+async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo): Promise<void> {
+    logger.info(`[列映射] 准备文件: ${fileInfo.originalName} (${currentUnmatchedIndex.value + 1}/${unmatchedFilesQueue.value.length})`);
+
+    const previewResponse = await services.previewImportFileFromTemp({
+        tempPath: fileInfo.tempPath,
+        delimiter: parsedFileDelimiter.value || undefined
+    });
+    const preview = previewResponse.data?.result as ImportFilePreviewResult | undefined;
+    const rows = preview?.sampleData || [];
+
+    if (!rows.length) {
+        snackbar.value?.showError(`文件 ${fileInfo.originalName} 没有可导入的数据`);
         return;
     }
 
-    if (currentStep.value === 'uploadFile' && importFiles.value.length > 1) {
-        logger.info(`[导入] 检测到多文件导入 ${importFiles.value.length} 个文件，将直接使用三阶段并行解析`);
+    parsedFileDelimiter.value = preview?.delimiter || parsedFileDelimiter.value;
+    parsedFileData.value = rows.slice(0, 300);
+    currentStep.value = 'defineColumn';
+
+    await nextTick();
+    importTransactionDefineColumnTab.value?.reset();
+
+    const headers = rows[0] || [];
+    if (!headers.length) return;
+
+    // 尝试自动匹配和建议列映射
+    try {
+        const response = await services.matchImportConfig({ fileFormat: 'csv', headers });
+        const result = response.data?.result;
+        if (response.data?.success && result?.fieldMappings) {
+            matchedImportConfig.value = result;
+            parsedFileDelimiter.value = result.delimiter || parsedFileDelimiter.value;
+            importTransactionDefineColumnTab.value?.applyFieldMappings(result.fieldMappings);
+            snackbar.value?.showMessage(getMatchedImportConfigMessage(result));
+            return;
+        }
+    } catch (error) {
+        logger.warn('failed to match import config', error);
     }
 
+    try {
+        const suggestionResponse = await services.suggestImportConfig({
+            fileFormat: 'csv',
+            headers,
+            sampleRows: rows.slice(1, 21)
+        });
+        const suggestion = suggestionResponse.data?.result as ImportConfigSuggestionResult | undefined;
+        if (suggestion?.columnMapping && Object.keys(suggestion.columnMapping).length > 0) {
+            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as any);
+            snackbar.value?.showMessage('已自动建议列映射');
+        }
+    } catch (error) {
+        logger.warn('failed to suggest import config', error);
+    }
+}
+
+/**
+ * v7: 执行阶段2去重并显示预览
+ */
+async function executeStage2Dedup(): Promise<void> {
+    importProcess.value = 60;
+    logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
+
+    const token = getCurrentToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const stage2Response = await fetch('/api/bills/import/v2/dedup', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ session_id: serverSessionId.value })
+    });
+
+    if (!stage2Response.ok) {
+        const errorText = await stage2Response.text();
+        throw new Error(`阶段2失败: ${errorText}`);
+    }
+
+    const stage2Result = await stage2Response.json();
+    logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, preview_count=${stage2Result.data?.preview_count || stage2Result.data?.preview?.length || 0}`);
+
+    if (!stage2Result.success) {
+        throw new Error(stage2Result.error || '去重预览失败');
+    }
+
+    logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
+
+    const previewData = stage2Result.data?.preview || [];
+    const transactions = previewData.map((item: any, idx: number) => {
+        return convertPreviewToImportTransaction(item, idx);
+    });
+
+    logger.info(`[三阶段导入-阶段2] 转换完成: ${transactions.length} 条交易`);
+
+    importTransactions.value = transactions;
+    currentStep.value = 'checkData';
+    importProcess.value = 100;
+}
+
+/**
+ * v7: 三阶段导入 - 解析并去重（含逐文件列映射）
+ *
+ * 新流程：
+ * 1. 所有文件先送 v2/parse，特定解析器匹配的直接写入 session
+ * 2. 未匹配的文件列表返回给前端，逐个进行人工列映射
+ * 3. 列映射完成后统一进入 v2/dedup 去重预览
+ */
+async function parseData(): Promise<void> {
     if (currentStep.value === 'defineColumn') {
+        // 来自列映射步骤：提交当前文件的列映射
         submitting.value = true;
         try {
             await executeColumnMappingImport();
@@ -1093,48 +1114,29 @@ async function parseData(): Promise<void> {
         serverSessionId.value = stage1Result.data.session_id;
         importProcess.value = 30;
 
-        // ========== 阶段2: 去重并获取预览 ==========
-        logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
+        // v7: 检查是否有未匹配特定解析器的文件
+        const unmatchedFiles: Array<{ original_name: string; temp_path: string }> = stage1Result.data.unmatched_files || [];
 
-        const stage2Response = await fetch('/api/bills/import/v2/dedup', {
-            method: 'POST',
-            headers: {
-                ...headers,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ session_id: serverSessionId.value })
-        });
+        if (unmatchedFiles.length > 0) {
+            // 有未匹配文件，进入逐文件列映射流程
+            logger.info(`[三阶段导入] ${unmatchedFiles.length} 个文件未匹配特定解析器，进入列映射流程`);
+            unmatchedFilesQueue.value = unmatchedFiles.map(f => ({
+                originalName: f.original_name,
+                tempPath: f.temp_path
+            }));
+            currentUnmatchedIndex.value = 0;
 
-        if (!stage2Response.ok) {
-            const errorText = await stage2Response.text();
-            throw new Error(`阶段2失败: ${errorText}`);
+            submitting.value = false;
+            await prepareColumnMappingForUnmatchedFile(unmatchedFilesQueue.value[0]!);
+            return;
         }
 
-        const stage2Result = await stage2Response.json();
-        logger.info(`[三阶段导入-阶段2] 完成: success=${stage2Result.success}, preview_count=${stage2Result.data?.preview_count || stage2Result.data?.preview?.length || 0}`);
-
-        if (!stage2Result.success) {
-            throw new Error(stage2Result.error || '去重预览失败');
-        }
-
-        logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
-
-        // 转换预览数据为前端ImportTransaction格式
-        const previewData = stage2Result.data?.preview || [];
-        const transactions = previewData.map((item: any, idx: number) => {
-            return convertPreviewToImportTransaction(item, idx);
-        });
-
-        logger.info(`[三阶段导入-阶段2] 转换完成: ${transactions.length} 条交易`);
-
-        importTransactions.value = transactions;
-        currentStep.value = 'checkData';
-        importProcess.value = 100;
+        // 所有文件都匹配了特定解析器，直接进入阶段2
+        await executeStage2Dedup();
 
     } catch (error) {
         logger.error('[三阶段导入] 失败:', error);
         snackbar.value?.showError(`导入失败: ${error}`);
-        // 如果失败，清理后端会话
         if (serverSessionId.value) {
             cleanupServerSession();
         }
@@ -1216,6 +1218,11 @@ function convertPreviewToImportTransaction(item: any, index: number): ImportTran
         investmentSignalScore: Number(item.investment_signal_score || 0),
         investmentSignalLevel: item.investment_signal_level || '',
         investmentSignalReason: item.investment_signal_reason || '',
+        learningRecommendationScore: Number(item.learning_recommendation_score || 0),
+        learningRecommendationLevel: item.learning_recommendation_level || '',
+        learningRecommendationReason: item.learning_recommendation_reason || '',
+        learningRecommendationType: item.learning_recommendation_type || '',
+        learningRecommendationSummary: item.learning_recommendation_summary || '',
         investmentPlatform: item.investment_platform || '',
         investmentProduct: item.investment_product || '',
         recurringTemplateId: item.preview_recurring_id ? String(item.preview_recurring_id) : '',
@@ -1223,12 +1230,16 @@ function convertPreviewToImportTransaction(item: any, index: number): ImportTran
         recurringCandidateCount: Number(item.preview_recurring_candidate_count || 0),
         recurringMatchScore: Number(item.preview_recurring_match_score || 0),
         recurringMatchReasons: item.preview_recurring_match_reasons || '',
-        recurringMatchedDate: item.preview_recurring_matched_date || ''
+        recurringMatchedDate: item.preview_recurring_matched_date || '',
+        parserSource: item.preview_parser_id || '',
+        isManuallyAnnotated: !!item.preview_is_manually_annotated
     };
 
-    // 添加预览表ID，用于阶段3确认导入
+    // 添加预览表ID和解析器来源，用于阶段3确认导入
     const transaction = ImportTransaction.of(responseItem, index);
     (transaction as any)._previewId = item.id;  // 保存预览表记录ID
+    transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
+    transaction.isManuallyAnnotated = !!item.preview_is_manually_annotated;
 
     return transaction;
 }

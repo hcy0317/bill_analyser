@@ -135,6 +135,23 @@ def _build_generic_bills(sample_path: Path) -> list[dict[str, Any]]:
     return bills
 
 
+def test_convert_bill_to_import_item_carries_parser_source():
+    """标准导入预览结构应带出解析器来源，供前端解析器列展示。"""
+    item = _convert_bill_to_import_item(
+        {
+            'date': '2026-03-09 10:00:00',
+            'type': '支出',
+            'amount': 12.5,
+            'description': '测试描述',
+            'counterparty': '测试商户',
+            'payment_method': '微信支付',
+            '_parser_id': 'wechat',
+        }
+    )
+
+    assert item['parserSource'] == 'wechat'
+
+
 def _preview_with_dedicated_parser(client, auth_headers, sample_path: Path):
     with sample_path.open('rb') as file_obj:
         return client.post(

@@ -5,7 +5,9 @@ Database Tests - 数据库模块测试
 import pytest
 import asyncio
 from pathlib import Path
+import sqlite3
 import tempfile
+import json
 
 from src.core.db import Database
 
@@ -254,50 +256,52 @@ async def test_import_learning_rules_promote_toggle_delete(db):
 
     promoted = await db.promote_import_annotation_samples_to_learning(session_id, user_id=1)
     assert promoted['selected_samples'] == 1
-    assert promoted['rules_total'] == 3
-    assert promoted['created'] == 3
+    assert promoted['rules_total'] == 1
+    assert promoted['created'] == 1
     assert promoted['updated'] == 0
 
     rules = await db.get_import_learning_rules(user_id=1)
-    assert len(rules) == 3
-    assert {rule['match_type'] for rule in rules} == {
-        'counterparty', 'description', 'payment_method'
-    }
+    assert len(rules) == 1
+    assert {rule['match_type'] for rule in rules} == {'composite'}
     assert all(rule['enabled'] == 1 for rule in rules)
     assert all(rule['learned_type'] == '转账' for rule in rules)
     assert all(rule['learned_category_id'] == category_id for rule in rules)
 
-    counterparty_rule = next(rule for rule in rules if rule['match_type'] == 'counterparty')
+    composite_rule = rules[0]
+    assert composite_rule['parser_id'] in (None, '')
+    assert composite_rule['composite_match_hash'] == 'c=学习商户|d=学习描述|m=支付宝'
+    assert json.loads(composite_rule['match_features_json']) == {
+        'counterparty': '学习商户',
+        'description': '学习描述',
+        'payment_method': '支付宝',
+    }
+
     toggled = await db.set_import_learning_rule_enabled(
-        int(counterparty_rule['id']), False, user_id=1
+        int(composite_rule['id']), False, user_id=1
     )
     assert toggled is True
 
     updated_rules = await db.get_import_learning_rules(user_id=1)
-    updated_counterparty_rule = next(
-        rule for rule in updated_rules if rule['match_type'] == 'counterparty'
-    )
-    assert updated_counterparty_rule['enabled'] == 0
+    updated_composite_rule = updated_rules[0]
+    assert updated_composite_rule['enabled'] == 0
 
     usage_count = await db.increment_import_learning_rule_usage(
-        [int(updated_counterparty_rule['id'])], user_id=1
+        [int(updated_composite_rule['id'])], user_id=1
     )
     assert usage_count == 1
 
     refreshed_rules = await db.get_import_learning_rules(user_id=1)
-    refreshed_counterparty_rule = next(
-        rule for rule in refreshed_rules if rule['match_type'] == 'counterparty'
-    )
-    assert refreshed_counterparty_rule['applied_count'] == 1
-    assert refreshed_counterparty_rule['last_applied_at']
+    refreshed_composite_rule = refreshed_rules[0]
+    assert refreshed_composite_rule['applied_count'] == 1
+    assert refreshed_composite_rule['last_applied_at']
 
     deleted = await db.delete_import_learning_rule(
-        int(updated_counterparty_rule['id']), user_id=1
+        int(updated_composite_rule['id']), user_id=1
     )
     assert deleted is True
 
     final_rules = await db.get_import_learning_rules(user_id=1)
-    assert len(final_rules) == 2
+    assert final_rules == []
 
     conn = await db._get_connection()
     async with conn.execute(
@@ -305,7 +309,170 @@ async def test_import_learning_rules_promote_toggle_delete(db):
         (1,)
     ) as cursor:
         row = await cursor.fetchone()
-    assert row['total'] >= 5
+    assert row['total'] >= 3
+
+
+@pytest.mark.asyncio
+async def test_import_learning_rules_promote_with_parser_builds_parser_aware_composite_rule(db):
+    """测试提升长期学习规则时会生成带解析器来源的复合匹配规则。"""
+    session_id = 'test-session-learning-composite-parser'
+    await db.create_import_session(session_id, user_id=1, file_count=1)
+
+    inserted = await db.insert_preview_bills_batch(session_id, [
+        {
+            'preview_data': {
+                'preview_date': '2026-03-09 08:00:00',
+                'preview_type': '支出',
+                'preview_amount': 35.0,
+                'preview_destination_amount': 0.0,
+                'preview_main_category': '',
+                'preview_sub_category': '',
+                'preview_source_account_id': None,
+                'preview_destination_account_id': None,
+                'preview_counterparty': '解析器商户',
+                'preview_payment_method': '微信支付',
+                'preview_description': '早餐豆浆',
+                'preview_parser_id': 'wechat'
+            },
+            'dedup_type': 'remaining',
+            'dedup_source_ids': []
+        }
+    ], user_id=1)
+    assert inserted == 1
+
+    preview_id = (await db.get_preview_by_session(session_id))[0]['id']
+    saved = await db.save_import_annotation_samples(session_id, [
+        {
+            'id': preview_id,
+            'preview_type': '支出',
+            'category_id': None,
+            'preview_source_account_id': None,
+            'preview_destination_account_id': None,
+        }
+    ], user_id=1)
+    assert saved == 1
+
+    promoted = await db.promote_import_annotation_samples_to_learning(session_id, user_id=1)
+    assert promoted['rules_total'] == 1
+
+    rules = await db.get_import_learning_rules(user_id=1)
+    assert len(rules) == 1
+    composite_rule = rules[0]
+    assert composite_rule['parser_id'] == 'wechat'
+    assert composite_rule['composite_match_hash'] == 'c=解析器商户|d=早餐豆浆|p=wechat|m=微信支付'
+    assert json.loads(composite_rule['match_features_json']) == {
+        'parser_id': 'wechat',
+        'counterparty': '解析器商户',
+        'description': '早餐豆浆',
+        'payment_method': '微信支付',
+    }
+
+
+@pytest.mark.asyncio
+async def test_init_db_migrates_legacy_learning_and_preview_tables():
+    """测试旧库初始化后会补齐复合学习规则与预览解析器列，且保留原有数据。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / 'legacy.db'
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            '''
+            CREATE TABLE import_learning_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                match_type TEXT NOT NULL,
+                match_value TEXT NOT NULL,
+                normalized_match_value TEXT NOT NULL,
+                learned_type TEXT,
+                learned_category_id INTEGER,
+                learned_source_account_id INTEGER,
+                learned_destination_account_id INTEGER,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                source_session_id TEXT,
+                source_preview_id INTEGER,
+                applied_count INTEGER NOT NULL DEFAULT 0,
+                last_applied_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, match_type, normalized_match_value)
+            )
+            '''
+        )
+        conn.execute(
+            '''
+            INSERT INTO import_learning_rules (
+                user_id, match_type, match_value, normalized_match_value,
+                learned_type, enabled, created_at, updated_at
+            ) VALUES (1, 'description', '旧描述', '旧描述', '支出', 1, '2026-03-01T08:00:00', '2026-03-01T08:00:00')
+            '''
+        )
+        conn.execute(
+            '''
+            CREATE TABLE bills_preview (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                preview_date TEXT,
+                preview_type TEXT,
+                preview_amount REAL DEFAULT 0,
+                preview_destination_amount REAL DEFAULT 0,
+                preview_main_category TEXT,
+                preview_sub_category TEXT,
+                preview_source_account_id INTEGER,
+                preview_destination_account_id INTEGER,
+                preview_counterparty TEXT,
+                preview_payment_method TEXT,
+                preview_description TEXT,
+                preview_selected INTEGER DEFAULT 1,
+                dedup_type TEXT,
+                dedup_source_ids TEXT,
+                created_at TEXT
+            )
+            '''
+        )
+        conn.execute(
+            '''
+            INSERT INTO bills_preview (
+                session_id, user_id, preview_date, preview_type, preview_amount,
+                preview_counterparty, preview_payment_method, preview_description,
+                preview_selected, dedup_type, dedup_source_ids, created_at
+            ) VALUES (
+                'legacy-session', 1, '2026-03-01 09:00:00', '支出', 12.5,
+                '旧商户', '旧支付方式', '旧描述', 1, 'remaining', '[]', '2026-03-01T09:00:00'
+            )
+            '''
+        )
+        conn.commit()
+        conn.close()
+
+        database = Database(str(db_path))
+        await database.init_db()
+
+        migrated_conn = await database._get_connection()
+
+        async with migrated_conn.execute('PRAGMA table_info(import_learning_rules)') as cursor:
+            learning_columns = {row[1] for row in await cursor.fetchall()}
+        assert 'parser_id' in learning_columns
+        assert 'composite_match_hash' in learning_columns
+        assert 'match_features_json' in learning_columns
+
+        async with migrated_conn.execute('PRAGMA table_info(bills_preview)') as cursor:
+            preview_columns = {row[1] for row in await cursor.fetchall()}
+        assert 'preview_parser_id' in preview_columns
+
+        rules = await database.get_import_learning_rules(user_id=1)
+        assert len(rules) == 1
+        assert rules[0]['match_type'] == 'description'
+        assert rules[0]['normalized_match_value'] == '旧描述'
+        assert rules[0]['parser_id'] is None
+        assert rules[0]['composite_match_hash'] is None
+        assert rules[0]['match_features_json'] is None
+
+        previews = await database.get_preview_by_session('legacy-session')
+        assert len(previews) == 1
+        assert previews[0]['preview_counterparty'] == '旧商户'
+        assert previews[0]['preview_parser_id'] is None
+
+        await database.close()
 
 
 @pytest.mark.asyncio

@@ -409,7 +409,7 @@ async def test_reclassify_preview_applies_long_term_learning_rules(service):
         user_id=user_id
     )
     assert promote_result['success'] is True
-    assert promote_result['rules_total'] == 3
+    assert promote_result['rules_total'] == 1
 
     target_session_id = 'session-long-learning-target'
     await service.db.create_import_session(target_session_id, user_id=user_id, file_count=1)
@@ -425,8 +425,8 @@ async def test_reclassify_preview_applies_long_term_learning_rules(service):
                 'preview_source_account_id': None,
                 'preview_destination_account_id': None,
                 'preview_counterparty': '夜宵商户',
-                'preview_payment_method': '',
-                'preview_description': '未匹配账单'
+                'preview_payment_method': '支付宝',
+                'preview_description': '深夜小吃'
             },
             'dedup_type': 'remaining',
             'dedup_source_ids': []
@@ -554,6 +554,210 @@ async def test_reclassify_preview_skips_long_term_learning_when_disabled(service
     assert updated_previews[0]['preview_type'] == '支出'
     assert not updated_previews[0]['preview_main_category']
     assert updated_previews[0]['preview_source_account_id'] is None
+
+
+def test_apply_session_annotation_learning_rules_prefers_composite_match():
+    """测试会话临时学习规则会优先使用复合匹配而不是单字段匹配。"""
+    bill = {
+        'id': 200,
+        '_parser_id': 'wechat',
+        'counterparty': '早餐铺',
+        'description': '共同描述',
+        'payment_method': '微信支付',
+        'type': '支出',
+        'main_category': '',
+        'sub_category': '',
+        'source_account_id': None,
+        'destination_account_id': None,
+    }
+    rule_lookup = {
+        ('description', '共同描述'): {
+            'preview_id': 11,
+            'annotated_type': '支出',
+            'annotated_main_category': '单字段分类',
+            'annotated_sub_category': '描述命中',
+            'annotated_source_account_id': 101,
+            'annotated_destination_account_id': None,
+        },
+        ('composite', 'c=早餐铺|d=共同描述|p=wechat|m=微信支付'): {
+            'preview_id': 22,
+            'annotated_type': '转账',
+            'annotated_main_category': '复合分类',
+            'annotated_sub_category': '优先命中',
+            'annotated_source_account_id': 202,
+            'annotated_destination_account_id': 303,
+        },
+    }
+
+    apply_rules = getattr(BillService, '_apply_session_annotation_learning_rules')
+    applied_count = apply_rules(
+        [bill],
+        rule_lookup,
+        annotation_map={},
+        type_only=False,
+    )
+
+    assert applied_count == 1
+    assert bill['_session_annotation_match_type'] == 'composite'
+    assert bill['_session_annotation_source_preview_id'] == 22
+    assert bill['type'] == '转账'
+    assert bill['main_category'] == '复合分类'
+    assert bill['sub_category'] == '优先命中'
+    assert bill['source_account_id'] == 202
+    assert bill['destination_account_id'] == 303
+
+
+def test_apply_session_annotation_learning_rules_falls_back_to_single_field_when_parser_differs():
+    """测试 parser 不同时不会误命中 composite，而会回退到单字段规则。"""
+    bill = {
+        'id': 201,
+        '_parser_id': 'alipay',
+        'counterparty': '早餐铺',
+        'description': '共同描述',
+        'payment_method': '微信支付',
+        'type': '支出',
+        'main_category': '',
+        'sub_category': '',
+        'source_account_id': None,
+        'destination_account_id': None,
+    }
+    rule_lookup = {
+        ('description', '共同描述'): {
+            'preview_id': 11,
+            'annotated_type': '支出',
+            'annotated_main_category': '单字段分类',
+            'annotated_sub_category': '描述命中',
+            'annotated_source_account_id': 101,
+            'annotated_destination_account_id': None,
+        },
+        ('composite', 'c=早餐铺|d=共同描述|p=wechat|m=微信支付'): {
+            'preview_id': 22,
+            'annotated_type': '转账',
+            'annotated_main_category': '复合分类',
+            'annotated_sub_category': '优先命中',
+            'annotated_source_account_id': 202,
+            'annotated_destination_account_id': 303,
+        },
+    }
+
+    apply_rules = getattr(BillService, '_apply_session_annotation_learning_rules')
+    applied_count = apply_rules(
+        [bill],
+        rule_lookup,
+        annotation_map={},
+        type_only=False,
+    )
+
+    assert applied_count == 1
+    assert bill['_session_annotation_match_type'] == 'description'
+    assert bill['_session_annotation_source_preview_id'] == 11
+    assert bill['type'] == '支出'
+    assert bill['main_category'] == '单字段分类'
+    assert bill['sub_category'] == '描述命中'
+    assert bill['source_account_id'] == 101
+    assert bill['destination_account_id'] is None
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_returns_parser_source_and_manual_annotation_flag(service):
+    """测试三阶段预览接口会返回解析器来源和人工标注标记。"""
+    session_id = 'session-preview-parser-and-annotation'
+    await service.db.create_import_session(session_id, user_id=1, file_count=1)
+
+    inserted = await service.db.insert_preview_bills_batch(session_id, [
+        {
+            'preview_data': {
+                'preview_date': '2026-03-09 10:00:00',
+                'preview_type': '支出',
+                'preview_amount': 18.8,
+                'preview_destination_amount': 0.0,
+                'preview_main_category': '',
+                'preview_sub_category': '',
+                'preview_source_account_id': None,
+                'preview_destination_account_id': None,
+                'preview_counterparty': '解析器早餐铺',
+                'preview_payment_method': '微信支付',
+                'preview_description': '豆浆油条',
+                'preview_parser_id': 'wechat',
+            },
+            'dedup_type': 'remaining',
+            'dedup_source_ids': []
+        }
+    ], user_id=1)
+    assert inserted == 1
+
+    preview_id = (await service.db.get_preview_by_session(session_id))[0]['id']
+    saved_count = await service.db.save_import_annotation_samples(
+        session_id,
+        [{
+            'id': preview_id,
+            'preview_type': '支出',
+            'category_id': None,
+            'preview_source_account_id': None,
+            'preview_destination_account_id': None,
+        }],
+        user_id=1,
+    )
+    assert saved_count == 1
+
+    preview_items = await service.get_import_preview(session_id)
+    assert len(preview_items) == 1
+    assert preview_items[0]['preview_parser_id'] == 'wechat'
+    assert preview_items[0]['preview_is_manually_annotated'] is True
+
+
+@pytest.mark.asyncio
+async def test_reclassify_preview_still_applies_legacy_single_field_learning_rules(service):
+    """测试历史单字段长期学习规则在升级后仍可回放，避免老用户规则失效。"""
+    user_id = await service.db.create_user({
+        'username': 'legacy_import_learning_user',
+        'email': 'legacy_import_learning_user@example.com',
+        'password_hash': 'hash',
+        'nickname': 'legacy_import_learning_user'
+    })
+
+    conn = await getattr(service.db, '_get_connection')()
+    now = datetime.now().isoformat()
+    await conn.execute(
+        '''
+        INSERT INTO import_learning_rules (
+            user_id, match_type, match_value, normalized_match_value,
+            learned_type, enabled, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+        ''',
+        (user_id, 'description', '旧规则描述', '旧规则描述', '转账', now, now)
+    )
+    await conn.commit()
+
+    session_id = 'legacy-single-field-learning-session'
+    await service.db.create_import_session(session_id, user_id=user_id, file_count=1)
+    inserted = await service.db.insert_preview_bills_batch(session_id, [
+        {
+            'preview_data': {
+                'preview_date': '2026-03-10 08:00:00',
+                'preview_type': '支出',
+                'preview_amount': 66.0,
+                'preview_destination_amount': 0.0,
+                'preview_main_category': '',
+                'preview_sub_category': '',
+                'preview_source_account_id': None,
+                'preview_destination_account_id': None,
+                'preview_counterparty': '陌生商户',
+                'preview_payment_method': '',
+                'preview_description': '旧规则描述'
+            },
+            'dedup_type': 'remaining',
+            'dedup_source_ids': []
+        }
+    ], user_id=user_id)
+    assert inserted == 1
+
+    reclassify_result = await service.reclassify_preview_bills(session_id, user_id=user_id)
+    assert reclassify_result['success'] is True
+
+    preview_items = await service.get_import_preview(session_id)
+    assert len(preview_items) == 1
+    assert preview_items[0]['preview_type'] == '转账'
 
 
 @pytest.mark.asyncio
@@ -787,6 +991,179 @@ async def test_get_import_preview_skips_transfer_suggestion_for_existing_transfe
     assert previews[0]['suggested_preview_type'] == ''
     assert previews[0]['transfer_suggestion_level'] == ''
     assert previews[0]['transfer_suggestion_score'] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_returns_learning_similarity_recommendation(service):
+    """测试预览接口会为高相似长期学习规则返回推荐信号。"""
+    user_id = await service.db.create_user({
+        'username': 'learning_similarity_user',
+        'email': 'learning_similarity_user@example.com',
+        'password_hash': 'hash',
+        'nickname': 'learning_similarity_user'
+    })
+
+    category_parent_id = await service.db.create_category({
+        'type': 3,
+        'main_category': '餐饮',
+        'sub_category': '',
+        'description': '',
+        'priority': 0,
+        'keywords': '',
+        'hidden': False,
+        'icon': '',
+        'color': ''
+    }, user_id=user_id)
+    assert category_parent_id is not None
+
+    category_id = await service.db.create_category({
+        'type': 3,
+        'main_category': '餐饮',
+        'sub_category': '咖啡',
+        'description': '',
+        'priority': 0,
+        'keywords': '',
+        'hidden': False,
+        'icon': '',
+        'color': ''
+    }, user_id=user_id)
+    assert category_id is not None
+
+    conn = await getattr(service.db, '_get_connection')()
+    now = datetime.now().isoformat()
+    rule_hash = service.db.build_composite_match_hash(
+        parser_id='alipay',
+        counterparty='星巴克咖啡',
+        description='门店消费',
+        payment_method='支付宝',
+    )
+    assert rule_hash is not None
+    await conn.execute(
+        '''
+        INSERT INTO import_learning_rules (
+            user_id, match_type, match_value, normalized_match_value,
+            learned_type, learned_category_id, enabled,
+            parser_id, composite_match_hash, match_features_json,
+            applied_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+        ''',
+        (
+            user_id,
+            'composite',
+            rule_hash,
+            rule_hash,
+            '支出',
+            category_id,
+            'alipay',
+            rule_hash,
+            '{"counterparty": "星巴克咖啡", "description": "门店消费", "parser_id": "alipay", "payment_method": "支付宝"}',
+            6,
+            now,
+            now,
+        )
+    )
+    await conn.commit()
+
+    session_id = 'learning-similarity-preview-session'
+    await service.db.create_import_session(session_id, user_id=user_id, file_count=1)
+    inserted = await service.db.insert_preview_bills_batch(session_id, [{
+        'preview_data': {
+            'preview_date': '2026-03-08 12:10:00',
+            'preview_type': '支出',
+            'preview_amount': 38.0,
+            'preview_destination_amount': 0.0,
+            'preview_main_category': '',
+            'preview_sub_category': '',
+            'preview_source_account_id': None,
+            'preview_destination_account_id': None,
+            'preview_counterparty': '星巴克',
+            'preview_payment_method': '支付宝',
+            'preview_description': '咖啡消费',
+            'preview_parser_id': 'alipay'
+        },
+        'dedup_type': 'remaining',
+        'dedup_source_ids': []
+    }], user_id=user_id)
+    assert inserted == 1
+
+    previews = await service.get_import_preview(session_id)
+    assert len(previews) == 1
+    assert previews[0]['learning_recommendation_level'] in {'high', 'medium', 'low'}
+    assert previews[0]['learning_recommendation_score'] >= 0.72
+    assert previews[0]['learning_recommendation_type'] == '支出'
+    assert previews[0]['learning_recommendation_summary'] == '支出 | 餐饮/咖啡'
+    assert 'parser_id' in previews[0]['learning_recommendation_reason']
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_skips_learning_similarity_when_exact_rule_matches(service):
+    """测试已存在精确 composite 命中时不会重复返回相似度推荐。"""
+    user_id = await service.db.create_user({
+        'username': 'learning_exact_match_user',
+        'email': 'learning_exact_match_user@example.com',
+        'password_hash': 'hash',
+        'nickname': 'learning_exact_match_user'
+    })
+
+    conn = await getattr(service.db, '_get_connection')()
+    now = datetime.now().isoformat()
+    rule_hash = service.db.build_composite_match_hash(
+        parser_id='wechat',
+        counterparty='便利店',
+        description='早餐',
+        payment_method='微信支付',
+    )
+    assert rule_hash is not None
+    await conn.execute(
+        '''
+        INSERT INTO import_learning_rules (
+            user_id, match_type, match_value, normalized_match_value,
+            learned_type, enabled, parser_id, composite_match_hash,
+            match_features_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+        ''',
+        (
+            user_id,
+            'composite',
+            rule_hash,
+            rule_hash,
+            '支出',
+            'wechat',
+            rule_hash,
+            '{"counterparty": "便利店", "description": "早餐", "parser_id": "wechat", "payment_method": "微信支付"}',
+            now,
+            now,
+        )
+    )
+    await conn.commit()
+
+    session_id = 'learning-exact-match-preview-session'
+    await service.db.create_import_session(session_id, user_id=user_id, file_count=1)
+    inserted = await service.db.insert_preview_bills_batch(session_id, [{
+        'preview_data': {
+            'preview_date': '2026-03-08 07:30:00',
+            'preview_type': '支出',
+            'preview_amount': 12.0,
+            'preview_destination_amount': 0.0,
+            'preview_main_category': '',
+            'preview_sub_category': '',
+            'preview_source_account_id': None,
+            'preview_destination_account_id': None,
+            'preview_counterparty': '便利店',
+            'preview_payment_method': '微信支付',
+            'preview_description': '早餐',
+            'preview_parser_id': 'wechat'
+        },
+        'dedup_type': 'remaining',
+        'dedup_source_ids': []
+    }], user_id=user_id)
+    assert inserted == 1
+
+    previews = await service.get_import_preview(session_id)
+    assert len(previews) == 1
+    assert previews[0]['learning_recommendation_level'] == ''
+    assert previews[0]['learning_recommendation_score'] == 0.0
+    assert previews[0]['learning_recommendation_summary'] == ''
 
 
 @pytest.mark.asyncio
