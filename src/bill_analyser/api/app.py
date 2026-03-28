@@ -7,12 +7,10 @@ Flask Web API Server - 账单分析系统Web API服务器
 import asyncio
 import sys
 
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_cors import CORS
 
 from bill_analyser import __version__
-from bill_analyser.constants import PROJECT_ROOT
-
 
 # pylint: disable=wrong-import-position
 # 导入蓝图
@@ -27,6 +25,7 @@ from bill_analyser.api.routes import (
     tags,
     templates,
 )
+from bill_analyser.constants import PROJECT_ROOT, STATIC_DIR
 from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.category_engine import CategoryEngine
 from bill_analyser.core.db import Database
@@ -147,15 +146,22 @@ def create_app():
         """健康检查"""
         return {"success": True, "status": "healthy", "version": __version__}
 
+    @flask_app.route("/", defaults={"path": ""})
+    @flask_app.route("/<path:path>")
+    def serve_frontend(path):
+        if path and (STATIC_DIR / path).is_file():
+            return send_from_directory(STATIC_DIR, path)
+        return send_from_directory(STATIC_DIR, "index.html")
+
     # 错误处理
     @flask_app.errorhandler(404)
     def not_found(error):
-        """404错误处理"""
+        if error.description and "favicon" in str(error.description):
+            return "", 204
         return {"success": False, "error": "Not Found", "message": str(error)}, 404
 
     @flask_app.errorhandler(500)
     def internal_error(error):
-        """500错误处理"""
         logger.error("Internal Server Error: %s", error)
         return {"success": False, "error": "Internal Server Error", "message": str(error)}, 500
 
@@ -240,9 +246,7 @@ async def create_default_admin_user(database: Database):
             logger.info("创建默认管理员用户: %s", username)
 
             password = default_user_config["password"]
-            password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode(
-                "utf-8"
-            )
+            password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
             await database.create_user(
                 {

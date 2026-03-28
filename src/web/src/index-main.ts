@@ -21,11 +21,7 @@ function isMobileDevice(): boolean {
 }
 
 function navigate(type: string): void {
-    if (__bill_analyser_IS_PRODUCTION__) {
-        window.location.replace(`${type}#/`);
-    } else {
-        window.location.replace(`${type}.html#/`);
-    }
+    window.location.replace(`${type}.html#/`);
 }
 
 if (isMobileDevice()) {
