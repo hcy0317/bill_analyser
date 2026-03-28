@@ -10,7 +10,6 @@ v6.47 更新：
 - 保留7天自动清理功能
 """
 
-import asyncio
 import atexit
 import functools
 import inspect
@@ -33,9 +32,16 @@ class SafeStreamHandler(logging.StreamHandler):
             if hasattr(self.stream, "closed") and self.stream.closed:
                 return
             super().emit(record)
-        except ValueError, OSError:
+        except (ValueError, OSError):
             # 忽略 I/O operation on closed file 错误
             pass
+
+    def handleError(self, record):
+        """静默吞掉测试/退出阶段的流错误，避免污染终端输出。"""
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (OSError, ValueError)):
+            return
+        super().handleError(record)
 
 
 class DailyFileHandler(logging.FileHandler):
@@ -88,7 +94,7 @@ class DailyFileHandler(logging.FileHandler):
                 try:
                     self.stream.flush()
                     self.stream.close()
-                except OSError, ValueError:
+                except (OSError, ValueError):
                     pass
                 self.stream = None
 
@@ -106,9 +112,16 @@ class DailyFileHandler(logging.FileHandler):
             if self._check_date_rollover():
                 self._do_rollover()
             super().emit(record)
-        except OSError, PermissionError, ValueError:
+        except (OSError, PermissionError, ValueError):
             # 静默处理日志错误，避免影响主程序
             pass
+
+    def handleError(self, record):
+        """静默吞掉文件 flush/close 抖动，避免在后台线程打印 logging error。"""
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (OSError, PermissionError, ValueError)):
+            return
+        super().handleError(record)
 
 
 class AsyncLogger:
@@ -134,10 +147,23 @@ class AsyncLogger:
 
         # 初始化
         self._setup_loggers()
-        self._start_cleanup_task()
+        if "pytest" not in sys.modules:
+            self._start_cleanup_task()
 
     def _setup_loggers(self):
         """配置日志器"""
+        self.logger = logging.getLogger("bill_analyser")
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.propagate = False
+        self.logger.handlers.clear()
+
+        # pytest 下不启动异步队列线程，避免测试退出阶段的句柄/线程抖动，
+        # 也减少大量无关日志 I/O 对测试性能的影响。
+        if "pytest" in sys.modules:
+            self.queue_listener = None
+            self.logger.addHandler(logging.NullHandler())
+            return
+
         # 创建自定义格式化器
         # 格式：时间戳 | 线程名 | 级别 | 类名.方法名 | 消息
         formatter = logging.Formatter(
@@ -170,13 +196,7 @@ class AsyncLogger:
         self.queue_listener = QueueListener(self.log_queue, *handlers, respect_handler_level=True)
         self.queue_listener.start()
 
-        # 配置根日志器使用QueueHandler
-        self.logger = logging.getLogger("bill_analyser")
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.propagate = False
-
         # 清除旧处理器并添加QueueHandler
-        self.logger.handlers.clear()
         queue_handler = QueueHandler(self.log_queue)
         self.logger.addHandler(queue_handler)
 
@@ -191,8 +211,11 @@ class AsyncLogger:
                     # 每天清理一次
                     threading.Event().wait(86400)
                 except Exception as e:  # pylint: disable=broad-except
-                    # 避免递归记录错误
-                    print(f"日志清理任务出错: {e}")
+                    # 避免递归记录错误；优先尝试统一日志，失败时退回 stderr。
+                    try:
+                        logging.getLogger("bill_analyser.logger_cleanup").error("日志清理任务出错: %s", e)
+                    except Exception:  # pylint: disable=broad-except
+                        sys.stderr.write(f"日志清理任务出错: {e}\n")
 
         cleanup_thread = threading.Thread(target=cleanup_worker, name="LogCleanupThread", daemon=True)
         cleanup_thread.start()
@@ -321,7 +344,7 @@ def log_method(func):
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug("进入方法 | 参数: %s", param_str if param_str else "无")
-        except ImportError, Exception:  # pylint: disable=broad-except
+        except (ImportError, Exception):  # pylint: disable=broad-except
             pass
 
         try:
@@ -342,7 +365,7 @@ def log_method(func):
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug("退出方法 | 耗时: %.2fms | 返回值: %s", duration, result_str)
-            except ImportError, Exception:  # pylint: disable=broad-except
+            except (ImportError, Exception):  # pylint: disable=broad-except
                 pass
 
             return result
@@ -383,7 +406,7 @@ def log_method(func):
         try:
             if LOG_METHOD_VERBOSE and sys.meta_path:
                 logger.debug("进入方法 | 参数: %s", param_str if param_str else "无")
-        except ImportError, Exception:  # pylint: disable=broad-except
+        except (ImportError, Exception):  # pylint: disable=broad-except
             # 忽略解释器关闭时的错误
             pass
 
@@ -405,7 +428,7 @@ def log_method(func):
             try:
                 if LOG_METHOD_VERBOSE and sys.meta_path:
                     logger.debug("退出方法 | 耗时: %.2fms | 返回值: %s", duration, result_str)
-            except ImportError, Exception:  # pylint: disable=broad-except
+            except (ImportError, Exception):  # pylint: disable=broad-except
                 pass
 
             return result
@@ -415,7 +438,7 @@ def log_method(func):
             raise
 
     # 判断是否为异步函数
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         return async_wrapper
     return sync_wrapper
 
@@ -461,7 +484,7 @@ def log_step(step_name: str):
                 logger.error("步骤失败: %s | 错误: %s: %s", step_name, type(e).__name__, e)
                 raise
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 

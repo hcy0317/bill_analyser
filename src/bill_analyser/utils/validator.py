@@ -224,7 +224,7 @@ class BillValidator:
             amount_str = normalized["amount"].replace("¥", "").replace("$", "").replace(",", "").strip()
             try:
                 normalized["amount"] = float(Decimal(amount_str))
-            except InvalidOperation, ValueError:
+            except (InvalidOperation, ValueError):
                 pass
 
         # 去除字符串字段的首尾空白

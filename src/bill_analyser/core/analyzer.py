@@ -91,7 +91,11 @@ class Analyzer:
 
     @log_method
     @log_step("生成数据分析报告")
-    async def generate_report(self, period: str = "month", filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def generate_report(
+        self,
+        period: str = "month",
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         生成分析报告
 
@@ -240,7 +244,11 @@ class Analyzer:
         freq = freq_map.get(period, "D")
 
         # 按日期和类型分组
-        df_grouped = df.groupby([pd.Grouper(key="date", freq=freq), "type"])["amount"].sum().reset_index()
+        df_grouped = (
+            df.groupby([pd.Grouper(key="date", freq=freq), "type"])["amount"]
+            .sum()
+            .reset_index()
+        )
 
         # 转换为趋势数据
         trend = []
@@ -251,7 +259,12 @@ class Analyzer:
             expense = float(date_data[date_data["type"] == "支出"]["amount"].sum())
 
             trend.append(
-                {"date": date_val.strftime("%Y-%m-%d"), "income": income, "expense": expense, "net": income - expense}
+                {
+                    "date": date_val.strftime("%Y-%m-%d"),
+                    "income": income,
+                    "expense": expense,
+                    "net": income - expense,
+                }
             )
 
         return sorted(trend, key=lambda x: x["date"])
@@ -301,7 +314,10 @@ class Analyzer:
 
     @log_method
     async def generate_report_with_charts(
-        self, period: str = "month", filters: dict[str, Any] | None = None, generate_charts: bool = True
+        self,
+        period: str = "month",
+        filters: dict[str, Any] | None = None,
+        generate_charts: bool = True,
     ) -> dict[str, Any]:
         """
         生成分析报告（含图表）
@@ -327,7 +343,11 @@ class Analyzer:
         return report
 
     @log_method
-    def generate_trend_chart(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
+    def generate_trend_chart(
+        self,
+        report_data: dict[str, Any],
+        filename: str | None = None,
+    ) -> Path | None:
         """
         生成收支趋势图
 
@@ -367,7 +387,11 @@ class Analyzer:
         if not category_data:
             return None
 
-        return self.chart_generator.generate_category_pie_chart(category_data, chart_type, filename=filename)
+        return self.chart_generator.generate_category_pie_chart(
+            category_data,
+            chart_type,
+            filename=filename,
+        )
 
     @log_method
     def generate_top_expenses_chart(
@@ -390,7 +414,11 @@ class Analyzer:
         return self.chart_generator.generate_top_merchants_chart(top_data, filename=filename)
 
     @log_method
-    def generate_comparison_chart(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
+    def generate_comparison_chart(
+        self,
+        report_data: dict[str, Any],
+        filename: str | None = None,
+    ) -> Path | None:
         """
         生成收支对比图
 
@@ -413,7 +441,10 @@ class Analyzer:
 
     @log_method
     async def generate_heatmap(
-        self, period: str = "month", filters: dict[str, Any] | None = None, filename: str | None = None
+        self,
+        period: str = "month",
+        filters: dict[str, Any] | None = None,
+        filename: str | None = None,
     ) -> Path | None:
         """
         生成消费热力图
@@ -444,7 +475,11 @@ class Analyzer:
         return self.chart_generator.generate_heatmap(bills, filename=filename)
 
     @log_method
-    def generate_dashboard(self, report_data: dict[str, Any], filename: str | None = None) -> Path | None:
+    def generate_dashboard(
+        self,
+        report_data: dict[str, Any],
+        filename: str | None = None,
+    ) -> Path | None:
         """
         生成综合仪表盘
 
@@ -460,7 +495,11 @@ class Analyzer:
     # ==================== UI Backend API所需的额外方法 ====================
 
     @log_method
-    async def get_trends(self, period: str = "month", category: str | None = None) -> dict[str, Any]:
+    async def get_trends(
+        self,
+        period: str = "month",
+        category: str | None = None,
+    ) -> dict[str, Any]:
         """
         获取趋势数据
 
@@ -480,9 +519,16 @@ class Analyzer:
                 target_date = now - timedelta(days=30 * i)
                 start_date = target_date.replace(day=1)
                 if target_date.month == 12:
-                    end_date = target_date.replace(year=target_date.year + 1, month=1, day=1) - timedelta(days=1)
+                    end_date = target_date.replace(
+                        year=target_date.year + 1,
+                        month=1,
+                        day=1,
+                    ) - timedelta(days=1)
                 else:
-                    end_date = target_date.replace(month=target_date.month + 1, day=1) - timedelta(days=1)
+                    end_date = target_date.replace(
+                        month=target_date.month + 1,
+                        day=1,
+                    ) - timedelta(days=1)
             elif period == "year":
                 target_year = now.year - i
                 start_date = datetime(target_year, 1, 1)
@@ -490,7 +536,10 @@ class Analyzer:
             else:
                 continue
 
-            filters = {"date_from": start_date.strftime("%Y-%m-%d"), "date_to": end_date.strftime("%Y-%m-%d")}
+            filters = {
+                "date_from": start_date.strftime("%Y-%m-%d"),
+                "date_to": end_date.strftime("%Y-%m-%d"),
+            }
 
             if category:
                 filters["main_category"] = category
@@ -512,7 +561,11 @@ class Analyzer:
         return {"trends": trends, "period": period, "category": category}
 
     @log_method
-    async def get_comparison(self, period: str = "month", compare_type: str = "category") -> dict[str, Any]:
+    async def get_comparison(
+        self,
+        period: str = "month",
+        compare_type: str = "category",
+    ) -> dict[str, Any]:
         """
         获取对比数据
 
@@ -561,7 +614,11 @@ class Analyzer:
         return {"comparison": comparison, "period": period, "compare_type": compare_type}
 
     @log_method
-    async def analyze_category(self, period: str = "month", main_category: str | None = None) -> dict[str, Any]:
+    async def analyze_category(
+        self,
+        period: str = "month",
+        main_category: str | None = None,
+    ) -> dict[str, Any]:
         """
         分析指定分类
 
@@ -608,7 +665,11 @@ class Analyzer:
                     "amount": round(data["amount"], 2),
                     "count": data["count"],
                     "percentage": round(percentage, 2),
-                    "avg_amount": round(data["amount"] / data["count"], 2) if data["count"] > 0 else 0,
+                    "avg_amount": (
+                        round(data["amount"] / data["count"], 2)
+                        if data["count"] > 0
+                        else 0
+                    ),
                 }
             )
 

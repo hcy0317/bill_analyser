@@ -27,6 +27,7 @@ Use this skill when you are:
 - Run targeted pytest coverage for affected areas.
 - Use pylint for changed Python modules.
 - Prefer minimal, focused changes over broad refactors.
+- Before ending a session with any git diff, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title for the current change set.
 
 ## Common Commands
 

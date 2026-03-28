@@ -4,22 +4,24 @@ Report Module - 报告导出模块
 使用 matplotlib 生成图表，支持导出为 PDF/Excel/HTML。
 """
 
+# pylint: disable=wrong-import-position
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import matplotlib
+import matplotlib.pyplot as plt
+import pandas as pd
 
 from bill_analyser.constants import PROJECT_ROOT
 
 matplotlib.use("Agg")  # 使用非交互式后端
-import matplotlib.pyplot as plt
-import pandas as pd
 
 from ..utils.logger import get_logger, log_method, log_step
 
 
-class ReportGenerator:
+class ReportGenerator:  # pylint: disable=too-few-public-methods
     """报告生成器"""
 
     def __init__(self, output_dir: str | None = None):
@@ -112,7 +114,12 @@ class ReportGenerator:
 
     @log_method
     @log_step("导出报告")
-    async def export_report(self, data: dict[str, Any], format_type: str = "pdf", filename: str | None = None) -> str:
+    async def export_report(
+        self,
+        data: dict[str, Any],
+        format_type: str = "pdf",
+        filename: str | None = None,
+    ) -> str:
         """
         导出报告
 
@@ -130,13 +137,13 @@ class ReportGenerator:
 
         if format_type == "pdf":
             return await self._export_pdf(data, filename)
-        elif format_type == "excel":
+        if format_type == "excel":
             return await self._export_excel(data, filename)
-        elif format_type == "html":
+        if format_type == "html":
             return await self._export_html(data, filename)
-        else:
-            self.logger.error("不支持的格式: %s", format_type)
-            raise ValueError(f"不支持的格式: {format_type}")
+
+        self.logger.error("不支持的格式: %s", format_type)
+        raise ValueError(f"不支持的格式: {format_type}")
 
     async def _export_pdf(self, data: dict[str, Any], filename: str) -> str:
         """导出为PDF"""
@@ -196,7 +203,12 @@ class ReportGenerator:
                 category_data = []
                 for cat, values in data["by_category"].items():
                     category_data.append(
-                        {"分类": cat, "笔数": values["count"], "总金额": values["total"], "平均金额": values["average"]}
+                        {
+                            "分类": cat,
+                            "笔数": values["count"],
+                            "总金额": values["total"],
+                            "平均金额": values["average"],
+                        }
                     )
                 cat_df = pd.DataFrame(category_data)
                 cat_df.to_excel(writer, sheet_name="分类统计", index=False)
@@ -227,11 +239,19 @@ class ReportGenerator:
             <h2>统计摘要</h2>
             <table>
                 <tr><th>项目</th><th>金额</th></tr>
-                <tr><td>总收入</td><td>¥{data.get("summary", {}).get("total_income", 0):,.2f}</td></tr>
-                <tr><td>总支出</td><td>¥{data.get("summary", {}).get("total_expense", 0):,.2f}</td></tr>
-                <tr><td>净收入</td><td>¥{data.get("summary", {}).get("net_income", 0):,.2f}</td></tr>
+                <tr><td>总收入</td><td>
+                    ¥{data.get("summary", {}).get("total_income", 0):,.2f}
+                </td></tr>
+                <tr><td>总支出</td><td>
+                    ¥{data.get("summary", {}).get("total_expense", 0):,.2f}
+                </td></tr>
+                <tr><td>净收入</td><td>
+                    ¥{data.get("summary", {}).get("net_income", 0):,.2f}
+                </td></tr>
             </table>
-            <p>生成时间: {data.get("generated_at", "")}</p>
+            <p>生成时间:
+                {data.get("generated_at", "")}
+            </p>
         </body>
         </html>
         """

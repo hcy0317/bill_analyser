@@ -35,6 +35,12 @@ Bill Analyser 是一个账单导入、去重、自动分类、预算与统计分
 - 不要提交本地数据库、日志、上传文件或密钥。
 - 不要在没有充分理由的情况下改动构建产物、历史快照目录或第三方参考代码。
 
+## Session Completion
+
+- 每次会话结束前，只要当前工作区存在 staged 或 unstaged 的 git diff，就必须自动使用 `zh-conventional-commit-from-diff` 这个 skill。
+- 生成结果必须给出一条基于当前 diff 的中文 Conventional Commit 标题；如果 staged diff 非空，优先基于 staged diff 生成。
+- 只有在确认没有任何 diff 时，才可以跳过这一步。
+
 ## Build And Test
 
 ```powershell

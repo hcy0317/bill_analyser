@@ -2,7 +2,10 @@
 测试Flask应用的基本功能
 """
 import json
+
 import pytest
+
+from bill_analyser import __version__
 
 
 class TestApp:
@@ -24,12 +27,12 @@ class TestApp:
         data = json.loads(response.data)
         assert data['success'] is True
         assert data['status'] == 'healthy'
+        assert data['version'] == __version__
         
     def test_cors_headers(self, client):
         """测试CORS头部"""
-        response = client.get('/api/health')
-        # Flask-CORS应该添加相应的头部
-        assert 'Access-Control-Allow-Origin' in response.headers or response.status_code == 200
+        response = client.get('/api/health', headers={'Origin': 'http://localhost:8081'})
+        assert response.headers.get('Access-Control-Allow-Origin') == 'http://localhost:8081'
         
     def test_404_handling(self, client):
         """测试404错误处理"""

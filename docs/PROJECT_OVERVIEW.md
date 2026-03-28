@@ -8,15 +8,19 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ## 2. 总体架构
 
 ### 2.1 分层结构
-- **API 层（Flask）**：`src/api/`
+- **API 层（Flask）**：`src/bill_analyser/api/`
   - 同步路由处理 HTTP 请求
   - 通过事件循环桥接调用异步服务
-- **业务层（Core）**：`src/core/`
+- **业务层（Core）**：`src/bill_analyser/core/`
   - 账单导入编排、去重、分类、统计、汇率等核心逻辑
-- **数据层（Database）**：`src/core/db.py`
+- **数据层（Database）**：`src/bill_analyser/core/db.py`
   - 基于 `aiosqlite` 的异步数据库访问
 - **前端层（Vue3 + TS）**：`src/web/src/`
   - 视图、状态管理（Pinia stores）、服务层（axios）
+
+补充说明（2026-03-28）：
+- 当前后端唯一源码根为 `src/bill_analyser/`。
+- 仓库级 `src/api`、`src/core`、`src/parsers`、`src/utils`、`src/data`、`src/uploads` 等顶层阴影目录不再承载运行时代码或数据。
 
 ### 2.2 关键架构模式
 - **异步桥接模式**：Flask 路由内创建独立事件循环调用 async 逻辑
@@ -25,13 +29,13 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 补充说明（2026-03-07）：
 - 当前运行态已无 `/api/v1/*` 路由，也无 WSGI 级 URL rewrite 中间件。
-- legacy 兼容主要残留在适配器实现文件与历史快照目录，不再体现在运行态路由表中。
+- legacy 兼容已退出运行时代码树，当前仅残留在历史快照目录与针对遗留路径的回归测试约束中，不再体现在运行态路由表或适配器实现中。
 
 ---
 
 ## 3. 后端模块分布
 
-### 3.1 API 路由模块（`src/api/routes/`）
+### 3.1 API 路由模块（`src/bill_analyser/api/routes/`）
 - `auth.py`：登录、鉴权、用户资料
 - `bills.py`：账单 CRUD、导入、预览、确认、批量操作
 - `accounts.py`：账户管理、余额同步
@@ -42,24 +46,25 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - `templates.py`：模板管理
 - `backup.py`：备份相关接口
 
-### 3.1.1 API 适配器出口（`src/api/adapters/`）
+### 3.1.1 API 适配器出口（`src/bill_analyser/api/adapters/`）
 - 中性实现模块：`transaction_adapter.py`、`account_adapter.py`、`category_adapter.py`
-- legacy 兼容壳：`v1_adapter.py`、`v1_account_adapter.py`、`v1_category_adapter.py`
-- 当前真实实现已前移到中性模块；legacy 文件仅保留 `V1*Adapter` / `V1ResponseBuilder` 等兼容导出，避免上层继续耦合 `v1_*` 文件名
-- 当前新增代码、路由与测试应优先直接引用中性模块；`v1_*` 文件只作为历史兼容别名保留
-- 静态回归：`tests/new_ui/test_no_direct_legacy_adapter_usage.py` 会阻止上层代码重新直接引用 `V1*Adapter` 类名或直接导入 `v1_* adapter` 模块
+- legacy `v1_*` wrapper 文件已移除，避免新增代码继续耦合旧文件名
+- 当前真实实现统一收口到中性模块；新增代码、路由与测试应只直接引用这些中性模块
+- 静态回归：`tests/new_ui/test_no_direct_legacy_adapter_usage.py` 会阻止重新引入 `V1*Adapter` / `V1ResponseBuilder` 旧命名、直接导入 `v1_* adapter` 模块，或重新提交这些 wrapper 文件
 
-### 3.2 核心业务模块（`src/core/`）
+### 3.2 核心业务模块（`src/bill_analyser/core/`）
 - `db.py`：数据库初始化、迁移、查询、写入、缓存
 - `bill_service.py`：导入主流程编排（含 v2 三阶段导入）
 - `smart_dedup.py`：智能去重引擎（转账配对、平台银行去重、相似去重、分账去重）
 - `category_engine.py`：关键词规则解析与分类匹配（含类型过滤与预编译优化）
 - `exchange_rate_providers.py`：多汇率提供者聚合
 - `budget.py` / `sync.py` / `analyzer.py` / `report*.py`：预算、同步、分析、报表
+- `smart_dedup_v641_backup.py` 等历史版本备份文件已从运行时代码树移除
 
-### 3.3 解析器模块（`src/parsers/`）
+### 3.3 解析器模块（`src/bill_analyser/parsers/`）
 - 已有解析器：`wechat.py`、`alipay.py`、`icbc.py`、`abc.py`、`ccb.py`、`cmbc.py`
 - 工厂入口：`factory.py`（自动识别并分发）
+- 历史 `parsers_old/` 目录已移除；运行态仅保留当前工厂与现行解析器实现
 
 ---
 
@@ -81,7 +86,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ## 5. API 对接关系（核心）
 
-### 5.1 Flask 蓝图注册（`src/api/app.py`）
+### 5.1 Flask 蓝图注册（`src/bill_analyser/api/app.py`）
 - RESTful 蓝图：
   - `/api/bills`
   - `/api/accounts`
@@ -113,7 +118,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
   - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；
   - `db.py` 已为预算 `forecast/import/export` 补齐 `user_id` 隔离；
   - `app.py` 已移除 `budgets.bp_v1` 注册；
-  - `src/api/routes/budgets.py` 内预算旧 `bp_v1` 实现已完成物理删除；
+  - `src/bill_analyser/api/routes/budgets.py` 内预算旧 `bp_v1` 实现已完成物理删除；
   - 已补 `tests/new_ui/test_budgets_rest_api.py` 覆盖 REST 主链与 legacy 404 回归。
 - 账户域历史 rewrite 与旧 `/get` `/modify` `/hide` `/delete` `/move` 兼容路由已移除。
 - 标签域 `bp_v1` 注册与全部 v1 兼容实现已移除。
@@ -154,7 +159,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 交易图片前端主链已切到 `POST /api/bills/pictures` 与 `POST /api/bills/pictures/unused`
 - 旧 `v1/transaction/pictures/upload.json` 与 `v1/transaction/pictures/remove_unused.json` 已停止使用，并由 legacy 404 回归保护
 - 当前运行态前端源码（`src/web/src`）已不再直接引用 `v1/` 或 `/api/v1/` 路径；legacy 兼容仅保留在后端兼容层与历史 `ezbookkeeping/` 快照中
-- `src/api/app.py` 中历史 `URLRewriteMiddleware` 已移除；当前运行态不再通过 WSGI rewrite 兼容任何 `/api/v1/*` 路径
+- `src/bill_analyser/api/app.py` 中历史 `URLRewriteMiddleware` 已移除；当前运行态不再通过 WSGI rewrite 兼容任何 `/api/v1/*` 路径
 - 认证入口主链已统一为 `POST /api/auth/login`、`POST /api/auth/register`、`POST /api/auth/logout`；旧 `authorize.json`、`register.json`、`logout.json` 已停止使用，并由 legacy 404 回归保护
 - 认证辅助入口已继续收口到 REST：`POST /api/auth/email/verify`、`POST /api/auth/email/resend-verification`、`POST /api/auth/password/forgot`、`POST /api/auth/password/reset`；旧 `verify_email/*.json` 与 `forget_password/*.json` 已停止使用，并由 legacy 404 回归保护
 - 用户资料主链已扩展到头像 REST：`GET|PUT /api/profile`、`POST|DELETE /api/profile/avatar`；旧 `v1/users/avatar/update.json` 与 `v1/users/avatar/remove.json` 已停止使用，并由 legacy 404 回归保护
@@ -198,10 +203,10 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ## 7. 日志与运维
 
 ### 7.1 日志系统
-- 统一日志入口：`src/utils/logger.py`
+- 统一日志入口：`src/bill_analyser/utils/logger.py`
 - 支持异步写入、滚动清理、等级分离
 - 常用日志目录：`logs/`
-- 当前仍保留重复实现候选：`src/utils/advanced_logger.py`（待后续收口确认无引用后清理）
+- 已删除 `src/bill_analyser/utils/advanced_logger.py` 等已确认退出运行态的平行实现，并由回归测试持续阻止回流。
 
 ### 7.2 启停脚本
 - 一键启动：`一键启动.bat` / `一键启动.ps1`
@@ -216,19 +221,20 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 核心测试：`test_import.py`、`test_smart_dedup.py`、`test_category_engine_v2.py`、`test_db.py`
 - API 测试：`test_v1_routes.py`、`test_statistics_*`、`new_ui/` 下接口测试
 - 回归脚本/诊断脚本：`check_*`、`diagnose_*`、`debug_*`
+- 前端 Jest 测试：`tests/web/`（与 Python 测试同仓库级根目录并行管理）
 
 ### 8.2 推荐验证命令
 - 单元/集成：
   - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pytest tests/ -v`
 - 代码质量：
-  - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pylint src/core/*.py src/api/routes/*.py`
+  - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py`
 
 ---
 
 ## 9. 当前已知现状（本次会话）
 
 1. 已修复统计汇率模块的导入路径不一致问题：
-   - `src/api/routes/statistics.py` 中 `_fetch_exchange_rates_from_providers` 现与同文件统一使用 `src.core.exchange_rate_providers`。
+  - `src/bill_analyser/api/routes/statistics.py` 中 `_fetch_exchange_rates_from_providers` 现与同文件统一使用 `src/bill_analyser/core/exchange_rate_providers.py`。
 2. 针对性回归显示：
   - `tests/new_ui/test_accounts_tags_rest_api.py`
   - `tests/new_ui/test_categories_api.py`

@@ -4,6 +4,8 @@ Sync Module - 同步与备份模块
 本地备份和云同步功能。
 """
 
+# pylint: disable=import-outside-toplevel
+
 import asyncio
 import hashlib
 import shutil
@@ -116,7 +118,7 @@ class SyncManager:
             self.logger.error("未指定云服务商")
             return False
 
-        self.logger.info(f"开始同步到云端: {provider}")
+        self.logger.info("开始同步到云端: %s", provider)
 
         try:
             # 首先创建本地备份
@@ -139,18 +141,18 @@ class SyncManager:
             elif provider == "webdav":
                 success = await self._upload_to_webdav(backup_file, cloud_config)
             else:
-                self.logger.error(f"不支持的云服务商: {provider}")
+                self.logger.error("不支持的云服务商: %s", provider)
                 return False
 
             if success:
-                self.logger.info(f"云同步成功: {backup_file.name}")
+                self.logger.info("云同步成功: %s", backup_file.name)
             else:
                 self.logger.error("云同步失败")
 
             return success
 
-        except Exception as e:
-            self.logger.error(f"云同步异常: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("云同步异常: %s", exc, exc_info=True)
             return False
 
     async def _upload_to_aliyun_oss(self, file_path: Path, config: dict) -> bool:
@@ -171,17 +173,17 @@ class SyncManager:
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
-            self.logger.debug(f"上传文件: {object_key}")
+            self.logger.debug("上传文件: %s", object_key)
             bucket.put_object_from_file(object_key, str(file_path))
 
-            self.logger.info(f"阿里云OSS上传成功: {object_key}")
+            self.logger.info("阿里云OSS上传成功: %s", object_key)
             return True
 
         except ImportError:
             self.logger.error("阿里云OSS SDK未安装: pip install oss2")
             return False
-        except Exception as e:
-            self.logger.error(f"阿里云OSS上传失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("阿里云OSS上传失败: %s", exc, exc_info=True)
             return False
 
     async def _upload_to_aws_s3(self, file_path: Path, config: dict) -> bool:
@@ -204,17 +206,17 @@ class SyncManager:
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
-            self.logger.debug(f"上传文件: {object_key}")
+            self.logger.debug("上传文件: %s", object_key)
             s3_client.upload_file(str(file_path), config.get("bucket"), object_key)
 
-            self.logger.info(f"AWS S3上传成功: {object_key}")
+            self.logger.info("AWS S3上传成功: %s", object_key)
             return True
 
         except ImportError:
             self.logger.error("AWS SDK未安装: pip install boto3")
             return False
-        except Exception as e:
-            self.logger.error(f"AWS S3上传失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("AWS S3上传失败: %s", exc, exc_info=True)
             return False
 
     async def _upload_to_tencent_cos(self, file_path: Path, config: dict) -> bool:
@@ -231,7 +233,11 @@ class SyncManager:
             region = region_match.group(1) if region_match else "ap-guangzhou"
 
             # 创建配置对象
-            cos_config = CosConfig(Region=region, SecretId=config.get("access_key"), SecretKey=config.get("secret_key"))
+            cos_config = CosConfig(
+                Region=region,
+                SecretId=config.get("access_key"),
+                SecretKey=config.get("secret_key"),
+            )
 
             # 创建客户端
             client = CosS3Client(cos_config)
@@ -241,18 +247,18 @@ class SyncManager:
             object_key = f"{prefix}{file_path.name}"
 
             # 上传文件
-            self.logger.debug(f"上传文件: {object_key}")
+            self.logger.debug("上传文件: %s", object_key)
             with open(file_path, "rb") as fp:
                 client.put_object(Bucket=config.get("bucket"), Body=fp, Key=object_key)
 
-            self.logger.info(f"腾讯云COS上传成功: {object_key}")
+            self.logger.info("腾讯云COS上传成功: %s", object_key)
             return True
 
         except ImportError:
             self.logger.error("腾讯云COS SDK未安装: pip install cos-python-sdk-v5")
             return False
-        except Exception as e:
-            self.logger.error(f"腾讯云COS上传失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("腾讯云COS上传失败: %s", exc, exc_info=True)
             return False
 
     async def _upload_to_azure_blob(self, file_path: Path, config: dict) -> bool:
@@ -279,19 +285,19 @@ class SyncManager:
             blob_name = f"{prefix}{file_path.name}"
 
             # 上传文件
-            self.logger.debug(f"上传文件: {blob_name}")
+            self.logger.debug("上传文件: %s", blob_name)
             blob_client = container_client.get_blob_client(blob_name)
             with open(file_path, "rb") as data:
                 blob_client.upload_blob(data, overwrite=True)
 
-            self.logger.info(f"Azure Blob上传成功: {blob_name}")
+            self.logger.info("Azure Blob上传成功: %s", blob_name)
             return True
 
         except ImportError:
             self.logger.error("Azure SDK未安装: pip install azure-storage-blob")
             return False
-        except Exception as e:
-            self.logger.error(f"Azure Blob上传失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("Azure Blob上传失败: %s", exc, exc_info=True)
             return False
 
     async def _upload_to_webdav(self, file_path: Path, config: dict) -> bool:
@@ -317,17 +323,17 @@ class SyncManager:
             client.mkdir(prefix)
 
             # 上传文件
-            self.logger.debug(f"上传文件: {remote_path}")
+            self.logger.debug("上传文件: %s", remote_path)
             client.upload_sync(remote_path=remote_path, local_path=str(file_path))
 
-            self.logger.info(f"WebDAV上传成功: {remote_path}")
+            self.logger.info("WebDAV上传成功: %s", remote_path)
             return True
 
         except ImportError:
             self.logger.error("WebDAV客户端未安装: pip install webdavclient3")
             return False
-        except Exception as e:
-            self.logger.error(f"WebDAV上传失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("WebDAV上传失败: %s", exc, exc_info=True)
             return False
 
     @log_method

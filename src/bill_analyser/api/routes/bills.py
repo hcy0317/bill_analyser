@@ -272,7 +272,7 @@ def _extract_import_config_header_type_pairs(config: dict[str, Any]) -> list[tup
             try:
                 column_type_int = int(column_type)
                 column_index_int = int(column_index)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if 0 <= column_index_int < len(sample_headers):
                 normalized_header = _normalize_import_suggestion_text(sample_headers[column_index_int])
@@ -484,7 +484,7 @@ def _parse_json_form_field(raw_value, default):
 
     try:
         return json.loads(raw_value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -835,7 +835,7 @@ def _get_mapped_cell(row: list[str], column_mapping: dict[str, Any], column_type
 
     try:
         column_index = int(index)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return ""
 
     if column_index < 0 or column_index >= len(row):
@@ -3931,7 +3931,7 @@ def get_reconciliation_statements():
         # 验证account_id是有效数字
         try:
             account_id_int = int(account_id)
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             logger.error("[get_reconciliation_statements] 无效的账户ID: %s", account_id)
             return jsonify({"success": False, "error": f"Invalid account_id: {account_id}"}), 400
 

@@ -30,7 +30,7 @@ def _parse_aliases(raw_value: Any) -> list[str]:
                 parsed = json.loads(text)
                 if isinstance(parsed, list):
                     return [str(item).strip() for item in parsed if str(item).strip()]
-            except TypeError, ValueError, json.JSONDecodeError:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 pass
 
         return [item.strip() for item in text.split(",") if item.strip()]
@@ -62,7 +62,10 @@ class AccountAdapter:
             "display_order": data.get("displayOrder", data.get("display_order", 0)),
             "hidden": data.get("hidden", not data.get("visible", True)),
             "subAccounts": data.get("subAccounts", []),
-            "credit_card_statement_date": data.get("creditCardStatementDate", data.get("credit_card_statement_date")),
+            "credit_card_statement_date": data.get(
+                "creditCardStatementDate",
+                data.get("credit_card_statement_date"),
+            ),
         }
 
     def backend_to_frontend(self, account: dict[str, Any]) -> dict[str, Any]:
@@ -93,7 +96,11 @@ class AccountAdapter:
 
         return result
 
-    def format_list_response(self, accounts: list[dict[str, Any]], build_hierarchy_flag: bool = True) -> dict[str, Any]:
+    def format_list_response(
+        self,
+        accounts: list[dict[str, Any]],
+        build_hierarchy_flag: bool = True,
+    ) -> dict[str, Any]:
         """格式化账户列表响应。"""
         formatted = [self.backend_to_frontend(account) for account in accounts]
 

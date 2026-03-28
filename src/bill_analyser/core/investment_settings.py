@@ -186,7 +186,7 @@ def normalize_keyword_list(raw_value: Any, fallback: Sequence[str] | None = None
         if text.startswith("["):
             try:
                 parsed = json.loads(text)
-            except TypeError, ValueError, json.JSONDecodeError:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 parsed = None
 
         if isinstance(parsed, list):

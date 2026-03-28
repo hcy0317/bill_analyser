@@ -212,13 +212,13 @@ class CMBCParser(ParserBase):
                         try:
                             amount_value = abs(float(credit_str.replace(",", "")))
                             transaction_type = "收入"
-                        except ValueError, TypeError:
+                        except (ValueError, TypeError):
                             pass
                     elif debit_str and debit_str not in ["", "nan", "NaN"]:
                         try:
                             amount_value = abs(float(debit_str.replace(",", "")))
                             transaction_type = "支出"
-                        except ValueError, TypeError:
+                        except (ValueError, TypeError):
                             pass
 
                     if amount_value == 0:
@@ -360,13 +360,13 @@ class CMBCParser(ParserBase):
                                 try:
                                     amount_str = str(abs(float(credit.replace(",", ""))))
                                     transaction_type = "收入"
-                                except ValueError, TypeError:
+                                except (ValueError, TypeError):
                                     pass
                             elif debit and debit != "nan" and debit != "":
                                 try:
                                     amount_str = str(abs(float(debit.replace(",", ""))))
                                     transaction_type = "支出"
-                                except ValueError, TypeError:
+                                except (ValueError, TypeError):
                                     pass
                         else:
                             # 旧格式：单列显示
@@ -374,7 +374,7 @@ class CMBCParser(ParserBase):
                             try:
                                 if float(amount_str.replace(",", "")) > 0:
                                     transaction_type = "收入"
-                            except ValueError, TypeError:
+                            except (ValueError, TypeError):
                                 pass
 
                         if not amount_str or amount_str == "0" or amount_str == "nan":

@@ -5,17 +5,60 @@ import inspect
 import pkgutil
 import sys
 from importlib import import_module
+from pathlib import Path
+from types import ModuleType
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / 'src'
+
+
+def _ensure_src_layout_on_path() -> None:
+    """Make the repository's src layout importable in clean CI environments."""
+    src_root = str(SRC_ROOT)
+    if SRC_ROOT.is_dir() and src_root not in sys.path:
+        sys.path.insert(0, src_root)
+
+
+def _import_bill_analyser_package() -> ModuleType:
+    """Import the root package, bootstrapping the src path when needed."""
+    try:
+        return import_module('bill_analyser')
+    except ModuleNotFoundError as exc:
+        if exc.name != 'bill_analyser':
+            raise
+
+        _ensure_src_layout_on_path()
+        return import_module('bill_analyser')
+
+
+def _is_missing_target_module(exc: ImportError, target_name: str) -> bool:
+    """Return True only when the requested module itself is missing."""
+    missing_name = getattr(exc, 'name', None)
+    return missing_name == target_name
+
+
+def _import_optional_module(target_name: str) -> ModuleType | None:
+    """Import an optional module without hiding nested import regressions."""
+    try:
+        return import_module(target_name)
+    except ImportError as exc:
+        if _is_missing_target_module(exc, target_name):
+            return None
+        raise
 
 
 def _install_src_compat_aliases() -> None:
     """Alias legacy src.* imports to the current bill_analyser.* package tree."""
-    root_package = import_module('bill_analyser')
+    root_package = _import_bill_analyser_package()
     sys.modules.setdefault('src', root_package)
 
     alias_roots = ('api', 'core', 'parsers', 'utils')
     for root in alias_roots:
         target_name = f'bill_analyser.{root}'
-        target_module = import_module(target_name)
+        target_module = _import_optional_module(target_name)
+        if target_module is None:
+            continue
         sys.modules.setdefault(f'src.{root}', target_module)
 
         if not hasattr(target_module, '__path__'):
@@ -30,7 +73,9 @@ def _install_src_compat_aliases() -> None:
             sys.modules.setdefault(alias_name, imported_module)
 
     for module_name in ('constants',):
-        imported_module = import_module(f'bill_analyser.{module_name}')
+        imported_module = _import_optional_module(f'bill_analyser.{module_name}')
+        if imported_module is None:
+            continue
         sys.modules.setdefault(f'src.{module_name}', imported_module)
 
 

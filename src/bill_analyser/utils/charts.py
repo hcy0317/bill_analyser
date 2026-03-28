@@ -74,7 +74,7 @@ class ChartGenerator:
     @log_method
     def generate_trend_chart(
         self, trend_data: list[dict[str, Any]], title: str = "收支趋势图", filename: str | None = None
-    ) -> Path:
+    ) -> Path | None:
         """
         生成收支趋势图
 
@@ -90,7 +90,7 @@ class ChartGenerator:
             self.logger.warning("趋势数据为空")
             return None
 
-        fig, ax = plt.subplots(figsize=(12, 6), facecolor="#d0d0d0")
+        _, ax = plt.subplots(figsize=(12, 6), facecolor="#d0d0d0")
         ax.set_facecolor("#d0d0d0")
 
         # 提取数据
@@ -100,9 +100,34 @@ class ChartGenerator:
         net = [d["net"] for d in trend_data]
 
         # 绘制折线图
-        ax.plot(dates, income, label="收入", color=COLORS["income"], linewidth=2, marker="o", markersize=4)
-        ax.plot(dates, expense, label="支出", color=COLORS["expense"], linewidth=2, marker="s", markersize=4)
-        ax.plot(dates, net, label="净收入", color=COLORS["net"], linewidth=2, marker="^", markersize=4, linestyle="--")
+        ax.plot(
+            dates,
+            income,
+            label="收入",
+            color=COLORS["income"],
+            linewidth=2,
+            marker="o",
+            markersize=4,
+        )
+        ax.plot(
+            dates,
+            expense,
+            label="支出",
+            color=COLORS["expense"],
+            linewidth=2,
+            marker="s",
+            markersize=4,
+        )
+        ax.plot(
+            dates,
+            net,
+            label="净收入",
+            color=COLORS["net"],
+            linewidth=2,
+            marker="^",
+            markersize=4,
+            linestyle="--",
+        )
 
         # 添加零线
         ax.axhline(y=0, color="gray", linestyle="-", linewidth=0.5, alpha=0.5)
@@ -145,7 +170,7 @@ class ChartGenerator:
         chart_type: str = "expense",
         title: str | None = None,
         filename: str | None = None,
-    ) -> Path:
+    ) -> Path | None:
         """
         生成分类占比饼图
 
@@ -158,6 +183,7 @@ class ChartGenerator:
         Returns:
             Path: 图片文件路径
         """
+        # pylint: disable=too-many-locals
         if not category_data:
             self.logger.warning("分类数据为空")
             return None
@@ -175,17 +201,18 @@ class ChartGenerator:
             return None
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(10, 8), facecolor="#d0d0d0")
+        _, ax = plt.subplots(figsize=(10, 8), facecolor="#d0d0d0")
         ax.set_facecolor("#d0d0d0")
-
-        # 计算百分比
-        total = sum(values)
-        percentages = [v / total * 100 for v in values]
 
         # 绘制饼图
         colors = CATEGORY_COLORS[: len(labels)]
-        wedges, texts, autotexts = ax.pie(
-            values, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 10}
+        _wedges, _texts, autotexts = ax.pie(
+            values,
+            labels=labels,
+            colors=colors,
+            autopct="%1.1f%%",
+            startangle=90,
+            textprops={"fontsize": 10},
         )
 
         # 美化标签
@@ -200,7 +227,10 @@ class ChartGenerator:
         ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
 
         # 添加图例（显示金额）
-        legend_labels = [f"{label}: ¥{value:,.2f}" for label, value in zip(labels, values)]
+        legend_labels = [
+            f"{label}: ¥{value:,.2f}"
+            for label, value in zip(labels, values)
+        ]
         ax.legend(legend_labels, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1), fontsize=9)
 
         # 调整布局
@@ -219,8 +249,11 @@ class ChartGenerator:
 
     @log_method
     def generate_top_merchants_chart(
-        self, top_data: list[dict[str, Any]], title: str = "消费排行榜 Top 10", filename: str | None = None
-    ) -> Path:
+        self,
+        top_data: list[dict[str, Any]],
+        title: str = "消费排行榜 Top 10",
+        filename: str | None = None,
+    ) -> Path | None:
         """
         生成Top商户/交易对象排行榜
 
@@ -232,32 +265,38 @@ class ChartGenerator:
         Returns:
             Path: 图片文件路径
         """
+        # pylint: disable=too-many-locals
         if not top_data:
             self.logger.warning("排行数据为空")
             return None
 
         # 提取数据
         merchants = [
-            d["counterparty"][:15] + "..." if len(d["counterparty"]) > 15 else d["counterparty"] for d in top_data
+            d["counterparty"][:15] + "..."
+            if len(d["counterparty"]) > 15
+            else d["counterparty"]
+            for d in top_data
         ]
         amounts = [d["amount"] for d in top_data]
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(10, 6), facecolor="#d0d0d0")
+        _, ax = plt.subplots(figsize=(10, 6), facecolor="#d0d0d0")
         ax.set_facecolor("#d0d0d0")
 
         # 绘制水平柱状图
         y_pos = np.arange(len(merchants))
-        colors_gradient = plt.cm.Reds(np.linspace(0.4, 0.8, len(merchants)))
+        colors_gradient = matplotlib.colormaps["Reds"](
+            np.linspace(0.4, 0.8, len(merchants))
+        )
 
         bars = ax.barh(y_pos, amounts, color=colors_gradient, alpha=0.8)
 
         # 在柱子上显示金额
-        for i, (bar, amount) in enumerate(zip(bars, amounts)):
-            width = bar.get_width()
+        for bar_patch, amount in zip(bars, amounts):
+            width = bar_patch.get_width()
             ax.text(
                 width,
-                bar.get_y() + bar.get_height() / 2,
+                bar_patch.get_y() + bar_patch.get_height() / 2,
                 f"¥{amount:,.2f}",
                 ha="left",
                 va="center",
@@ -294,7 +333,7 @@ class ChartGenerator:
     @log_method
     def generate_comparison_bar_chart(
         self, summary_data: dict[str, float], title: str = "收支对比", filename: str | None = None
-    ) -> Path:
+    ) -> Path | None:
         """
         生成收支对比柱状图
 
@@ -320,7 +359,7 @@ class ChartGenerator:
         colors = [COLORS["income"], COLORS["expense"], COLORS["net"]]
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(8, 6), facecolor="#d0d0d0")
+        _, ax = plt.subplots(figsize=(8, 6), facecolor="#d0d0d0")
         ax.set_facecolor("#d0d0d0")
 
         # 绘制柱状图
@@ -328,10 +367,10 @@ class ChartGenerator:
         bars = ax.bar(x_pos, values, color=colors, alpha=0.8, width=0.6)
 
         # 在柱子上显示金额
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
+        for bar_patch, value in zip(bars, values):
+            height = bar_patch.get_height()
             ax.text(
-                bar.get_x() + bar.get_width() / 2,
+                bar_patch.get_x() + bar_patch.get_width() / 2,
                 height,
                 f"¥{value:,.2f}",
                 ha="center",
@@ -371,7 +410,7 @@ class ChartGenerator:
     @log_method
     def generate_heatmap(
         self, bills_data: list[dict[str, Any]], title: str = "消费热力图", filename: str | None = None
-    ) -> Path:
+    ) -> Path | None:
         """
         生成每日消费热力图
 
@@ -413,7 +452,7 @@ class ChartGenerator:
         pivot_data = pivot_data.sort_index(axis=1)
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(14, 6), facecolor="#d0d0d0")
+        _, ax = plt.subplots(figsize=(14, 6), facecolor="#d0d0d0")
         ax.set_facecolor("#d0d0d0")
 
         # 绘制热力图
@@ -453,7 +492,7 @@ class ChartGenerator:
     @log_method
     def generate_budget_progress_chart(
         self, budget_data: dict[str, Any], title: str = "预算执行进度", filename: str | None = None
-    ) -> Path:
+    ) -> Path | None:
         """
         生成预算执行进度图
 
@@ -465,6 +504,7 @@ class ChartGenerator:
         Returns:
             Path: 图片文件路径
         """
+        # pylint: disable=too-many-locals
         if not budget_data:
             self.logger.warning("预算数据为空")
             return None
@@ -484,7 +524,10 @@ class ChartGenerator:
             return None
 
         # 创建图表
-        fig, ax = plt.subplots(figsize=(12, len(categories) * 0.8 + 2), facecolor="#d0d0d0")
+        _, ax = plt.subplots(
+            figsize=(12, len(categories) * 0.8 + 2),
+            facecolor="#d0d0d0",
+        )
         ax.set_facecolor("#d0d0d0")
 
         # 设置位置
@@ -492,7 +535,14 @@ class ChartGenerator:
         bar_height = 0.35
 
         # 绘制柱状图
-        bars1 = ax.barh(y_pos - bar_height / 2, budgets, bar_height, label="预算", color="#90CAF9", alpha=0.8)
+        ax.barh(
+            y_pos - bar_height / 2,
+            budgets,
+            bar_height,
+            label="预算",
+            color="#90CAF9",
+            alpha=0.8,
+        )
         bars2 = ax.barh(y_pos + bar_height / 2, actuals, bar_height, label="实际", alpha=0.8)
 
         # 根据超支情况着色
@@ -505,14 +555,21 @@ class ChartGenerator:
             else:
                 colors.append("#4CAF50")  # 绿色 - 良好
 
-        for bar, color in zip(bars2, colors):
-            bar.set_color(color)
+        for bar_patch, color in zip(bars2, colors):
+            bar_patch.set_color(color)
 
         # 添加百分比标签
         for i, (budget, actual) in enumerate(zip(budgets, actuals)):
             if budget > 0:
                 percentage = (actual / budget) * 100
-                ax.text(max(budget, actual), y_pos[i], f" {percentage:.1f}%", va="center", ha="left", fontsize=9)
+                ax.text(
+                    max(budget, actual),
+                    y_pos[i],
+                    f" {percentage:.1f}%",
+                    va="center",
+                    ha="left",
+                    fontsize=9,
+                )
 
         # 设置标签
         ax.set_yticks(y_pos)
@@ -543,7 +600,11 @@ class ChartGenerator:
         return filepath
 
     @log_method
-    def generate_comprehensive_dashboard(self, report_data: dict[str, Any], filename: str | None = None) -> Path:
+    def generate_comprehensive_dashboard(
+        self,
+        report_data: dict[str, Any],
+        filename: str | None = None,
+    ) -> Path | None:
         """
         生成综合仪表盘（多图组合）
 
@@ -554,6 +615,7 @@ class ChartGenerator:
         Returns:
             Path: 图片文件路径
         """
+        # pylint: disable=too-many-locals,too-many-statements
         if not report_data:
             self.logger.warning("报告数据为空")
             return None
@@ -568,14 +630,23 @@ class ChartGenerator:
         summary = report_data.get("summary", {})
         if summary:
             categories = ["收入", "支出", "净收入"]
-            values = [summary.get("total_income", 0), summary.get("total_expense", 0), summary.get("net_income", 0)]
+            values = [
+                summary.get("total_income", 0),
+                summary.get("total_expense", 0),
+                summary.get("net_income", 0),
+            ]
             colors = [COLORS["income"], COLORS["expense"], COLORS["net"]]
             bars = ax1.bar(categories, values, color=colors, alpha=0.8)
 
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
+            for bar_patch, value in zip(bars, values):
+                height = bar_patch.get_height()
                 ax1.text(
-                    bar.get_x() + bar.get_width() / 2, height, f"¥{value:,.0f}", ha="center", va="bottom", fontsize=9
+                    bar_patch.get_x() + bar_patch.get_width() / 2,
+                    height,
+                    f"¥{value:,.0f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
                 )
 
             ax1.set_title("收支概览", fontsize=14, fontweight="bold")
@@ -591,7 +662,7 @@ class ChartGenerator:
             values = [by_category[cat]["total"] for cat in labels]
             colors_pie = CATEGORY_COLORS[: len(labels)]
 
-            wedges, texts, autotexts = ax2.pie(
+            _wedges, _texts, autotexts = ax2.pie(
                 values, labels=labels, colors=colors_pie, autopct="%1.1f%%", startangle=90
             )
             for autotext in autotexts:
@@ -634,9 +705,15 @@ class ChartGenerator:
             y_pos = np.arange(len(merchants))
             bars = ax4.barh(y_pos, amounts, color=COLORS["expense"], alpha=0.7)
 
-            for bar, amount in zip(bars, amounts):
-                width = bar.get_width()
-                ax4.text(width, bar.get_y() + bar.get_height() / 2, f" ¥{amount:,.0f}", va="center", fontsize=8)
+            for bar_patch, amount in zip(bars, amounts):
+                width = bar_patch.get_width()
+                ax4.text(
+                    width,
+                    bar_patch.get_y() + bar_patch.get_height() / 2,
+                    f" ¥{amount:,.0f}",
+                    va="center",
+                    fontsize=8,
+                )
 
             ax4.set_yticks(y_pos)
             ax4.set_yticklabels(merchants, fontsize=9)
@@ -666,7 +743,10 @@ class ChartGenerator:
 _chart_generator = ChartGenerator()
 
 
-def generate_all_charts(report_data: dict[str, Any], output_dir: Path | None = None) -> dict[str, Path]:
+def generate_all_charts(
+    report_data: dict[str, Any],
+    output_dir: Path | None = None,
+) -> dict[str, Path | None]:
     """
     生成所有图表
 
@@ -685,7 +765,10 @@ def generate_all_charts(report_data: dict[str, Any], output_dir: Path | None = N
         charts["trend"] = generator.generate_trend_chart(report_data["trend"])
 
     if report_data.get("by_category"):
-        charts["category_pie"] = generator.generate_category_pie_chart(report_data["by_category"], chart_type="expense")
+        charts["category_pie"] = generator.generate_category_pie_chart(
+            report_data["by_category"],
+            chart_type="expense",
+        )
 
     if report_data.get("top_expenses"):
         charts["top_expenses"] = generator.generate_top_merchants_chart(

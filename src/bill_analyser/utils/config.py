@@ -7,6 +7,7 @@ Config Module - 配置管理模块
 import asyncio
 import json
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,195 @@ from watchdog.observers import Observer
 from bill_analyser.constants import PROJECT_ROOT
 
 from .logger import get_logger, log_method
+
+
+SERVER_CONFIG_FILENAME = "server_config.json"
+INSECURE_JWT_SECRET_VALUES = frozenset(
+    {
+        "default_secret_key_change_in_production",
+        "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY_IN_PRODUCTION",
+    }
+)
+
+DEFAULT_AUTH_CONFIG: dict[str, Any] = {
+    "jwt_algorithm": "HS256",
+    "jwt_expiration_days": 7,
+    "refresh_token_expiration_days": 30,
+    "password_min_length": 8,
+    "enable_user_registration": True,
+    "max_login_attempts": 5,
+    "lockout_duration_minutes": 15,
+}
+
+DEFAULT_API_RUNTIME_CONFIG: dict[str, Any] = {
+    "host": "127.0.0.1",
+    "port": 5000,
+    "debug": False,
+    "threaded": True,
+    "cors": {
+        "origins": ["http://localhost:8081", "http://127.0.0.1:8081"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": [
+            "Content-Type",
+            "Authorization",
+            "X-Timezone-Offset",
+            "X-Language",
+            "Accept",
+            "Accept-Language",
+        ],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "max_age_seconds": 3600,
+        "send_wildcard": False,
+        "always_send": True,
+    },
+}
+
+DEFAULT_DEFAULT_USER_PROFILE: dict[str, Any] = {
+    "auto_create": True,
+    "nickname": "管理员",
+    "language": "zh_Hans",
+    "default_currency": "CNY",
+    "first_day_of_week": 1,
+}
+
+
+class ConfigValidationError(RuntimeError):
+    """配置合法性校验失败。"""
+
+
+def _deep_merge_dicts(base: dict[str, Any], override: Mapping[str, Any] | None) -> dict[str, Any]:
+    """深度合并配置字典，避免调用方自己散落地补默认值。"""
+    result: dict[str, Any] = {}
+
+    for key, value in base.items():
+        if isinstance(value, dict):
+            result[key] = _deep_merge_dicts(value, None)
+        elif isinstance(value, list):
+            result[key] = value.copy()
+        else:
+            result[key] = value
+
+    if not override:
+        return result
+
+    for key, value in override.items():
+        if isinstance(value, Mapping) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge_dicts(result[key], value)
+        elif isinstance(value, list):
+            result[key] = value.copy()
+        else:
+            result[key] = value
+
+    return result
+
+
+def _normalize_string_list(raw_value: Any, fallback: list[str]) -> list[str]:
+    """将配置中的字符串列表标准化，支持逗号分隔字符串。"""
+    if isinstance(raw_value, str):
+        values = [item.strip() for item in raw_value.split(",") if item.strip()]
+        return values or fallback.copy()
+
+    if isinstance(raw_value, list):
+        values = [str(item).strip() for item in raw_value if str(item).strip()]
+        return values or fallback.copy()
+
+    return fallback.copy()
+
+
+def _coerce_port(raw_value: Any, fallback: int) -> int:
+    """将端口配置解析为有效整数。"""
+    try:
+        port = int(raw_value)
+    except (TypeError, ValueError):
+        return fallback
+
+    if port <= 0:
+        return fallback
+
+    return port
+
+
+def get_server_config(use_cache: bool = True) -> dict[str, Any]:
+    """加载服务端主配置文件。"""
+    return get_config(SERVER_CONFIG_FILENAME, use_cache=use_cache)
+
+
+def load_auth_settings(use_cache: bool = True) -> dict[str, Any]:
+    """加载认证配置；不再回退到代码内置 JWT secret。"""
+    config = _deep_merge_dicts(DEFAULT_AUTH_CONFIG, get_server_config(use_cache))
+    jwt_secret = str(config.get("jwt_secret", "") or "").strip()
+
+    if not jwt_secret:
+        raise ConfigValidationError("server_config.json 缺少 jwt_secret，认证功能无法启动")
+
+    if jwt_secret in INSECURE_JWT_SECRET_VALUES:
+        _config_manager.logger.warning("检测到占位 jwt_secret，请在生产环境替换为真实密钥")
+
+    config["jwt_secret"] = jwt_secret
+    return config
+
+
+def load_api_runtime_settings(use_cache: bool = True) -> dict[str, Any]:
+    """加载 API 运行时配置（监听地址、端口、CORS 等）。"""
+    server_config = get_server_config(use_cache)
+    api_override = server_config.get("api") if isinstance(server_config.get("api"), dict) else {}
+    runtime_config = _deep_merge_dicts(DEFAULT_API_RUNTIME_CONFIG, api_override)
+
+    if "api_host" in server_config:
+        runtime_config["host"] = str(server_config.get("api_host") or runtime_config["host"]).strip() or runtime_config[
+            "host"
+        ]
+
+    runtime_config["port"] = _coerce_port(server_config.get("api_port", runtime_config.get("port")), runtime_config["port"])
+    runtime_config["debug"] = bool(runtime_config.get("debug", False))
+    runtime_config["threaded"] = bool(runtime_config.get("threaded", True))
+
+    cors_defaults = DEFAULT_API_RUNTIME_CONFIG["cors"]
+    cors_override = api_override.get("cors") if isinstance(api_override.get("cors"), dict) else {}
+    cors_config = _deep_merge_dicts(cors_defaults, cors_override)
+    cors_config["origins"] = _normalize_string_list(cors_config.get("origins"), cors_defaults["origins"])
+    cors_config["methods"] = _normalize_string_list(cors_config.get("methods"), cors_defaults["methods"])
+    cors_config["allow_headers"] = _normalize_string_list(
+        cors_config.get("allow_headers"), cors_defaults["allow_headers"]
+    )
+    cors_config["expose_headers"] = _normalize_string_list(
+        cors_config.get("expose_headers"), cors_defaults["expose_headers"]
+    )
+    cors_config["supports_credentials"] = bool(cors_config.get("supports_credentials", True))
+    cors_config["max_age_seconds"] = _coerce_port(cors_config.get("max_age_seconds"), cors_defaults["max_age_seconds"])
+    cors_config["send_wildcard"] = bool(cors_config.get("send_wildcard", False))
+    cors_config["always_send"] = bool(cors_config.get("always_send", True))
+
+    runtime_config["cors"] = cors_config
+    return runtime_config
+
+
+def load_default_user_settings(use_cache: bool = True) -> dict[str, Any] | None:
+    """加载默认管理员引导配置；仅在显式配置存在时启用。"""
+    server_config = get_server_config(use_cache)
+    raw_default_user = server_config.get("default_user")
+
+    if not isinstance(raw_default_user, dict):
+        return None
+
+    default_user = _deep_merge_dicts(DEFAULT_DEFAULT_USER_PROFILE, raw_default_user)
+    default_user["auto_create"] = bool(default_user.get("auto_create", True))
+    if not default_user["auto_create"]:
+        return None
+
+    required_fields = ("username", "password", "email")
+    missing_fields = [field for field in required_fields if not str(default_user.get(field, "") or "").strip()]
+    if missing_fields:
+        raise ConfigValidationError(
+            f"default_user 配置缺少必填字段: {', '.join(missing_fields)}"
+        )
+
+    default_user["username"] = str(default_user["username"]).strip()
+    default_user["password"] = str(default_user["password"])
+    default_user["email"] = str(default_user["email"]).strip()
+    default_user["nickname"] = str(default_user.get("nickname", "") or default_user["username"]).strip()
+    return default_user
 
 
 class ConfigFileHandler(FileSystemEventHandler):

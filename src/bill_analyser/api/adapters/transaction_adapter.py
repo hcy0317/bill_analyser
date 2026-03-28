@@ -11,14 +11,26 @@ from bill_analyser.utils.constants import BACKEND_TO_FRONTEND_TYPE, FRONTEND_TO_
 from bill_analyser.utils.currency import cents_to_yuan, yuan_to_cents
 
 
-class ResponseBuilder:
+class ResponseBuilder:  # pylint: disable=too-few-public-methods
     """构建常见事务响应。"""
 
     @staticmethod
-    def build_page(items: list[dict[str, Any]], total: int, page: int, page_size: int) -> dict[str, Any]:
+    def build_page(
+        items: list[dict[str, Any]],
+        total: int,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        """构建分页响应体。"""
         return {
             "success": True,
-            "result": {"items": items, "totalCount": total, "page": page, "pageSize": page_size, "total": total},
+            "result": {
+                "items": items,
+                "totalCount": total,
+                "page": page,
+                "pageSize": page_size,
+                "total": total,
+            },
         }
 
 
@@ -43,7 +55,7 @@ class TransactionAdapter:
 
         try:
             normalized = int(time_value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return 0
 
         if abs(normalized) >= 10**11:
@@ -51,17 +63,24 @@ class TransactionAdapter:
 
         return normalized
 
-    def frontend_to_backend(self, frontend_data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def frontend_to_backend(
+        self,
+        frontend_data: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """前端交易 -> 后端账单。"""
         tx_type = frontend_data.get("type")
-        backend_type = FRONTEND_TO_BACKEND_TYPE.get(int(tx_type), "支出") if tx_type not in (None, "") else ""
+        backend_type = (
+            FRONTEND_TO_BACKEND_TYPE.get(int(tx_type), "支出")
+            if tx_type not in (None, "")
+            else ""
+        )
 
         unix_time = self._normalize_frontend_unix_time(frontend_data.get("time"))
         date_str = ""
         if unix_time:
             try:
                 date_str = datetime.fromtimestamp(unix_time).strftime("%Y-%m-%d %H:%M:%S")
-            except TypeError, ValueError, OSError:
+            except (TypeError, ValueError, OSError):
                 date_str = ""
 
         source_amount = cents_to_yuan(frontend_data.get("sourceAmount"))
@@ -78,7 +97,10 @@ class TransactionAdapter:
             "destination_amount": destination_amount,
             "source_account_id": int(frontend_data.get("sourceAccountId", 0) or 0),
             "destination_account_id": int(frontend_data.get("destinationAccountId", 0) or 0),
-            "description": frontend_data.get("comment", frontend_data.get("remark", "")),
+            "description": frontend_data.get(
+                "comment",
+                frontend_data.get("remark", ""),
+            ),
         }
 
         metadata = {
@@ -86,7 +108,9 @@ class TransactionAdapter:
             "source_account_id": backend_data["source_account_id"],
             "destination_account_id": backend_data["destination_account_id"],
             "tag_ids": [
-                int(tag_id) for tag_id in frontend_data.get("tagIds", []) if str(tag_id).strip() and str(tag_id) != "0"
+                int(tag_id)
+                for tag_id in frontend_data.get("tagIds", [])
+                if str(tag_id).strip() and str(tag_id) != "0"
             ],
             "auto_invest_account": False,
         }
@@ -98,13 +122,18 @@ class TransactionAdapter:
         accounts = await self.db.get_all_accounts(user_id=self.user_id)
         return {int(account["id"]): account for account in accounts}
 
-    async def _build_category_maps(self) -> tuple[dict[int, dict[str, Any]], dict[tuple[str, str], int]]:
+    async def _build_category_maps(
+        self,
+    ) -> tuple[dict[int, dict[str, Any]], dict[tuple[str, str], int]]:
         if not self.db:
             return {}, {}
         categories = await self.db.get_all_categories(user_id=self.user_id)
         by_id = {int(category["id"]): category for category in categories}
         by_name = {
-            (category.get("main_category", ""), category.get("sub_category", "")): int(category["id"])
+            (
+                category.get("main_category", ""),
+                category.get("sub_category", ""),
+            ): int(category["id"])
             for category in categories
         }
         return by_id, by_name
@@ -117,6 +146,7 @@ class TransactionAdapter:
         tags: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """后端账单 -> 前端交易。"""
+        # pylint: disable=too-many-locals
         if account_map and "id_to_account" in account_map:
             id_to_account = account_map["id_to_account"]
         else:
@@ -130,14 +160,18 @@ class TransactionAdapter:
 
         bill_type = str(bill.get("type", "") or "")
         frontend_type = BACKEND_TO_FRONTEND_TYPE.get(bill_type, 3)
-        category_id = name_to_id.get((bill.get("main_category", ""), bill.get("sub_category", "")), 0)
+        category_id = name_to_id.get(
+            (bill.get("main_category", ""), bill.get("sub_category", "")),
+            0,
+        )
 
         time_value = 0
         date_text = str(bill.get("date", "") or "")
         try:
             fmt = "%Y-%m-%d %H:%M:%S" if len(date_text) > 10 else "%Y-%m-%d"
-            time_value = int(datetime.strptime(date_text[:19] if len(date_text) > 19 else date_text, fmt).timestamp())
-        except ValueError, TypeError:
+            parsed_text = date_text[:19] if len(date_text) > 19 else date_text
+            time_value = int(datetime.strptime(parsed_text, fmt).timestamp())
+        except (ValueError, TypeError):
             time_value = 0
 
         amount = float(bill.get("amount", 0) or 0)
@@ -174,7 +208,11 @@ class TransactionAdapter:
         if category:
             result["category"] = self.category_adapter.backend_to_frontend(
                 category,
-                parent_id="0" if not category.get("sub_category") else f"virtual_{category.get('main_category', '')}",
+                parent_id=(
+                    "0"
+                    if not category.get("sub_category")
+                    else f"virtual_{category.get('main_category', '')}"
+                ),
             )
 
         source_account = id_to_account.get(source_account_id)

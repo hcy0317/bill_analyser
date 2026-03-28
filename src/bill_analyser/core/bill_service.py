@@ -12,13 +12,13 @@ Bill Service Module - 账单导入服务
 import asyncio
 import json
 import re
+import warnings
 from difflib import SequenceMatcher
 from datetime import datetime
 from typing import Any
 
 from ..parsers.factory import ParserFactory
 from ..utils.constants import TransactionType
-from ..utils.deduplication import DeduplicationEngine, DeduplicationMode
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.validator import BillValidator
 from .category_engine import CategoryEngine
@@ -46,7 +46,7 @@ class BillService:
     def __init__(
         self,
         db: Database | None = None,
-        deduplication_mode: DeduplicationMode | None = None,
+        deduplication_mode: Any | None = None,
         use_smart_dedup: bool = True,
     ):
         """
@@ -54,8 +54,8 @@ class BillService:
 
         Args:
             db: 数据库实例，如果为 None 则创建新实例
-            deduplication_mode: 去重模式（用于传统去重引擎）
-            use_smart_dedup: 是否使用智能去重引擎（推荐True）
+            deduplication_mode: 已弃用，仅为兼容旧调用签名保留
+            use_smart_dedup: 已弃用，仅为兼容旧调用签名保留
         """
         self.logger = get_logger("BillService")
         self.db = db or Database()
@@ -63,12 +63,21 @@ class BillService:
         self.parser_factory = ParserFactory()
         self.validator = BillValidator()
 
-        # 智能去重引擎（优先使用）
-        self.use_smart_dedup = use_smart_dedup
-        self.smart_dedup_engine = SmartDeduplicationEngine() if use_smart_dedup else None
+        if deduplication_mode is not None:
+            warnings.warn(
+                "BillService(deduplication_mode=...) 已弃用；运行时仅保留 SmartDeduplicationEngine。",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if not use_smart_dedup:
+            warnings.warn(
+                "BillService(use_smart_dedup=False) 已弃用；运行时会继续使用 SmartDeduplicationEngine。",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
-        # 传统去重引擎（备用）
-        self.deduplication_engine = DeduplicationEngine(deduplication_mode or DeduplicationMode.ADVANCED)
+        # 智能去重引擎是唯一运行时去重实现。
+        self.smart_dedup_engine = SmartDeduplicationEngine()
         self._initialized = False
 
     @log_method
@@ -179,38 +188,31 @@ class BillService:
 
             # 3. 智能去重（包含数据库对比，跨文件去重）
             self.logger.info("步骤 3/5: 智能去重（含数据库对比）")
-            if self.use_smart_dedup and self.smart_dedup_engine:
-                # v6.45: 使用 process_with_db() 替代 process()
-                # process_with_db() 会额外与数据库已有账单对比，实现跨文件去重
-                dedup_result = await self.smart_dedup_engine.process_with_db(valid_bills, self.db, user_id)
-                deduplicated_bills = dedup_result.kept_bills
+            # v6.45: 使用 process_with_db() 替代 process()
+            # process_with_db() 会额外与数据库已有账单对比，实现跨文件去重
+            dedup_result = await self.smart_dedup_engine.process_with_db(valid_bills, self.db, user_id)
+            deduplicated_bills = dedup_result.kept_bills
 
-                # 统计数据库重复数量
-                db_dup_count = sum(
-                    1 for g in dedup_result.duplicate_groups if g.type == DeduplicationType.DATABASE_DUPLICATE
-                )
+            # 统计数据库重复数量
+            db_dup_count = sum(
+                1 for g in dedup_result.duplicate_groups if g.type == DeduplicationType.DATABASE_DUPLICATE
+            )
 
-                result["dedup_stats"] = {
-                    "original_count": dedup_result.original_count,
-                    "removed_count": dedup_result.removed_count,
-                    "transfer_pairs": len(dedup_result.transfer_pairs),
-                    "split_groups": len(dedup_result.split_groups),
-                    "duplicate_groups": len(dedup_result.duplicate_groups),
-                    "database_duplicates": db_dup_count,
-                }
-                self.logger.info(
-                    "智能去重完成: 移除 %d, 转账对 %d, 分账组 %d, 数据库重复 %d",
-                    dedup_result.removed_count,
-                    len(dedup_result.transfer_pairs),
-                    len(dedup_result.split_groups),
-                    db_dup_count,
-                )
-            else:
-                # 使用传统去重引擎
-                deduplicated_bills, dedup_stats = await loop.run_in_executor(
-                    None, self.deduplication_engine.deduplicate_all, valid_bills
-                )
-                result["dedup_stats"] = dedup_stats
+            result["dedup_stats"] = {
+                "original_count": dedup_result.original_count,
+                "removed_count": dedup_result.removed_count,
+                "transfer_pairs": len(dedup_result.transfer_pairs),
+                "split_groups": len(dedup_result.split_groups),
+                "duplicate_groups": len(dedup_result.duplicate_groups),
+                "database_duplicates": db_dup_count,
+            }
+            self.logger.info(
+                "智能去重完成: 移除 %d, 转账对 %d, 分账组 %d, 数据库重复 %d",
+                dedup_result.removed_count,
+                len(dedup_result.transfer_pairs),
+                len(dedup_result.split_groups),
+                db_dup_count,
+            )
 
             # 4. 分类账单（预览和正式导入都需要）
             self.logger.info("步骤 4/5: 自动分类 (user_id=%d)", user_id)
@@ -1045,6 +1047,7 @@ class BillService:
         当账单 type 为支出/收入但分类属于转账类型时，清除该分类，
         避免出现 "type=支出 + category=转账" 的不一致状态。
         """
+        _ = user_id
         if not bills:
             return bills
 
@@ -1989,21 +1992,17 @@ class BillService:
                 template_id_map[idx] = template.get("id")
 
             # 3. 执行智能去重（包含数据库对比）
-            if self.use_smart_dedup and self.smart_dedup_engine:
-                dedup_result = await self.smart_dedup_engine.process_with_db(bills, self.db, user_id)
+            dedup_result = await self.smart_dedup_engine.process_with_db(bills, self.db, user_id)
 
-                result["dedup_stats"] = {
-                    "original_count": dedup_result.original_count,
-                    "removed_count": dedup_result.removed_count,
-                    "transfer_pairs": len(dedup_result.transfer_pairs),
-                    "split_groups": len(dedup_result.split_groups),
-                    "duplicate_groups": len(dedup_result.duplicate_groups),
-                }
+            result["dedup_stats"] = {
+                "original_count": dedup_result.original_count,
+                "removed_count": dedup_result.removed_count,
+                "transfer_pairs": len(dedup_result.transfer_pairs),
+                "split_groups": len(dedup_result.split_groups),
+                "duplicate_groups": len(dedup_result.duplicate_groups),
+            }
 
-                kept_bills = dedup_result.kept_bills
-            else:
-                kept_bills = bills
-                result["dedup_stats"] = {"original_count": len(bills), "removed_count": 0}
+            kept_bills = dedup_result.kept_bills
 
             # 4. 加载分类规则
             if not self.category_engine.is_initialized or self.category_engine.current_user_id != user_id:

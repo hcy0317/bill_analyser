@@ -17,6 +17,7 @@ description: Repository-specific guidance for Bill Analyser workflows in Claude 
 - Start from the repository entry files: CLAUDE.md, AGENTS.md, and .github/copilot-instructions.md.
 - Preserve repository-specific architecture rather than generic ECC defaults.
 - Validate changes with focused tests and keep edits narrow.
+- Before ending a session that leaves any git diff behind, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title.
 
 ## Examples
 

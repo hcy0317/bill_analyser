@@ -185,7 +185,7 @@ class CCBParser(ParserBase):
                         else:
                             continue  # 跳过金额为0的记录
 
-                    except ValueError, TypeError:
+                    except (ValueError, TypeError):
                         continue
 
                     # 获取摘要

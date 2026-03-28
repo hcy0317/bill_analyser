@@ -2,13 +2,17 @@
 Categories API Routes - 分类相关API端点
 """
 
-import asyncio
 import json
+from typing import Any, cast
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from bill_analyser.api.adapters.category_adapter import CategoryAdapter
 from bill_analyser.api.middleware.auth import require_auth
+from bill_analyser.api.routes.request_context_helpers import (
+    get_required_request_int,
+    run_async_in_new_loop as _run_async,
+)
 from bill_analyser.utils.config import save_config
 from bill_analyser.utils.logger import get_logger, log_method
 
@@ -62,21 +66,24 @@ CATEGORY_ICONS = {
 }
 
 
-def get_app_context(user_id: int = None):
+def _get_request_user_id() -> int:
+    """获取认证中间件注入的当前用户 ID。"""
+    return get_required_request_int("user_id")
+
+
+def get_app_context(user_id: int | None = None):
     """获取应用上下文中的服务实例
 
     Args:
         user_id: 用户ID (如果为None，自动从request获取)
     """
-    from flask import current_app
-
-    db = current_app.config.get("DB_INSTANCE")
-    bill_service = current_app.config.get("BILL_SERVICE_INSTANCE")
-    category_engine = current_app.config.get("CATEGORY_ENGINE_INSTANCE")
+    db = cast(Any, current_app.config.get("DB_INSTANCE"))
+    bill_service = cast(Any, current_app.config.get("BILL_SERVICE_INSTANCE"))
+    category_engine = cast(Any, current_app.config.get("CATEGORY_ENGINE_INSTANCE"))
 
     # 自动获取user_id
     if user_id is None:
-        user_id = getattr(request, "user_id", 1)
+        user_id = _get_request_user_id()
 
     return db, bill_service, category_engine
 
@@ -88,31 +95,27 @@ def get_categories():
     """获取所有分类"""
     try:
         db, _, _ = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-        loop.close()
+        categories = _run_async(db.get_all_categories(user_id=_get_request_user_id()))
 
         # 使用adapter构建层级并格式化
         response = category_adapter.format_list_response(categories)
 
         return jsonify(response)
 
-    except Exception as e:
-        logger.error("获取分类列表失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类列表失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/", methods=["POST"])
 @log_method
 @require_auth
-def create_category():
+def create_category():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-return-statements
     """创建分类"""
     logger.info("收到创建分类请求")
     try:
         data = request.get_json()
-        logger.debug(f"请求数据: {data}")
+        logger.debug("请求数据: %s", data)
 
         if not data:
             logger.warning("请求数据为空")
@@ -134,9 +137,8 @@ def create_category():
             logger.warning("分类名称为空")
             return jsonify({"success": False, "error": "Category name is required"}), 400
 
-        logger.info(f"准备创建分类: name={name}, parent_id={parent_id}, type={type_val}")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logger.info("准备创建分类: name=%s, parent_id=%s, type=%s", name, parent_id, type_val)
+        user_id = _get_request_user_id()
 
         cat_data = {
             "description": comment,
@@ -150,15 +152,14 @@ def create_category():
 
         if str(parent_id) == "0":
             # 创建一级分类
-            logger.debug(f"创建一级分类: {name}")
+            logger.debug("创建一级分类: %s", name)
             cat_data["main_category"] = name
             cat_data["sub_category"] = ""
 
             # 检查分类是否已存在
-            existing = loop.run_until_complete(db.get_category_by_name(name, "", user_id=request.user_id))
+            existing = _run_async(db.get_category_by_name(name, "", user_id=user_id))
             if existing:
-                loop.close()
-                logger.info(f"分类已存在: {name}, 返回现有分类 ID={existing['id']}")
+                logger.info("分类已存在: %s, 返回现有分类 ID=%s", name, existing["id"])
                 result = {
                     "id": str(existing["id"]),
                     "name": existing["main_category"],
@@ -171,71 +172,101 @@ def create_category():
                     "visible": True,
                     "keywords": existing.get("keywords", ""),
                 }
-                return jsonify({"success": True, "result": result, "message": "Category already exists"})
-        else:
-            # 创建二级分类
-            # 需要查找父分类名称
-            # 注意：如果父分类是虚拟的(ID以virtual_开头)，我们需要从ID中提取名称
-            # 或者如果父分类是真实的ID，我们需要查询DB
-            logger.debug(f"创建二级分类: {name}, 父分类ID: {parent_id}")
+                return jsonify(
+                    {"success": True, "result": result, "message": "Category already exists"},
+                )
 
-            main_category_name = ""
-            parent_type = 1
-            if str(parent_id).startswith("virtual_"):
-                main_category_name = str(parent_id).replace("virtual_", "")
-                logger.debug(f"从虚拟ID提取父分类名: {main_category_name}")
-            else:
-                parent = loop.run_until_complete(db.get_category_by_id(int(parent_id), user_id=request.user_id))
-                if parent:
-                    main_category_name = parent["main_category"]
-                    parent_type = parent.get("type", 1)
-                    logger.debug(f"从数据库查询父分类名: {main_category_name}")
-                else:
-                    logger.warning(f"未找到父分类: {parent_id}")
+            logger.debug("调用数据库创建一级分类: %s", cat_data)
+            cat_id = _run_async(db.create_category(cat_data, user_id=user_id))
 
-            if not main_category_name:
-                loop.close()
-                logger.error(f"无法确定父分类名称，parent_id={parent_id}")
-                return jsonify({"success": False, "error": "Parent category not found"}), 404
+            if cat_id:
+                logger.info("一级分类创建成功，ID=%s", cat_id)
+                new_cat = _run_async(db.get_category_by_id(cat_id, user_id=user_id))
 
-            cat_data["main_category"] = main_category_name
-            cat_data["sub_category"] = name
-            cat_data["type"] = parent_type  # 二级分类继承父分类类型
-
-            # 检查分类是否已存在
-            existing = loop.run_until_complete(
-                db.get_category_by_name(main_category_name, name, user_id=request.user_id)
-            )
-            if existing:
-                loop.close()
-                logger.info(f"分类已存在: {main_category_name}/{name}, 返回现有分类 ID={existing['id']}")
                 result = {
-                    "id": str(existing["id"]),
-                    "name": existing["sub_category"],
-                    "parentId": parent_id,
-                    "type": existing.get("type", parent_type),
-                    "icon": existing.get("icon", icon),
-                    "color": existing.get("color", color),
-                    "comment": existing.get("description", ""),
-                    "displayOrder": existing.get("priority", 0),
-                    "visible": True,
-                    "keywords": existing.get("keywords", ""),
+                    "id": str(new_cat["id"]),
+                    "name": new_cat["main_category"],
+                    "parentId": "0",
+                    "type": new_cat.get("type", type_val),
+                    "icon": new_cat.get("icon", icon),
+                    "color": new_cat.get("color", color),
+                    "comment": new_cat.get("description", ""),
+                    "displayOrder": new_cat.get("priority", 0),
+                    "visible": not new_cat.get("hidden", False),
+                    "keywords": new_cat.get("keywords", ""),
                 }
-                return jsonify({"success": True, "result": result, "message": "Category already exists"})
+                return jsonify({"success": True, "result": result}), 201
 
-        logger.debug(f"调用数据库创建分类: {cat_data}")
-        cat_id = loop.run_until_complete(db.create_category(cat_data, user_id=request.user_id))
+            logger.error("数据库返回创建一级分类失败（cat_id为None）")
+            return jsonify({"success": False, "error": "Failed to create category"}), 500
+
+        # 创建二级分类
+        # 需要查找父分类名称
+        # 注意：如果父分类是虚拟的(ID以virtual_开头)，我们需要从ID中提取名称
+        # 或者如果父分类是真实的ID，我们需要查询DB
+        logger.debug("创建二级分类: %s, 父分类ID: %s", name, parent_id)
+
+        main_category_name = ""
+        parent_type = 1
+        if str(parent_id).startswith("virtual_"):
+            main_category_name = str(parent_id).replace("virtual_", "")
+            logger.debug("从虚拟ID提取父分类名: %s", main_category_name)
+        else:
+            parent = _run_async(db.get_category_by_id(int(parent_id), user_id=user_id))
+            if parent:
+                main_category_name = parent["main_category"]
+                parent_type = parent.get("type", 1)
+                logger.debug("从数据库查询父分类名: %s", main_category_name)
+            else:
+                logger.warning("未找到父分类: %s", parent_id)
+
+        if not main_category_name:
+            logger.error("无法确定父分类名称，parent_id=%s", parent_id)
+            return jsonify({"success": False, "error": "Parent category not found"}), 404
+
+        cat_data["main_category"] = main_category_name
+        cat_data["sub_category"] = name
+        cat_data["type"] = parent_type  # 二级分类继承父分类类型
+
+        # 检查分类是否已存在
+        existing = _run_async(db.get_category_by_name(main_category_name, name, user_id=user_id))
+        if existing:
+            logger.info(
+                "分类已存在: %s/%s, 返回现有分类 ID=%s",
+                main_category_name,
+                name,
+                existing["id"],
+            )
+            result = {
+                "id": str(existing["id"]),
+                "name": existing["sub_category"],
+                "parentId": parent_id,
+                "type": existing.get("type", parent_type),
+                "icon": existing.get("icon", icon),
+                "color": existing.get("color", color),
+                "comment": existing.get("description", ""),
+                "displayOrder": existing.get("priority", 0),
+                "visible": True,
+                "keywords": existing.get("keywords", ""),
+            }
+            return jsonify(
+                {"success": True, "result": result, "message": "Category already exists"},
+            )
+
+        logger.debug("调用数据库创建分类: %s", cat_data)
+        cat_id = _run_async(db.create_category(cat_data, user_id=user_id))
 
         # 获取完整信息返回
         if cat_id:
-            logger.info(f"分类创建成功，ID={cat_id}")
-            new_cat = loop.run_until_complete(db.get_category_by_id(cat_id, user_id=request.user_id))
-            loop.close()
+            logger.info("分类创建成功，ID=%s", cat_id)
+            new_cat = _run_async(db.get_category_by_id(cat_id, user_id=user_id))
 
             # 格式化返回
             result = {
                 "id": str(new_cat["id"]),
-                "name": new_cat["sub_category"] if new_cat["sub_category"] else new_cat["main_category"],
+                "name": (
+                    new_cat["sub_category"] if new_cat["sub_category"] else new_cat["main_category"]
+                ),
                 "parentId": parent_id,
                 "type": new_cat.get("type", type_val),
                 "icon": new_cat.get("icon", ""),
@@ -247,26 +278,24 @@ def create_category():
             }
 
             return jsonify({"success": True, "result": result})
-        else:
-            loop.close()
-            logger.error("数据库返回创建失败（cat_id为None）")
-            return jsonify({"success": False, "error": "Failed to create category"}), 500
 
-    except Exception as e:
-        logger.error(f"创建分类异常: {type(e).__name__}: {e}", exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error("数据库返回创建失败（cat_id为None）")
+        return jsonify({"success": False, "error": "Failed to create category"}), 500
+
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("创建分类异常: %s: %s", type(exc).__name__, exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<category_id>", methods=["PUT"])
 @log_method
 @require_auth
-def update_category(category_id):
+def update_category(category_id):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """更新分类"""
     try:
         data = request.get_json()
         db, _, _ = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if str(category_id).startswith("virtual_"):
             # 更新虚拟分类 -> 实际上是创建主分类记录 + 可能的重命名
@@ -275,10 +304,10 @@ def update_category(category_id):
 
             # 1. 如果改名了，更新所有子分类
             if new_name != old_name:
-                loop.run_until_complete(db.update_main_category_name(old_name, new_name))
+                _run_async(db.update_main_category_name(old_name, new_name))
 
             # 2. 创建主分类记录 (如果不存在)
-            existing = loop.run_until_complete(db.get_category_by_name(new_name, "", user_id=request.user_id))
+            existing = _run_async(db.get_category_by_name(new_name, "", user_id=user_id))
 
             updates = {
                 "description": data.get("comment", ""),
@@ -292,18 +321,17 @@ def update_category(category_id):
 
             if existing:
                 # 更新现有记录
-                loop.run_until_complete(db.update_category(existing["id"], updates, user_id=request.user_id))
+                _run_async(db.update_category(existing["id"], updates, user_id=user_id))
                 cat_id = existing["id"]
             else:
                 # 创建新记录
                 cat_data = updates.copy()
                 cat_data["main_category"] = new_name
                 cat_data["sub_category"] = ""
-                cat_id = loop.run_until_complete(db.create_category(cat_data, user_id=request.user_id))
+                cat_id = _run_async(db.create_category(cat_data, user_id=user_id))
 
             # 获取最新数据返回
-            updated_cat = loop.run_until_complete(db.get_category_by_id(cat_id, user_id=request.user_id))
-            loop.close()
+            updated_cat = _run_async(db.get_category_by_id(cat_id, user_id=user_id))
 
             result = {
                 "id": str(updated_cat["id"]),
@@ -319,71 +347,69 @@ def update_category(category_id):
             }
             return jsonify({"success": True, "result": result})
 
-        else:
-            # 普通ID更新
-            try:
-                cat_id_int = int(category_id)
-            except ValueError:
-                loop.close()
-                return jsonify({"success": False, "error": "Invalid category ID"}), 400
+        # 普通ID更新
+        try:
+            cat_id_int = int(category_id)
+        except ValueError:
+            return jsonify({"success": False, "error": "Invalid category ID"}), 400
 
-            updates = {}
-            if "comment" in data:
-                updates["description"] = data["comment"]
-            if "displayOrder" in data:
-                updates["priority"] = data["displayOrder"]
-            if "keywords" in data:
-                updates["keywords"] = data["keywords"]
-            if "type" in data:
-                updates["type"] = data["type"]
-            if "visible" in data:
-                updates["hidden"] = not data["visible"]
-            if "icon" in data:
-                updates["icon"] = data["icon"]
-            if "color" in data:
-                updates["color"] = data["color"]
+        updates = {}
+        if "comment" in data:
+            updates["description"] = data["comment"]
+        if "displayOrder" in data:
+            updates["priority"] = data["displayOrder"]
+        if "keywords" in data:
+            updates["keywords"] = data["keywords"]
+        if "type" in data:
+            updates["type"] = data["type"]
+        if "visible" in data:
+            updates["hidden"] = not data["visible"]
+        if "icon" in data:
+            updates["icon"] = data["icon"]
+        if "color" in data:
+            updates["color"] = data["color"]
 
-            # 处理改名逻辑
-            if "name" in data:
-                cat = loop.run_until_complete(db.get_category_by_id(cat_id_int, user_id=request.user_id))
-                if cat:
-                    if not cat["sub_category"]:
-                        # 修改一级分类名称
-                        if data["name"] != cat["main_category"]:
-                            updates["main_category"] = data["name"]
-                            loop.run_until_complete(db.update_main_category_name(cat["main_category"], data["name"]))
-                    else:
-                        # 修改二级分类名称
-                        updates["sub_category"] = data["name"]
+        # 处理改名逻辑
+        if "name" in data:
+            cat = _run_async(db.get_category_by_id(cat_id_int, user_id=user_id))
+            if cat:
+                if not cat["sub_category"]:
+                    # 修改一级分类名称
+                    if data["name"] != cat["main_category"]:
+                        updates["main_category"] = data["name"]
+                        _run_async(db.update_main_category_name(cat["main_category"], data["name"]))
+                else:
+                    # 修改二级分类名称
+                    updates["sub_category"] = data["name"]
 
-            success = loop.run_until_complete(db.update_category(cat_id_int, updates, user_id=request.user_id))
+        success = _run_async(db.update_category(cat_id_int, updates, user_id=user_id))
 
-            if success:
-                updated_cat = loop.run_until_complete(db.get_category_by_id(cat_id_int, user_id=request.user_id))
-                loop.close()
+        if success:
+            updated_cat = _run_async(db.get_category_by_id(cat_id_int, user_id=user_id))
 
-                result = {
-                    "id": str(updated_cat["id"]),
-                    "name": updated_cat["sub_category"]
+            result = {
+                "id": str(updated_cat["id"]),
+                "name": (
+                    updated_cat["sub_category"]
                     if updated_cat["sub_category"]
-                    else updated_cat["main_category"],
-                    "parentId": "0",
-                    "type": updated_cat.get("type", 1),
-                    "icon": updated_cat.get("icon", ""),
-                    "color": updated_cat.get("color", ""),
-                    "comment": updated_cat.get("description", ""),
-                    "displayOrder": updated_cat.get("priority", 0),
-                    "visible": not updated_cat.get("hidden", False),
-                    "keywords": updated_cat.get("keywords", ""),
-                }
-                return jsonify({"success": True, "result": result})
+                    else updated_cat["main_category"]
+                ),
+                "parentId": "0",
+                "type": updated_cat.get("type", 1),
+                "icon": updated_cat.get("icon", ""),
+                "color": updated_cat.get("color", ""),
+                "comment": updated_cat.get("description", ""),
+                "displayOrder": updated_cat.get("priority", 0),
+                "visible": not updated_cat.get("hidden", False),
+                "keywords": updated_cat.get("keywords", ""),
+            }
+            return jsonify({"success": True, "result": result})
 
-            loop.close()
-            return jsonify({"success": False, "error": "Category not found"}), 404
+        return jsonify({"success": False, "error": "Category not found"}), 404
 
-    except Exception as e:
-        logger.error(f"更新分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/move", methods=["POST"])
@@ -399,23 +425,21 @@ def move_categories():
             return jsonify({"success": True, "result": True})
 
         db, _, _ = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         for item in new_display_orders:
             cat_id = item.get("id")
             display_order = item.get("displayOrder")
             if cat_id and display_order is not None:
-                loop.run_until_complete(
-                    db.update_category(int(cat_id), {"priority": display_order}, user_id=request.user_id)
+                _run_async(
+                    db.update_category(int(cat_id), {"priority": display_order}, user_id=user_id),
                 )
 
-        loop.close()
         return jsonify({"success": True, "result": True})
 
-    except Exception as e:
-        logger.error(f"移动分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("移动分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<category_id>", methods=["DELETE"])
@@ -425,32 +449,27 @@ def delete_category(category_id):
     """删除分类"""
     try:
         db, _, _ = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if str(category_id).startswith("virtual_"):
             # 处理虚拟分类删除 (删除该主分类下的所有子分类)
             main_category = str(category_id).replace("virtual_", "", 1)
-            success = loop.run_until_complete(db.delete_categories_by_main_category(main_category))
+            success = _run_async(db.delete_categories_by_main_category(main_category))
         else:
             # 处理普通ID删除
             try:
                 cat_id_int = int(category_id)
-                success = loop.run_until_complete(db.delete_category(cat_id_int, user_id=request.user_id))
+                success = _run_async(db.delete_category(cat_id_int, user_id=user_id))
             except ValueError:
-                loop.close()
                 return jsonify({"success": False, "error": "Invalid category ID"}), 400
-
-        loop.close()
 
         if success:
             return jsonify({"success": True, "result": True})
         return jsonify({"success": False, "error": "Category not found or delete failed"}), 404
 
-    except Exception as e:
-        logger.error(f"删除分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/flat", methods=["GET"])
@@ -460,20 +479,16 @@ def get_flat_categories():
     """获取扁平分类列表"""
     try:
         db, _, _ = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-        loop.close()
+        categories = _run_async(db.get_all_categories(user_id=_get_request_user_id()))
 
         # 使用adapter获取扁平列表
         flat_list = category_adapter.get_flat_list(categories)
 
         return jsonify({"success": True, "result": flat_list})
 
-    except Exception as e:
-        logger.error("获取扁平分类列表失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取扁平分类列表失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/rules", methods=["GET"])
@@ -486,9 +501,9 @@ def get_category_rules():
 
         return jsonify({"success": True, "result": category_engine.rules})
 
-    except Exception as e:
-        logger.error("获取分类规则失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类规则失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/rules", methods=["PUT"])
@@ -507,16 +522,13 @@ def update_category_rules():
 
         # 重新加载规则
         _, _, category_engine = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(category_engine.load_rules())
-        loop.close()
+        _run_async(category_engine.load_rules())
 
         return jsonify({"success": True, "message": "Category rules updated successfully"})
 
-    except Exception as e:
-        logger.error("更新分类规则失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新分类规则失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/statistics", methods=["GET"])
@@ -531,13 +543,14 @@ def get_category_statistics():
         end_date = request.args.get("end_date")
 
         db, _, _ = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        stats_list = loop.run_until_complete(
-            db.get_category_statistics(period=period, start_date=start_date, end_date=end_date, user_id=request.user_id)
+        stats_list = _run_async(
+            db.get_category_statistics(
+                period=period,
+                start_date=start_date,
+                end_date=end_date,
+                user_id=_get_request_user_id(),
+            )
         )
-        loop.close()
 
         # 转换为树形字典结构
         stats_dict = {}
@@ -559,9 +572,9 @@ def get_category_statistics():
 
         return jsonify({"success": True, "result": stats_dict})
 
-    except Exception as e:
-        logger.error("获取分类统计失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类统计失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/tree", methods=["GET"])
@@ -579,17 +592,13 @@ def get_all_categories():
     """获取所有分类(原始列表)"""
     try:
         db, _, _ = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-        loop.close()
+        categories = _run_async(db.get_all_categories(user_id=_get_request_user_id()))
 
         return jsonify({"success": True, "result": categories})
 
-    except Exception as e:
-        logger.error("获取所有分类失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取所有分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/all", methods=["PUT"])
@@ -602,23 +611,23 @@ def update_all_categories():
         if not data or "categories" not in data:
             return jsonify({"success": False, "error": "categories are required"}), 400
 
-        # TODO: 实现批量更新逻辑
+        # 预留批量更新实现，当前保持兼容成功响应。
         return jsonify({"success": True, "message": "Categories updated successfully"})
 
-    except Exception as e:
-        logger.error("批量更新分类失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("批量更新分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/batch", methods=["POST"])
 @log_method
 @require_auth
-def batch_create_categories():
+def batch_create_categories():  # pylint: disable=too-many-locals
     """批量创建分类"""
     logger.info("开始批量创建分类")
     try:
         data = request.get_json()
-        logger.debug(f"接收到的数据: {data}")
+        logger.debug("接收到的数据: %s", data)
 
         if not data or "categories" not in data:
             logger.warning("请求数据缺少categories字段")
@@ -626,10 +635,8 @@ def batch_create_categories():
 
         db, _, _ = get_app_context()
         categories = data["categories"]
-        logger.info(f"准备创建 {len(categories)} 个分类")
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logger.info("准备创建 %d 个分类", len(categories))
+        user_id = _get_request_user_id()
 
         created_count = 0
         skipped_count = 0
@@ -652,16 +659,16 @@ def batch_create_categories():
             }
 
             # 查询一级分类是否存在
-            existing_main = loop.run_until_complete(db.get_category_by_name(main_name, "", user_id=request.user_id))
+            existing_main = _run_async(db.get_category_by_name(main_name, "", user_id=user_id))
 
             if not existing_main:
-                cat_id = loop.run_until_complete(db.create_category(main_cat_data, user_id=request.user_id))
+                cat_id = _run_async(db.create_category(main_cat_data, user_id=user_id))
                 if cat_id:
                     created_count += 1
-                    logger.debug(f"创建主分类成功: {main_name} (ID: {cat_id})")
+                    logger.debug("创建主分类成功: %s (ID: %s)", main_name, cat_id)
             else:
                 skipped_count += 1
-                logger.debug(f"主分类已存在，跳过: {main_name}")
+                logger.debug("主分类已存在，跳过: %s", main_name)
 
             # 处理子分类
             sub_categories = cat.get("subCategories", [])
@@ -680,28 +687,26 @@ def batch_create_categories():
                     "keywords": sub.get("keywords", ""),
                 }
 
-                existing_sub = loop.run_until_complete(
-                    db.get_category_by_name(main_name, sub_name, user_id=request.user_id)
+                existing_sub = _run_async(
+                    db.get_category_by_name(main_name, sub_name, user_id=user_id),
                 )
                 if not existing_sub:
-                    cat_id = loop.run_until_complete(db.create_category(sub_cat_data, user_id=request.user_id))
+                    cat_id = _run_async(db.create_category(sub_cat_data, user_id=user_id))
                     if cat_id:
                         created_count += 1
-                        logger.debug(f"创建子分类成功: {main_name}/{sub_name} (ID: {cat_id})")
+                        logger.debug("创建子分类成功: %s/%s (ID: %s)", main_name, sub_name, cat_id)
                 else:
                     skipped_count += 1
-                    logger.debug(f"子分类已存在，跳过: {main_name}/{sub_name}")
+                    logger.debug("子分类已存在，跳过: %s/%s", main_name, sub_name)
 
-        loop.close()
-
-        logger.info(f"批量创建分类完成: 创建={created_count}, 跳过={skipped_count}")
+        logger.info("批量创建分类完成: 创建=%d, 跳过=%d", created_count, skipped_count)
 
         # 返回最新的分类树
         return get_categories()
 
-    except Exception as e:
-        logger.error(f"批量创建分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("批量创建分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/update-all", methods=["POST"])
@@ -714,13 +719,11 @@ def recategorize_all_bills():
         force = data.get("force", False)
 
         db, _, category_engine = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         # 获取所有账单
-        all_bills, total = loop.run_until_complete(
-            db.query_bills(page=1, page_size=100000, filters={}, user_id=request.user_id)
+        all_bills, total = _run_async(
+            db.query_bills(page=1, page_size=100000, filters={}, user_id=user_id),
         )
 
         updated_count = 0
@@ -729,20 +732,20 @@ def recategorize_all_bills():
             if force or not bill.get("main_category"):
                 main_cat, sub_cat = category_engine.match_category(bill)
                 if main_cat:
-                    loop.run_until_complete(
+                    _run_async(
                         db.update_bill(
-                            bill["id"], {"main_category": main_cat, "sub_category": sub_cat}, user_id=request.user_id
+                            bill["id"],
+                            {"main_category": main_cat, "sub_category": sub_cat},
+                            user_id=user_id,
                         )
                     )
                     updated_count += 1
 
-        loop.close()
-
         return jsonify({"success": True, "result": {"total": total, "updated": updated_count}})
 
-    except Exception as e:
-        logger.error("重新分类所有账单失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("重新分类所有账单失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/export", methods=["GET"])
@@ -753,56 +756,51 @@ def export_categories():
     logger.info("收到导出分类请求")
     try:
         db, _, _ = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
+        categories = _run_async(db.get_all_categories(user_id=_get_request_user_id()))
 
-            # 仅保留指定字段，按照指定顺序排序
-            # id和created_at在导入时自动生成
-            export_fields = [
-                "type",
-                "main_category",
-                "sub_category",
-                "priority",
-                "keywords",
-                "description",
-                "icon",
-                "color",
-                "hidden",
-            ]
+        # 仅保留指定字段，按照指定顺序排序
+        # id和created_at在导入时自动生成
+        export_fields = [
+            "type",
+            "main_category",
+            "sub_category",
+            "priority",
+            "keywords",
+            "description",
+            "icon",
+            "color",
+            "hidden",
+        ]
 
-            # 字段默认值映射
-            default_values = {
-                "type": 3,  # 默认为支出类型
-                "main_category": "",
-                "sub_category": "",
-                "priority": 0,
-                "keywords": "",
-                "description": "",
-                "icon": "",
-                "color": "",
-                "hidden": False,
-            }
+        # 字段默认值映射
+        default_values = {
+            "type": 3,  # 默认为支出类型
+            "main_category": "",
+            "sub_category": "",
+            "priority": 0,
+            "keywords": "",
+            "description": "",
+            "icon": "",
+            "color": "",
+            "hidden": False,
+        }
 
-            cleaned_categories = []
-            for cat in categories:
-                # 按照export_fields的顺序构建字典，确保JSON输出字段顺序正确
-                cleaned_cat = {field: cat.get(field, default_values[field]) for field in export_fields}
-                cleaned_categories.append(cleaned_cat)
+        cleaned_categories = []
+        for cat in categories:
+            # 按照export_fields的顺序构建字典，确保JSON输出字段顺序正确
+            cleaned_cat = {field: cat.get(field, default_values[field]) for field in export_fields}
+            cleaned_categories.append(cleaned_cat)
 
-            logger.info(f"成功导出 {len(cleaned_categories)} 个分类")
+        logger.info("成功导出 %d 个分类", len(cleaned_categories))
 
-            # 使用json.dumps直接序列化，保持字段顺序
-            # Flask 3.x的jsonify会忽略字典顺序，因此使用Response + json.dumps
-            response_data = {"success": True, "result": cleaned_categories}
-            json_str = json.dumps(response_data, ensure_ascii=False, separators=(",", ":"))
-            return Response(json_str, mimetype="application/json")
-        finally:
-            loop.close()
-    except Exception as e:
-        logger.error(f"导出分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        # 使用json.dumps直接序列化，保持字段顺序
+        # Flask 3.x的jsonify会忽略字典顺序，因此使用Response + json.dumps
+        response_data = {"success": True, "result": cleaned_categories}
+        json_str = json.dumps(response_data, ensure_ascii=False, separators=(",", ":"))
+        return Response(json_str, mimetype="application/json")
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("导出分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/import", methods=["POST"])
@@ -823,74 +821,81 @@ def import_categories():
 
         if not isinstance(categories, list):
             logger.warning("导入数据格式无效，期望列表")
-            return jsonify({"success": False, "error": "Invalid format, expected list of categories"}), 400
+            return jsonify(
+                {"success": False, "error": "Invalid format, expected list of categories"},
+            ), 400
 
-        logger.info(f"准备导入 {len(categories)} 个分类")
+        logger.info("准备导入 %d 个分类", len(categories))
 
         db, _, _ = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         success_count = 0
         updated_count = 0
         skipped_count = 0
 
-        try:
-            for idx, cat in enumerate(categories):
-                # 验证必填字段
-                if "main_category" not in cat or not cat["main_category"]:
-                    logger.warning(f"跳过第 {idx + 1} 个分类：缺少main_category字段")
-                    skipped_count += 1
-                    continue
+        for idx, cat in enumerate(categories):
+            # 验证必填字段
+            if "main_category" not in cat or not cat["main_category"]:
+                logger.warning("跳过第 %d 个分类：缺少main_category字段", idx + 1)
+                skipped_count += 1
+                continue
 
-                main = cat["main_category"]
-                sub = cat.get("sub_category", "")
+            main = cat["main_category"]
+            sub = cat.get("sub_category", "")
 
-                # 检查是否存在
-                existing = loop.run_until_complete(db.get_category_by_name(main, sub, user_id=request.user_id))
+            # 检查是否存在
+            existing = _run_async(db.get_category_by_name(main, sub, user_id=user_id))
 
-                # 准备导入数据，移除id和created_at（这两个字段会自动生成）
-                cat_data = {
-                    "type": cat.get("type", 3),  # 默认为支出
-                    "main_category": main,
-                    "sub_category": sub,
-                    "priority": cat.get("priority", 0),
-                    "keywords": cat.get("keywords", ""),
-                    "description": cat.get("description", ""),
-                    "icon": cat.get("icon", ""),
-                    "color": cat.get("color", ""),
-                    "hidden": cat.get("hidden", False),
-                }
+            # 准备导入数据，移除id和created_at（这两个字段会自动生成）
+            cat_data = {
+                "type": cat.get("type", 3),  # 默认为支出
+                "main_category": main,
+                "sub_category": sub,
+                "priority": cat.get("priority", 0),
+                "keywords": cat.get("keywords", ""),
+                "description": cat.get("description", ""),
+                "icon": cat.get("icon", ""),
+                "color": cat.get("color", ""),
+                "hidden": cat.get("hidden", False),
+            }
 
-                # 确保不包含id和created_at字段
-                # id会在数据库层自动生成（自增）
-                # created_at会在数据库层使用当前时间生成
+            # 确保不包含id和created_at字段
+            # id会在数据库层自动生成（自增）
+            # created_at会在数据库层使用当前时间生成
 
-                if existing:
-                    # 更新现有分类
-                    logger.debug(f"更新现有分类: {main}/{sub}")
-                    loop.run_until_complete(db.update_category(existing["id"], cat_data, user_id=request.user_id))
-                    updated_count += 1
-                else:
-                    # 创建新分类（id和created_at在db.create_category中自动生成）
-                    logger.debug(f"创建新分类: {main}/{sub}")
-                    loop.run_until_complete(db.create_category(cat_data, user_id=request.user_id))
-                    success_count += 1
+            if existing:
+                # 更新现有分类
+                logger.debug("更新现有分类: %s/%s", main, sub)
+                _run_async(db.update_category(existing["id"], cat_data, user_id=user_id))
+                updated_count += 1
+            else:
+                # 创建新分类（id和created_at在db.create_category中自动生成）
+                logger.debug("创建新分类: %s/%s", main, sub)
+                _run_async(db.create_category(cat_data, user_id=user_id))
+                success_count += 1
 
-            logger.info(f"导入完成: 新增 {success_count}, 更新 {updated_count}, 跳过 {skipped_count}")
+        logger.info(
+            "导入完成: 新增 %d, 更新 %d, 跳过 %d",
+            success_count,
+            updated_count,
+            skipped_count,
+        )
 
-            return jsonify(
-                {
-                    "success": True,
-                    "result": {"imported": success_count, "updated": updated_count, "skipped": skipped_count},
-                }
-            )
-        finally:
-            loop.close()
+        return jsonify(
+            {
+                "success": True,
+                "result": {
+                    "imported": success_count,
+                    "updated": updated_count,
+                    "skipped": skipped_count,
+                },
+            }
+        )
 
-    except Exception as e:
-        logger.error(f"导入分类失败: {e}", exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("导入分类失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<category_id>", methods=["GET"])
@@ -900,8 +905,7 @@ def get_category(category_id):
     """获取单个分类"""
     try:
         db, _, _ = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if str(category_id).startswith("virtual_"):
             main_category_name = str(category_id).replace("virtual_", "", 1)
@@ -920,50 +924,41 @@ def get_category(category_id):
                 "visible": True,
                 "keywords": "",
             }
-            loop.close()
             return jsonify({"success": True, "result": result})
 
-        else:
-            try:
-                cat_id_int = int(category_id)
-                cat = loop.run_until_complete(db.get_category_by_id(cat_id_int, user_id=request.user_id))
+        try:
+            cat_id_int = int(category_id)
+        except ValueError:
+            return jsonify({"success": False, "error": "Invalid category ID"}), 400
 
-                if not cat:
-                    loop.close()
-                    return jsonify({"success": False, "error": "Category not found"}), 404
+        cat = _run_async(db.get_category_by_id(cat_id_int, user_id=user_id))
+        if not cat:
+            return jsonify({"success": False, "error": "Category not found"}), 404
 
-                # 确定 parentId
-                parent_id = "0"
-                if cat["sub_category"]:
-                    # 查找是否存在对应的主分类记录
-                    parent = loop.run_until_complete(
-                        db.get_category_by_name(cat["main_category"], "", user_id=request.user_id)
-                    )
-                    if parent:
-                        parent_id = str(parent["id"])
-                    else:
-                        parent_id = f"virtual_{cat['main_category']}"
+        # 确定 parentId
+        parent_id = "0"
+        if cat["sub_category"]:
+            # 查找是否存在对应的主分类记录
+            parent = _run_async(db.get_category_by_name(cat["main_category"], "", user_id=user_id))
+            if parent:
+                parent_id = str(parent["id"])
+            else:
+                parent_id = f"virtual_{cat['main_category']}"
 
-                loop.close()
+        result = {
+            "id": str(cat["id"]),
+            "name": cat["sub_category"] if cat["sub_category"] else cat["main_category"],
+            "parentId": parent_id,
+            "type": cat.get("type", 1),
+            "icon": "",
+            "color": "",
+            "comment": cat.get("description", ""),
+            "displayOrder": cat.get("priority", 0),
+            "visible": not cat.get("hidden", False),
+            "keywords": cat.get("keywords", ""),
+        }
+        return jsonify({"success": True, "result": result})
 
-                result = {
-                    "id": str(cat["id"]),
-                    "name": cat["sub_category"] if cat["sub_category"] else cat["main_category"],
-                    "parentId": parent_id,
-                    "type": cat.get("type", 1),
-                    "icon": "",
-                    "color": "",
-                    "comment": cat.get("description", ""),
-                    "displayOrder": cat.get("priority", 0),
-                    "visible": not cat.get("hidden", False),
-                    "keywords": cat.get("keywords", ""),
-                }
-                return jsonify({"success": True, "result": result})
-
-            except ValueError:
-                loop.close()
-                return jsonify({"success": False, "error": "Invalid category ID"}), 400
-
-    except Exception as e:
-        logger.error(f"获取分类失败: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500

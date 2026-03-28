@@ -2,15 +2,28 @@
 Statistics API Routes - 统计分析相关API端点
 """
 
+# pylint: disable=too-many-lines
+
 import asyncio
 import time
+from calendar import monthrange
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from flask import Blueprint, current_app, jsonify, request
 
 from bill_analyser.api.middleware.auth import require_auth
+from bill_analyser.api.routes.request_context_helpers import (
+    get_required_request_int,
+    run_async_in_new_loop as _run_async,
+)
 from bill_analyser.core.analyzer import Analyzer
+from bill_analyser.core.exchange_rate_providers import (
+    BOCChinaProvider,
+    CMBChinaProvider,
+    ECBProvider,
+    RBAProvider,
+)
 from bill_analyser.utils.currency import yuan_to_cents
 from bill_analyser.utils.logger import get_logger, log_method
 
@@ -20,8 +33,16 @@ bp = Blueprint("statistics", __name__)
 
 EXCHANGE_RATE_PROVIDER_OPTIONS = {
     "auto": {"label": "自动选择", "reference_url": "", "region": "mixed"},
-    "boc_cn": {"label": "中国银行外汇牌价", "reference_url": "https://www.boc.cn/sourcedb/whpj/", "region": "domestic"},
-    "cmb_cn": {"label": "招商银行实时汇率", "reference_url": "https://fx.cmbchina.com/hq/", "region": "domestic"},
+    "boc_cn": {
+        "label": "中国银行外汇牌价",
+        "reference_url": "https://www.boc.cn/sourcedb/whpj/",
+        "region": "domestic",
+    },
+    "cmb_cn": {
+        "label": "招商银行实时汇率",
+        "reference_url": "https://fx.cmbchina.com/hq/",
+        "region": "domestic",
+    },
     "ecb": {
         "label": "ECB (欧洲央行)",
         "reference_url": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
@@ -39,7 +60,12 @@ DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER = ["boc_cn", "cmb_cn", "ecb", "rba"]
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    return current_app.config.get("DB_INSTANCE")
+    return cast(Any, current_app.config.get("DB_INSTANCE"))
+
+
+def _get_request_user_id() -> int:
+    """获取认证中间件注入的当前用户 ID。"""
+    return get_required_request_int("user_id")
 
 
 def _get_request_base_currency(db) -> str:
@@ -48,28 +74,29 @@ def _get_request_base_currency(db) -> str:
     if requested:
         return requested
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
-        return (user or {}).get("default_currency", "CNY") or "CNY"
-    finally:
-        loop.close()
+    user = _run_async(db.get_user_by_id(_get_request_user_id()))
+    return (user or {}).get("default_currency", "CNY") or "CNY"
 
 
-def _build_user_custom_exchange_rates_result(base_currency: str, custom_rates: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_user_custom_exchange_rates_result(
+    base_currency: str,
+    custom_rates: list[dict[str, Any]],
+) -> dict[str, Any]:
     """构建用户自定义汇率响应。"""
     update_time = int(time.time())
     exchange_rates_list = [{"currency": base_currency, "rate": "1.0"}]
 
     latest_update_time = update_time
     for rate in custom_rates:
-        exchange_rates_list.append({"currency": rate.get("to_currency", ""), "rate": str(rate.get("rate", "1.0"))})
+        exchange_rates_list.append(
+            {"currency": rate.get("to_currency", ""), "rate": str(rate.get("rate", "1.0"))},
+        )
         effective_date = rate.get("effective_date")
         if effective_date:
             try:
                 latest_update_time = max(
-                    latest_update_time, int(datetime.fromisoformat(str(effective_date)).timestamp())
+                    latest_update_time,
+                    int(datetime.fromisoformat(str(effective_date)).timestamp()),
                 )
             except ValueError:
                 logger.debug("忽略非法 effective_date: %s", effective_date)
@@ -128,10 +155,9 @@ def get_overview():
         if end_date:
             filters["end_date"] = end_date
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        data = loop.run_until_complete(analyzer.generate_report(period=period, filters=filters if filters else None))
-        loop.close()
+        data = _run_async(
+            analyzer.generate_report(period=period, filters=filters if filters else None),
+        )
 
         summary_data = data.get("summary", {})
         total_income = round(float(summary_data.get("total_income", 0) or 0), 2)
@@ -155,9 +181,9 @@ def get_overview():
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("获取概览统计失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取概览统计失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/trends", methods=["GET"])
@@ -171,17 +197,13 @@ def get_trends():
 
         db = get_app_context()
         analyzer = Analyzer(db=db)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        trends = loop.run_until_complete(analyzer.get_trends(period=period, category=category))
-        loop.close()
+        trends = _run_async(analyzer.get_trends(period=period, category=category))
 
         return jsonify({"success": True, "result": trends})
 
-    except Exception as e:
-        logger.error("获取趋势数据失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取趋势数据失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/comparison", methods=["GET"])
@@ -195,17 +217,13 @@ def get_comparison():
 
         db = get_app_context()
         analyzer = Analyzer(db=db)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        comparison = loop.run_until_complete(analyzer.get_comparison(period=period, compare_type=compare_type))
-        loop.close()
+        comparison = _run_async(analyzer.get_comparison(period=period, compare_type=compare_type))
 
         return jsonify({"success": True, "result": comparison})
 
-    except Exception as e:
-        logger.error("获取对比数据失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取对比数据失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/category", methods=["GET"])
@@ -219,17 +237,13 @@ def get_category_analysis():
 
         db = get_app_context()
         analyzer = Analyzer(db=db)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        analysis = loop.run_until_complete(analyzer.analyze_category(period=period, main_category=main_category))
-        loop.close()
+        analysis = _run_async(analyzer.analyze_category(period=period, main_category=main_category))
 
         return jsonify({"success": True, "data": analysis})
 
-    except Exception as e:
-        logger.error("获取分类分析失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类分析失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/trend", methods=["GET"])
@@ -243,11 +257,7 @@ def get_trend():
 
         db = get_app_context()
         analyzer = Analyzer(db=db)
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(analyzer.get_trends(period=granularity, category=category))
-        loop.close()
+        result = _run_async(analyzer.get_trends(period=granularity, category=category))
 
         # 提取trends数组,并转换字段名以符合测试预期
         trends_data = result.get("trends", [])
@@ -264,9 +274,9 @@ def get_trend():
 
         return jsonify({"success": True, "data": formatted_trends})
 
-    except Exception as e:
-        logger.error("获取趋势数据失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取趋势数据失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/category-pie", methods=["GET"])
@@ -288,12 +298,14 @@ def get_category_pie():
         if end_date:
             filters["end_date"] = end_date
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bills, _ = loop.run_until_complete(
-            db.query_bills(page=1, page_size=100000, filters=filters, user_id=request.user_id)
+        bills, _ = _run_async(
+            db.query_bills(
+                page=1,
+                page_size=100000,
+                filters=filters,
+                user_id=_get_request_user_id(),
+            ),
         )
-        loop.close()
 
         # 按分类汇总
         category_totals = {}
@@ -303,16 +315,19 @@ def get_category_pie():
             category_totals[category] = category_totals.get(category, 0) + amount
 
         # 转换为饼图数据格式
-        pie_data = [{"name": category, "value": amount} for category, amount in category_totals.items()]
+        pie_data = [
+            {"name": category, "value": amount}
+            for category, amount in category_totals.items()
+        ]
 
         # 按金额降序排序
         pie_data.sort(key=lambda x: x["value"], reverse=True)
 
         return jsonify({"success": True, "data": pie_data})
 
-    except Exception as e:
-        logger.error("获取分类饼图数据失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取分类饼图数据失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/top-merchants", methods=["GET"])
@@ -334,12 +349,14 @@ def get_top_merchants():
         if end_date:
             filters["end_date"] = end_date
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bills, _ = loop.run_until_complete(
-            db.query_bills(page=1, page_size=100000, filters=filters, user_id=request.user_id)
+        bills, _ = _run_async(
+            db.query_bills(
+                page=1,
+                page_size=100000,
+                filters=filters,
+                user_id=_get_request_user_id(),
+            ),
         )
-        loop.close()
 
         # 按商家汇总
         merchant_stats = {}
@@ -365,15 +382,15 @@ def get_top_merchants():
 
         return jsonify({"success": True, "data": top_merchants})
 
-    except Exception as e:
-        logger.error("获取TOP商家失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取TOP商家失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/amounts", methods=["GET"])
 @log_method
 @require_auth
-def get_transaction_amounts():
+def get_transaction_amounts():  # pylint: disable=too-many-locals
     """
     获取多个时间段的交易金额统计
 
@@ -398,6 +415,7 @@ def get_transaction_amounts():
 
         db = get_app_context()
         results = {}
+        user_id = _get_request_user_id()
 
         # 解析查询字符串: "today_1763481600_1763567999|thisWeek_1763308800_1763913599"
         for period_query in query_str.split("|"):
@@ -412,17 +430,14 @@ def get_transaction_amounts():
             end_date = datetime.fromtimestamp(int(end_timestamp)).strftime("%Y-%m-%d")
 
             # 查询该时间段的账单
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            bills, _ = loop.run_until_complete(
+            bills, _ = _run_async(
                 db.query_bills(
                     page=1,
                     page_size=100000,
                     filters={"start_date": start_date, "end_date": end_date},
-                    user_id=request.user_id,
+                    user_id=user_id,
                 )
             )
-            loop.close()
 
             # 计算统计数据（单位：元）
             total_income = sum(abs(float(bill.get("amount", 0))) for bill in bills if bill.get("type") == "收入")
@@ -449,9 +464,9 @@ def get_transaction_amounts():
 
         return jsonify({"success": True, "result": results})
 
-    except Exception as e:
-        logger.error("获取交易金额统计失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取交易金额统计失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/exchange-rates", methods=["GET"])
@@ -489,33 +504,37 @@ def get_exchange_rates():
             }
         }
     """
+    base_currency = "CNY"
     try:
         logger.info("[汇率API] 开始处理汇率数据请求")
 
         db = get_app_context()
+        user_id = _get_request_user_id()
 
         # 获取请求参数
         base_currency = _get_request_base_currency(db)
         requested_provider = _normalize_requested_exchange_rate_provider()
-        logger.debug("[汇率API] 请求参数: base_currency=%s, provider=%s", base_currency, requested_provider)
+        logger.debug(
+            "[汇率API] 请求参数: base_currency=%s, provider=%s",
+            base_currency,
+            requested_provider,
+        )
 
         if requested_provider not in EXCHANGE_RATE_PROVIDER_OPTIONS:
             return jsonify(
-                {"success": False, "error": f"Unsupported exchange rate provider: {requested_provider}"}
+                {
+                    "success": False,
+                    "error": f"Unsupported exchange rate provider: {requested_provider}",
+                },
             ), 400
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            custom_rates = loop.run_until_complete(db.get_user_custom_exchange_rates(base_currency, request.user_id))
-        finally:
-            loop.close()
+        custom_rates = _run_async(db.get_user_custom_exchange_rates(base_currency, user_id))
 
         if custom_rates and requested_provider == "auto":
             result = _build_user_custom_exchange_rates_result(base_currency, custom_rates)
             logger.info(
                 "[汇率API] 返回用户自定义汇率: user_id=%s, base=%s, count=%d",
-                request.user_id,
+                user_id,
                 base_currency,
                 len(result["exchangeRates"]),
             )
@@ -549,16 +568,13 @@ def get_exchange_rates():
             target_currencies.remove(base_currency)
 
         # 创建事件循环获取汇率
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        try:
-            # 尝试从多个数据源获取汇率
-            rates_data = loop.run_until_complete(
-                _fetch_exchange_rates_from_providers(base_currency, target_currencies, requested_provider)
-            )
-        finally:
-            loop.close()
+        rates_data = _run_async(
+            _fetch_exchange_rates_from_providers(
+                base_currency,
+                target_currencies,
+                requested_provider,
+            ),
+        )
 
         # 构建汇率列表
         exchange_rates_list = []
@@ -590,8 +606,8 @@ def get_exchange_rates():
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("[汇率API] 获取汇率数据失败: %s", e, exc_info=True)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("[汇率API] 获取汇率数据失败: %s", exc, exc_info=True)
 
         # 失败时回退到内置汇率
         logger.warning("[汇率API] 回退到内置汇率数据")
@@ -603,38 +619,46 @@ def get_exchange_rates():
 @require_auth
 def update_user_custom_exchange_rate():
     """更新当前用户自定义汇率。"""
-    loop = None
     try:
         data = request.get_json(silent=True) or {}
         currency = (data.get("currency") or "").strip().upper()
         rate_raw = data.get("rate")
         if not currency or rate_raw in [None, ""]:
             return jsonify(
-                {"success": False, "error": "Invalid request", "message": "currency and rate are required"}
+                {
+                    "success": False,
+                    "error": "Invalid request",
+                    "message": "currency and rate are required",
+                }
             ), 400
 
-        rate = float(rate_raw)
+        rate = float(str(rate_raw))
         if rate <= 0:
             return jsonify(
-                {"success": False, "error": "Invalid request", "message": "rate must be greater than 0"}
+                {
+                    "success": False,
+                    "error": "Invalid request",
+                    "message": "rate must be greater than 0",
+                }
             ), 400
 
         db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id)) or {}
+        user_id = _get_request_user_id()
+        user = _run_async(db.get_user_by_id(user_id)) or {}
         base_currency = (user.get("default_currency") or "CNY").upper()
-        result = loop.run_until_complete(
-            db.upsert_user_custom_exchange_rate(base_currency, currency, rate, request.user_id)
+        result = _run_async(
+            db.upsert_user_custom_exchange_rate(base_currency, currency, rate, user_id),
         )
-        loop.close()
 
         if not result.get("success"):
             return jsonify(
                 {
                     "success": False,
                     "error": "Internal Server Error",
-                    "message": result.get("message", "Failed to update user custom exchange rate"),
+                    "message": result.get(
+                        "message",
+                        "Failed to update user custom exchange rate",
+                    ),
                 }
             ), 500
 
@@ -650,14 +674,14 @@ def update_user_custom_exchange_rate():
         )
 
     except ValueError:
-        if loop and not loop.is_closed():
-            loop.close()
-        return jsonify({"success": False, "error": "Invalid request", "message": "rate must be numeric"}), 400
-    except Exception as e:
-        if loop and not loop.is_closed():
-            loop.close()
-        logger.error("更新用户自定义汇率失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+        return jsonify(
+            {"success": False, "error": "Invalid request", "message": "rate must be numeric"},
+        ), 400
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新用户自定义汇率失败: %s", exc, exc_info=True)
+        return jsonify(
+            {"success": False, "error": "Internal Server Error", "message": str(exc)},
+        ), 500
 
 
 @bp.route("/exchange-rates/custom/<currency>", methods=["DELETE"])
@@ -665,29 +689,28 @@ def update_user_custom_exchange_rate():
 @require_auth
 def delete_user_custom_exchange_rate(currency: str):
     """删除当前用户自定义汇率。"""
-    loop = None
     try:
         normalized_currency = (currency or "").strip().upper()
         if not normalized_currency:
-            return jsonify({"success": False, "error": "Invalid request", "message": "currency is required"}), 400
+            return jsonify(
+                {"success": False, "error": "Invalid request", "message": "currency is required"},
+            ), 400
 
         db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id)) or {}
+        user_id = _get_request_user_id()
+        user = _run_async(db.get_user_by_id(user_id)) or {}
         base_currency = (user.get("default_currency") or "CNY").upper()
-        deleted = loop.run_until_complete(
-            db.delete_user_custom_exchange_rate(base_currency, normalized_currency, request.user_id)
+        deleted = _run_async(
+            db.delete_user_custom_exchange_rate(base_currency, normalized_currency, user_id),
         )
-        loop.close()
 
         return jsonify({"success": True, "result": deleted})
 
-    except Exception as e:
-        if loop and not loop.is_closed():
-            loop.close()
-        logger.error("删除用户自定义汇率失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error", "message": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除用户自定义汇率失败: %s", exc, exc_info=True)
+        return jsonify(
+            {"success": False, "error": "Internal Server Error", "message": str(exc)},
+        ), 500
 
 
 async def _fetch_exchange_rates_from_providers(
@@ -711,8 +734,6 @@ async def _fetch_exchange_rates_from_providers(
             'fallback_used': bool
         }
     """
-    from bill_analyser.core.exchange_rate_providers import BOCChinaProvider, CMBChinaProvider, ECBProvider, RBAProvider
-
     provider_instances = {
         "boc_cn": BOCChinaProvider(),
         "cmb_cn": CMBChinaProvider(),
@@ -745,14 +766,14 @@ async def _fetch_exchange_rates_from_providers(
                     "source": source_name,
                     "url": reference_url,
                     "provider_key": provider_key,
-                    "fallback_used": requested_provider != "auto" and provider_key != requested_provider,
+                    "fallback_used": requested_provider not in {"auto", provider_key},
                 }
-            else:
-                logger.warning("[汇率API] %s 返回空汇率数据", source_name)
 
-        except Exception as e:
-            last_error = e
-            logger.warning("[汇率API] 从 %s 获取汇率失败: %s", source_name, str(e))
+            logger.warning("[汇率API] %s 返回空汇率数据", source_name)
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            last_error = exc
+            logger.warning("[汇率API] 从 %s 获取汇率失败: %s", source_name, exc)
             continue
 
     # 所有提供者都失败，抛出异常
@@ -801,11 +822,15 @@ def _get_fallback_exchange_rates(base_currency: str):
     elif base_currency in cny_based_rates:
         base_rate = cny_based_rates[base_currency]
         exchange_rates_list.append({"currency": base_currency, "rate": "1.0"})
-        exchange_rates_list.append({"currency": "CNY", "rate": str(round(1.0 / base_rate, 6))})
+        exchange_rates_list.append(
+            {"currency": "CNY", "rate": str(round(1.0 / base_rate, 6))},
+        )
         for currency, rate in cny_based_rates.items():
             if currency != base_currency:
                 cross_rate = rate / base_rate
-                exchange_rates_list.append({"currency": currency, "rate": str(round(cross_rate, 6))})
+                exchange_rates_list.append(
+                    {"currency": currency, "rate": str(round(cross_rate, 6))},
+                )
 
     result = {
         "providerKey": "fallback",
@@ -818,7 +843,11 @@ def _get_fallback_exchange_rates(base_currency: str):
         "exchangeRates": exchange_rates_list,
     }
 
-    logger.info("[汇率API] 使用内置回退汇率: 基准=%s, 汇率数=%d", base_currency, len(exchange_rates_list))
+    logger.info(
+        "[汇率API] 使用内置回退汇率: 基准=%s, 汇率数=%d",
+        base_currency,
+        len(exchange_rates_list),
+    )
 
     return jsonify({"success": True, "result": result})
 
@@ -829,7 +858,7 @@ def _get_fallback_exchange_rates(base_currency: str):
 @bp.route("/category-statistics", methods=["GET"])
 @log_method
 @require_auth
-def get_categorical_analysis():
+def get_categorical_analysis():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     分类分析API - 按分类汇总收支统计
 
@@ -861,7 +890,10 @@ def get_categorical_analysis():
     try:
         logger.info("[分类分析] API调用: %s", request.args)
         logger.info(
-            "[分类分析] 完整请求: method=%s, path=%s, args=%s", request.method, request.path, dict(request.args)
+            "[分类分析] 完整请求: method=%s, path=%s, args=%s",
+            request.method,
+            request.path,
+            dict(request.args),
         )
 
         # 解析请求参数（支持驼峰和下划线两种命名）
@@ -936,12 +968,14 @@ def get_categorical_analysis():
             filters["keyword"] = keyword
             logger.info("[分类分析] 关键词筛选: %s", keyword)
 
+        user_id = _get_request_user_id()
+
         # 查询账单数据
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             bills, _ = loop.run_until_complete(
-                db.query_bills(page=1, page_size=100000, filters=filters, user_id=request.user_id)
+                db.query_bills(page=1, page_size=100000, filters=filters, user_id=user_id)
             )
             logger.info("[分类分析] 查询到 %d 条账单", len(bills))
 
@@ -960,8 +994,8 @@ def get_categorical_analysis():
                 )
 
             # 获取所有分类和账户映射（用于ID转换）
-            categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-            accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
+            categories = loop.run_until_complete(db.get_all_categories(user_id=user_id))
+            accounts = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
 
             logger.debug(
                 "[分类分析] 分类列表: %d个，前3个: %s",
@@ -990,7 +1024,11 @@ def get_categorical_analysis():
             account_name_to_id[acc["name"]] = str(acc["id"])
             valid_account_ids.add(str(acc["id"]))
 
-        logger.debug("[分类分析] 分类映射: %d 个, 账户映射: %d 个", len(category_name_to_id), len(account_name_to_id))
+        logger.debug(
+            "[分类分析] 分类映射: %d 个, 账户映射: %d 个",
+            len(category_name_to_id),
+            len(account_name_to_id),
+        )
 
         # 按 (分类ID, 账户ID) 汇总金额
         statistics_map = {}
@@ -1075,15 +1113,15 @@ def get_categorical_analysis():
             {"success": True, "result": {"startTime": start_time, "endTime": end_time, "items": result_items}}
         )
 
-    except Exception as e:
-        logger.error("[分类分析] 失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("[分类分析] 失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/category-statistics/trends", methods=["GET"])
 @log_method
 @require_auth
-def get_trend_analysis():
+def get_trend_analysis():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     趋势分析API - 按年月分组的分类统计
 
@@ -1117,12 +1155,19 @@ def get_trend_analysis():
     try:
         logger.info("[趋势分析] API调用: %s", request.args)
         logger.info(
-            "[趋势分析] 完整请求: method=%s, path=%s, args=%s", request.method, request.path, dict(request.args)
+            "[趋势分析] 完整请求: method=%s, path=%s, args=%s",
+            request.method,
+            request.path,
+            dict(request.args),
         )
 
         # 解析请求参数（支持驼峰和下划线两种命名）
-        start_year_month = request.args.get("startYearMonth") or request.args.get("start_year_month") or ""
-        end_year_month = request.args.get("endYearMonth") or request.args.get("end_year_month") or ""
+        start_year_month = (
+            request.args.get("startYearMonth") or request.args.get("start_year_month") or ""
+        )
+        end_year_month = (
+            request.args.get("endYearMonth") or request.args.get("end_year_month") or ""
+        )
         keyword = request.args.get("keyword", "")
 
         logger.info(
@@ -1135,7 +1180,10 @@ def get_trend_analysis():
         # v6.88: 前端选择“全部”时会传 1970-01 / 197001，这里识别为全量查询
         start_year_month_clean = start_year_month.replace("-", "") if start_year_month else ""
         end_year_month_clean = end_year_month.replace("-", "") if end_year_month else ""
-        is_all_mode = start_year_month_clean in ["0", "197001"] and end_year_month_clean in ["0", "197001"]
+        is_all_mode = (
+            start_year_month_clean in ["0", "197001"]
+            and end_year_month_clean in ["0", "197001"]
+        )
 
         if not is_all_mode and (not start_year_month or not end_year_month):
             now = datetime.now()
@@ -1143,7 +1191,10 @@ def get_trend_analysis():
             end_year_month = f"{now.year}12"  # 本年12月
 
             logger.warning(
-                "[趋势分析] 缺少年月参数,使用本年作为默认范围: start_year_month=%s, end_year_month=%s",
+                (
+                    "[趋势分析] 缺少年月参数,使用本年作为默认范围: "
+                    "start_year_month=%s, end_year_month=%s"
+                ),
                 start_year_month,
                 end_year_month,
             )
@@ -1155,7 +1206,11 @@ def get_trend_analysis():
                 start_year_month_clean = start_year_month.replace("-", "")
                 end_year_month_clean = end_year_month.replace("-", "")
 
-                logger.info("[趋势分析] 清理后的年月: start=%s, end=%s", start_year_month_clean, end_year_month_clean)
+                logger.info(
+                    "[趋势分析] 清理后的年月: start=%s, end=%s",
+                    start_year_month_clean,
+                    end_year_month_clean,
+                )
 
                 start_year = int(start_year_month_clean[:4])
                 start_month = int(start_year_month_clean[4:6])
@@ -1163,18 +1218,23 @@ def get_trend_analysis():
                 end_month = int(end_year_month_clean[4:6])
 
                 logger.info(
-                    "[趋势分析] 解析年月: start=%d-%02d, end=%d-%02d", start_year, start_month, end_year, end_month
+                    "[趋势分析] 解析年月: start=%d-%02d, end=%d-%02d",
+                    start_year,
+                    start_month,
+                    end_year,
+                    end_month,
                 )
-            except (ValueError, IndexError) as e:
-                logger.error("[趋势分析] 年月格式错误: %s", e)
+            except (ValueError, IndexError) as exc:
+                logger.error("[趋势分析] 年月格式错误: %s", exc)
                 return jsonify(
-                    {"success": False, "error": f"Invalid year-month format (expected: 202411 or 2024-11): {e}"}
+                    {
+                        "success": False,
+                        "error": f"Invalid year-month format (expected: 202411 or 2024-11): {exc}",
+                    }
                 ), 400
 
             start_date = f"{start_year}-{start_month:02d}-01"
             # 计算结束日期（月末最后一天）
-            from calendar import monthrange
-
             _, last_day = monthrange(end_year, end_month)
             end_date = f"{end_year}-{end_month:02d}-{last_day}"
             logger.info("[趋势分析] 查询时间范围: %s 到 %s", start_date, end_date)
@@ -1198,12 +1258,14 @@ def get_trend_analysis():
         if keyword:
             filters["keyword"] = keyword
 
+        user_id = _get_request_user_id()
+
         # 查询账单数据
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             bills, _ = loop.run_until_complete(
-                db.query_bills(page=1, page_size=100000, filters=filters, user_id=request.user_id)
+                db.query_bills(page=1, page_size=100000, filters=filters, user_id=user_id)
             )
             logger.info("[趋势分析] 查询到 %d 条账单", len(bills))
 
@@ -1211,7 +1273,9 @@ def get_trend_analysis():
             if bills:
                 dates = [b.get("date", "")[:10] for b in bills if b.get("date")]
                 logger.debug(
-                    "[趋势分析] 账单日期范围: %s 到 %s", min(dates) if dates else "N/A", max(dates) if dates else "N/A"
+                    "[趋势分析] 账单日期范围: %s 到 %s",
+                    min(dates) if dates else "N/A",
+                    max(dates) if dates else "N/A",
                 )
                 # 前3条账单示例
                 for i, bill in enumerate(bills[:3]):
@@ -1225,8 +1289,8 @@ def get_trend_analysis():
                     )
 
             # 获取映射数据
-            categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
-            accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
+            categories = loop.run_until_complete(db.get_all_categories(user_id=user_id))
+            accounts = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
 
             logger.debug("[趋势分析] 映射数据: 分类=%d个, 账户=%d个", len(categories), len(accounts))
         finally:
@@ -1260,7 +1324,7 @@ def get_trend_analysis():
                 bill_date = datetime.fromisoformat(bill_date_str.replace("Z", "+00:00"))
                 year = bill_date.year
                 month = bill_date.month
-            except ValueError, AttributeError:
+            except (ValueError, AttributeError):
                 continue
 
             # 获取分类和账户ID
@@ -1311,7 +1375,7 @@ def get_trend_analysis():
                 try:
                     bill_date = datetime.fromisoformat(bill_date_str.replace("Z", "+00:00"))
                     valid_bill_dates.append((bill_date.year, bill_date.month))
-                except ValueError, AttributeError:
+                except (ValueError, AttributeError):
                     continue
 
             if valid_bill_dates:
@@ -1319,7 +1383,11 @@ def get_trend_analysis():
                 start_year, start_month = sorted_dates[0]
                 end_year, end_month = sorted_dates[-1]
                 logger.info(
-                    "[趋势分析] 全量模式动态范围: %d-%02d 到 %d-%02d", start_year, start_month, end_year, end_month
+                    "[趋势分析] 全量模式动态范围: %d-%02d 到 %d-%02d",
+                    start_year,
+                    start_month,
+                    end_year,
+                    end_month,
                 )
             else:
                 logger.info("[趋势分析] 全量模式无账单数据，返回空结果")
@@ -1346,7 +1414,9 @@ def get_trend_analysis():
                 for (cat_id, acc_id), amount in month_data.items()
             ]
 
-            result.append({"year": current_year, "month": current_month, "items": items})
+            result.append(
+                {"year": current_year, "month": current_month, "items": items},
+            )
 
             # 递增月份
             current_month += 1
@@ -1367,23 +1437,31 @@ def get_trend_analysis():
             )
             if month_data["items"]:
                 # 计算该月总收入和总支出
-                total_income = sum(item["amount"] for item in month_data["items"] if item["amount"] > 0)
-                total_expense = sum(abs(item["amount"]) for item in month_data["items"] if item["amount"] < 0)
-                logger.debug("[趋势分析]   该月: 收入=%.2f元, 支出=%.2f元", total_income / 100.0, total_expense / 100.0)
+                total_income = sum(
+                    item["amount"] for item in month_data["items"] if item["amount"] > 0
+                )
+                total_expense = sum(
+                    abs(item["amount"]) for item in month_data["items"] if item["amount"] < 0
+                )
+                logger.debug(
+                    "[趋势分析]   该月: 收入=%.2f元, 支出=%.2f元",
+                    total_income / 100.0,
+                    total_expense / 100.0,
+                )
 
         logger.info("[趋势分析] ✅ 返回结果: %d个月的数据", len(result))
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("[趋势分析] 失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("[趋势分析] 失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/asset-trends", methods=["GET"])
 @log_method
 @require_auth
-def get_asset_trends():
+def get_asset_trends():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     资产趋势API - 每日账户余额变化统计
 
@@ -1415,7 +1493,10 @@ def get_asset_trends():
         # v6.72: API调用日志改为DEBUG级别，仅保留开始和完成的INFO日志
         logger.debug("[资产趋势] API调用: %s", request.args)
         logger.debug(
-            "[资产趋势] 完整请求: method=%s, path=%s, args=%s", request.method, request.path, dict(request.args)
+            "[资产趋势] 完整请求: method=%s, path=%s, args=%s",
+            request.method,
+            request.path,
+            dict(request.args),
         )
 
         # 解析请求参数（支持驼峰和下划线两种命名）
@@ -1433,13 +1514,20 @@ def get_asset_trends():
         start_time = start_time_raw
         end_time = end_time_raw
 
+        user_id = _get_request_user_id()
+
         if is_all_mode:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 db = get_app_context()
                 bills_all, _ = loop.run_until_complete(
-                    db.query_bills(page=1, page_size=1000000, filters={}, user_id=request.user_id)
+                    db.query_bills(
+                        page=1,
+                        page_size=1000000,
+                        filters={},
+                        user_id=user_id,
+                    )
                 )
             finally:
                 loop.close()
@@ -1452,7 +1540,7 @@ def get_asset_trends():
                 try:
                     bill_date = datetime.fromisoformat(bill_date_str.replace("Z", "+00:00"))
                     bill_timestamps.append(int(bill_date.timestamp()))
-                except ValueError, AttributeError:
+                except (ValueError, AttributeError):
                     continue
 
             if not bill_timestamps:
@@ -1498,9 +1586,9 @@ def get_asset_trends():
         try:
             start_time = int(start_time)
             end_time = int(end_time)
-        except (ValueError, TypeError) as e:
-            logger.error("[资产趋势] 时间戳格式错误: %s", e)
-            return jsonify({"success": False, "error": f"Invalid timestamp format: {e}"}), 400
+        except (ValueError, TypeError) as exc:
+            logger.error("[资产趋势] 时间戳格式错误: %s", exc)
+            return jsonify({"success": False, "error": f"Invalid timestamp format: {exc}"}), 400
 
         # 【关键】验证时间范围，防止无限循环（限制最多365天，支持本年查询）
         time_diff_seconds = end_time - start_time
@@ -1539,14 +1627,14 @@ def get_asset_trends():
         asyncio.set_event_loop(loop)
         try:
             # 1. 获取所有账户
-            accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
+            accounts = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
             # v6.72: 中间步骤日志改为DEBUG级别
             logger.debug("[资产趋势] 查询到 %d 个账户", len(accounts))
 
             # 2. 获取起始日期前的所有账户余额（期初余额）
             start_date_str = start_date.strftime("%Y-%m-%d")
             initial_balances = loop.run_until_complete(
-                db.get_balances_before_date(start_date_str, user_id=request.user_id)
+                db.get_balances_before_date(start_date_str, user_id=user_id)
             )
             logger.debug("[资产趋势] 已计算期初余额")
 
@@ -1557,7 +1645,7 @@ def get_asset_trends():
                     page=1,
                     page_size=1000000,  # 足够大的数量以获取所有账单
                     filters={"start_date": start_date_str, "end_date": end_date_str},
-                    user_id=request.user_id,
+                    user_id=user_id,
                 )
             )
             logger.debug("[资产趋势] 查询到范围内 %d 条账单", len(bills_in_range))
@@ -1642,7 +1730,12 @@ def get_asset_trends():
                 )
 
             result.append(
-                {"year": current_date.year, "month": current_date.month, "day": current_date.day, "items": day_items}
+                {
+                    "year": current_date.year,
+                    "month": current_date.month,
+                    "day": current_date.day,
+                    "items": day_items,
+                }
             )
 
             current_date += timedelta(days=1)
@@ -1654,14 +1747,26 @@ def get_asset_trends():
                 "[资产趋势] 完成: %d天, %d个账户, 日期范围 %s ~ %s",
                 len(result),
                 total_accounts_per_day,
-                result[0]["year"] * 10000 + result[0]["month"] * 100 + result[0]["day"] if result else 0,
-                result[-1]["year"] * 10000 + result[-1]["month"] * 100 + result[-1]["day"] if result else 0,
+                (
+                    result[0]["year"] * 10000
+                    + result[0]["month"] * 100
+                    + result[0]["day"]
+                    if result
+                    else 0
+                ),
+                (
+                    result[-1]["year"] * 10000
+                    + result[-1]["month"] * 100
+                    + result[-1]["day"]
+                    if result
+                    else 0
+                ),
             )
         else:
             logger.info("[资产趋势] 完成: 无数据")
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("[资产趋势] 失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("[资产趋势] 失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500

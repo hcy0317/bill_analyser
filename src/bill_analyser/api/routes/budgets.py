@@ -8,6 +8,7 @@ import asyncio
 import calendar
 import json
 from datetime import date, datetime
+from typing import Any, cast
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
@@ -22,10 +23,39 @@ bp = Blueprint("budgets", __name__)
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    return current_app.config.get("DB_INSTANCE")
+    return cast(Any, current_app.config.get("DB_INSTANCE"))
 
 
-def _resolve_budget_period_range(period_type, year=None, month=None, quarter=None, start_date=None, end_date=None):
+def _run_async(coroutine):
+    """在独立事件循环中执行异步数据库调用。"""
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
+
+
+def _get_request_user_id() -> int:
+    """获取认证中间件注入的当前用户 ID。"""
+    return int(getattr(request, "user_id", 0) or 0)
+
+
+def _get_optional_int(value: Any) -> int | None:
+    """安全解析可选整数参数。"""
+    if value in [None, ""]:
+        return None
+    return int(value)
+
+
+def _resolve_budget_period_range(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    period_type,
+    year=None,
+    month=None,
+    quarter=None,
+    start_date=None,
+    end_date=None,
+):
     """解析预算执行/快照使用的日期范围。"""
     if start_date and end_date:
         return start_date, end_date
@@ -79,24 +109,19 @@ def get_budgets():
         if request.args.get("category"):
             filters["category"] = request.args.get("category")
 
-        logger.info(f"[get_budgets] 筛选条件: {filters}")
+        logger.info("[get_budgets] 筛选条件: %s", filters)
 
         db = get_app_context()
+        user_id = _get_request_user_id()
+        budgets = _run_async(db.get_budgets(filters, user_id=user_id))
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            budgets = loop.run_until_complete(db.get_budgets(filters, user_id=request.user_id))
-        finally:
-            loop.close()
-
-        logger.info(f"[get_budgets] 返回{len(budgets)}条预算")
+        logger.info("[get_budgets] 返回%s条预算", len(budgets))
 
         return jsonify({"success": True, "result": budgets})
 
-    except Exception as e:
-        logger.error("获取预算列表失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取预算列表失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:budget_id>", methods=["GET"])
@@ -104,29 +129,24 @@ def get_budgets():
 @require_auth
 def get_budget(budget_id: int):
     """获取预算详情"""
-    logger.info(f"[get_budget] 获取预算ID: {budget_id}")
+    logger.info("[get_budget] 获取预算ID: %s", budget_id)
 
     try:
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            budget = loop.run_until_complete(db.get_budget_by_id(budget_id, user_id=request.user_id))
-        finally:
-            loop.close()
+        user_id = _get_request_user_id()
+        budget = _run_async(db.get_budget_by_id(budget_id, user_id=user_id))
 
         if not budget:
-            logger.warning(f"[get_budget] 预算不存在: {budget_id}")
+            logger.warning("[get_budget] 预算不存在: %s", budget_id)
             return jsonify({"success": False, "error": "Budget not found"}), 404
 
-        logger.info(f"[get_budget] 成功获取预算: {budget['name']}")
+        logger.info("[get_budget] 成功获取预算: %s", budget["name"])
 
         return jsonify({"success": True, "result": budget})
 
-    except Exception as e:
-        logger.error("获取预算详情失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取预算详情失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/", methods=["POST"])
@@ -156,13 +176,13 @@ def create_budget():
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        logger.info(f"[create_budget] 请求数据: {data}")
+        logger.info("[create_budget] 请求数据: %s", data)
 
         # 预算名称已改为备注，允许为空；分类仍为必填
         required_fields = ["period_type", "amount", "start_date"]
         for field in required_fields:
             if field not in data:
-                logger.warning(f"[create_budget] 缺少必填字段: {field}")
+                logger.warning("[create_budget] 缺少必填字段: %s", field)
                 return jsonify({"success": False, "error": f"Missing required field: {field}"}), 400
 
         if not data.get("category"):
@@ -177,26 +197,21 @@ def create_budget():
         data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         db = get_app_context()
+        user_id = _get_request_user_id()
+        budget_id = _run_async(db.create_budget(data, user_id=user_id))
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            budget_id = loop.run_until_complete(db.create_budget(data, user_id=request.user_id))
+        if budget_id:
+            budget = _run_async(db.get_budget_by_id(budget_id, user_id=user_id))
+            logger.info("[create_budget] 创建成功: ID=%s, name=%s", budget_id, data["name"])
 
-            if budget_id:
-                budget = loop.run_until_complete(db.get_budget_by_id(budget_id, user_id=request.user_id))
-                logger.info(f"[create_budget] 创建成功: ID={budget_id}, name={data['name']}")
-
-                return jsonify({"success": True, "result": budget}), 201
-        finally:
-            loop.close()
+            return jsonify({"success": True, "result": budget}), 201
 
         logger.error("[create_budget] 创建失败")
         return jsonify({"success": False, "error": "Failed to create budget"}), 500
 
-    except Exception as e:
-        logger.error("创建预算失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("创建预算失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:budget_id>", methods=["PUT"])
@@ -204,36 +219,31 @@ def create_budget():
 @require_auth
 def update_budget(budget_id: int):
     """更新预算"""
-    logger.info(f"[update_budget] 更新预算ID: {budget_id}")
+    logger.info("[update_budget] 更新预算ID: %s", budget_id)
 
     try:
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        logger.info(f"[update_budget] 更新数据: {data}")
+        logger.info("[update_budget] 更新数据: %s", data)
 
         data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.update_budget(budget_id, data, user_id=request.user_id))
-        finally:
-            loop.close()
+        user_id = _get_request_user_id()
+        result = _run_async(db.update_budget(budget_id, data, user_id=user_id))
 
         if result:
-            logger.info(f"[update_budget] 更新成功: ID={budget_id}")
+            logger.info("[update_budget] 更新成功: ID=%s", budget_id)
             return jsonify({"success": True, "message": "Budget updated successfully"})
 
-        logger.warning(f"[update_budget] 预算不存在: {budget_id}")
+        logger.warning("[update_budget] 预算不存在: %s", budget_id)
         return jsonify({"success": False, "error": "Budget not found"}), 404
 
-    except Exception as e:
-        logger.error("更新预算失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新预算失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:budget_id>", methods=["DELETE"])
@@ -241,34 +251,29 @@ def update_budget(budget_id: int):
 @require_auth
 def delete_budget(budget_id: int):
     """删除预算"""
-    logger.info(f"[delete_budget] 删除预算ID: {budget_id}")
+    logger.info("[delete_budget] 删除预算ID: %s", budget_id)
 
     try:
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.delete_budget(budget_id, user_id=request.user_id))
-        finally:
-            loop.close()
+        user_id = _get_request_user_id()
+        result = _run_async(db.delete_budget(budget_id, user_id=user_id))
 
         if result:
-            logger.info(f"[delete_budget] 删除成功: ID={budget_id}")
+            logger.info("[delete_budget] 删除成功: ID=%s", budget_id)
             return jsonify({"success": True, "message": "Budget deleted successfully"})
 
-        logger.warning(f"[delete_budget] 预算不存在: {budget_id}")
+        logger.warning("[delete_budget] 预算不存在: %s", budget_id)
         return jsonify({"success": False, "error": "Budget not found"}), 404
 
-    except Exception as e:
-        logger.error("删除预算失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除预算失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/execution", methods=["GET"])
 @log_method
 @require_auth
-def get_budget_execution():
+def get_budget_execution():  # pylint: disable=too-many-locals
     """
     获取预算执行详情
 
@@ -285,9 +290,9 @@ def get_budget_execution():
     try:
         budget_type = int(request.args.get("budget_type", 3))
         period_type = request.args.get("period_type", "monthly")
-        year = int(request.args.get("year")) if request.args.get("year") else None
-        month = int(request.args.get("month")) if request.args.get("month") else None
-        quarter = int(request.args.get("quarter")) if request.args.get("quarter") else None
+        year = _get_optional_int(request.args.get("year"))
+        month = _get_optional_int(request.args.get("month"))
+        quarter = _get_optional_int(request.args.get("quarter"))
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
         category_id = request.args.get("category_id")
@@ -295,7 +300,12 @@ def get_budget_execution():
         tag_ids_str = request.args.get("tag_ids", "")
 
         start_date, end_date = _resolve_budget_period_range(
-            period_type, year=year, month=month, quarter=quarter, start_date=start_date, end_date=end_date
+            period_type,
+            year=year,
+            month=month,
+            quarter=quarter,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         # 解析ID列表
@@ -310,36 +320,39 @@ def get_budget_execution():
         category_id_int = int(category_id) if category_id else None
 
         logger.info(
-            f"[get_budget_execution] 参数: type={budget_type}, "
-            f"period={period_type}, dates={start_date}~{end_date}, category={category_id_int}, "
-            f"accounts={account_ids}, tags={tag_ids}"
+            (
+                "[get_budget_execution] 参数: type=%s, period=%s, dates=%s~%s, "
+                "category=%s, accounts=%s, tags=%s"
+            ),
+            budget_type,
+            period_type,
+            start_date,
+            end_date,
+            category_id_int,
+            account_ids,
+            tag_ids,
         )
 
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            results = loop.run_until_complete(
-                db.get_budget_execution_details(
-                    budget_type=budget_type,
-                    start_date=start_date,
-                    end_date=end_date,
-                    category_id=category_id_int,
-                    account_ids=account_ids,
-                    tag_ids=tag_ids,
-                    user_id=request.user_id,
-                )
+        user_id = _get_request_user_id()
+        results = _run_async(
+            db.get_budget_execution_details(
+                budget_type=budget_type,
+                start_date=start_date,
+                end_date=end_date,
+                category_id=category_id_int,
+                account_ids=account_ids,
+                tag_ids=tag_ids,
+                user_id=user_id,
             )
-        finally:
-            loop.close()
+        )
 
         # 计算汇总
         total_budget = sum(r["budget_amount"] for r in results)
         total_spent = sum(r["spent_amount"] for r in results)
         overall_execution_rate = (total_spent / total_budget * 100) if total_budget > 0 else 0
 
-        logger.info(f"[get_budget_execution] 返回{len(results)}条执行详情")
+        logger.info("[get_budget_execution] 返回%s条执行详情", len(results))
 
         return jsonify(
             {
@@ -359,15 +372,15 @@ def get_budget_execution():
             }
         )
 
-    except Exception as e:
-        logger.error("获取预算执行详情失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取预算执行详情失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/forecast", methods=["GET"])
 @log_method
 @require_auth
-def get_period_forecast():
+def get_period_forecast():  # pylint: disable=too-many-locals
     """
     获取周期预计
 
@@ -390,12 +403,23 @@ def get_period_forecast():
         months_history = int(request.args.get("months_history", 6))
 
         logger.info(
-            f"[get_period_forecast] 参数: type={budget_type}, "
-            f"period={period_type}, dates={start_date}~{end_date}, "
-            f"strategy={forecast_strategy}, months_history={months_history}"
+            (
+                "[get_period_forecast] 参数: type=%s, period=%s, dates=%s~%s, "
+                "strategy=%s, months_history=%s"
+            ),
+            budget_type,
+            period_type,
+            start_date,
+            end_date,
+            forecast_strategy,
+            months_history,
         )
 
-        period_start, period_end = _resolve_budget_period_range(period_type, start_date=start_date, end_date=end_date)
+        period_start, period_end = _resolve_budget_period_range(
+            period_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         today = date.today()
         start_dt = datetime.strptime(period_start, "%Y-%m-%d").date()
@@ -412,30 +436,25 @@ def get_period_forecast():
             days_remaining = max((end_dt - today).days, 0)
 
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            results = loop.run_until_complete(
-                db.get_period_forecast(
-                    budget_type=budget_type,
-                    period_type=period_type,
-                    start_date=start_date,
-                    end_date=end_date,
-                    forecast_strategy=forecast_strategy,
-                    history_periods=months_history,
-                    user_id=request.user_id,
-                )
+        user_id = _get_request_user_id()
+        results = _run_async(
+            db.get_period_forecast(
+                budget_type=budget_type,
+                period_type=period_type,
+                start_date=start_date,
+                end_date=end_date,
+                forecast_strategy=forecast_strategy,
+                history_periods=months_history,
+                user_id=user_id,
             )
-        finally:
-            loop.close()
+        )
 
         # 计算汇总
         total_forecast = sum(r["forecast_amount"] for r in results)
         mape_values = [r["backtest_mape"] for r in results if r.get("backtest_mape") is not None]
         avg_backtest_mape = round(sum(mape_values) / len(mape_values), 2) if mape_values else None
 
-        logger.info(f"[get_period_forecast] 返回{len(results)}条预测数据")
+        logger.info("[get_period_forecast] 返回%s条预测数据", len(results))
 
         return jsonify(
             {
@@ -461,15 +480,15 @@ def get_period_forecast():
             }
         )
 
-    except Exception as e:
-        logger.error("获取周期预计失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取周期预计失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/history/snapshot", methods=["POST"])
 @log_method
 @require_auth
-def create_budget_history_snapshot():
+def create_budget_history_snapshot():  # pylint: disable=too-many-locals
     """创建预算执行历史快照。"""
     logger.info("[create_budget_history_snapshot] 开始创建预算执行快照")
 
@@ -477,11 +496,11 @@ def create_budget_history_snapshot():
         data = request.get_json(silent=True) or {}
         budget_type = int(data.get("budget_type", 3))
         period_type = data.get("period_type", "monthly")
-        year = int(data.get("year")) if data.get("year") else None
-        month = int(data.get("month")) if data.get("month") else None
-        quarter = int(data.get("quarter")) if data.get("quarter") else None
-        budget_id = int(data.get("budget_id")) if data.get("budget_id") else None
-        category_id = int(data.get("category_id")) if data.get("category_id") else None
+        year = _get_optional_int(data.get("year"))
+        month = _get_optional_int(data.get("month"))
+        quarter = _get_optional_int(data.get("quarter"))
+        budget_id = _get_optional_int(data.get("budget_id"))
+        category_id = _get_optional_int(data.get("category_id"))
         account_ids = [int(x) for x in data.get("account_ids", []) if str(x).strip()]
         tag_ids = [int(x) for x in data.get("tag_ids", []) if str(x).strip()]
         start_date, end_date = _resolve_budget_period_range(
@@ -494,50 +513,50 @@ def create_budget_history_snapshot():
         )
 
         db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                db.create_budget_execution_snapshots(
-                    budget_type=budget_type,
-                    period_type=period_type,
-                    start_date=start_date,
-                    end_date=end_date,
-                    budget_id=budget_id,
-                    category_id=category_id,
-                    account_ids=account_ids or None,
-                    tag_ids=tag_ids or None,
-                    user_id=request.user_id,
-                )
+        user_id = _get_request_user_id()
+        result = _run_async(
+            db.create_budget_execution_snapshots(
+                budget_type=budget_type,
+                period_type=period_type,
+                start_date=start_date,
+                end_date=end_date,
+                budget_id=budget_id,
+                category_id=category_id,
+                account_ids=account_ids or None,
+                tag_ids=tag_ids or None,
+                user_id=user_id,
             )
-        finally:
-            loop.close()
+        )
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("创建预算执行快照失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("创建预算执行快照失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/history", methods=["GET"])
 @log_method
 @require_auth
-def get_budget_history():
+def get_budget_history():  # pylint: disable=too-many-locals
     """获取预算执行历史快照。"""
     logger.info("[get_budget_history] 开始获取预算执行历史")
 
     try:
         budget_type = int(request.args.get("budget_type", 3))
         period_type = request.args.get("period_type", "monthly")
-        year = int(request.args.get("year")) if request.args.get("year") else None
-        month = int(request.args.get("month")) if request.args.get("month") else None
-        quarter = int(request.args.get("quarter")) if request.args.get("quarter") else None
-        budget_id = int(request.args.get("budget_id")) if request.args.get("budget_id") else None
-        category_id = int(request.args.get("category_id")) if request.args.get("category_id") else None
+        year = _get_optional_int(request.args.get("year"))
+        month = _get_optional_int(request.args.get("month"))
+        quarter = _get_optional_int(request.args.get("quarter"))
+        budget_id = _get_optional_int(request.args.get("budget_id"))
+        category_id = _get_optional_int(request.args.get("category_id"))
         account_ids_str = request.args.get("account_ids", "")
         tag_ids_str = request.args.get("tag_ids", "")
-        account_ids = [int(x) for x in account_ids_str.split(",") if x.strip()] if account_ids_str else None
+        account_ids = (
+            [int(x) for x in account_ids_str.split(",") if x.strip()]
+            if account_ids_str
+            else None
+        )
         tag_ids = [int(x) for x in tag_ids_str.split(",") if x.strip()] if tag_ids_str else None
         start_date, end_date = _resolve_budget_period_range(
             period_type,
@@ -549,38 +568,38 @@ def get_budget_history():
         )
 
         db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            items = loop.run_until_complete(
-                db.get_budget_execution_history(
-                    budget_type=budget_type,
-                    period_type=period_type,
-                    start_date=start_date,
-                    end_date=end_date,
-                    budget_id=budget_id,
-                    category_id=category_id,
-                    account_ids=account_ids,
-                    tag_ids=tag_ids,
-                    user_id=request.user_id,
-                )
+        user_id = _get_request_user_id()
+        items = _run_async(
+            db.get_budget_execution_history(
+                budget_type=budget_type,
+                period_type=period_type,
+                start_date=start_date,
+                end_date=end_date,
+                budget_id=budget_id,
+                category_id=category_id,
+                account_ids=account_ids,
+                tag_ids=tag_ids,
+                user_id=user_id,
             )
-        finally:
-            loop.close()
+        )
 
         return jsonify(
             {
                 "success": True,
                 "result": {
                     "items": items,
-                    "summary": {"count": len(items), "period_start": start_date, "period_end": end_date},
+                    "summary": {
+                        "count": len(items),
+                        "period_start": start_date,
+                        "period_end": end_date,
+                    },
                 },
             }
         )
 
-    except Exception as e:
-        logger.error("获取预算执行历史失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取预算执行历史失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/export", methods=["GET"])
@@ -592,24 +611,23 @@ def export_budgets():
 
     try:
         db = get_app_context()
+        user_id = _get_request_user_id()
+        budgets = _run_async(db.export_budgets(user_id=user_id))
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            budgets = loop.run_until_complete(db.export_budgets(user_id=request.user_id))
-        finally:
-            loop.close()
-
-        logger.info(f"[export_budgets] 导出{len(budgets)}条预算")
+        logger.info("[export_budgets] 导出%s条预算", len(budgets))
 
         # 保持字段顺序
-        json_str = json.dumps({"success": True, "result": budgets}, ensure_ascii=False, separators=(",", ":"))
+        json_str = json.dumps(
+            {"success": True, "result": budgets},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
         return Response(json_str, mimetype="application/json")
 
-    except Exception as e:
-        logger.error("导出预算失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("导出预算失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/import", methods=["POST"])
@@ -635,25 +653,28 @@ def import_budgets():
     try:
         data = request.get_json()
         if not data or not isinstance(data, list):
-            return jsonify({"success": False, "error": "Invalid data format. Expected array of budgets."}), 400
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid data format. Expected array of budgets.",
+                }
+            ), 400
 
-        logger.info(f"[import_budgets] 准备导入{len(data)}条预算")
+        logger.info("[import_budgets] 准备导入%s条预算", len(data))
 
         db = get_app_context()
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(db.import_budgets(data, user_id=request.user_id))
-        finally:
-            loop.close()
+        user_id = _get_request_user_id()
+        result = _run_async(db.import_budgets(data, user_id=user_id))
 
         logger.info(
-            f"[import_budgets] 导入完成: 创建={result['created']}, 更新={result['updated']}, 错误={result['errors']}"
+            "[import_budgets] 导入完成: 创建=%s, 更新=%s, 错误=%s",
+            result["created"],
+            result["updated"],
+            result["errors"],
         )
 
         return jsonify({"success": True, "result": result})
 
-    except Exception as e:
-        logger.error("导入预算失败: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("导入预算失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500

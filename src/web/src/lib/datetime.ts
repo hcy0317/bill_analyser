@@ -660,11 +660,11 @@ export function getAMOrPM(hour: number): string {
 }
 
 export function getUnixTimeBeforeUnixTime(unixTime: number, amount: number, unit: unitOfTime.DurationConstructor): number {
-    return moment.unix(unixTime).subtract(amount, unit).unix();
+    return moment.unix(unixTime).subtract(amount, unit as moment.unitOfTime.Base).unix();
 }
 
 export function getUnixTimeAfterUnixTime(unixTime: number, amount: number, unit: unitOfTime.DurationConstructor): number {
-    return moment.unix(unixTime).add(amount, unit).unix();
+    return moment.unix(unixTime).add(amount, unit as moment.unitOfTime.Base).unix();
 }
 
 export function getDayDifference(yearMonthDay1: YearMonthDay, yearMonthDay2: YearMonthDay): number {
@@ -1486,7 +1486,7 @@ export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValu
 
     // For January 1 fiscal year start, fiscal year start time is always January 1 in the input calendar year
     // Note: We use loose equality check here to handle potential type mismatches (string vs number)
-     
+
     if (fiscalYearStartValue == FiscalYearStart.JanuaryFirstDay.value) {
         return moment().year(date.year()).month(0).date(1).hour(0).minute(0).second(0).millisecond(0).unix();
     }

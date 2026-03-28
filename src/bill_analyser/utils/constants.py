@@ -162,12 +162,14 @@ VALID_SORT_FIELDS = ["date", "amount", "type", "category", "account", "created_a
 VALID_SORT_ORDERS = ["asc", "desc"]
 
 
-# ==================== 去重模式 ====================
+# ==================== 兼容保留常量 ====================
 
+# 历史导入面保留：运行时已统一到 SmartDeduplicationEngine，
+# 但旧脚本/调用方仍可能静态导入该常量。
 DEDUPLICATION_MODES = {
-    "simple": "简单去重(完全匹配)",
-    "advanced": "高级去重(模糊匹配+时间窗口)",
-    "aggressive": "激进去重(最宽松)",
+    "simple": "简单去重(历史兼容，运行时已废弃)",
+    "advanced": "高级去重(历史兼容，运行时已废弃)",
+    "aggressive": "激进去重(历史兼容，运行时已废弃)",
 }
 
 

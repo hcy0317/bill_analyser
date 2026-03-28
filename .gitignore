@@ -111,6 +111,7 @@ coverage.xml
 .hypothesis/
 
 # Temporary files
+.tmp/
 temp/
 tmp/
 *.tmp

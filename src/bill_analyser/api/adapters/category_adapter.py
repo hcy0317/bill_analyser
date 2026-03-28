@@ -10,7 +10,11 @@ from bill_analyser.utils.constants import DEFAULT_PARENT_ID
 class CategoryAdapter:
     """分类数据适配器。"""
 
-    def backend_to_frontend(self, category: dict[str, Any], parent_id: str = DEFAULT_PARENT_ID) -> dict[str, Any]:
+    def backend_to_frontend(
+        self,
+        category: dict[str, Any],
+        parent_id: str = DEFAULT_PARENT_ID,
+    ) -> dict[str, Any]:
         """后端分类 -> 前端分类。"""
         name = category.get("sub_category") or category.get("main_category", "")
         return {
@@ -64,7 +68,9 @@ class CategoryAdapter:
                 node["parentId"] = DEFAULT_PARENT_ID
                 node.setdefault("subCategories", [])
             else:
-                node.setdefault("subCategories", []).append(self.backend_to_frontend(category, parent_id=node["id"]))
+                node.setdefault("subCategories", []).append(
+                    self.backend_to_frontend(category, parent_id=node["id"])
+                )
 
         return {"success": True, "result": grouped}
 
@@ -72,10 +78,8 @@ class CategoryAdapter:
         """返回扁平分类列表。"""
         flat_list: list[dict[str, Any]] = []
         for category in categories:
-            parent_id = (
-                DEFAULT_PARENT_ID
-                if not category.get("sub_category")
-                else f"virtual_{category.get('main_category', '')}"
+            parent_id = DEFAULT_PARENT_ID if not category.get("sub_category") else (
+                f"virtual_{category.get('main_category', '')}"
             )
             flat_list.append(self.backend_to_frontend(category, parent_id=parent_id))
         return flat_list

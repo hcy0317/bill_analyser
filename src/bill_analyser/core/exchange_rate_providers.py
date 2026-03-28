@@ -130,18 +130,19 @@ class ExchangeRateProvider(ABC):
         Returns:
             Dict[str, float]: {货币代码: 汇率}
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def get_name(self) -> str:
         """获取提供者名称"""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def get_supported_currencies(self) -> list[str]:
         """获取支持的货币列表"""
-        pass
+        raise NotImplementedError
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def _convert_base_currency(
         self,
         rates: dict[str, float],
@@ -175,7 +176,7 @@ class ExchangeRateProvider(ABC):
         result = {}
         base_rate = rates.get(target_base)
         if not base_rate:
-            self.logger.warning(f"目标基准货币 {target_base} 不在汇率数据中")
+            self.logger.warning("目标基准货币 %s 不在汇率数据中", target_base)
             return result
 
         for currency in target_currencies:
@@ -268,7 +269,7 @@ class ECBProvider(ExchangeRateProvider):
             async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        self.logger.error(f"ECB API请求失败: {response.status}")
+                        self.logger.error("ECB API请求失败: %s", response.status)
                         return {}
 
                     xml_data = await response.text()
@@ -279,8 +280,8 @@ class ECBProvider(ExchangeRateProvider):
                         rates, "EUR", base_currency, target_currencies, rate_format="base_to_target"
                     )
 
-        except Exception as e:
-            self.logger.error(f"获取ECB汇率失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("获取ECB汇率失败: %s", exc)
             return {}
 
     def _parse_ecb_xml(self, xml_data: str, target_date: str | None = None) -> dict[str, float]:
@@ -308,8 +309,8 @@ class ECBProvider(ExchangeRateProvider):
                     if target_date is None:
                         break  # 只取最新的
 
-        except Exception as e:
-            self.logger.error(f"解析ECB XML失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("解析ECB XML失败: %s", exc)
 
         return rates
 
@@ -342,8 +343,12 @@ class BOCChinaProvider(ExchangeRateProvider):
 
                     html = await response.text()
                     quote_map = self._parse_quote_map(html)
-                    return _convert_cny_quote_map_to_rates(quote_map, base_currency, target_currencies)
-        except Exception as exc:
+                    return _convert_cny_quote_map_to_rates(
+                        quote_map,
+                        base_currency,
+                        target_currencies,
+                    )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.error("获取中国银行汇率失败: %s", exc)
             return {}
 
@@ -413,8 +418,12 @@ class CMBChinaProvider(ExchangeRateProvider):
                         html = await response.text()
                         quote_map = self._parse_quote_map(html)
 
-                return _convert_cny_quote_map_to_rates(quote_map, base_currency, target_currencies)
-        except Exception as exc:
+                return _convert_cny_quote_map_to_rates(
+                    quote_map,
+                    base_currency,
+                    target_currencies,
+                )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.error("获取招商银行汇率失败: %s", exc)
             return {}
 
@@ -539,9 +548,16 @@ class BOCProvider(ExchangeRateProvider):
         self, base_currency: str, target_currencies: list[str], date: str | None = None
     ) -> dict[str, float]:
         """从BOC获取汇率"""
+        # pylint: disable=too-many-locals
         try:
             # BOC API使用特定的系列代码
-            series_map = {"USD": "FXUSDCAD", "EUR": "FXEURCAD", "GBP": "FXGBPCAD", "JPY": "FXJPYCAD", "CNY": "FXCNYCAD"}
+            series_map = {
+                "USD": "FXUSDCAD",
+                "EUR": "FXEURCAD",
+                "GBP": "FXGBPCAD",
+                "JPY": "FXJPYCAD",
+                "CNY": "FXCNYCAD",
+            }
 
             rates = {"CAD": 1.0}
 
@@ -566,7 +582,7 @@ class BOCProvider(ExchangeRateProvider):
             async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        self.logger.error(f"BOC API请求失败: {response.status}")
+                        self.logger.error("BOC API请求失败: %s", response.status)
                         return {}
 
                     data = await response.json()
@@ -583,8 +599,8 @@ class BOCProvider(ExchangeRateProvider):
                         rates, "CAD", base_currency, target_currencies, rate_format="target_to_base"
                     )
 
-        except Exception as e:
-            self.logger.error(f"获取BOC汇率失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("获取BOC汇率失败: %s", exc)
             return {}
 
 
@@ -612,7 +628,7 @@ class RBAProvider(ExchangeRateProvider):
             async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(self.BASE_URL) as response:
                     if response.status != 200:
-                        self.logger.error(f"RBA API请求失败: {response.status}")
+                        self.logger.error("RBA API请求失败: %s", response.status)
                         return {}
 
                     xml_data = await response.text()
@@ -623,8 +639,8 @@ class RBAProvider(ExchangeRateProvider):
                         rates, "AUD", base_currency, target_currencies, rate_format="base_to_target"
                     )
 
-        except Exception as e:
-            self.logger.error(f"获取RBA汇率失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("获取RBA汇率失败: %s", exc)
             return {}
 
     def _parse_rba_xml(self, xml_data: str) -> dict[str, float]:
@@ -635,8 +651,6 @@ class RBAProvider(ExchangeRateProvider):
 
         我们使用正则表达式从 <cb:targetCurrency> 和 <cb:value> 标签提取数据
         """
-        import re
-
         rates = {"AUD": 1.0}
 
         try:
@@ -655,10 +669,10 @@ class RBAProvider(ExchangeRateProvider):
                     currency = currency_match.group(1)
                     rate_value = float(value_match.group(1))
                     rates[currency] = rate_value
-                    self.logger.debug(f"RBA 解析: {currency} = {rate_value}")
+                    self.logger.debug("RBA 解析: %s = %s", currency, rate_value)
 
-        except Exception as e:
-            self.logger.error(f"解析RBA XML失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("解析RBA XML失败: %s", exc)
 
         return rates
 
@@ -692,16 +706,21 @@ class NBPProvider(ExchangeRateProvider):
             async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        self.logger.error(f"NBP API请求失败: {response.status}")
+                        self.logger.error("NBP API请求失败: %s", response.status)
                         return {}
 
                     data = await response.json()
                     rates = self._parse_nbp_json(data)
 
-                    return self._convert_base_currency(rates, "PLN", base_currency, target_currencies)
+                    return self._convert_base_currency(
+                        rates,
+                        "PLN",
+                        base_currency,
+                        target_currencies,
+                    )
 
-        except Exception as e:
-            self.logger.error(f"获取NBP汇率失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("获取NBP汇率失败: %s", exc)
             return {}
 
     def _parse_nbp_json(self, data: list[dict]) -> dict[str, float]:
@@ -717,8 +736,8 @@ class NBPProvider(ExchangeRateProvider):
                     if currency and mid_rate:
                         rates[currency] = float(mid_rate)
 
-        except Exception as e:
-            self.logger.error(f"解析NBP JSON失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("解析NBP JSON失败: %s", exc)
 
         return rates
 
@@ -748,20 +767,30 @@ class SNBProvider(ExchangeRateProvider):
             async with aiohttp.ClientSession(timeout=self.timeout, connector=connector) as session:
                 async with session.get(self.BASE_URL) as response:
                     if response.status != 200:
-                        self.logger.error(f"SNB API请求失败: {response.status}")
+                        self.logger.error("SNB API请求失败: %s", response.status)
                         return {}
 
                     csv_data = await response.text()
                     rates = self._parse_snb_csv(csv_data, date)
 
-                    return self._convert_base_currency(rates, "CHF", base_currency, target_currencies)
+                    return self._convert_base_currency(
+                        rates,
+                        "CHF",
+                        base_currency,
+                        target_currencies,
+                    )
 
-        except Exception as e:
-            self.logger.error(f"获取SNB汇率失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("获取SNB汇率失败: %s", exc)
             return {}
 
-    def _parse_snb_csv(self, csv_data: str, target_date: str | None = None) -> dict[str, float]:
+    def _parse_snb_csv(
+        self,
+        csv_data: str,
+        target_date: str | None = None,
+    ) -> dict[str, float]:
         """解析SNB CSV数据"""
+        del target_date
         rates = {"CHF": 1.0}
 
         try:
@@ -772,8 +801,8 @@ class SNBProvider(ExchangeRateProvider):
                 # 这里需要根据实际SNB CSV格式实现
                 pass
 
-        except Exception as e:
-            self.logger.error(f"解析SNB CSV失败: {e}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("解析SNB CSV失败: %s", exc)
 
         return rates
 
@@ -801,7 +830,12 @@ class ExchangeRateManager:
         }
 
     @log_method
-    async def get_rate(self, from_currency: str, to_currency: str, date: str | None = None) -> float | None:
+    async def get_rate(
+        self,
+        from_currency: str,
+        to_currency: str,
+        date: str | None = None,
+    ) -> float | None:
         """
         获取汇率（优先从数据库，否则从API）
 
@@ -817,7 +851,7 @@ class ExchangeRateManager:
             return 1.0
 
         # 1. 先从数据库查询
-        conn = await self.db._get_connection()
+        conn = await self.db._get_connection()  # pylint: disable=protected-access
 
         if date:
             query = """
@@ -840,7 +874,11 @@ class ExchangeRateManager:
             return row[0]
 
         # 2. 从API获取并缓存
-        self.logger.info(f"数据库无汇率，尝试从API获取: {from_currency} -> {to_currency}")
+        self.logger.info(
+            "数据库无汇率，尝试从API获取: %s -> %s",
+            from_currency,
+            to_currency,
+        )
         rate = await self._fetch_from_providers(from_currency, to_currency, date)
 
         if rate:
@@ -858,19 +896,25 @@ class ExchangeRateManager:
             try:
                 rates = await provider.fetch_rates(from_currency, [to_currency], date)
                 if to_currency in rates:
-                    self.logger.info(f"从 {provider_name} 获取汇率成功")
+                    self.logger.info("从 %s 获取汇率成功", provider_name)
                     return rates[to_currency]
-            except Exception as e:
-                self.logger.warning(f"从 {provider_name} 获取汇率失败: {e}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.warning("从 %s 获取汇率失败: %s", provider_name, exc)
                 continue
 
         return None
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def _save_rate(
-        self, from_currency: str, to_currency: str, rate: float, source: str, date: str | None = None
+        self,
+        from_currency: str,
+        to_currency: str,
+        rate: float,
+        source: str,
+        date: str | None = None,
     ):
         """保存汇率到数据库"""
-        conn = await self.db._get_connection()
+        conn = await self.db._get_connection()  # pylint: disable=protected-access
         effective_date = date or datetime.now().strftime("%Y-%m-%d")
 
         await conn.execute(
@@ -893,7 +937,7 @@ class ExchangeRateManager:
             currencies: 要同步的货币列表
             base_currency: 基准货币
         """
-        self.logger.info(f"开始同步汇率: {base_currency} -> {currencies}")
+        self.logger.info("开始同步汇率: %s -> %s", base_currency, currencies)
 
         success_count = 0
         for provider_name, provider in self.providers.items():
@@ -904,13 +948,13 @@ class ExchangeRateManager:
                     await self._save_rate(base_currency, currency, rate, provider_name)
                     success_count += 1
 
-                self.logger.info(f"{provider_name}: 同步了 {len(rates)} 个汇率")
+                self.logger.info("%s: 同步了 %d 个汇率", provider_name, len(rates))
 
-            except Exception as e:
-                self.logger.error(f"{provider_name} 同步失败: {e}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.error("%s 同步失败: %s", provider_name, exc)
                 continue
 
-        self.logger.info(f"汇率同步完成，成功 {success_count} 条")
+        self.logger.info("汇率同步完成，成功 %d 条", success_count)
         return success_count
 
     @log_method

@@ -244,7 +244,7 @@ class ICBCParser(ParserBase):
 
             try:
                 amount_value = float(amount_str.replace(",", ""))
-            except ValueError, TypeError:
+            except (ValueError, TypeError):
                 return None
 
             if amount_value == 0:
@@ -282,7 +282,7 @@ class ICBCParser(ParserBase):
                     encoding_used = encoding
                     self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
                     break
-                except UnicodeDecodeError, ValueError:
+                except (UnicodeDecodeError, ValueError):
                     continue
 
             if not dfs:
@@ -463,7 +463,7 @@ class ICBCParser(ParserBase):
             # 跳过非数字金额(如表头重复行)
             try:
                 amount_value = float(amount_str)
-            except ValueError, TypeError:
+            except (ValueError, TypeError):
                 return None
 
             # 跳过零金额

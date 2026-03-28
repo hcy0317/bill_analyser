@@ -150,7 +150,7 @@ def validate_amount(
 
         return True
 
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return False
 
 

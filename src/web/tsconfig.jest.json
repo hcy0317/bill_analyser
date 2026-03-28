@@ -2,15 +2,23 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "commonjs",
+    "baseUrl": ".",
     "types": ["jest", "node"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "isolatedModules": false,
     "verbatimModuleSyntax": false,
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@jest/globals": ["./node_modules/@jest/globals"],
+      "moment-timezone": ["./node_modules/moment-timezone"],
+      "pinia": ["./node_modules/pinia"]
+    }
   },
   "include": [
     "src/**/*.ts",
+    "../../tests/web/**/*.ts",
     "jest.config.ts"
   ]
 }

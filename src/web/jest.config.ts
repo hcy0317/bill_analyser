@@ -3,8 +3,9 @@ import type { Config } from 'jest';
 const config: Config = {
     preset: 'ts-jest',
     testEnvironment: 'node',
-    roots: ['<rootDir>/src'],
-    testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.spec.ts'],
+    roots: ['<rootDir>/src', '<rootDir>/../../tests/web'],
+    testMatch: ['**/*.test.ts', '**/*.spec.ts'],
+    moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
     moduleNameMapper: {
         '^@/(.*)$': '<rootDir>/src/$1'
     },
@@ -14,8 +15,7 @@ const config: Config = {
     moduleFileExtensions: ['ts', 'js', 'json'],
     collectCoverageFrom: [
         'src/**/*.ts',
-        '!src/**/*.d.ts',
-        '!src/**/__tests__/**'
+        '!src/**/*.d.ts'
     ]
 };
 

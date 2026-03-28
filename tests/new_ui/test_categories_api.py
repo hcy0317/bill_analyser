@@ -45,6 +45,32 @@ def _auth_headers_fixture(client):
 class TestCategoriesAPI:
     """分类API测试类"""
 
+    def test_create_top_level_category_with_root_parent_id(self, client, auth_headers):
+        """parentId='0' 应创建一级分类，而不是误走二级分类分支。"""
+        category_name = f'pytest顶级分类_{int(time.time() * 1000)}'
+
+        response = client.post(
+            '/api/categories/',
+            data=json.dumps({
+                'name': category_name,
+                'parentId': '0',
+                'type': 3,
+                'comment': 'top-level category regression guard',
+                'displayOrder': 0,
+                'visible': True,
+                'keywords': '顶级分类回归保护',
+            }),
+            content_type='application/json',
+            headers=auth_headers,
+        )
+
+        assert response.status_code in (200, 201), response.get_data(as_text=True)
+        data = json.loads(response.data)
+        assert data['success'] is True
+        result = data['result']
+        assert result['name'] == category_name
+        assert result['parentId'] == '0'
+
     def test_get_categories_tree(self, client, auth_headers):
         """测试获取分类树"""
         response = client.get('/api/categories/', headers=auth_headers)

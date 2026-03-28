@@ -3,8 +3,9 @@ Templates API Routes - 模板相关API端点
 """
 
 import asyncio
+from typing import Any, cast
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.utils.logger import get_logger, log_method
@@ -16,9 +17,22 @@ bp = Blueprint("templates", __name__)
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    from flask import current_app
+    return cast(Any, current_app.config.get("DB_INSTANCE"))
 
-    return current_app.config.get("DB_INSTANCE")
+
+def _get_request_user_id() -> int:
+    """获取认证中间件注入的当前用户 ID。"""
+    return int(getattr(request, "user_id", 0) or 0)
+
+
+def _run_async(coroutine):
+    """在独立事件循环中执行异步数据库调用。"""
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
 
 
 def _get_template_type(default: int | None = None) -> int | None:
@@ -32,9 +46,13 @@ def _get_template_type(default: int | None = None) -> int | None:
     if template_type in [None, ""]:
         return default
 
+    normalized = str(template_type).strip()
+    if not normalized:
+        return default
+
     try:
-        return int(template_type)
-    except TypeError, ValueError:
+        return int(normalized)
+    except (TypeError, ValueError):
         return default
 
 
@@ -45,18 +63,21 @@ def get_templates():
     """获取模板列表"""
     try:
         db = get_app_context()
+        user_id = _get_request_user_id()
         template_type = _get_template_type()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        templates = loop.run_until_complete(db.get_all_templates(user_id=request.user_id, template_type=template_type))
-        loop.close()
+        templates = _run_async(
+            db.get_all_templates(
+                user_id=user_id,
+                template_type=template_type,
+            )
+        )
 
         return jsonify({"success": True, "result": templates})
 
-    except Exception as e:
-        logger.error("获取模板列表失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取模板列表失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:template_id>", methods=["GET"])
@@ -66,23 +87,25 @@ def get_template(template_id: int):
     """获取模板详情"""
     try:
         db = get_app_context()
+        user_id = _get_request_user_id()
         template_type = _get_template_type()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        template = loop.run_until_complete(
-            db.get_template_by_id(template_id, user_id=request.user_id, template_type=template_type)
+        template = _run_async(
+            db.get_template_by_id(
+                template_id,
+                user_id=user_id,
+                template_type=template_type,
+            )
         )
-        loop.close()
 
         if not template:
             return jsonify({"success": False, "error": "Template not found"}), 404
 
         return jsonify({"success": True, "result": template})
 
-    except Exception as e:
-        logger.error("获取模板详情失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取模板详情失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/", methods=["POST"])
@@ -96,20 +119,22 @@ def create_template():
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         db = get_app_context()
+        user_id = _get_request_user_id()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        template_id = loop.run_until_complete(db.create_template(data, user_id=request.user_id))
-        template = loop.run_until_complete(
-            db.get_template_by_id(template_id, user_id=request.user_id, template_type=_get_template_type(default=1))
+        template_id = _run_async(db.create_template(data, user_id=user_id))
+        template = _run_async(
+            db.get_template_by_id(
+                template_id,
+                user_id=user_id,
+                template_type=_get_template_type(default=1),
+            )
         )
-        loop.close()
 
         return jsonify({"success": True, "result": template or {"id": str(template_id)}}), 201
 
-    except Exception as e:
-        logger.error("创建模板失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("创建模板失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:template_id>", methods=["PUT"])
@@ -123,28 +148,35 @@ def update_template(template_id: int):
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         db = get_app_context()
+        user_id = _get_request_user_id()
         template_type = _get_template_type(default=1)
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(
-            db.update_template(template_id, data, user_id=request.user_id, template_type=template_type)
+        result = _run_async(
+            db.update_template(
+                template_id,
+                data,
+                user_id=user_id,
+                template_type=template_type,
+            )
         )
 
         template = None
         if result:
-            template = loop.run_until_complete(
-                db.get_template_by_id(template_id, user_id=request.user_id, template_type=template_type)
+            template = _run_async(
+                db.get_template_by_id(
+                    template_id,
+                    user_id=user_id,
+                    template_type=template_type,
+                )
             )
-        loop.close()
 
         if result:
             return jsonify({"success": True, "result": template})
         return jsonify({"success": False, "error": "Template not found"}), 404
 
-    except Exception as e:
-        logger.error("更新模板失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新模板失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/<int:template_id>", methods=["DELETE"])
@@ -154,22 +186,24 @@ def delete_template(template_id: int):
     """删除模板"""
     try:
         db = get_app_context()
+        user_id = _get_request_user_id()
         template_type = _get_template_type(default=1)
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(
-            db.delete_template(template_id, user_id=request.user_id, template_type=template_type)
+        result = _run_async(
+            db.delete_template(
+                template_id,
+                user_id=user_id,
+                template_type=template_type,
+            )
         )
-        loop.close()
 
         if result:
             return jsonify({"success": True, "result": True})
         return jsonify({"success": False, "error": "Template not found"}), 404
 
-    except Exception as e:
-        logger.error("删除模板失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除模板失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @bp.route("/display-orders", methods=["PUT"])
@@ -190,14 +224,16 @@ def update_template_display_orders():
             orders.append((int(item["id"]), int(item["displayOrder"])))
 
         db = get_app_context()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(
-            db.update_template_display_orders(orders, template_type=template_type, user_id=request.user_id)
+        user_id = _get_request_user_id()
+        result = _run_async(
+            db.update_template_display_orders(
+                orders,
+                template_type=template_type,
+                user_id=user_id,
+            )
         )
-        loop.close()
 
         return jsonify({"success": True, "result": result})
-    except Exception as e:
-        logger.error("更新模板排序失败: %s", e)
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新模板排序失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500

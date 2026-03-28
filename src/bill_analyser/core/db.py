@@ -2747,7 +2747,7 @@ class Database:
                             value2 = float(parts[2])
                             count_query += " AND amount BETWEEN ? AND ?"
                             params.extend([value1, value2])
-                    except ValueError, IndexError:
+                    except (ValueError, IndexError):
                         pass
 
         async with conn.execute(count_query, params) as cursor:
@@ -2815,14 +2815,14 @@ class Database:
         conn.row_factory = aiosqlite.Row
 
         # 优先从 categories 表获取 (priority ASC: 优先级越小越靠前)
-        self.logger.info(f"[get_all_categories] 查询分类 (user_id={user_id})，排序：priority ASC")
+        self.logger.debug(f"[get_all_categories] 查询分类 (user_id={user_id})，排序：priority ASC")
         async with conn.execute(
             "SELECT * FROM categories WHERE user_id = ? ORDER BY priority ASC, main_category, sub_category", (user_id,)
         ) as cursor:
             rows = await cursor.fetchall()
             categories = [dict(row) for row in rows]
 
-        self.logger.info(f"[get_all_categories] 返回 {len(categories)} 个分类")
+        self.logger.debug(f"[get_all_categories] 返回 {len(categories)} 个分类")
         if categories:
             # 记录前5个分类的排序信息
             for i, cat in enumerate(categories[:5]):
@@ -2940,8 +2940,9 @@ class Database:
             return None
         except Exception as e:
             self.logger.error(f"创建分类失败: {type(e).__name__}: {e}", exc_info=True)
-            return None @ log_method
+            return None
 
+    @log_method
     async def update_category(self, category_id: int, updates: dict[str, Any], user_id: int = 1) -> bool:
         """更新分类
 
@@ -5855,7 +5856,7 @@ class Database:
 
         try:
             return datetime.strptime(str(date_text)[:10], "%Y-%m-%d").date()
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
 
     @staticmethod
@@ -7010,7 +7011,7 @@ class Database:
             parsed = json.loads(raw_value)
             if isinstance(parsed, dict):
                 return parsed
-        except TypeError, ValueError, json.JSONDecodeError:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
         return default.copy() if default else {}

@@ -4,6 +4,10 @@ Authentication Routes - 认证相关API端点
 提供用户登录、注册、登出等认证功能
 """
 
+# pylint: disable=too-many-lines,broad-exception-caught,line-too-long,import-outside-toplevel,duplicate-code
+# pylint: disable=too-many-return-statements,too-many-branches,too-many-locals,too-many-statements
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+
 import asyncio
 import base64
 import csv
@@ -13,21 +17,25 @@ import json
 import mimetypes
 import secrets
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import bcrypt
 import jwt
 import pyotp
 import qrcode
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from bill_analyser import __version__
 from bill_analyser.api.middleware.auth import require_auth
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.api.routes.request_context_helpers import (
+    get_required_request_int,
+    get_required_request_str,
+)
 from bill_analyser.core.investment_settings import (
     build_user_investment_keyword_settings,
     serialize_keyword_list,
 )
+from bill_analyser.utils.config import load_auth_settings as load_server_auth_settings
 from bill_analyser.utils.constants import FRONTEND_TO_BACKEND_TYPE
 from bill_analyser.utils.logger import get_logger, log_method
 
@@ -76,33 +84,12 @@ TWO_FACTOR_RECOVERY_CODES: dict[int, list[str]] = {}
 
 def load_auth_config():
     """加载认证配置"""
-    config_path = PROJECT_ROOT / "config" / "server_config.json"
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            config = json.load(f)
-            logger.info("认证配置加载成功")
-            return config
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        logger.error("加载配置文件失败: %s", error)
-        # 返回默认配置
-        return {
-            "jwt_secret": "default_secret_key_change_in_production",
-            "jwt_algorithm": "HS256",
-            "jwt_expiration_days": 7,
-            "refresh_token_expiration_days": 30,
-            "password_min_length": 8,
-            "enable_user_registration": True,
-            "max_login_attempts": 5,
-            "lockout_duration_minutes": 15,
-        }
+    return load_server_auth_settings()
 
 
 def get_app_context():
     """获取应用上下文"""
-    from flask import current_app
-
-    db = current_app.config.get("DB_INSTANCE")
+    db = cast(Any, current_app.config.get("DB_INSTANCE"))
     if db is None:
         # 回退方案：尝试从模块导入
         import bill_analyser.api.app as app_module
@@ -113,13 +100,32 @@ def get_app_context():
     return db
 
 
+def _get_request_user_id() -> int:
+    """获取认证中间件注入的当前用户 ID。"""
+    return get_required_request_int("user_id")
+
+
+def _get_request_username() -> str:
+    """获取认证中间件注入的当前用户名。"""
+    return get_required_request_str("username")
+
+
+def _get_request_session_id() -> int:
+    """获取认证中间件注入的当前会话 ID。"""
+    return get_required_request_int("session_id")
+
+
 def get_client_ip():
     """获取客户端IP地址"""
-    if request.headers.get("X-Forwarded-For"):
-        return request.headers.get("X-Forwarded-For").split(",")[0].strip()
-    if request.headers.get("X-Real-IP"):
-        return request.headers.get("X-Real-IP")
-    return request.remote_addr
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+
+    return request.remote_addr or ""
 
 
 def calculate_token_hash(token: str) -> str:
@@ -128,7 +134,11 @@ def calculate_token_hash(token: str) -> str:
 
 
 def generate_access_token(
-    user_id: int, username: str, config: dict, expires_in_seconds: int = 0, token_kind: str = "session"
+    user_id: int,
+    username: str,
+    config: dict,
+    expires_in_seconds: int = 0,
+    token_kind: str = "session",
 ) -> dict:
     """生成单个访问令牌，用于 API/MCP token 与普通会话。"""
     jwt_secret = config.get("jwt_secret")
@@ -213,7 +223,7 @@ def _validate_application_cloud_setting(setting: dict) -> str:
         try:
             float(setting_value)
             return ""
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return f"Invalid number value for {setting_key}"
 
     if setting_type == CLOUD_SETTING_TYPE_BOOLEAN:
@@ -224,7 +234,7 @@ def _validate_application_cloud_setting(setting: dict) -> str:
     if setting_type == CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP:
         try:
             parsed = json.loads(setting_value)
-        except TypeError, ValueError, json.JSONDecodeError:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return f"Invalid JSON value for {setting_key}"
 
         if not isinstance(parsed, dict):
@@ -360,7 +370,7 @@ def _generate_2fa_qrcode_data_url(username: str, secret: str) -> str:
 
     qr_image = qrcode.make(provisioning_uri)
     buffer = io.BytesIO()
-    qr_image.save(buffer, format="PNG")
+    qr_image.save(buffer, "PNG")
     encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{encoded}"
 
@@ -457,7 +467,7 @@ def _parse_export_datetime(raw_value: str) -> str | None:
         return None
     try:
         return datetime.fromtimestamp(int(raw_value) / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    except TypeError, ValueError, OSError:
+    except (TypeError, ValueError, OSError):
         logger.warning("非法时间戳参数: %s", raw_value)
         return None
 
@@ -546,7 +556,8 @@ def _render_bills_export(
     account_map = {int(account["id"]): account.get("name", "") for account in accounts}
     for bill in bills:
         bill_id = bill.get("id")
-        tag_names = "|".join(tag.get("name", "") for tag in tags_map.get(bill_id, []))
+        normalized_bill_id = int(bill_id) if bill_id is not None else -1
+        tag_names = "|".join(tag.get("name", "") for tag in tags_map.get(normalized_bill_id, []))
         writer.writerow(
             [
                 bill_id or "",
@@ -622,7 +633,12 @@ def generate_jwt_token(user_id: int, username: str, config: dict) -> dict:
 
 
 def generate_action_token(
-    user_id: int, username: str, email: str, config: dict, token_type: str, expires_in_hours: int = 24
+    user_id: int,
+    username: str,
+    email: str,
+    config: dict,
+    token_type: str,
+    expires_in_hours: int = 24,
 ) -> str:
     """生成用于邮箱验证/重置密码的一次性动作令牌。"""
     jwt_secret = config.get("jwt_secret")
@@ -1108,7 +1124,7 @@ def login():
         )
 
         # 更新最后登录时间
-        loop.run_until_complete(db.update_user_last_login(user["id"], ip_address))
+        loop.run_until_complete(db.update_user_last_login(user["id"], ip_address or ""))
 
         # 记录成功日志
         loop.run_until_complete(
@@ -1284,7 +1300,10 @@ def register():
             )
         )
 
-        preset_categories_saved = loop.run_until_complete(_save_register_categories(db, user_id, register_categories))
+        normalized_register_categories = register_categories if isinstance(register_categories, list) else []
+        preset_categories_saved = loop.run_until_complete(
+            _save_register_categories(db, user_id, normalized_register_categories)
+        )
 
         default_accounts_result = loop.run_until_complete(
             _create_register_default_accounts(db, user_id, data.get("language", "zh_Hans"))
@@ -1349,6 +1368,11 @@ def verify_email_by_token():
             ), 400
 
         user_id = payload.get("user_id")
+        if not isinstance(user_id, int):
+            return jsonify(
+                {"success": False, "error": "Invalid token", "message": "Verification token is invalid"},
+            ), 400
+
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1360,6 +1384,9 @@ def verify_email_by_token():
 
         loop.run_until_complete(db.update_user(user_id, {"email_verified": 1}))
         user = loop.run_until_complete(db.get_user_by_id(user_id))
+        if not user:
+            loop.close()
+            return jsonify({"success": False, "error": "User not found"}), 404
 
         new_token = None
         if request_new_token and user:
@@ -1383,7 +1410,11 @@ def verify_email_by_token():
         return jsonify(
             {
                 "success": True,
-                "result": {"newToken": new_token, "user": _build_user_profile_info(user), "notificationContent": ""},
+                "result": {
+                    "newToken": new_token,
+                    "user": _build_user_profile_info(user),
+                    "notificationContent": "",
+                },
             }
         )
     except Exception as exc:
@@ -1554,7 +1585,12 @@ def reset_password_by_token():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(payload.get("user_id")))
+        user_id = payload.get("user_id")
+        if not isinstance(user_id, int):
+            loop.close()
+            return jsonify({"success": False, "error": "Invalid token"}), 400
+
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user or (user.get("email") or "").strip() != email:
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -1708,6 +1744,11 @@ def refresh_token():
             user_id = payload.get("user_id")
             username = payload.get("username")
 
+            if not isinstance(user_id, int) or not isinstance(username, str) or not username:
+                return jsonify(
+                    {"success": False, "error": "Invalid token", "message": "Invalid refresh token"},
+                ), 401
+
         except jwt.ExpiredSignatureError:
             return jsonify({"success": False, "error": "Token expired", "message": "Refresh token has expired"}), 401
         except jwt.InvalidTokenError:
@@ -1788,10 +1829,11 @@ def profile():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if request.method == "GET":
             # 获取用户资料
-            user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+            user = loop.run_until_complete(db.get_user_by_id(user_id))
             loop.close()
 
             if not user:
@@ -1801,7 +1843,7 @@ def profile():
 
             logger.info(
                 "返回用户资料: user_id=%s, username=%s, calendarDisplayType=%s, fiscalYearStart=%s",
-                request.user_id,
+                user_id,
                 user_info["username"],
                 user_info["calendarDisplayType"],
                 user_info["fiscalYearStart"],
@@ -1881,20 +1923,20 @@ def profile():
         if "investmentExcludeKeywords" in data:
             update_data["investment_exclude_keywords"] = serialize_keyword_list(data["investmentExcludeKeywords"])
 
-        logger.info("将更新用户资料: user_id=%s, fields=%s", request.user_id, list(update_data.keys()))
+        logger.info("将更新用户资料: user_id=%s, fields=%s", user_id, list(update_data.keys()))
         logger.debug("更新数据详情: %s", update_data)
 
         if update_data:
-            success = loop.run_until_complete(db.update_user(request.user_id, update_data))
+            success = loop.run_until_complete(db.update_user(user_id, update_data))
             if not success:
                 loop.close()
                 return jsonify(
                     {"success": False, "error": "Update failed", "message": "Failed to update user profile"}
                 ), 500
-            logger.info("用户资料更新成功: user_id=%s", request.user_id)
+            logger.info("用户资料更新成功: user_id=%s", user_id)
 
         # 返回更新后的用户信息
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         loop.close()
 
         if not user:
@@ -1902,7 +1944,7 @@ def profile():
 
         user_info = _build_user_profile_info(user)
 
-        logger.info("用户资料更新并返回: user_id=%s, updated_fields=%s", request.user_id, len(update_data))
+        logger.info("用户资料更新并返回: user_id=%s, updated_fields=%s", user_id, len(update_data))
         logger.debug("返回的用户资料: %s", user_info)
 
         # v6.79: 前端 updateUserProfile() 期望 result.user 格式
@@ -1931,13 +1973,14 @@ def update_profile_avatar():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        success = loop.run_until_complete(db.update_user(request.user_id, {"avatar": avatar_data_url}))
+        success = loop.run_until_complete(db.update_user(user_id, {"avatar": avatar_data_url}))
         if not success:
             loop.close()
             return jsonify({"success": False, "error": "Update failed", "message": "Failed to update avatar"}), 500
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         loop.close()
         if not user:
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -1964,13 +2007,14 @@ def remove_profile_avatar():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        success = loop.run_until_complete(db.update_user(request.user_id, {"avatar": ""}))
+        success = loop.run_until_complete(db.update_user(user_id, {"avatar": ""}))
         if not success:
             loop.close()
             return jsonify({"success": False, "error": "Update failed", "message": "Failed to remove avatar"}), 500
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         loop.close()
         if not user:
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -1999,8 +2043,10 @@ def resend_profile_verification_email():
         config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        username = _get_request_username()
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -2018,8 +2064,8 @@ def resend_profile_verification_email():
         loop.run_until_complete(
             db.create_auth_log(
                 {
-                    "user_id": request.user_id,
-                    "username": request.username,
+                    "user_id": user_id,
+                    "username": username,
                     "event_type": "verification_email_resend_requested",
                     "ip_address": get_client_ip(),
                     "user_agent": request.headers.get("User-Agent", ""),
@@ -2040,7 +2086,7 @@ def resend_profile_verification_email():
 
         logger.info(
             "重发验证邮件请求已记录: user_id=%s, email=%s, verified=%s, require_email_verification=%s",
-            request.user_id,
+            user_id,
             email,
             email_verified,
             require_email_verification,
@@ -2065,8 +2111,9 @@ def list_profile_external_auths():
         config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        external_auths = loop.run_until_complete(db.get_user_external_auths(request.user_id))
+        external_auths = loop.run_until_complete(db.get_user_external_auths(user_id))
         result = [_build_external_auth_info(item) for item in external_auths]
 
         oauth2_enabled = bool(config.get("enable_oauth2", False))
@@ -2138,8 +2185,10 @@ def unlink_profile_external_auth():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        username = _get_request_username()
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found", "errorMessage": "User not found"}), 404
@@ -2155,7 +2204,7 @@ def unlink_profile_external_auth():
                 }
             ), 400
 
-        existing = loop.run_until_complete(db.get_user_external_auth(request.user_id, external_auth_type))
+        existing = loop.run_until_complete(db.get_user_external_auth(user_id, external_auth_type))
         if not existing:
             loop.close()
             return jsonify(
@@ -2167,12 +2216,12 @@ def unlink_profile_external_auth():
                 }
             ), 404
 
-        success = loop.run_until_complete(db.delete_user_external_auth(request.user_id, external_auth_type))
+        success = loop.run_until_complete(db.delete_user_external_auth(user_id, external_auth_type))
         loop.run_until_complete(
             db.create_auth_log(
                 {
-                    "user_id": request.user_id,
-                    "username": request.username,
+                    "user_id": user_id,
+                    "username": username,
                     "event_type": "external_auth_unlinked",
                     "ip_address": get_client_ip(),
                     "user_agent": request.headers.get("User-Agent", ""),
@@ -2232,8 +2281,10 @@ def _generate_personal_token(token_kind: str):
         config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        username = _get_request_username()
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found", "message": "User not found"}), 404
@@ -2242,8 +2293,8 @@ def _generate_personal_token(token_kind: str):
             loop.run_until_complete(
                 db.create_auth_log(
                     {
-                        "user_id": request.user_id,
-                        "username": request.username,
+                        "user_id": user_id,
+                        "username": username,
                         "event_type": f"{token_kind}_token_generate_failed",
                         "ip_address": get_client_ip(),
                         "user_agent": request.headers.get("User-Agent", ""),
@@ -2258,8 +2309,8 @@ def _generate_personal_token(token_kind: str):
             ), 401
 
         token_data = generate_access_token(
-            request.user_id,
-            request.username,
+            user_id,
+            username,
             config,
             expires_in_seconds=expires_in_seconds,
             token_kind=token_kind,
@@ -2268,7 +2319,7 @@ def _generate_personal_token(token_kind: str):
         session_id = loop.run_until_complete(
             db.create_session(
                 {
-                    "user_id": request.user_id,
+                    "user_id": user_id,
                     "token_hash": token_hash,
                     "refresh_token_hash": None,
                     "expires_at": token_data["expires_at"],
@@ -2281,8 +2332,8 @@ def _generate_personal_token(token_kind: str):
         loop.run_until_complete(
             db.create_auth_log(
                 {
-                    "user_id": request.user_id,
-                    "username": request.username,
+                    "user_id": user_id,
+                    "username": username,
                     "event_type": f"{token_kind}_token_generate_success",
                     "ip_address": get_client_ip(),
                     "user_agent": _get_token_user_agent(token_kind),
@@ -2302,7 +2353,7 @@ def _generate_personal_token(token_kind: str):
             result["mcpUrl"] = _build_mcp_url()
 
         return jsonify({"success": True, "result": result})
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         if loop and not loop.is_closed():
             loop.close()
         return jsonify(
@@ -2326,7 +2377,7 @@ def revoke_token(token_id: str):
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(db.invalidate_session_by_id(session_id, request.user_id))
+        result = loop.run_until_complete(db.invalidate_session_by_id(session_id, _get_request_user_id()))
         loop.close()
 
         if not result:
@@ -2356,11 +2407,11 @@ def list_tokens():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        session_id = _get_request_session_id()
 
         if request.method == "DELETE":
-            revoked_count = loop.run_until_complete(
-                db.invalidate_other_user_sessions(request.user_id, request.session_id)
-            )
+            revoked_count = loop.run_until_complete(db.invalidate_other_user_sessions(user_id, session_id))
             loop.close()
             return jsonify({"success": True, "result": True, "revokedCount": revoked_count})
 
@@ -2368,7 +2419,7 @@ def list_tokens():
         loop.run_until_complete(db.cleanup_expired_sessions())
 
         # 获取所有活跃会话
-        sessions = loop.run_until_complete(db.get_user_sessions(request.user_id))
+        sessions = loop.run_until_complete(db.get_user_sessions(user_id))
         loop.close()
 
         # 转换为前端期望的格式
@@ -2379,7 +2430,7 @@ def list_tokens():
             user_agent = session.get("user_agent", "")
             ip_address = session.get("ip_address", "")
             token_type = _infer_token_type(user_agent)
-            is_current = session["id"] == request.session_id
+            is_current = session["id"] == session_id
             last_seen = _datetime_to_unix_millis(session.get("last_activity_at") or session.get("created_at", ""))
 
             # 简单的设备标识: IP + UA的前50个字符
@@ -2404,7 +2455,7 @@ def list_tokens():
                 }
             )
 
-        logger.info("返回会话列表: user_id=%s, count=%s", request.user_id, len(tokens))
+        logger.info("返回会话列表: user_id=%s, count=%s", user_id, len(tokens))
 
         return jsonify({"success": True, "result": tokens})
 
@@ -2465,8 +2516,9 @@ def get_2fa_status():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         loop.close()
 
         if not user:
@@ -2491,7 +2543,7 @@ def enable_2fa_request():
     """请求启用 2FA，返回 secret 与二维码。"""
     try:
         secret = pyotp.random_base32()
-        qrcode_data = _generate_2fa_qrcode_data_url(request.username, secret)
+        qrcode_data = _generate_2fa_qrcode_data_url(_get_request_username(), secret)
 
         return jsonify({"success": True, "result": {"secret": secret, "qrcode": qrcode_data}})
     except Exception as exc:
@@ -2509,14 +2561,15 @@ def profile_cloud_settings():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if request.method == "GET":
-            settings = _load_application_cloud_settings(db, request.user_id, loop)
+            settings = _load_application_cloud_settings(db, user_id, loop)
             loop.close()
             return jsonify({"success": True, "result": settings or False})
 
         if request.method == "DELETE":
-            loop.run_until_complete(db.delete_user_application_cloud_settings(request.user_id))
+            loop.run_until_complete(db.delete_user_application_cloud_settings(user_id))
             loop.close()
             return jsonify({"success": True, "result": True})
 
@@ -2536,7 +2589,7 @@ def profile_cloud_settings():
 
         normalized_settings = _normalize_application_cloud_settings(settings)
         loop.run_until_complete(
-            db.update_user_application_cloud_settings(request.user_id, normalized_settings, full_update=full_update)
+            db.update_user_application_cloud_settings(user_id, normalized_settings, full_update=full_update)
         )
         loop.close()
 
@@ -2574,9 +2627,11 @@ def enable_2fa_confirm():
         config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        username = _get_request_username()
 
         success = loop.run_until_complete(
-            db.update_user(request.user_id, {"two_factor_enabled": 1, "two_factor_secret": secret})
+            db.update_user(user_id, {"two_factor_enabled": 1, "two_factor_secret": secret})
         )
         if not success:
             loop.close()
@@ -2584,9 +2639,9 @@ def enable_2fa_confirm():
                 {"success": False, "error": "Update failed", "message": "Failed to enable two-factor authentication"}
             ), 500
 
-        tokens = _create_new_session_payload(request.user_id, request.username, config, db, loop)
+        tokens = _create_new_session_payload(user_id, username, config, db, loop)
         recovery_codes = _generate_recovery_codes()
-        _set_recovery_codes(request.user_id, recovery_codes)
+        _set_recovery_codes(user_id, recovery_codes)
         loop.close()
 
         return jsonify(
@@ -2621,7 +2676,8 @@ def disable_2fa():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user_id = _get_request_user_id()
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -2633,9 +2689,9 @@ def disable_2fa():
             ), 401
 
         success = loop.run_until_complete(
-            db.update_user(request.user_id, {"two_factor_enabled": 0, "two_factor_secret": ""})
+            db.update_user(user_id, {"two_factor_enabled": 0, "two_factor_secret": ""})
         )
-        TWO_FACTOR_RECOVERY_CODES.pop(request.user_id, None)
+        TWO_FACTOR_RECOVERY_CODES.pop(user_id, None)
         loop.close()
         if not success:
             return jsonify(
@@ -2665,7 +2721,8 @@ def regenerate_2fa_recovery_codes():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(request.user_id))
+        user_id = _get_request_user_id()
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         loop.close()
         if not user:
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -2681,7 +2738,7 @@ def regenerate_2fa_recovery_codes():
             ), 400
 
         recovery_codes = _generate_recovery_codes()
-        _set_recovery_codes(request.user_id, recovery_codes)
+        _set_recovery_codes(user_id, recovery_codes)
 
         return jsonify({"success": True, "result": {"recoveryCodes": recovery_codes}})
     except Exception as exc:
@@ -2717,7 +2774,12 @@ def verify_2fa_login():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        user = loop.run_until_complete(db.get_user_by_id(payload.get("user_id")))
+        user_id = payload.get("user_id")
+        if not isinstance(user_id, int):
+            loop.close()
+            return jsonify({"success": False, "error": "Unauthorized", "message": "Invalid or expired 2FA token"}), 401
+
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
@@ -2785,6 +2847,9 @@ def verify_2fa_login_by_recovery_code():
             return jsonify({"success": False, "error": "Unauthorized", "message": "Invalid or expired 2FA token"}), 401
 
         user_id = payload.get("user_id")
+        if not isinstance(user_id, int):
+            return jsonify({"success": False, "error": "Unauthorized", "message": "Invalid or expired 2FA token"}), 401
+
         if not _consume_recovery_code(user_id, recovery_code):
             return jsonify(
                 {
@@ -2840,14 +2905,15 @@ def get_user_data_statistics():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        statistics = loop.run_until_complete(db.get_user_data_statistics(user_id=request.user_id))
+        statistics = loop.run_until_complete(db.get_user_data_statistics(user_id=user_id))
 
         loop.close()
 
         logger.info(
             "返回用户数据统计: user_id=%s, bills=%s, accounts=%s, categories=%s, tags=%s, templates=%s",
-            request.user_id,
+            user_id,
             statistics["billCount"],
             statistics["accountCount"],
             statistics["categoryCount"],
@@ -2880,13 +2946,14 @@ def export_user_data(file_type: str):
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
-        categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
+        categories = loop.run_until_complete(db.get_all_categories(user_id=user_id))
         filters = _build_export_filters(categories)
-        bills = loop.run_until_complete(db.get_bills(filters=filters, user_id=request.user_id))
-        accounts = loop.run_until_complete(db.get_all_accounts(user_id=request.user_id))
+        bills = loop.run_until_complete(db.get_bills(filters=filters, user_id=user_id))
+        accounts = loop.run_until_complete(db.get_all_accounts(user_id=user_id))
         bill_ids = [int(bill["id"]) for bill in bills if bill.get("id") is not None]
-        tags_map = loop.run_until_complete(db.get_tags_for_bills(bill_ids, user_id=request.user_id)) if bill_ids else {}
+        tags_map = loop.run_until_complete(db.get_tags_for_bills(bill_ids, user_id=user_id)) if bill_ids else {}
         loop.close()
 
         delimiter = "," if normalized_file_type == "csv" else "\t"
@@ -2922,6 +2989,7 @@ def clear_user_transactions():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if not loop.run_until_complete(db.verify_operation_password(password)):
             loop.close()
@@ -2929,12 +2997,12 @@ def clear_user_transactions():
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
 
-        result = loop.run_until_complete(db.clear_user_transactions(request.user_id))
+        result = loop.run_until_complete(db.clear_user_transactions(user_id))
         loop.run_until_complete(
             db.create_audit_log(
                 operation_type="clear_transactions",
                 operation_target="user_data",
-                target_id=request.user_id,
+            target_id=user_id,
                 details={"deleted_count": result.get("deleted_count", 0)},
                 affected_count=result.get("deleted_count", 0),
                 status="success" if result.get("success") else "failed",
@@ -2980,6 +3048,7 @@ def clear_all_user_data():
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
 
         if not loop.run_until_complete(db.verify_operation_password(password)):
             loop.close()
@@ -2987,12 +3056,12 @@ def clear_all_user_data():
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
 
-        result = loop.run_until_complete(db.clear_user_data(request.user_id))
+        result = loop.run_until_complete(db.clear_user_data(user_id))
         loop.run_until_complete(
             db.create_audit_log(
                 operation_type="clear_all_user_data",
                 operation_target="user_data",
-                target_id=request.user_id,
+            target_id=user_id,
                 details=result.get("counts", {}),
                 status="success" if result.get("success") else "failed",
                 error_message=None if result.get("success") else result.get("message"),

@@ -22,6 +22,8 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
     const allTransactionCategories = ref<Record<number, TransactionCategory[]>>({});
     const allTransactionCategoriesMap = ref<Record<string, TransactionCategory>>({});
     const transactionCategoryListStateInvalid = ref<boolean>(true);
+    let pendingNonForceLoadAllCategories: Promise<Record<number, TransactionCategory[]>> | null = null;
+    let loadAllCategoriesGeneration = 0;
 
     const hasAvailableExpenseCategories = computed<boolean>(() => {
         if (!allTransactionCategories.value || !allTransactionCategories.value[CategoryType.Expense] || !allTransactionCategories.value[CategoryType.Expense].length) {
@@ -187,6 +189,8 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
         allTransactionCategories.value = {};
         allTransactionCategoriesMap.value = {};
         transactionCategoryListStateInvalid.value = true;
+        pendingNonForceLoadAllCategories = null;
+        loadAllCategoriesGeneration += 1;
     }
 
     function loadAllCategories({ force }: { force?: boolean }): Promise<Record<number, TransactionCategory[]>> {
@@ -196,7 +200,12 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
             });
         }
 
-        return new Promise((resolve, reject) => {
+        if (!force && pendingNonForceLoadAllCategories) {
+            return pendingNonForceLoadAllCategories;
+        }
+
+        const requestGeneration = loadAllCategoriesGeneration;
+        const requestPromise = new Promise<Record<number, TransactionCategory[]>>((resolve, reject) => {
             services.getAllTransactionCategories().then(response => {
                 const data = response.data;
 
@@ -215,6 +224,11 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
 
                 if (!data.result[CategoryType.Transfer]) {
                     data.result[CategoryType.Transfer] = [];
+                }
+
+                if (requestGeneration !== loadAllCategoriesGeneration) {
+                    resolve(allTransactionCategories.value);
+                    return;
                 }
 
                 if (transactionCategoryListStateInvalid.value) {
@@ -247,6 +261,24 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
                 }
             });
         });
+
+        if (!force) {
+            pendingNonForceLoadAllCategories = requestPromise;
+            requestPromise.then(
+                () => {
+                    if (pendingNonForceLoadAllCategories === requestPromise) {
+                        pendingNonForceLoadAllCategories = null;
+                    }
+                },
+                () => {
+                    if (pendingNonForceLoadAllCategories === requestPromise) {
+                        pendingNonForceLoadAllCategories = null;
+                    }
+                }
+            );
+        }
+
+        return requestPromise;
     }
 
     function getCategory({ categoryId }: { categoryId: string }): Promise<TransactionCategory> {

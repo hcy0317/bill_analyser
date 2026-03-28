@@ -30,7 +30,7 @@ class StandardBill:
 
     所有解析器的输出都必须转换为这个标准格式，
     便于后续的去重、分类和导入处理。
-    """
+    """  # pylint: disable=too-many-instance-attributes
 
     # 必需字段
     date: str  # YYYY-MM-DD HH:MM:SS 格式
@@ -72,7 +72,7 @@ class StandardBill:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> StandardBill:
+    def from_dict(cls, data: dict[str, Any]) -> "StandardBill":
         """从字典创建实例"""
         return cls(
             date=data.get("date", ""),
@@ -164,16 +164,18 @@ class ParserBase(ABC):
         path = Path(file_path)
 
         if not path.exists():
-            self.logger.error(f"文件不存在: {file_path}")
+            self.logger.error("文件不存在: %s", file_path)
             return False
 
         if not path.is_file():
-            self.logger.error(f"不是文件: {file_path}")
+            self.logger.error("不是文件: %s", file_path)
             return False
 
         if path.suffix.lower() not in self.supported_extensions:
             self.logger.warning(
-                f"文件扩展名不支持: {path.suffix}, 支持的扩展名: {', '.join(self.supported_extensions)}"
+                "文件扩展名不支持: %s, 支持的扩展名: %s",
+                path.suffix,
+                ", ".join(self.supported_extensions),
             )
             return False
 
@@ -209,7 +211,7 @@ class ParserBase(ABC):
                 continue
 
         # 如果都失败，返回原字符串
-        self.logger.warning(f"无法解析日期格式: {date_str}")
+        self.logger.warning("无法解析日期格式: %s", date_str)
         return date_str
 
     def normalize_amount(self, amount_str: str) -> float:
@@ -224,11 +226,18 @@ class ParserBase(ABC):
         """
         try:
             # 移除常见符号
-            cleaned = str(amount_str).replace("¥", "").replace("$", "").replace(",", "").replace("，", "").strip()
+            cleaned = (
+                str(amount_str)
+                .replace("¥", "")
+                .replace("$", "")
+                .replace(",", "")
+                .replace("，", "")
+                .strip()
+            )
 
             return float(cleaned)
         except (ValueError, AttributeError) as e:
-            self.logger.warning(f"无法解析金额: {amount_str} - {e}")
+            self.logger.warning("无法解析金额: %s - %s", amount_str, e)
             return 0.0
 
     def normalize_type(self, type_str: str) -> str:
@@ -267,7 +276,7 @@ class ParserBase(ABC):
                 return value
 
         # 默认根据金额符号判断
-        self.logger.debug(f"未识别的交易类型: {type_str}")
+        self.logger.debug("未识别的交易类型: %s", type_str)
         return "支出"
 
     def aggregate_description(self, bill: dict[str, Any]) -> str:
@@ -339,6 +348,7 @@ class ParserBase(ABC):
         Returns:
             List[Dict]: 标准格式账单列表
         """
+        # pylint: disable=too-many-branches
         processed_bills = []
 
         for bill in bills:
@@ -396,10 +406,14 @@ class ParserBase(ABC):
 
                 # 6. 保留原始字段
                 processed_bill["counterparty"] = str(bill.get("counterparty", ""))
-                processed_bill["payment_method"] = str(bill.get("payment_method", "") or bill.get("channel", ""))
+                processed_bill["payment_method"] = str(
+                    bill.get("payment_method", "") or bill.get("channel", "")
+                )
                 processed_bill["original_type"] = original_type
                 processed_bill["original_category"] = original_category
-                processed_bill["transaction_id"] = str(bill.get("transaction_id", "") or bill.get("order_id", ""))
+                processed_bill["transaction_id"] = str(
+                    bill.get("transaction_id", "") or bill.get("order_id", "")
+                )
                 processed_bill["merchant_id"] = str(bill.get("merchant_id", ""))
                 processed_bill["status"] = str(bill.get("status", ""))
 
@@ -412,11 +426,13 @@ class ParserBase(ABC):
                     processed_bills.append(processed_bill)
                 else:
                     self.logger.warning(
-                        f"账单数据不完整: date={processed_bill.get('date')}, amount={processed_bill.get('amount')}"
+                        "账单数据不完整: date=%s, amount=%s",
+                        processed_bill.get("date"),
+                        processed_bill.get("amount"),
                     )
 
-            except Exception as e:  # pylint: disable=broad-except
-                self.logger.error(f"处理账单时出错: {e}")
+            except Exception as exc:  # pylint: disable=broad-except
+                self.logger.error("处理账单时出错: %s", exc)
 
-        self.logger.info(f"后处理完成: {len(processed_bills)}/{len(bills)} 条有效")
+        self.logger.info("后处理完成: %d/%d 条有效", len(processed_bills), len(bills))
         return processed_bills

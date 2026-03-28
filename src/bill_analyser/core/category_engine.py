@@ -24,7 +24,6 @@ from typing import Any
 
 from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
-from ..utils.logic import RuleEngine
 
 
 @dataclass
@@ -83,7 +82,11 @@ class KeywordMatcher:
         regex_count = len(self._regex_cache)
         self._compiled_rules_cache.clear()
         self._regex_cache.clear()
-        self.logger.info("[KeywordMatcher] 缓存已清空: 规则缓存=%d条, 正则缓存=%d条", cache_count, regex_count)
+        self.logger.info(
+            "[KeywordMatcher] 缓存已清空: 规则缓存=%d条, 正则缓存=%d条",
+            cache_count,
+            regex_count,
+        )
 
     def compile_rule(self, rule: str) -> CompiledRule:
         """预编译关键词规则
@@ -97,6 +100,7 @@ class KeywordMatcher:
         Returns:
             CompiledRule: 预编译的规则对象
         """
+        # pylint: disable=too-many-branches
         if not rule:
             return CompiledRule(is_empty=True)
 
@@ -140,9 +144,12 @@ class KeywordMatcher:
                     # 预编译正则表达式
                     try:
                         if regex_pattern not in self._regex_cache:
-                            self._regex_cache[regex_pattern] = re.compile(regex_pattern, re.IGNORECASE)
-                    except re.error as e:
-                        self.logger.warning(f"无效的正则表达式 '{regex_pattern}': {e}")
+                            self._regex_cache[regex_pattern] = re.compile(
+                                regex_pattern,
+                                re.IGNORECASE,
+                            )
+                    except re.error as exc:
+                        self.logger.warning("无效的正则表达式 '%s': %s", regex_pattern, exc)
             else:
                 # 简单匹配
                 if part:
@@ -153,7 +160,10 @@ class KeywordMatcher:
             or_blocks.append(simple_patterns)
 
         compiled = CompiledRule(
-            or_blocks=or_blocks, not_patterns=not_patterns, and_patterns=and_patterns, is_empty=False
+            or_blocks=or_blocks,
+            not_patterns=not_patterns,
+            and_patterns=and_patterns,
+            is_empty=False,
         )
 
         # 缓存结果
@@ -174,6 +184,7 @@ class KeywordMatcher:
         Returns:
             bool: 是否匹配
         """
+        # pylint: disable=too-many-return-statements
         if compiled.is_empty or not text:
             return False
 
@@ -224,8 +235,8 @@ class KeywordMatcher:
                 if regex_pattern not in self._regex_cache:
                     self._regex_cache[regex_pattern] = re.compile(regex_pattern, re.IGNORECASE)
                 return bool(self._regex_cache[regex_pattern].search(text_lower))
-            except re.error as e:
-                self.logger.warning(f"无效的正则表达式 '{regex_pattern}': {e}")
+            except re.error as exc:
+                self.logger.warning("无效的正则表达式 '%s': %s", regex_pattern, exc)
                 return False
         else:
             # 普通子串匹配
@@ -309,7 +320,6 @@ class CategoryEngine:
     def __init__(self):
         """初始化分类引擎"""
         self.logger = get_logger("CategoryEngine")
-        self.rule_engine = RuleEngine()
         self.keyword_matcher = KeywordMatcher()
         self.rules: list[dict[str, Any]] = []
         self._initialized = False
@@ -416,7 +426,7 @@ class CategoryEngine:
         try:
             # 获取指定用户的所有分类
             types_str = str(types) if types else "all"
-            self.logger.info(f"从数据库加载分类规则 (user_id={user_id}, types={types_str})")
+            self.logger.info("从数据库加载分类规则 (user_id=%s, types=%s)", user_id, types_str)
             categories = await db.get_all_categories(user_id=user_id)
 
             # v6.53: 将types转换为set便于快速查找
@@ -452,18 +462,20 @@ class CategoryEngine:
             # v6.73: 预编译所有规则关键词，提升批量匹配性能
             self._precompile_rules()
 
-            self.logger.info(f"从数据库加载了 {len(valid_rules)} 条分类规则 (user_id={user_id})")
+            self.logger.info("从数据库加载了 %d 条分类规则 (user_id=%s)", len(valid_rules), user_id)
             if valid_rules:
                 # 记录前3条规则用于调试
                 for i, rule in enumerate(valid_rules[:3]):
-                    self.logger.debug(f"规则#{i + 1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'")
-            if valid_rules:
-                # 记录前3条规则用于调试
-                for i, rule in enumerate(valid_rules[:3]):
-                    self.logger.debug(f"规则#{i + 1}: {rule['main']}/{rule['sub']} -> '{rule['keywords'][:50]}...'")
+                    self.logger.debug(
+                        "规则#%d: %s/%s -> '%s...'",
+                        i + 1,
+                        rule["main"],
+                        rule["sub"],
+                        rule["keywords"][:50],
+                    )
 
-        except Exception as e:
-            self.logger.error(f"从数据库加载分类规则失败: {e}", exc_info=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.error("从数据库加载分类规则失败: %s", exc, exc_info=True)
             self.rules = []
 
     @log_method
@@ -498,6 +510,7 @@ class CategoryEngine:
         Returns:
             Tuple[Optional[str], Optional[str]]: (主分类, 子分类)
         """
+        # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         if not self._initialized:
             self.logger.warning("分类引擎未初始化")
             return None, None
@@ -517,7 +530,10 @@ class CategoryEngine:
         dedup_type = str(bill.get("_dedup_type", "")).lower()
 
         self.logger.debug(
-            "[分类匹配] counterparty='%s', description='%s', amount=%.2f, type='%s', dedup_type='%s'",
+            (
+                "[分类匹配] counterparty='%s', description='%s', amount=%.2f, "
+                "type='%s', dedup_type='%s'"
+            ),
             counterparty[:30],
             description[:30],
             amount,
@@ -566,7 +582,10 @@ class CategoryEngine:
                         TransactionType.INVESTMENT,
                     }
             self.logger.debug(
-                "[分类匹配] 自动类型过滤: %s (type='%s', amount=%.2f)", type_filter, original_type, amount
+                "[分类匹配] 自动类型过滤: %s (type='%s', amount=%.2f)",
+                type_filter,
+                original_type,
+                amount,
             )
 
         # ===== 第一步：在对应类型的分类规则中按关键词匹配（优先级排序）=====
@@ -589,7 +608,11 @@ class CategoryEngine:
 
                 # v6.63: 单条匹配日志改为 DEBUG，减少批量导入时的冗余输出
                 self.logger.debug(
-                    "[分类匹配] '%s' -> %s/%s (type=%s)", combined_text[:30], main_cat, sub_cat, rule_type
+                    "[分类匹配] '%s' -> %s/%s (type=%s)",
+                    combined_text[:30],
+                    main_cat,
+                    sub_cat,
+                    rule_type,
                 )
 
                 # v6.52: 修复分类匹配逻辑
@@ -639,28 +662,11 @@ class CategoryEngine:
         filtered_rules = [rule for rule in self.rules if rule.get("type") in target_types]
 
         self.logger.debug(
-            "[分类匹配] 默认类型过滤: target_types=%s, 规则数=%d/%d", target_types, len(filtered_rules), len(self.rules)
+            "[分类匹配] 默认类型过滤: target_types=%s, 规则数=%d/%d",
+            target_types,
+            len(filtered_rules),
+            len(self.rules),
         )
-
-        # ===== v6.88: ML分类器兜底预测 =====
-        # 关键词规则都未命中时，尝试使用机器学习模型预测
-        try:
-            from .ml_classifier import get_ml_classifier  # pylint: disable=import-outside-toplevel
-
-            ml_clf = get_ml_classifier(user_id=getattr(self, "_current_user_id", 1))
-            if ml_clf.is_ready:
-                ml_main, ml_sub, ml_conf = ml_clf.predict(
-                    counterparty=bill.get("counterparty", ""),
-                    description=bill.get("description", ""),
-                    original_category=bill.get("original_category", ""),
-                )
-                if ml_main:
-                    self.logger.debug(
-                        "[ML兜底] '%s' -> %s/%s (置信度=%.2f)", combined_text[:30], ml_main, ml_sub, ml_conf
-                    )
-                    return ml_main, ml_sub
-        except Exception:  # pylint: disable=broad-except
-            pass  # ML不可用时静默降级
 
         return None, None
 
@@ -685,7 +691,7 @@ class CategoryEngine:
             return bills
 
         types_str = str(types) if types else "all"
-        self.logger.info(f"开始批量分类 {len(bills)} 条账单 (types={types_str})")
+        self.logger.info("开始批量分类 %d 条账单 (types=%s)", len(bills), types_str)
 
         categorized_bills = []
         matched_count = 0
@@ -705,7 +711,12 @@ class CategoryEngine:
                 matched_count += 1
 
         match_rate = (matched_count / len(bills) * 100) if bills else 0
-        self.logger.info(f"批量分类完成: 成功匹配 {matched_count}/{len(bills)} 条 ({match_rate:.1f}%)")
+        self.logger.info(
+            "批量分类完成: 成功匹配 %d/%d 条 (%.1f%%)",
+            matched_count,
+            len(bills),
+            match_rate,
+        )
 
         return categorized_bills
 
@@ -750,10 +761,11 @@ class CategoryEngine:
                 tree[bill_type][main].append(sub)
 
         self.logger.debug(
-            f"生成分类树: 支出 {len(tree['支出'])} 个, "
-            f"收入 {len(tree['收入'])} 个, "
-            f"转账 {len(tree['转账'])} 个, "
-            f"投资 {len(tree['投资'])} 个"
+            "生成分类树: 支出 %d 个, 收入 %d 个, 转账 %d 个, 投资 %d 个",
+            len(tree["支出"]),
+            len(tree["收入"]),
+            len(tree["转账"]),
+            len(tree["投资"]),
         )
         return tree
 
@@ -762,7 +774,11 @@ class CategoryEngine:
 _category_engine_v2 = CategoryEngine()
 
 
-async def get_category_engine(db=None, user_id: int = 1, types: list[int] | None = None) -> CategoryEngine:
+async def get_category_engine(
+    db=None,
+    user_id: int = 1,
+    types: list[int] | None = None,
+) -> CategoryEngine:
     """获取分类引擎实例
 
     Args:
@@ -777,7 +793,11 @@ async def get_category_engine(db=None, user_id: int = 1, types: list[int] | None
     """
     if not _category_engine_v2.is_initialized and db:
         await _category_engine_v2.load_rules_from_db(db, user_id=user_id, types=types)
-    elif _category_engine_v2.is_initialized and _category_engine_v2.current_user_id != user_id and db:
+    elif (
+        _category_engine_v2.is_initialized
+        and _category_engine_v2.current_user_id != user_id
+        and db
+    ):
         # 如果用户ID变化，重新加载规则
         await _category_engine_v2.load_rules_from_db(db, user_id=user_id, types=types)
     return _category_engine_v2
