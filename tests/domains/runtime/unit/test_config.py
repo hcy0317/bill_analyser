@@ -112,6 +112,20 @@ def test_load_auth_settings_validates_missing_secret_and_warns_for_insecure_secr
     assert logger.warning_messages
 
 
+def test_load_auth_settings_accepts_secure_secret_without_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """非占位 jwt_secret 应直接通过，不触发异常路径。"""
+    monkeypatch.setattr(
+        config_module,
+        "get_server_config",
+        lambda use_cache=True: {"jwt_secret": "real-secret", "jwt_algorithm": "HS512"},
+    )
+
+    auth_settings = config_module.load_auth_settings()
+
+    assert auth_settings["jwt_secret"] == "real-secret"
+    assert auth_settings["jwt_algorithm"] == "HS512"
+
+
 
 def test_load_api_runtime_settings_applies_overrides_and_normalizes_lists(
     monkeypatch: pytest.MonkeyPatch,
@@ -265,7 +279,70 @@ def test_config_file_handler_reloads_only_modified_json_files(
     handler.on_modified(FileModifiedEvent(str(json_path)))
     handler.on_modified(FileModifiedEvent(str(text_path)))
 
+    directory_event = FileModifiedEvent(str(json_path))
+    directory_event.is_directory = True
+    handler.on_modified(directory_event)
+
     assert reloaded_paths == [str(json_path)]
+
+
+def test_config_manager_singleton_stale_cache_refresh_and_partial_reload_cleanup(
+    isolated_config_manager: config_module.ConfigManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """配置管理器应保持单例、在缓存过期时刷新，并清理不完整缓存条目。"""
+    manager = isolated_config_manager
+
+    assert config_module.ConfigManager() is manager
+
+    assert manager.save_config("stale.json", {"value": 1}) is True
+    assert manager.load_config("stale.json") == {"value": 1}
+
+    stale_file = manager.config_dir / "stale.json"
+    stale_file.write_text(json.dumps({"value": 2}, ensure_ascii=False), encoding="utf-8")
+    with manager._cache_lock:
+        manager._cache_timestamps["stale.json"] = 0
+    assert manager.load_config("stale.json") == {"value": 2}
+
+    with manager._cache_lock:
+        manager._cache.pop("ghost.json", None)
+        manager._cache_timestamps["ghost.json"] = 1
+
+    monkeypatch.setattr(manager, "load_config", lambda *_args, **_kwargs: {})
+    manager._reload_config(str(manager.config_dir / "ghost.json"))
+
+    assert "ghost.json" not in manager._cache
+    assert "ghost.json" not in manager._cache_timestamps
+
+    with manager._cache_lock:
+        manager._cache["cache-only.json"] = {"cached": True}
+        manager._cache_timestamps.pop("cache-only.json", None)
+
+    manager._reload_config(str(manager.config_dir / "cache-only.json"))
+
+    assert "cache-only.json" not in manager._cache
+    assert "cache-only.json" not in manager._cache_timestamps
+
+
+def test_config_manager_new_returns_existing_instance_when_initialized_during_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """双重检查锁的内层 false 分支应在竞争者先完成初始化时返回既有实例。"""
+
+    class FakeLock:
+        def __enter__(self):
+            config_module.ConfigManager._instance = sentinel
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    sentinel = object()
+    monkeypatch.setattr(config_module.ConfigManager, "_instance", None, raising=False)
+    monkeypatch.setattr(config_module.ConfigManager, "_lock", FakeLock(), raising=False)
+
+    assert config_module.ConfigManager() is sentinel
 
 
 
