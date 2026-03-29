@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import BACKUP_DIR, DATA_DIR
 
 from ..utils.logger import get_logger, log_method, log_step
 
@@ -24,9 +24,8 @@ class SyncManager:
     def __init__(self):
         """初始化"""
         self.logger = get_logger("SyncManager")
-        # 数据目录和备份目录都指向项目根目录
-        self.data_dir = PROJECT_ROOT / "data"
-        self.backup_dir = PROJECT_ROOT / "backup"
+        self.data_dir = DATA_DIR
+        self.backup_dir = BACKUP_DIR
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self._last_backup_hash: str | None = None
 

@@ -146,6 +146,16 @@ def create_app():
         """健康检查"""
         return {"success": True, "status": "healthy", "version": __version__}
 
+    @flask_app.route("/api/ml/receipt-recognition", methods=["POST"])
+    def receipt_recognition_disabled_safe():
+        """AI 小票识图当前保持 disabled-safe 501 占位语义。"""
+        return {
+            "success": False,
+            "error": "Not Implemented",
+            "errorMessage": "Receipt recognition not implemented",
+            "message": "Receipt recognition not implemented",
+        }, 501
+
     @flask_app.route("/", defaults={"path": ""})
     @flask_app.route("/<path:path>")
     def serve_frontend(path):
@@ -159,6 +169,21 @@ def create_app():
         if error.description and "favicon" in str(error.description):
             return "", 204
         return {"success": False, "error": "Not Found", "message": str(error)}, 404
+
+    @flask_app.errorhandler(405)
+    def method_not_allowed(error):
+        from flask import request as flask_request  # pylint: disable=import-outside-toplevel
+
+        if flask_request.path.startswith("/api/v1/") or (
+            flask_request.path.startswith("/api/") and flask_request.path.endswith(".json")
+        ):
+            return {"success": False, "error": "Not Found", "message": "Legacy endpoint not found"}, 404
+
+        return {
+            "success": False,
+            "error": "Method Not Allowed",
+            "message": str(error),
+        }, 405
 
     @flask_app.errorhandler(500)
     def internal_error(error):

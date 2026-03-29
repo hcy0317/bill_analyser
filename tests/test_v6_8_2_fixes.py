@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from src.api.app import app, initialize
+from tests.runtime_paths import get_test_db_path
 
 
 @pytest.fixture(scope='module', name='client')
@@ -15,7 +16,7 @@ def _client_fixture():
     """Create a Flask test client bound to an initialized test database."""
 
     async def init_services() -> None:
-        await initialize(db_path='data/test_v682_fixes.db')
+        await initialize(db_path=str(get_test_db_path('test_v682_fixes.db')))
 
     asyncio.run(init_services())
     app.config['TESTING'] = True

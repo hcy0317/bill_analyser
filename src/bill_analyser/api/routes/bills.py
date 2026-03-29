@@ -20,7 +20,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import UPLOADS_DIR
 
 try:
     import openpyxl
@@ -43,8 +43,8 @@ logger = get_logger("BillsAPI")
 # 主蓝图 - 现代RESTful API
 bp = Blueprint("bills", __name__)
 
-# 上传文件配置 - 指向项目根目录的 uploads 文件夹
-UPLOAD_FOLDER = PROJECT_ROOT / "uploads"
+# 上传文件配置 - 固定到 data/uploads
+UPLOAD_FOLDER = UPLOADS_DIR
 ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "txt"}
 ALLOWED_PICTURE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB

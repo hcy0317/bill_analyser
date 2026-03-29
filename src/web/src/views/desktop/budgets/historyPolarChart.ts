@@ -83,20 +83,18 @@ export interface HistoricalPolarChartOptionArgs {
     spentAmountLabel: string;
     executionRateLabel: string;
     formatAmount: (amount: number) => string;
+    showPrimaryRing: boolean;
 }
 
 const START_ANGLE = 90;
 const MAX_EXECUTION_RATE = 120;
 const EXECUTION_AXIS_MAX = 125;
 const EXECUTION_AXIS_INTERVAL = 25;
-const PRIMARY_RING_PAD_ANGLE = 2.2;
+const PRIMARY_RING_PAD_ANGLE = 3.2;
 const POLAR_CENTER = ['50%', '46%'] as const;
 const BAR_POLAR_RADIUS = ['20%', '74%'] as const;
 const EXECUTION_POLAR_RADIUS = ['20%', '74%'] as const;
 const PRIMARY_RING_RADIUS = ['76%', '82%'] as const;
-const SVG_CENTER_X = 50;
-const SVG_CENTER_Y = 46;
-const PRIMARY_LABEL_RADIUS = 43.3;
 
 interface InternalPrimaryGroupItem extends HistoricalCategoryChartPoint {
     secondaryKey: string;
@@ -151,22 +149,36 @@ function withAlpha(color: string, alpha: number): string {
     return `rgba(${red},${green},${blue},${alpha})`;
 }
 
-function normalizeAngle(angle: number): number {
-    if (angle > 180) {
-        return angle - 360;
-    }
-    if (angle < -180) {
-        return angle + 360;
-    }
-    return angle;
+function normalizeCircleAngle(angle: number): number {
+    return ((angle % 360) + 360) % 360;
 }
 
-function polarToSvgPoint(radius: number, angle: number): { x: number; y: number } {
-    const radians = (angle * Math.PI) / 180;
-    return {
-        x: SVG_CENTER_X + radius * Math.cos(radians),
-        y: SVG_CENTER_Y - radius * Math.sin(radians)
-    };
+function getOutsideLabelAlign(angle: number): 'left' | 'right' | 'center' {
+    const normalized = normalizeCircleAngle(angle);
+
+    if (normalized > 110 && normalized < 250) {
+        return 'right';
+    }
+
+    if (normalized > 290 || normalized < 70) {
+        return 'left';
+    }
+
+    return 'center';
+}
+
+function getOutsideLabelVerticalAlign(angle: number): 'top' | 'middle' | 'bottom' {
+    const normalized = normalizeCircleAngle(angle);
+
+    if (normalized >= 70 && normalized <= 110) {
+        return 'bottom';
+    }
+
+    if (normalized >= 250 && normalized <= 290) {
+        return 'top';
+    }
+
+    return 'middle';
 }
 
 function getHistoricalAmountAxisInterval(maxAmount: number): number {
@@ -307,43 +319,6 @@ function buildPrimaryBandsAndSlots(
     };
 }
 
-function buildPrimaryLabelGlyphs(primaryBands: HistoricalPrimaryBand[]): HistoricalPrimaryLabelGlyph[] {
-    const glyphs: HistoricalPrimaryLabelGlyph[] = [];
-
-    for (const band of primaryBands) {
-        const characters = Array.from(band.label);
-        if (!characters.length) {
-            continue;
-        }
-
-        const paddingAngle = Math.min(1.1, band.spanAngle * 0.08);
-        const effectiveStartAngle = band.startAngle - paddingAngle;
-        const effectiveEndAngle = band.endAngle + paddingAngle;
-        const usableSpanAngle = effectiveStartAngle - effectiveEndAngle;
-        const textArcLength = (Math.abs(usableSpanAngle) * Math.PI / 180) * PRIMARY_LABEL_RADIUS;
-        const fontSize = clamp(textArcLength / Math.max(characters.length * 1.36, 1), 1.75, 2.5);
-
-        for (const [index, character] of characters.entries()) {
-            const progress = characters.length === 1 ? 0.5 : index / (characters.length - 1);
-            const angle = effectiveStartAngle - (usableSpanAngle * progress);
-            const point = polarToSvgPoint(PRIMARY_LABEL_RADIUS, angle);
-
-            glyphs.push({
-                key: `${band.key}-${index}`,
-                character,
-                x: point.x,
-                y: point.y,
-                rotate: normalizeAngle(90 - angle),
-                fontSize,
-                color: band.color,
-                angle
-            });
-        }
-    }
-
-    return glyphs;
-}
-
 export function syncHistoricalLegendSelection(
     points: HistoricalCategoryChartPoint[],
     currentSelection: HistoricalLegendSelection = {}
@@ -428,7 +403,7 @@ export function buildHistoricalPolarChartModel(
         amountAxisMax,
         amountAxisInterval: interval,
         averageExecutionRate,
-        primaryLabelGlyphs: buildPrimaryLabelGlyphs(primaryBands),
+        primaryLabelGlyphs: [],
         primaryPadAngle,
         executionAxisMax: EXECUTION_AXIS_MAX
     };
@@ -439,6 +414,123 @@ export function buildHistoricalPolarChartOption(
     args: HistoricalPolarChartOptionArgs
 ): Record<string, unknown> {
     const slotLabels = model.slots.map(slot => slot.key);
+    const series: Array<Record<string, unknown>> = [];
+
+    if (args.showPrimaryRing) {
+        series.push({
+            name: 'primary-ring',
+            type: 'pie',
+            radius: PRIMARY_RING_RADIUS,
+            center: POLAR_CENTER,
+            startAngle: START_ANGLE,
+            clockwise: true,
+            silent: true,
+            z: 1,
+            padAngle: model.primaryPadAngle,
+            avoidLabelOverlap: false,
+            label: {
+                show: true,
+                position: 'inside',
+                rotate: 'tangential',
+                color: args.isDarkMode ? '#f3f4f6' : '#1f2937',
+                fontSize: 11,
+                fontWeight: 700,
+                formatter: '{b}'
+            },
+            labelLine: { show: false },
+            tooltip: { show: false },
+            universalTransition: { enabled: true },
+            data: model.primaryBands.map(band => ({
+                name: band.label,
+                value: band.secondaryKeys.length,
+                itemStyle: {
+                    color: band.color,
+                    borderColor: args.isDarkMode ? '#121212' : '#ffffff',
+                    borderWidth: 1.5
+                }
+            }))
+        });
+    }
+
+    series.push(
+        {
+            name: args.budgetAmountLabel,
+            type: 'bar',
+            coordinateSystem: 'polar',
+            polarIndex: 0,
+            roundCap: true,
+            barWidth: 14,
+            barGap: '-100%',
+            z: 2,
+            universalTransition: { enabled: true },
+            data: model.slots.map(slot => ({
+                value: slot.budgetAmount,
+                itemStyle: {
+                    color: withAlpha(slot.color, 0.28)
+                }
+            }))
+        },
+        {
+            name: args.spentAmountLabel,
+            type: 'bar',
+            coordinateSystem: 'polar',
+            polarIndex: 0,
+            roundCap: true,
+            barWidth: 14,
+            barGap: '-100%',
+            z: 3,
+            universalTransition: { enabled: true },
+            data: model.slots.map(slot => ({
+                value: slot.spentAmount,
+                itemStyle: {
+                    color: slot.color
+                }
+            }))
+        },
+        {
+            name: 'secondary-labels',
+            type: 'scatter',
+            coordinateSystem: 'polar',
+            polarIndex: 0,
+            symbolSize: 1,
+            z: 4,
+            animationDurationUpdate: 720,
+            animationEasingUpdate: 'cubicInOut',
+            itemStyle: {
+                color: 'rgba(0,0,0,0)'
+            },
+            data: model.slots.map(slot => ({
+                value: model.amountAxisMax,
+                label: {
+                    show: true,
+                    position: 'top',
+                    distance: 8,
+                    color: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    rotate: 0,
+                    align: getOutsideLabelAlign(slot.angle),
+                    verticalAlign: getOutsideLabelVerticalAlign(slot.angle),
+                    formatter: slot.label
+                }
+            }))
+        },
+        {
+            name: args.executionRateLabel,
+            type: 'line',
+            coordinateSystem: 'polar',
+            polarIndex: 1,
+            smooth: true,
+            connectNulls: false,
+            symbol: 'circle',
+            symbolSize: 6,
+            z: 5,
+            universalTransition: { enabled: true },
+            lineStyle: { width: 2.5, color: args.accentColor },
+            itemStyle: { color: args.accentColor },
+            data: model.slots.map(slot => clamp(slot.executionRate, 0, MAX_EXECUTION_RATE))
+        }
+    );
 
     return {
         animation: true,
@@ -503,7 +595,11 @@ export function buildHistoricalPolarChartOption(
                 axisTick: { show: false },
                 axisLabel: {
                     color: args.isDarkMode ? '#888' : '#666',
-                    margin: 8,
+                    margin: 4,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    align: 'center',
+                    verticalAlign: 'bottom',
                     formatter: (value: number) => args.formatAmount(value)
                 },
                 splitLine: { show: false }
@@ -528,124 +624,40 @@ export function buildHistoricalPolarChartOption(
         ],
         graphic: [
             {
-                type: 'text',
+                type: 'group',
                 left: 'center',
-                top: '39%',
-                style: {
-                    text: `${model.averageExecutionRate.toFixed(1)}%`,
-                    fill: args.accentColor,
-                    fontSize: 22,
-                    fontWeight: 700,
-                    textAlign: 'center'
-                }
-            },
-            {
-                type: 'text',
-                left: 'center',
-                top: '45%',
-                style: {
-                    text: args.executionRateLabel,
-                    fill: args.isDarkMode ? '#bdbdbd' : '#666',
-                    fontSize: 11,
-                    textAlign: 'center'
-                }
+                top: '46%',
+                bounding: 'raw',
+                children: [
+                    {
+                        type: 'text',
+                        x: 0,
+                        y: -9,
+                        style: {
+                            text: args.executionRateLabel,
+                            fill: args.isDarkMode ? '#bdbdbd' : '#666',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            textAlign: 'center',
+                            textVerticalAlign: 'middle'
+                        }
+                    },
+                    {
+                        type: 'text',
+                        x: 0,
+                        y: 10,
+                        style: {
+                            text: `${model.averageExecutionRate.toFixed(1)}%`,
+                            fill: args.accentColor,
+                            fontSize: 18,
+                            fontWeight: 700,
+                            textAlign: 'center',
+                            textVerticalAlign: 'middle'
+                        }
+                    }
+                ]
             }
         ],
-        series: [
-            {
-                name: 'primary-ring',
-                type: 'pie',
-                radius: PRIMARY_RING_RADIUS,
-                center: POLAR_CENTER,
-                startAngle: START_ANGLE,
-                clockwise: true,
-                silent: true,
-                z: 1,
-                padAngle: model.primaryPadAngle,
-                label: { show: false },
-                labelLine: { show: false },
-                tooltip: { show: false },
-                universalTransition: { enabled: true },
-                data: model.primaryBands.map(band => ({
-                    name: band.label,
-                    value: band.secondaryKeys.length,
-                    itemStyle: {
-                        color: band.color,
-                        borderColor: args.isDarkMode ? '#121212' : '#ffffff',
-                        borderWidth: 1.5
-                    }
-                }))
-            },
-            {
-                name: args.budgetAmountLabel,
-                type: 'bar',
-                coordinateSystem: 'polar',
-                polarIndex: 0,
-                roundCap: true,
-                barWidth: 14,
-                barGap: '-100%',
-                z: 2,
-                universalTransition: { enabled: true },
-                data: model.slots.map(slot => ({
-                    value: slot.budgetAmount,
-                    itemStyle: {
-                        color: withAlpha(slot.color, 0.28)
-                    }
-                }))
-            },
-            {
-                name: args.spentAmountLabel,
-                type: 'bar',
-                coordinateSystem: 'polar',
-                polarIndex: 0,
-                roundCap: true,
-                barWidth: 14,
-                barGap: '-100%',
-                z: 3,
-                universalTransition: { enabled: true },
-                data: model.slots.map(slot => ({
-                    value: slot.spentAmount,
-                    itemStyle: {
-                        color: slot.color
-                    }
-                }))
-            },
-            {
-                name: 'secondary-labels',
-                type: 'scatter',
-                coordinateSystem: 'polar',
-                polarIndex: 0,
-                symbolSize: 1,
-                z: 4,
-                animationDurationUpdate: 650,
-                itemStyle: {
-                    color: 'rgba(0,0,0,0)'
-                },
-                label: {
-                    show: true,
-                    position: 'top',
-                    distance: 2,
-                    color: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
-                    fontSize: 11,
-                    formatter: (params: { dataIndex?: number }) => model.slots[params.dataIndex || 0]?.label || ''
-                },
-                data: model.slots.map(slot => slot.labelAnchorAmount)
-            },
-            {
-                name: args.executionRateLabel,
-                type: 'line',
-                coordinateSystem: 'polar',
-                polarIndex: 1,
-                smooth: true,
-                connectNulls: false,
-                symbol: 'circle',
-                symbolSize: 6,
-                z: 5,
-                universalTransition: { enabled: true },
-                lineStyle: { width: 2.5, color: args.accentColor },
-                itemStyle: { color: args.accentColor },
-                data: model.slots.map(slot => clamp(slot.executionRate, 0, MAX_EXECUTION_RATE))
-            }
-        ]
+        series
     };
 }

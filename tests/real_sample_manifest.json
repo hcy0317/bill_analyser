@@ -1,65 +1,56 @@
 [
   {
     "id": "wechat_csv",
-    "patterns": ["微信支付账单*.csv"],
-    "expected_header_row": 16,
+    "patterns": ["wechat_statement_sample.csv"],
+    "expected_header_row": 15,
     "expected_headers": ["交易时间", "交易类型", "交易对方", "商品", "收/支", "金额(元)"],
     "min_mapping_count": 5,
     "dedicated_parser": "wechat",
-    "comparison_sample": "微信支付账单(20240101-20240331).csv"
-  },
-  {
-    "id": "wechat_xlsx",
-    "patterns": ["微信支付账单流水文件*.xlsx"],
-    "expected_header_row": 16,
-    "expected_headers": ["交易时间", "交易类型", "交易对方", "商品", "收/支", "金额(元)"],
-    "min_mapping_count": 5,
-    "dedicated_parser": "wechat",
-    "comparison_sample": "微信支付账单流水文件(20160503-20160803)——【解压密码可在微信支付公众号查看】.xlsx"
+    "comparison_sample": "wechat_statement_sample.csv"
   },
   {
     "id": "alipay_csv",
-    "patterns": ["支付宝交易明细*.csv", "alipay_record_*.csv"],
+    "patterns": ["alipay_statement_sample.csv"],
     "expected_header_row": 24,
     "expected_headers": ["交易时间", "交易分类", "交易对方", "对方账号", "商品说明", "收/支", "金额"],
     "min_mapping_count": 5,
     "dedicated_parser": "alipay",
-    "comparison_sample": "支付宝交易明细(20190715-20200714).csv"
+    "comparison_sample": "alipay_statement_sample.csv"
   },
   {
-    "id": "bank_html_xls",
-    "patterns": ["账号6226192003866332交易明细*.xls"],
-    "expected_header_row": 3,
-    "expected_headers": ["交易时间", "支出金额", "存入金额", "账户余额", "对方账号", "对方名称"],
-    "min_mapping_count": 4,
-    "dedicated_parser": "cmbc",
-    "comparison_sample": "账号6226192003866332交易明细 (2).xls"
-  },
-  {
-    "id": "bank_detail_xlsx",
-    "patterns": ["detail*.xlsx"],
-    "expected_header_row": 2,
-    "expected_headers": ["交易日期", "交易时间", "交易金额", "本次余额", "对方户名", "对方账号"],
-    "min_mapping_count": 4,
-    "dedicated_parser": "abc",
-    "comparison_sample": "detail20250825.xlsx"
-  },
-  {
-    "id": "bank_ccb_xls",
-    "patterns": ["交易明细_9316_*.xls"],
-    "expected_header_row": 5,
-    "expected_headers": ["记账日", "交易日期", "交易时间", "支出", "收入", "账户余额"],
-    "min_mapping_count": 3,
-    "dedicated_parser": "ccb",
-    "comparison_sample": "交易明细_9316_20230827_20250827.xls"
-  },
-  {
-    "id": "bank_icbc_xlsx",
-    "patterns": ["工商银行历史明细*.xlsx"],
+    "id": "bank_icbc_csv",
+    "patterns": ["icbc_statement_sample.csv"],
     "expected_header_row": 1,
-    "expected_headers": ["", "交易日期", "账号", "储种", "序号", "币种", "钞汇", "摘要"],
+    "expected_headers": ["交易日期", "交易金额", "对方户名", "对方账号", "摘要", "交易流水号"],
     "min_mapping_count": 4,
     "dedicated_parser": "icbc",
-    "comparison_sample": "工商银行历史明细（申请单号：25082520010041279887）.xlsx"
+    "comparison_sample": "icbc_statement_sample.csv"
+  },
+  {
+    "id": "bank_cmbc_csv",
+    "patterns": ["cmbc_statement_sample.csv"],
+    "expected_header_row": 1,
+    "expected_headers": ["交易时间", "交易金额", "收/支", "交易对手", "交易说明", "摘要"],
+    "min_mapping_count": 4,
+    "dedicated_parser": "cmbc",
+    "comparison_sample": "cmbc_statement_sample.csv"
+  },
+  {
+    "id": "bank_abc_csv",
+    "patterns": ["abc_statement_sample.csv"],
+    "expected_header_row": 1,
+    "expected_headers": ["交易日期", "交易时间", "收入金额", "支出金额", "对方户名", "交易用途", "交易摘要"],
+    "min_mapping_count": 4,
+    "dedicated_parser": "abc",
+    "comparison_sample": "abc_statement_sample.csv"
+  },
+  {
+    "id": "bank_ccb_xlsx",
+    "patterns": ["ccb_statement_sample.xlsx"],
+    "expected_header_row": 4,
+    "expected_headers": ["记账日", "交易日期", "交易时间", "摘要", "支出", "收入", "账户余额", "对方户名"],
+    "min_mapping_count": 3,
+    "dedicated_parser": "ccb",
+    "comparison_sample": "ccb_statement_sample.xlsx"
   }
 ]

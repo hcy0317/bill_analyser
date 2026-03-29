@@ -60,6 +60,17 @@
                                 <div class="list-item-footer text-truncate" v-if="primaryFooterField">{{ primaryFooterField ? ti(item[primaryFooterField] as string, !!primaryFooterI18n) : '' }}</div>
                             </template>
                         </v-list-item>
+                        <v-divider v-if="primaryActionTitle" />
+                        <v-list-item v-if="primaryActionTitle"
+                                     :disabled="primaryActionDisabled"
+                                     @click="onPrimaryActionClicked">
+                            <template #prepend>
+                                <v-icon :icon="primaryActionIcon" />
+                            </template>
+                            <template #title>
+                                <div class="text-truncate text-primary">{{ primaryActionTitle }}</div>
+                            </template>
+                        </v-list-item>
                     </v-list>
                 </div>
                 <div class="secondary-list-container">
@@ -79,6 +90,17 @@
                                 <div class="list-item-header text-truncate" v-if="secondaryHeaderField">{{ secondaryHeaderField ? ti(subItem[secondaryHeaderField] as string, !!secondaryHeaderI18n) : '' }}</div>
                                 <div class="text-truncate">{{ ti(secondaryTitleField ? subItem[secondaryTitleField] as string : '', !!secondaryTitleI18n) }}</div>
                                 <div class="list-item-footer text-truncate" v-if="secondaryFooterField">{{ secondaryFooterField ? ti(subItem[secondaryFooterField] as string, !!secondaryFooterI18n) : '' }}</div>
+                            </template>
+                        </v-list-item>
+                        <v-divider v-if="secondaryActionTitle" />
+                        <v-list-item v-if="secondaryActionTitle"
+                                     :disabled="secondaryActionDisabled"
+                                     @click="onSecondaryActionClicked">
+                            <template #prepend>
+                                <v-icon :icon="secondaryActionIcon" />
+                            </template>
+                            <template #title>
+                                <div class="text-truncate text-primary">{{ secondaryActionTitle }}</div>
                             </template>
                         </v-list-item>
                     </v-list>
@@ -105,7 +127,8 @@ import { type ComponentDensity, type InputVariant, setChildInputFocus, scrollToS
 
 import {
     mdiChevronRight,
-    mdiMagnify
+    mdiMagnify,
+    mdiPlusCircleOutline
 } from '@mdi/js';
 
 interface DesktopTwoColumnListItemSelectionProps extends CommonTwoColumnListItemSelectionProps {
@@ -120,12 +143,20 @@ interface DesktopTwoColumnListItemSelectionProps extends CommonTwoColumnListItem
     customSelectionSecondaryText?: string;
     noItemText?: string;
     autoUpdateMenuPosition?: boolean;
+    primaryActionTitle?: string;
+    primaryActionIcon?: string;
+    primaryActionDisabled?: boolean;
+    secondaryActionTitle?: string;
+    secondaryActionIcon?: string;
+    secondaryActionDisabled?: boolean;
 }
 
 const props = defineProps<DesktopTwoColumnListItemSelectionProps>();
 
 const emit = defineEmits<{
     (e: 'update:modelValue', value: unknown): void;
+    (e: 'primary-action', selectedPrimaryItem: unknown): void;
+    (e: 'secondary-action', selectedPrimaryItem: unknown): void;
 }>();
 
 const { tt, ti } = useI18n();
@@ -185,6 +216,8 @@ const selectedPrimaryItem = computed<unknown>(() => getSelectedPrimaryItem(curre
 const selectedSecondaryItem = computed<unknown>(() => getSelectedSecondaryItem(currentSecondaryValue.value, selectedPrimaryItem.value));
 
 const noSelectionText = computed<string>(() => props.noItemText ? props.noItemText : tt('None'));
+const primaryActionIcon = computed<string>(() => props.primaryActionIcon || mdiPlusCircleOutline);
+const secondaryActionIcon = computed<string>(() => props.secondaryActionIcon || mdiPlusCircleOutline);
 
 const selectionPrimaryItemText = computed<string>(() => {
     if (!props.primaryTitleField) {
@@ -241,6 +274,16 @@ function onPrimaryItemClicked(item: unknown): void {
 
 function onSecondaryItemClicked(subItem: unknown): void {
     updateCurrentSecondaryValue(currentSecondaryValue, subItem);
+}
+
+function onPrimaryActionClicked(): void {
+    menuState.value = false;
+    emit('primary-action', selectedPrimaryItem.value);
+}
+
+function onSecondaryActionClicked(): void {
+    menuState.value = false;
+    emit('secondary-action', selectedPrimaryItem.value);
 }
 
 function onMenuStateChanged(state: boolean): void {

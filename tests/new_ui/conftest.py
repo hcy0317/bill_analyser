@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from tests.real_sample_support import extract_real_sample_family
+from tests.runtime_paths import get_test_db_path, remove_test_database_family
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -27,18 +28,13 @@ async def initialize_app():
     from src.api.app import initialize
     
     # 使用测试数据库
-    test_db_path = Path(__file__).parent.parent.parent / "data" / "test_bills.db"
-    # 如果存在则删除，确保干净的环境
-    if test_db_path.exists():
-        try:
-            test_db_path.unlink()
-        except PermissionError:
-            pass # 如果被占用则忽略，可能导致测试失败但比直接崩溃好
+    test_db_path = get_test_db_path("test_bills.db")
+    remove_test_database_family(test_db_path)
             
     await initialize(db_path=str(test_db_path))
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def app(initialize_app):
     """创建Flask应用实例（依赖异步初始化）"""
     from src.api.app import app, db
@@ -53,6 +49,8 @@ async def app(initialize_app):
     # Cleanup: 确保所有资源正确释放
     if db:
         await db.close()
+
+    remove_test_database_family(get_test_db_path("test_bills.db"))
         
     # 停止日志监听器
     _logger_instance.stop()

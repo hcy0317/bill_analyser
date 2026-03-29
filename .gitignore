@@ -478,3 +478,11 @@ $RECYCLE.BIN/
 # Runtime data and local user data
 data/
 static/
+
+#hcy0317 Ignore 
+.tmp/
+bills/*
+.VSCodeCounter/
+output/*
+uploads/*
+tests/.runtime/

@@ -11,19 +11,37 @@
 2. 执行: python tests/test_reconciliation_api.py
 """
 
+import os
 import requests
-import json
 from datetime import datetime, timedelta
+
+import pytest
+
+
+REQUEST_TIMEOUT = (2, 10)
+LIVE_BACKEND_TEST_ENV = 'BILL_ANALYSER_RUN_LIVE_BACKEND_TESTS'
+
+
+def _request_or_fail(method, url, **kwargs):
+    """带超时的 live backend 请求，避免整套测试挂住。"""
+    kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+
+    try:
+        return method(url, **kwargs)
+    except requests.RequestException as exc:
+        pytest.fail(f'live backend request failed: {exc}')
 
 
 def test_reconciliation_api():
     """测试对账单API完整流程"""
+    if os.environ.get(LIVE_BACKEND_TEST_ENV) != '1':
+        pytest.skip(f'set {LIVE_BACKEND_TEST_ENV}=1 to enable live backend reconciliation API test')
     
     base_url = "http://127.0.0.1:5000"
     
     # 1. 获取账户列表
     print("\n=== 步骤1: 获取账户列表 ===")
-    accounts_response = requests.get(f"{base_url}/api/v1/accounts/list.json")
+    accounts_response = _request_or_fail(requests.get, f"{base_url}/api/v1/accounts/list.json")
     if accounts_response.status_code != 200:
         print(f"❌ 获取账户列表失败: {accounts_response.status_code}")
         print(f"   响应: {accounts_response.text}")
@@ -54,7 +72,7 @@ def test_reconciliation_api():
     }
     
     print(f"   请求参数: {params}")
-    response = requests.get(reconciliation_url, params=params)
+    response = _request_or_fail(requests.get, reconciliation_url, params=params)
     
     if response.status_code != 200:
         print(f"❌ 对账单API失败: {response.status_code}")

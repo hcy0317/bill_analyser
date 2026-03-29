@@ -136,6 +136,8 @@ import { generateRandomUUID } from '@/lib/misc.ts';
 
 interface TransactionCategoryEditResponse {
     message: string;
+    id?: string;
+    category?: TransactionCategory;
 }
 
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -264,7 +266,7 @@ function save(): void {
         category: category.value,
         isEdit: !!editCategoryId.value,
         clientSessionId: clientSessionId.value
-    }).then(() => {
+    }).then((savedCategory) => {
         submitting.value = false;
 
         let message = 'You have saved this category';
@@ -273,7 +275,7 @@ function save(): void {
             message = 'You have added a new category';
         }
 
-        resolveFunc?.({ message });
+        resolveFunc?.({ message, id: savedCategory.id, category: savedCategory });
         showState.value = false;
     }).catch(error => {
         submitting.value = false;

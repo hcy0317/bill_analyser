@@ -7,68 +7,6 @@ from datetime import datetime
 import pytest
 
 
-@pytest.fixture(scope='module', name='client')
-def _client_fixture():
-    """创建测试客户端。"""
-
-    async def init_services():
-        from src.api.app import initialize
-        await initialize()
-
-    asyncio.run(init_services())
-
-    from src.api.app import app
-    app.config['TESTING'] = True
-
-    with app.test_client() as test_client:
-        yield test_client
-
-
-@pytest.fixture(scope='module', name='auth_context')
-def _auth_context_fixture(client):
-    """注册并登录测试用户。"""
-    suffix = int(datetime.now().timestamp())
-    username = f'test_data_rest_{suffix}'
-    password = 'Test123456!'
-
-    register_response = client.post('/api/auth/register', json={
-        'username': username,
-        'email': f'{username}@example.com',
-        'password': password,
-        'nickname': username
-    })
-    assert register_response.status_code in [200, 409], register_response.get_data(as_text=True)
-
-    login_response = client.post('/api/auth/login', json={
-        'loginName': username,
-        'password': password
-    })
-    assert login_response.status_code == 200, login_response.get_data(as_text=True)
-
-    login_data = login_response.get_json() or {}
-    token = (login_data.get('result') or {}).get('token')
-    assert token
-
-    return {
-        'username': username,
-        'password': password,
-        'headers': {'Authorization': f'Bearer {token}'}
-    }
-
-
-@pytest.fixture(scope='module', name='auth_headers')
-def _auth_headers_fixture(auth_context):
-    """返回鉴权请求头。"""
-    return auth_context['headers']
-
-
-@pytest.fixture(scope='module', name='db')
-def _db_fixture():
-    """返回数据库实例。"""
-    from src.api.app import app
-    return app.config['DB_INSTANCE']
-
-
 async def _get_user_id(db, username: str) -> int:
     user = await db.get_user_by_username(username)
     assert user is not None

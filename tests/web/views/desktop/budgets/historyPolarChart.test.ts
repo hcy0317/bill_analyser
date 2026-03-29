@@ -83,8 +83,8 @@ describe('historyPolarChart helpers', () => {
             expect.objectContaining({ key: '交通', state: 'all' })
         ]);
         expect(model.primaryPadAngle).toBeGreaterThan(0);
-        expect(model.primaryLabelGlyphs.length).toBeGreaterThan(0);
-        expect(model.primaryLabelGlyphs[0]?.angle).toBeGreaterThan(model.primaryLabelGlyphs[1]?.angle || -Infinity);
+        expect(model.primaryLabelGlyphs).toStrictEqual([]);
+        expect(model.primaryBands[0]?.startAngle).toBeGreaterThan(model.primaryBands[0]?.endAngle || -Infinity);
         expect(model.amountAxisMax).toBeGreaterThan(1500);
     });
 
@@ -133,7 +133,8 @@ describe('historyPolarChart helpers', () => {
             budgetAmountLabel: '预算金额',
             spentAmountLabel: '已花费',
             executionRateLabel: '执行度',
-            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: true
         }) as {
             radiusAxis: Array<{ max?: number; interval?: number }>;
             series: Array<Record<string, unknown>>;
@@ -148,15 +149,38 @@ describe('historyPolarChart helpers', () => {
             data: Array<{ value: number }>;
         };
         const labelSeries = option.series[3] as {
-            data: Array<number>;
+            data: Array<{
+                value: number;
+                label: {
+                    formatter: string;
+                };
+            }>;
         };
         const lineSeries = option.series[4] as {
             data: Array<number>;
         };
 
         expect(spentSeries.data[0]?.value).toBe(620);
-        expect(labelSeries.data[0]).toBe(800);
-        expect(labelSeries.data[2]).toBe(820);
+        expect(labelSeries.data[0]?.value).toBe(model.amountAxisMax);
+        expect(labelSeries.data[0]?.label?.formatter).toBe('早餐');
+        expect(labelSeries.data[2]?.label?.formatter).toBe('打车');
         expect(lineSeries.data[2]).toBeCloseTo(117.1, 1);
+    });
+
+    test('buildHistoricalPolarChartOption omits the primary ring when showPrimaryRing is false', () => {
+        const model = buildHistoricalPolarChartModel(SAMPLE_POINTS, buildSelection());
+        const option = buildHistoricalPolarChartOption(model, {
+            isDarkMode: false,
+            accentColor: '#5c6bc0',
+            budgetAmountLabel: '预算金额',
+            spentAmountLabel: '已花费',
+            executionRateLabel: '执行度',
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: false
+        }) as {
+            series: Array<Record<string, unknown>>;
+        };
+
+        expect(option.series[0]?.['name']).not.toBe('主分类环');
     });
 });

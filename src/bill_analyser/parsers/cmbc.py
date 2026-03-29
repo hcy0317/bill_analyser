@@ -283,11 +283,14 @@ class CMBCParser(ParserBase):
                             if not date_field.strip():
                                 continue
 
-                            amount_str = row.get("交易金额") or row.get("金额") or "0"
+                            amount_str = (row.get("交易金额") or row.get("金额") or "0").strip()
 
                             # 判断收支
                             transaction_type = "支出"
-                            if row.get("收/支") == "收入" or float(amount_str.replace(",", "")) > 0:
+                            explicit_type = (row.get("收/支") or "").strip()
+                            if explicit_type in {"收入", "支出"}:
+                                transaction_type = explicit_type
+                            elif float(amount_str.replace(",", "")) > 0:
                                 transaction_type = "收入"
 
                             bill = {

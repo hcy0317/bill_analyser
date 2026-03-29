@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import LOG_DIR
 
 
 class SafeStreamHandler(logging.StreamHandler):
@@ -135,7 +135,7 @@ class AsyncLogger:
 
     def __init__(self):
         """初始化日志管理器"""
-        self.log_dir = PROJECT_ROOT / "logs"
+        self.log_dir = LOG_DIR
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._stopped = False
 

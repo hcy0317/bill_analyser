@@ -14,9 +14,6 @@ REVIEWER_FILES = (
     ".github/agents/code-reviewer.agent.md",
     ".github/agents/python-reviewer.agent.md",
     ".github/agents/security-reviewer.agent.md",
-    ".cursor/agents/code-reviewer.md",
-    ".cursor/agents/python-reviewer.md",
-    ".cursor/agents/security-reviewer.md",
 )
 
 REVIEWER_CONTRACT_SNIPPETS = (
@@ -42,13 +39,6 @@ GUIDE_FILES = {
         "changed_files",
         "diff_text",
     ),
-    ".cursor/rules/common-agents.md": (
-        "## Reviewer Invocation Contract",
-        "base_ref",
-        "head_ref",
-        "changed_files",
-        "diff_text",
-    ),
     "AGENTS.md": (
         "## Reviewer Diff Contract",
         "base_ref",
@@ -57,20 +47,6 @@ GUIDE_FILES = {
         "diff_text",
     ),
 }
-
-REVIEWER_FILE_PAIRS = (
-    (".github/agents/code-reviewer.agent.md", ".cursor/agents/code-reviewer.md"),
-    (".github/agents/python-reviewer.agent.md", ".cursor/agents/python-reviewer.md"),
-    (".github/agents/security-reviewer.agent.md", ".cursor/agents/security-reviewer.md"),
-)
-
-GUIDE_FILE_PAIRS = (
-    (
-        ".github/instructions/ecc/common-agents.instructions.md",
-        ".cursor/rules/common-agents.md",
-        "## Reviewer Invocation Contract",
-    ),
-)
 
 
 def _read_repo_file(relative_path: str) -> str:
@@ -136,26 +112,3 @@ def test_workspace_guides_document_reviewer_diff_contract(
             f"{relative_path} is missing reviewer orchestration snippet inside {section_title}: {snippet}"
         )
 
-
-@pytest.mark.parametrize(("left_path", "right_path"), REVIEWER_FILE_PAIRS)
-def test_reviewer_agent_pairs_stay_in_sync(left_path: str, right_path: str) -> None:
-    left_section = _extract_markdown_section(_read_repo_file(left_path), REVIEWER_SECTION_TITLE)
-    right_section = _extract_markdown_section(_read_repo_file(right_path), REVIEWER_SECTION_TITLE)
-
-    assert _normalize_whitespace(left_section) == _normalize_whitespace(right_section), (
-        f"Reviewer contract drift detected between {left_path} and {right_path}"
-    )
-
-
-@pytest.mark.parametrize(("left_path", "right_path", "section_title"), GUIDE_FILE_PAIRS)
-def test_shared_reviewer_guide_pairs_stay_in_sync(
-    left_path: str,
-    right_path: str,
-    section_title: str,
-) -> None:
-    left_section = _extract_markdown_section(_read_repo_file(left_path), section_title)
-    right_section = _extract_markdown_section(_read_repo_file(right_path), section_title)
-
-    assert _normalize_whitespace(left_section) == _normalize_whitespace(right_section), (
-        f"Reviewer orchestration drift detected between {left_path} and {right_path}"
-    )

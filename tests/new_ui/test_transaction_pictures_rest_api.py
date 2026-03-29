@@ -1,53 +1,6 @@
 """交易图片 REST 主链测试。"""
 
 import io
-from datetime import datetime
-
-import pytest
-
-
-@pytest.fixture(scope='module', name='client')
-def _client_fixture():
-    """创建测试客户端。"""
-    import asyncio
-
-    async def init_services():
-        from src.api.app import initialize
-        await initialize()
-
-    asyncio.run(init_services())
-
-    from src.api.app import app
-    app.config['TESTING'] = True
-
-    with app.test_client() as test_client:
-        yield test_client
-
-
-@pytest.fixture(scope='module', name='auth_headers')
-def _auth_headers_fixture(client):
-    """返回鉴权请求头。"""
-    suffix = int(datetime.now().timestamp())
-    username = f'test_transaction_pictures_rest_{suffix}'
-    password = 'Test123456!'
-
-    register_response = client.post('/api/auth/register', json={
-        'username': username,
-        'email': f'{username}@example.com',
-        'password': password,
-        'nickname': username
-    })
-    assert register_response.status_code in [200, 409], register_response.get_data(as_text=True)
-
-    login_response = client.post('/api/auth/login', json={
-        'loginName': username,
-        'password': password
-    })
-    assert login_response.status_code == 200, login_response.get_data(as_text=True)
-
-    token = ((login_response.get_json() or {}).get('result') or {}).get('token')
-    assert token
-    return {'Authorization': f'Bearer {token}'}
 
 
 def test_upload_transaction_picture_rest(client, auth_headers):

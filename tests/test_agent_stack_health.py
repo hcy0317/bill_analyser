@@ -19,12 +19,49 @@ def _assert_session_completion_contract(text: str, requirement_groups: tuple[tup
 
 
 def _run_agent_stack_health(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    agent_stack_health = importlib.import_module("scripts.agent_stack_health")
+
+    argv = list(args)
+
+    def _get_arg(name: str, default: str) -> str:
+        if name not in argv:
+            return default
+
+        index = argv.index(name)
+        if index + 1 >= len(argv):
+            return default
+
+        return argv[index + 1]
+
+    mode = _get_arg("--mode", "all")
+    output_format = _get_arg("--format", "text")
+    repo_root = Path(_get_arg("--repo-root", str(REPO_ROOT))).resolve()
+    home = Path(_get_arg("--home", str(Path.home()))).resolve()
+
+    checks = []
+    probes = []
+
+    if mode in {"repo", "all"}:
+        checks.extend(agent_stack_health.scan_repo(repo_root))
+
+    if mode in {"global", "all"}:
+        checks.extend(agent_stack_health.scan_global(home, repo_root))
+
+    if mode in {"probes", "all"}:
+        probes = agent_stack_health.build_manual_probes()
+
+    payload = agent_stack_health.build_payload(mode, repo_root, home, checks, probes)
+    stdout = (
+        json.dumps(payload, ensure_ascii=False, indent=2)
+        if output_format == "json"
+        else agent_stack_health.render_text(payload)
+    )
+
+    return subprocess.CompletedProcess(
+        args=[sys.executable, str(SCRIPT_PATH), *args],
+        returncode=1 if payload["summary"]["fail"] else 0,
+        stdout=stdout,
+        stderr="",
     )
 
 
@@ -40,9 +77,8 @@ def test_repo_scan_reports_expected_contracts() -> None:
     checks = _checks_by_id(payload)
 
     assert checks["repo.entrypoints"]["status"] == "pass"
-    assert checks["repo.agent-parity"]["status"] == "pass"
-    assert checks["repo.skill-parity"]["status"] == "pass"
-    assert checks["repo.cursor-hooks-trimmed"]["status"] == "pass"
+    assert checks["repo.cursor-removed"]["status"] == "pass"
+    assert checks["repo.hooks-baseline"]["status"] == "pass"
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
     assert checks["repo.codex-baseline"]["status"] == "pass"
 
@@ -50,11 +86,6 @@ def test_repo_scan_reports_expected_contracts() -> None:
 def test_global_scan_warns_when_claude_hook_settings_are_missing(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     (fake_home / ".claude").mkdir(parents=True)
-    (fake_home / ".cursor" / "skills-cursor").mkdir(parents=True)
-    (fake_home / ".cursor" / "skills-cursor" / ".cursor-managed-skills-manifest.json").write_text(
-        "{}",
-        encoding="utf-8",
-    )
     (fake_home / ".codex").mkdir(parents=True)
     (fake_home / ".codex" / "config.toml").write_text(
         'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\n',
@@ -67,8 +98,7 @@ def test_global_scan_warns_when_claude_hook_settings_are_missing(tmp_path: Path)
     payload = json.loads(result.stdout)
     checks = _checks_by_id(payload)
 
-    assert checks["global.claude.settings"]["status"] == "warn"
-    assert checks["global.cursor.skills-manifest"]["status"] == "pass"
+    assert checks["global.claude.settings"]["status"] == "info"
     assert checks["global.codex.config"]["status"] == "pass"
 
 
@@ -82,8 +112,8 @@ def test_probe_catalog_exposes_manual_behavior_checks() -> None:
     assert {
         "reviewer-scope-refusal",
         "money-unit-convention",
-        "python-hook-warning",
-        "typescript-hook-warning",
+        "repo-guard-banned-command",
+        "repo-guard-protected-path",
     } <= probe_ids
 
 

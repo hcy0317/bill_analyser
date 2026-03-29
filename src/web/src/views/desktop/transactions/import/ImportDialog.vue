@@ -53,19 +53,22 @@
                            :icon="true" :disabled="loading || submitting"
                            v-if="currentStep === 'checkData' && importTransactionCheckDataTab?.filterMenus">
                         <v-icon :icon="mdiFilterOutline" />
-                        <v-menu activator="parent" max-height="500">
-                            <v-list>
-                                <template :key="groupIndex" v-for="(group, groupIndex) in importTransactionCheckDataTab.filterMenus">
-                                    <v-list-subheader :title="group.title" />
-                                    <v-divider class="my-2" v-if="groupIndex > 0" />
-                                    <v-list-item :key="`menu_${groupIndex}_${index}`"
-                                                 :prepend-icon="menu.prependIcon"
-                                                 :title="menu.title"
-                                                 :subtitle="menu.subTitle"
-                                                 :append-icon="menu.appendIcon"
-                                                 :disabled="menu.disabled"
-                                                 @click="menu.onClick()"
-                                                 v-for="(menu, index) in group.items" />
+                        <v-menu activator="parent" max-height="500" min-width="360">
+                            <v-list density="compact" class="py-1">
+                                <template :key="group.title" v-for="(group, groupIndex) in importTransactionCheckDataTab.filterMenus">
+                                    <v-list-subheader class="text-high-emphasis">{{ group.title }}</v-list-subheader>
+                                    <div class="px-4 pb-1 text-caption text-medium-emphasis" v-if="group.summary">{{ group.summary }}</div>
+                                    <v-list-item
+                                        v-for="(menu, index) in group.items"
+                                        :key="`${group.title}_${index}`"
+                                        :prepend-icon="menu.prependIcon"
+                                        :title="menu.title"
+                                        :subtitle="menu.subTitle"
+                                        :append-icon="menu.appendIcon"
+                                        :disabled="menu.disabled"
+                                        @click="menu.onClick()"
+                                    />
+                                    <v-divider class="my-2" v-if="groupIndex < importTransactionCheckDataTab.filterMenus.length - 1" />
                                 </template>
                             </v-list>
                         </v-menu>
@@ -112,7 +115,7 @@
                             />
                         </v-col>
 
-                        <v-col cols="12" md="12" v-if="importFiles.length <= 1 && (fileType === 'dsv' || fileType === 'dsv_data')">
+                        <v-col cols="12" md="12" v-if="showHandlingMethodSelector">
                             <v-select
                                 item-title="displayName"
                                 item-value="type"
@@ -214,6 +217,7 @@
                        @click="close(true)"
                        v-if="currentStep === 'finalResult'">{{ tt('Close') }}</v-btn>
             </div>
+
         </v-card>
     </v-dialog>
 
@@ -416,7 +420,7 @@ interface ImportConfigMatchResult {
     fileFormat?: string;
     description?: string;
     descriptionSummary?: string;
-    fieldMappings: Record<string, unknown>;
+    fieldMappings: ImportFieldMappings;
     sampleHeaders?: string[];
     dateFormat?: string;
     delimiter?: string;
@@ -450,6 +454,60 @@ interface ImportConfigSuggestionResult {
         score: number;
     }>;
 }
+
+interface ImportFieldMappings {
+    includeHeader?: boolean;
+    columnMapping?: Record<number, number>;
+    transactionTypeMapping?: Record<string, number>;
+    timeFormat?: string;
+    timezoneFormat?: string;
+    amountDecimalSeparator?: string;
+    amountDigitGroupingSymbol?: string;
+    geoLocationSeparator?: string;
+    geoLocationOrder?: string;
+    tagSeparator?: string;
+}
+
+interface ImportPreviewRecord {
+    id: number;
+    preview_type?: string;
+    suggested_preview_type?: string;
+    preview_date?: string;
+    preview_amount?: number;
+    preview_destination_amount?: number;
+    preview_main_category?: string;
+    preview_sub_category?: string;
+    preview_source_account_id?: number;
+    preview_destination_account_id?: number;
+    preview_description?: string;
+    preview_counterparty?: string;
+    preview_payment_method?: string;
+    transfer_suggestion_score?: number;
+    transfer_suggestion_level?: string;
+    transfer_suggestion_reason?: string;
+    investment_signal_score?: number;
+    investment_signal_level?: string;
+    investment_signal_reason?: string;
+    learning_recommendation_score?: number;
+    learning_recommendation_level?: string;
+    learning_recommendation_reason?: string;
+    learning_recommendation_type?: string;
+    learning_recommendation_summary?: string;
+    investment_platform?: string;
+    investment_product?: string;
+    preview_recurring_id?: number;
+    preview_recurring_name?: string;
+    preview_recurring_candidate_count?: number;
+    preview_recurring_match_score?: number;
+    preview_recurring_match_reasons?: string;
+    preview_recurring_matched_date?: string;
+    preview_parser_id?: string;
+    preview_is_manually_annotated?: boolean;
+}
+
+type ImportTransactionWithPreviewId = ImportTransaction & {
+    _previewId?: number;
+};
 
 defineProps<{
     persistent?: boolean;
@@ -538,6 +596,18 @@ const fileType = computed<string>(() => {
     }
 
     return 'auto';
+});
+
+const showHandlingMethodSelector = computed<boolean>(() => {
+    if (importFiles.value.length > 1) {
+        return false;
+    }
+
+    if (fileType.value !== 'dsv' && fileType.value !== 'dsv_data') {
+        return false;
+    }
+
+    return !looksLikeStructuredBillStatementFile(importFile.value);
 });
 
 const allFileSubTypes = computed<LocalizedImportFileTypeSubType[] | undefined>(() => undefined);
@@ -675,6 +745,12 @@ function setImportFile(event: Event): void {
     el.value = '';
 }
 
+function looksLikeStructuredBillStatementFile(file?: File): boolean {
+    const fileName = file?.name?.toLowerCase() || '';
+
+    return /微信支付账单|wechat|wxpay|支付宝交易明细|alipay/.test(fileName);
+}
+
 function getImportConfigFileFormat(): string {
     const lowerName = importFile.value?.name.toLowerCase() || '';
     if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt')) {
@@ -707,13 +783,13 @@ async function loadImportConfigList(): Promise<void> {
         fileFormat: getImportConfigFileFormat()
     });
     const result = response.data?.result || [];
-    importConfigList.value = result.map((config: any) => ({
+    importConfigList.value = result.map((config: Partial<ImportConfigMatchResult>) => ({
         id: config.id,
         name: config.name,
         fileFormat: config.fileFormat,
         description: config.description,
         descriptionSummary: config.descriptionSummary,
-        fieldMappings: config.fieldMappings,
+        fieldMappings: config.fieldMappings || {},
         sampleHeaders: config.sampleHeaders || [],
         dateFormat: config.dateFormat,
         delimiter: config.delimiter,
@@ -738,7 +814,7 @@ async function openManageImportConfigDialog(): Promise<void> {
 }
 
 function applyImportConfig(config: ImportConfigMatchResult): void {
-    importTransactionDefineColumnTab.value?.applyFieldMappings(config.fieldMappings as any);
+    importTransactionDefineColumnTab.value?.applyFieldMappings(config.fieldMappings);
     matchedImportConfig.value = config;
     parsedFileDelimiter.value = config.delimiter || parsedFileDelimiter.value;
     showManageImportConfigDialog.value = false;
@@ -852,7 +928,7 @@ async function executeColumnMappingImport(): Promise<void> {
     });
 
     if (!response.data?.success) {
-        throw new Error((response.data as any)?.error || `解析文件 ${currentFile.originalName} 失败`);
+        throw new Error(response.data?.error || `解析文件 ${currentFile.originalName} 失败`);
     }
 
     logger.info(`[列映射导入] 文件 ${currentFile.originalName} 解析完成, parsed_count=${response.data?.result?.parsed_count || 0}`);
@@ -991,7 +1067,7 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
         });
         const suggestion = suggestionResponse.data?.result as ImportConfigSuggestionResult | undefined;
         if (suggestion?.columnMapping && Object.keys(suggestion.columnMapping).length > 0) {
-            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as any);
+            importTransactionDefineColumnTab.value?.applyFieldMappings(suggestion as ImportFieldMappings);
             snackbar.value?.showMessage('已自动建议列映射');
         }
     } catch (error) {
@@ -1033,7 +1109,7 @@ async function executeStage2Dedup(): Promise<void> {
     logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
 
     const previewData = stage2Result.data?.preview || [];
-    const transactions = previewData.map((item: any, idx: number) => {
+    const transactions = previewData.map((item: ImportPreviewRecord, idx: number) => {
         return convertPreviewToImportTransaction(item, idx);
     });
 
@@ -1148,7 +1224,7 @@ async function parseData(): Promise<void> {
 /**
  * 将后端预览数据转换为前端 ImportTransaction 格式
  */
-function convertPreviewToImportTransaction(item: any, index: number): ImportTransaction {
+function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: number): ImportTransaction {
     // 类型映射: 后端中文类型 -> 前端数字类型
     const typeMap: Record<string, number> = {
         '支出': 3,    // Expense
@@ -1237,7 +1313,8 @@ function convertPreviewToImportTransaction(item: any, index: number): ImportTran
 
     // 添加预览表ID和解析器来源，用于阶段3确认导入
     const transaction = ImportTransaction.of(responseItem, index);
-    (transaction as any)._previewId = item.id;  // 保存预览表记录ID
+    const previewTransaction = transaction as ImportTransactionWithPreviewId;
+    previewTransaction._previewId = item.id;  // 保存预览表记录ID
     transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
     transaction.isManuallyAnnotated = !!item.preview_is_manually_annotated;
 
@@ -1248,7 +1325,7 @@ function convertPreviewToImportTransaction(item: any, index: number): ImportTran
  * v6.55: 处理重新分类后的数据更新
  * @param previewData 后端返回的原始预览数据数组（preview_* 字段格式）
  */
-function onReclassified(previewData: any[]): void {
+function onReclassified(previewData: ImportPreviewRecord[]): void {
     if (!previewData || previewData.length === 0) {
         return;
     }
@@ -1378,7 +1455,7 @@ function submit(): void {
                 };
 
                 return {
-                    id: (t as any)._previewId,
+                    id: (t as ImportTransactionWithPreviewId)._previewId,
                     preview_type: typeReverseMap[t.type] || '支出',
                     preview_amount: t.sourceAmount / 100,  // 分转元
                     preview_destination_amount: t.destinationAmount / 100,
@@ -1471,3 +1548,10 @@ defineExpose({
     open
 });
 </script>
+
+<style scoped>
+.import-check-data-filter-drawer :deep(.v-navigation-drawer__content) {
+    display: flex;
+    flex-direction: column;
+}
+</style>

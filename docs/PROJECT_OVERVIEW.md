@@ -64,7 +64,9 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ### 3.3 解析器模块（`src/bill_analyser/parsers/`）
 - 已有解析器：`wechat.py`、`alipay.py`、`icbc.py`、`abc.py`、`ccb.py`、`cmbc.py`
 - 工厂入口：`factory.py`（自动识别并分发）
-- 历史 `parsers_old/` 目录已移除；运行态仅保留当前工厂与现行解析器实现
+- 历史 `parsers_old/` 目录与 `*_parser.py` / `csv_parser.py` / `excel_parser.py` 兼容 shim 已移除；运行态仅保留当前工厂与现行解析器实现
+- 外部脚本如果仍引用旧 shim 导入路径，应迁移到 `factory.py` 或对应的现行 parser 模块
+- 标准解析样本统一放在 `tests/fixtures/import_samples/`，供 parser 单测与真实样本回归复用
 
 ---
 
@@ -135,6 +137,12 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - **legacy 导入兼容说明**
   - 前端导入弹窗已不再依赖旧 `v1/transactions/import/process.json` 轮询与 `v1/transactions/parse_dsv_file.json`
   - `v1/transactions/parse_import.json` rewrite 已移除，当前应返回 404
+
+### 5.2.1 导入预览校验交互
+- 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，按日期、类型、分类、账户、标签、人工标注状态与备注等维度组织筛选项。
+- `Annotation` 筛选中的 `Needs Review or Manually Annotated` 表示：交易仍存在待补分类/账户问题，或该交易已经被用户手工编辑过并视为人工标注。
+- 当用户在导入预览表中行内编辑一条交易时，当前正在编辑的行会在标注筛选结果里保持可见，避免因分类/账户刚被补齐而立即从列表中消失。
+- 当用户结束行内编辑时，该交易会被标记为人工标注；此后它仍命中 `Needs Review or Manually Annotated`，但不会再命中 `No Annotation Issues`。
 
 ### 5.3 统计与汇率
 - 统计主链当前统一由 `GET /api/statistics/*` 提供
@@ -231,24 +239,3 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ---
 
-## 9. 当前已知现状（本次会话）
-
-1. 已修复统计汇率模块的导入路径不一致问题：
-  - `src/bill_analyser/api/routes/statistics.py` 中 `_fetch_exchange_rates_from_providers` 现与同文件统一使用 `src/bill_analyser/core/exchange_rate_providers.py`。
-2. 针对性回归显示：
-  - `tests/new_ui/test_accounts_tags_rest_api.py`
-  - `tests/new_ui/test_categories_api.py`
-  - `tests/new_ui/test_bills_api.py`
-  - `tests/new_ui/test_transaction_list_rest_api.py`
-  当前组合回归结果为：`24 passed, 6 skipped`。
-   - 现有 `statistics` 相关测试存在既有 401/404 夹具与鉴权依赖问题（非本次导入路径修复引入）。
-3. 当前代码质量：
-   - `statistics.py` Pylint 评分维持在高分区间（本次修复未引入新增严重告警）。
-
----
-
-## 10. 后续建议（可执行）
-
-1. 为 `statistics` 测试补齐统一鉴权 fixture（避免 401/404 误报掩盖业务回归）。
-2. 建立“导入链路”和“统计链路”两套最小可用回归集，作为每次改动必跑基线。
-3. 按模块分批重构测试（优先 `bills/category/statistics`），避免一次性重写导致不可控风险。

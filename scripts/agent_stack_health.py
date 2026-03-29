@@ -9,7 +9,10 @@ import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATUS_PRIORITY = {"fail": 0, "warn": 1, "pass": 2, "info": 3}
-CURSOR_HOOKS_NOTE = "Cursor hooks and the ECC runtime were intentionally removed"
+CURSOR_REMOVAL_NOTES = (
+    "Cursor hooks and the ECC runtime were intentionally removed",
+    "Legacy `.cursor/` compatibility mirrors were intentionally removed",
+)
 DIFF_COMMIT_SKILL = "zh-conventional-commit-from-diff"
 ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS = {
     "section": ("## Session Completion", "Session Completion"),
@@ -53,6 +56,10 @@ def _read_text(path: Path) -> str:
 def _load_toml(path: Path) -> dict:
     with path.open("rb") as handle:
         return tomllib.load(handle)
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(_read_text(path))
 
 
 def _contains_any(text: str, candidates: tuple[str, ...]) -> bool:
@@ -112,6 +119,7 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         repo_root / ".github" / "copilot-instructions.md",
         repo_root / ".codex" / "AGENTS.md",
         repo_root / ".codex" / "config.toml",
+        repo_root / "opencode.json",
     ]
     missing_entrypoints = [str(path.relative_to(repo_root)) for path in entrypoints if not path.exists()]
     if missing_entrypoints:
@@ -136,100 +144,110 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
             )
         )
 
-    github_agents = _agent_ids(repo_root / ".github" / "agents", ".agent.md")
-    cursor_agents = _agent_ids(repo_root / ".cursor" / "agents", ".md")
-    if github_agents and github_agents == cursor_agents:
-        checks.append(
-            _result(
-                "repo.agent-parity",
-                "repo",
-                "pass",
-                "`.github/agents` 与 `.cursor/agents` 的 agent 名单保持同步。",
-                [f"{len(github_agents)} mirrored agents"],
-            )
-        )
-    else:
-        only_github = sorted(github_agents - cursor_agents)
-        only_cursor = sorted(cursor_agents - github_agents)
-        checks.append(
-            _result(
-                "repo.agent-parity",
-                "repo",
-                "fail",
-                "Copilot 与 Cursor 的 agent 清单发生漂移。",
-                [
-                    f"only_in_.github={only_github}",
-                    f"only_in_.cursor={only_cursor}",
-                ],
-                "同步两个目录中的 agent 文件名与职责。",
-            )
-        )
-
-    github_skills = _skill_ids(repo_root / ".github" / "skills")
-    cursor_skills = _skill_ids(repo_root / ".cursor" / "skills")
-    if github_skills and github_skills == cursor_skills:
-        checks.append(
-            _result(
-                "repo.skill-parity",
-                "repo",
-                "pass",
-                "`.github/skills` 与 `.cursor/skills` 的共享技能目录保持同步。",
-                [f"{len(github_skills)} mirrored skills"],
-            )
-        )
-    else:
-        only_github = sorted(github_skills - cursor_skills)
-        only_cursor = sorted(cursor_skills - github_skills)
-        checks.append(
-            _result(
-                "repo.skill-parity",
-                "repo",
-                "fail",
-                "Copilot 与 Cursor 的技能目录发生漂移。",
-                [
-                    f"only_in_.github={only_github}",
-                    f"only_in_.cursor={only_cursor}",
-                ],
-                "优先同步共享技能，再决定是否保留平台专属差异。",
-            )
-        )
+    cursor_root = repo_root / ".cursor"
+    cursor_files = []
+    if cursor_root.exists():
+        cursor_files = [
+            str(path.relative_to(repo_root))
+            for path in cursor_root.rglob("*")
+            if path.is_file()
+        ]
 
     agents_text = _read_text(repo_root / "AGENTS.md")
-    cursor_hooks_runtime_paths = [
-        repo_root / ".cursor" / "hooks.json",
-        repo_root / ".cursor" / "hooks",
-    ]
-    runtime_present = [str(path.relative_to(repo_root)) for path in cursor_hooks_runtime_paths if path.exists()]
-    if CURSOR_HOOKS_NOTE in agents_text and not runtime_present:
+    if _contains_any(agents_text, CURSOR_REMOVAL_NOTES) and not cursor_files:
         checks.append(
             _result(
-                "repo.cursor-hooks-trimmed",
+                "repo.cursor-removed",
                 "repo",
                 "pass",
-                "仓库已明确声明 Cursor hooks 被裁剪，并且运行态文件确实不存在。",
-                ["AGENTS.md", "no .cursor/hooks.json", "no .cursor/hooks/"],
+                "仓库已明确声明 `.cursor/` 兼容镜像被移除，当前也不存在残留文件。",
+                ["AGENTS.md", "no tracked files under .cursor/"],
             )
         )
-    elif CURSOR_HOOKS_NOTE in agents_text and runtime_present:
+    elif _contains_any(agents_text, CURSOR_REMOVAL_NOTES) and cursor_files:
         checks.append(
             _result(
-                "repo.cursor-hooks-trimmed",
+                "repo.cursor-removed",
                 "repo",
                 "fail",
-                "文档说 Cursor hooks 已移除，但仓库里又出现了运行态 hook 文件。",
-                runtime_present,
-                "要么恢复并记录完整 hooks 方案，要么移除残留文件，避免误导。",
+                "文档说 `.cursor/` 兼容镜像已移除，但仓库里仍有残留文件。",
+                cursor_files,
+                "删除 `.cursor/` 下的重复文件，并更新相关 CI / 文档 / 测试基线。",
             )
         )
     else:
         checks.append(
             _result(
-                "repo.cursor-hooks-trimmed",
+                "repo.cursor-removed",
                 "repo",
                 "warn",
-                "仓库未保留清晰的 Cursor hook 运行态说明。",
-                ["missing trim note in AGENTS.md"],
-                "在 AGENTS.md 中写明 hooks 是可运行、已移除，还是仅作文档提示。",
+                "仓库未保留清晰的 `.cursor/` 移除说明。",
+                ["missing removal note in AGENTS.md"],
+                "在 AGENTS.md 中明确 `.cursor/` 是已移除的历史兼容层。",
+            )
+        )
+
+    required_hook_paths = [
+        repo_root / ".github" / "hooks" / "repo-guard.json",
+        repo_root / ".claude" / "settings.json",
+        repo_root / "scripts" / "hooks" / "pre_tool_repo_guard.py",
+    ]
+    missing_hook_paths = [str(path.relative_to(repo_root)) for path in required_hook_paths if not path.exists()]
+    if not missing_hook_paths:
+        github_hook_config = _load_json(required_hook_paths[0])
+        claude_settings = _load_json(required_hook_paths[1])
+        guard_script = "scripts/hooks/pre_tool_repo_guard.py"
+        github_pre_tool_use = github_hook_config.get("hooks", {}).get("preToolUse", [])
+        github_commands = [
+            *(str(entry.get("bash") or "") for entry in github_pre_tool_use if isinstance(entry, dict)),
+            *(str(entry.get("powershell") or "") for entry in github_pre_tool_use if isinstance(entry, dict)),
+        ]
+        claude_pre_tool_use = claude_settings.get("hooks", {}).get("PreToolUse", [])
+        claude_commands = [
+            str(hook.get("command") or "")
+            for entry in claude_pre_tool_use
+            if isinstance(entry, dict)
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict)
+        ]
+        wiring_errors: list[str] = []
+        if not any(guard_script in command for command in github_commands):
+            wiring_errors.append("Copilot preToolUse 未指向 scripts/hooks/pre_tool_repo_guard.py")
+        if not any(guard_script in command for command in claude_commands):
+            wiring_errors.append("Claude PreToolUse 未指向 scripts/hooks/pre_tool_repo_guard.py")
+
+        if wiring_errors:
+            checks.append(
+                _result(
+                    "repo.hooks-baseline",
+                    "repo",
+                    "fail",
+                    "hooks 文件虽然存在，但 repo guard 接线不一致。",
+                    wiring_errors,
+                    "让 `.github/hooks/*.json` 与 `.claude/settings.json` 都显式调用同一份 `scripts/hooks/pre_tool_repo_guard.py`。",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.hooks-baseline",
+                    "repo",
+                    "pass",
+                    "最小 hooks 基线已落地：Copilot / Claude 共用同一套 repo guard 脚本。",
+                    [
+                        str(path.relative_to(repo_root)) for path in required_hook_paths
+                    ] + github_commands + claude_commands,
+                )
+            )
+    else:
+        checks.append(
+            _result(
+                "repo.hooks-baseline",
+                "repo",
+                "fail",
+                "最小 hooks 基线不完整，仓库还不能稳定验证 repo guard 是否被宿主加载。",
+                missing_hook_paths,
+                "补齐 `.github/hooks/`、项目级 `.claude/settings.json` 与共享 hook 脚本。",
             )
         )
 
@@ -380,14 +398,13 @@ def scan_global(home: Path, repo_root: Path) -> list[CheckResult]:
             _result(
                 "global.claude.settings",
                 "global",
-                "warn",
-                "仓库 hook 规则指向 `~/.claude/settings.json`，但当前机器没有这个文件。",
+                "info",
+                "当前机器没有 `~/.claude/settings.json`，但仓库已提供项目级 `.claude/settings.json` 作为基线。",
                 [
                     str(claude_root),
-                    str(repo_root / ".cursor" / "rules" / "python-hooks.md"),
-                    str(repo_root / ".cursor" / "rules" / "typescript-hooks.md"),
+                    str(repo_root / ".claude" / "settings.json"),
                 ],
-                "若想验证 Claude hook 真在工作，请补齐 `~/.claude/settings.json` 中的 hook 配置。",
+                "如果你还需要跨仓库的 Claude 全局 hooks，再补齐 `~/.claude/settings.json`。",
             )
         )
 
@@ -410,30 +427,6 @@ def scan_global(home: Path, repo_root: Path) -> list[CheckResult]:
                 "info",
                 "当前机器没有 Claude 全局 skills 目录，主要依赖仓库内或其他宿主层。",
                 [str(claude_skills_dir)],
-            )
-        )
-
-    cursor_root = home / ".cursor"
-    cursor_manifest = cursor_root / "skills-cursor" / ".cursor-managed-skills-manifest.json"
-    if cursor_manifest.exists():
-        checks.append(
-            _result(
-                "global.cursor.skills-manifest",
-                "global",
-                "pass",
-                "Cursor 全局技能托管清单存在。",
-                [str(cursor_manifest)],
-            )
-        )
-    else:
-        checks.append(
-            _result(
-                "global.cursor.skills-manifest",
-                "global",
-                "warn",
-                "未发现 Cursor 全局技能托管清单。",
-                [str(cursor_manifest)],
-                "如果你依赖 Cursor 全局技能，请确认 `skills-cursor` 是否安装完成。",
             )
         )
 
@@ -537,35 +530,37 @@ def build_manual_probes() -> list[ManualProbe]:
             ],
         ),
         ManualProbe(
-            id="python-hook-warning",
+            id="repo-guard-banned-command",
             surface="hook",
-            goal="验证 Python hook 是否真的会对编辑行为产生反馈。",
+            goal="验证最小 repo guard hook 会拦截明确禁止的破坏性命令。",
             prompt=(
-                "新建一个临时 `.py` 文件，加入 `print(\"hook probe\")` 或故意的格式问题后保存，"
-                "观察宿主是否自动格式化、类型检查或弹出 warning。"
+                "在支持 hooks 的宿主里尝试执行 `taskkill /f /im python.exe`，"
+                "观察 PreToolUse hook 是否直接拒绝该命令。"
             ),
             expected_signals=[
-                "保存后触发格式化或类型检查",
-                "对 print() 给出 warning，或输出与 Python hooks 对应的提示",
+                "命令在执行前被拒绝",
+                "拒绝理由明确提到仓库边界或禁止批量杀掉所有 Python 进程",
             ],
             failure_signals=[
-                "保存后完全无反馈，且宿主日志/界面也没有 hook 触发痕迹",
+                "命令直接执行",
+                "完全没有 hook 命中痕迹",
             ],
         ),
         ManualProbe(
-            id="typescript-hook-warning",
+            id="repo-guard-protected-path",
             surface="hook",
-            goal="验证 JS/TS hook 是否真的会对 `console.log` 或格式问题做出响应。",
+            goal="验证最小 repo guard hook 会阻止编辑第三方/参考目录。",
             prompt=(
-                "新建一个临时 `.ts`/`.tsx` 文件，加入 `console.log('probe')` 后保存，"
-                "观察宿主是否自动格式化、跑类型检查或发出 console.log warning。"
+                "尝试编辑 `.tmp/ecc-unpacked/...` 或 `src/web/node_modules/...` 里的任意文件，"
+                "观察 PreToolUse hook 是否在写入前拒绝。"
             ),
             expected_signals=[
-                "保存后触发格式化或 TypeScript 检查",
-                "对 console.log 给出 warning，或在会话结束前审计提示中出现它",
+                "写入或编辑在执行前被拒绝",
+                "拒绝理由明确提到第三方/参考代码目录受保护",
             ],
             failure_signals=[
-                "保存后完全无反馈，且没有任何 hook 执行证据",
+                "编辑直接落盘",
+                "完全没有 hook 执行证据",
             ],
         ),
     ]
@@ -685,9 +680,9 @@ def main() -> int:
     payload = build_payload(args.mode, repo_root, home, checks, probes)
 
     if args.format == "json":
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
     else:
-        print(render_text(payload), end="")
+        print(render_text(payload), end="", flush=True)
 
     return 1 if payload["summary"]["fail"] else 0
 

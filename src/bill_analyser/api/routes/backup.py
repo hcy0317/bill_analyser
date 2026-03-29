@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 # pylint: disable=import-error
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import BACKUP_DIR, DATA_DIR
 from bill_analyser.utils.logger import log_method
 
 bp = Blueprint("backup", __name__)
@@ -17,7 +17,7 @@ bp = Blueprint("backup", __name__)
 
 def get_backup_dir() -> Path:
     """获取备份目录"""
-    backup_dir = PROJECT_ROOT / "backup"
+    backup_dir = BACKUP_DIR
     backup_dir.mkdir(parents=True, exist_ok=True)
     return backup_dir
 
@@ -180,8 +180,8 @@ async def restore_backup(filename):
         if not file_path.exists():
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
-        # 获取数据目录 - 指向项目根目录的 data 文件夹
-        data_dir = PROJECT_ROOT / "data"
+        # 获取数据目录 - 固定为 data 文件夹
+        data_dir = DATA_DIR
 
         # 创建临时恢复目录
         temp_restore_dir = backup_dir / f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

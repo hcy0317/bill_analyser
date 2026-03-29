@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "python3 scripts/hooks/pre_tool_repo_guard.py",
+        "powershell": "python scripts/hooks/pre_tool_repo_guard.py",
+        "cwd": ".",
+        "timeoutSec": 20
+      }
+    ]
+  }
+}

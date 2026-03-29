@@ -763,12 +763,12 @@
                                         >
                                             <span class="budget-history-legend-swatch" :style="{ backgroundColor: group.color }"></span>
                                             <span class="budget-history-legend-label">{{ group.primaryLabel }}</span>
-                                            <span class="budget-history-legend-count">
+                                            <span v-if="historicalBudgetLevel === 'secondary'" class="budget-history-legend-count">
                                                 {{ group.secondaryItems.filter(item => item.selected).length }}/{{ group.secondaryItems.length }}
                                             </span>
                                         </button>
 
-                                        <div class="budget-history-legend-secondary-list">
+                                        <div v-if="historicalBudgetLevel === 'secondary'" class="budget-history-legend-secondary-list">
                                             <button
                                                 v-for="item in group.secondaryItems"
                                                 :key="item.key"
@@ -2128,7 +2128,8 @@ const historicalChartOptions = computed(() => {
         budgetAmountLabel: tt('Budget Amount'),
         spentAmountLabel: tt('Spent Amount'),
         executionRateLabel: tt('Execution Rate'),
-        formatAmount
+        formatAmount,
+        showPrimaryRing: historicalBudgetLevel.value === 'secondary'
     });
 });
 
@@ -3528,8 +3529,9 @@ watch(filterKeyword, (newVal) => {
 
 .budget-history-legend {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 16px 20px;
     margin-top: 12px;
 }
 
@@ -3537,12 +3539,14 @@ watch(filterKeyword, (newVal) => {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 180px;
 }
 
 .budget-history-legend-secondary-list {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
     padding-left: 12px;
 }
 

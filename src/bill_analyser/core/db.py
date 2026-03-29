@@ -6,6 +6,7 @@ Database Module - 异步数据库管理模块
 
 import hashlib
 import json
+import os
 import sqlite3
 
 # import threading  # 已移除
@@ -15,9 +16,69 @@ from typing import Any
 
 import aiosqlite
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import DATA_DIR, TEST_DB_DIR_ENV
 
 from ..utils.logger import get_logger, log_method, log_step
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    """兼容 Python 版本差异的 Path 前缀判断。"""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_database_path(db_path: str | None) -> Path:
+    """解析数据库路径，并在测试场景下将测试库重定向到 tests 运行目录。"""
+    test_db_dir = os.environ.get(TEST_DB_DIR_ENV, "").strip()
+
+    if db_path is None:
+        if test_db_dir:
+            return Path(test_db_dir) / "pytest_default.db"
+        return DATA_DIR / "bills.db"
+
+    if db_path in {":memory:", "file::memory:?cache=shared"}:
+        return Path(db_path)
+
+    candidate = Path(db_path)
+    if not test_db_dir:
+        return candidate
+
+    filename = candidate.name.lower()
+    is_test_db_name = filename.startswith("test") and filename.endswith(".db")
+    if not is_test_db_name:
+        return candidate
+
+    redirected_root = Path(test_db_dir)
+
+    if not candidate.is_absolute():
+        parts = tuple(part.lower() for part in candidate.parts)
+        if parts and parts[0] == "data":
+            return redirected_root / Path(*candidate.parts[1:])
+
+        try:
+            resolved_candidate = (Path.cwd() / candidate).resolve()
+            resolved_data_dir = DATA_DIR.resolve()
+        except OSError:
+            return candidate
+
+        if _is_relative_to(resolved_candidate, resolved_data_dir):
+            return redirected_root / resolved_candidate.relative_to(resolved_data_dir)
+
+        return candidate
+
+    try:
+        resolved_candidate = candidate.resolve()
+        resolved_data_dir = DATA_DIR.resolve()
+    except OSError:
+        return candidate
+
+    if _is_relative_to(resolved_candidate, resolved_data_dir):
+        return redirected_root / resolved_candidate.relative_to(resolved_data_dir)
+
+    return candidate
 
 
 class Database:
@@ -32,14 +93,11 @@ class Database:
         """
         self.logger = get_logger("Database")
 
-        if db_path:
-            self.db_path = Path(db_path)
-        else:
-            # 数据库路径指向项目根目录的 data 文件夹
-            self.db_path = PROJECT_ROOT / "bills.db"
+        self.db_path = _resolve_database_path(db_path)
 
         # 确保数据目录存在
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if str(self.db_path) not in {":memory:", "file::memory:?cache=shared"}:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._connection: aiosqlite.Connection | None = None
         # 使用线程锁而非asyncio.Lock,避免事件循环绑定问题
@@ -2602,6 +2660,22 @@ class Database:
     async def close(self):
         """关闭数据库连接"""
         if self._connection:
+            try:
+                test_db_dir = os.environ.get(TEST_DB_DIR_ENV, "").strip()
+                should_checkpoint = False
+
+                if test_db_dir and str(self.db_path) not in {":memory:", "file::memory:?cache=shared"}:
+                    try:
+                        should_checkpoint = _is_relative_to(self.db_path.resolve(), Path(test_db_dir).resolve())
+                    except OSError:
+                        should_checkpoint = False
+
+                if should_checkpoint:
+                    await self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    await self._connection.commit()
+            except (sqlite3.Error, aiosqlite.Error, OSError, RuntimeError, ValueError) as exc:
+                self.logger.debug("关闭数据库前执行 WAL checkpoint 失败: %s", exc)
+
             await self._connection.close()
             self._connection = None
             self.logger.info("数据库连接已关闭")
@@ -5275,16 +5349,141 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    @log_method
-    async def create_budget(self, data: dict[str, Any], user_id: int = 1) -> int:
-        """创建预算
+    def _build_budget_category_context(self, categories: list[dict[str, Any]]) -> dict[str, Any]:
+        """构建预算分类类型/图标解析上下文。"""
+        primary_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+        sub_by_key: dict[tuple[int, str, str], dict[str, Any]] = {}
+        fallback_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+        types_by_name: dict[str, set[int]] = {}
 
-        Args:
-            data: 预算数据
-            user_id: 用户ID (默认1, 用于多用户数据隔离)
-        """
-        conn = await self._get_connection()
+        for category in categories:
+            main_category = str(category.get("main_category") or "").strip()
+            if not main_category:
+                continue
 
+            category_type = int(category.get("type") or 0)
+            if category_type <= 0:
+                continue
+
+            normalized_sub_category = self._normalize_budget_sub_category(category.get("sub_category"))
+            types_by_name.setdefault(main_category, set()).add(category_type)
+
+            if not normalized_sub_category:
+                primary_by_key[(category_type, main_category)] = category
+                continue
+
+            fallback_key = (category_type, main_category)
+            sub_by_key[(category_type, main_category, normalized_sub_category)] = category
+
+            existing_fallback = fallback_by_key.get(fallback_key)
+            if existing_fallback is None:
+                fallback_by_key[fallback_key] = category
+                continue
+
+            if not existing_fallback.get("icon") and category.get("icon"):
+                fallback_by_key[fallback_key] = category
+
+        return {
+            "primary_by_key": primary_by_key,
+            "sub_by_key": sub_by_key,
+            "fallback_by_key": fallback_by_key,
+            "types_by_name": {name: tuple(sorted(values)) for name, values in types_by_name.items()},
+        }
+
+    def _resolve_budget_category_type(
+        self,
+        category_name: str | None,
+        sub_category: Any,
+        category_context: dict[str, Any],
+        preferred_type: int | None = None,
+    ) -> int | None:
+        """根据预算分类名称推导预算类型。"""
+        normalized_category_name = str(category_name or "").strip()
+        if not normalized_category_name:
+            return None
+
+        normalized_sub_category = self._normalize_budget_sub_category(sub_category)
+        primary_by_key = category_context["primary_by_key"]
+        sub_by_key = category_context["sub_by_key"]
+        fallback_by_key = category_context["fallback_by_key"]
+        candidate_types = list(category_context["types_by_name"].get(normalized_category_name, ()))
+
+        if preferred_type is not None and preferred_type in candidate_types:
+            if normalized_sub_category:
+                if (preferred_type, normalized_category_name, normalized_sub_category) in sub_by_key:
+                    return preferred_type
+            elif (
+                (preferred_type, normalized_category_name) in primary_by_key
+                or (preferred_type, normalized_category_name) in fallback_by_key
+            ):
+                return preferred_type
+
+        for candidate_type in candidate_types:
+            if normalized_sub_category:
+                if (candidate_type, normalized_category_name, normalized_sub_category) in sub_by_key:
+                    return candidate_type
+                continue
+
+            if (candidate_type, normalized_category_name) in primary_by_key:
+                return candidate_type
+            if (candidate_type, normalized_category_name) in fallback_by_key:
+                return candidate_type
+
+        if not candidate_types and preferred_type is not None:
+            return preferred_type
+
+        return None
+
+    def _resolve_budget_category_info(
+        self,
+        category_name: str | None,
+        sub_category: Any,
+        category_context: dict[str, Any],
+        budget_type: int,
+    ) -> dict[str, Any] | None:
+        """根据预算类型解析当前预算对应的分类信息与图标。"""
+        normalized_category_name = str(category_name or "").strip()
+        if not normalized_category_name:
+            return None
+
+        normalized_sub_category = self._normalize_budget_sub_category(sub_category)
+        primary_by_key = category_context["primary_by_key"]
+        sub_by_key = category_context["sub_by_key"]
+        fallback_by_key = category_context["fallback_by_key"]
+
+        if normalized_sub_category:
+            category_info = sub_by_key.get((budget_type, normalized_category_name, normalized_sub_category))
+            return dict(category_info) if category_info else None
+
+        primary_category = primary_by_key.get((budget_type, normalized_category_name))
+        fallback_category = fallback_by_key.get((budget_type, normalized_category_name))
+
+        if primary_category is None:
+            return dict(fallback_category) if fallback_category else None
+
+        if primary_category.get("icon") or fallback_category is None:
+            return dict(primary_category)
+
+        merged_category = dict(primary_category)
+        merged_category["icon"] = fallback_category.get("icon", "")
+        if not merged_category.get("color") and fallback_category.get("color"):
+            merged_category["color"] = fallback_category["color"]
+        return merged_category
+
+    @staticmethod
+    def _normalize_budget_sub_category(sub_category: Any) -> str:
+        """统一一级/二级预算的子分类存储格式。"""
+        if sub_category is None:
+            return ""
+
+        return str(sub_category).strip()
+
+    async def _insert_budget_record(
+        self,
+        conn: aiosqlite.Connection,
+        data: dict[str, Any],
+        user_id: int,
+    ) -> int:
         cursor = await conn.execute(
             """
             INSERT INTO budgets (
@@ -5294,9 +5493,9 @@ class Database:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
-                data["name"],
+                data.get("name", ""),
                 data.get("category"),
-                data.get("sub_category"),
+                self._normalize_budget_sub_category(data.get("sub_category")),
                 data["period_type"],
                 data["amount"],
                 data["start_date"],
@@ -5309,8 +5508,144 @@ class Database:
             ),
         )
 
+        return int(cursor.lastrowid)
+
+    async def _get_primary_category_budget_with_conn(
+        self,
+        conn: aiosqlite.Connection,
+        category: str,
+        period_type: str,
+        start_date: str,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        async with conn.execute(
+            """
+            SELECT * FROM budgets
+            WHERE category = ?
+              AND (sub_category IS NULL OR sub_category = '')
+              AND period_type = ?
+              AND start_date = ?
+              AND user_id = ?
+        """,
+            (category, period_type, start_date, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def _get_sub_category_budgets_total_with_conn(
+        self,
+        conn: aiosqlite.Connection,
+        category: str,
+        period_type: str,
+        start_date: str,
+        user_id: int,
+    ) -> float:
+        async with conn.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM budgets
+            WHERE category = ?
+              AND sub_category IS NOT NULL
+              AND sub_category != ''
+              AND period_type = ?
+              AND start_date = ?
+              AND user_id = ?
+        """,
+            (category, period_type, start_date, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return float(row["total"] if row else 0)
+
+    async def _synchronize_primary_budget_for_group(
+        self,
+        conn: aiosqlite.Connection,
+        category: str | None,
+        period_type: str | None,
+        start_date: str | None,
+        user_id: int,
+        reference_data: dict[str, Any] | None = None,
+    ) -> None:
+        """确保一级预算遵循“总额不小于二级预算之和”的联动规则。"""
+        if not category or not period_type or not start_date:
+            return
+
+        sub_total = await self._get_sub_category_budgets_total_with_conn(
+            conn,
+            category,
+            period_type,
+            start_date,
+            user_id,
+        )
+        primary_budget = await self._get_primary_category_budget_with_conn(
+            conn,
+            category,
+            period_type,
+            start_date,
+            user_id,
+        )
+
+        if sub_total <= 0:
+            return
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not primary_budget:
+            reference = reference_data or {}
+            await self._insert_budget_record(
+                conn,
+                {
+                    "name": reference.get("name", ""),
+                    "category": category,
+                    "sub_category": "",
+                    "period_type": period_type,
+                    "amount": sub_total,
+                    "start_date": start_date,
+                    "end_date": reference.get("end_date"),
+                    "alert_threshold": reference.get("alert_threshold", 80),
+                    "enabled": reference.get("enabled", 1),
+                    "created_at": reference.get("created_at", now),
+                    "updated_at": now,
+                },
+                user_id,
+            )
+            return
+
+        current_amount = float(primary_budget.get("amount") or 0)
+        if current_amount >= sub_total:
+            return
+
+        await conn.execute(
+            "UPDATE budgets SET amount = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (sub_total, now, primary_budget["id"], user_id),
+        )
+
+    @log_method
+    async def create_budget(self, data: dict[str, Any], user_id: int = 1) -> int:
+        """创建预算
+
+        Args:
+            data: 预算数据
+            user_id: 用户ID (默认1, 用于多用户数据隔离)
+        """
+        conn = await self._get_connection()
+
+        normalized_data = {
+            **data,
+            "name": data.get("name", ""),
+            "sub_category": self._normalize_budget_sub_category(data.get("sub_category")),
+        }
+
+        budget_id = await self._insert_budget_record(conn, normalized_data, user_id)
+        await self._synchronize_primary_budget_for_group(
+            conn,
+            normalized_data.get("category"),
+            normalized_data.get("period_type"),
+            normalized_data.get("start_date"),
+            user_id,
+            reference_data=normalized_data,
+        )
+
         await conn.commit()
-        return cursor.lastrowid
+        return budget_id
 
     @log_method
     async def get_primary_category_budget(
@@ -5330,19 +5665,7 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            """
-            SELECT * FROM budgets
-            WHERE category = ?
-              AND (sub_category IS NULL OR sub_category = '')
-              AND period_type = ?
-              AND start_date = ?
-              AND user_id = ?
-        """,
-            (category, period_type, start_date, user_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+        return await self._get_primary_category_budget_with_conn(conn, category, period_type, start_date, user_id)
 
     @log_method
     async def get_budget_by_category(
@@ -5412,21 +5735,7 @@ class Database:
         """
         conn = await self._get_connection()
 
-        async with conn.execute(
-            """
-            SELECT COALESCE(SUM(amount), 0) as total
-            FROM budgets
-            WHERE category = ?
-              AND sub_category IS NOT NULL
-              AND sub_category != ''
-              AND period_type = ?
-              AND start_date = ?
-              AND user_id = ?
-        """,
-            (category, period_type, start_date, user_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row["total"] if row else 0
+        return await self._get_sub_category_budgets_total_with_conn(conn, category, period_type, start_date, user_id)
 
     @log_method
     async def update_budget(self, budget_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
@@ -5438,10 +5747,17 @@ class Database:
             user_id: 用户ID (默认1, 用于多用户数据隔离)
         """
         conn = await self._get_connection()
+        existing_budget = await self.get_budget_by_id(budget_id, user_id=user_id)
+        if not existing_budget:
+            return False
 
         # 构建更新字段
         fields = []
         values = []
+        normalized_data = {
+            **data,
+            "sub_category": self._normalize_budget_sub_category(data.get("sub_category", existing_budget.get("sub_category"))),
+        }
 
         for key in [
             "name",
@@ -5454,13 +5770,13 @@ class Database:
             "alert_threshold",
             "enabled",
         ]:
-            if key in data:
+            if key in normalized_data:
                 fields.append(f"{key} = ?")
-                values.append(data[key])
+                values.append(normalized_data[key])
 
-        if "updated_at" in data:
+        if "updated_at" in normalized_data:
             fields.append("updated_at = ?")
-            values.append(data["updated_at"])
+            values.append(normalized_data["updated_at"])
 
         if not fields:
             return False
@@ -5469,6 +5785,38 @@ class Database:
 
         query = f"UPDATE budgets SET {', '.join(fields)} WHERE id = ? AND user_id = ?"
         cursor = await conn.execute(query, values)
+
+        if cursor.rowcount > 0:
+            updated_budget = {
+                **existing_budget,
+                **normalized_data,
+            }
+            group_keys = {
+                (
+                    existing_budget.get("category"),
+                    existing_budget.get("period_type"),
+                    existing_budget.get("start_date"),
+                )
+            }
+
+            group_keys.add(
+                (
+                    updated_budget.get("category"),
+                    updated_budget.get("period_type"),
+                    updated_budget.get("start_date"),
+                )
+            )
+
+            for category, period_type, start_date in group_keys:
+                await self._synchronize_primary_budget_for_group(
+                    conn,
+                    category,
+                    period_type,
+                    start_date,
+                    user_id,
+                    reference_data=updated_budget or normalized_data,
+                )
+
         await conn.commit()
 
         return cursor.rowcount > 0
@@ -5483,7 +5831,37 @@ class Database:
         """
         conn = await self._get_connection()
 
-        cursor = await conn.execute("DELETE FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id))
+        budget = await self.get_budget_by_id(budget_id, user_id=user_id)
+        if not budget:
+            return False
+
+        category = budget.get("category")
+        period_type = budget.get("period_type")
+        start_date = budget.get("start_date")
+        is_primary_budget = not self._normalize_budget_sub_category(budget.get("sub_category"))
+
+        if is_primary_budget:
+            cursor = await conn.execute(
+                """
+                DELETE FROM budgets
+                WHERE category = ?
+                  AND period_type = ?
+                  AND start_date = ?
+                  AND user_id = ?
+                """,
+                (category, period_type, start_date, user_id),
+            )
+        else:
+            cursor = await conn.execute("DELETE FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id))
+            await self._synchronize_primary_budget_for_group(
+                conn,
+                category,
+                period_type,
+                start_date,
+                user_id,
+                reference_data=budget,
+            )
+
         await conn.commit()
 
         return cursor.rowcount > 0
@@ -5522,6 +5900,8 @@ class Database:
         )
 
         conn = await self._get_connection()
+        categories = await self.get_all_categories(user_id=user_id)
+        category_context = self._build_budget_category_context(categories)
 
         # 1. 获取符合条件的预算 - 添加 user_id 过滤
         budget_query = "SELECT * FROM budgets WHERE enabled = 1 AND user_id = ?"
@@ -5538,13 +5918,35 @@ class Database:
 
         if category_id:
             # 根据category_id获取分类名称
-            cat_info = await self.get_category_by_id(category_id)
+            cat_info = await self.get_category_by_id(category_id, user_id=user_id)
             if cat_info:
                 budget_query += " AND category = ?"
                 budget_params.append(cat_info["main_category"])
+                normalized_sub_category = self._normalize_budget_sub_category(cat_info.get("sub_category"))
+                if normalized_sub_category:
+                    budget_query += " AND sub_category = ?"
+                    budget_params.append(normalized_sub_category)
 
         async with conn.execute(budget_query, budget_params) as cursor:
-            budgets = [dict(row) for row in await cursor.fetchall()]
+            raw_budgets = [dict(row) for row in await cursor.fetchall()]
+
+        budgets: list[dict[str, Any]] = []
+        for budget in raw_budgets:
+            resolved_budget_type = self._resolve_budget_category_type(
+                budget.get("category"),
+                budget.get("sub_category"),
+                category_context,
+                preferred_type=budget_type,
+            )
+            if resolved_budget_type != budget_type:
+                continue
+
+            budgets.append(
+                {
+                    **budget,
+                    "_resolved_budget_type": resolved_budget_type,
+                }
+            )
 
         # 2. 对每个预算计算实际支出
         type_name = "支出" if budget_type == 3 else "投资"
@@ -5610,33 +6012,13 @@ class Database:
             budget_amount = budget.get("amount", 0)
             execution_rate = (spent / budget_amount * 100) if budget_amount > 0 else 0
 
-            # 获取分类信息（正确匹配一级或二级分类）
-            category_info = None
-            fallback_sub_category = None  # 用于一级分类没有图标时的fallback
-            if budget.get("category"):
-                categories = await self.get_all_categories(user_id=user_id)
-                for cat in categories:
-                    if budget.get("sub_category"):
-                        # 二级分类预算：匹配完整的主分类+子分类
-                        if cat["main_category"] == budget["category"] and cat["sub_category"] == budget["sub_category"]:
-                            category_info = cat
-                            break
-                    else:
-                        # 一级分类预算：匹配主分类（子分类为空）
-                        if cat["main_category"] == budget["category"] and not cat["sub_category"]:
-                            category_info = cat
-                            # 不要break，继续找一个有icon的子分类作为fallback
-                        elif cat["main_category"] == budget["category"] and cat["sub_category"] and cat.get("icon"):
-                            # 记录第一个有图标的子分类
-                            if not fallback_sub_category:
-                                fallback_sub_category = cat
-
-                # 如果一级分类没有图标，使用子分类的图标
-                if category_info and not category_info.get("icon") and fallback_sub_category:
-                    category_info = dict(category_info)  # 复制一份以防止修改原数据
-                    category_info["icon"] = fallback_sub_category.get("icon", "")
-                    if not category_info.get("color") and fallback_sub_category.get("color"):
-                        category_info["color"] = fallback_sub_category["color"]
+            resolved_budget_type = int(budget.get("_resolved_budget_type") or budget_type)
+            category_info = self._resolve_budget_category_info(
+                budget.get("category"),
+                budget.get("sub_category"),
+                category_context,
+                resolved_budget_type,
+            )
 
             results.append(
                 {
@@ -5645,11 +6027,13 @@ class Database:
                     "category": budget.get("category", ""),
                     "sub_category": budget.get("sub_category", ""),
                     "category_info": category_info,
+                    "category_id": str(category_info.get("id") or "") if category_info else "",
                     "period_type": budget.get("period_type", "monthly"),
                     "budget_amount": budget_amount,
                     "spent_amount": spent,
                     "remaining_amount": budget_amount - spent,
                     "execution_rate": round(execution_rate, 2),
+                    "type": resolved_budget_type,
                     "alert_threshold": budget.get("alert_threshold", 80),
                     "start_date": budget.get("start_date"),
                     "end_date": budget.get("end_date"),
@@ -6007,6 +6391,9 @@ class Database:
                         "name": detail.get("name", ""),
                         "category": detail.get("category", ""),
                         "sub_category": detail.get("sub_category", ""),
+                        "category_id": detail.get("category_id", ""),
+                        "category_info": detail.get("category_info"),
+                        "type": detail.get("type", budget_type),
                         "period_type": detail.get("period_type", period_type),
                         "alert_threshold": detail.get("alert_threshold", 80),
                         "enabled": detail.get("enabled", 1),
@@ -6116,9 +6503,7 @@ class Database:
             category_totals[category]["periods"].append({"period": period, "amount": amount})
 
         categories = await self.get_all_categories(user_id=user_id)
-        category_type_map = {
-            (cat.get("main_category") or "未分类"): cat.get("type") for cat in categories if not cat.get("sub_category")
-        }
+        category_context = self._build_budget_category_context(categories)
 
         budget_query = """
             SELECT category, sub_category, amount
@@ -6141,7 +6526,13 @@ class Database:
         budget_map = {}
         for row in budget_rows:
             category_name = row["category"] or "未分类"
-            if int(category_type_map.get(category_name) or 0) != int(budget_type):
+            resolved_budget_type = self._resolve_budget_category_type(
+                category_name,
+                row["sub_category"],
+                category_context,
+                preferred_type=budget_type,
+            )
+            if int(resolved_budget_type or 0) != int(budget_type):
                 continue
             budget_map.setdefault(category_name, {"primary": 0.0, "sub_total": 0.0})
             amount_value = float(row["amount"] or 0)
@@ -6213,11 +6604,7 @@ class Database:
             else:
                 trend = "stable"
 
-            category_info = None
-            for cat in categories:
-                if cat["main_category"] == category and not cat["sub_category"]:
-                    category_info = cat
-                    break
+            category_info = self._resolve_budget_category_info(category, "", category_context, budget_type)
 
             budget_amount = 0.0
             if category in budget_map:

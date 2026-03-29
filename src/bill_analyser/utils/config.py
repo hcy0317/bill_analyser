@@ -14,7 +14,7 @@ from typing import Any
 from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import CONFIG_DIR, LEGACY_CONFIG_DIR
 
 from .logger import get_logger, log_method
 
@@ -246,8 +246,9 @@ class ConfigManager:
 
         self._initialized = True
         self.logger = get_logger("ConfigManager")
-        # 配置目录指向项目根目录的 config 文件夹
-        self.config_dir = PROJECT_ROOT / "config"
+        # 配置目录固定为 data/config，兼容读取旧的顶层 config 目录。
+        self.config_dir = CONFIG_DIR
+        self.legacy_config_dir = LEGACY_CONFIG_DIR
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         # 配置缓存
@@ -274,12 +275,14 @@ class ConfigManager:
             Dict[str, Any]: 配置字典
         """
         config_path = self.config_dir / filename
+        legacy_config_path = self.legacy_config_dir / filename
+        source_path = config_path if config_path.exists() or not legacy_config_path.exists() else legacy_config_path
 
         with self._cache_lock:
             # 检查缓存
             if use_cache and filename in self._cache:
                 # 验证文件是否被修改
-                current_mtime = config_path.stat().st_mtime
+                current_mtime = source_path.stat().st_mtime
                 cached_mtime = self._cache_timestamps.get(filename, 0)
 
                 if current_mtime <= cached_mtime:
@@ -289,12 +292,15 @@ class ConfigManager:
             # 加载配置文件
             try:
                 self.logger.info("加载配置文件: %s", filename)
-                with open(config_path, encoding="utf-8") as f:
+                if source_path == legacy_config_path:
+                    self.logger.warning("配置文件 %s 仍位于旧目录 %s，当前以兼容模式读取", filename, legacy_config_path)
+
+                with open(source_path, encoding="utf-8") as f:
                     config = json.load(f)
 
                 # 更新缓存
                 self._cache[filename] = config
-                self._cache_timestamps[filename] = config_path.stat().st_mtime
+                self._cache_timestamps[filename] = source_path.stat().st_mtime
 
                 self.logger.info("配置文件加载成功: %s", filename)
                 return config.copy()

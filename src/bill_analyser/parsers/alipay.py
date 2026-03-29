@@ -38,15 +38,20 @@ class AlipayParser(ParserBase):
     @log_method
     def can_parse(self, file_path: str) -> bool:
         """判断是否为支付宝账单"""
-        try:
-            # 支付宝账单通常是 GBK 编码
-            with open(file_path, encoding="gbk") as f:
-                first_lines = "".join([f.readline() for _ in range(15)])
-                # 支付宝特征
-                alipay_indicators = ["支付宝", "alipay", "支付宝账户", "支付宝（中国）网络技术有限公司"]
-                return any(ind.lower() in first_lines.lower() for ind in alipay_indicators)
-        except Exception:  # pylint: disable=broad-except
-            return False
+        alipay_indicators = ["支付宝", "alipay", "支付宝账户", "支付宝（中国）网络技术有限公司"]
+
+        for encoding in ("gbk", "utf-8", "gb18030"):
+            try:
+                with open(file_path, encoding=encoding) as f:
+                    first_lines = "".join([f.readline() for _ in range(15)])
+                    if any(ind.lower() in first_lines.lower() for ind in alipay_indicators):
+                        return True
+            except UnicodeDecodeError:
+                continue
+            except OSError:
+                return False
+
+        return False
 
     @log_method
     def parse(self, file_path: str) -> list[dict[str, Any]]:

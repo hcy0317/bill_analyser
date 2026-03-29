@@ -10,10 +10,9 @@
 
 它验证：
 
-- 仓库级入口文件是否齐全：`AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`、`.codex/AGENTS.md`、`.codex/config.toml`
-- `.github/agents` 与 `.cursor/agents` 是否仍然同步
-- `.github/skills` 与 `.cursor/skills` 是否仍然同步
-- 仓库是否还保持“Cursor hooks 已裁剪”的当前事实
+- 仓库级入口文件是否齐全：`AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`、`.codex/AGENTS.md`、`.codex/config.toml`、`opencode.json`
+- `.cursor/` 兼容镜像是否真的已经被移除
+- 最小 hooks 基线是否齐全：`.github/hooks/*.json`、项目级 `.claude/settings.json`、`scripts/hooks/*`
 - Codex 的多 agent / MCP 基线是否还在
 - Codex / Claude 的仓库专属 skill 入口是否还在
 
@@ -28,12 +27,11 @@
 
 ### 2. 全局层：检查你机器上的宿主配置是否可用
 
-这一层是**本机检查**，不适合放进公共 CI，因为每个人的 `~/.claude`、`~/.cursor`、`~/.codex` 都不同。
+这一层是**本机检查**，不适合放进公共 CI，因为每个人的 `~/.claude`、`~/.codex` 都不同。
 
 当前脚本会检查：
 
-- `~/.claude/settings.json` 是否存在（Claude hooks 常见入口）
-- `~/.cursor/skills-cursor/.cursor-managed-skills-manifest.json` 是否存在
+- `~/.claude/settings.json` 是否存在（如果你额外叠加全局 Claude hooks）
 - `~/.codex/config.toml` 是否存在，并能读出模型/MCP 基线
 - `~/.codex/skills` 是否有额外自定义内容
 
@@ -66,13 +64,13 @@
    - 问“改金额字段最该注意什么”
    - 期待它主动提到元/分转换、REST 主链、async bridge 等仓库规则
 
-3. **python-hook-warning**
-   - 临时新建 `.py` 文件，插入 `print()` 或格式问题后保存
-   - 期待宿主触发 warning、格式化或类型检查
+3. **repo-guard-banned-command**
+   - 尝试执行 `taskkill /f /im python.exe`
+   - 期待 PreToolUse hook 在执行前拒绝，并说明这是仓库明确禁止的命令
 
-4. **typescript-hook-warning**
-   - 临时新建 `.ts` / `.tsx` 文件，加入 `console.log()` 后保存
-   - 期待宿主触发 warning、格式化或类型检查
+4. **repo-guard-protected-path**
+   - 尝试编辑 `.tmp/ecc-unpacked/...` 或 `src/web/node_modules/...` 中的文件
+   - 期待 PreToolUse hook 在写入前拒绝，并说明受保护目录不可直接改动
 
 ## 推荐执行节奏
 
@@ -101,7 +99,7 @@
 - `.github/agents`
 - `.github/skills`
 - `.github/instructions`
-- `.cursor`
+- `.github/hooks`
 - `.claude`
 - `.codex`
 - `.agents`

@@ -6,23 +6,6 @@ from datetime import datetime
 import pytest
 
 
-@pytest.fixture(scope='module', name='client')
-def _client_fixture():
-    """创建测试客户端。"""
-
-    async def init_services():
-        from src.api.app import initialize
-        await initialize()
-
-    asyncio.run(init_services())
-
-    from src.api.app import app
-    app.config['TESTING'] = True
-
-    with app.test_client() as test_client:
-        yield test_client
-
-
 @pytest.fixture(scope='module', name='user_credentials')
 def _user_credentials_fixture(client):
     """注册测试用户并返回凭据。"""

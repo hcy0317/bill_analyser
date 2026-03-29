@@ -239,6 +239,8 @@ import {
 
 interface AccountEditResponse {
     message: string;
+    id?: string;
+    account?: Account;
 }
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -365,7 +367,7 @@ function save(): void {
         subAccounts: subAccounts.value,
         isEdit: !!editAccountId.value,
         clientSessionId: clientSessionId.value
-    }).then(() => {
+    }).then((savedAccount) => {
         submitting.value = false;
 
         let message = 'You have saved this account';
@@ -374,7 +376,7 @@ function save(): void {
             message = 'You have added a new account';
         }
 
-        resolveFunc?.({ message });
+        resolveFunc?.({ message, id: savedAccount.id, account: savedAccount });
         showState.value = false;
     }).catch(error => {
         submitting.value = false;

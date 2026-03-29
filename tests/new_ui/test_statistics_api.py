@@ -6,7 +6,8 @@ import asyncio
 import time
 import pytest
 from datetime import datetime, timedelta
-from pathlib import Path
+
+from tests.runtime_paths import get_test_db_path
 
 
 @pytest.fixture(scope='module')
@@ -14,7 +15,7 @@ def client():
     """为统计测试创建独立应用与数据库，避免全量运行中的全局状态串扰。"""
     from bill_analyser.api.app import app, initialize
 
-    test_db_path = Path(__file__).resolve().parents[2] / 'data' / f'test_statistics_api_{int(time.time() * 1000)}.db'
+    test_db_path = get_test_db_path(f'test_statistics_api_{int(time.time() * 1000)}.db')
     if test_db_path.exists():
         test_db_path.unlink()
 

@@ -92,10 +92,10 @@ def _scan_legacy_parser_factory_import_hits() -> list[tuple[str, int, str]]:
     return hits
 
 
-def test_legacy_parser_factory_stack_only_exists_as_compatibility_shims():
-    """旧模块如仍存在，也只能作为兼容 shim，不能被运行时代码主动依赖。"""
+def test_legacy_parser_factory_stack_removed():
+    """旧 parser 兼容 shim 应已从运行时代码树中移除。"""
     existing_files = [path.as_posix() for path in LEGACY_PARSER_FILES if path.exists()]
-    assert existing_files, '兼容 shim 缺失：旧 parser 导入路径需要保留薄兼容层'
+    assert not existing_files, '发现旧 parser 兼容 shim 仍存在: ' + '; '.join(existing_files)
 
 
 def test_runtime_code_does_not_import_legacy_parser_factory_stack():

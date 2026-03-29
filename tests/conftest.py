@@ -7,10 +7,20 @@ import sys
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
+
+from tests.runtime_paths import (
+    cleanup_test_runtime_databases,
+    configure_test_runtime_environment,
+    remove_test_database_family,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / 'src'
+
+configure_test_runtime_environment()
+cleanup_test_runtime_databases()
 
 
 def _ensure_src_layout_on_path() -> None:
@@ -90,11 +100,25 @@ def _close_db_instance(db_instance) -> None:
     close_method = db_instance.close
 
     if inspect.iscoroutinefunction(close_method):
+        original_policy = None
+        policy_changed = False
+        windows_selector_policy = cast(Any, getattr(asyncio, 'WindowsSelectorEventLoopPolicy', None))
+
+        if sys.platform == 'win32' and windows_selector_policy is not None:
+            original_policy = asyncio.get_event_loop_policy()
+            if not isinstance(original_policy, windows_selector_policy):
+                asyncio.set_event_loop_policy(windows_selector_policy())
+                policy_changed = True
+
         loop = asyncio.new_event_loop()
         try:
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(close_method())
+            loop.run_until_complete(loop.shutdown_asyncgens())
         finally:
             loop.close()
+            if policy_changed and original_policy is not None:
+                asyncio.set_event_loop_policy(original_policy)
         return
 
     close_method()
@@ -107,11 +131,17 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
 
         db_from_config = api_app.app.config.get('DB_INSTANCE') if hasattr(api_app, 'app') else None
         db_global = getattr(api_app, 'db', None)
+        db_path = getattr(db_from_config, 'db_path', None) or getattr(db_global, 'db_path', None)
 
         # Try both references; close is idempotent in Database implementation.
         _close_db_instance(db_from_config)
         if db_global is not db_from_config:
             _close_db_instance(db_global)
+
+        if db_path:
+            remove_test_database_family(Path(db_path))
     except Exception:
         # Never fail test process during teardown cleanup.
         pass
+
+    cleanup_test_runtime_databases()

@@ -1,12 +1,13 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with Bill Analyser.
+This file is the Claude Code adapter for Bill Analyser.
+Shared repository rules live in [AGENTS.md](AGENTS.md); keep this file Claude-specific and intentionally short.
 
 ## Start Here
 
-1. Read [.github/copilot-instructions.md](.github/copilot-instructions.md).
-2. Read [AGENTS.md](AGENTS.md) for the repository's agent-asset map and tool-specific entrypoints.
-3. Use this file only for Claude-specific additions after the workspace rules above.
+1. Read [AGENTS.md](AGENTS.md) for the canonical shared repository rules.
+2. Read `.claude/rules/` for path-scoped or Claude-only overlays.
+3. Use this file only for Claude-specific additions; do not duplicate the full repository guide here.
 
 ## Project Summary
 
@@ -15,9 +16,21 @@ This file provides guidance to Claude Code when working with Bill Analyser.
 - Database: SQLite in WAL mode
 - Core domains: bill import, categorization, budgeting, statistics, accounts, tags
 
-## Guardrails
+## Claude Code entrypoints
 
-For project-wide architecture constraints, safety rules, and build/test commands, follow [.github/copilot-instructions.md](.github/copilot-instructions.md) instead of maintaining a second copy here.
+- Project instructions adapter: `CLAUDE.md`
+- Path-scoped rules: `.claude/rules/`
+- Subagents: `.claude/agents/`
+- Claude-native skills and bridges: `.claude/skills/`
+- Commands and workflows: `.claude/commands/`
+- Permissions, hooks, plugins, and local overrides: `.claude/settings.json` and `.claude/settings.local.json`
+
+## Claude-specific guidance
+
+- If a rule is tool-agnostic, move it to `AGENTS.md` or a shared skill under `.agents/skills/` instead of growing this file.
+- Prefer `.claude/rules/` for Claude path-scoped guidance; do not turn it into another full copy of `AGENTS.md`.
+- If a reusable workflow should work in Claude Code, Copilot, OpenCode, and Codex, prefer `.agents/skills/` as the canonical source and keep `.claude/skills/` as a thin discovery bridge.
+- Use `.claude/settings.json` for hard enforcement (permissions, hooks, plugin/MCP policy), not long-form behavioral guidance.
 
 ## Claude Code Support Files
 
@@ -25,4 +38,4 @@ For project-wide architecture constraints, safety rules, and build/test commands
 - Rules: [.claude/rules](.claude/rules)
 - Skills: [.claude/skills](.claude/skills)
 
-When there is any ambiguity, follow [.github/copilot-instructions.md](.github/copilot-instructions.md).
+When there is any ambiguity, follow [AGENTS.md](AGENTS.md) first.

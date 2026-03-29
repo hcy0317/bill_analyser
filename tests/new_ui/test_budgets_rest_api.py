@@ -216,3 +216,74 @@ def test_budget_forecast_strategy_params(client, auth_headers):
         assert 'backtest_mape' in item
         assert 'confidence' in item
         assert item['confidence'] in ['high', 'medium', 'low']
+
+
+def test_budget_primary_secondary_rules(client, auth_headers):
+    """一级/二级预算应遵循自动补父预算、总额下限与级联删除规则。"""
+    category_name = f'层级预算分类-{int(time.time())}'
+    period_payload = {
+        'category': category_name,
+        'period_type': 'monthly',
+        'start_date': '2026-03-01',
+        'end_date': '2026-03-31',
+        'alert_threshold': 80,
+        'enabled': True
+    }
+
+    create_secondary_a = client.post('/api/budgets/', json={
+        'name': '二级预算-A',
+        **period_payload,
+        'sub_category': '子分类A',
+        'amount': 100.0
+    }, headers=auth_headers)
+    assert create_secondary_a.status_code == 201
+
+    first_list = client.get('/api/budgets/', query_string={'category': category_name}, headers=auth_headers)
+    assert first_list.status_code == 200
+    first_items = first_list.get_json()['result']
+    assert len(first_items) == 2
+
+    primary_budget = next(item for item in first_items if not item.get('sub_category'))
+    assert primary_budget['amount'] == 100.0
+
+    update_primary = client.put(f"/api/budgets/{primary_budget['id']}", json={
+        'name': primary_budget.get('name', ''),
+        **period_payload,
+        'sub_category': '',
+        'amount': 180.0
+    }, headers=auth_headers)
+    assert update_primary.status_code == 200
+
+    create_secondary_b = client.post('/api/budgets/', json={
+        'name': '二级预算-B',
+        **period_payload,
+        'sub_category': '子分类B',
+        'amount': 30.0
+    }, headers=auth_headers)
+    assert create_secondary_b.status_code == 201
+
+    second_list = client.get('/api/budgets/', query_string={'category': category_name}, headers=auth_headers)
+    second_items = second_list.get_json()['result']
+    updated_primary = next(item for item in second_items if int(item['id']) == int(primary_budget['id']))
+    assert updated_primary['amount'] == 180.0
+
+    create_secondary_c = client.post('/api/budgets/', json={
+        'name': '二级预算-C',
+        **period_payload,
+        'sub_category': '子分类C',
+        'amount': 70.0
+    }, headers=auth_headers)
+    assert create_secondary_c.status_code == 201
+
+    third_list = client.get('/api/budgets/', query_string={'category': category_name}, headers=auth_headers)
+    third_items = third_list.get_json()['result']
+    synced_primary = next(item for item in third_items if int(item['id']) == int(primary_budget['id']))
+    assert synced_primary['amount'] == 200.0
+
+    delete_primary = client.delete(f"/api/budgets/{primary_budget['id']}", headers=auth_headers)
+    assert delete_primary.status_code == 200
+    assert delete_primary.get_json()['success'] is True
+
+    final_list = client.get('/api/budgets/', query_string={'category': category_name}, headers=auth_headers)
+    final_items = final_list.get_json()['result']
+    assert final_items == []

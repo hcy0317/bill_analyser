@@ -4,9 +4,9 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 ## Start Order
 
-1. Read [AGENTS.md](AGENTS.md).
-2. Read [.github/copilot-instructions.md](.github/copilot-instructions.md).
-3. Use this file only for Codex-specific runtime details.
+1. Read [AGENTS.md](AGENTS.md) for the canonical shared repository rules.
+2. Use this file only for Codex-specific runtime details.
+3. Do not copy the full repository guide into `.codex/`; keep Codex adapters thin.
 
 ## Recommended Focus
 
@@ -16,13 +16,19 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 ## Session Completion
 
-- Codex 侧没有仓库内 stop hooks 兜底时，仍然必须遵循 `.github/copilot-instructions.md` 的会话收尾规则。
+- Codex 侧没有仓库内 stop hooks 兜底时，仍然必须遵循 `AGENTS.md` 里的会话收尾规则。
 - 只要结束会话时存在 git diff，就自动使用 `zh-conventional-commit-from-diff` 生成一条中文 Conventional Commit 标题，再结束本次会话。
 
 ## MCP Baseline
 
 The project-local Codex baseline is defined in [.codex/config.toml](.codex/config.toml).
 It keeps a small MCP set aligned with the repository's VS Code setup.
+
+## Codex-specific runtime layer
+
+- Root `AGENTS.md` is the primary instructions source that Codex discovers automatically.
+- `.codex/config.toml` contains Codex runtime configuration, MCP defaults, and Codex-specific agent wiring.
+- `.codex/agents/*.toml` remains Codex-native because its schema is not shared with Copilot / Claude / OpenCode agent manifests.
 
 ## Multi-Agent Roles
 

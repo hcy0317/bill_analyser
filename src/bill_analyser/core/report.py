@@ -14,7 +14,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from bill_analyser.constants import PROJECT_ROOT
+from bill_analyser.constants import OUTPUT_DIR
 
 matplotlib.use("Agg")  # 使用非交互式后端
 
@@ -31,8 +31,7 @@ class ReportGenerator:  # pylint: disable=too-few-public-methods
         if output_dir:
             self.output_dir = Path(output_dir)
         else:
-            # 输出目录指向项目根目录的 output 文件夹
-            self.output_dir = PROJECT_ROOT / "output"
+            self.output_dir = OUTPUT_DIR
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,60 +1,11 @@
 """导入解析 REST 收口回归测试。"""
 
-import asyncio
-from datetime import datetime
 from pathlib import Path
-
-import pytest
-
-
-@pytest.fixture(scope='module', name='client')
-def _client_fixture():
-    """创建测试客户端。"""
-
-    async def init_services():
-        from src.api.app import initialize
-        await initialize()
-
-    asyncio.run(init_services())
-
-    from src.api.app import app
-    app.config['TESTING'] = True
-
-    with app.test_client() as test_client:
-        yield test_client
-
-
-@pytest.fixture(scope='module', name='auth_headers')
-def _auth_headers_fixture(client):
-    """返回鉴权请求头。"""
-    suffix = int(datetime.now().timestamp())
-    username = f'test_import_parse_rest_{suffix}'
-    password = 'Test123456!'
-
-    register_response = client.post('/api/auth/register', json={
-        'username': username,
-        'email': f'{username}@example.com',
-        'password': password,
-        'nickname': username
-    })
-    assert register_response.status_code in [200, 409], register_response.get_data(as_text=True)
-
-    login_response = client.post('/api/auth/login', json={
-        'loginName': username,
-        'password': password
-    })
-    assert login_response.status_code == 200, login_response.get_data(as_text=True)
-
-    login_data = login_response.get_json() or {}
-    token = (login_data.get('result') or {}).get('token')
-    assert token
-
-    return {'Authorization': f'Bearer {token}'}
 
 
 def test_parse_import_rest_endpoint(client, auth_headers):
     """导入解析应走新的 REST 主链。"""
-    sample_file = Path('c:/Users/hcy/OneDrive/Github/bill_analyser/bills/微信支付账单(20240101-20240331).csv')
+    sample_file = Path(__file__).resolve().parents[1] / 'fixtures' / 'import_samples' / 'wechat_statement_sample.csv'
     assert sample_file.exists(), f'样例文件不存在: {sample_file}'
 
     with sample_file.open('rb') as file_obj:

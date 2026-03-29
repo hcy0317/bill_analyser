@@ -80,6 +80,12 @@
                 :icon="editingTransaction === item ? mdiCheck : mdiPencilOutline"
                 @click="editTransaction(item)">
             </v-icon>
+            <v-icon v-if="item.isManuallyAnnotated"
+                size="small"
+                color="info"
+                :icon="mdiAccountEditOutline"
+                :title="getManuallyAnnotatedText()">
+            </v-icon>
             <v-icon v-if="needsAnnotation(item)"
                 size="small"
                 color="warning"
@@ -279,12 +285,17 @@
                                    secondary-hidden-field="hidden"
                                    :disabled="!!disabled || !hasAvailableCategoriesForType(item.type)"
                                    :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
+                                   :primary-action-title="tt('新建一级分类')"
+                                   :secondary-action-title="tt('新建二级分类')"
+                                   :secondary-action-disabled="!hasAvailableCategoriesForType(item.type)"
                                    :show-selection-primary-text="true"
                                    :custom-selection-primary-text="getCategoryPrimaryText(item)"
                                    :custom-selection-secondary-text="getCategorySecondaryText(item)"
                                    :placeholder="tt('Category')"
                                    :items="getCategoriesForType(item.type)"
-                                   v-model="item.categoryId">
+                                   v-model="item.categoryId"
+                                   @primary-action="quickCreatePrimaryCategory(item)"
+                                   @secondary-action="quickCreateSecondaryCategory(item, $event)">
                 </two-column-select>
             </div>
         </template>
@@ -343,10 +354,12 @@
                                    secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                    :disabled="!!disabled || !allVisibleAccounts.length"
                                    :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
+                                   :secondary-action-title="tt('新建账户')"
                                    :custom-selection-primary-text="getSourceAccountDisplayName(item)"
                                    :placeholder="getSourceAccountTitle(item)"
                                    :items="allVisibleCategorizedAccounts"
-                                   v-model="item.sourceAccountId">
+                                   v-model="item.sourceAccountId"
+                                   @secondary-action="quickCreateAccount(item, 'source', $event)">
                 </two-column-select>
                 <v-icon class="icon-with-direction mx-1" size="13" :icon="mdiArrowRight" v-if="requiresDestinationAccount(item)"></v-icon>
                 <two-column-select density="compact" variant="plain"
@@ -360,10 +373,12 @@
                                    secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                    :disabled="!!disabled || !allVisibleAccounts.length"
                                    :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
+                                   :secondary-action-title="tt('新建账户')"
                                    :custom-selection-primary-text="getDestinationAccountDisplayName(item)"
                                    :placeholder="getDestinationAccountTitle(item)"
                                    :items="allVisibleCategorizedAccounts"
                                    v-model="item.destinationAccountId"
+                                   @secondary-action="quickCreateAccount(item, 'destination', $event)"
                                    v-if="requiresDestinationAccount(item)">
                 </two-column-select>
             </div>
@@ -899,6 +914,10 @@ import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.
 import { ref, computed, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
+import {
+    matchesImportCheckAnnotationFilter,
+    type ImportCheckAnnotationFilterValue
+} from '../checkDataAnnotation.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -943,6 +962,7 @@ import logger from '@/lib/logger.ts';
 
 import {
     mdiCheck,
+    mdiAccountEditOutline,
     mdiArrowRight,
     mdiSelectAll,
     mdiSelect,
@@ -978,12 +998,13 @@ interface ImportTransactionCheckDataFilter {
     category: string | null | undefined; // null for 'All Category', undefined for 'Invalid Category'
     account: string | null | undefined; // null for 'All Account', undefined for 'Invalid Account'
     tag: string | null | undefined; // null for 'All Tag', undefined for 'Invalid Tag'
-    annotation: string | null; // null=all, 'pending'=needs annotation, 'annotated'=manually annotated, 'no-issues'=no issues
+    annotation: ImportCheckAnnotationFilterValue; // null=all, 'needs-review'=needs annotation or manually annotated, 'no-issues'=no issues
     description: string | null; // null for 'All Description'
 }
 
 interface ImportTransactionCheckDataMenuGroup {
     title: string;
+    summary?: string;
     items: ImportTransactionCheckDataMenu[];
 }
 
@@ -1120,11 +1141,15 @@ function getAnnotationActionText(): string {
 }
 
 function getAnnotationFilterTitle(): string {
-    return tt(getAnnotationTextKey('Annotation', 'AI Annotation'));
+    return tt('Annotation');
+}
+
+function getNeedsReviewOrAnnotatedText(): string {
+    return tt('Needs Review or Manually Annotated');
 }
 
 function getNoAnnotationIssuesText(): string {
-    return tt(getAnnotationTextKey('No Annotation Issues', 'No AI Annotation Issues'));
+    return tt('No Annotation Issues');
 }
 
 function getManuallyAnnotatedText(): string {
@@ -1629,6 +1654,110 @@ function openAccountManagement(): void {
     showAccountSelectDialog.value = true;
 }
 
+function applyCreatedCategoryToTransaction(importTransaction: ImportTransaction, category: TransactionCategory | undefined): void {
+    if (!category) {
+        return;
+    }
+
+    importTransaction.categoryId = category.id;
+    importTransaction.actualCategoryName = category.name;
+    importTransaction.originalCategoryName = category.name;
+    importTransaction.isManuallyAnnotated = true;
+    updateTransactionData(importTransaction);
+}
+
+function applyCreatedAccountToTransaction(
+    importTransaction: ImportTransaction,
+    target: 'source' | 'destination',
+    account: Account | undefined
+): void {
+    if (!account) {
+        return;
+    }
+
+    if (target === 'source') {
+        importTransaction.sourceAccountId = account.id;
+        importTransaction.actualSourceAccountName = account.name;
+        importTransaction.originalSourceAccountName = account.name;
+    } else {
+        importTransaction.destinationAccountId = account.id;
+        importTransaction.actualDestinationAccountName = account.name;
+        importTransaction.originalDestinationAccountName = account.name;
+    }
+
+    importTransaction.isManuallyAnnotated = true;
+    updateTransactionData(importTransaction);
+}
+
+async function quickCreatePrimaryCategory(importTransaction: ImportTransaction): Promise<void> {
+    const categoryType = transactionTypeToCategoryType(importTransaction.type);
+    if (categoryType === null) {
+        return;
+    }
+
+    try {
+        const result = await categoryEditDialog.value?.open({
+            parentId: '0',
+            type: categoryType
+        });
+
+        applyCreatedCategoryToTransaction(importTransaction, result?.category);
+    } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[快捷新建分类] 失败: ${error}`);
+        }
+    }
+}
+
+async function quickCreateSecondaryCategory(importTransaction: ImportTransaction, selectedPrimaryItem: unknown): Promise<void> {
+    const parentCategory = selectedPrimaryItem as TransactionCategory | undefined;
+    if (!parentCategory?.id) {
+        return;
+    }
+
+    const categoryType = transactionTypeToCategoryType(importTransaction.type);
+    if (categoryType === null) {
+        return;
+    }
+
+    try {
+        const result = await categoryEditDialog.value?.open({
+            parentId: parentCategory.id,
+            type: categoryType,
+            color: parentCategory.color,
+            icon: parentCategory.icon
+        });
+
+        applyCreatedCategoryToTransaction(importTransaction, result?.category);
+    } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[快捷新建子分类] 失败: ${error}`);
+        }
+    }
+}
+
+async function quickCreateAccount(
+    importTransaction: ImportTransaction,
+    target: 'source' | 'destination',
+    selectedPrimaryItem: unknown
+): Promise<void> {
+    const accountGroup = selectedPrimaryItem as Record<string, unknown> | undefined;
+    const categoryValue = Number(accountGroup?.['category'] ?? NaN);
+    const category = Number.isFinite(categoryValue) ? categoryValue : undefined;
+
+    try {
+        const result = await accountEditDialog.value?.open(
+            category !== undefined ? { category } : undefined
+        );
+
+        applyCreatedAccountToTransaction(importTransaction, target, result?.account);
+    } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'processed' in error && !(error as { processed: boolean }).processed) {
+            logger.error(`[快捷新建账户] 失败: ${error}`);
+        }
+    }
+}
+
 // v6.34: 获取当前选中类型的分类列表
 function getManageCategoryItems(): TransactionCategory[] {
     return allCategories.value[manageCategoryType.value] || [];
@@ -1770,9 +1899,71 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
+function getDateFilterSummary(): string {
+    return filters.value.minDatetime !== null && filters.value.maxDatetime !== null
+        ? displayFilterCustomDateRange.value || tt('Custom')
+        : tt('All');
+}
+
+function getTypeFilterSummary(): string {
+    switch (filters.value.transactionType) {
+        case TransactionType.Income:
+            return tt('Income');
+        case TransactionType.Expense:
+            return tt('Expense');
+        case TransactionType.Transfer:
+            return tt('Transfer');
+        case TransactionType.Investment:
+            return tt('Investment');
+        default:
+            return tt('All');
+    }
+}
+
+function getNamedFilterSummary(value: string | null | undefined, invalidLabel: string): string {
+    if (value === null) {
+        return tt('All');
+    }
+
+    if (value === undefined) {
+        return invalidLabel;
+    }
+
+    if (value === '') {
+        return tt('None');
+    }
+
+    return value;
+}
+
+function getAnnotationFilterSummary(): string {
+    if (filters.value.annotation === 'needs-review') {
+        return getNeedsReviewOrAnnotatedText();
+    }
+
+    if (filters.value.annotation === 'no-issues') {
+        return getNoAnnotationIssuesText();
+    }
+
+    return tt('All');
+}
+
+function getDescriptionFilterSummary(): string {
+    if (filters.value.description === null) {
+        return tt('All');
+    }
+
+    if (filters.value.description === '') {
+        return tt('None');
+    }
+
+    return filters.value.description;
+}
+
 const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     {
         title: tt('Date Range'),
+        summary: getDateFilterSummary(),
         items: [
             {
                 title: tt('All'),
@@ -1792,6 +1983,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: tt('Type'),
+        summary: getTypeFilterSummary(),
         items: [
             {
                 title: tt('All'),
@@ -1822,6 +2014,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: tt('Category'),
+        summary: getNamedFilterSummary(filters.value.category, tt('Invalid Category')),
         items: [
             {
                 title: tt('All'),
@@ -1847,6 +2040,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: tt('Account'),
+        summary: getNamedFilterSummary(filters.value.account, tt('Invalid Account')),
         items: [
             {
                 title: tt('All'),
@@ -1872,6 +2066,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: tt('Tags'),
+        summary: getNamedFilterSummary(filters.value.tag, tt('Invalid Tag')),
         items: [
             {
                 title: tt('All'),
@@ -1897,6 +2092,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: getAnnotationFilterTitle(),
+        summary: getAnnotationFilterSummary(),
         items: [
             {
                 title: tt('All'),
@@ -1904,14 +2100,9 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 onClick: () => filters.value.annotation = null
             },
             {
-                title: getNeedsAnnotationText(),
-                appendIcon: filters.value.annotation === 'pending' ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = 'pending'
-            },
-            {
-                title: getManuallyAnnotatedText(),
-                appendIcon: filters.value.annotation === 'annotated' ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = 'annotated'
+                title: getNeedsReviewOrAnnotatedText(),
+                appendIcon: filters.value.annotation === 'needs-review' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'needs-review'
             },
             {
                 title: getNoAnnotationIssuesText(),
@@ -1922,6 +2113,7 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     },
     {
         title: tt('Description'),
+        summary: getDescriptionFilterSummary(),
         items: [
             {
                 title: tt('All'),
@@ -2110,6 +2302,7 @@ const importTransactionHeaders = computed<object[]>(() => {
     return [
         { value: 'valid', sortable: true, nowrap: true, width: 35 },
         { value: 'time', title: tt('Transaction Time'), sortable: true, nowrap: true, maxWidth: 280 },
+        { value: 'parserSource', title: '解析器', sortable: true, nowrap: true },
         { value: 'type', title: tt('Type'), sortable: true, nowrap: true, maxWidth: 140 },
         { value: 'actualCategoryName', title: tt('Category'), sortable: true, nowrap: true },
         { value: 'sourceAmount', title: tt('Amount'), sortable: true, nowrap: true },
@@ -2119,7 +2312,6 @@ const importTransactionHeaders = computed<object[]>(() => {
         // v6.33: 交易对方和支付方式列移到标签列之后
         { value: 'counterparty', title: tt('Counterparty'), sortable: true, nowrap: true },
         { value: 'paymentMethod', title: tt('Payment Method'), sortable: true, nowrap: true },
-        { value: 'parserSource', title: '解析器', sortable: true, nowrap: true },
         { value: 'comment', title: tt('Description'), sortable: true, nowrap: true },
     ];
 });
@@ -2512,16 +2704,12 @@ function isTransactionDisplayed(transaction: ImportTransaction): boolean {
         }
     }
 
-    if (filters.value.annotation !== null) {
-        if (filters.value.annotation === 'pending' && (!needsAnnotation(transaction) || transaction.isManuallyAnnotated)) {
-            return false;
-        }
-        if (filters.value.annotation === 'annotated' && !transaction.isManuallyAnnotated) {
-            return false;
-        }
-        if (filters.value.annotation === 'no-issues' && needsAnnotation(transaction)) {
-            return false;
-        }
+    if (!matchesImportCheckAnnotationFilter(filters.value.annotation, {
+        hasAnnotationIssues: needsAnnotation(transaction),
+        isManuallyAnnotated: transaction.isManuallyAnnotated,
+        isEditing: editingTransaction.value === transaction
+    })) {
+        return false;
     }
 
     if (isString(filters.value.description)) {
@@ -2536,16 +2724,8 @@ function isTransactionDisplayed(transaction: ImportTransaction): boolean {
 }
 
 function isTagValid(tagIds: string[], tagIndex: number): boolean {
-    if (!tagIds || !tagIds[tagIndex]) {
-        return false;
-    }
-
-    if (tagIds[tagIndex] === '0') {
-        return false;
-    }
-
     const tagId = tagIds[tagIndex];
-    return !!allTagsMap.value[tagId];
+    return !!tagId && !!allTagsMap.value[tagId];
 }
 
 function getDisplayDateTime(transaction: ImportTransaction): string {
@@ -2833,8 +3013,8 @@ function selectInvertInThisPage(): void {
 function editTransaction(transaction: ImportTransaction): void {
     if (editingTransaction.value) {
         editingTransaction.value.tagIds = editingTags.value;
-        updateTransactionData(editingTransaction.value);
         editingTransaction.value.isManuallyAnnotated = true;
+        updateTransactionData(editingTransaction.value);
     }
 
     if (editingTransaction.value === transaction) {

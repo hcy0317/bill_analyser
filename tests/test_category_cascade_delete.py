@@ -1,21 +1,36 @@
 """
 测试分类级联删除功能
 """
-import pytest
-import asyncio
 from datetime import datetime
 
-from src.core.db import Database
-from src.utils.logger import get_logger
+import pytest
+
+from bill_analyser.core.db import Database
+from bill_analyser.utils.logger import get_logger
+
+from tests.runtime_paths import get_test_db_path, remove_test_database_family
 
 logger = get_logger('TestCategoryCascadeDelete')
 
 
+@pytest.fixture(name='db')
+async def _db_fixture():
+    db_path = get_test_db_path(f"test_category_cascade_delete_{int(datetime.now().timestamp() * 1000)}.db")
+    remove_test_database_family(db_path)
+    database = Database(str(db_path))
+    await database.init_db()
+
+    try:
+        yield database
+    finally:
+        await database.close()
+        remove_test_database_family(db_path)
+
+
 @pytest.mark.asyncio
-async def test_delete_parent_category_cascades_to_children():
+async def test_delete_parent_category_cascades_to_children(db):
     """测试删除父级分类时级联删除所有子分类"""
-    db = Database('src/data/bills.db')
-    
+
     # 创建测试数据：一个父级分类和3个子分类
     test_main = f"测试主分类_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
@@ -78,10 +93,9 @@ async def test_delete_parent_category_cascades_to_children():
 
 
 @pytest.mark.asyncio
-async def test_delete_child_category_does_not_affect_siblings():
+async def test_delete_child_category_does_not_affect_siblings(db):
     """测试删除子分类不影响其他子分类和父分类"""
-    db = Database('src/data/bills.db')
-    
+
     # 创建测试数据
     test_main = f"测试主分类_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     
@@ -148,10 +162,9 @@ async def test_delete_child_category_does_not_affect_siblings():
 
 
 @pytest.mark.asyncio
-async def test_delete_nonexistent_category():
+async def test_delete_nonexistent_category(db):
     """测试删除不存在的分类"""
-    db = Database('src/data/bills.db')
-    
+
     # 使用一个不存在的ID（假设999999不存在）
     nonexistent_id = 999999
     
@@ -165,10 +178,9 @@ async def test_delete_nonexistent_category():
 
 
 @pytest.mark.asyncio
-async def test_delete_category_with_empty_subcategory():
+async def test_delete_category_with_empty_subcategory(db):
     """测试删除sub_category为空字符串的父级分类"""
-    db = Database('src/data/bills.db')
-    
+
     # 创建测试数据
     test_main = f"测试空子类_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     

@@ -10,7 +10,7 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BILLS_DIR = PROJECT_ROOT / 'bills'
+SAMPLE_BILLS_DIR = PROJECT_ROOT / 'tests' / 'fixtures' / 'import_samples'
 MANIFEST_PATH = Path(__file__).with_name('real_sample_manifest.json')
 
 
@@ -27,7 +27,7 @@ def discover_real_sample_cases() -> list[dict[str, Any]]:
         seen_paths: set[Path] = set()
 
         for pattern in spec['patterns']:
-            for path in sorted(BILLS_DIR.glob(pattern)):
+            for path in sorted(SAMPLE_BILLS_DIR.glob(pattern)):
                 if path in seen_paths:
                     continue
                 seen_paths.add(path)
@@ -56,7 +56,7 @@ def discover_parser_comparison_cases() -> list[dict[str, Any]]:
         if not comparison_sample or not dedicated_parser:
             continue
 
-        sample_path = BILLS_DIR / comparison_sample
+        sample_path = SAMPLE_BILLS_DIR / comparison_sample
         assert sample_path.exists(), f'对比样本不存在: {sample_path}'
         cases.append(
             {

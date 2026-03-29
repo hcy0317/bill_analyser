@@ -8,9 +8,14 @@ applyTo: '**/*.ts,**/*.tsx,**/*.js,**/*.jsx,**/*.mjs,**/*.cjs,**/*.mts,**/*.cts,
 
 > This file extends the common hooks rule with TypeScript/JavaScript specific content.
 
-## PostToolUse Hooks
+## Repository Hook Baseline
 
-Configure in `~/.claude/settings.json`:
+- 仓库当前提供最小 guard hooks，入口在 `.github/hooks/*.json` 与项目级 `.claude/settings.json`
+- 共享 guard 脚本位于 `scripts/hooks/pre_tool_repo_guard.py`
+
+## Optional Local PostToolUse Hooks
+
+If you want auto-formatting or deeper local-only automation, configure it in `~/.claude/settings.json` or `.claude/settings.local.json`:
 
 - **Prettier**: Auto-format JS/TS files after edit
 - **TypeScript check**: Run `tsc` after editing `.ts`/`.tsx` files
@@ -18,4 +23,4 @@ Configure in `~/.claude/settings.json`:
 
 ## Stop Hooks
 
-- **console.log audit**: Check all modified files for `console.log` before session ends
+- **console.log audit**: Optionally check modified files for `console.log` before session ends

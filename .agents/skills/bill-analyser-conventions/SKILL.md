@@ -5,6 +5,9 @@ description: Repository-specific conventions for Bill Analyser. Use this for imp
 
 # Bill Analyser Conventions
 
+This is the canonical shared Bill Analyser workflow skill for cross-tool reuse.
+If a tool needs its own discovery wrapper (for example `.claude/skills/...`), keep that wrapper thin and point back here.
+
 ## When to Use
 
 Use this skill when you are:
@@ -16,11 +19,14 @@ Use this skill when you are:
 
 ## Core Rules
 
-- Follow the repository entry files first: AGENTS.md and .github/copilot-instructions.md.
+- Follow `AGENTS.md` first, then use tool-specific adapter files only for platform-native delta.
+- Read `docs/PROJECT_OVERVIEW.md` before changing import, budgeting, statistics, accounts, categories, tags, or other cross-module flows so domain relationships are reloaded from the current repository baseline.
 - Preserve the Flask-to-async bridge pattern.
 - Keep database code async with aiosqlite.
 - Treat REST as the primary runtime API chain.
 - Keep yuan and cents conversions explicit.
+- After stable business behavior, API contracts, or module relationships change, update the relevant section of `docs/PROJECT_OVERVIEW.md` immediately.
+- Write `docs/PROJECT_OVERVIEW.md` as current-state business/architecture documentation, not as an update log, bug-fix diary, or dated session summary.
 
 ## Verification Baseline
 
