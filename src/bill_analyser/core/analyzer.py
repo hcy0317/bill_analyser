@@ -239,7 +239,7 @@ class Analyzer:
         freq_map = {
             "month": "D",  # 按天
             "quarter": "W",  # 按周
-            "year": "M",  # 按月
+            "year": "ME",  # 按月（月末）；兼容较新的 pandas 频率别名
         }
         freq = freq_map.get(period, "D")
 

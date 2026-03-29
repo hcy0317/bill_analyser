@@ -924,6 +924,10 @@ class BillService:
         if platform:
             cleaned = re.sub(rf"^{re.escape(platform)}[-－:：\s]*", "", cleaned, flags=re.IGNORECASE)
 
+        cleaned = re.sub(
+            r"^(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出)[-－:：\s]*", "", cleaned, flags=re.IGNORECASE
+        )
+
         if "|" in cleaned or "｜" in cleaned:
             candidates = [segment.strip().strip("|｜,， ") for segment in re.split(r"[|｜]", cleaned)]
             preferred = [

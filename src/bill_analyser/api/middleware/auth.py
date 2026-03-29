@@ -168,7 +168,7 @@ def optional_auth(f):
     """
     可选认证装饰器 - 尝试验证令牌，但不强制要求
 
-    如果提供了有效令牌，则注入用户信息；否则继续执行，不会返回401错误
+    如果未提供令牌，则继续执行匿名请求；如果提供了无效令牌，则返回401。
     """
 
     @wraps(f)
@@ -178,43 +178,80 @@ def optional_auth(f):
 
         if auth_header:
             parts = auth_header.split()
-            if len(parts) == 2 and parts[0].lower() == "bearer":
-                token = parts[1]
+            if len(parts) != 2 or parts[0].lower() != "bearer":
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Unauthorized",
+                            "message": "Invalid authorization header format",
+                        }
+                    ),
+                    401,
+                )
 
-                try:
-                    config = get_auth_config()
-                    jwt_secret = config.get("jwt_secret")
-                    jwt_algorithm = config.get("jwt_algorithm", "HS256")
+            token = parts[1]
 
-                    # 验证JWT令牌(检查签名和过期时间)
-                    jwt.decode(token, jwt_secret, algorithms=[jwt_algorithm])
-                    token_hash = calculate_token_hash(token)
+            try:
+                config = get_auth_config()
+                jwt_secret = config.get("jwt_secret")
+                jwt_algorithm = config.get("jwt_algorithm", "HS256")
 
-                    import asyncio
+                # 验证JWT令牌(检查签名和过期时间)
+                jwt.decode(token, jwt_secret, algorithms=[jwt_algorithm])
+                token_hash = calculate_token_hash(token)
 
-                    db_instance = get_db()
-                    if db_instance is None:
-                        logger.debug("可选认证跳过：数据库实例尚未初始化")
-                        return f(*args, **kwargs)
+                import asyncio
 
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                db_instance = get_db()
+                if db_instance is None:
+                    logger.error("可选认证失败：数据库实例尚未初始化")
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Service Unavailable",
+                                "message": "Authentication temporarily unavailable",
+                            }
+                        ),
+                        503,
+                    )
 
-                    session = loop.run_until_complete(db_instance.get_session_by_token_hash(token_hash))
-                    loop.close()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
 
-                    if session and session.get("user_is_active"):
-                        expires_at = datetime.fromisoformat(session["expires_at"])
-                        if datetime.now() <= expires_at:
-                            setattr(request, "user_id", session["user_id"])
-                            setattr(request, "username", session["username"])
-                            setattr(request, "user_email", session["email"])
-                            setattr(request, "session_id", session["id"])
-                            logger.info("可选认证成功: username=%s", getattr(request, "username"))
+                session = loop.run_until_complete(db_instance.get_session_by_token_hash(token_hash))
+                loop.close()
 
-                except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-                    logger.debug("可选认证失败: %s", e)
-                    # 忽略错误，继续执行
+                if session and session.get("user_is_active"):
+                    expires_at = datetime.fromisoformat(session["expires_at"])
+                    if datetime.now() <= expires_at:
+                        setattr(request, "user_id", session["user_id"])
+                        setattr(request, "username", session["username"])
+                        setattr(request, "user_email", session["email"])
+                        setattr(request, "session_id", session["id"])
+                        logger.info("可选认证成功: username=%s", getattr(request, "username"))
+
+            except jwt.ExpiredSignatureError:
+                logger.warning("可选认证令牌已过期")
+                return jsonify({"success": False, "error": "Unauthorized", "message": "Token expired"}), 401
+
+            except jwt.InvalidTokenError as e:
+                logger.warning("可选认证令牌无效: %s", e)
+                return jsonify({"success": False, "error": "Unauthorized", "message": "Invalid token"}), 401
+
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+                logger.error("可选认证内部错误: %s", e, exc_info=True)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Service Unavailable",
+                            "message": "Authentication temporarily unavailable",
+                        }
+                    ),
+                    503,
+                )
 
         # 如果没有认证信息，设置默认值
         if not hasattr(request, "user_id"):
