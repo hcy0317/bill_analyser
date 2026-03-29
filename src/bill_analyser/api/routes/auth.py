@@ -948,7 +948,9 @@ def login():
         }
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            data = {}
         login_name = data.get("loginName", "").strip()
         password = data.get("password", "")
 
@@ -1724,7 +1726,9 @@ def refresh_token():
         }
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            data = {}
         refresh_token_str = data.get("refreshToken", "")
 
         if not refresh_token_str:

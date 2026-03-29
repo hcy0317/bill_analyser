@@ -178,6 +178,8 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 2FA 登录验证链路已补齐 REST：`POST /api/2fa/verify`、`POST /api/2fa/recovery/verify`；`/api/auth/login` 在用户启用 2FA 时返回 `need2FA` 与待验证 token，旧 `/api/2fa/authorize.json`、`/api/2fa/recovery.json` 已停止使用，并由 legacy 404 回归保护
 - OAuth2 callback authorize 已收口到 `POST /api/auth/oauth2/authorize`；旧 `/api/oauth2/authorize.json` 已停止使用，并由 legacy 404 回归保护。当前后端仅提供 disabled-safe / not-implemented 语义，待后续真实 OAuth2 provider exchange 主链补齐
 - token 会话主链已切到认证域 REST：`GET|DELETE /api/tokens`、`POST /api/tokens/api`、`POST /api/tokens/mcp`、`POST /api/tokens/refresh`、`DELETE /api/tokens/<id>`；旧 `v1/tokens/generate*.json`、`v1/tokens/revoke*.json` 与 `v1/tokens/refresh.json` 已收口到新主链，并由 legacy 回归保护
+- 认证错误契约已补齐：`POST /api/auth/login` 与 `POST /api/tokens/refresh` 在请求体为空、`null` 或其他非对象 JSON 时返回 `400 Invalid request`，不再落入 `500`。
+- 统计时间范围契约已收紧：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends` 在起始时间/年月晚于结束时间时返回 `400`，避免把反向区间静默视为空结果。
 
 ---
 
@@ -228,6 +230,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ### 8.1 测试分布（`tests/`）
 - 核心测试：`test_import.py`、`test_smart_dedup.py`、`test_category_engine_v2.py`、`test_db.py`
 - API 测试：`test_v1_routes.py`、`test_statistics_*`、`new_ui/` 下接口测试
+- 领域化测试：`tests/domains/` 采用 `domain/(unit|integration)` 结构，当前已覆盖认证、统计、导入主链、数据库深水区等高价值路径
 - 回归脚本/诊断脚本：`check_*`、`diagnose_*`、`debug_*`
 - 前端 Jest 测试：`tests/web/`（与 Python 测试同仓库级根目录并行管理）
 

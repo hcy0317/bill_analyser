@@ -463,7 +463,27 @@ class ConfigManager:
 
     def __del__(self):
         """析构函数"""
-        self.disable_auto_reload()
+        observer = getattr(self, "_observer", None)
+        if observer is None:
+            return
+
+        try:
+            observer.stop()
+
+            should_join = observer is not threading.current_thread()
+            if should_join:
+                try:
+                    should_join = bool(observer.is_alive())
+                except Exception:  # pylint: disable=broad-except
+                    should_join = True
+
+            if should_join:
+                observer.join(timeout=1)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        self._observer = None
+        self._auto_reload_enabled = False
 
 
 # 全局配置管理器实例

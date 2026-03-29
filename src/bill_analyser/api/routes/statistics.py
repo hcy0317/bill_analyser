@@ -952,6 +952,16 @@ def get_categorical_analysis():  # pylint: disable=too-many-locals,too-many-bran
                 logger.error("[分类分析] 时间戳格式错误: %s", e)
                 return jsonify({"success": False, "error": f"Invalid timestamp format: {e}"}), 400
 
+            if start_time > end_time:
+                logger.error("[分类分析] 非法时间范围: start_time=%s, end_time=%s", start_time, end_time)
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "Invalid time range",
+                        "message": "startTime must be less than or equal to endTime",
+                    }
+                ), 400
+
             # 转换时间戳为日期字符串
             start_date = datetime.fromtimestamp(start_time).strftime("%Y-%m-%d")
             end_date = datetime.fromtimestamp(end_time).strftime("%Y-%m-%d")
@@ -1224,6 +1234,22 @@ def get_trend_analysis():  # pylint: disable=too-many-locals,too-many-branches,t
                     end_year,
                     end_month,
                 )
+
+                if (start_year, start_month) > (end_year, end_month):
+                    logger.error(
+                        "[趋势分析] 非法年月范围: start=%d-%02d, end=%d-%02d",
+                        start_year,
+                        start_month,
+                        end_year,
+                        end_month,
+                    )
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": "Invalid year-month range",
+                            "message": "startYearMonth must be less than or equal to endYearMonth",
+                        }
+                    ), 400
             except (ValueError, IndexError) as exc:
                 logger.error("[趋势分析] 年月格式错误: %s", exc)
                 return jsonify(
@@ -1589,6 +1615,16 @@ def get_asset_trends():  # pylint: disable=too-many-locals,too-many-branches,too
         except (ValueError, TypeError) as exc:
             logger.error("[资产趋势] 时间戳格式错误: %s", exc)
             return jsonify({"success": False, "error": f"Invalid timestamp format: {exc}"}), 400
+
+        if start_time > end_time:
+            logger.error("[资产趋势] 非法时间范围: start_time=%s, end_time=%s", start_time, end_time)
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid time range",
+                    "message": "startTime must be less than or equal to endTime",
+                }
+            ), 400
 
         # 【关键】验证时间范围，防止无限循环（限制最多365天，支持本年查询）
         time_diff_seconds = end_time - start_time
