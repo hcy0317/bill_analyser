@@ -726,7 +726,7 @@
                                     </div>
 
                                     <svg
-                                        v-if="historicalChartModel.primaryLabelGlyphs.length > 0"
+                                        v-if="historicalBudgetLevel === 'secondary' && historicalChartModel.primaryLabelGlyphs.length > 0"
                                         class="budget-history-label-overlay"
                                         viewBox="0 0 100 100"
                                         preserveAspectRatio="xMidYMid meet"

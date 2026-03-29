@@ -907,6 +907,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/BatchReplaceDialog.vue';
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
+import type { ImportPreviewRecord } from '../importPreview.ts';
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
@@ -1040,7 +1041,7 @@ const props = defineProps<{
 
 // v6.55: 定义事件，用于通知父组件数据刷新
 const emit = defineEmits<{
-    (e: 'reclassified', data: ImportTransaction[]): void;
+    (e: 'reclassified', data: ImportPreviewRecord[]): void;
 }>();
 
 const {

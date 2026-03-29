@@ -83,7 +83,11 @@ describe('historyPolarChart helpers', () => {
             expect.objectContaining({ key: '交通', state: 'all' })
         ]);
         expect(model.primaryPadAngle).toBeGreaterThan(0);
-        expect(model.primaryLabelGlyphs).toStrictEqual([]);
+        expect(model.primaryLabelGlyphs).toHaveLength(4);
+        expect(model.primaryLabelGlyphs.every(glyph => {
+            const radius = Math.hypot(glyph.x - 50, glyph.y - 46);
+            return radius > 43;
+        })).toBe(true);
         expect(model.primaryBands[0]?.startAngle).toBeGreaterThan(model.primaryBands[0]?.endAngle || -Infinity);
         expect(model.amountAxisMax).toBeGreaterThan(1500);
     });
@@ -124,7 +128,7 @@ describe('historyPolarChart helpers', () => {
         expect(model.legendGroups[1]?.state).toBe('all');
     });
 
-    test('buildHistoricalPolarChartOption keeps equal-width bars, puts labels on the taller bar, and uses the updated execution scale', () => {
+    test('buildHistoricalPolarChartOption keeps equal-width bars, keeps bar labels inside the ring gap, and uses the updated execution scale', () => {
         const selection = buildSelection({ '交通::地铁': false });
         const model = buildHistoricalPolarChartModel(SAMPLE_POINTS, selection);
         const option = buildHistoricalPolarChartOption(model, {
@@ -136,14 +140,17 @@ describe('historyPolarChart helpers', () => {
             formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
             showPrimaryRing: true
         }) as {
-            radiusAxis: Array<{ max?: number; interval?: number }>;
+            radiusAxis: Array<{ max?: number; interval?: number; axisLabel?: { margin?: number } }>;
             series: Array<Record<string, unknown>>;
         };
 
         expect(option.radiusAxis[1]?.max).toBe(125);
         expect(option.radiusAxis[1]?.interval).toBe(25);
+        expect(option.radiusAxis[0]?.axisLabel?.margin).toBe(10);
         expect(option.series[1]?.['barWidth']).toBe(option.series[2]?.['barWidth']);
         expect(option.series[4]?.['smooth']).toBe(true);
+        expect(option.series[0]?.['label']).toMatchObject({ show: false });
+        expect(option.series[0]?.['radius']).toStrictEqual(['80%', '86%']);
 
         const spentSeries = option.series[2] as {
             data: Array<{ value: number }>;
@@ -153,6 +160,7 @@ describe('historyPolarChart helpers', () => {
                 value: number;
                 label: {
                     formatter: string;
+                    rotate: number;
                 };
             }>;
         };
@@ -161,9 +169,14 @@ describe('historyPolarChart helpers', () => {
         };
 
         expect(spentSeries.data[0]?.value).toBe(620);
-        expect(labelSeries.data[0]?.value).toBe(model.amountAxisMax);
+        expect(labelSeries.data[0]?.value).toBeGreaterThan(800);
+        expect(labelSeries.data[0]?.value).toBeLessThan(model.amountAxisMax);
         expect(labelSeries.data[0]?.label?.formatter).toBe('早餐');
+        expect(Math.abs(labelSeries.data[0]?.label?.rotate || 0)).toBeGreaterThan(1);
+        expect(Math.abs(labelSeries.data[0]?.label?.rotate || 0)).toBeLessThanOrEqual(90);
         expect(labelSeries.data[2]?.label?.formatter).toBe('打车');
+        expect(Math.abs(labelSeries.data[2]?.label?.rotate || 0)).toBeGreaterThan(1);
+        expect(Math.abs(labelSeries.data[2]?.label?.rotate || 0)).toBeLessThanOrEqual(90);
         expect(lineSeries.data[2]).toBeCloseTo(117.1, 1);
     });
 

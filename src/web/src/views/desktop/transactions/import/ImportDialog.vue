@@ -53,11 +53,42 @@
                            :icon="true" :disabled="loading || submitting"
                            v-if="currentStep === 'checkData' && importTransactionCheckDataTab?.filterMenus">
                         <v-icon :icon="mdiFilterOutline" />
-                        <v-menu activator="parent" max-height="500" min-width="360">
-                            <v-list density="compact" class="py-1">
-                                <template :key="group.title" v-for="(group, groupIndex) in importTransactionCheckDataTab.filterMenus">
-                                    <v-list-subheader class="text-high-emphasis">{{ group.title }}</v-list-subheader>
-                                    <div class="px-4 pb-1 text-caption text-medium-emphasis" v-if="group.summary">{{ group.summary }}</div>
+                        <v-menu
+                            activator="parent"
+                            max-height="500"
+                            min-width="360"
+                            v-model="showCheckDataFilterMenu"
+                            :close-on-content-click="false"
+                        >
+                            <v-list
+                                density="compact"
+                                class="py-1 import-check-data-filter-menu"
+                                v-model:opened="openedCheckDataFilterGroups"
+                                open-strategy="multiple"
+                            >
+                                <v-list-group
+                                    v-for="group in importTransactionCheckDataTab.filterMenus"
+                                    :key="group.title"
+                                    :value="group.title"
+                                >
+                                    <template #activator="{ props: groupActivatorProps }">
+                                        <v-list-item
+                                            v-bind="groupActivatorProps"
+                                            class="import-check-data-filter-menu__group"
+                                        >
+                                            <template #title>
+                                                <span
+                                                    :class="{
+                                                        'import-check-data-filter-menu__group-title': true,
+                                                        'import-check-data-filter-menu__group-title--active': isActiveCheckDataFilterGroup(group.summary)
+                                                    }"
+                                                >
+                                                    {{ group.title }}
+                                                </span>
+                                            </template>
+                                        </v-list-item>
+                                    </template>
+
                                     <v-list-item
                                         v-for="(menu, index) in group.items"
                                         :key="`${group.title}_${index}`"
@@ -66,10 +97,10 @@
                                         :subtitle="menu.subTitle"
                                         :append-icon="menu.appendIcon"
                                         :disabled="menu.disabled"
+                                        class="import-check-data-filter-menu__item"
                                         @click="menu.onClick()"
                                     />
-                                    <v-divider class="my-2" v-if="groupIndex < importTransactionCheckDataTab.filterMenus.length - 1" />
-                                </template>
+                                </v-list-group>
                             </v-list>
                         </v-menu>
                     </v-btn>
@@ -368,8 +399,9 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
+import type { ImportPreviewRecord } from './importPreview.ts';
 
-import { ref, computed, nextTick, useTemplateRef } from 'vue';
+import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { getTimezoneOffsetMinutes } from '@/lib/datetime.ts';
@@ -468,45 +500,21 @@ interface ImportFieldMappings {
     tagSeparator?: string;
 }
 
-interface ImportPreviewRecord {
-    id: number;
-    preview_type?: string;
-    suggested_preview_type?: string;
-    preview_date?: string;
-    preview_amount?: number;
-    preview_destination_amount?: number;
-    preview_main_category?: string;
-    preview_sub_category?: string;
-    preview_source_account_id?: number;
-    preview_destination_account_id?: number;
-    preview_description?: string;
-    preview_counterparty?: string;
-    preview_payment_method?: string;
-    transfer_suggestion_score?: number;
-    transfer_suggestion_level?: string;
-    transfer_suggestion_reason?: string;
-    investment_signal_score?: number;
-    investment_signal_level?: string;
-    investment_signal_reason?: string;
-    learning_recommendation_score?: number;
-    learning_recommendation_level?: string;
-    learning_recommendation_reason?: string;
-    learning_recommendation_type?: string;
-    learning_recommendation_summary?: string;
-    investment_platform?: string;
-    investment_product?: string;
-    preview_recurring_id?: number;
-    preview_recurring_name?: string;
-    preview_recurring_candidate_count?: number;
-    preview_recurring_match_score?: number;
-    preview_recurring_match_reasons?: string;
-    preview_recurring_matched_date?: string;
-    preview_parser_id?: string;
-    preview_is_manually_annotated?: boolean;
-}
-
 type ImportTransactionWithPreviewId = ImportTransaction & {
     _previewId?: number;
+};
+
+interface ImportTransactionCheckDataFilterMenuGroup {
+    title: string;
+    summary?: string;
+}
+
+const PREVIEW_TRANSACTION_TYPE_MAP: Record<string, number> = {
+    '支出': 3,
+    '收入': 2,
+    '转账': 4,
+    '投资': 5,
+    '退款': 2
 };
 
 defineProps<{
@@ -569,6 +577,8 @@ const editImportConfigDescription = ref<string>('');
 const editImportConfigIsDefault = ref<boolean>(false);
 const editImportConfigRecommended = ref<boolean>(false);
 const editingImportConfig = ref<ImportConfigMatchResult | null>(null);
+const showCheckDataFilterMenu = ref<boolean>(false);
+const openedCheckDataFilterGroups = ref<string[]>([]);
 
 const allSteps = computed<StepBarItem[]>(() => {
     const defineColumnSubTitle = unmatchedFilesQueue.value.length > 0
@@ -657,6 +667,111 @@ function getDisplayCount(count: number): string {
     return numeralSystem.value.formatNumber(count);
 }
 
+function normalizeImportConfigMatchResult(config: Partial<ImportConfigMatchResult>): ImportConfigMatchResult | null {
+    const id = Number(config.id);
+    const name = typeof config.name === 'string' ? config.name.trim() : '';
+
+    if (!Number.isFinite(id) || !name) {
+        return null;
+    }
+
+    return {
+        id,
+        name,
+        fileFormat: config.fileFormat,
+        description: config.description,
+        descriptionSummary: config.descriptionSummary,
+        fieldMappings: config.fieldMappings || {},
+        sampleHeaders: config.sampleHeaders || [],
+        dateFormat: config.dateFormat,
+        delimiter: config.delimiter,
+        encoding: config.encoding,
+        skipRows: config.skipRows,
+        hasHeader: config.hasHeader,
+        customRules: config.customRules,
+        isDefault: config.isDefault,
+        defaultRecommendation: config.defaultRecommendation,
+        matchScore: config.matchScore,
+        matchReason: config.matchReason
+    };
+}
+
+function extractApiErrorMessage(payload: unknown, fallbackMessage: string): string {
+    if (!payload || typeof payload !== 'object') {
+        return fallbackMessage;
+    }
+
+    const apiError = payload as {
+        error?: string;
+        errorMessage?: string;
+        message?: string;
+    };
+
+    return apiError.errorMessage || apiError.error || apiError.message || fallbackMessage;
+}
+
+function getPreviewTransactionType(previewType?: string): number | undefined {
+    if (!previewType) {
+        return undefined;
+    }
+
+    return PREVIEW_TRANSACTION_TYPE_MAP[previewType];
+}
+
+function isActiveCheckDataFilterGroup(summary?: string): boolean {
+    return !!summary && summary !== tt('All');
+}
+
+function getVisibleCheckDataFilterGroups(): ImportTransactionCheckDataFilterMenuGroup[] {
+    return importTransactionCheckDataTab.value?.filterMenus || [];
+}
+
+function syncOpenedCheckDataFilterGroups(): void {
+    const groups = getVisibleCheckDataFilterGroups();
+    if (groups.length < 1) {
+        openedCheckDataFilterGroups.value = [];
+        return;
+    }
+
+    const validTitles = new Set(groups.map(group => group.title));
+    const retainedTitles = openedCheckDataFilterGroups.value.filter(title => validTitles.has(title));
+
+    if (retainedTitles.length > 0) {
+        openedCheckDataFilterGroups.value = retainedTitles;
+        return;
+    }
+
+    const activeTitles = groups
+        .filter(group => isActiveCheckDataFilterGroup(group.summary))
+        .map(group => group.title);
+    const firstGroup = groups[0];
+
+    openedCheckDataFilterGroups.value = activeTitles.length > 0
+        ? activeTitles
+        : (firstGroup ? [firstGroup.title] : []);
+}
+
+watch(showCheckDataFilterMenu, visible => {
+    if (visible) {
+        syncOpenedCheckDataFilterGroups();
+    }
+});
+
+watch(currentStep, step => {
+    if (step !== 'checkData') {
+        showCheckDataFilterMenu.value = false;
+    }
+});
+
+watch(
+    () => getVisibleCheckDataFilterGroups().map(group => `${group.title}:${group.summary || ''}`).join('|'),
+    () => {
+        if (showCheckDataFilterMenu.value) {
+            syncOpenedCheckDataFilterGroups();
+        }
+    }
+);
+
 function open(): Promise<void> {
     // v6.52: 清理之前可能残留的导入会话数据
     // 确保每次打开导入对话框时 bills_parser_template 和 bills_preview 表都是干净的
@@ -686,6 +801,8 @@ function open(): Promise<void> {
     editImportConfigIsDefault.value = false;
     editImportConfigRecommended.value = false;
     editingImportConfig.value = null;
+    showCheckDataFilterMenu.value = false;
+    openedCheckDataFilterGroups.value = [];
     importConfigList.value = [];
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
@@ -782,25 +899,10 @@ async function loadImportConfigList(): Promise<void> {
     const response = await services.getImportConfigs({
         fileFormat: getImportConfigFileFormat()
     });
-    const result = response.data?.result || [];
-    importConfigList.value = result.map((config: Partial<ImportConfigMatchResult>) => ({
-        id: config.id,
-        name: config.name,
-        fileFormat: config.fileFormat,
-        description: config.description,
-        descriptionSummary: config.descriptionSummary,
-        fieldMappings: config.fieldMappings || {},
-        sampleHeaders: config.sampleHeaders || [],
-        dateFormat: config.dateFormat,
-        delimiter: config.delimiter,
-        encoding: config.encoding,
-        skipRows: config.skipRows,
-        hasHeader: config.hasHeader,
-        customRules: config.customRules,
-        isDefault: config.isDefault,
-        defaultRecommendation: config.defaultRecommendation,
-        matchScore: config.matchScore
-    }));
+    const result = Array.isArray(response.data?.result) ? response.data.result : [];
+    importConfigList.value = result
+        .map((config: Partial<ImportConfigMatchResult>) => normalizeImportConfigMatchResult(config))
+        .filter((config): config is ImportConfigMatchResult => config !== null);
 }
 
 async function openManageImportConfigDialog(): Promise<void> {
@@ -928,7 +1030,7 @@ async function executeColumnMappingImport(): Promise<void> {
     });
 
     if (!response.data?.success) {
-        throw new Error(response.data?.error || `解析文件 ${currentFile.originalName} 失败`);
+        throw new Error(extractApiErrorMessage(response.data, `解析文件 ${currentFile.originalName} 失败`));
     }
 
     logger.info(`[列映射导入] 文件 ${currentFile.originalName} 解析完成, parsed_count=${response.data?.result?.parsed_count || 0}`);
@@ -999,7 +1101,7 @@ async function saveCurrentImportConfig(): Promise<void> {
             fileFormat: getImportConfigFileFormat(),
             description: saveImportConfigDescription.value.trim(),
             descriptionSummary: saveImportConfigDescription.value.trim(),
-            fieldMappings: mapping as unknown as Record<string, unknown>,
+            fieldMappings: mapping,
             sampleHeaders: parsedFileData.value[0] || [],
             delimiter: parsedFileDelimiter.value,
             encoding: matchedImportConfig.value?.encoding || 'utf-8',
@@ -1225,15 +1327,7 @@ async function parseData(): Promise<void> {
  * 将后端预览数据转换为前端 ImportTransaction 格式
  */
 function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: number): ImportTransaction {
-    // 类型映射: 后端中文类型 -> 前端数字类型
-    const typeMap: Record<string, number> = {
-        '支出': 3,    // Expense
-        '收入': 2,    // Income
-        '转账': 4,    // Transfer
-        '投资': 5,    // Investment
-        '退款': 2     // 退款视为收入
-    };
-    const type = typeMap[item.preview_type] || 3;
+    const type = getPreviewTransactionType(item.preview_type) ?? 3;
 
     // 解析时间
     const timeStr = item.preview_date || '';
@@ -1287,7 +1381,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         comment: item.preview_description || '',
         counterparty: item.preview_counterparty || '',
         paymentMethod: item.preview_payment_method || '',
-        suggestedType: typeMap[item.suggested_preview_type] || undefined,
+        suggestedType: getPreviewTransactionType(item.suggested_preview_type),
         transferSuggestionScore: Number(item.transfer_suggestion_score || 0),
         transferSuggestionLevel: item.transfer_suggestion_level || '',
         transferSuggestionReason: item.transfer_suggestion_reason || '',
@@ -1553,5 +1647,19 @@ defineExpose({
 .import-check-data-filter-drawer :deep(.v-navigation-drawer__content) {
     display: flex;
     flex-direction: column;
+}
+
+.import-check-data-filter-menu__group-title {
+    font-size: 0.98rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.import-check-data-filter-menu__group-title--active {
+    color: rgb(var(--v-theme-primary));
+}
+
+.import-check-data-filter-menu :deep(.v-list-group__items .v-list-item) {
+    padding-inline-start: 28px;
 }
 </style>

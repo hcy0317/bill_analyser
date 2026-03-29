@@ -91,10 +91,19 @@ const MAX_EXECUTION_RATE = 120;
 const EXECUTION_AXIS_MAX = 125;
 const EXECUTION_AXIS_INTERVAL = 25;
 const PRIMARY_RING_PAD_ANGLE = 3.2;
+const VIEWBOX_CENTER_X = 50;
+const VIEWBOX_CENTER_Y = 46;
 const POLAR_CENTER = ['50%', '46%'] as const;
 const BAR_POLAR_RADIUS = ['20%', '74%'] as const;
 const EXECUTION_POLAR_RADIUS = ['20%', '74%'] as const;
-const PRIMARY_RING_RADIUS = ['76%', '82%'] as const;
+const PRIMARY_RING_RADIUS = ['80%', '86%'] as const;
+const PRIMARY_LABEL_RADIUS_VIEWBOX = 46;
+const PRIMARY_LABEL_EDGE_PADDING_ANGLE = 8;
+const PRIMARY_LABEL_MAX_STEP_ANGLE = 5.8;
+const PRIMARY_LABEL_MIN_FONT_SIZE = 2.05;
+const PRIMARY_LABEL_MAX_FONT_SIZE = 2.55;
+const SECONDARY_LABEL_BUFFER_INTERVAL_RATIO = 0.18;
+const SECONDARY_LABEL_MAX_AXIS_RATIO = 0.93;
 
 interface InternalPrimaryGroupItem extends HistoricalCategoryChartPoint {
     secondaryKey: string;
@@ -153,32 +162,85 @@ function normalizeCircleAngle(angle: number): number {
     return ((angle % 360) + 360) % 360;
 }
 
-function getOutsideLabelAlign(angle: number): 'left' | 'right' | 'center' {
+function getCartesianPoint(angle: number, radius: number): { x: number; y: number } {
     const normalized = normalizeCircleAngle(angle);
+    const radians = normalized * Math.PI / 180;
 
-    if (normalized > 110 && normalized < 250) {
-        return 'right';
-    }
-
-    if (normalized > 290 || normalized < 70) {
-        return 'left';
-    }
-
-    return 'center';
+    return {
+        x: Number((VIEWBOX_CENTER_X + radius * Math.cos(radians)).toFixed(2)),
+        y: Number((VIEWBOX_CENTER_Y - radius * Math.sin(radians)).toFixed(2))
+    };
 }
 
-function getOutsideLabelVerticalAlign(angle: number): 'top' | 'middle' | 'bottom' {
+function isBottomHalf(angle: number): boolean {
     const normalized = normalizeCircleAngle(angle);
 
-    if (normalized >= 70 && normalized <= 110) {
-        return 'bottom';
+    return normalized > 180 && normalized < 360;
+}
+
+function getTangentialTextRotation(angle: number): number {
+    let rotation = 90 - normalizeCircleAngle(angle);
+
+    if (rotation > 180) {
+        rotation -= 360;
+    }
+    if (rotation <= -180) {
+        rotation += 360;
     }
 
-    if (normalized >= 250 && normalized <= 290) {
-        return 'top';
+    if (rotation > 90) {
+        rotation -= 180;
+    }
+    if (rotation <= -90) {
+        rotation += 180;
     }
 
-    return 'middle';
+    return Number(rotation.toFixed(2));
+}
+
+function buildPrimaryLabelGlyphs(primaryBands: HistoricalPrimaryBand[]): HistoricalPrimaryLabelGlyph[] {
+    return primaryBands.flatMap(band => {
+        const characters = Array.from(band.label.trim()).filter(character => !!character);
+        if (characters.length < 1) {
+            return [];
+        }
+
+        const midAngle = band.startAngle - (band.spanAngle / 2);
+        const availableSpan = Math.max(0, band.spanAngle - (PRIMARY_LABEL_EDGE_PADDING_ANGLE * 2));
+        const stepAngle = characters.length > 1
+            ? Math.min(PRIMARY_LABEL_MAX_STEP_ANGLE, availableSpan / (characters.length - 1))
+            : 0;
+        const direction = isBottomHalf(midAngle) ? 1 : -1;
+        const centerIndex = (characters.length - 1) / 2;
+        const fontSize = Number(clamp(
+            1.8 + (stepAngle * 0.18),
+            PRIMARY_LABEL_MIN_FONT_SIZE,
+            PRIMARY_LABEL_MAX_FONT_SIZE
+        ).toFixed(2));
+
+        return characters.map((character, index) => {
+            const angle = midAngle + ((index - centerIndex) * stepAngle * direction);
+            const point = getCartesianPoint(angle, PRIMARY_LABEL_RADIUS_VIEWBOX);
+
+            return {
+                key: `${band.key}-${index}-${character}`,
+                character,
+                x: point.x,
+                y: point.y,
+                rotate: getTangentialTextRotation(angle),
+                fontSize,
+                color: band.color,
+                angle
+            };
+        });
+    });
+}
+
+function getSecondaryLabelValue(slot: HistoricalChartSlot, model: HistoricalPolarChartModel): number {
+    const bufferedValue = slot.labelAnchorAmount + (model.amountAxisInterval * SECONDARY_LABEL_BUFFER_INTERVAL_RATIO);
+    const cappedValue = model.amountAxisMax * SECONDARY_LABEL_MAX_AXIS_RATIO;
+
+    return Math.min(bufferedValue, cappedValue);
 }
 
 function getHistoricalAmountAxisInterval(maxAmount: number): number {
@@ -395,6 +457,7 @@ export function buildHistoricalPolarChartModel(
     const averageExecutionRate = slots.length > 0
         ? Number((slots.reduce((sum, slot) => sum + slot.executionRate, 0) / slots.length).toFixed(1))
         : 0;
+    const primaryLabelGlyphs = buildPrimaryLabelGlyphs(primaryBands);
 
     return {
         slots,
@@ -403,7 +466,7 @@ export function buildHistoricalPolarChartModel(
         amountAxisMax,
         amountAxisInterval: interval,
         averageExecutionRate,
-        primaryLabelGlyphs: [],
+        primaryLabelGlyphs,
         primaryPadAngle,
         executionAxisMax: EXECUTION_AXIS_MAX
     };
@@ -429,13 +492,7 @@ export function buildHistoricalPolarChartOption(
             padAngle: model.primaryPadAngle,
             avoidLabelOverlap: false,
             label: {
-                show: true,
-                position: 'inside',
-                rotate: 'tangential',
-                color: args.isDarkMode ? '#f3f4f6' : '#1f2937',
-                fontSize: 11,
-                fontWeight: 700,
-                formatter: '{b}'
+                show: false
             },
             labelLine: { show: false },
             tooltip: { show: false },
@@ -500,17 +557,17 @@ export function buildHistoricalPolarChartOption(
                 color: 'rgba(0,0,0,0)'
             },
             data: model.slots.map(slot => ({
-                value: model.amountAxisMax,
+                value: getSecondaryLabelValue(slot, model),
                 label: {
                     show: true,
-                    position: 'top',
-                    distance: 8,
+                    position: 'inside',
+                    distance: 0,
                     color: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
                     fontSize: 10,
                     fontWeight: 600,
-                    rotate: 0,
-                    align: getOutsideLabelAlign(slot.angle),
-                    verticalAlign: getOutsideLabelVerticalAlign(slot.angle),
+                    rotate: getTangentialTextRotation(slot.angle),
+                    align: 'center',
+                    verticalAlign: 'middle',
                     formatter: slot.label
                 }
             }))
@@ -595,7 +652,7 @@ export function buildHistoricalPolarChartOption(
                 axisTick: { show: false },
                 axisLabel: {
                     color: args.isDarkMode ? '#888' : '#666',
-                    margin: 4,
+                    margin: 10,
                     fontSize: 10,
                     fontWeight: 700,
                     align: 'center',
