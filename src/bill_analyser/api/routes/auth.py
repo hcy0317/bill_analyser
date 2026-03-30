@@ -26,6 +26,17 @@ import qrcode
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from bill_analyser import __version__
+from bill_analyser.api.config.auth import (
+    AUTH_DEFAULT_ACCOUNT_TEMPLATES,
+    CLOUD_SETTING_TYPE_BOOLEAN,
+    CLOUD_SETTING_TYPE_NUMBER,
+    CLOUD_SETTING_TYPE_STRING,
+    CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
+    SUPPORTED_APPLICATION_CLOUD_SETTING_KEY_TYPES,
+    TOKEN_TYPE_API,
+    TOKEN_TYPE_DEFAULT,
+    TOKEN_TYPE_MCP,
+)
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.api.routes.request_context_helpers import (
     get_required_request_int,
@@ -42,42 +53,6 @@ from bill_analyser.utils.logger import get_logger, log_method
 logger = get_logger("AuthAPI")
 
 bp = Blueprint("auth", __name__)
-
-TOKEN_TYPE_DEFAULT = 0
-TOKEN_TYPE_MCP = 5
-TOKEN_TYPE_API = 8
-
-CLOUD_SETTING_TYPE_STRING = "string"
-CLOUD_SETTING_TYPE_NUMBER = "number"
-CLOUD_SETTING_TYPE_BOOLEAN = "boolean"
-CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP = "string_boolean_map"
-
-SUPPORTED_APPLICATION_CLOUD_SETTING_KEY_TYPES = {
-    "showAccountBalance": CLOUD_SETTING_TYPE_BOOLEAN,
-    "showAmountInHomePage": CLOUD_SETTING_TYPE_BOOLEAN,
-    "timezoneUsedForStatisticsInHomePage": CLOUD_SETTING_TYPE_NUMBER,
-    "overviewAccountFilterInHomePage": CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
-    "overviewTransactionCategoryFilterInHomePage": CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
-    "itemsCountInTransactionListPage": CLOUD_SETTING_TYPE_NUMBER,
-    "showTotalAmountInTransactionListPage": CLOUD_SETTING_TYPE_BOOLEAN,
-    "showTagInTransactionListPage": CLOUD_SETTING_TYPE_BOOLEAN,
-    "autoSaveTransactionDraft": CLOUD_SETTING_TYPE_STRING,
-    "autoGetCurrentGeoLocation": CLOUD_SETTING_TYPE_BOOLEAN,
-    "alwaysShowTransactionPicturesInMobileTransactionEditPage": CLOUD_SETTING_TYPE_BOOLEAN,
-    "totalAmountExcludeAccountIds": CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
-    "currencySortByInExchangeRatesPage": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultChartDataType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultTimezoneType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultAccountFilter": CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
-    "statistics.defaultTransactionCategoryFilter": CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
-    "statistics.defaultSortingType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultCategoricalChartType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultCategoricalChartDataRangeType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultTrendChartType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultTrendChartDataRangeType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultAssetTrendsChartType": CLOUD_SETTING_TYPE_NUMBER,
-    "statistics.defaultAssetTrendsChartDataRangeType": CLOUD_SETTING_TYPE_NUMBER,
-}
 
 TWO_FACTOR_RECOVERY_CODES: dict[int, list[str]] = {}
 
@@ -717,113 +692,15 @@ def validate_password(password: str, config: dict) -> tuple:
 def _build_default_accounts(language: str = "zh_Hans") -> list[dict[str, Any]]:
     """构建默认账户模板（国内常见账户）"""
     is_chinese = str(language).lower().startswith("zh")
+    template_key = "zh" if is_chinese else "default"
+    serialized_accounts: list[dict[str, Any]] = []
 
-    if is_chinese:
-        return [
-            {
-                "name": "现金",
-                "type": 1,
-                "category": 1,
-                "currency": "CNY",
-                "icon": "1",
-                "color": "4caf50",
-                "aliases": json.dumps(["现金", "现金钱包", "cash"], ensure_ascii=False),
-                "display_order": 0,
-            },
-            {
-                "name": "借记卡",
-                "type": 1,
-                "category": 2,
-                "currency": "CNY",
-                "icon": "100",
-                "color": "2196f3",
-                "aliases": json.dumps(["借记卡", "储蓄卡", "银行卡", "debit card"], ensure_ascii=False),
-                "display_order": 1,
-            },
-            {
-                "name": "信用卡",
-                "type": 1,
-                "category": 3,
-                "currency": "CNY",
-                "icon": "100",
-                "color": "ff9800",
-                "aliases": json.dumps(["信用卡", "贷记卡", "credit card"], ensure_ascii=False),
-                "display_order": 2,
-            },
-            {
-                "name": "支付宝",
-                "type": 1,
-                "category": 4,
-                "currency": "CNY",
-                "icon": "500",
-                "color": "1677ff",
-                "aliases": json.dumps(["支付宝", "alipay", "花呗", "余额宝"], ensure_ascii=False),
-                "display_order": 3,
-            },
-            {
-                "name": "微信",
-                "type": 1,
-                "category": 4,
-                "currency": "CNY",
-                "icon": "500",
-                "color": "07c160",
-                "aliases": json.dumps(["微信", "微信支付", "wechat"], ensure_ascii=False),
-                "display_order": 4,
-            },
-        ]
+    for template in AUTH_DEFAULT_ACCOUNT_TEMPLATES[template_key]:
+        account = dict(template)
+        account["aliases"] = json.dumps(template["aliases"], ensure_ascii=not is_chinese)
+        serialized_accounts.append(account)
 
-    return [
-        {
-            "name": "Cash",
-            "type": 1,
-            "category": 1,
-            "currency": "CNY",
-            "icon": "1",
-            "color": "4caf50",
-            "aliases": json.dumps(["cash", "wallet"]),
-            "display_order": 0,
-        },
-        {
-            "name": "Debit Card",
-            "type": 1,
-            "category": 2,
-            "currency": "CNY",
-            "icon": "100",
-            "color": "2196f3",
-            "aliases": json.dumps(["debit card", "bank card", "checking"]),
-            "display_order": 1,
-        },
-        {
-            "name": "Credit Card",
-            "type": 1,
-            "category": 3,
-            "currency": "CNY",
-            "icon": "100",
-            "color": "ff9800",
-            "aliases": json.dumps(["credit card"]),
-            "display_order": 2,
-        },
-        {
-            "name": "Alipay",
-            "type": 1,
-            "category": 4,
-            "currency": "CNY",
-            "icon": "500",
-            "color": "1677ff",
-            "aliases": json.dumps(["alipay"]),
-            "display_order": 3,
-        },
-        {
-            "name": "WeChat",
-            "type": 1,
-            "category": 4,
-            "currency": "CNY",
-            "icon": "500",
-            "color": "07c160",
-            "aliases": json.dumps(["wechat", "wechat pay"]),
-            "display_order": 4,
-        },
-    ]
+    return serialized_accounts
 
 
 async def _save_register_categories(db, user_id: int, categories: list[dict[str, Any]]) -> bool:
@@ -2484,14 +2361,14 @@ def parse_user_agent(user_agent: str) -> str:
             os_name = "Windows 10"
         elif "windows nt 11" in ua_lower:
             os_name = "Windows 11"
-    elif "mac os" in ua_lower or "macos" in ua_lower:
-        os_name = "macOS"
-    elif "linux" in ua_lower:
-        os_name = "Linux"
-    elif "android" in ua_lower:
-        os_name = "Android"
     elif "iphone" in ua_lower or "ipad" in ua_lower:
         os_name = "iOS"
+    elif "mac os" in ua_lower or "macos" in ua_lower:
+        os_name = "macOS"
+    elif "android" in ua_lower:
+        os_name = "Android"
+    elif "linux" in ua_lower:
+        os_name = "Linux"
     else:
         os_name = "其他系统"
 

@@ -78,6 +78,8 @@ class FakeAuthDB:
         self.failed_login_increments: list[tuple[int, int]] = []
         self.last_login_updates: list[tuple[int, str]] = []
         self.user_locked = False
+        self.user_external_auths: list[dict[str, Any]] = []
+        self.deleted_external_auths: list[tuple[int, str]] = []
 
     async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         if self.user_by_id is None:
@@ -189,6 +191,25 @@ class FakeAuthDB:
     async def get_user_sessions(self, user_id: int) -> list[dict[str, Any]]:
         _ = user_id
         return [dict(item) for item in self.user_sessions]
+
+    async def get_user_external_auths(self, user_id: int) -> list[dict[str, Any]]:
+        _ = user_id
+        return [dict(item) for item in self.user_external_auths]
+
+    async def get_user_external_auth(self, user_id: int, external_auth_type: str) -> dict[str, Any] | None:
+        _ = user_id
+        for item in self.user_external_auths:
+            if item.get("external_auth_type") == external_auth_type:
+                return dict(item)
+        return None
+
+    async def delete_user_external_auth(self, user_id: int, external_auth_type: str) -> bool:
+        _ = user_id
+        self.deleted_external_auths.append((user_id, external_auth_type))
+        self.user_external_auths = [
+            item for item in self.user_external_auths if item.get("external_auth_type") != external_auth_type
+        ]
+        return True
 
     async def delete_user_application_cloud_settings(self, user_id: int) -> None:
         self.deleted_cloud_settings.append(user_id)
@@ -774,6 +795,24 @@ def test_profile_avatar_routes_cover_missing_file_value_error_failures_and_succe
     assert avatar_success_db.updated_users
     assert avatar_success_db.updated_users[0][1]["avatar"].startswith("data:image/png;base64,")
 
+    class AvatarExplodingDB(FakeAuthDB):
+        async def update_user(self, user_id: int, data: dict[str, Any]) -> bool:
+            _ = (user_id, data)
+            raise RuntimeError("avatar boom")
+
+    avatar_exploding_db = AvatarExplodingDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    avatar_exploding_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, avatar_exploding_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: avatar_exploding_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/avatar",
+        method="POST",
+        data={"avatar": (io.BytesIO(b"avatar-bytes"), "avatar.png")},
+    ):
+        response, status = _unwrap_response(upload_route())
+        assert status == 500
+        assert response.get_json()["message"] == "avatar boom"
+
     remove_fail_db = UpdateFailDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
     remove_fail_loop = FakeLoop()
     _install_fake_loop(monkeypatch, remove_fail_loop)
@@ -803,6 +842,223 @@ def test_profile_avatar_routes_cover_missing_file_value_error_failures_and_succe
     assert status == 200
     assert payload["result"]["username"] == "alice"
     assert remove_success_db.updated_users[0][1] == {"avatar": ""}
+
+    remove_exploding_db = AvatarExplodingDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    remove_exploding_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, remove_exploding_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: remove_exploding_db)
+    with auth_route_unit_app.test_request_context("/api/profile/avatar", method="DELETE"):
+        response, status = _unwrap_response(delete_route())
+        assert status == 500
+        assert response.get_json()["message"] == "avatar boom"
+
+
+def test_profile_email_and_external_auth_routes_cover_error_and_success_paths(
+    auth_route_unit_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """认证资料相关的验证邮件与第三方登录接口应覆盖主要错误和成功分支。"""
+    resend_route = _unwrap_all(auth_module.resend_profile_verification_email)
+    list_route = _unwrap_all(auth_module.list_profile_external_auths)
+    unlink_route = _unwrap_all(auth_module.unlink_profile_external_auth)
+
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: 1)
+    monkeypatch.setattr(auth_module, "_get_request_username", lambda: "alice")
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(
+        auth_module,
+        "load_auth_config",
+        lambda: {"require_email_verification": True, "enable_oauth2": True, "oauth2_provider": "gitlab"},
+    )
+
+    missing_user_db = FakeAuthDB(user_by_id=None)
+    missing_user_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, missing_user_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: missing_user_db)
+    with auth_route_unit_app.test_request_context("/api/profile/email/resend-verification", method="POST"):
+        response, status = _unwrap_response(resend_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    no_email_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "", "email_verified": 0})
+    no_email_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, no_email_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: no_email_db)
+    with auth_route_unit_app.test_request_context("/api/profile/email/resend-verification", method="POST"):
+        response, status = _unwrap_response(resend_route())
+        assert status == 400
+        assert response.get_json()["message"] == "Email is required to resend verification email"
+
+    resend_success_db = FakeAuthDB(
+        user_by_id={"id": 1, "username": "alice", "email": "alice@example.com", "email_verified": 0}
+    )
+    resend_success_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, resend_success_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: resend_success_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/email/resend-verification",
+        method="POST",
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(resend_route())
+        assert status == 200
+        assert response.get_json()["result"] is True
+        assert resend_success_db.auth_logs
+
+    class ExplodingGetUserDB(FakeAuthDB):
+        async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+            _ = user_id
+            raise RuntimeError("resend boom")
+
+    resend_fail_db = ExplodingGetUserDB(user_by_id={"id": 1})
+    resend_fail_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, resend_fail_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: resend_fail_db)
+    with auth_route_unit_app.test_request_context("/api/profile/email/resend-verification", method="POST"):
+        response, status = _unwrap_response(resend_route())
+        assert status == 500
+        assert response.get_json()["message"] == "resend boom"
+
+    external_auths_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice"})
+    external_auths_db.user_external_auths = [
+        {
+            "external_auth_category": "oauth2",
+            "external_auth_type": "github",
+            "linked": True,
+            "external_username": "octocat",
+            "created_at": "2026-03-01T12:00:00",
+        }
+    ]
+    external_auths_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, external_auths_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: external_auths_db)
+    with auth_route_unit_app.test_request_context("/api/profile/external-auths", method="GET"):
+        response, status = _unwrap_response(list_route())
+        payload = response.get_json() or {}
+        assert status == 200
+        assert [item["externalAuthType"] for item in payload["result"]] == ["github", "gitlab"]
+        assert payload["result"][1]["linked"] is False
+
+    class ExplodingExternalAuthsDB(FakeAuthDB):
+        async def get_user_external_auths(self, user_id: int) -> list[dict[str, Any]]:
+            _ = user_id
+            raise RuntimeError("external auths boom")
+
+    exploding_external_auths_db = ExplodingExternalAuthsDB(user_by_id={"id": 1})
+    exploding_external_auths_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, exploding_external_auths_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: exploding_external_auths_db)
+    with auth_route_unit_app.test_request_context("/api/profile/external-auths", method="GET"):
+        response, status = _unwrap_response(list_route())
+        assert status == 500
+        assert response.get_json()["message"] == "external auths boom"
+
+    with auth_route_unit_app.test_request_context("/api/profile/external-auths/unlink", method="POST", json={}):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 400
+        assert response.get_json()["message"] == "externalAuthType is required"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 400
+        assert response.get_json()["message"] == "password is required"
+
+    unlink_missing_user_db = FakeAuthDB(user_by_id=None)
+    unlink_missing_user_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, unlink_missing_user_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: unlink_missing_user_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github", "password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    hashed_password = bcrypt.hashpw(b"Correct123!", bcrypt.gensalt()).decode("utf-8")
+    unlink_user = {"id": 1, "username": "alice", "password_hash": hashed_password}
+    invalid_password_db = FakeAuthDB(user_by_id=dict(unlink_user))
+    invalid_password_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, invalid_password_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: invalid_password_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github", "password": "Wrong123!"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 400
+        assert response.get_json()["message"] == "Invalid password"
+
+    not_linked_db = FakeAuthDB(user_by_id=dict(unlink_user))
+    not_linked_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, not_linked_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: not_linked_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github", "password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 404
+        assert response.get_json()["message"] == "Third-party login is not linked"
+
+    linked_db = FakeAuthDB(user_by_id=dict(unlink_user))
+    linked_db.user_external_auths = [
+        {
+            "external_auth_category": "oauth2",
+            "external_auth_type": "github",
+            "linked": True,
+            "external_username": "octocat",
+            "created_at": "2026-03-01T12:00:00",
+        }
+    ]
+    linked_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, linked_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: linked_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github", "password": "Correct123!"},
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 200
+        assert response.get_json()["result"] is True
+        assert linked_db.deleted_external_auths == [(1, "github")]
+        assert linked_db.auth_logs
+
+    class ExplodingDeleteExternalAuthDB(FakeAuthDB):
+        async def delete_user_external_auth(self, user_id: int, external_auth_type: str) -> bool:
+            _ = (user_id, external_auth_type)
+            raise RuntimeError("unlink boom")
+
+    exploding_unlink_db = ExplodingDeleteExternalAuthDB(user_by_id=dict(unlink_user))
+    exploding_unlink_db.user_external_auths = [
+        {
+            "external_auth_category": "oauth2",
+            "external_auth_type": "github",
+            "linked": True,
+            "external_username": "octocat",
+            "created_at": "2026-03-01T12:00:00",
+        }
+    ]
+    exploding_unlink_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, exploding_unlink_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: exploding_unlink_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/external-auths/unlink",
+        method="POST",
+        json={"externalAuthType": "github", "password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(unlink_route())
+        assert status == 500
+        assert response.get_json()["message"] == "unlink boom"
 
 
 def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
@@ -1766,3 +2022,833 @@ def test_login_and_register_routes_cover_error_pending_2fa_and_success_paths(
     assert payload["result"]["needVerifyEmail"] is True
     assert payload["result"]["presetCategoriesSaved"] is True
     assert payload["result"]["presetAccountsSaved"] is True
+
+
+def test_auth_entry_and_refresh_routes_cover_remaining_generic_exceptions(
+    auth_route_unit_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """登录/注册/邮箱/密码/登出/refresh 剩余兜底异常与坏路径应被锁定。"""
+    login_route = _unwrap_all(auth_module.login)
+    register_route = _unwrap_all(auth_module.register)
+    verify_email_route = _unwrap_all(auth_module.verify_email_by_token)
+    resend_guest_route = _unwrap_all(auth_module.resend_verification_email_unauthed)
+    forgot_route = _unwrap_all(auth_module.request_password_reset)
+    reset_route = _unwrap_all(auth_module.reset_password_by_token)
+    oauth_route = _unwrap_all(auth_module.authorize_oauth2_callback)
+    logout_route = _unwrap_all(auth_module.logout)
+    refresh_route = _unwrap_all(auth_module.refresh_token)
+
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(auth_module, "validate_password", lambda *_args, **_kwargs: (True, ""))
+    monkeypatch.setattr(
+        auth_module,
+        "load_auth_config",
+        lambda: {
+            "enable_user_registration": True,
+            "require_email_verification": True,
+            "enable_user_forget_password": True,
+            "jwt_secret": "secret",
+            "jwt_algorithm": "HS256",
+        },
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "decode_action_token",
+        lambda *_args, **_kwargs: {"user_id": 1, "email": "alice@example.com"},
+    )
+
+    def _raise_runtime_error(message: str):
+        def _raiser():
+            raise RuntimeError(message)
+
+        return _raiser
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/login",
+        method="POST",
+        json={"loginName": "alice", "password": "Valid1!A"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("login boom"))
+        response, status = _unwrap_response(login_route())
+        assert status == 500
+        assert response.get_json()["message"] == "login boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/register",
+        method="POST",
+        json={"username": "alice", "email": "alice@example.com", "password": "Valid1!A"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("register boom"))
+        response, status = _unwrap_response(register_route())
+        assert status == 500
+        assert response.get_json()["message"] == "register boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/email/verify",
+        method="POST",
+        json={"token": "ok-token"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("verify boom"))
+        response, status = _unwrap_response(verify_email_route())
+        assert status == 500
+        assert response.get_json()["message"] == "verify boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/email/resend-verification",
+        method="POST",
+        json={"email": "alice@example.com", "password": "Valid1!A"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("guest resend boom"))
+        response, status = _unwrap_response(resend_guest_route())
+        assert status == 500
+        assert response.get_json()["message"] == "guest resend boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/password/forgot",
+        method="POST",
+        json={"email": "alice@example.com"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("forgot boom"))
+        response, status = _unwrap_response(forgot_route())
+        assert status == 500
+        assert response.get_json()["message"] == "forgot boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/password/reset",
+        method="POST",
+        json={"email": "alice@example.com", "password": "Valid1!A", "token": "ok-token"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("reset boom"))
+        response, status = _unwrap_response(reset_route())
+        assert status == 500
+        assert response.get_json()["message"] == "reset boom"
+
+    monkeypatch.setattr(auth_module, "load_auth_config", _raise_runtime_error("oauth boom"))
+    with auth_route_unit_app.test_request_context("/api/auth/oauth2/authorize", method="POST"):
+        response, status = _unwrap_response(oauth_route())
+        assert status == 500
+        assert response.get_json()["message"] == "oauth boom"
+
+    monkeypatch.setattr(
+        auth_module,
+        "load_auth_config",
+        lambda: {
+            "enable_user_registration": True,
+            "require_email_verification": True,
+            "enable_user_forget_password": True,
+            "jwt_secret": "secret",
+            "jwt_algorithm": "HS256",
+        },
+    )
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/logout",
+        method="POST",
+        headers={"Authorization": "Token nope"},
+    ):
+        response, status = _unwrap_response(logout_route())
+        assert status == 401
+        assert response.get_json()["message"] == "Invalid authorization header"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/logout",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("logout boom"))
+        response, status = _unwrap_response(logout_route())
+        assert status == 500
+        assert response.get_json()["message"] == "logout boom"
+
+    with auth_route_unit_app.test_request_context("/api/tokens/refresh", method="POST", json={}):
+        response, status = _unwrap_response(refresh_route())
+        assert status == 400
+        assert response.get_json()["message"] == "Refresh token is required"
+
+    def _raise_expired_signature(*_args, **_kwargs):
+        raise auth_module.jwt.ExpiredSignatureError("expired")
+
+    monkeypatch.setattr(auth_module.jwt, "decode", _raise_expired_signature)
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/refresh",
+        method="POST",
+        json={"refreshToken": "expired-token"},
+    ):
+        response, status = _unwrap_response(refresh_route())
+        assert status == 401
+        assert response.get_json()["error"] == "Token expired"
+
+    def _raise_invalid_token(*_args, **_kwargs):
+        raise auth_module.jwt.InvalidTokenError("invalid")
+
+    monkeypatch.setattr(auth_module.jwt, "decode", _raise_invalid_token)
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/refresh",
+        method="POST",
+        json={"refreshToken": "invalid-token"},
+    ):
+        response, status = _unwrap_response(refresh_route())
+        assert status == 401
+        assert response.get_json()["error"] == "Invalid token"
+
+    monkeypatch.setattr(
+        auth_module.jwt,
+        "decode",
+        lambda *_args, **_kwargs: {"type": "refresh", "user_id": 1, "username": "alice"},
+    )
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/refresh",
+        method="POST",
+        json={"refreshToken": "good-token"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("refresh boom"))
+        response, status = _unwrap_response(refresh_route())
+        assert status == 500
+        assert response.get_json()["message"] == "refresh boom"
+
+
+def test_profile_token_2fa_and_clear_routes_cover_remaining_generic_exceptions(
+    auth_route_unit_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """profile / token / 2FA / clear 路由剩余兜底异常分支应可回归。"""
+    profile_route = _unwrap_all(auth_module.profile)
+    generate_api_route = _unwrap_all(auth_module.generate_api_token)
+    revoke_route = _unwrap_all(auth_module.revoke_token)
+    list_tokens_route = _unwrap_all(auth_module.list_tokens)
+    status_route = _unwrap_all(auth_module.get_2fa_status)
+    cloud_route = _unwrap_all(auth_module.profile_cloud_settings)
+    confirm_route = _unwrap_all(auth_module.enable_2fa_confirm)
+    disable_route = _unwrap_all(auth_module.disable_2fa)
+    regenerate_route = _unwrap_all(auth_module.regenerate_2fa_recovery_codes)
+    verify_route = _unwrap_all(auth_module.verify_2fa_login)
+    recovery_route = _unwrap_all(auth_module.verify_2fa_login_by_recovery_code)
+    clear_transactions_route = _unwrap_all(auth_module.clear_user_transactions)
+    clear_all_route = _unwrap_all(auth_module.clear_all_user_data)
+
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: 1)
+    monkeypatch.setattr(auth_module, "_get_request_username", lambda: "alice")
+    monkeypatch.setattr(auth_module, "_get_request_session_id", lambda: 101)
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(auth_module, "load_auth_config", lambda: {"jwt_secret": "secret", "jwt_algorithm": "HS256"})
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": 1})
+    monkeypatch.setattr(auth_module, "_consume_recovery_code", lambda *_args, **_kwargs: True)
+
+    class AcceptingTOTP:
+        def __init__(self, _secret: str) -> None:
+            pass
+
+        def verify(self, _passcode: str, valid_window: int = 1) -> bool:
+            _ = valid_window
+            return True
+
+    monkeypatch.setattr(auth_module.pyotp, "TOTP", AcceptingTOTP)
+
+    def _raise_runtime_error(message: str):
+        def _raiser():
+            raise RuntimeError(message)
+
+        return _raiser
+
+    with auth_route_unit_app.test_request_context("/api/profile", method="GET"):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("profile boom"))
+        response, status = _unwrap_response(profile_route())
+        assert status == 500
+        assert response.get_json()["message"] == "profile boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/api",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("personal token boom"))
+        response, status = _unwrap_response(generate_api_route())
+        assert status == 500
+        assert response.get_json()["message"] == "personal token boom"
+
+    class ExplodingRevokeDB(FakeAuthDB):
+        async def invalidate_session_by_id(self, session_id: int, user_id: int) -> bool:
+            _ = (session_id, user_id)
+            raise RuntimeError("revoke boom")
+
+    revoke_db = ExplodingRevokeDB(user_by_id={"id": 1})
+    revoke_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, revoke_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: revoke_db)
+    with auth_route_unit_app.test_request_context("/api/tokens/42", method="DELETE"):
+        response, status = _unwrap_response(revoke_route("42"))
+        assert status == 500
+        assert response.get_json()["message"] == "revoke boom"
+
+    with auth_route_unit_app.test_request_context("/api/tokens", method="GET"):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("list tokens boom"))
+        response, status = _unwrap_response(list_tokens_route())
+        assert status == 500
+        assert response.get_json()["message"] == "list tokens boom"
+
+    with auth_route_unit_app.test_request_context("/api/2fa/status", method="GET"):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa status boom"))
+        response, status = _unwrap_response(status_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa status boom"
+
+    with auth_route_unit_app.test_request_context("/api/profile/cloud-settings", method="GET"):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("cloud settings boom"))
+        response, status = _unwrap_response(cloud_route())
+        assert status == 500
+        assert response.get_json()["message"] == "cloud settings boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/enable/confirm",
+        method="POST",
+        json={"secret": "SECRET123", "passcode": "111111"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa confirm boom"))
+        response, status = _unwrap_response(confirm_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa confirm boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/disable",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa disable boom"))
+        response, status = _unwrap_response(disable_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa disable boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/regenerate",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa regenerate boom"))
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa regenerate boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"passcode": "123456"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa verify boom"))
+        response, status = _unwrap_response(verify_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa verify boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"recoveryCode": "ABCD-1234"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("2fa recovery boom"))
+        response, status = _unwrap_response(recovery_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa recovery boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/transactions",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("clear transactions boom"))
+        response, status = _unwrap_response(clear_transactions_route())
+        assert status == 500
+        assert response.get_json()["message"] == "clear transactions boom"
+
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/all",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        monkeypatch.setattr(auth_module, "get_app_context", _raise_runtime_error("clear all boom"))
+        response, status = _unwrap_response(clear_all_route())
+        assert status == 500
+        assert response.get_json()["message"] == "clear all boom"
+
+
+def test_auth_route_remaining_branch_closures_and_field_mapping(
+    auth_route_unit_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """收尾分支：loop 关闭路径、字段映射和剩余 2FA/token 坏路径应保持稳定。"""
+    verify_email_route = _unwrap_all(auth_module.verify_email_by_token)
+    resend_guest_route = _unwrap_all(auth_module.resend_verification_email_unauthed)
+    forgot_route = _unwrap_all(auth_module.request_password_reset)
+    reset_route = _unwrap_all(auth_module.reset_password_by_token)
+    logout_route = _unwrap_all(auth_module.logout)
+    profile_route = _unwrap_all(auth_module.profile)
+    generate_api_route = _unwrap_all(auth_module.generate_api_token)
+    revoke_route = _unwrap_all(auth_module.revoke_token)
+    list_tokens_route = _unwrap_all(auth_module.list_tokens)
+    status_route = _unwrap_all(auth_module.get_2fa_status)
+    cloud_route = _unwrap_all(auth_module.profile_cloud_settings)
+    confirm_route = _unwrap_all(auth_module.enable_2fa_confirm)
+    disable_route = _unwrap_all(auth_module.disable_2fa)
+    regenerate_route = _unwrap_all(auth_module.regenerate_2fa_recovery_codes)
+    verify_route = _unwrap_all(auth_module.verify_2fa_login)
+    recovery_route = _unwrap_all(auth_module.verify_2fa_login_by_recovery_code)
+    clear_transactions_route = _unwrap_all(auth_module.clear_user_transactions)
+    clear_all_route = _unwrap_all(auth_module.clear_all_user_data)
+
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: 1)
+    monkeypatch.setattr(auth_module, "_get_request_username", lambda: "alice")
+    monkeypatch.setattr(auth_module, "_get_request_session_id", lambda: 101)
+    monkeypatch.setattr(
+        auth_module,
+        "load_auth_config",
+        lambda: {"jwt_secret": "secret", "jwt_algorithm": "HS256", "enable_user_forget_password": True},
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "decode_action_token",
+        lambda *_args, **_kwargs: {"user_id": 1, "email": "alice@example.com"},
+    )
+    monkeypatch.setattr(auth_module, "serialize_keyword_list", lambda values: "|".join(values))
+
+    class AcceptingTOTP:
+        def __init__(self, _secret: str) -> None:
+            pass
+
+        def verify(self, _passcode: str, valid_window: int = 1) -> bool:
+            _ = valid_window
+            return True
+
+    monkeypatch.setattr(auth_module.pyotp, "TOTP", AcceptingTOTP)
+    monkeypatch.setattr(
+        auth_module,
+        "_create_new_session_payload",
+        lambda *_args, **_kwargs: {"access_token": "session", "refresh_token": "refresh"},
+    )
+    monkeypatch.setattr(auth_module, "_generate_recovery_codes", lambda: ["ABCD-1234"])
+    monkeypatch.setattr(auth_module, "_build_auth_success_result", lambda user, tokens, settings=None: {"token": tokens["access_token"], "user": user, "applicationCloudSettings": settings or []})
+    monkeypatch.setattr(auth_module, "_build_user_profile_info", lambda user: {"username": user.get("username", "alice")})
+    monkeypatch.setattr(auth_module, "_load_application_cloud_settings", lambda *_args, **_kwargs: [{"settingKey": "k", "settingValue": "v"}])
+    monkeypatch.setattr(auth_module, "_consume_recovery_code", lambda *_args, **_kwargs: True)
+
+    def _async_runtime_error(message: str):
+        async def _raiser(*_args, **_kwargs):
+            raise RuntimeError(message)
+
+        return _raiser
+
+    def _async_value_error(message: str):
+        async def _raiser(*_args, **_kwargs):
+            raise ValueError(message)
+
+        return _raiser
+
+    class VerifyEmailUpdateThenMissingDB(FakeAuthDB):
+        def __init__(self) -> None:
+            super().__init__(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+            self.lookup_count = 0
+
+        async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+            self.lookup_count += 1
+            if self.lookup_count == 1:
+                return await super().get_user_by_id(user_id)
+            return None
+
+    verify_missing_db = VerifyEmailUpdateThenMissingDB()
+    verify_missing_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, verify_missing_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: verify_missing_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/email/verify",
+        method="POST",
+        json={"token": "ok-token"},
+    ):
+        response, status = _unwrap_response(verify_email_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    verify_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    verify_error_db.get_user_by_id = _async_runtime_error("verify lookup boom")  # type: ignore[method-assign]
+    verify_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, verify_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: verify_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/email/verify",
+        method="POST",
+        json={"token": "ok-token"},
+    ):
+        response, status = _unwrap_response(verify_email_route())
+        assert status == 500
+        assert response.get_json()["message"] == "verify lookup boom"
+
+    forgot_error_db = FakeAuthDB(user_by_email={"id": 1, "username": "alice", "email": "alice@example.com"})
+    forgot_error_db.get_user_by_email = _async_runtime_error("forgot lookup boom")  # type: ignore[method-assign]
+    forgot_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, forgot_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: forgot_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/password/forgot",
+        method="POST",
+        json={"email": "alice@example.com"},
+    ):
+        response, status = _unwrap_response(forgot_route())
+        assert status == 500
+        assert response.get_json()["message"] == "forgot lookup boom"
+
+    reset_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    reset_error_db.get_user_by_id = _async_runtime_error("reset lookup boom")  # type: ignore[method-assign]
+    reset_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, reset_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: reset_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/password/reset",
+        method="POST",
+        json={"email": "alice@example.com", "password": "Valid1!A", "token": "ok-token"},
+    ):
+        response, status = _unwrap_response(reset_route())
+        assert status == 500
+        assert response.get_json()["message"] == "reset lookup boom"
+
+    logout_missing_session_db = FakeAuthDB(session=None)
+    logout_missing_session_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, logout_missing_session_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: logout_missing_session_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/logout",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+    ):
+        response, status = _unwrap_response(logout_route())
+        assert status == 200
+        assert response.get_json()["result"] is True
+
+    profile_fields_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    profile_fields_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, profile_fields_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: profile_fields_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/profile",
+        method="PUT",
+        json={
+            "email": "new@example.com",
+            "avatar": "data:image/png;base64,abc",
+            "firstDayOfWeek": 1,
+            "defaultAccountId": "11",
+            "transactionEditScope": 2,
+            "calendarDisplayType": 1,
+            "dateDisplayType": 2,
+            "longDateFormat": 3,
+            "shortDateFormat": 4,
+            "longTimeFormat": 5,
+            "shortTimeFormat": 6,
+            "fiscalYearFormat": 7,
+            "currencyDisplayType": 8,
+            "numeralSystem": 9,
+            "decimalSeparator": 10,
+            "digitGroupingSymbol": 11,
+            "digitGrouping": 12,
+            "coordinateDisplayType": 13,
+            "expenseAmountColor": 14,
+            "incomeAmountColor": 15,
+            "cashAccountId": "16",
+            "cashTransferCategoryId": "17",
+        },
+    ):
+        response, status = _unwrap_response(profile_route())
+        assert status == 200
+        updated_fields = profile_fields_db.updated_users[0][1]
+        assert updated_fields["email"] == "new@example.com"
+        assert updated_fields["avatar"] == "data:image/png;base64,abc"
+        assert updated_fields["first_day_of_week"] == 1
+        assert updated_fields["default_account_id"] == "11"
+        assert updated_fields["transaction_edit_scope"] == 2
+        assert updated_fields["calendar_display_type"] == 1
+        assert updated_fields["date_display_type"] == 2
+        assert updated_fields["long_date_format"] == 3
+        assert updated_fields["short_date_format"] == 4
+        assert updated_fields["long_time_format"] == 5
+        assert updated_fields["short_time_format"] == 6
+        assert updated_fields["fiscal_year_format"] == 7
+        assert updated_fields["currency_display_type"] == 8
+        assert updated_fields["numeral_system"] == 9
+        assert updated_fields["decimal_separator"] == 10
+        assert updated_fields["digit_grouping_symbol"] == 11
+        assert updated_fields["digit_grouping"] == 12
+        assert updated_fields["coordinate_display_type"] == 13
+        assert updated_fields["expense_amount_color"] == 14
+        assert updated_fields["income_amount_color"] == 15
+        assert updated_fields["cash_account_id"] == "16"
+        assert updated_fields["cash_transfer_category_id"] == "17"
+
+    profile_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    profile_error_db.get_user_by_id = _async_runtime_error("profile lookup boom")  # type: ignore[method-assign]
+    profile_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, profile_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: profile_error_db)
+    with auth_route_unit_app.test_request_context("/api/profile", method="GET"):
+        response, status = _unwrap_response(profile_route())
+        assert status == 500
+        assert response.get_json()["message"] == "profile lookup boom"
+
+    avatar_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
+    avatar_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, avatar_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: avatar_db)
+    monkeypatch.setattr(auth_module, "_build_avatar_data_url", lambda _file: "data:image/png;base64,abc")
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: (_ for _ in ()).throw(ValueError("avatar id boom")))
+    with auth_route_unit_app.test_request_context(
+        "/api/profile/avatar",
+        method="POST",
+        data={"avatar": (io.BytesIO(b"avatar-bytes"), "avatar.png")},
+    ):
+        response, status = _unwrap_response(_unwrap_all(auth_module.update_profile_avatar)())
+        assert status == 400
+        assert response.get_json()["message"] == "avatar id boom"
+
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: 1)
+
+    hashed_password = bcrypt.hashpw(b"Correct123!", bcrypt.gensalt()).decode("utf-8")
+
+    resend_guest_error_db = FakeAuthDB(
+        user_by_email={"id": 1, "username": "alice", "email": "alice@example.com", "password_hash": hashed_password}
+    )
+    resend_guest_error_db.get_user_by_email = _async_runtime_error("resend guest lookup boom")  # type: ignore[method-assign]
+    resend_guest_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, resend_guest_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: resend_guest_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/email/resend-verification",
+        method="POST",
+        json={"email": "alice@example.com", "password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(resend_guest_route())
+        assert status == 500
+        assert response.get_json()["message"] == "resend guest lookup boom"
+
+    value_error_token_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password})
+    value_error_token_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, value_error_token_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: value_error_token_db)
+
+    def _raise_generate_access_token(*_args, **_kwargs):
+        raise ValueError("generate token boom")
+
+    monkeypatch.setattr(auth_module, "generate_access_token", _raise_generate_access_token)
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/api",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(generate_api_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    runtime_error_token_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password})
+    runtime_error_token_db.create_session = _async_runtime_error("session boom")  # type: ignore[method-assign]
+    runtime_error_token_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, runtime_error_token_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: runtime_error_token_db)
+    monkeypatch.setattr(
+        auth_module,
+        "generate_access_token",
+        lambda *_args, **_kwargs: {"access_token": "token-abc", "expires_at": "2026-03-10T10:00:00"},
+    )
+    with auth_route_unit_app.test_request_context(
+        "/api/tokens/api",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(generate_api_route())
+        assert status == 500
+        assert response.get_json()["message"] == "session boom"
+
+    revoke_value_error_db = FakeAuthDB(user_by_id={"id": 1})
+    revoke_value_error_db.invalidate_session_by_id = _async_value_error("revoke value boom")  # type: ignore[method-assign]
+    revoke_value_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, revoke_value_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: revoke_value_error_db)
+    with auth_route_unit_app.test_request_context("/api/tokens/42", method="DELETE"):
+        response, status = _unwrap_response(revoke_route("42"))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    list_error_db = FakeAuthDB(user_by_id={"id": 1})
+    list_error_db.cleanup_expired_sessions = _async_runtime_error("cleanup boom")  # type: ignore[method-assign]
+    list_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, list_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: list_error_db)
+    with auth_route_unit_app.test_request_context("/api/tokens", method="GET"):
+        response, status = _unwrap_response(list_tokens_route())
+        assert status == 500
+        assert response.get_json()["message"] == "cleanup boom"
+
+    status_error_db = FakeAuthDB(user_by_id={"id": 1})
+    status_error_db.get_user_by_id = _async_runtime_error("status lookup boom")  # type: ignore[method-assign]
+    status_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, status_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: status_error_db)
+    with auth_route_unit_app.test_request_context("/api/2fa/status", method="GET"):
+        response, status = _unwrap_response(status_route())
+        assert status == 500
+        assert response.get_json()["message"] == "status lookup boom"
+
+    cloud_error_db = FakeAuthDB(user_by_id={"id": 1})
+    cloud_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, cloud_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: cloud_error_db)
+    monkeypatch.setattr(auth_module, "_load_application_cloud_settings", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("cloud lookup boom")))
+    with auth_route_unit_app.test_request_context("/api/profile/cloud-settings", method="GET"):
+        response, status = _unwrap_response(cloud_route())
+        assert status == 500
+        assert response.get_json()["message"] == "cloud lookup boom"
+
+    confirm_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice"})
+    confirm_error_db.update_user = _async_runtime_error("confirm update boom")  # type: ignore[method-assign]
+    confirm_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, confirm_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: confirm_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/enable/confirm",
+        method="POST",
+        json={"secret": "SECRET123", "passcode": "111111"},
+    ):
+        response, status = _unwrap_response(confirm_route())
+        assert status == 500
+        assert response.get_json()["message"] == "confirm update boom"
+
+    disable_error_user = {"id": 1, "username": "alice", "password_hash": hashed_password}
+    disable_error_db = FakeAuthDB(user_by_id=dict(disable_error_user))
+    disable_error_db.update_user = _async_runtime_error("disable update boom")  # type: ignore[method-assign]
+    disable_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, disable_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: disable_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/disable",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(disable_route())
+        assert status == 500
+        assert response.get_json()["message"] == "disable update boom"
+
+    regenerate_missing_db = FakeAuthDB(user_by_id=None)
+    regenerate_missing_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, regenerate_missing_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: regenerate_missing_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/regenerate",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    regenerate_invalid_password_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": hashed_password, "two_factor_enabled": 1})
+    regenerate_invalid_password_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, regenerate_invalid_password_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: regenerate_invalid_password_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/regenerate",
+        method="POST",
+        json={"password": "Wrong123!"},
+    ):
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 401
+        assert response.get_json()["error"] == "Invalid credentials"
+
+    regenerate_error_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": hashed_password, "two_factor_enabled": 1})
+    regenerate_error_db.get_user_by_id = _async_runtime_error("regenerate lookup boom")  # type: ignore[method-assign]
+    regenerate_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, regenerate_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: regenerate_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/regenerate",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 500
+        assert response.get_json()["message"] == "regenerate lookup boom"
+
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": "bad", "email": "alice@example.com"})
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"passcode": "123456"},
+    ):
+        response, status = _unwrap_response(verify_route())
+        assert status == 401
+        assert response.get_json()["error"] == "Unauthorized"
+
+    verify_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "two_factor_enabled": 1, "two_factor_secret": "SECRET123"})
+    verify_error_db.get_user_by_id = _async_runtime_error("2fa verify lookup boom")  # type: ignore[method-assign]
+    verify_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, verify_error_loop)
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": 1, "email": "alice@example.com"})
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: verify_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"passcode": "123456"},
+    ):
+        response, status = _unwrap_response(verify_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa verify lookup boom"
+
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": "bad", "email": "alice@example.com"})
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"recoveryCode": "ABCD-1234"},
+    ):
+        response, status = _unwrap_response(recovery_route())
+        assert status == 401
+        assert response.get_json()["error"] == "Unauthorized"
+
+    recovery_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice"})
+    recovery_error_db.get_user_by_id = _async_runtime_error("2fa recovery lookup boom")  # type: ignore[method-assign]
+    recovery_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, recovery_error_loop)
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": 1, "email": "alice@example.com"})
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: recovery_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"recoveryCode": "ABCD-1234"},
+    ):
+        response, status = _unwrap_response(recovery_route())
+        assert status == 500
+        assert response.get_json()["message"] == "2fa recovery lookup boom"
+
+    clear_transactions_error_db = FakeAuthDB(user_by_id={"id": 1})
+    clear_transactions_error_db.verify_operation_password = _async_runtime_error("clear transactions verify boom")  # type: ignore[method-assign]
+    clear_transactions_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, clear_transactions_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_transactions_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/transactions",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_transactions_route())
+        assert status == 500
+        assert response.get_json()["message"] == "clear transactions verify boom"
+
+    clear_all_error_db = FakeAuthDB(user_by_id={"id": 1})
+    clear_all_error_db.verify_operation_password = _async_runtime_error("clear all verify boom")  # type: ignore[method-assign]
+    clear_all_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, clear_all_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_all_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/all",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_all_route())
+        assert status == 500
+        assert response.get_json()["message"] == "clear all verify boom"

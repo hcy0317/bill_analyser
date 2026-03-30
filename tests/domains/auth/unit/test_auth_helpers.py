@@ -71,6 +71,35 @@ class FakeSessionDB:
         self.session_payloads.append(payload)
 
 
+class FakeRegisterSetupDB:
+    """Helper DB stub for register preset category/account helpers."""
+
+    def __init__(self, *, fail_on_category: bool = False, fail_on_account: bool = False) -> None:
+        self.fail_on_category = fail_on_category
+        self.fail_on_account = fail_on_account
+        self.created_categories: list[dict[str, Any]] = []
+        self.created_accounts: list[dict[str, Any]] = []
+        self.updated_users: list[tuple[int, dict[str, Any]]] = []
+
+    async def create_category(self, payload: dict[str, Any], *, user_id: int) -> int:
+        _ = user_id
+        if self.fail_on_category:
+            raise RuntimeError("category boom")
+        self.created_categories.append(dict(payload))
+        return len(self.created_categories)
+
+    async def create_account(self, payload: dict[str, Any], *, user_id: int) -> int:
+        _ = user_id
+        if self.fail_on_account:
+            raise RuntimeError("account boom")
+        self.created_accounts.append(dict(payload))
+        return len(self.created_accounts) + 100
+
+    async def update_user(self, user_id: int, payload: dict[str, Any]) -> bool:
+        self.updated_users.append((user_id, dict(payload)))
+        return True
+
+
 
 def test_load_auth_config_and_get_app_context_cover_primary_fallback_and_error(
     auth_helper_app: Flask,
@@ -245,6 +274,10 @@ def test_token_generation_password_validation_and_action_token_helpers() -> None
             "Invalid boolean value for showAmountInHomePage",
         ),
         (
+            {"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{bad-json}"},
+            "Invalid JSON value for overviewAccountFilterInHomePage",
+        ),
+        (
             {"settingKey": "overviewAccountFilterInHomePage", "settingValue": '{"a":"true"}'},
             "Invalid map value for overviewAccountFilterInHomePage",
         ),
@@ -354,6 +387,11 @@ def test_avatar_qrcode_export_and_misc_parsing_helpers(
     assert avatar_data_url.startswith("data:image/png;base64,")
     assert base64.b64decode(avatar_data_url.split(",", 1)[1]) == b"avatar-bytes"
 
+    unknown_avatar_data_url = auth_module._build_avatar_data_url(
+        FakeUploadedFile(b"avatar-bytes", mimetype="", filename="avatar.unknown")
+    )
+    assert unknown_avatar_data_url.startswith("data:application/octet-stream;base64,")
+
     with pytest.raises(ValueError, match="Avatar file is empty"):
         auth_module._build_avatar_data_url(FakeUploadedFile(b""))
 
@@ -414,6 +452,14 @@ def test_avatar_qrcode_export_and_misc_parsing_helpers(
         assert session_db.session_payloads[0]["token_hash"] == auth_module.calculate_token_hash("access-token")
         assert session_db.session_payloads[0]["refresh_token_hash"] == auth_module.calculate_token_hash("refresh-token")
 
+    with auth_helper_app.test_request_context("/export?type=9999"):
+        filters = auth_module._build_export_filters(categories)
+        assert "type" not in filters
+
+    with auth_helper_app.test_request_context("/export?type=manual"):
+        filters = auth_module._build_export_filters(categories)
+        assert filters["type"] == "manual"
+
     export_text = auth_module._render_bills_export(
         bills=[
             {
@@ -445,3 +491,78 @@ def test_avatar_qrcode_export_and_misc_parsing_helpers(
     default_accounts_en = auth_module._build_default_accounts("en_US")
     assert default_accounts_zh[0]["name"] == "现金"
     assert default_accounts_en[0]["name"] == "Cash"
+
+
+def test_decode_action_token_parse_user_agent_and_register_helpers_cover_remaining_edges(
+    auth_helper_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """动作 token、UA 解析和注册辅助函数应覆盖剩余边角分支。"""
+    monkeypatch.setitem(
+        auth_module.SUPPORTED_APPLICATION_CLOUD_SETTING_KEY_TYPES,
+        "broken.setting",
+        "mystery-type",
+    )
+    assert auth_module._validate_application_cloud_setting({"settingKey": "broken.setting", "settingValue": "x"}) == (
+        "Unsupported setting type for broken.setting"
+    )
+
+    assert auth_module.decode_action_token("", {"jwt_secret": "secret"}, "verify_email") is None
+
+    def _raise_expired(*_args, **_kwargs):
+        raise jwt.ExpiredSignatureError("expired")
+
+    monkeypatch.setattr(auth_module.jwt, "decode", _raise_expired)
+    assert auth_module.decode_action_token("expired-token", {"jwt_secret": "secret"}, "verify_email") is None
+
+    assert auth_module.parse_user_agent("") == "未知设备"
+    assert auth_module.parse_user_agent("Mozilla/5.0 (Mac OS X) Firefox/123.0") == "macOS (Firefox)"
+    assert auth_module.parse_user_agent("Mozilla/5.0 (X11; Linux x86_64) Safari/605.1") == "Linux (Safari)"
+    assert auth_module.parse_user_agent("Mozilla/5.0 (Windows NT 11.0) Chrome/123.0") == "Windows 11 (Chrome)"
+    assert auth_module.parse_user_agent("Mozilla/5.0 (Android 14) Chrome/121.0") == "Android (Chrome)"
+    assert auth_module.parse_user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Edge/120.0") == "iOS (Edge)"
+    assert auth_module.parse_user_agent("CustomAgent/1.0") == "其他系统 (其他浏览器)"
+
+    register_db = FakeRegisterSetupDB()
+    assert asyncio.run(auth_module._save_register_categories(register_db, 1, [])) is True
+
+    categories = [
+        {"name": "  ", "type": 3},
+        {
+            "name": "餐饮",
+            "type": 3,
+            "icon": "mdi-food",
+            "color": "#5470c6",
+            "subCategories": [
+                {"name": "早餐"},
+                {"name": "  "},
+            ],
+        },
+    ]
+    assert asyncio.run(auth_module._save_register_categories(register_db, 1, categories)) is True
+    assert [item["sub_category"] for item in register_db.created_categories] == ["", "早餐"]
+    assert register_db.created_categories[1]["icon"] == "mdi-food"
+
+    failing_category_db = FakeRegisterSetupDB(fail_on_category=True)
+    assert asyncio.run(auth_module._save_register_categories(failing_category_db, 1, [{"name": "餐饮"}])) is False
+
+    monkeypatch.setattr(auth_module, "_build_default_accounts", lambda _language: [])
+    empty_accounts_result = asyncio.run(auth_module._create_register_default_accounts(register_db, 1, "zh_Hans"))
+    assert empty_accounts_result == {"success": True, "cash_account_id": None, "default_account_id": None}
+
+    monkeypatch.setattr(
+        auth_module,
+        "_build_default_accounts",
+        lambda _language: [
+            {"name": "现金", "category": 1, "aliases": "[]"},
+            {"name": "借记卡", "category": 2, "aliases": "[]"},
+        ],
+    )
+    account_db = FakeRegisterSetupDB()
+    account_result = asyncio.run(auth_module._create_register_default_accounts(account_db, 9, "zh_Hans"))
+    assert account_result == {"success": True, "cash_account_id": 101, "default_account_id": 101}
+    assert account_db.updated_users == [(9, {"default_account_id": 101, "cash_account_id": 101})]
+
+    failing_account_db = FakeRegisterSetupDB(fail_on_account=True)
+    failing_account_result = asyncio.run(auth_module._create_register_default_accounts(failing_account_db, 9, "zh_Hans"))
+    assert failing_account_result["success"] is False

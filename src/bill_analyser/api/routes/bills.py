@@ -20,6 +20,35 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
+from bill_analyser.api.config.bills import (
+    ALLOWED_BILLS_FILE_EXTENSIONS,
+    ALLOWED_BILLS_PICTURE_EXTENSIONS,
+    IMPORT_CONFIG_BASE_WEIGHT,
+    IMPORT_CONFIG_USE_COUNT_CAP,
+    IMPORT_CONFIG_USE_COUNT_FACTOR,
+    IMPORT_HEADER_ACCEPT_SCORE,
+    IMPORT_HEADER_CANDIDATE_MIN_SCORE,
+    IMPORT_HEADER_CONTEXT_SCORE,
+    IMPORT_HEADER_DATA_LIKE_PENALTY,
+    IMPORT_HEADER_EXACT_SCORE,
+    IMPORT_HEADER_LOW_MATCH_TYPES_PENALTY,
+    IMPORT_HEADER_MATCH_REPEAT_BONUS,
+    IMPORT_HEADER_MATCH_UNIQUE_BONUS,
+    IMPORT_HEADER_MATCHED_TYPES_WEIGHT,
+    IMPORT_HEADER_MIN_MATCHED_TYPES,
+    IMPORT_HEADER_MIN_REVIEW_SCORE,
+    IMPORT_HEADER_NEXT_ROW_SCORE_CAP,
+    IMPORT_HEADER_NEXT_ROW_WEIGHT,
+    IMPORT_HEADER_NON_EMPTY_CELL_CAP,
+    IMPORT_HEADER_NON_EMPTY_CELL_WEIGHT,
+    IMPORT_HEADER_PARTIAL_SCORE,
+    IMPORT_HEADER_SCAN_LIMIT,
+    IMPORT_HEADER_SEMANTIC_MEDIUM_SCORE,
+    IMPORT_HEADER_SEMANTIC_SCORE,
+    IMPORT_HEADER_STRONG_EXACT_SCORE,
+    IMPORT_HEADER_TYPE_HINT_SCORE,
+    MAX_BILLS_FILE_SIZE,
+)
 from bill_analyser.constants import UPLOADS_DIR
 
 try:
@@ -45,9 +74,9 @@ bp = Blueprint("bills", __name__)
 
 # 上传文件配置 - 固定到 data/uploads
 UPLOAD_FOLDER = UPLOADS_DIR
-ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "txt"}
-ALLOWED_PICTURE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+ALLOWED_EXTENSIONS = set(ALLOWED_BILLS_FILE_EXTENSIONS)
+ALLOWED_PICTURE_EXTENSIONS = set(ALLOWED_BILLS_PICTURE_EXTENSIONS)
+MAX_FILE_SIZE = MAX_BILLS_FILE_SIZE
 
 # 确保上传目录存在
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -120,7 +149,7 @@ async def _apply_common_transaction_filters(args, filters, db, user_id: int):
 
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_BILLS_FILE_EXTENSIONS
 
 
 IMPORT_COLUMN_TYPE_KEYWORDS = {
@@ -203,9 +232,9 @@ def _score_header_keyword_match(normalized_header: str, column_type: int) -> flo
     """根据关键词规则计算表头与导入列类型的匹配分。"""
     if column_type == 3:
         if normalized_header in {"收支", "收/支", "收支类型", "借贷标志", "借贷"}:
-            return 12.0
+            return IMPORT_HEADER_STRONG_EXACT_SCORE
         if normalized_header in {"交易类型", "交易分类", "类别", "类型"}:
-            return 8.0
+            return IMPORT_HEADER_TYPE_HINT_SCORE
 
     if column_type == 6 and "余额" in normalized_header:
         return 0.0
@@ -218,42 +247,42 @@ def _score_header_keyword_match(normalized_header: str, column_type: int) -> flo
         if not normalized_keyword:
             continue
         if normalized_header == normalized_keyword:
-            best_score = max(best_score, 10.0)
+            best_score = max(best_score, IMPORT_HEADER_EXACT_SCORE)
         elif normalized_keyword in normalized_header or normalized_header in normalized_keyword:
-            best_score = max(best_score, 6.0)
+            best_score = max(best_score, IMPORT_HEADER_PARTIAL_SCORE)
 
     if column_type == 4 and normalized_header in {"交易分类", "原始分类"}:
-        best_score = max(best_score, 10.0)
+        best_score = max(best_score, IMPORT_HEADER_EXACT_SCORE)
 
     if column_type == 6 and any(token in normalized_header for token in ["支付方式", "付款方式", "收付款方式", "支付渠道"]):
-        best_score = max(best_score, 9.0)
+        best_score = max(best_score, IMPORT_HEADER_SEMANTIC_SCORE)
 
     if column_type == 9 and any(token in normalized_header for token in ["户名", "名称"]):
-        best_score = max(best_score, 9.5)
+        best_score = max(best_score, IMPORT_HEADER_SEMANTIC_MEDIUM_SCORE)
 
     if column_type == 14 and any(token in normalized_header for token in ["商品说明", "商品", "交易摘要"]):
-        best_score = max(best_score, 9.0)
+        best_score = max(best_score, IMPORT_HEADER_SEMANTIC_SCORE)
 
     if column_type == 9 and any(token in normalized_header for token in ["对方", "转入", "目标", "收款"]):
-        best_score = max(best_score, 8.0)
+        best_score = max(best_score, IMPORT_HEADER_TYPE_HINT_SCORE)
     if (
         column_type == 11
         and any(token in normalized_header for token in ["对方", "转入", "目标", "收款"])
         and "金额" in str(normalized_header)
     ):
-        best_score = max(best_score, 8.0)
+        best_score = max(best_score, IMPORT_HEADER_TYPE_HINT_SCORE)
     if (
         column_type == 6
         and "账户" in str(normalized_header)
         and not any(token in normalized_header for token in ["对方", "转入", "目标", "收款"])
     ):
-        best_score = max(best_score, 7.0)
+        best_score = max(best_score, IMPORT_HEADER_CONTEXT_SCORE)
     if (
         column_type == 8
         and "金额" in str(normalized_header)
         and not any(token in normalized_header for token in ["对方", "转入", "目标", "收款"])
     ):
-        best_score = max(best_score, 7.0)
+        best_score = max(best_score, IMPORT_HEADER_CONTEXT_SCORE)
 
     return best_score
 
@@ -263,7 +292,7 @@ def _extract_import_config_header_type_pairs(config: dict[str, Any]) -> list[tup
     field_mappings = config.get("field_mappings") or {}
     sample_headers = config.get("sample_headers") or []
     use_count = float(config.get("use_count", 0) or 0)
-    base_weight = 3.0 + min(use_count, 20.0) * 0.1
+    base_weight = IMPORT_CONFIG_BASE_WEIGHT + min(use_count, IMPORT_CONFIG_USE_COUNT_CAP) * IMPORT_CONFIG_USE_COUNT_FACTOR
     pairs: list[tuple[str, int, float]] = []
 
     column_mapping = field_mappings.get("columnMapping") if isinstance(field_mappings, dict) else None
@@ -339,7 +368,7 @@ def _build_import_mapping_suggestion(
     suggestions: list[dict[str, Any]] = []
 
     for score, column_type, index in candidates:
-        if score < 5.0:
+        if score < IMPORT_HEADER_CANDIDATE_MIN_SCORE:
             continue
         if column_type in chosen_types or index in chosen_indices:
             continue
@@ -407,19 +436,21 @@ def _score_generic_import_header_row(row: list[Any]) -> tuple[float, set[int]]:
                 best_column_type = column_type
 
         if best_column_type is not None and best_score >= 5.0:
-            total_score += best_score + (2.5 if best_column_type not in matched_types else 0.5)
+            total_score += best_score + (
+                IMPORT_HEADER_MATCH_UNIQUE_BONUS if best_column_type not in matched_types else IMPORT_HEADER_MATCH_REPEAT_BONUS
+            )
             matched_types.add(best_column_type)
             continue
 
         if _is_generic_import_data_like_cell(cell):
             data_like_count += 1
 
-    total_score += len(matched_types) * 3.0
-    total_score += min(len(non_empty_cells), 6) * 0.5
-    total_score -= data_like_count * 2.0
+    total_score += len(matched_types) * IMPORT_HEADER_MATCHED_TYPES_WEIGHT
+    total_score += min(len(non_empty_cells), IMPORT_HEADER_NON_EMPTY_CELL_CAP) * IMPORT_HEADER_NON_EMPTY_CELL_WEIGHT
+    total_score -= data_like_count * IMPORT_HEADER_DATA_LIKE_PENALTY
 
-    if len(matched_types) < 2:
-        total_score -= 6.0
+    if len(matched_types) < IMPORT_HEADER_MIN_MATCHED_TYPES:
+        total_score -= IMPORT_HEADER_LOW_MATCH_TYPES_PENALTY
 
     return total_score, matched_types
 
@@ -441,23 +472,23 @@ def _detect_generic_import_header_row_index(rows: list[list[Any]]) -> int:
 
     best_index = 0
     best_score = float("-inf")
-    scan_limit = min(len(rows), 30)
+    scan_limit = min(len(rows), IMPORT_HEADER_SCAN_LIMIT)
 
     for index, row in enumerate(rows[:scan_limit]):
         header_score, matched_types = _score_generic_import_header_row(row)
-        if len(matched_types) < 2 and header_score < 8.0:
+        if len(matched_types) < IMPORT_HEADER_MIN_MATCHED_TYPES and header_score < IMPORT_HEADER_MIN_REVIEW_SCORE:
             continue
 
         next_row_score = 0.0
         if index + 1 < len(rows):
             next_row_score = _score_generic_import_data_row(rows[index + 1])
 
-        candidate_score = header_score + min(next_row_score, 4.0) * 1.5
+        candidate_score = header_score + min(next_row_score, IMPORT_HEADER_NEXT_ROW_SCORE_CAP) * IMPORT_HEADER_NEXT_ROW_WEIGHT
         if candidate_score > best_score:
             best_index = index
             best_score = candidate_score
 
-    if best_score < 10.0:
+    if best_score < IMPORT_HEADER_ACCEPT_SCORE:
         return 0
 
     return best_index
@@ -474,7 +505,7 @@ def _trim_generic_import_rows_to_header(rows: list[list[Any]]) -> tuple[list[lis
 
 def allowed_picture_file(filename):
     """检查图片扩展名是否允许。"""
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_PICTURE_EXTENSIONS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_BILLS_PICTURE_EXTENSIONS
 
 
 def _parse_json_form_field(raw_value, default):
@@ -2859,10 +2890,17 @@ def _match_account_by_name(accounts: list, name: str) -> dict:
                 return account
 
     # 模糊匹配：名称包含关系
+    fuzzy_matches: list[tuple[int, dict[str, Any]]] = []
     for account in accounts:
-        account_name = account.get("name", "").lower()
+        account_name = account.get("name", "").lower().strip()
+        if not account_name:
+            continue
         if name_lower in account_name or account_name in name_lower:
-            return account
+            fuzzy_matches.append((len(account_name), account))
+
+    if fuzzy_matches:
+        fuzzy_matches.sort(key=lambda item: item[0], reverse=True)
+        return fuzzy_matches[0][1]
 
     return None
 
