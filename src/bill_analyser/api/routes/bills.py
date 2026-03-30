@@ -557,10 +557,8 @@ def _load_generic_import_rows(
             for record in table.itertuples(index=False, name=None):
                 rows.append([str(cell).strip() for cell in record])
             return rows, "utf-8", ""
-        except Exception as exc:
-            if html_error is not None:
-                raise ValueError(f"未能读取 xls 文件: {file_path.name}") from html_error
-            raise exc
+        except Exception:
+            raise ValueError(f"未能读取 xls 文件: {file_path.name}") from html_error
 
     raise ValueError(f"Unsupported file format for generic import: {suffix}")
 
@@ -715,9 +713,6 @@ def _auto_detect_and_normalize_amount(value: str) -> str:
     elif comma_count >= 2 and dot_count == 1:
         # "1,234,567.89" — 逗号千位，点小数
         return sign + cleaned.replace(",", "")
-    elif dot_count >= 2 and comma_count == 1:
-        # "1.234.567,89" — 点千位，逗号小数
-        return sign + cleaned.replace(".", "").replace(",", ".")
     else:
         # 无法确定，尝试去掉所有非数字/点字符
         return sign + cleaned.replace(",", "")

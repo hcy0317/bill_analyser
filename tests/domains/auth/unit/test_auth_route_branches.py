@@ -1274,7 +1274,7 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
     with auth_route_unit_app.test_request_context("/api/auth/2fa/disable", method="POST", json={}):
         response, status = _unwrap_response(disable_route())
         assert status == 400
-        assert response.get_json()["message"] == "Current password is required"
+        assert response.get_json()["message"] == "Current password or stepUpToken is required"
 
     disable_missing_db = FakeAuthDB(user_by_id=None)
     disable_missing_loop = FakeLoop()
@@ -1318,10 +1318,28 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
         assert status == 200
         assert response.get_json()["result"] is True
 
+    monkeypatch.setattr(
+        auth_module,
+        "decode_action_token",
+        lambda token, _config, expected_type: {"user_id": 1, "type": expected_type} if token == "step-up-token" else None,
+    )
+    disable_step_up_db = FakeAuthDB(user_by_id=dict(disable_user))
+    disable_step_up_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, disable_step_up_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: disable_step_up_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/disable",
+        method="POST",
+        json={"stepUpToken": "step-up-token"},
+    ):
+        response, status = _unwrap_response(disable_route())
+        assert status == 200
+        assert response.get_json()["result"] is True
+
     with auth_route_unit_app.test_request_context("/api/auth/2fa/recovery/regenerate", method="POST", json={}):
         response, status = _unwrap_response(regenerate_route())
         assert status == 400
-        assert response.get_json()["message"] == "Current password is required"
+        assert response.get_json()["message"] == "Current password or stepUpToken is required"
 
     regen_disabled_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": disable_user["password_hash"], "two_factor_enabled": 0})
     regen_disabled_loop = FakeLoop()
@@ -1345,6 +1363,19 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
         "/api/auth/2fa/recovery/regenerate",
         method="POST",
         json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 200
+        assert response.get_json()["result"]["recoveryCodes"] == ["WXYZ-9999"]
+
+    regen_step_up_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": disable_user["password_hash"], "two_factor_enabled": 1})
+    regen_step_up_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, regen_step_up_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: regen_step_up_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/recovery/regenerate",
+        method="POST",
+        json={"stepUpToken": "step-up-token"},
     ):
         response, status = _unwrap_response(regenerate_route())
         assert status == 200
@@ -1634,11 +1665,17 @@ def test_user_data_routes_cover_statistics_export_clear_and_version(
     clear_loop = FakeLoop()
     _install_fake_loop(monkeypatch, clear_loop)
     monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_db)
+    monkeypatch.setattr(auth_module, "load_auth_config", lambda: {"jwt_secret": "secret", "jwt_algorithm": "HS256"})
+    monkeypatch.setattr(
+        auth_module,
+        "decode_action_token",
+        lambda token, _config, expected_type: {"user_id": 1, "type": expected_type} if token == "step-up-token" else None,
+    )
 
     with auth_route_unit_app.test_request_context("/api/auth/data/clear/transactions", method="POST", json={}):
         response, status = _unwrap_response(clear_transactions_route())
         assert status == 400
-        assert response.get_json()["message"] == "Current password is required"
+        assert response.get_json()["message"] == "Current password or stepUpToken is required"
 
     with auth_route_unit_app.test_request_context(
         "/api/auth/data/clear/transactions",
@@ -1671,10 +1708,30 @@ def test_user_data_routes_cover_statistics_export_clear_and_version(
         assert status == 200
         assert response.get_json()["deletedCount"] == 7
 
+    step_up_clear_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": "not-a-valid-bcrypt-hash"})
+    step_up_clear_db.clear_transactions_result = {"success": True, "deleted_count": 7}
+    step_up_clear_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, step_up_clear_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: step_up_clear_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/data/clear/transactions",
+        method="POST",
+        json={"stepUpToken": "step-up-token"},
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(clear_transactions_route())
+        assert status == 200
+        assert response.get_json()["deletedCount"] == 7
+
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_db)
+
+    _install_fake_loop(monkeypatch, clear_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_db)
+
     with auth_route_unit_app.test_request_context("/api/auth/data/clear/all", method="POST", json={}):
         response, status = _unwrap_response(clear_all_route())
         assert status == 400
-        assert response.get_json()["message"] == "Current password is required"
+        assert response.get_json()["message"] == "Current password or stepUpToken is required"
 
     with auth_route_unit_app.test_request_context(
         "/api/auth/data/clear/all",
@@ -1707,11 +1764,149 @@ def test_user_data_routes_cover_statistics_export_clear_and_version(
         assert status == 200
         assert response.get_json()["counts"] == {"bills": 3, "accounts": 1}
 
+    step_up_clear_all_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": "not-a-valid-bcrypt-hash"})
+    step_up_clear_all_db.clear_all_result = {"success": True, "counts": {"bills": 2}}
+    step_up_clear_all_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, step_up_clear_all_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: step_up_clear_all_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/data/clear/all",
+        method="POST",
+        json={"stepUpToken": "step-up-token"},
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(clear_all_route())
+        assert status == 200
+        assert response.get_json()["counts"] == {"bills": 2}
+
     monkeypatch.setattr(auth_module, "__version__", "9.9.9")
     with auth_route_unit_app.test_request_context("/api/auth/system/version", method="GET"):
         response, status = _unwrap_response(version_route())
         assert status == 200
         assert response.get_json()["result"]["version"] == "9.9.9"
+
+
+def test_security_step_up_verify_route_covers_password_and_passcode_paths(
+    auth_route_unit_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """step-up 验证路由应支持密码与 2FA passcode，并返回短期 token。"""
+    route = _unwrap_all(auth_module.verify_security_step_up)
+
+    monkeypatch.setattr(auth_module, "_get_request_user_id", lambda: 1)
+    monkeypatch.setattr(auth_module, "_get_request_username", lambda: "alice")
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(auth_module, "load_auth_config", lambda: {"jwt_secret": "secret", "jwt_algorithm": "HS256"})
+    monkeypatch.setattr(auth_module, "generate_action_token", lambda *_args, **_kwargs: "step-up-token")
+
+    with auth_route_unit_app.test_request_context("/api/security/step-up/verify", method="POST", json={}):
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["message"] == "password or passcode is required"
+
+    missing_user_db = FakeAuthDB(user_by_id=None)
+    missing_user_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, missing_user_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: missing_user_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    hashed_password = bcrypt.hashpw(b"Correct123!", bcrypt.gensalt()).decode("utf-8")
+    invalid_password_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password})
+    invalid_password_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, invalid_password_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: invalid_password_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"password": "Wrong123!"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 401
+        assert response.get_json()["error"] == "Invalid credentials"
+
+    no_2fa_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password, "two_factor_enabled": 0})
+    no_2fa_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, no_2fa_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: no_2fa_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"passcode": "123456"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["message"] == "Two-factor authentication is not enabled"
+
+    class RejectingTOTP:
+        def __init__(self, _secret: str) -> None:
+            pass
+
+        def verify(self, _passcode: str, valid_window: int = 1) -> bool:
+            _ = valid_window
+            return False
+
+    monkeypatch.setattr(auth_module.pyotp, "TOTP", RejectingTOTP)
+    invalid_passcode_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password, "two_factor_enabled": 1, "two_factor_secret": "SECRET123"})
+    invalid_passcode_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, invalid_passcode_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: invalid_passcode_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"passcode": "123456"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 401
+        assert response.get_json()["error"] == "Invalid passcode"
+
+    class AcceptingTOTP:
+        def __init__(self, _secret: str) -> None:
+            pass
+
+        def verify(self, _passcode: str, valid_window: int = 1) -> bool:
+            _ = valid_window
+            return True
+
+    monkeypatch.setattr(auth_module.pyotp, "TOTP", AcceptingTOTP)
+    success_password_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password, "email": "alice@example.com"})
+    success_password_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, success_password_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: success_password_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"password": "Correct123!"},
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 200
+        payload = response.get_json() or {}
+        assert payload["result"]["stepUpToken"] == "step-up-token"
+        assert payload["result"]["verifiedVia"] == "password"
+        assert success_password_db.auth_logs
+
+    success_passcode_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "password_hash": hashed_password, "email": "alice@example.com", "two_factor_enabled": 1, "two_factor_secret": "SECRET123"})
+    success_passcode_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, success_passcode_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: success_passcode_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"passcode": "123456"},
+        headers={"User-Agent": "Browser"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 200
+        payload = response.get_json() or {}
+        assert payload["result"]["stepUpToken"] == "step-up-token"
+        assert payload["result"]["verifiedVia"] == "passcode"
 
 
 def test_personal_token_routes_cover_validation_failures_and_success_paths(

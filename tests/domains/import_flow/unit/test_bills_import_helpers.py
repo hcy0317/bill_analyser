@@ -1178,6 +1178,67 @@ def test_prepare_backend_bill_for_create_supports_rule_match_and_missing_account
     assert default_category_backend_data["sub_category"] == ""
 
 
+def test_prepare_backend_bill_for_create_uses_default_mapping_and_handles_missing_invest_target() -> None:
+    """创建前预处理应覆盖默认分类映射与投资目标账户缺失分支。"""
+
+    class _LocalLoop:
+        @staticmethod
+        def run_until_complete(coro: Any) -> Any:
+            return asyncio.run(coro)
+
+    class _FallbackDb:
+        async def get_all_accounts(self, *, user_id: int) -> list[dict[str, Any]]:
+            _ = user_id
+            return [{"id": 5, "name": "普通账户"}]
+
+        async def get_category_by_id(self, category_id: int, *, user_id: int) -> dict[str, Any] | None:
+            _ = (category_id, user_id)
+            return None
+
+    fallback_db = _FallbackDb()
+    category_engine = _FakePrepareCategoryEngine((None, None))
+
+    invest_backend, _ = bills_module._prepare_backend_bill_for_create(
+        {"comment": "投资测试"},
+        fallback_db,
+        category_engine,
+        _FakePrepareAdapter(
+            backend_data={
+                "type": "投资",
+                "amount": 66.0,
+                "payment_method": "现金",
+                "source_account_id": 5,
+                "destination_account_id": 0,
+            },
+            metadata={"auto_invest_account": True},
+        ),
+        _LocalLoop(),
+        1,
+    )
+    assert invest_backend["destination_account_id"] == 0
+    assert invest_backend["main_category"] == bills_module.DEFAULT_BILL_CATEGORY_MAPPING["投资"][0]
+
+    mapped_backend, _ = bills_module._prepare_backend_bill_for_create(
+        {"comment": "收入测试"},
+        fallback_db,
+        category_engine,
+        _FakePrepareAdapter(
+            backend_data={
+                "type": "收入",
+                "amount": 8.8,
+                "payment_method": "现金",
+                "source_account_id": 5,
+            },
+            metadata={},
+        ),
+        _LocalLoop(),
+        1,
+    )
+    assert (mapped_backend["main_category"], mapped_backend["sub_category"]) == bills_module.DEFAULT_BILL_CATEGORY_MAPPING[
+        "收入"
+    ]
+
+
 def test_create_bill_and_build_response_handles_success_and_failed_creation() -> None:
     """创建账单后处理应保存标签、同步余额，并在创建失败时抛错。"""
     db = _FakeCreateDB(created_bill_id=123)
