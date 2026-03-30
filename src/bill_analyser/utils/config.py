@@ -6,20 +6,23 @@ Config Module - 配置管理模块
 
 import asyncio
 import json
+import os
 import threading
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from dotenv import dotenv_values
 from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from bill_analyser.constants import CONFIG_DIR, LEGACY_CONFIG_DIR
+from bill_analyser.constants import CONFIG_DIR, LEGACY_CONFIG_DIR, PROJECT_ROOT
 
 from .logger import get_logger, log_method
 
 
 SERVER_CONFIG_FILENAME = "server_config.json"
+DOTENV_PATH = PROJECT_ROOT / ".env"
 INSECURE_JWT_SECRET_VALUES = frozenset(
     {
         "default_secret_key_change_in_production",
@@ -131,13 +134,40 @@ def get_server_config(use_cache: bool = True) -> dict[str, Any]:
     return get_config(SERVER_CONFIG_FILENAME, use_cache=use_cache)
 
 
+def load_env_settings() -> dict[str, Any]:
+    """加载仓库根目录 .env 与进程环境变量中的运行时配置。"""
+    env_config: dict[str, Any] = {}
+
+    if DOTENV_PATH.exists():
+        env_config.update({key: value for key, value in dotenv_values(DOTENV_PATH).items() if value is not None})
+
+    for key in ("JWT_SECRET_KEY", "BILL_ANALYSER_OPERATION_PASSWORD", "JWT_ACCESS_TOKEN_EXPIRES"):
+        value = os.getenv(key)
+        if value is not None:
+            env_config[key] = value
+
+    return env_config
+
+
+def _resolve_auth_jwt_secret(server_config: dict[str, Any]) -> str:
+    """按 环境变量 > .env > server_config.json 的顺序解析 JWT secret。"""
+    env_config = load_env_settings()
+    for raw_value in (env_config.get("JWT_SECRET_KEY"), server_config.get("jwt_secret")):
+        jwt_secret = str(raw_value or "").strip()
+        if jwt_secret:
+            return jwt_secret
+
+    return ""
+
+
 def load_auth_settings(use_cache: bool = True) -> dict[str, Any]:
     """加载认证配置；不再回退到代码内置 JWT secret。"""
-    config = _deep_merge_dicts(DEFAULT_AUTH_CONFIG, get_server_config(use_cache))
-    jwt_secret = str(config.get("jwt_secret", "") or "").strip()
+    server_config = get_server_config(use_cache)
+    config = _deep_merge_dicts(DEFAULT_AUTH_CONFIG, server_config)
+    jwt_secret = _resolve_auth_jwt_secret(server_config)
 
     if not jwt_secret:
-        raise ConfigValidationError("server_config.json 缺少 jwt_secret，认证功能无法启动")
+        raise ConfigValidationError("缺少 JWT secret，请通过环境变量、.env 或 server_config.json 提供")
 
     if jwt_secret in INSECURE_JWT_SECRET_VALUES:
         _config_manager.logger.warning("检测到占位 jwt_secret，请在生产环境替换为真实密钥")

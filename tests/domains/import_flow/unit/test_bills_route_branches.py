@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -475,12 +476,27 @@ class FakeBillsService:
         self.stage1_calls: list[tuple[list[str], str, int]] = []
         self.stage2_calls: list[tuple[str, int]] = []
         self.stage3_calls: list[tuple[str, int, Any]] = []
+        self.import_bills_calls: list[tuple[str, str, bool, int | None]] = []
+        self.import_bills_result: dict[str, Any] = {
+            "success": True,
+            "preview": [{"id": 1, "description": "早餐"}],
+            "total": 1,
+            "valid": 1,
+            "invalid": 0,
+            "inserted": 1,
+            "duplicates": 0,
+            "dedup_stats": {"similar": 0},
+            "parser_type": "wechat",
+            "errors": [],
+        }
         self.validator = type("Validator", (), {"validate_bills": staticmethod(lambda bills: (bills, []))})()
         self.db = type(
             "DBBridge",
             (),
             {
-                "insert_parser_templates": staticmethod(lambda session_id, bills, parser_id, user_id: asyncio.sleep(0, result=len(bills)))
+                "insert_parser_templates": staticmethod(
+                    lambda session_id, bills, parser_id, user_id: asyncio.sleep(0, result=len(bills))
+                )
             },
         )()
 
@@ -540,6 +556,17 @@ class FakeBillsService:
         copied_selected = list(selected_ids) if isinstance(selected_ids, list) else selected_ids
         self.stage3_calls.append((session_id, user_id, copied_selected))
         return dict(self.stage3_result)
+
+    async def import_bills(
+        self,
+        file_path: str,
+        *,
+        parser_type: str = "auto",
+        preview_only: bool = False,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        self.import_bills_calls.append((file_path, parser_type, preview_only, user_id))
+        return dict(self.import_bills_result)
 
 
 def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
@@ -1399,8 +1426,16 @@ def test_bills_picture_monthly_recurring_and_single_item_routes_cover_more_branc
     _install_fake_loop(monkeypatch, loop)
     monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
     monkeypatch.setattr(bills_module, "get_app_context", lambda: (db, service, category_engine))
-    monkeypatch.setattr(bills_module, "get_app_context_with_adapter", lambda user_id=None: (db, service, category_engine, adapter))
-    monkeypatch.setattr(bills_module, "_apply_common_transaction_filters", lambda *args, **kwargs: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+    monkeypatch.setattr(
+        bills_module,
+        "_apply_common_transaction_filters",
+        lambda *args, **kwargs: asyncio.sleep(0, result=None),
+    )
 
     upload_picture_route = _unwrap_all(bills_module.upload_transaction_picture_rest)
     remove_picture_route = _unwrap_all(bills_module.remove_unused_transaction_picture_rest)
@@ -1617,14 +1652,27 @@ def test_bills_picture_monthly_recurring_and_single_item_routes_cover_more_branc
         assert payload["success"] is True
         assert payload["result"]["id"] == 1
 
-    with bills_route_app.test_request_context("/api/bills/", method="POST", data="null", content_type="application/json"):
+    with bills_route_app.test_request_context(
+        "/api/bills/",
+        method="POST",
+        data="null",
+        content_type="application/json",
+    ):
         _set_request_user_id()
         response, status = _unwrap_response(create_bill_route())
         assert status == 400
         assert response.get_json()["error"] == "No data provided"
 
-    monkeypatch.setattr(bills_module, "_prepare_backend_bill_for_create", lambda *args, **kwargs: ({"source_account_id": 11, "destination_account_id": 22}, {"tag_ids": [7]}))
-    monkeypatch.setattr(bills_module, "_create_bill_and_build_response", lambda *args, **kwargs: (123, {"id": 123, "description": "新账单"}))
+    monkeypatch.setattr(
+        bills_module,
+        "_prepare_backend_bill_for_create",
+        lambda *args, **kwargs: ({"source_account_id": 11, "destination_account_id": 22}, {"tag_ids": [7]}),
+    )
+    monkeypatch.setattr(
+        bills_module,
+        "_create_bill_and_build_response",
+        lambda *args, **kwargs: (123, {"id": 123, "description": "新账单"}),
+    )
     with bills_route_app.test_request_context("/api/bills/", method="POST", json={"comment": "早餐"}):
         _set_request_user_id()
         response, status = _unwrap_response(create_bill_route())
@@ -1651,7 +1699,12 @@ def test_bills_picture_monthly_recurring_and_single_item_routes_cover_more_branc
         assert status == 500
         assert response.get_json()["error"] == "create boom"
 
-    with bills_route_app.test_request_context("/api/bills/1", method="PUT", data="null", content_type="application/json"):
+    with bills_route_app.test_request_context(
+        "/api/bills/1",
+        method="PUT",
+        data="null",
+        content_type="application/json",
+    ):
         _set_request_user_id()
         response, status = _unwrap_response(update_bill_route(1))
         assert status == 400
@@ -1807,7 +1860,7 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/parse_generic",
         method="POST",
-        json={"session_id": "sess", "temp_path": str(tmp_path.parent / 'escape.csv')},
+        json={"session_id": "sess", "temp_path": str(tmp_path.parent / "escape.csv")},
     ):
         response, status = _unwrap_response(parse_generic_route())
         assert status == 400
@@ -1816,13 +1869,17 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/parse_generic",
         method="POST",
-        json={"session_id": "sess", "temp_path": str(tmp_path / 'missing.csv')},
+        json={"session_id": "sess", "temp_path": str(tmp_path / "missing.csv")},
     ):
         response, status = _unwrap_response(parse_generic_route())
         assert status == 404
         assert response.get_json()["error"] == "Temp file not found"
 
-    monkeypatch.setattr(bills_module, "_parse_import_file_with_column_mapping", lambda *args, **kwargs: ([], "utf-8", ","))
+    monkeypatch.setattr(
+        bills_module,
+        "_parse_import_file_with_column_mapping",
+        lambda *args, **kwargs: ([], "utf-8", ","),
+    )
     empty_temp = tmp_path / "empty_generic.csv"
     empty_temp.write_text("交易时间,金额\n", encoding="utf-8")
     with bills_route_app.test_request_context(
@@ -1913,8 +1970,16 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         assert status == 400
         assert response.get_json()["error"] == "Missing session_id"
 
-    monkeypatch.setattr(service, "import_stage2_dedup", service.__class__.import_stage2_dedup.__get__(service, service.__class__))
-    monkeypatch.setattr(service, "import_stage3_confirm", service.__class__.import_stage3_confirm.__get__(service, service.__class__))
+    monkeypatch.setattr(
+        service,
+        "import_stage2_dedup",
+        service.__class__.import_stage2_dedup.__get__(service, service.__class__),
+    )
+    monkeypatch.setattr(
+        service,
+        "import_stage3_confirm",
+        service.__class__.import_stage3_confirm.__get__(service, service.__class__),
+    )
 
     async def _reset_selection(session_id: str) -> int:
         assert session_id == "sess-confirm"
@@ -2140,3 +2205,941 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         response, status = _unwrap_response(update_preview_route("sess-12"))
         assert status == 500
         assert response.get_json()["error"] == "update preview boom"
+
+
+def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remaining_paths(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """遗留删除、批量创建和批量导入路由应覆盖主要成功与失败分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    legacy_delete_route = _unwrap_all(bills_module.delete_bill_by_query)
+    batch_create_route = _unwrap_all(bills_module.batch_create_bills)
+    import_batch_route = _unwrap_all(bills_module.import_bills_batch)
+
+    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={}):
+        _set_request_user_id()
+        response, status = _unwrap_response(legacy_delete_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Missing id parameter"
+
+    db.bill_lookup[1] = None
+    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
+        _set_request_user_id()
+        response, status = _unwrap_response(legacy_delete_route())
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    db.bill_lookup[1] = {"source_account_id": 11, "destination_account_id": 22}
+    db.delete_bill_result = True
+    db.synced_accounts = []
+    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
+        _set_request_user_id()
+        payload = legacy_delete_route().get_json() or {}
+        assert payload == {"success": True}
+        assert db.synced_accounts == [11, 22]
+
+    db.delete_bill_result = False
+    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
+        _set_request_user_id()
+        response, status = _unwrap_response(legacy_delete_route())
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to delete bill"
+
+    db.bill_lookup[1] = RuntimeError("legacy delete boom")
+    with bills_route_app.test_request_context("/api/bills/delete", method="POST", json={"id": 1}):
+        _set_request_user_id()
+        response, status = _unwrap_response(legacy_delete_route())
+        assert status == 500
+        assert response.get_json()["error"] == "legacy delete boom"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        data="null",
+        content_type="application/json",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_create_route())
+        assert status == 400
+        assert response.get_json()["error"] == "transactions is required"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json={"transactions": ["bad-item"]},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_create_route())
+        assert status == 400
+        assert response.get_json()["error"] == "transactions[0] must be an object"
+
+    def _prepare_for_batch(
+        frontend_data: dict[str, Any],
+        _db: Any,
+        _category_engine: Any,
+        _adapter: Any,
+        _loop: Any,
+        _user_id: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        comment = str(frontend_data.get("comment") or "")
+        if comment == "bad-prepare":
+            raise ValueError("prepare bad input")
+        return ({"description": comment or "prepared"}, {"tag_ids": []})
+
+    monkeypatch.setattr(bills_module, "_prepare_backend_bill_for_create", _prepare_for_batch)
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json={"transactions": [{"comment": "ok"}, {"comment": "bad-prepare"}]},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_create_route())
+        payload = response.get_json() or {}
+        assert status == 400
+        assert payload["error"] == "prepare bad input"
+        assert payload["result"]["failedIndex"] == 1
+        assert payload["result"]["createdCount"] == 0
+
+    created_counter = {"value": 0}
+
+    def _create_for_batch(
+        backend_data: dict[str, Any],
+        _metadata: dict[str, Any],
+        _db: Any,
+        _adapter: Any,
+        _loop: Any,
+        _user_id: int,
+    ) -> tuple[int, dict[str, Any]]:
+        created_counter["value"] += 1
+        if backend_data["description"] == "boom":
+            raise RuntimeError("create boom")
+        created_id = 100 + created_counter["value"]
+        return created_id, {"id": str(created_id), "description": backend_data["description"]}
+
+    monkeypatch.setattr(bills_module, "_create_bill_and_build_response", _create_for_batch)
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json={"transactions": [{"comment": "first"}, {"comment": "boom"}]},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_create_route())
+        payload = response.get_json() or {}
+        assert status == 500
+        assert payload["error"] == "create boom"
+        assert payload["result"]["failedIndex"] == 1
+        assert payload["result"]["createdCount"] == 1
+        assert payload["result"]["ids"] == ["101"]
+
+    created_counter["value"] = 0
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json=[{"comment": "one"}, {"comment": "two"}],
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_create_route())
+        payload = response.get_json() or {}
+        assert status == 201
+        assert payload["success"] is True
+        assert payload["result"]["createdCount"] == 2
+        assert payload["result"]["ids"] == ["101", "102"]
+
+    with bills_route_app.test_request_context("/api/bills/batch", method="POST", json={}):
+        _set_request_user_id()
+        response, status = _unwrap_response(import_batch_route())
+        assert status == 400
+        assert response.get_json()["error"] == "file_path is required"
+
+    service.import_bills_result = {"success": True, "inserted": 2, "duplicates": 1}
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json={"file_path": "demo.csv"},
+    ):
+        _set_request_user_id()
+        payload = import_batch_route().get_json() or {}
+        assert payload == {"success": True, "result": {"success": True, "inserted": 2, "duplicates": 1}}
+
+    async def _raise_import_batch_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("batch import boom")
+
+    monkeypatch.setattr(service, "import_bills", _raise_import_batch_error)
+    with bills_route_app.test_request_context(
+        "/api/bills/batch",
+        method="POST",
+        json={"file_path": "demo.csv"},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(import_batch_route())
+        assert status == 500
+        assert response.get_json()["error"] == "batch import boom"
+
+
+def test_bills_upload_and_reconciliation_routes_cover_remaining_heavy_paths(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """上传导入与对账单路由应覆盖主要成功、筛选和异常分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    upload_route = _unwrap_all(bills_module.upload_and_import)
+    reconciliation_route = _unwrap_all(bills_module.get_reconciliation_statements)
+
+    with bills_route_app.test_request_context("/api/bills/import/upload", method="POST", data={}):
+        _set_request_user_id()
+        response, status = _unwrap_response(upload_route())
+        assert status == 400
+        assert response.get_json()["error"] == "No file provided"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={"file": (io.BytesIO(b"abc"), "")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(upload_route())
+        assert status == 400
+        assert response.get_json()["error"] == "No file selected"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={"file": (io.BytesIO(b"abc"), "bad.exe")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(upload_route())
+        assert status == 400
+        assert "File type not allowed" in response.get_json()["error"]
+
+    service.import_bills_calls = []
+    service.import_bills_result = {
+        "success": True,
+        "preview": [{"id": 1, "description": "早餐"}],
+        "total": 3,
+        "valid": 2,
+        "invalid": 1,
+        "inserted": 2,
+        "duplicates": 1,
+        "dedup_stats": {"similar": 1},
+        "parser_type": "wechat",
+        "errors": ["warn"],
+    }
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={
+            "file": (io.BytesIO(b"trade,data\n1,2\n"), "ok.csv"),
+            "parser_type": "wechat",
+            "preview_only": "false",
+        },
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(5)
+        payload = upload_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["inserted"] == 2
+        assert payload["data"]["parser_type"] == "wechat"
+        assert service.import_bills_calls[-1][1:] == ("wechat", False, 5)
+        assert list(tmp_path.iterdir()) == []
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={
+            "file": (io.BytesIO(b"trade,data\n1,2\n"), "preview.csv"),
+            "preview_only": "true",
+        },
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(6)
+        payload = upload_route().get_json() or {}
+        assert payload["success"] is True
+        assert service.import_bills_calls[-1][1:] == ("auto", True, 6)
+        remaining_files = list(tmp_path.iterdir())
+        assert len(remaining_files) == 1
+        assert remaining_files[0].suffix == ".csv"
+
+    for leftover in list(tmp_path.iterdir()):
+        leftover.unlink()
+
+    async def _raise_upload_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("upload boom")
+
+    monkeypatch.setattr(service, "import_bills", _raise_upload_error)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={"file": (io.BytesIO(b"trade,data\n1,2\n"), "boom.csv")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(upload_route())
+        assert status == 500
+        assert response.get_json()["error"] == "upload boom"
+
+    async def _query_reconciliation_bills(
+        *,
+        page: int,
+        page_size: int,
+        filters: dict[str, Any],
+        user_id: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        _ = (page, page_size, user_id)
+        if page_size == 1 and filters.get("end_date") == "2026-03-01":
+            return ([{"account_balance": 55.0}], 1)
+
+        return (
+            [
+                {"id": 1, "date": "2026-03-01", "type": "支出", "amount": 5.0, "source_account_id": 1},
+                {"id": 2, "date": "2026-03-02", "type": "收入", "amount": 10.0, "source_account_id": 1},
+                {
+                    "id": 3,
+                    "date": "2026-03-03",
+                    "type": "转账",
+                    "amount": 7.0,
+                    "source_account_id": 2,
+                    "destination_account_id": 1,
+                },
+                {
+                    "id": 4,
+                    "date": "2026-03-04",
+                    "type": "投资",
+                    "amount": 3.0,
+                    "source_account_id": 1,
+                    "destination_account_id": 2,
+                },
+                {"id": 5, "date": "2026-03-05", "type": "未知类型", "amount": 99.0, "source_account_id": 1},
+            ],
+            5,
+        )
+
+    monkeypatch.setattr(db, "query_bills", _query_reconciliation_bills)
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=1&start_time=0&end_time=0&category_ids=10,11&keyword=早餐",
+        method="GET",
+    ):
+        _set_request_user_id(3)
+        payload = reconciliation_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["openingBalance"] == 2000
+        assert payload["result"]["closingBalance"] == 2900
+        assert payload["result"]["totalInflows"] == 1700
+        assert payload["result"]["totalOutflows"] == 800
+        assert payload["result"]["netFlow"] == 900
+        assert payload["result"]["itemCount"] == 4
+        assert payload["result"]["transactions"][0]["accountOpeningBalance"] >= 0
+
+    start_time = int(bills_module.datetime.strptime("2026-03-01", "%Y-%m-%d").timestamp())
+    end_time = int(bills_module.datetime.strptime("2026-03-31", "%Y-%m-%d").timestamp())
+    with bills_route_app.test_request_context(
+        f"/api/bills/reconciliation_statements?account_id=1&start_time={start_time}&end_time={end_time}&type=4",
+        method="GET",
+    ):
+        _set_request_user_id()
+        payload = reconciliation_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["openingBalance"] == 5500
+
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=1&start_time=0",
+        method="GET",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(reconciliation_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Missing required parameters: account_id, start_time, end_time"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=abc&start_time=0&end_time=0",
+        method="GET",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(reconciliation_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid account_id: abc"
+
+    async def _missing_account(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(db, "get_account_by_id", _missing_account)
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=1&start_time=0&end_time=0",
+        method="GET",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(reconciliation_route())
+        assert status == 404
+        assert response.get_json()["error"] == "Account not found"
+
+    monkeypatch.setattr(db, "get_account_by_id", FakeBillsDB().get_account_by_id)
+
+    async def _raise_reconciliation_query(*_args: Any, **_kwargs: Any) -> tuple[list[dict[str, Any]], int]:
+        raise RuntimeError("reconciliation boom")
+
+    monkeypatch.setattr(db, "query_bills", _raise_reconciliation_query)
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=1&start_time=0&end_time=0",
+        method="GET",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(reconciliation_route())
+        assert status == 500
+        payload = response.get_json() or {}
+        assert payload["error"] == "reconciliation boom"
+        assert payload["message"] == "Failed to retrieve reconciliation statements"
+
+
+def test_bills_legacy_modify_route_covers_partial_update_and_error_paths(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """legacy modify 路由应覆盖简化备注更新、分类查询与失败分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    modify_route = _unwrap_all(bills_module.modify_bill)
+
+    with bills_route_app.test_request_context("/api/bills/modify", method="POST", json={}):
+        _set_request_user_id()
+        response, status = _unwrap_response(modify_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Missing id parameter"
+
+    db.bill_lookup[1] = None
+    with bills_route_app.test_request_context("/api/bills/modify", method="POST", json={"id": 1}):
+        _set_request_user_id()
+        response, status = _unwrap_response(modify_route())
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    db.bill_lookup[1] = {
+        "id": 1,
+        "type": "支出",
+        "source_account_id": 11,
+        "destination_account_id": 22,
+        "destination_amount": 34.5,
+    }
+    db.category_by_id = {10: {"main_category": "餐饮", "sub_category": "早餐"}}
+    db.synced_accounts = []
+    adapter.frontend_to_backend_result = (
+        {"amount": 12.3},
+        {"category_id": "10", "tag_ids": [7]},
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/modify",
+        method="POST",
+        json={"id": 1, "remark": "只改备注", "tagIds": [7]},
+    ):
+        _set_request_user_id(9)
+        payload = modify_route().get_json() or {}
+        assert payload == {"success": True, "result": {"id": "1"}}
+        assert db.synced_accounts == [11, 22, 11, 22]
+
+    db.synced_accounts = []
+    adapter.frontend_to_backend_result = (
+        {"type": "收入", "source_account_id": 99, "destination_account_id": 100},
+        {"category_id": "bad", "tag_ids": [8]},
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/modify",
+        method="POST",
+        json={"id": 1, "type": 2, "tagIds": [8]},
+    ):
+        _set_request_user_id()
+        payload = modify_route().get_json() or {}
+        assert payload == {"success": True, "result": {"id": "1"}}
+        assert db.synced_accounts == [11, 22, 99, 100]
+
+    db.update_bill_result = False
+    with bills_route_app.test_request_context(
+        "/api/bills/modify",
+        method="POST",
+        json={"id": 1, "type": 2},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(modify_route())
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to update bill"
+
+    db.update_bill_result = True
+    db.bill_lookup[1] = RuntimeError("modify boom")
+    with bills_route_app.test_request_context(
+        "/api/bills/modify",
+        method="POST",
+        json={"id": 1, "type": 2},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(modify_route())
+        assert status == 500
+        assert response.get_json()["error"] == "modify boom"
+
+
+def test_parse_import_file_covers_parser_first_and_generic_fallback_paths(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """parse_import_file 应覆盖 parser-first、通用列映射和异常分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+
+    parse_route = _unwrap_all(bills_module.parse_import_file)
+
+    class FakeParserFactory:
+        def __init__(self) -> None:
+            self.detect_result: dict[str, Any] | None = {"id": "wechat", "name": "微信支付"}
+            self.parsed_rows: list[dict[str, Any]] = [
+                {"trade_time": "2026-03-01 08:00:00", "amount": 12.34, "description": "早餐"}
+            ]
+
+        def detect_parser(self, file_path: str) -> dict[str, Any] | None:
+            _ = file_path
+            return self.detect_result
+
+        def parse(self, file_path: str, parser_type: str | None = None) -> list[dict[str, Any]]:
+            _ = (file_path, parser_type)
+            return [dict(item) for item in self.parsed_rows]
+
+    fake_parser_factory = FakeParserFactory()
+    fake_factory_module = SimpleNamespace(
+        PARSER_CLASS_REGISTRY={"wechat": object()},
+        ParserFactory=lambda: fake_parser_factory,
+    )
+    import sys
+
+    monkeypatch.setitem(sys.modules, "bill_analyser.parsers.factory", fake_factory_module)
+
+    async def _prepare_import_review(
+        bills: list[dict[str, Any]],
+        _db: Any,
+        _bill_service: Any,
+        _user_id: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, int]]:
+        enriched = [dict(item) for item in bills]
+        return (
+            enriched,
+            {"id_to_account": {}, "name_to_id": {}, "id_to_name": {}},
+            {"name_to_id": {}},
+            {"learning_seeded": 0, "learning_replayed": 0},
+        )
+
+    monkeypatch.setattr(bills_module, "_prepare_import_review_bills", _prepare_import_review)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={"file": (io.BytesIO(b"a,b\n1,2\n"), "wechat.csv"), "fileType": "auto"},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(3)
+        payload = parse_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parserType"] == "wechat"
+        assert payload["result"]["detectedParserType"] == "wechat"
+        assert payload["result"]["totalCount"] == 1
+
+    assert list(tmp_path.iterdir()) == []
+
+    fake_parser_factory.detect_result = {"id": "wechat", "name": "微信支付"}
+    fake_parser_factory.parsed_rows = []
+    db.import_configs = [{"field_mappings": {}, "sample_headers": [], "use_count": 1}]
+    monkeypatch.setattr(
+        bills_module,
+        "_parse_import_file_with_column_mapping",
+        lambda *args, **kwargs: ([{"trade_time": "2026-03-02 09:00:00", "amount": 20.0}], "utf-8", ","),
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={
+            "file": (io.BytesIO(b"a,b\n1,2\n"), "generic.csv"),
+            "fileType": "generic",
+            "columnMapping": '{"1": 0}',
+            "transactionTypeMapping": "{}",
+            "hasHeaderLine": "true",
+        },
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(4)
+        payload = parse_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parserType"] == "generic"
+        assert payload["result"]["totalCount"] == 1
+
+    fake_parser_factory.detect_result = None
+    monkeypatch.setattr(
+        bills_module,
+        "_parse_import_file_with_auto_mapping",
+        lambda *args, **kwargs: (
+            [{"trade_time": "2026-03-03 10:00:00", "amount": 30.0}],
+            {"columnMapping": {"1": 0}},
+            "utf-8",
+            ",",
+        ),
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={"file": (io.BytesIO(b"a,b\n1,2\n"), "auto.csv"), "fileType": "auto"},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(5)
+        payload = parse_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parserType"] == "generic"
+        assert payload["result"]["detectedParserType"] == ""
+        assert payload["result"]["totalCount"] == 1
+
+    def _raise_review_error(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("review boom")
+
+    monkeypatch.setattr(bills_module, "_prepare_import_review_bills", _raise_review_error)
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={"file": (io.BytesIO(b"a,b\n1,2\n"), "boom.csv"), "fileType": "auto"},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(parse_route())
+        assert status == 500
+        assert response.get_json()["error"] == "review boom"
+
+
+def test_bills_update_import_config_preview_and_stage1_cleanup_cover_more_tail_branches(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """补齐 update/list/preview/stage1 的剩余尾部分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    update_bill_route = _unwrap_all(bills_module.update_bill)
+    list_configs_route = _unwrap_all(bills_module.list_import_configs)
+    preview_route = _unwrap_all(bills_module.preview_import_file)
+    stage1_route = _unwrap_all(bills_module.import_stage1_parse)
+    upload_route = _unwrap_all(bills_module.upload_and_import)
+
+    db.bill_lookup[1] = {
+        "id": 1,
+        "description": "旧账单",
+        "counterparty": "旧商户",
+        "source_account_id": 11,
+        "destination_account_id": 22,
+        "type": "支出",
+    }
+    db.synced_accounts = []
+    with bills_route_app.test_request_context(
+        "/api/bills/1",
+        method="PUT",
+        json={"description": "后端格式改描述"},
+    ):
+        _set_request_user_id(2)
+        payload = update_bill_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["id"] == 1
+        assert db.synced_accounts == [11, 22, 11, 22]
+
+    db.bill_lookup[1] = {
+        "id": 1,
+        "description": "旧账单",
+        "counterparty": "旧商户",
+        "source_account_id": 11,
+        "destination_account_id": 22,
+        "type": "支出",
+    }
+    db.synced_accounts = []
+    adapter.frontend_to_backend_result = (
+        {"type": "支出", "source_account_id": 11, "destination_account_id": 22},
+        {"category_id": "bad"},
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/1",
+        method="PUT",
+        json={"sourceAmount": 100, "sourceAccountId": "11"},
+    ):
+        _set_request_user_id(2)
+        payload = update_bill_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["id"] == 1
+
+    async def _raise_list_configs_error(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise RuntimeError("list configs boom")
+
+    monkeypatch.setattr(db, "get_import_configs", _raise_list_configs_error)
+    with bills_route_app.test_request_context("/api/bills/import/configs", method="GET"):
+        _set_request_user_id()
+        response, status = _unwrap_response(list_configs_route())
+        assert status == 500
+        assert response.get_json()["error"] == "list configs boom"
+
+    preview_file = tmp_path / "delete_fail.csv"
+    preview_file.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bills_module,
+        "_load_generic_import_rows",
+        lambda *_args, **_kwargs: ([ ["交易时间", "金额"], ["2026-03-01", "12.34"] ], "utf-8", ","),
+    )
+    monkeypatch.setattr(bills_module, "_trim_generic_import_rows_to_header", lambda rows: (rows, 0))
+    original_remove = bills_module.os.remove
+    removal_calls: list[str] = []
+
+    def _remove_with_os_error(path: Any) -> None:
+        if str(path).endswith("delete_fail.csv"):
+            removal_calls.append(str(path))
+            raise OSError("cleanup fail")
+        original_remove(path)
+
+    monkeypatch.setattr(bills_module.os, "remove", _remove_with_os_error)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/preview",
+        method="POST",
+        data={"file": (io.BytesIO("交易时间,金额\n2026-03-01,12.34\n".encode("utf-8")), "delete_fail.csv")},
+        content_type="multipart/form-data",
+    ):
+        payload = preview_route().get_json() or {}
+        assert payload["success"] is True
+        assert removal_calls
+
+    async def _stage1_with_matched_cleanup(
+        file_paths: list[str],
+        session_id: str,
+        user_id: int,
+    ) -> dict[str, Any]:
+        _ = user_id
+        return {
+            "success": True,
+            "session_id": session_id,
+            "total_parsed": 1,
+            "file_results": [{"file": file_paths[0], "success": True, "count": 1}],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(service, "import_stage1_parse", _stage1_with_matched_cleanup)
+    stage1_remove_calls: list[str] = []
+
+    def _remove_stage1(path: Any) -> None:
+        if str(path).endswith("matched.csv"):
+            stage1_remove_calls.append(str(path))
+            raise RuntimeError("stage1 cleanup boom")
+        original_remove(path)
+
+    monkeypatch.setattr(bills_module.os, "remove", _remove_stage1)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse",
+        method="POST",
+        data={"files": [(io.BytesIO(b"a,b\n1,2\n"), "matched.csv")]},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(6)
+        payload = stage1_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["unmatched_files"] == []
+        assert stage1_remove_calls
+
+    monkeypatch.setattr(bills_module.os, "remove", original_remove)
+
+    service.import_bills_result = {
+        "success": True,
+        "preview": [{"id": 1}],
+        "total": 1,
+        "valid": 1,
+        "invalid": 0,
+        "inserted": 1,
+        "duplicates": 0,
+        "dedup_stats": None,
+        "parser_type": "wechat",
+        "errors": [],
+    }
+
+    upload_remove_calls: list[str] = []
+
+    def _remove_upload_cleanup(path: Any) -> None:
+        if str(path).endswith("cleanup.csv"):
+            upload_remove_calls.append(str(path))
+            raise RuntimeError("upload cleanup boom")
+        original_remove(path)
+
+    monkeypatch.setattr(bills_module.os, "remove", _remove_upload_cleanup)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={"file": (io.BytesIO(b"abc"), "cleanup.csv")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        payload = upload_route().get_json() or {}
+        assert payload["success"] is True
+        assert upload_remove_calls
+    monkeypatch.setattr(bills_module.os, "remove", original_remove)
+
+
+def test_bills_get_list_and_delete_routes_cover_remaining_type_and_sync_branches(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """账单列表与删除路由应覆盖剩余类型映射和删除后同步失败分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+
+    get_bills_route = _unwrap_all(bills_module.get_bills)
+    delete_bill_route = _unwrap_all(bills_module.delete_bill)
+
+    async def _noop_filters(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(bills_module, "_apply_common_transaction_filters", _noop_filters)
+    db.query_bills_result = ([{"id": 1, "description": "早餐"}], 1)
+
+    with bills_route_app.test_request_context("/api/bills/?type=999&page=1&page_size=20", method="GET"):
+        _set_request_user_id(3)
+        payload = get_bills_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["total"] == 1
+        assert payload["result"]["total_pages"] == 1
+
+    with bills_route_app.test_request_context("/api/bills/?type=%E6%94%AF%E5%87%BA", method="GET"):
+        _set_request_user_id(3)
+        payload = get_bills_route().get_json() or {}
+        assert payload["success"] is True
+
+    async def _raise_query_error(*_args: Any, **_kwargs: Any) -> tuple[list[dict[str, Any]], int]:
+        raise RuntimeError("list boom")
+
+    monkeypatch.setattr(db, "query_bills", _raise_query_error)
+    with bills_route_app.test_request_context("/api/bills/?type=2", method="GET"):
+        _set_request_user_id()
+        response, status = _unwrap_response(get_bills_route())
+        assert status == 500
+        assert response.get_json()["error"] == "list boom"
+
+    monkeypatch.setattr(db, "query_bills", FakeBillsDB().query_bills)
+    db.bill_lookup[1] = {"id": 1, "source_account_id": 11, "destination_account_id": 22}
+    db.delete_bill_result = True
+
+    async def _sync_fail(_account_id: int) -> None:
+        raise RuntimeError("sync delete boom")
+
+    monkeypatch.setattr(db, "sync_account_balance", _sync_fail)
+    with bills_route_app.test_request_context("/api/bills/1", method="DELETE"):
+        _set_request_user_id()
+        payload = delete_bill_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] is True
+
+
+def test_prepare_backend_bill_for_create_covers_missing_invest_account_and_unknown_type_default() -> None:
+    """创建前预处理应覆盖投资目标账户缺失与未知类型默认分类分支。"""
+
+    class _LocalRunnerLoop:
+        @staticmethod
+        def run_until_complete(coro: Any) -> Any:
+            return asyncio.run(coro)
+
+    class _LocalCategoryEngine:
+        @staticmethod
+        def match_category(_backend_data: dict[str, Any]) -> tuple[str | None, str | None]:
+            return None, None
+
+    class _NoInvestAccountDB:
+        async def get_all_accounts(self, *, user_id: int) -> list[dict[str, Any]]:
+            _ = user_id
+            return [{"id": 5, "name": "普通账户"}]
+
+        async def get_category_by_id(self, category_id: int, *, user_id: int) -> dict[str, Any] | None:
+            _ = (category_id, user_id)
+            return None
+
+    class _UnknownTypeAdapter:
+        @staticmethod
+        def frontend_to_backend(_frontend_data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+            return (
+                {
+                    "type": "神秘类型",
+                    "amount": 66.0,
+                    "payment_method": "现金",
+                    "source_account_id": 0,
+                    "destination_account_id": 0,
+                },
+                {"auto_invest_account": True, "category_id": "bad"},
+            )
+
+    backend_data, metadata = bills_module._prepare_backend_bill_for_create(
+        {"description": "测试账单"},
+        _NoInvestAccountDB(),
+        _LocalCategoryEngine(),
+        _UnknownTypeAdapter(),
+        _LocalRunnerLoop(),
+        1,
+    )
+
+    assert metadata == {"auto_invest_account": True, "category_id": "bad"}
+    assert backend_data["source_account_id"] == 5
+    assert backend_data["destination_account_id"] == 0
+    assert backend_data["main_category"] == "其他"
+    assert backend_data["sub_category"] == ""

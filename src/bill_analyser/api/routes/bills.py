@@ -23,9 +23,16 @@ from werkzeug.utils import secure_filename
 from bill_analyser.api.config.bills import (
     ALLOWED_BILLS_FILE_EXTENSIONS,
     ALLOWED_BILLS_PICTURE_EXTENSIONS,
+    AUTO_TRANSACTION_TYPE_MAPPING,
+    DEFAULT_BILL_CATEGORY_MAPPING,
+    GENERIC_IMPORT_DATE_HEADERS,
+    GENERIC_IMPORT_EXPENSE_AMOUNT_HEADERS,
+    GENERIC_IMPORT_INCOME_AMOUNT_HEADERS,
+    GENERIC_IMPORT_TIME_HEADERS,
     IMPORT_CONFIG_BASE_WEIGHT,
     IMPORT_CONFIG_USE_COUNT_CAP,
     IMPORT_CONFIG_USE_COUNT_FACTOR,
+    IMPORT_COLUMN_TYPE_KEYWORDS,
     IMPORT_HEADER_ACCEPT_SCORE,
     IMPORT_HEADER_CANDIDATE_MIN_SCORE,
     IMPORT_HEADER_CONTEXT_SCORE,
@@ -47,6 +54,7 @@ from bill_analyser.api.config.bills import (
     IMPORT_HEADER_SEMANTIC_SCORE,
     IMPORT_HEADER_STRONG_EXACT_SCORE,
     IMPORT_HEADER_TYPE_HINT_SCORE,
+    LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE,
     MAX_BILLS_FILE_SIZE,
 )
 from bill_analyser.constants import UPLOADS_DIR
@@ -150,76 +158,6 @@ async def _apply_common_transaction_filters(args, filters, db, user_id: int):
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_BILLS_FILE_EXTENSIONS
-
-
-IMPORT_COLUMN_TYPE_KEYWORDS = {
-    1: ["交易时间", "入账时间", "记账时间", "发生时间", "交易日期", "时间", "日期", "datetime", "date", "time"],
-    2: ["时区", "timezone", "tz"],
-    3: ["交易类型", "收支类型", "收支", "收/支", "类型", "类别", "type"],
-    4: ["分类", "一级分类", "主分类", "category"],
-    5: ["子分类", "二级分类", "次分类", "subcategory", "subcategoryname"],
-    6: ["账户", "账户名", "账户名称", "账号", "付款账户", "支付账户", "account"],
-    7: ["币种", "货币", "currency"],
-    8: ["金额", "交易金额", "发生金额", "收支金额", "amount", "money"],
-    9: [
-        "对方账户",
-        "对方账号",
-        "对方名称",
-        "对方户名",
-        "相关账户",
-        "转入账户",
-        "目标账户",
-        "收款账户",
-        "destinationaccount",
-        "relatedaccount",
-    ],
-    10: ["对方币种", "目标币种", "转入币种", "destinationcurrency", "relatedcurrency"],
-    11: ["对方金额", "目标金额", "转入金额", "收款金额", "destinationamount", "relatedamount"],
-    12: ["地理位置", "位置", "经纬度", "坐标", "location", "geolocation"],
-    13: ["标签", "标记", "tags", "tag"],
-    14: ["备注", "摘要", "描述", "说明", "附言", "用途", "memo", "remark", "description", "note", "detail"],
-}
-
-LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE = {
-    "date": 1,
-    "time": 1,
-    "type": 3,
-    "category": 4,
-    "subcategory": 5,
-    "sub_category": 5,
-    "account": 6,
-    "accountname": 6,
-    "currency": 7,
-    "amount": 8,
-    "relatedaccount": 9,
-    "relatedaccountname": 9,
-    "relatedcurrency": 10,
-    "relatedamount": 11,
-    "geolocation": 12,
-    "tags": 13,
-    "description": 14,
-    "comment": 14,
-    "memo": 14,
-}
-
-AUTO_TRANSACTION_TYPE_MAPPING = {
-    "支出": 3,
-    "收入": 2,
-    "支": 3,
-    "收": 2,
-    "转账": 4,
-    "投资": 5,
-    "退款": 2,
-    "expense": 3,
-    "income": 2,
-    "transfer": 4,
-    "investment": 5,
-}
-
-GENERIC_IMPORT_DATE_HEADERS = ["交易日期", "日期", "入账日期", "记账日期"]
-GENERIC_IMPORT_TIME_HEADERS = ["交易时间", "入账时间", "记账时间", "发生时间", "时间"]
-GENERIC_IMPORT_INCOME_AMOUNT_HEADERS = ["收入金额", "存入金额", "贷方金额", "入账金额", "收款金额", "收入"]
-GENERIC_IMPORT_EXPENSE_AMOUNT_HEADERS = ["支出金额", "借方金额", "出账金额", "付款金额", "付出金额", "支出"]
 
 
 def _normalize_import_suggestion_text(value: Any) -> str:
@@ -553,13 +491,19 @@ def _detect_csv_delimiter(sample_text: str, fallback: str = ",") -> str:
     if not sample_text:
         return fallback
 
+    candidates = [",", "\t", ";", "|"]
+
     try:
-        return csv.Sniffer().sniff(sample_text).delimiter
+        detected_delimiter = csv.Sniffer().sniff(sample_text).delimiter
+        if detected_delimiter in candidates and sample_text.count(detected_delimiter) > 0:
+            return detected_delimiter
     except csv.Error:
-        candidates = [",", "\t", ";", "|"]
-        counts = {candidate: sample_text.count(candidate) for candidate in candidates}
-        best = max(counts.items(), key=lambda item: item[1])
-        return best[0] if best[1] > 0 else fallback
+
+        pass
+
+    counts = {candidate: sample_text.count(candidate) for candidate in candidates}
+    best = max(counts.items(), key=lambda item: item[1])
+    return best[0] if best[1] > 0 else fallback
 
 
 def _load_generic_import_rows(
@@ -2177,15 +2121,9 @@ def _prepare_backend_bill_for_create(
             backend_data["sub_category"] = sub_cat
             logger.info("自动分类（规则匹配）: %s - %s", main_cat, sub_cat)
         else:
-            default_categories = {
-                "收入": ("工资", ""),
-                "支出": ("其他", "日常支出"),
-                "转账": ("转账", ""),
-                "投资": ("投资理财", "证券投资"),
-            }
             bill_type = backend_data.get("type", "支出")
-            if bill_type in default_categories:
-                backend_data["main_category"], backend_data["sub_category"] = default_categories[bill_type]
+            if bill_type in DEFAULT_BILL_CATEGORY_MAPPING:
+                backend_data["main_category"], backend_data["sub_category"] = DEFAULT_BILL_CATEGORY_MAPPING[bill_type]
                 logger.info(
                     "自动分类（默认分类）: %s - %s", backend_data["main_category"], backend_data["sub_category"]
                 )

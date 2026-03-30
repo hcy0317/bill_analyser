@@ -176,6 +176,8 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 用户资料主链已扩展到应用云同步设置 REST：`GET|PUT|DELETE /api/profile/cloud-settings`；旧 `v1/users/settings/cloud/*.json` 已停止使用，并由 legacy 404 回归保护
 - 2FA 主链已扩展到完整 REST 写接口：`GET /api/2fa/status`、`POST /api/2fa/enable/request`、`POST /api/2fa/enable/confirm`、`POST /api/2fa/disable`、`POST /api/2fa/recovery/regenerate`；旧 `v1/users/2fa/*.json` 写接口已停止使用，并由 legacy 404 回归保护
 - 2FA 登录验证链路已补齐 REST：`POST /api/2fa/verify`、`POST /api/2fa/recovery/verify`；`/api/auth/login` 在用户启用 2FA 时返回 `need2FA` 与待验证 token，旧 `/api/2fa/authorize.json`、`/api/2fa/recovery.json` 已停止使用，并由 legacy 404 回归保护
+- 2FA 恢复码当前已从纯内存缓存升级为数据库持久化哈希存储：`db.py` 新增 `user_two_factor_recovery_codes` 表，启用 2FA / 重生成恢复码时会整体替换当前批次，恢复码登录校验按哈希一次性消费，旧批次在重生成后立即失效
+- 认证域敏感安全动作当前会同时写认证日志与操作审计：`2fa_enabled`、`2fa_disabled`、`2fa_recovery_regenerated`、`2fa_recovery_code_used` 通过 `audit_logs` 持久化关键安全事件上下文
 - OAuth2 callback authorize 已收口到 `POST /api/auth/oauth2/authorize`；旧 `/api/oauth2/authorize.json` 已停止使用，并由 legacy 404 回归保护。当前后端仅提供 disabled-safe / not-implemented 语义，待后续真实 OAuth2 provider exchange 主链补齐
 - token 会话主链已切到认证域 REST：`GET|DELETE /api/tokens`、`POST /api/tokens/api`、`POST /api/tokens/mcp`、`POST /api/tokens/refresh`、`DELETE /api/tokens/<id>`；旧 `v1/tokens/generate*.json`、`v1/tokens/revoke*.json` 与 `v1/tokens/refresh.json` 已收口到新主链，并由 legacy 回归保护
 - 认证错误契约已补齐：`POST /api/auth/login` 与 `POST /api/tokens/refresh` 在请求体为空、`null` 或其他非对象 JSON 时返回 `400 Invalid request`，不再落入 `500`。
@@ -192,7 +194,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 标签域：`tags`、`bill_tags`
 - 模板域：`bill_templates`、`recurring_bills`
 - 预算域：`budgets`、`budget_history`
-- 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`
+- 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
 
 ### 6.1.1 模板域当前漂移清单

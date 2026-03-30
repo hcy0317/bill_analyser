@@ -80,6 +80,9 @@ class FakeAuthDB:
         self.user_locked = False
         self.user_external_auths: list[dict[str, Any]] = []
         self.deleted_external_auths: list[tuple[int, str]] = []
+        self.replaced_recovery_codes: list[tuple[int, list[str]]] = []
+        self.cleared_recovery_codes: list[int] = []
+        self.recovery_codes_by_user: dict[int, list[str]] = {}
 
     async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         if self.user_by_id is None:
@@ -135,6 +138,30 @@ class FakeAuthDB:
 
     async def create_audit_log(self, **payload: Any) -> None:
         self.auth_logs.append(payload)
+
+    async def replace_two_factor_recovery_codes(self, user_id: int, recovery_codes: list[str]) -> int:
+        self.replaced_recovery_codes.append((user_id, list(recovery_codes)))
+        self.recovery_codes_by_user[user_id] = [str(code).strip().upper() for code in recovery_codes]
+        return len(recovery_codes)
+
+    async def consume_two_factor_recovery_code(self, user_id: int, recovery_code: str) -> bool:
+        normalized_code = str(recovery_code).strip().upper()
+        active_codes = self.recovery_codes_by_user.get(user_id, [])
+        if normalized_code not in active_codes:
+            return False
+
+        active_codes.remove(normalized_code)
+        self.recovery_codes_by_user[user_id] = active_codes
+        return True
+
+    async def clear_two_factor_recovery_codes(self, user_id: int) -> int:
+        active_count = len(self.recovery_codes_by_user.get(user_id, []))
+        self.cleared_recovery_codes.append(user_id)
+        self.recovery_codes_by_user[user_id] = []
+        return active_count
+
+    async def count_active_two_factor_recovery_codes(self, user_id: int) -> int:
+        return len(self.recovery_codes_by_user.get(user_id, []))
 
     async def get_user_data_statistics(self, user_id: int) -> dict[str, Any]:
         _ = user_id
@@ -1224,6 +1251,26 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
     assert payload["result"]["token"] == "access"
     assert payload["result"]["recoveryCodes"] == ["ABCD-1234"]
 
+    class ConfirmPersistErrorDB(FakeAuthDB):
+        async def replace_two_factor_recovery_codes(self, user_id: int, recovery_codes: list[str]) -> int:
+            self.replaced_recovery_codes.append((user_id, list(recovery_codes)))
+            raise RuntimeError("persist boom")
+
+    confirm_persist_error_db = ConfirmPersistErrorDB(user_by_id={"id": 1, "username": "alice"})
+    confirm_persist_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, confirm_persist_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: confirm_persist_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/enable/confirm",
+        method="POST",
+        json={"secret": "SECRET123", "passcode": "111111"},
+    ):
+        response, status = _unwrap_response(confirm_route())
+        assert status == 500
+        assert response.get_json()["message"] == "persist boom"
+        assert confirm_persist_error_db.updated_users[-1] == (1, {"two_factor_enabled": 0, "two_factor_secret": ""})
+        assert confirm_persist_error_db.cleared_recovery_codes == [1]
+
     with auth_route_unit_app.test_request_context("/api/auth/2fa/disable", method="POST", json={}):
         response, status = _unwrap_response(disable_route())
         assert status == 400
@@ -1449,7 +1496,10 @@ def test_2fa_verify_and_recovery_verify_routes_cover_error_and_success_paths(
         assert response.get_json()["message"] == "Invalid or expired 2FA token"
 
     monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": 1})
-    monkeypatch.setattr(auth_module, "_consume_recovery_code", lambda *_args, **_kwargs: False)
+    recovery_invalid_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "two_factor_enabled": 1})
+    recovery_invalid_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, recovery_invalid_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: recovery_invalid_db)
     with auth_route_unit_app.test_request_context(
         "/api/auth/2fa/recovery/verify",
         method="POST",
@@ -1460,7 +1510,6 @@ def test_2fa_verify_and_recovery_verify_routes_cover_error_and_success_paths(
         assert status == 401
         assert response.get_json()["error"] == "Invalid recovery code"
 
-    monkeypatch.setattr(auth_module, "_consume_recovery_code", lambda *_args, **_kwargs: True)
     recovery_missing_db = FakeAuthDB(user_by_id=None)
     recovery_missing_loop = FakeLoop()
     _install_fake_loop(monkeypatch, recovery_missing_loop)
@@ -1475,7 +1524,8 @@ def test_2fa_verify_and_recovery_verify_routes_cover_error_and_success_paths(
         assert status == 404
         assert response.get_json()["error"] == "User not found"
 
-    recovery_success_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice"})
+    recovery_success_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "two_factor_enabled": 1})
+    recovery_success_db.recovery_codes_by_user[1] = ["ABCD-1234"]
     recovery_success_loop = FakeLoop()
     _install_fake_loop(monkeypatch, recovery_success_loop)
     monkeypatch.setattr(auth_module, "get_app_context", lambda: recovery_success_db)
@@ -2852,3 +2902,29 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
         response, status = _unwrap_response(clear_all_route())
         assert status == 500
         assert response.get_json()["message"] == "clear all verify boom"
+
+    bad_hash_clear_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": "not-a-valid-bcrypt-hash"})
+    bad_hash_clear_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, bad_hash_clear_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: bad_hash_clear_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/transactions",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_transactions_route())
+        assert status == 200
+        assert response.get_json()["success"] is True
+
+    bad_hash_clear_all_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": "not-a-valid-bcrypt-hash"})
+    bad_hash_clear_all_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, bad_hash_clear_all_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: bad_hash_clear_all_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/all",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_all_route())
+        assert status == 200
+        assert response.get_json()["success"] is True

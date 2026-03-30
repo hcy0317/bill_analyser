@@ -7,6 +7,7 @@ Accounts API Routes - 账户相关API端点
 import asyncio
 from typing import Any, cast
 
+import bcrypt
 from flask import Blueprint, current_app, jsonify, request
 
 from bill_analyser.api.adapters.account_adapter import AccountAdapter
@@ -37,6 +38,20 @@ def _run_async(coroutine):
 def _get_request_user_id() -> int:
     """获取认证中间件注入的当前用户 ID。"""
     return int(getattr(request, "user_id", 0) or 0)
+
+
+def _verify_sensitive_operation_password(db, user_id: int, password: str) -> bool:
+    """优先验证当前用户密码，必要时回退到全局操作密码。"""
+    user = _run_async(db.get_user_by_id(user_id)) if hasattr(db, "get_user_by_id") else None
+    password_hash = (user or {}).get("password_hash", "")
+    if password_hash and password:
+        try:
+            if bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
+                return True
+        except ValueError:
+            logger.warning("敏感操作密码校验失败：password_hash 格式无效, user_id=%s", user_id)
+
+    return bool(_run_async(db.verify_operation_password(password))) if hasattr(db, "verify_operation_password") else False
 
 
 @bp.route("/", methods=["GET"])
@@ -417,7 +432,7 @@ def move_all_transactions_rest(account_id: int):  # pylint: disable=too-many-ret
         db = get_app_context()
         user_id = _get_request_user_id()
 
-        password_valid = _run_async(db.verify_operation_password(password))
+        password_valid = _verify_sensitive_operation_password(db, user_id, password)
         if not password_valid:
             _run_async(
                 db.create_audit_log(
@@ -491,7 +506,7 @@ def clear_all_transactions_by_account_rest(account_id: int):  # pylint: disable=
         db = get_app_context()
         user_id = _get_request_user_id()
 
-        password_valid = _run_async(db.verify_operation_password(password))
+        password_valid = _verify_sensitive_operation_password(db, user_id, password)
         if not password_valid:
             _run_async(
                 db.create_audit_log(

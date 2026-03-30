@@ -671,6 +671,19 @@ class Database:
         """)
 
         await conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_two_factor_recovery_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            code_hash TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, code_hash),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """)
+
+        await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_external_auths (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -708,6 +721,14 @@ class Database:
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_user ON auth_logs(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_event ON auth_logs(event_type, created_at)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_logs_created ON auth_logs(created_at)")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_two_factor_recovery_codes_user "
+            "ON user_two_factor_recovery_codes(user_id, used_at)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_two_factor_recovery_codes_hash "
+            "ON user_two_factor_recovery_codes(user_id, code_hash)"
+        )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id)")
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_external_auths_type ON user_external_auths(external_auth_type)"
@@ -1386,6 +1407,20 @@ class Database:
         ]
         key_string = "|".join(key_fields)
         return hashlib.md5(key_string.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_two_factor_recovery_code(recovery_code: str) -> str:
+        """标准化 2FA 恢复码文本。"""
+        return str(recovery_code or "").strip().upper()
+
+    @classmethod
+    def _hash_two_factor_recovery_code(cls, recovery_code: str) -> str:
+        """对 2FA 恢复码执行稳定哈希，避免持久化明文。"""
+        normalized_code = cls._normalize_two_factor_recovery_code(recovery_code)
+        if not normalized_code:
+            return ""
+
+        return hashlib.sha256(f"2fa-recovery:{normalized_code}".encode()).hexdigest()
 
     @log_method
     async def insert_bills(self, bills: list[dict[str, Any]], batch_id: str | None = None, user_id: int = 1) -> int:
@@ -5257,6 +5292,87 @@ class Database:
         )
 
         await conn.commit()
+
+    @log_method
+    async def replace_two_factor_recovery_codes(self, user_id: int, recovery_codes: list[str]) -> int:
+        """替换用户当前有效的 2FA 恢复码（仅保存哈希）。"""
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+
+        try:
+            seen_hashes: set[str] = set()
+            hashed_payloads: list[tuple[int, str, str, str]] = []
+            for recovery_code in recovery_codes:
+                code_hash = self._hash_two_factor_recovery_code(recovery_code)
+                if not code_hash or code_hash in seen_hashes:
+                    continue
+
+                seen_hashes.add(code_hash)
+                hashed_payloads.append((user_id, code_hash, now, now))
+
+            await conn.execute("DELETE FROM user_two_factor_recovery_codes WHERE user_id = ?", (user_id,))
+
+            if hashed_payloads:
+                await conn.executemany(
+                    """
+                    INSERT INTO user_two_factor_recovery_codes (
+                        user_id, code_hash, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    hashed_payloads,
+                )
+
+            await conn.commit()
+            self.logger.info("替换用户 2FA 恢复码: user_id=%s, count=%s", user_id, len(hashed_payloads))
+            return len(hashed_payloads)
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
+    async def consume_two_factor_recovery_code(self, user_id: int, recovery_code: str) -> bool:
+        """一次性消费用户恢复码；已使用或不存在时返回 False。"""
+        code_hash = self._hash_two_factor_recovery_code(recovery_code)
+        if not code_hash:
+            return False
+
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        cursor = await conn.execute(
+            """
+            UPDATE user_two_factor_recovery_codes
+            SET used_at = ?, updated_at = ?
+            WHERE user_id = ? AND code_hash = ? AND used_at IS NULL
+            """,
+            (now, now, user_id, code_hash),
+        )
+        await conn.commit()
+
+        success = cursor.rowcount > 0
+        self.logger.info("消费用户 2FA 恢复码: user_id=%s, success=%s", user_id, success)
+        return success
+
+    @log_method
+    async def clear_two_factor_recovery_codes(self, user_id: int) -> int:
+        """清空用户全部恢复码。"""
+        conn = await self._get_connection()
+        cursor = await conn.execute("DELETE FROM user_two_factor_recovery_codes WHERE user_id = ?", (user_id,))
+        await conn.commit()
+
+        cleared_count = cursor.rowcount
+        self.logger.info("清空用户 2FA 恢复码: user_id=%s, count=%s", user_id, cleared_count)
+        return cleared_count
+
+    @log_method
+    async def count_active_two_factor_recovery_codes(self, user_id: int) -> int:
+        """返回用户当前未使用的恢复码数量。"""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT COUNT(*) AS count FROM user_two_factor_recovery_codes WHERE user_id = ? AND used_at IS NULL",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return int((row["count"] if row else 0) or 0)
 
     @log_method
     async def get_auth_logs(

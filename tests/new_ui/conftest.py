@@ -2,6 +2,7 @@
 测试配置和Fixtures
 """
 from collections import defaultdict
+import os
 import uuid
 import pytest
 import pytest_asyncio
@@ -115,6 +116,17 @@ def auth_context(client, auth_identity):
 def auth_headers(auth_context):
     """返回可复用的认证请求头。"""
     return auth_context['headers']
+
+
+@pytest.fixture(scope="session")
+def operation_password(db):
+    """返回与运行时密码校验逻辑一致的操作密码。"""
+    env_password = os.getenv('BILL_ANALYSER_OPERATION_PASSWORD')
+    if env_password:
+        return env_password
+
+    stored_password = asyncio.run(db.get_app_setting('operation_password'))
+    return stored_password or 'admin123'
 
 
 @pytest.fixture(scope="session")

@@ -191,7 +191,7 @@ def test_account_rest_hide_move_and_delete_subaccount(client, auth_headers):
     assert not parent_detail_data['result'].get('subAccounts')
 
 
-def test_account_rest_move_and_clear_transactions(client, auth_headers):
+def test_account_rest_move_and_clear_transactions(client, auth_headers, operation_password):
     """账户相关剩余批量动作应走 REST 扩展接口。"""
     source_response = client.post('/api/accounts/', json={
         'name': 'REST迁移源账户',
@@ -236,7 +236,7 @@ def test_account_rest_move_and_clear_transactions(client, auth_headers):
 
     move_response = client.post(f'/api/accounts/{source_id}/transactions/move', json={
         'toAccountId': str(target_id),
-        'password': 'admin123'
+        'password': operation_password
     }, headers=auth_headers)
     assert move_response.status_code == 200
     move_data = move_response.get_json()
@@ -245,7 +245,7 @@ def test_account_rest_move_and_clear_transactions(client, auth_headers):
     assert move_data['moved_count'] >= 1
 
     clear_response = client.post(f'/api/accounts/{target_id}/transactions/clear', json={
-        'password': 'admin123'
+        'password': operation_password
     }, headers=auth_headers)
     assert clear_response.status_code == 200
     clear_data = clear_response.get_json()

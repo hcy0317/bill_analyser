@@ -64,7 +64,7 @@ def load_auth_config():
 
 def get_app_context():
     """获取应用上下文"""
-    db = cast(Any, current_app.config.get("DB_INSTANCE"))
+    db = cast("Any", current_app.config.get("DB_INSTANCE"))
     if db is None:
         # 回退方案：尝试从模块导入
         import bill_analyser.api.app as app_module
@@ -149,6 +149,26 @@ def _verify_user_password(user: dict, password: str) -> bool:
     if not password_hash or not password:
         return False
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def _verify_sensitive_operation_password(db, user: dict | None, password: str, loop) -> bool:
+    """优先校验当前用户密码，必要时回退到操作密码。"""
+    if user:
+        try:
+            if _verify_user_password(user, password):
+                return True
+        except ValueError as exc:
+            logger.warning(
+                "敏感操作密码校验遇到无效哈希，回退到操作密码验证: user_id=%s, error=%s",
+                user.get("id"),
+                exc,
+            )
+
+    verify_operation_password = getattr(db, "verify_operation_password", None)
+    if callable(verify_operation_password):
+        return bool(loop.run_until_complete(verify_operation_password(password)))
+
+    return False
 
 
 def _build_external_auth_info(external_auth: dict) -> dict:
@@ -353,6 +373,70 @@ def _generate_2fa_qrcode_data_url(username: str, secret: str) -> str:
 def _generate_recovery_codes() -> list[str]:
     """生成恢复码列表。"""
     return [f"{secrets.token_hex(4)[:4]}-{secrets.token_hex(4)[:4]}".upper() for _ in range(8)]
+
+
+def _replace_persistent_recovery_codes(db, user_id: int, recovery_codes: list[str], loop) -> int:
+    """优先使用数据库持久化恢复码；仅在测试桩缺失实现时回退到内存缓存。"""
+    replace_method = getattr(db, "replace_two_factor_recovery_codes", None)
+    if callable(replace_method):
+        stored_count = loop.run_until_complete(replace_method(user_id, recovery_codes))
+        TWO_FACTOR_RECOVERY_CODES.pop(user_id, None)
+        return int(stored_count or 0)
+
+    _set_recovery_codes(user_id, recovery_codes)
+    return len(recovery_codes)
+
+
+def _clear_persistent_recovery_codes(db, user_id: int, loop) -> int:
+    """清空持久化恢复码，并同步清理测试兼容用的内存缓存。"""
+    clear_method = getattr(db, "clear_two_factor_recovery_codes", None)
+    cleared_count = 0
+    if callable(clear_method):
+        cleared_count = int(loop.run_until_complete(clear_method(user_id)) or 0)
+
+    TWO_FACTOR_RECOVERY_CODES.pop(user_id, None)
+    return cleared_count
+
+
+def _consume_persistent_recovery_code(db, user_id: int, recovery_code: str, loop) -> bool:
+    """消费恢复码，数据库持久化优先，测试兼容场景回退到内存 helper。"""
+    consume_method = getattr(db, "consume_two_factor_recovery_code", None)
+    if callable(consume_method) and loop.run_until_complete(consume_method(user_id, recovery_code)):
+        return True
+
+    return _consume_recovery_code(user_id, recovery_code)
+
+
+def _create_two_factor_audit_log(
+    db,
+    loop,
+    *,
+    operation_type: str,
+    user_id: int,
+    details: dict[str, Any] | None = None,
+    affected_count: int = 0,
+) -> None:
+    """为 2FA 关键动作写审计日志；失败时只告警，不影响主流程。"""
+    create_audit_log = getattr(db, "create_audit_log", None)
+    if not callable(create_audit_log):
+        return
+
+    try:
+        loop.run_until_complete(
+            create_audit_log(
+                operation_type=operation_type,
+                operation_target="user",
+                target_id=user_id,
+                details=details,
+                affected_count=affected_count,
+                ip_address=get_client_ip(),
+                user_agent=request.headers.get("User-Agent", ""),
+                session_id=str(getattr(request, "session_id", "") or "") or None,
+                status="success",
+            )
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("记录 2FA 审计日志失败: operation=%s, user_id=%s, error=%s", operation_type, user_id, exc)
 
 
 def _create_new_session_payload(user_id: int, username: str, config: dict, db, loop) -> dict:
@@ -2520,9 +2604,38 @@ def enable_2fa_confirm():
                 {"success": False, "error": "Update failed", "message": "Failed to enable two-factor authentication"}
             ), 500
 
-        tokens = _create_new_session_payload(user_id, username, config, db, loop)
         recovery_codes = _generate_recovery_codes()
-        _set_recovery_codes(user_id, recovery_codes)
+        try:
+            stored_count = _replace_persistent_recovery_codes(db, user_id, recovery_codes, loop)
+        except Exception:
+            loop.run_until_complete(db.update_user(user_id, {"two_factor_enabled": 0, "two_factor_secret": ""}))
+            try:
+                _clear_persistent_recovery_codes(db, user_id, loop)
+            except Exception as clear_exc:  # pylint: disable=broad-except
+                logger.warning("2FA 启用补偿清理恢复码失败: user_id=%s, error=%s", user_id, clear_exc)
+            raise
+
+        if stored_count != len(recovery_codes):
+            loop.run_until_complete(db.update_user(user_id, {"two_factor_enabled": 0, "two_factor_secret": ""}))
+            _clear_persistent_recovery_codes(db, user_id, loop)
+            loop.close()
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Update failed",
+                    "message": "Failed to persist two-factor recovery codes",
+                }
+            ), 500
+
+        tokens = _create_new_session_payload(user_id, username, config, db, loop)
+        _create_two_factor_audit_log(
+            db,
+            loop,
+            operation_type="2fa_enabled",
+            user_id=user_id,
+            details={"recovery_code_count": stored_count},
+            affected_count=stored_count,
+        )
         loop.close()
 
         return jsonify(
@@ -2572,12 +2685,22 @@ def disable_2fa():
         success = loop.run_until_complete(
             db.update_user(user_id, {"two_factor_enabled": 0, "two_factor_secret": ""})
         )
-        TWO_FACTOR_RECOVERY_CODES.pop(user_id, None)
-        loop.close()
         if not success:
+            loop.close()
             return jsonify(
                 {"success": False, "error": "Update failed", "message": "Failed to disable two-factor authentication"}
             ), 500
+
+        cleared_count = _clear_persistent_recovery_codes(db, user_id, loop)
+        _create_two_factor_audit_log(
+            db,
+            loop,
+            operation_type="2fa_disabled",
+            user_id=user_id,
+            details={"cleared_recovery_code_count": cleared_count},
+            affected_count=cleared_count,
+        )
+        loop.close()
 
         return jsonify({"success": True, "result": True})
     except Exception as exc:
@@ -2604,22 +2727,43 @@ def regenerate_2fa_recovery_codes():
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
         user = loop.run_until_complete(db.get_user_by_id(user_id))
-        loop.close()
         if not user:
+            loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
 
         if not _verify_user_password(user, password):
+            loop.close()
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
 
         if not user.get("two_factor_enabled"):
+            loop.close()
             return jsonify(
                 {"success": False, "error": "Bad Request", "message": "Two-factor authentication is not enabled"}
             ), 400
 
         recovery_codes = _generate_recovery_codes()
-        _set_recovery_codes(user_id, recovery_codes)
+        stored_count = _replace_persistent_recovery_codes(db, user_id, recovery_codes, loop)
+        if stored_count != len(recovery_codes):
+            loop.close()
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Update failed",
+                    "message": "Failed to persist two-factor recovery codes",
+                }
+            ), 500
+
+        _create_two_factor_audit_log(
+            db,
+            loop,
+            operation_type="2fa_recovery_regenerated",
+            user_id=user_id,
+            details={"recovery_code_count": stored_count},
+            affected_count=stored_count,
+        )
+        loop.close()
 
         return jsonify({"success": True, "result": {"recoveryCodes": recovery_codes}})
     except Exception as exc:
@@ -2731,15 +2875,6 @@ def verify_2fa_login_by_recovery_code():
         if not isinstance(user_id, int):
             return jsonify({"success": False, "error": "Unauthorized", "message": "Invalid or expired 2FA token"}), 401
 
-        if not _consume_recovery_code(user_id, recovery_code):
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Invalid recovery code",
-                    "message": "Recovery code is invalid or already used",
-                }
-            ), 401
-
         db = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -2747,6 +2882,22 @@ def verify_2fa_login_by_recovery_code():
         if not user:
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
+
+        if not user.get("two_factor_enabled"):
+            loop.close()
+            return jsonify(
+                {"success": False, "error": "Bad Request", "message": "Two-factor authentication is not enabled"}
+            ), 400
+
+        if not _consume_persistent_recovery_code(db, user_id, recovery_code, loop):
+            loop.close()
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid recovery code",
+                    "message": "Recovery code is invalid or already used",
+                }
+            ), 401
 
         tokens = _create_new_session_payload(user["id"], user["username"], config, db, loop)
         application_cloud_settings = _load_application_cloud_settings(db, user["id"], loop)
@@ -2761,6 +2912,14 @@ def verify_2fa_login_by_recovery_code():
                     "success": True,
                 }
             )
+        )
+        _create_two_factor_audit_log(
+            db,
+            loop,
+            operation_type="2fa_recovery_code_used",
+            user_id=user_id,
+            details={"verification": "recovery_code"},
+            affected_count=1,
         )
         loop.close()
 
@@ -2871,8 +3030,12 @@ def clear_user_transactions():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
+        if not user:
+            loop.close()
+            return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not loop.run_until_complete(db.verify_operation_password(password)):
+        if not _verify_sensitive_operation_password(db, user, password, loop):
             loop.close()
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
@@ -2930,8 +3093,12 @@ def clear_all_user_data():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
+        if not user:
+            loop.close()
+            return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not loop.run_until_complete(db.verify_operation_password(password)):
+        if not _verify_sensitive_operation_password(db, user, password, loop):
             loop.close()
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}

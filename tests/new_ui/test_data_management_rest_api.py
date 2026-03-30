@@ -118,14 +118,14 @@ def test_export_user_data_csv_and_tsv(client, auth_context, auth_headers, db):
     assert '\tsource_account\t' in tsv_text or tsv_text.startswith('\ufeffid\tdate')
 
 
-def test_clear_user_transactions_rest_endpoint(client, auth_context, auth_headers, db):
+def test_clear_user_transactions_rest_endpoint(client, auth_context, auth_headers, db, operation_password):
     """清空交易应仅删除账单并保留账户/分类。"""
     user_id = asyncio.run(_get_user_id(db, auth_context['username']))
     suffix = f'tx_{int(time.time() * 1000)}'
     seed = asyncio.run(_seed_user_records(db, user_id, suffix))
 
     response = client.post('/api/data/clear/transactions', json={
-        'password': auth_context['password']
+        'password': operation_password
     }, headers=auth_headers)
     assert response.status_code == 200, response.get_data(as_text=True)
 
@@ -143,14 +143,14 @@ def test_clear_user_transactions_rest_endpoint(client, auth_context, auth_header
     assert any(int(category['id']) == int(seed['category_id']) for category in remaining_categories)
 
 
-def test_clear_all_user_data_rest_endpoint(client, auth_context, auth_headers, db):
+def test_clear_all_user_data_rest_endpoint(client, auth_context, auth_headers, db, operation_password):
     """清空全部数据应删除账户、分类与账单等业务数据。"""
     user_id = asyncio.run(_get_user_id(db, auth_context['username']))
     suffix = f'all_{int(time.time() * 1000)}'
     seed = asyncio.run(_seed_user_records(db, user_id, suffix))
 
     response = client.post('/api/data/clear/all', json={
-        'password': auth_context['password']
+        'password': operation_password
     }, headers=auth_headers)
     assert response.status_code == 200, response.get_data(as_text=True)
 
