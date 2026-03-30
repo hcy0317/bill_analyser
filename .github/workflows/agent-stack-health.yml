@@ -13,6 +13,7 @@ on:
       - "tests/test_agent_stack_health.py"
       - "tests/test_ai_workflow_docs.py"
       - "tests/test_task_state.py"
+      - "tests/test_task_state_reader.py"
       - "tests/test_reviewer_agent_diff_contract.py"
       - "pyproject.toml"
   pull_request:
@@ -27,6 +28,7 @@ on:
       - "tests/test_agent_stack_health.py"
       - "tests/test_ai_workflow_docs.py"
       - "tests/test_task_state.py"
+      - "tests/test_task_state_reader.py"
       - "tests/test_reviewer_agent_diff_contract.py"
       - "pyproject.toml"
   workflow_dispatch:
@@ -50,4 +52,4 @@ jobs:
         run: python -m pip install --upgrade pip pytest
 
       - name: Run agent-stack contract tests
-        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py -v
+        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py -v

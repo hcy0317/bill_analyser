@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
+from scripts.hooks.file_io import write_text_atomic
 from scripts.hooks.task_state import write_task_state
 from scripts.hooks.work_context import (
     REPO_ROOT,
@@ -60,7 +61,7 @@ def build_snapshot_markdown(
     scopes = detect_scopes(all_paths)
     verification_steps = build_verification_steps(all_paths)
     next_step = choose_next_step(all_paths)
-    timestamp = datetime.now(tz=UTC).astimezone().isoformat(timespec="seconds")
+    timestamp = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
 
     def _render_list(items: Sequence[str], empty_text: str) -> str:
         if not items:
@@ -158,8 +159,7 @@ def write_session_snapshot(
         task_status=task_state.status if task_state else None,
     )
     try:
-        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_path.write_text(snapshot_text, encoding="utf-8")
+        write_text_atomic(snapshot_path, snapshot_text, encoding="utf-8")
     except OSError:
         return None
 

@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 from scripts.hooks.work_context import (
-    REPO_ROOT,
     build_verification_steps,
     choose_next_step,
     collect_git_state,
@@ -24,6 +28,7 @@ from scripts.hooks.work_context import (
     normalize_paths,
     resolve_git_ai_path,
 )
+from scripts.hooks.file_io import write_text_atomic
 
 TASK_STATE_RELATIVE_PATH = Path(".git") / "ai" / "task-state.json"
 GIT_INTERNAL_TASK_STATE_PATH = Path("ai") / "task-state.json"
@@ -122,7 +127,7 @@ def build_task_state_payload(
     resolved_status = _normalize_status(status)
 
     return {
-        "updatedAt": datetime.now(tz=UTC).astimezone().isoformat(timespec="seconds"),
+        "updatedAt": datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds"),
         "trigger": trigger,
         "title": build_task_title(scopes, normalized_recent_files, title),
         "status": resolved_status,
@@ -176,8 +181,11 @@ def write_task_state(
     )
 
     try:
-        task_state_path.parent.mkdir(parents=True, exist_ok=True)
-        task_state_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        write_text_atomic(
+            task_state_path,
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     except OSError:
         return None
 

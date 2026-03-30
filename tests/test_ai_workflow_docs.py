@@ -36,8 +36,10 @@ def test_verification_assets_define_non_overlapping_roles() -> None:
 def test_handoff_and_start_work_prompts_reference_shared_workflows() -> None:
     handoff_prompt = (REPO_ROOT / ".github" / "prompts" / "handoff.prompt.md").read_text(encoding="utf-8")
     start_work_prompt = (REPO_ROOT / ".github" / "prompts" / "start-work.prompt.md").read_text(encoding="utf-8")
+    verify_prompt = (REPO_ROOT / ".github" / "prompts" / "verify.prompt.md").read_text(encoding="utf-8")
 
     assert "session-handoff" in handoff_prompt
     assert ".git/ai/task-state.json" in handoff_prompt
     assert "approved-plan-execution" in start_work_prompt
     assert ".git/ai/task-state.json" in start_work_prompt
+    assert "nextVerification" in verify_prompt

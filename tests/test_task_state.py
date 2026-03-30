@@ -77,10 +77,7 @@ def test_write_task_state_returns_none_when_file_cannot_be_written(
         ),
     )
 
-    def fail_write_text(self: Path, _text: str, encoding: str = "utf-8") -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(Path, "write_text", fail_write_text)
+    monkeypatch.setattr(task_state, "write_text_atomic", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
 
     result = task_state.write_task_state(
         trigger="handoff",
@@ -100,3 +97,25 @@ def test_build_task_title_prefers_handoff_and_start_work_specific_assets() -> No
         task_state.build_task_title(("ai-customization",), (".github/prompts/start-work.prompt.md",))
         == "从已批准计划进入执行"
     )
+
+
+def test_build_task_state_payload_preserves_absolute_paths_outside_repo() -> None:
+    payload = task_state.build_task_state_payload(
+        trigger="manual",
+        recent_files=["D:/outside/notes.md"],
+        repo_root=task_state.REPO_ROOT,
+    )
+    recent_files = payload["recentFiles"] if isinstance(payload.get("recentFiles"), list) else []
+
+    assert "D:/outside/notes.md" in recent_files
+
+
+def test_build_task_state_payload_falls_back_for_unknown_status() -> None:
+    payload = task_state.build_task_state_payload(
+        trigger="manual",
+        recent_files=["AGENTS.md"],
+        status="unexpected",
+        repo_root=task_state.REPO_ROOT,
+    )
+
+    assert payload["status"] == task_state.DEFAULT_STATUS

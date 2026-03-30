@@ -38,3 +38,27 @@ def test_stop_commit_title_hint_can_run_as_a_script() -> None:
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert "ModuleNotFoundError" not in result.stderr
+
+
+def test_task_state_can_run_as_a_script() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "hooks" / "task_state.py"),
+            "--trigger",
+            "manual",
+            "--recent-file",
+            "AGENTS.md",
+            "--json",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert ".git/ai/task-state.json" in result.stdout
+    assert "ImportError" not in result.stderr

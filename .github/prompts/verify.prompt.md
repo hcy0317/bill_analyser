@@ -38,6 +38,7 @@ Execute verification in this exact order:
 
 6. **Git Status Review**
    - Show uncommitted changes and summarize any remaining verification gaps
+   - If `.git/ai/task-state.json` exists, mention whether its `nextVerification` still matches the current diff scope
 
 ## Output
 

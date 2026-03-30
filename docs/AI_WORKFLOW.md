@@ -94,6 +94,11 @@
 - `.git/ai/last-session.md`：面向人读的最近会话快照
 - `.git/ai/task-state.json`：面向工具和后续 prompt 的轻量任务状态
 
+如果只是想快速看当前 task-state，可运行：
+
+- `./.venv/Scripts/python.exe scripts/hooks/task_state.py --trigger manual --recent-file AGENTS.md --json`
+- 或直接读取 `.git/ai/task-state.json`
+
 前者回答“刚才发生了什么”，后者回答“当前任务现在卡在哪儿、下一步做什么”。
 
 ## `/verify`、`/quality-gate`、`verification-loop` 的关系

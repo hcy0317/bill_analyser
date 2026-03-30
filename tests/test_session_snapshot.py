@@ -73,10 +73,7 @@ def test_write_session_snapshot_returns_none_on_filesystem_error(tmp_path: Path,
     )
     monkeypatch.setattr(session_snapshot, "write_task_state", lambda **_kwargs: None)
 
-    def fail_write_text(self: Path, _text: str, encoding: str = "utf-8") -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(Path, "write_text", fail_write_text)
+    monkeypatch.setattr(session_snapshot, "write_text_atomic", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
 
     result = session_snapshot.write_session_snapshot(trigger="post-tool", recent_files=["AGENTS.md"], repo_root=repo_root)
 

@@ -42,6 +42,7 @@ HANDOFF_SKILL_PATH = f".agents/skills/{SESSION_HANDOFF_SKILL}/SKILL.md"
 START_WORK_SKILL_PATH = f".agents/skills/{APPROVED_PLAN_EXECUTION_SKILL}/SKILL.md"
 AI_WORKFLOW_DOC_PATH = "docs/AI_WORKFLOW.md"
 TASK_STATE_HELPER_PATH = "scripts/hooks/task_state.py"
+TASK_STATE_READER_PATH = "scripts/hooks/task_state_reader.py"
 
 
 @dataclass(frozen=True)
@@ -456,10 +457,12 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
 
     task_state_support_paths = {
         TASK_STATE_HELPER_PATH: repo_root / TASK_STATE_HELPER_PATH,
+        TASK_STATE_READER_PATH: repo_root / TASK_STATE_READER_PATH,
         "scripts/hooks/session_snapshot.py": repo_root / "scripts" / "hooks" / "session_snapshot.py",
         "scripts/hooks/post_tool_validation_hint.py": repo_root / "scripts" / "hooks" / "post_tool_validation_hint.py",
         "scripts/hooks/stop_commit_title_hint.py": repo_root / "scripts" / "hooks" / "stop_commit_title_hint.py",
         "tests/test_task_state.py": repo_root / "tests" / "test_task_state.py",
+        "tests/test_task_state_reader.py": repo_root / "tests" / "test_task_state_reader.py",
         "tests/test_session_snapshot.py": repo_root / "tests" / "test_session_snapshot.py",
         "tests/test_ai_workflow_docs.py": repo_root / "tests" / "test_ai_workflow_docs.py",
     }
@@ -908,8 +911,9 @@ def render_doctor(payload: dict) -> str:
             "快速命令",
             "--------",
             "1. `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo --format doctor`",
-            "2. `./.venv/Scripts/python.exe -m pytest tests/test_agent_stack_health.py tests/test_session_snapshot.py tests/test_task_state.py -v`",
-            "3. 如果资产改动涉及 `.github/**` / `.agents/**` / `scripts/hooks/**`，再跑一次 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`",
+            "2. `./.venv/Scripts/python.exe -m pytest tests/test_agent_stack_health.py tests/test_session_snapshot.py tests/test_task_state.py tests/test_task_state_reader.py -v`",
+            "3. `./.venv/Scripts/python.exe scripts/hooks/task_state.py --trigger manual --recent-file AGENTS.md --json`",
+            "4. 如果资产改动涉及 `.github/**` / `.agents/**` / `scripts/hooks/**`，再跑一次 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`",
             "",
         ]
     )
