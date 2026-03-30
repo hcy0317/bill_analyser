@@ -20,7 +20,6 @@ from bill_analyser.constants import CONFIG_DIR, LEGACY_CONFIG_DIR, PROJECT_ROOT
 
 from .logger import get_logger, log_method
 
-
 SERVER_CONFIG_FILENAME = "server_config.json"
 DOTENV_PATH = PROJECT_ROOT / ".env"
 INSECURE_JWT_SECRET_VALUES = frozenset(

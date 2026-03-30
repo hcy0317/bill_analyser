@@ -22,7 +22,7 @@ account_adapter = AccountAdapter()
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    return cast(Any, current_app.config.get("DB_INSTANCE"))
+    return cast("Any", current_app.config.get("DB_INSTANCE"))
 
 
 def _run_async(coroutine):

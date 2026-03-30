@@ -94,8 +94,9 @@ def test_load_auth_settings_validates_missing_secret_and_warns_for_insecure_secr
     logger = LoggerRecorder()
     monkeypatch.setattr(config_module._config_manager, "logger", logger)
     monkeypatch.setattr(config_module, "get_server_config", lambda use_cache=True: {})
+    monkeypatch.setattr(config_module, "load_env_settings", lambda: {})
 
-    with pytest.raises(config_module.ConfigValidationError, match="jwt_secret"):
+    with pytest.raises(config_module.ConfigValidationError, match="JWT secret"):
         config_module.load_auth_settings()
 
     insecure_secret = next(iter(config_module.INSECURE_JWT_SECRET_VALUES))
@@ -104,6 +105,7 @@ def test_load_auth_settings_validates_missing_secret_and_warns_for_insecure_secr
         "get_server_config",
         lambda use_cache=True: {"jwt_secret": insecure_secret, "password_min_length": 12},
     )
+    monkeypatch.setattr(config_module, "load_env_settings", lambda: {})
 
     auth_settings = config_module.load_auth_settings()
 
@@ -119,6 +121,7 @@ def test_load_auth_settings_accepts_secure_secret_without_warning(monkeypatch: p
         "get_server_config",
         lambda use_cache=True: {"jwt_secret": "real-secret", "jwt_algorithm": "HS512"},
     )
+    monkeypatch.setattr(config_module, "load_env_settings", lambda: {})
 
     auth_settings = config_module.load_auth_settings()
 
@@ -244,7 +247,7 @@ def test_config_manager_save_load_reload_and_legacy_fallback(
     legacy_file = manager.legacy_config_dir / "legacy.json"
     legacy_file.write_text(json.dumps({"legacy": True}, ensure_ascii=False), encoding="utf-8")
     assert manager.load_config("legacy.json", use_cache=False) == {"legacy": True}
-    logger = cast(LoggerRecorder, manager.logger)
+    logger = cast("LoggerRecorder", manager.logger)
     assert any("旧目录" in message for message in logger.warning_messages)
 
 
@@ -382,7 +385,7 @@ def test_config_manager_enable_disable_auto_reload_and_clear_cache(
     assert manager._observer.scheduled_paths == [str(manager.config_dir)]
 
     manager.enable_auto_reload()
-    logger = cast(LoggerRecorder, manager.logger)
+    logger = cast("LoggerRecorder", manager.logger)
     assert any("自动重载已启用" in message for message in logger.warning_messages)
 
     with manager._cache_lock:

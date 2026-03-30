@@ -29,10 +29,10 @@ from bill_analyser.api.config.bills import (
     GENERIC_IMPORT_EXPENSE_AMOUNT_HEADERS,
     GENERIC_IMPORT_INCOME_AMOUNT_HEADERS,
     GENERIC_IMPORT_TIME_HEADERS,
+    IMPORT_COLUMN_TYPE_KEYWORDS,
     IMPORT_CONFIG_BASE_WEIGHT,
     IMPORT_CONFIG_USE_COUNT_CAP,
     IMPORT_CONFIG_USE_COUNT_FACTOR,
-    IMPORT_COLUMN_TYPE_KEYWORDS,
     IMPORT_HEADER_ACCEPT_SCORE,
     IMPORT_HEADER_CANDIDATE_MIN_SCORE,
     IMPORT_HEADER_CONTEXT_SCORE,
@@ -3762,7 +3762,7 @@ def parse_import_file():
                 configs = loop.run_until_complete(
                     db.get_import_configs(
                         user_id=request.user_id,
-                        file_format=file_path.suffix.lower().lstrip('.'),
+                        file_format=file_path.suffix.lower().lstrip("."),
                         limit=200,
                     )
                 )
