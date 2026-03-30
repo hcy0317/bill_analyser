@@ -13,6 +13,7 @@ CURSOR_REMOVAL_NOTES = (
     "Cursor hooks and the ECC runtime were intentionally removed",
     "Legacy `.cursor/` compatibility mirrors were intentionally removed",
 )
+ALLOWED_CURSOR_ADAPTERS = {".cursor\\mcp.json", ".cursor/mcp.json"}
 DIFF_COMMIT_SKILL = "zh-conventional-commit-from-diff"
 ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS = {
     "section": ("## Session Completion", "Session Completion"),
@@ -154,6 +155,8 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         ]
 
     agents_text = _read_text(repo_root / "AGENTS.md")
+    cursor_file_set = set(cursor_files)
+
     if _contains_any(agents_text, CURSOR_REMOVAL_NOTES) and not cursor_files:
         checks.append(
             _result(
@@ -164,15 +167,25 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 ["AGENTS.md", "no tracked files under .cursor/"],
             )
         )
+    elif _contains_any(agents_text, CURSOR_REMOVAL_NOTES) and cursor_file_set <= ALLOWED_CURSOR_ADAPTERS:
+        checks.append(
+            _result(
+                "repo.cursor-removed",
+                "repo",
+                "pass",
+                "仓库继续禁止 `.cursor/` 镜像树，但允许单文件 `.cursor/mcp.json` 作为 Cursor MCP 薄适配器。",
+                ["AGENTS.md", *cursor_files],
+            )
+        )
     elif _contains_any(agents_text, CURSOR_REMOVAL_NOTES) and cursor_files:
         checks.append(
             _result(
                 "repo.cursor-removed",
                 "repo",
                 "fail",
-                "文档说 `.cursor/` 兼容镜像已移除，但仓库里仍有残留文件。",
+                "仓库只允许 `.cursor/mcp.json` 这一个薄适配器，但当前 `.cursor/` 下仍有额外残留文件。",
                 cursor_files,
-                "删除 `.cursor/` 下的重复文件，并更新相关 CI / 文档 / 测试基线。",
+                "删除 `.cursor/` 下除 `mcp.json` 外的重复文件，并保持 Cursor 兼容层停留在单文件适配器级别。",
             )
         )
     else:

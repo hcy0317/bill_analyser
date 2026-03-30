@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import pytest
 from flask import Flask
@@ -43,7 +46,11 @@ class FakeAccountsDB:
 
     def get_sub_accounts(self, account_id: int, user_id: int = 0) -> list[dict[str, Any]]:
         _ = user_id
-        return [dict(account) for account in self.accounts.values() if int(account.get("parent_id") or 0) == int(account_id)]
+        return [
+            dict(account)
+            for account in self.accounts.values()
+            if int(account.get("parent_id") or 0) == int(account_id)
+        ]
 
     def create_account(self, payload: dict[str, Any], user_id: int = 0) -> int:
         _ = user_id
@@ -88,13 +95,21 @@ class FakeAccountsDB:
 
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
+
+
+def _raise_runtime_error(message: str) -> Any:
+    raise RuntimeError(message)
+
+
+def _identity_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    return dict(payload)
 
 
 def test_accounts_routes_cover_crud_sort_sync_and_transaction_actions(
@@ -114,8 +129,8 @@ def test_accounts_routes_cover_crud_sort_sync_and_transaction_actions(
     monkeypatch.setattr(accounts_module, "_run_async", lambda value: value)
     monkeypatch.setattr(accounts_module, "get_app_context", lambda: db)
     monkeypatch.setattr(accounts_module, "_get_request_user_id", lambda: 7)
-    monkeypatch.setattr(accounts_module.account_adapter, "frontend_to_backend", lambda payload: dict(payload))
-    monkeypatch.setattr(accounts_module.account_adapter, "backend_to_frontend", lambda payload: dict(payload))
+    monkeypatch.setattr(accounts_module.account_adapter, "frontend_to_backend", _identity_mapping)
+    monkeypatch.setattr(accounts_module.account_adapter, "backend_to_frontend", _identity_mapping)
     monkeypatch.setattr(accounts_module.account_adapter, "format_list_response", format_list_response)
 
     get_accounts = _unwrap(accounts_module.get_accounts)
@@ -345,3 +360,150 @@ def test_accounts_routes_cover_crud_sort_sync_and_transaction_actions(
         payload = clear_transactions(2).get_json() or {}
         assert payload["success"] is True
         assert payload["deleted_count"] == 5
+
+
+def test_accounts_routes_cover_helpers_and_error_handlers(
+    accounts_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """账户路由应覆盖 helper 与主要 500 异常兜底。"""
+    run_async_helper = getattr(accounts_module, "_run_async")
+    get_request_user_id_helper = getattr(accounts_module, "_get_request_user_id")
+
+    async def _sample_coroutine() -> str:
+        return "ok"
+
+    assert run_async_helper(_sample_coroutine()) == "ok"
+
+    db = FakeAccountsDB()
+    monkeypatch.setattr(accounts_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(accounts_module, "_get_request_user_id", lambda: 9)
+    monkeypatch.setattr(accounts_module.account_adapter, "frontend_to_backend", _identity_mapping)
+    monkeypatch.setattr(accounts_module.account_adapter, "backend_to_frontend", _identity_mapping)
+    monkeypatch.setattr(
+        accounts_module.account_adapter,
+        "format_list_response",
+        lambda accounts, build_hierarchy_flag=True: {"success": True, "result": list(accounts)},
+    )
+
+    get_accounts = _unwrap(accounts_module.get_accounts)
+    get_account = _unwrap(accounts_module.get_account)
+    create_account = _unwrap(accounts_module.create_account)
+    update_account = _unwrap(accounts_module.update_account)
+    delete_account = _unwrap(accounts_module.delete_account)
+    sync_all_balances = _unwrap(accounts_module.sync_all_balances)
+    move_all_transactions = _unwrap(accounts_module.move_all_transactions_rest)
+    clear_transactions = _unwrap(accounts_module.clear_all_transactions_by_account_rest)
+
+    with accounts_route_app.test_request_context("/api/accounts/"):
+        cast("Any", accounts_module.request).user_id = 12
+        assert get_request_user_id_helper() == 12
+
+    with accounts_route_app.app_context():
+        accounts_route_app.config["DB_INSTANCE"] = db
+        assert accounts_module.get_app_context() is db
+
+    list_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        list_fail_db,
+        "get_all_accounts",
+        lambda *args, **kwargs: _raise_runtime_error("list boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: list_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/"):
+        response, status = get_accounts()
+        assert status == 500
+        assert response.get_json()["error"] == "list boom"
+
+    detail_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        detail_fail_db,
+        "get_account_by_id",
+        lambda *args, **kwargs: _raise_runtime_error("detail boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: detail_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/1"):
+        response, status = get_account(1)
+        assert status == 500
+        assert response.get_json()["error"] == "detail boom"
+
+    create_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        create_fail_db,
+        "create_account",
+        lambda *args, **kwargs: _raise_runtime_error("create boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: create_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/", method="POST", json={"name": "异常账户"}):
+        response, status = create_account()
+        assert status == 500
+        assert response.get_json()["error"] == "create boom"
+
+    update_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        update_fail_db,
+        "update_account",
+        lambda *args, **kwargs: _raise_runtime_error("update boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: update_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/1", method="PUT", json={"name": "异常更新"}):
+        response, status = update_account(1)
+        assert status == 500
+        assert response.get_json()["error"] == "update boom"
+
+    delete_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        delete_fail_db,
+        "delete_account",
+        lambda *args, **kwargs: _raise_runtime_error("delete boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: delete_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/1", method="DELETE"):
+        response, status = delete_account(1)
+        assert status == 500
+        assert response.get_json()["error"] == "delete boom"
+
+    sync_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        sync_fail_db,
+        "sync_all_account_balances",
+        lambda *args, **kwargs: _raise_runtime_error("sync boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: sync_fail_db)
+    with accounts_route_app.test_request_context("/api/accounts/sync-balances", method="POST"):
+        response, status = sync_all_balances()
+        assert status == 500
+        assert response.get_json()["error"] == "sync boom"
+
+    move_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        move_fail_db,
+        "move_all_transactions",
+        lambda *args, **kwargs: _raise_runtime_error("move boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: move_fail_db)
+    with accounts_route_app.test_request_context(
+        "/api/accounts/1/transactions/move",
+        method="POST",
+        json={"toAccountId": "2", "password": "ok"},
+    ):
+        response, status = move_all_transactions(1)
+        assert status == 500
+        assert response.get_json()["error"] == "move boom"
+
+    clear_fail_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        clear_fail_db,
+        "delete_all_transactions_by_account",
+        lambda *args, **kwargs: _raise_runtime_error("clear boom"),
+    )
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: clear_fail_db)
+    with accounts_route_app.test_request_context(
+        "/api/accounts/2/transactions/clear",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = clear_transactions(2)
+        assert status == 500
+        assert response.get_json()["error"] == "clear boom"

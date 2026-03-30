@@ -27,6 +27,10 @@ def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
     return cast(Callable[..., Any], wrapped or current)
 
 
+def _raise_runtime_error(message: str) -> Any:
+    raise RuntimeError(message)
+
+
 def test_backup_listing_download_delete_and_cleanup_branches(
     backup_route_app: Flask,
     tmp_path: Path,
@@ -157,3 +161,81 @@ def test_backup_create_and_restore_cover_success_empty_and_missing_cases(
         assert payload["success"] is True
         assert payload["data"]["filename"] == "backup_valid.zip"
         assert (data_dir / "restored.txt").read_text(encoding="utf-8") == "restored"
+
+
+def test_backup_routes_cover_directory_creation_restore_fallback_and_error_paths(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """备份路由应覆盖目录创建、restore fallback 分支和异常兜底。"""
+    nested_backup_dir = tmp_path / "runtime" / "backups"
+    monkeypatch.setattr(backup_module, "BACKUP_DIR", nested_backup_dir)
+    created_dir = backup_module.get_backup_dir()
+    assert created_dir == nested_backup_dir
+    assert created_dir.exists() is True
+
+    get_backups = _unwrap(backup_module.get_backups)
+    create_backup = _unwrap(backup_module.create_backup)
+    download_backup = _unwrap(backup_module.download_backup)
+    delete_backup = _unwrap(backup_module.delete_backup)
+    restore_backup = _unwrap(backup_module.restore_backup)
+    cleanup_backups = _unwrap(backup_module.cleanup_old_backups)
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: _raise_runtime_error("backup dir boom"))
+
+    with backup_route_app.test_request_context("/api/backup/"):
+        response, status = get_backups()
+        assert status == 500
+        assert response.get_json()["error"] == "backup dir boom"
+
+    class ExplodingSyncManager:
+        async def backup_local(self) -> str | None:
+            raise RuntimeError("create boom")
+
+    monkeypatch.setattr(sync_module, "SyncManager", ExplodingSyncManager)
+    with backup_route_app.test_request_context("/api/backup/create", method="POST"):
+        response, status = asyncio.run(create_backup())
+        assert status == 500
+        assert response.get_json()["error"] == "create boom"
+
+    with backup_route_app.test_request_context("/api/backup/download/backup_any.zip"):
+        response, status = download_backup("backup_any.zip")
+        assert status == 500
+        assert response.get_json()["error"] == "backup dir boom"
+
+    with backup_route_app.test_request_context("/api/backup/delete/backup_any.zip", method="DELETE"):
+        response, status = delete_backup("backup_any.zip")
+        assert status == 500
+        assert response.get_json()["error"] == "backup dir boom"
+
+    with backup_route_app.test_request_context("/api/backup/cleanup", method="POST", json={"keep_count": 2}):
+        response, status = cleanup_backups()
+        assert status == 500
+        assert response.get_json()["error"] == "backup dir boom"
+
+    backup_dir = tmp_path / "restore_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "restore_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "old.txt").write_text("old", encoding="utf-8")
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+    monkeypatch.setattr(backup_module, "DATA_DIR", data_dir)
+
+    flat_backup = backup_dir / "backup_flat.zip"
+    with ZipFile(flat_backup, "w") as zip_file:
+        zip_file.writestr("flat.txt", "flat-restored")
+
+    with backup_route_app.test_request_context("/api/backup/restore/backup_flat.zip", method="POST"):
+        payload = asyncio.run(restore_backup("backup_flat.zip")).get_json() or {}
+        assert payload["success"] is True
+        assert (data_dir / "flat.txt").read_text(encoding="utf-8") == "flat-restored"
+
+    broken_backup = backup_dir / "backup_broken.zip"
+    broken_backup.write_bytes(b"not-a-zip")
+
+    with backup_route_app.test_request_context("/api/backup/restore/backup_broken.zip", method="POST"):
+        response, status = asyncio.run(restore_backup("backup_broken.zip"))
+        assert status == 500
+        assert response.get_json()["success"] is False

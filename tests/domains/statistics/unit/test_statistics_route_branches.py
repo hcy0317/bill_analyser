@@ -110,6 +110,10 @@ def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
     return cast(Callable[..., Any], second or first)
 
 
+def _raise_runtime_error(message: str) -> Any:
+    raise RuntimeError(message)
+
+
 
 def test_basic_statistics_routes_transform_analyzer_outputs(
     statistics_route_app: Flask,
@@ -326,3 +330,136 @@ def test_exchange_rate_routes_cover_short_circuit_success_fallback_and_mutations
     ):
         payload = delete_custom_rate("usd").get_json() or {}
         assert payload == {"success": True, "result": True}
+
+
+def test_statistics_routes_cover_helpers_and_error_handlers(
+    statistics_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """统计路由应覆盖 helper 与主要异常兜底分支。"""
+    get_request_user_id_helper = getattr(statistics_module, "_get_request_user_id")
+    db = FakeStatisticsDB()
+
+    with statistics_route_app.app_context():
+        statistics_route_app.config["DB_INSTANCE"] = db
+        assert statistics_module.get_app_context() is db
+
+    monkeypatch.setattr(statistics_module, "get_required_request_int", lambda _name: 12)
+    with statistics_route_app.test_request_context("/api/statistics/overview"):
+        assert get_request_user_id_helper() == 12
+
+    class ExplodingAnalyzer(FakeAnalyzer):
+        def generate_report(self, period: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+            _ = (period, filters)
+            raise RuntimeError("overview boom")
+
+        def get_trends(self, period: str, category: str | None = None) -> dict[str, Any]:
+            _ = (period, category)
+            raise RuntimeError("trends boom")
+
+        def get_comparison(self, period: str, compare_type: str = "category") -> dict[str, Any]:
+            _ = (period, compare_type)
+            raise RuntimeError("comparison boom")
+
+        def analyze_category(self, period: str, main_category: str | None = None) -> dict[str, Any]:
+            _ = (period, main_category)
+            raise RuntimeError("category boom")
+
+    monkeypatch.setattr(statistics_module, "Analyzer", ExplodingAnalyzer)
+    monkeypatch.setattr(statistics_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: object())
+
+    get_overview = _unwrap(statistics_module.get_overview)
+    get_trends = _unwrap(statistics_module.get_trends)
+    get_comparison = _unwrap(statistics_module.get_comparison)
+    get_category_analysis = _unwrap(statistics_module.get_category_analysis)
+    get_trend = _unwrap(statistics_module.get_trend)
+
+    with statistics_route_app.test_request_context("/api/statistics/overview"):
+        response, status = get_overview()
+        assert status == 500
+        assert response.get_json()["error"] == "overview boom"
+
+    with statistics_route_app.test_request_context("/api/statistics/trends"):
+        response, status = get_trends()
+        assert status == 500
+        assert response.get_json()["error"] == "trends boom"
+
+    with statistics_route_app.test_request_context("/api/statistics/comparison"):
+        response, status = get_comparison()
+        assert status == 500
+        assert response.get_json()["error"] == "comparison boom"
+
+    with statistics_route_app.test_request_context("/api/statistics/category"):
+        response, status = get_category_analysis()
+        assert status == 500
+        assert response.get_json()["error"] == "category boom"
+
+    with statistics_route_app.test_request_context("/api/statistics/trend"):
+        response, status = get_trend()
+        assert status == 500
+        assert response.get_json()["error"] == "trends boom"
+
+    exploding_db = FakeStatisticsDB()
+    monkeypatch.setattr(statistics_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: exploding_db)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+    monkeypatch.setattr(
+        exploding_db,
+        "query_bills",
+        lambda *args, **kwargs: _raise_runtime_error("query boom"),
+    )
+
+    get_category_pie = _unwrap(statistics_module.get_category_pie)
+    get_top_merchants = _unwrap(statistics_module.get_top_merchants)
+    get_transaction_amounts = _unwrap(statistics_module.get_transaction_amounts)
+
+    with statistics_route_app.test_request_context("/api/statistics/category-pie?type=支出"):
+        response, status = get_category_pie()
+        assert status == 500
+        assert response.get_json()["error"] == "query boom"
+
+    with statistics_route_app.test_request_context("/api/statistics/top-merchants"):
+        response, status = get_top_merchants()
+        assert status == 500
+        assert response.get_json()["error"] == "query boom"
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/amounts?periods=range_1740787200_1740873599"
+    ):
+        response, status = get_transaction_amounts()
+        assert status == 500
+        assert response.get_json()["error"] == "query boom"
+
+    mutation_db = FakeStatisticsDB()
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: mutation_db)
+    monkeypatch.setattr(
+        mutation_db,
+        "upsert_user_custom_exchange_rate",
+        lambda *args, **kwargs: _raise_runtime_error("upsert boom"),
+    )
+    monkeypatch.setattr(
+        mutation_db,
+        "delete_user_custom_exchange_rate",
+        lambda *args, **kwargs: _raise_runtime_error("delete boom"),
+    )
+
+    update_custom_rate = _unwrap(statistics_module.update_user_custom_exchange_rate)
+    delete_custom_rate = _unwrap(statistics_module.delete_user_custom_exchange_rate)
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/exchange-rates/custom",
+        method="PUT",
+        json={"currency": "usd", "rate": 7.2},
+    ):
+        response, status = update_custom_rate()
+        assert status == 500
+        assert response.get_json()["message"] == "upsert boom"
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/exchange-rates/custom/usd",
+        method="DELETE",
+    ):
+        response, status = delete_custom_rate("usd")
+        assert status == 500
+        assert response.get_json()["message"] == "delete boom"

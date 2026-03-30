@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import pytest
 from flask import Flask
@@ -84,13 +87,17 @@ class FakeTemplatesDB:
 
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
+
+
+def _raise_runtime_error(message: str) -> Any:
+    raise RuntimeError(message)
 
 
 def test_template_routes_cover_helper_crud_and_display_order_branches(
@@ -98,6 +105,7 @@ def test_template_routes_cover_helper_crud_and_display_order_branches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """模板路由应覆盖模板类型解析、CRUD 与排序分支。"""
+    get_template_type_helper = getattr(templates_module, "_get_template_type")
     db = FakeTemplatesDB()
     monkeypatch.setattr(templates_module, "_run_async", lambda value: value)
     monkeypatch.setattr(templates_module, "get_app_context", lambda: db)
@@ -111,9 +119,9 @@ def test_template_routes_cover_helper_crud_and_display_order_branches(
     update_display_orders = _unwrap(templates_module.update_template_display_orders)
 
     with templates_route_app.test_request_context("/api/templates/?templateType=2"):
-        assert templates_module._get_template_type() == 2
+        assert get_template_type_helper() == 2
     with templates_route_app.test_request_context("/api/templates/", method="POST", json={"templateType": "bad"}):
-        assert templates_module._get_template_type(default=1) == 1
+        assert get_template_type_helper(default=1) == 1
 
     with templates_route_app.test_request_context("/api/templates/?templateType=1"):
         payload = get_templates().get_json() or {}
@@ -198,3 +206,132 @@ def test_template_routes_cover_helper_crud_and_display_order_branches(
         payload = update_display_orders().get_json() or {}
         assert payload["success"] is True
         assert payload["result"] is True
+
+
+def test_template_routes_cover_helpers_success_paths_and_error_handlers(
+    templates_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模板路由应覆盖 helper、本体成功路径与异常兜底。"""
+    run_async_helper = getattr(templates_module, "_run_async")
+    get_template_type_helper = getattr(templates_module, "_get_template_type")
+    get_request_user_id_helper = getattr(templates_module, "_get_request_user_id")
+
+    async def _sample_coroutine() -> str:
+        return "ok"
+
+    assert run_async_helper(_sample_coroutine()) == "ok"
+
+    db = FakeTemplatesDB()
+    monkeypatch.setattr(templates_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(templates_module, "_get_request_user_id", lambda: 9)
+
+    get_templates = _unwrap(templates_module.get_templates)
+    get_template = _unwrap(templates_module.get_template)
+    create_template = _unwrap(templates_module.create_template)
+    update_template = _unwrap(templates_module.update_template)
+    delete_template = _unwrap(templates_module.delete_template)
+    update_display_orders = _unwrap(templates_module.update_template_display_orders)
+
+    with templates_route_app.test_request_context("/api/templates/"):
+        assert get_template_type_helper(default=7) == 7
+        cast("Any", templates_module.request).user_id = 12
+        assert get_request_user_id_helper() == 12
+
+    with templates_route_app.app_context():
+        templates_route_app.config["DB_INSTANCE"] = db
+        assert templates_module.get_app_context() is db
+
+    with templates_route_app.test_request_context("/api/templates/1?templateType=1"):
+        payload = get_template(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["id"] == 1
+
+    with templates_route_app.test_request_context(
+        "/api/templates/1?templateType=1",
+        method="DELETE",
+    ):
+        payload = delete_template(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] is True
+
+    list_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(list_fail_db, "get_all_templates", lambda *args, **kwargs: _raise_runtime_error("list boom"))
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: list_fail_db)
+    with templates_route_app.test_request_context("/api/templates/?templateType=1"):
+        response, status = get_templates()
+        assert status == 500
+        assert response.get_json()["error"] == "list boom"
+
+    detail_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(
+        detail_fail_db,
+        "get_template_by_id",
+        lambda *args, **kwargs: _raise_runtime_error("detail boom"),
+    )
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: detail_fail_db)
+    with templates_route_app.test_request_context("/api/templates/1?templateType=1"):
+        response, status = get_template(1)
+        assert status == 500
+        assert response.get_json()["error"] == "detail boom"
+
+    create_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(
+        create_fail_db,
+        "create_template",
+        lambda *args, **kwargs: _raise_runtime_error("create boom"),
+    )
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: create_fail_db)
+    with templates_route_app.test_request_context(
+        "/api/templates/",
+        method="POST",
+        json={"templateType": 1, "name": "异常模板"},
+    ):
+        response, status = create_template()
+        assert status == 500
+        assert response.get_json()["error"] == "create boom"
+
+    update_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(
+        update_fail_db,
+        "update_template",
+        lambda *args, **kwargs: _raise_runtime_error("update boom"),
+    )
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: update_fail_db)
+    with templates_route_app.test_request_context(
+        "/api/templates/2?templateType=2",
+        method="PUT",
+        json={"templateType": 2, "name": "异常更新"},
+    ):
+        response, status = update_template(2)
+        assert status == 500
+        assert response.get_json()["error"] == "update boom"
+
+    delete_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(
+        delete_fail_db,
+        "delete_template",
+        lambda *args, **kwargs: _raise_runtime_error("delete boom"),
+    )
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: delete_fail_db)
+    with templates_route_app.test_request_context("/api/templates/2?templateType=2", method="DELETE"):
+        response, status = delete_template(2)
+        assert status == 500
+        assert response.get_json()["error"] == "delete boom"
+
+    order_fail_db = FakeTemplatesDB()
+    monkeypatch.setattr(
+        order_fail_db,
+        "update_template_display_orders",
+        lambda *args, **kwargs: _raise_runtime_error("order boom"),
+    )
+    monkeypatch.setattr(templates_module, "get_app_context", lambda: order_fail_db)
+    with templates_route_app.test_request_context(
+        "/api/templates/display-orders",
+        method="PUT",
+        json={"templateType": 1, "newDisplayOrders": [{"id": "1", "displayOrder": "3"}]},
+    ):
+        response, status = update_display_orders()
+        assert status == 500
+        assert response.get_json()["error"] == "order boom"

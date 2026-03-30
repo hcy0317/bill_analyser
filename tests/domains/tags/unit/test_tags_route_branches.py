@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import pytest
 from flask import Flask
@@ -61,13 +62,17 @@ class FakeTagsDB:
 
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
+
+
+def _raise_runtime_error(message: str) -> Any:
+    raise RuntimeError(message)
 
 
 def test_tag_routes_cover_crud_batch_and_display_order_branches(
@@ -214,3 +219,120 @@ def test_tag_routes_cover_crud_batch_and_display_order_branches(
         payload = update_display_orders().get_json() or {}
         assert payload["success"] is True
         assert payload["result"] is True
+
+
+def test_tag_routes_cover_helpers_success_paths_and_error_handlers(
+    tags_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """标签路由应覆盖 helper、本体成功路径与异常兜底。"""
+    run_async_helper = getattr(tags_module, "_run_async")
+    get_request_user_id_helper = getattr(tags_module, "_get_request_user_id")
+
+    async def _sample_coroutine() -> str:
+        return "ok"
+
+    assert run_async_helper(_sample_coroutine()) == "ok"
+
+    db = FakeTagsDB()
+    monkeypatch.setattr(tags_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(tags_module, "_get_request_user_id", lambda: 9)
+
+    get_tags = _unwrap(tags_module.get_tags)
+    get_tag = _unwrap(tags_module.get_tag)
+    create_tag = _unwrap(tags_module.create_tag)
+    update_tag = _unwrap(tags_module.update_tag)
+    delete_tag = _unwrap(tags_module.delete_tag)
+    create_tags_batch = _unwrap(tags_module.create_tags_batch)
+    update_display_orders = _unwrap(tags_module.update_tag_display_orders_rest)
+
+    with tags_route_app.test_request_context("/api/tags/"):
+        cast("Any", tags_module.request).user_id = 12
+        assert get_request_user_id_helper() == 12
+
+    with tags_route_app.app_context():
+        tags_route_app.config["DB_INSTANCE"] = db
+        assert tags_module.get_app_context() is db
+
+    with tags_route_app.test_request_context("/api/tags/1"):
+        payload = get_tag(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["id"] == 1
+
+    with tags_route_app.test_request_context("/api/tags/1", method="DELETE"):
+        payload = delete_tag(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] is True
+
+    list_fail_db = FakeTagsDB()
+    monkeypatch.setattr(list_fail_db, "get_all_tags", lambda *args, **kwargs: _raise_runtime_error("list boom"))
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: list_fail_db)
+    with tags_route_app.test_request_context("/api/tags/"):
+        response, status = get_tags()
+        assert status == 500
+        assert response.get_json()["error"] == "list boom"
+
+    detail_fail_db = FakeTagsDB()
+    monkeypatch.setattr(
+        detail_fail_db,
+        "get_tag_by_id",
+        lambda *args, **kwargs: _raise_runtime_error("detail boom"),
+    )
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: detail_fail_db)
+    with tags_route_app.test_request_context("/api/tags/1"):
+        response, status = get_tag(1)
+        assert status == 500
+        assert response.get_json()["error"] == "detail boom"
+
+    create_fail_db = FakeTagsDB()
+    monkeypatch.setattr(create_fail_db, "create_tag", lambda *args, **kwargs: _raise_runtime_error("create boom"))
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: create_fail_db)
+    with tags_route_app.test_request_context("/api/tags/", method="POST", json={"name": "异常标签"}):
+        response, status = create_tag()
+        assert status == 500
+        assert response.get_json()["error"] == "create boom"
+
+    update_fail_db = FakeTagsDB()
+    monkeypatch.setattr(update_fail_db, "update_tag", lambda *args, **kwargs: _raise_runtime_error("update boom"))
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: update_fail_db)
+    with tags_route_app.test_request_context("/api/tags/2", method="PUT", json={"name": "异常更新"}):
+        response, status = update_tag(2)
+        assert status == 500
+        assert response.get_json()["error"] == "update boom"
+
+    delete_fail_db = FakeTagsDB()
+    monkeypatch.setattr(delete_fail_db, "delete_tag", lambda *args, **kwargs: _raise_runtime_error("delete boom"))
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: delete_fail_db)
+    with tags_route_app.test_request_context("/api/tags/2", method="DELETE"):
+        response, status = delete_tag(2)
+        assert status == 500
+        assert response.get_json()["error"] == "delete boom"
+
+    batch_fail_db = FakeTagsDB()
+    monkeypatch.setattr(batch_fail_db, "create_tag", lambda *args, **kwargs: _raise_runtime_error("batch boom"))
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: batch_fail_db)
+    with tags_route_app.test_request_context(
+        "/api/tags/batch",
+        method="POST",
+        json={"tags": [{"name": "全新标签"}]},
+    ):
+        response, status = create_tags_batch()
+        assert status == 500
+        assert response.get_json()["error"] == "batch boom"
+
+    order_fail_db = FakeTagsDB()
+    monkeypatch.setattr(
+        order_fail_db,
+        "update_tag_display_orders",
+        lambda *args, **kwargs: _raise_runtime_error("order boom"),
+    )
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: order_fail_db)
+    with tags_route_app.test_request_context(
+        "/api/tags/display-orders",
+        method="PUT",
+        json={"newDisplayOrders": [{"id": "1", "displayOrder": "3"}]},
+    ):
+        response, status = update_display_orders()
+        assert status == 500
+        assert response.get_json()["error"] == "order boom"
