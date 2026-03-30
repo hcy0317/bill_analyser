@@ -34,6 +34,7 @@ TEST_PREFIXES = (
     "tests/",
     "src/web/tests/",
 )
+TASK_STATE_CONTRACT_PATH = ".git/ai/task-state.json"
 
 
 def _starts_with_any(path_text: str, prefixes: Sequence[str]) -> bool:
@@ -219,6 +220,12 @@ def build_stop_messages(source: str, changed_files: list[str], diff_text: str) -
         lines.append(
             f"[hook] 已刷新 `{snapshot.snapshot_display_path}`；如果会话中断，可先读取它，再检查 `git status` / `git diff`，并按 `session-resume` workflow 继续。"
         )
+        if snapshot.task_state_display_path:
+            lines.append(
+                "[hook] 已同步刷新 "
+                f"`{snapshot.task_state_display_path}`（契约路径：`{TASK_STATE_CONTRACT_PATH}`）；"
+                "下次 handoff / start-work 可直接复用当前任务状态。"
+            )
         lines.append(f"[hook] 建议下一步：{snapshot.next_step}")
 
     return lines

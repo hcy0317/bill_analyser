@@ -22,11 +22,13 @@ def test_build_stop_messages_include_commit_title_and_resume_hint() -> None:
     assert any("中文 Conventional Commit 标题建议" in message for message in messages)
     assert any("session-resume" in message for message in messages)
     assert any("last-session.md" in message for message in messages)
+    assert any("task-state.json" in message for message in messages)
     assert any("建议下一步" in message for message in messages)
     assert snapshot_path.exists()
     snapshot_text = snapshot_path.read_text(encoding="utf-8")
     assert "scripts/hooks/stop_commit_title_hint.py" in snapshot_text
     assert ".github/copilot-instructions.md" in snapshot_text
+    assert "Linked Task State Path" in snapshot_text
 
 
 def test_build_stop_messages_returns_empty_without_diff() -> None:
@@ -40,3 +42,4 @@ def test_build_stop_messages_still_emit_commit_hint_when_snapshot_write_fails(mo
 
     assert any("中文 Conventional Commit 标题建议" in message for message in messages)
     assert not any("session-resume" in message for message in messages)
+    assert not any("task-state.json" in message for message in messages)

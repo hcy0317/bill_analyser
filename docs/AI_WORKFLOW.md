@@ -32,6 +32,8 @@
 | `docs/PROJECT_OVERVIEW.md` | 架构/领域事实 | 改 API、导入、预算、统计、账户、分类时 | 不写会话流水账 |
 | `bill-analyser-conventions` skill | 仓库专属 workflow | 全栈、导入、统计、金额、契约变更 | 不替代项目总规则 |
 | `/plan` | 复杂任务规划 | 跨模块功能、重构、需求不清 | 小改动别过度启动 |
+| `/start-work` | 从已批准计划直接执行 | `/plan` 之后、已有 checklist 之后、恢复已确认方案时 | 没有批准计划时不要假装进入执行 |
+| `/handoff` | 显式交接未完成工作 | 会话要暂停、还有 diff、需要给下个会话可恢复摘要时 | 不要拿它代替 `/verify` |
 | `/tdd` | 测试先行实现 | 新行为、bug fix、关键逻辑 | 不是所有小文案都要强上 |
 | `/verify` | **默认验证入口** | 交付前、评审前、PR 前 | 不适合只想快速看单文件问题 |
 | `/quality-gate` | **快速路径检查** | 想快速检查单文件/单目录的格式、lint、type | 不能代替 `/verify` |
@@ -56,16 +58,43 @@
 2. 明确风险点
 3. 先补最相关测试
 4. 做最小实现
-5. 用 `/verify`
-6. 再做评审
+5. 如果已有批准计划或 checklist，用 `/start-work` 进入执行
+6. 用 `/verify`
+7. 再做评审
 
 ### 复杂改动
 
 1. `/plan`
-2. 必要时 `/tdd`
-3. 分阶段实现与验证
-4. `/verify`
-5. `code-reviewer` / `security-reviewer`
+2. plan 被确认后用 `/start-work`
+3. 必要时 `/tdd`
+4. 分阶段实现与验证
+5. `/verify`
+6. `code-reviewer` / `security-reviewer`
+
+## `/plan`、`/start-work`、`/handoff` 的关系
+
+这三个入口现在构成一个更顺手的闭环：
+
+- `/plan`：把需求和边界讲清楚
+- `/start-work`：在**已有批准计划**前提下直接进入执行
+- `/handoff`：在中断或暂停前显式交接当前状态
+
+可以把它理解成：
+
+`plan -> start-work -> verify -> handoff(如需暂停)`
+
+如果你已经有明确 checklist，不一定非要重新 `/plan`；这时可以直接 `/start-work`。
+
+如果你还没做完、但会话要停，就不要只留下一个模糊的聊天尾巴，优先 `/handoff`。
+
+## `.git/ai/last-session.md` 和 `.git/ai/task-state.json`
+
+现在恢复链有两份互补的状态文件：
+
+- `.git/ai/last-session.md`：面向人读的最近会话快照
+- `.git/ai/task-state.json`：面向工具和后续 prompt 的轻量任务状态
+
+前者回答“刚才发生了什么”，后者回答“当前任务现在卡在哪儿、下一步做什么”。
 
 ## `/verify`、`/quality-gate`、`verification-loop` 的关系
 
@@ -119,6 +148,7 @@
 
 - 给出最相关的验证提示
 - 刷新会话快照
+- 刷新 `.git/ai/task-state.json`
 
 ### Stop
 
@@ -126,6 +156,7 @@
 
 - 如果工作区还有 diff，给出中文 Conventional Commit 标题建议
 - 刷新会话快照
+- 刷新 `.git/ai/task-state.json`
 - 提示下一步恢复动作
 
 ## 会话中断后怎么继续
@@ -135,9 +166,10 @@
 1. 先看 `AGENTS.md`
 2. 再看 `docs/PROJECT_OVERVIEW.md`
 3. 如果存在，读取 `.git/ai/last-session.md`
-4. 运行 `git status`
-5. 运行 `git diff`
-6. 按 `.agents/skills/session-resume/SKILL.md` 的流程恢复任务
+4. 如果存在，再读取 `.git/ai/task-state.json`
+5. 运行 `git status`
+6. 运行 `git diff`
+7. 按 `.agents/skills/session-resume/SKILL.md` 的流程恢复任务
 
 快照只存**元信息**，不会记录完整 patch 或密钥。
 

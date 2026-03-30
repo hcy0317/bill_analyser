@@ -51,11 +51,12 @@ def _run_agent_stack_health(*args: str) -> subprocess.CompletedProcess[str]:
         probes = agent_stack_health.build_manual_probes()
 
     payload = agent_stack_health.build_payload(mode, repo_root, home, checks, probes)
-    stdout = (
-        json.dumps(payload, ensure_ascii=False, indent=2)
-        if output_format == "json"
-        else agent_stack_health.render_text(payload)
-    )
+    if output_format == "json":
+        stdout = json.dumps(payload, ensure_ascii=False, indent=2)
+    elif output_format == "doctor":
+        stdout = agent_stack_health.render_doctor(payload)
+    else:
+        stdout = agent_stack_health.render_text(payload)
 
     return subprocess.CompletedProcess(
         args=[sys.executable, str(SCRIPT_PATH), *args],
@@ -81,6 +82,8 @@ def test_repo_scan_reports_expected_contracts() -> None:
     assert checks["repo.hooks-baseline"]["status"] == "pass"
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
     assert checks["repo.session-resume-skill"]["status"] == "pass"
+    assert checks["repo.workflow-entrypoints"]["status"] == "pass"
+    assert checks["repo.task-state-support"]["status"] == "pass"
     assert checks["repo.codex-baseline"]["status"] == "pass"
 
 
@@ -116,7 +119,17 @@ def test_probe_catalog_exposes_manual_behavior_checks() -> None:
         "repo-guard-banned-command",
         "repo-guard-protected-path",
         "session-resume-recovery",
+        "handoff-task-state-refresh",
     } <= probe_ids
+
+
+def test_doctor_format_highlights_quick_actions() -> None:
+    result = _run_agent_stack_health("--mode", "repo", "--format", "doctor")
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "AI 定制层 Doctor" in result.stdout
+    assert "快速命令" in result.stdout
+    assert "repo.workflow-entrypoints" in result.stdout or "repo.task-state-support" in result.stdout
 
 
 def test_pytest_conftest_bootstraps_src_layout_in_clean_python() -> None:

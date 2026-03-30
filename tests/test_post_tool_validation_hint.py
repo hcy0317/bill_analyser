@@ -25,10 +25,12 @@ def test_build_hook_messages_refreshes_session_snapshot_for_repo_edit() -> None:
     messages = hook.build_hook_messages(payload)
 
     assert any("last-session.md" in message for message in messages)
+    assert any("task-state.json" in message for message in messages)
     assert snapshot_path.exists()
     snapshot_text = snapshot_path.read_text(encoding="utf-8")
     assert "scripts/hooks/post_tool_validation_hint.py" in snapshot_text
     assert "Suggested next verification" in snapshot_text
+    assert "Linked Task State Path" in snapshot_text
 
 
 def test_build_hook_messages_ignores_non_edit_tools() -> None:
@@ -59,4 +61,5 @@ def test_build_hook_messages_handles_snapshot_write_failures_gracefully(monkeypa
     messages = hook.build_hook_messages(payload)
 
     assert not any("last-session.md" in message for message in messages)
+    assert not any("task-state.json" in message for message in messages)
     assert any("Python 文件已编辑" in message for message in messages)

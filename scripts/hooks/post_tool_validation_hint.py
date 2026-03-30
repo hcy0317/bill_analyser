@@ -16,6 +16,7 @@ API_ROUTE_PREFIX = "src/bill_analyser/api/routes/"
 SERVICES_TS_PATH = "src/web/src/lib/services.ts"
 PYTHON_EDIT_TOOL_NAMES = {"edit", "write", "create", "apply_patch", "create_file"}
 PATH_KEYS = ("file_path", "path", "filePath")
+TASK_STATE_CONTRACT_PATH = ".git/ai/task-state.json"
 
 
 def load_payload(stdin_text: str) -> dict[str, Any] | None:
@@ -119,6 +120,12 @@ def build_hook_messages(payload: dict[str, Any]) -> list[str]:
         messages.append(
             f"[hook] 已刷新 `{snapshot.snapshot_display_path}`；如果会话因网络中断，可先读取该快照再继续。"
         )
+        if snapshot.task_state_display_path:
+            messages.append(
+                "[hook] 已同步刷新 "
+                f"`{snapshot.task_state_display_path}`（契约路径：`{TASK_STATE_CONTRACT_PATH}`）；"
+                "handoff / start-work 会复用这份 task-state。"
+            )
 
     return messages
 

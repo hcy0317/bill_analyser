@@ -33,6 +33,15 @@ SESSION_RESUME_REQUIREMENTS = {
     "skill": (SESSION_RESUME_SKILL,),
     "snapshot": (".git/ai/last-session.md",),
 }
+SESSION_HANDOFF_SKILL = "session-handoff"
+APPROVED_PLAN_EXECUTION_SKILL = "approved-plan-execution"
+TASK_STATE_PATH = ".git/ai/task-state.json"
+HANDOFF_PROMPT_PATH = ".github/prompts/handoff.prompt.md"
+START_WORK_PROMPT_PATH = ".github/prompts/start-work.prompt.md"
+HANDOFF_SKILL_PATH = f".agents/skills/{SESSION_HANDOFF_SKILL}/SKILL.md"
+START_WORK_SKILL_PATH = f".agents/skills/{APPROVED_PLAN_EXECUTION_SKILL}/SKILL.md"
+AI_WORKFLOW_DOC_PATH = "docs/AI_WORKFLOW.md"
+TASK_STATE_HELPER_PATH = "scripts/hooks/task_state.py"
 
 
 @dataclass(frozen=True)
@@ -383,6 +392,120 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 )
             )
 
+    workflow_asset_paths = {
+        HANDOFF_PROMPT_PATH: repo_root / HANDOFF_PROMPT_PATH,
+        START_WORK_PROMPT_PATH: repo_root / START_WORK_PROMPT_PATH,
+        HANDOFF_SKILL_PATH: repo_root / HANDOFF_SKILL_PATH,
+        START_WORK_SKILL_PATH: repo_root / START_WORK_SKILL_PATH,
+        AI_WORKFLOW_DOC_PATH: repo_root / AI_WORKFLOW_DOC_PATH,
+    }
+    missing_workflow_assets = [
+        relative_path for relative_path, path in workflow_asset_paths.items() if not path.exists()
+    ]
+    if missing_workflow_assets:
+        checks.append(
+            _result(
+                "repo.workflow-entrypoints",
+                "repo",
+                "fail",
+                "handoff / start-work 工作流资产不完整，无法形成稳定的计划执行与会话交接闭环。",
+                missing_workflow_assets,
+                "补齐共享 skill、Copilot prompt 与 AI 工作流文档中的对应入口。",
+            )
+        )
+    else:
+        handoff_prompt_text = _read_text(workflow_asset_paths[HANDOFF_PROMPT_PATH])
+        start_work_prompt_text = _read_text(workflow_asset_paths[START_WORK_PROMPT_PATH])
+        handoff_skill_text = _read_text(workflow_asset_paths[HANDOFF_SKILL_PATH])
+        start_work_skill_text = _read_text(workflow_asset_paths[START_WORK_SKILL_PATH])
+        workflow_doc_text = _read_text(workflow_asset_paths[AI_WORKFLOW_DOC_PATH])
+        workflow_issues: list[str] = []
+
+        if TASK_STATE_PATH not in handoff_prompt_text or SESSION_HANDOFF_SKILL not in handoff_prompt_text:
+            workflow_issues.append(f"{HANDOFF_PROMPT_PATH}: missing task-state or shared skill reference")
+        if TASK_STATE_PATH not in start_work_prompt_text or APPROVED_PLAN_EXECUTION_SKILL not in start_work_prompt_text:
+            workflow_issues.append(f"{START_WORK_PROMPT_PATH}: missing task-state or shared skill reference")
+        if TASK_STATE_PATH not in handoff_skill_text or ".git/ai/last-session.md" not in handoff_skill_text:
+            workflow_issues.append(f"{HANDOFF_SKILL_PATH}: missing snapshot/task-state recovery guidance")
+        if TASK_STATE_PATH not in start_work_skill_text or ".git/ai/last-session.md" not in start_work_skill_text:
+            workflow_issues.append(f"{START_WORK_SKILL_PATH}: missing snapshot/task-state execution guidance")
+        if "/handoff" not in workflow_doc_text or "/start-work" not in workflow_doc_text or TASK_STATE_PATH not in workflow_doc_text:
+            workflow_issues.append(f"{AI_WORKFLOW_DOC_PATH}: missing /handoff, /start-work, or task-state documentation")
+
+        if workflow_issues:
+            checks.append(
+                _result(
+                    "repo.workflow-entrypoints",
+                    "repo",
+                    "fail",
+                    "handoff / start-work 资产存在，但没有形成一致的共享 workflow 契约。",
+                    workflow_issues,
+                    "让 prompt、shared skill 与 docs 同时引用 `.git/ai/task-state.json`、`.git/ai/last-session.md` 以及对应入口名。",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.workflow-entrypoints",
+                    "repo",
+                    "pass",
+                    "handoff / start-work 入口已形成共享 skill + prompt + docs 闭环。",
+                    list(workflow_asset_paths.keys()) + [TASK_STATE_PATH],
+                )
+            )
+
+    task_state_support_paths = {
+        TASK_STATE_HELPER_PATH: repo_root / TASK_STATE_HELPER_PATH,
+        "scripts/hooks/session_snapshot.py": repo_root / "scripts" / "hooks" / "session_snapshot.py",
+        "scripts/hooks/post_tool_validation_hint.py": repo_root / "scripts" / "hooks" / "post_tool_validation_hint.py",
+        "scripts/hooks/stop_commit_title_hint.py": repo_root / "scripts" / "hooks" / "stop_commit_title_hint.py",
+        "tests/test_task_state.py": repo_root / "tests" / "test_task_state.py",
+        "tests/test_session_snapshot.py": repo_root / "tests" / "test_session_snapshot.py",
+        "tests/test_ai_workflow_docs.py": repo_root / "tests" / "test_ai_workflow_docs.py",
+    }
+    missing_task_state_support = [
+        relative_path for relative_path, path in task_state_support_paths.items() if not path.exists()
+    ]
+    if missing_task_state_support:
+        checks.append(
+            _result(
+                "repo.task-state-support",
+                "repo",
+                "fail",
+                "task-state 持久化链路缺少关键脚本或测试。",
+                missing_task_state_support,
+                "补齐 task-state helper、snapshot/ hook 联动与对应测试。",
+            )
+        )
+    else:
+        task_state_contract_issues = []
+        for relative_path, path in task_state_support_paths.items():
+            if relative_path.startswith("scripts/hooks/") or relative_path.startswith("tests/"):
+                if TASK_STATE_PATH not in _read_text(path):
+                    task_state_contract_issues.append(f"{relative_path}: missing {TASK_STATE_PATH} reference")
+
+        if task_state_contract_issues:
+            checks.append(
+                _result(
+                    "repo.task-state-support",
+                    "repo",
+                    "fail",
+                    "task-state 相关文件存在，但没有被 snapshot / hook / test 链完整引用。",
+                    task_state_contract_issues,
+                    "让 task-state 路径在 helper、snapshot、hook 提示与测试中都成为显式契约。",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.task-state-support",
+                    "repo",
+                    "pass",
+                    "task-state helper、snapshot、hooks 与测试链路已经串通。",
+                    list(task_state_support_paths.keys()),
+                )
+            )
+
     codex_config = _load_toml(repo_root / ".codex" / "config.toml")
     mcp_servers = codex_config.get("mcp_servers", {})
     features = codex_config.get("features", {})
@@ -661,6 +784,24 @@ def build_manual_probes() -> list[ManualProbe]:
                 "恢复时仍然需要从零重新分析整个仓库",
             ],
         ),
+        ManualProbe(
+            id="handoff-task-state-refresh",
+            surface="prompt",
+            goal="验证 `/handoff` 会同时刷新 `.git/ai/last-session.md` 与 `.git/ai/task-state.json`，并生成可执行的下一步说明。",
+            prompt=(
+                "在仓库内完成一次小编辑后触发 `/handoff`，观察输出是否提到当前目标、剩余工作、下一步验证；"
+                "然后检查 `.git/ai/last-session.md` 与 `.git/ai/task-state.json` 是否都被刷新。"
+            ),
+            expected_signals=[
+                "输出中明确出现当前目标与下一步验证",
+                f"存在 `{TASK_STATE_PATH}` 文件",
+                "task-state 中包含 recentFiles、nextVerification、nextStep",
+            ],
+            failure_signals=[
+                "只有聊天摘要，没有刷新任何 `.git/ai/*` 状态文件",
+                "task-state 缺少 nextVerification 或 nextStep",
+            ],
+        ),
     ]
 
 
@@ -729,6 +870,65 @@ def render_text(payload: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_doctor(payload: dict) -> str:
+    fail_count = payload["summary"]["fail"]
+    warn_count = payload["summary"]["warn"]
+    overall = "HEALTHY" if fail_count == 0 and warn_count == 0 else "ATTENTION"
+    lines = [
+        "AI 定制层 Doctor",
+        "================",
+        f"模式: {payload['mode']}",
+        f"仓库: {payload['repoRoot']}",
+        f"总体状态: {overall}",
+        (
+            "统计: "
+            f"FAIL={fail_count}  "
+            f"WARN={warn_count}  "
+            f"PASS={payload['summary']['pass']}  "
+            f"INFO={payload['summary']['info']}"
+        ),
+        "",
+    ]
+
+    actionable_checks = [
+        check
+        for check in payload["checks"]
+        if check["status"] in {"fail", "warn"}
+    ]
+    if actionable_checks:
+        lines.extend(["优先处理", "--------"])
+        for check in actionable_checks:
+            lines.append(f"- [{check['status'].upper()}] {check['id']} — {check['summary']}")
+            if check.get("recommendation"):
+                lines.append(f"  建议: {check['recommendation']}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "快速命令",
+            "--------",
+            "1. `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo --format doctor`",
+            "2. `./.venv/Scripts/python.exe -m pytest tests/test_agent_stack_health.py tests/test_session_snapshot.py tests/test_task_state.py -v`",
+            "3. 如果资产改动涉及 `.github/**` / `.agents/**` / `scripts/hooks/**`，再跑一次 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`",
+            "",
+        ]
+    )
+
+    if payload["manualProbes"]:
+        lines.extend(["推荐手动探针", "------------"])
+        for probe in payload["manualProbes"][:3]:
+            lines.append(f"- {probe['id']}: {probe['goal']}")
+        lines.append("")
+
+    passing_ids = [check["id"] for check in payload["checks"] if check["status"] == "pass"]
+    if passing_ids:
+        lines.extend(["已通过的关键项", "--------------"])
+        for check_id in passing_ids[:8]:
+            lines.append(f"- {check_id}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit whether repo/global AI customization assets are really wired in.")
     parser.add_argument(
@@ -739,7 +939,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("text", "json"),
+        choices=("text", "json", "doctor"),
         default="text",
         help="Output format.",
     )
@@ -779,6 +979,8 @@ def main() -> int:
 
     if args.format == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
+    elif args.format == "doctor":
+        print(render_doctor(payload), end="", flush=True)
     else:
         print(render_text(payload), end="", flush=True)
 
