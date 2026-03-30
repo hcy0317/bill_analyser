@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import io
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    pass
 
 import pytest
 from flask import Flask
@@ -1771,6 +1772,425 @@ def test_bills_picture_monthly_recurring_and_single_item_routes_cover_more_branc
         response, status = _unwrap_response(delete_bill_route(1))
         assert status == 500
         assert response.get_json()["error"] == "delete boom"
+
+
+def test_bills_get_list_and_legacy_modify_routes_cover_remaining_query_and_update_branches(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """账单列表与 legacy modify 路由应覆盖额外筛选和简化更新分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "_apply_common_transaction_filters",
+        lambda *args, **kwargs: asyncio.sleep(0, result=None),
+    )
+
+    get_bills_route = _unwrap_all(bills_module.get_bills)
+    modify_route = _unwrap_all(bills_module.modify_bill)
+
+    seen_filters: list[dict[str, Any]] = []
+
+    async def _query_bills_capture(
+        *,
+        page: int,
+        page_size: int,
+        filters: dict[str, Any],
+        user_id: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        _ = (page, page_size, user_id)
+        seen_filters.append(dict(filters))
+        return ([{"id": 1, "description": "早餐", "time": 1}], 1)
+
+    monkeypatch.setattr(db, "query_bills", _query_bills_capture)
+    with bills_route_app.test_request_context(
+        "/api/bills/?page=2&page_size=3&type=支出&main_category=餐饮&sub_category=早餐&start_date=2026-03-01&end_date=2026-03-31",
+        method="GET",
+    ):
+        _set_request_user_id(2)
+        payload = get_bills_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["page"] == 2
+        assert payload["result"]["page_size"] == 3
+        assert seen_filters[-1]["type"] == "支出"
+        assert seen_filters[-1]["main_category"] == "餐饮"
+        assert seen_filters[-1]["sub_category"] == "早餐"
+        assert seen_filters[-1]["start_date"] == "2026-03-01"
+        assert seen_filters[-1]["end_date"] == "2026-03-31"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/?max_time=1711929600000&min_time=1711843200000&type=0",
+        method="GET",
+    ):
+        _set_request_user_id(2)
+        payload = get_bills_route().get_json() or {}
+        assert payload["success"] is True
+        assert seen_filters[-1]["start_date"] == "2024-03-31"
+        assert seen_filters[-1]["end_date"] == "2024-04-01"
+        assert "type" not in seen_filters[-1]
+
+    db.bill_lookup[1] = {
+        "id": 1,
+        "type": "收入",
+        "source_account_id": 11,
+        "destination_account_id": 22,
+        "destination_amount": 77,
+    }
+    captured_updates: list[dict[str, Any]] = []
+
+    async def _update_bill_capture(bill_id: int, payload: dict[str, Any], *, user_id: int) -> bool:
+        _ = (bill_id, user_id)
+        captured_updates.append(dict(payload))
+        return True
+
+    monkeypatch.setattr(db, "update_bill", _update_bill_capture)
+    monkeypatch.setattr(db, "update_bill_tags", lambda *args, **kwargs: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(db, "sync_account_balance", lambda *args, **kwargs: asyncio.sleep(0, result=None))
+    with bills_route_app.test_request_context(
+        "/api/bills/modify",
+        method="POST",
+        json={"id": 1, "remark": "新备注", "comment": "最终备注"},
+    ):
+        _set_request_user_id()
+        payload = modify_route().get_json() or {}
+        assert payload == {"success": True, "result": {"id": "1"}}
+        assert captured_updates[-1]["description"] == "最终备注"
+        assert captured_updates[-1]["type"] == "收入"
+        assert captured_updates[-1]["source_account_id"] == 11
+        assert captured_updates[-1]["destination_account_id"] == 22
+        assert captured_updates[-1]["destination_amount"] == 77
+
+
+def test_bills_parse_import_file_and_stage1_routes_cover_remaining_parser_and_cleanup_branches(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """parse_import 与阶段1导入应覆盖 parser-first、清理失败和未匹配文件成功分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+
+    parse_import_route = _unwrap_all(bills_module.parse_import_file)
+    stage1_route = _unwrap_all(bills_module.import_stage1_parse)
+    parse_generic_route = _unwrap_all(bills_module.import_parse_generic_into_session)
+
+    class _FakeParserFactory:
+        def __init__(self) -> None:
+            self.detect_calls: list[str] = []
+            self.parse_calls: list[tuple[str, str | None]] = []
+
+        def detect_parser(self, file_path: str) -> dict[str, Any]:
+            self.detect_calls.append(file_path)
+            return {"id": "wechat", "name": "微信支付"}
+
+        def parse(self, file_path: str, parser_type: str | None = None) -> list[dict[str, Any]]:
+            self.parse_calls.append((file_path, parser_type))
+            return [
+                {
+                    "trade_time": "2026-03-01 08:00:00",
+                    "type": "支出",
+                    "amount": 12.34,
+                    "description": "早餐",
+                    "payment_method": "",
+                }
+            ]
+
+    fake_parser_factory = _FakeParserFactory()
+    fake_factory_module = SimpleNamespace(PARSER_CLASS_REGISTRY={"wechat": object()}, ParserFactory=lambda: fake_parser_factory)
+
+    class _ParserBridge:
+        PARSER_CLASS_REGISTRY = {"wechat": object()}
+
+    monkeypatch.setitem(__import__("sys").modules, "bill_analyser.parsers.factory", fake_factory_module)
+    monkeypatch.setattr(
+        bills_module,
+        "_prepare_import_review_bills",
+        lambda bills, db_obj, service_obj, user_id: asyncio.sleep(
+            0,
+            result=(
+                bills,
+                {"id_to_account": {}, "name_to_id": {}, "id_to_name": {}},
+                {"id_to_category": {}, "name_to_id": {}},
+                {"learning_seeded": 0, "learning_replayed": 0},
+            ),
+        ),
+    )
+
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={
+            "fileType": "auto",
+            "columnMapping": "{\"1\":0}",
+            "file": (io.BytesIO(b"trade,data\n1,2\n"), "parser-first.csv"),
+        },
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(4)
+        payload = parse_import_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parserType"] == "wechat"
+        assert payload["result"]["detectedParserType"] == "wechat"
+        assert payload["result"]["items"][0]["paymentMethod"] == "微信支付"
+
+    original_remove = bills_module.os.remove
+
+    def _raise_remove_once(path: Any) -> None:
+        raise OSError(f"cannot remove {path}")
+
+    monkeypatch.setattr(bills_module.os, "remove", _raise_remove_once)
+    with bills_route_app.test_request_context(
+        "/api/bills/parse_import",
+        method="POST",
+        data={
+            "fileType": "auto",
+            "file": (io.BytesIO(b"trade,data\n1,2\n"), "cleanup-warning.csv"),
+        },
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(4)
+        payload = parse_import_route().get_json() or {}
+        assert payload["success"] is True
+
+    monkeypatch.setattr(bills_module.os, "remove", original_remove)
+
+    service.stage1_result = {
+        "success": False,
+        "session_id": "sess-unmatched",
+        "total_parsed": 0,
+        "file_results": [],
+        "errors": ["no parser"],
+    }
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse",
+        method="POST",
+        data={"file": (io.BytesIO(b"col1,col2\n1,2\n"), "unmatched.csv")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(9)
+        payload = stage1_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["parsed_count"] == 0
+        assert payload["data"]["unmatched_files"][0]["original_name"] == "unmatched.csv"
+        temp_path = Path(payload["data"]["unmatched_files"][0]["temp_path"])
+        assert temp_path.exists()
+        temp_path.unlink()
+
+    service.validator = type("Validator", (), {"validate_bills": staticmethod(lambda bills: ([], bills))})()
+    invalid_only_temp = tmp_path / "invalid_only_generic.csv"
+    invalid_only_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bills_module,
+        "_parse_import_file_with_column_mapping",
+        lambda *args, **kwargs: ([{"trade_time": "2026-03-01 08:00:00", "amount": 12.34}], "utf-8", ","),
+    )
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse_generic",
+        method="POST",
+        json={"session_id": "sess-invalid-only", "temp_path": str(invalid_only_temp)},
+    ):
+        payload = parse_generic_route().get_json() or {}
+        assert payload == {"success": True, "data": {"parsed_count": 0}}
+        assert not invalid_only_temp.exists()
+
+
+def test_bills_upload_and_reconciliation_routes_cover_remaining_tail_branches(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """上传导入与对账单路由应覆盖 preview-only 清理、余额回退与类型分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    upload_route = _unwrap_all(bills_module.upload_and_import)
+    reconciliation_route = _unwrap_all(bills_module.get_reconciliation_statements)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/upload",
+        method="POST",
+        data={"file": (io.BytesIO(b"trade,data\n1,2\n"), "preview.csv"), "preview_only": "true"},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id(6)
+        payload = upload_route().get_json() or {}
+        assert payload["success"] is True
+        leftover_files = list(tmp_path.iterdir())
+        assert len(leftover_files) == 1
+        leftover_files[0].unlink()
+
+    async def _query_bills_balance_failure(
+        *,
+        page: int,
+        page_size: int,
+        filters: dict[str, Any],
+        user_id: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        _ = (page, user_id)
+        if page_size == 1:
+            raise RuntimeError("opening boom")
+        return (
+            [
+                {"id": 1, "date": "2026-03-01", "type": "转账", "amount": 5.0, "source_account_id": 9, "destination_account_id": 9},
+                {"id": 2, "date": "2026-03-02", "type": "投资", "amount": 2.0, "source_account_id": 9, "destination_account_id": 1},
+            ],
+            2,
+        )
+
+    async def _adapter_backend_to_frontend(bill: dict[str, Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
+        _ = (args, kwargs)
+        return {"id": bill["id"], "time": bill["id"]}
+
+    monkeypatch.setattr(db, "query_bills", _query_bills_balance_failure)
+    monkeypatch.setattr(adapter, "backend_to_frontend", _adapter_backend_to_frontend)
+    with bills_route_app.test_request_context(
+        "/api/bills/reconciliation_statements?account_id=1&start_time=1&end_time=2&type=4",
+        method="GET",
+    ):
+        _set_request_user_id()
+        payload = reconciliation_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["openingBalance"] == 0
+        assert payload["result"]["totalInflows"] == 200
+        assert payload["result"]["totalOutflows"] == 0
+        assert payload["result"]["itemCount"] == 1
+
+
+def test_bills_picture_and_query_routes_cover_remaining_exception_tails(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """图片删除与按查询取账单应覆盖剩余异常尾分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    remove_picture_route = _unwrap_all(bills_module.remove_unused_transaction_picture_rest)
+    get_bill_by_query_route = _unwrap_all(bills_module.get_bill_by_query)
+
+    failing_picture = tmp_path / "fail.png"
+    failing_picture.write_bytes(b"abc")
+
+    def _raise_remove(_path: Any) -> None:
+        raise OSError("remove picture boom")
+
+    monkeypatch.setattr(bills_module.os, "remove", _raise_remove)
+    with bills_route_app.test_request_context(
+        "/api/bills/pictures/unused",
+        method="POST",
+        json={"id": "fail.png"},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(remove_picture_route())
+        assert status == 500
+        assert response.get_json()["error"] == "remove picture boom"
+
+    db.bill_lookup[1] = RuntimeError("query detail boom")
+    with bills_route_app.test_request_context("/api/bills/get?id=1", method="GET"):
+        _set_request_user_id()
+        response, status = _unwrap_response(get_bill_by_query_route())
+        assert status == 500
+        assert response.get_json()["error"] == "query detail boom"
+
+
+def test_bills_additional_tail_branches_cover_default_category_and_cleanup_logging(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """额外尾分支应覆盖默认分类、详情 404、无文件名和阶段清理路径。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    adapter = FakeBillsAdapter()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "UPLOAD_FOLDER", tmp_path)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda user_id=None: (db, service, category_engine))
+    monkeypatch.setattr(
+        bills_module,
+        "get_app_context_with_adapter",
+        lambda user_id=None: (db, service, category_engine, adapter),
+    )
+
+    get_bill_by_query_route = _unwrap_all(bills_module.get_bill_by_query)
+    parse_import_route = _unwrap_all(bills_module.parse_import_file)
+    stage1_route = _unwrap_all(bills_module.import_stage1_parse)
+
+    db.bill_lookup[1] = None
+    with bills_route_app.test_request_context("/api/bills/get?id=1", method="GET"):
+        _set_request_user_id()
+        response, status = _unwrap_response(get_bill_by_query_route())
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    async def _stage1_with_matched_saved_file(file_paths: list[str], session_id: str, user_id: int) -> dict[str, Any]:
+        _ = (session_id, user_id)
+        return {
+            "success": True,
+            "session_id": "sess-cleanup-log",
+            "total_parsed": 1,
+            "file_results": [{"file": file_paths[0], "success": True}],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(service, "import_stage1_parse", _stage1_with_matched_saved_file)
+
+    original_remove = bills_module.os.remove
+    remove_calls: list[str] = []
+
+    def _remove_and_record(path: Any) -> None:
+        remove_calls.append(str(path))
+        original_remove(path)
+
+    monkeypatch.setattr(bills_module.os, "remove", _remove_and_record)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse",
+        method="POST",
+        data={"file": (io.BytesIO(b"a,b\n1,2\n"), "matched.csv")},
+        content_type="multipart/form-data",
+    ):
+        _set_request_user_id()
+        payload = stage1_route().get_json() or {}
+        assert payload["success"] is True
+        assert any(path.endswith("matched.csv") for path in remove_calls)
 
 
 def test_bills_import_stage_routes_cover_validation_and_lightweight_success_paths(

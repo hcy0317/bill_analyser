@@ -129,6 +129,7 @@ def test_query_filters_and_import_scoring_helpers_cover_invalid_and_context_path
     assert bills_module.allowed_picture_file("avatar.png") is True
     assert bills_module.allowed_picture_file("avatar.txt") is False
 
+    assert bills_module._score_header_keyword_match("交易时间", 1) >= bills_module.IMPORT_HEADER_EXACT_SCORE
     assert bills_module._score_header_keyword_match("账户余额", 6) == 0.0
     assert bills_module._score_header_keyword_match("对方账户", 6) == 0.0
     assert bills_module._score_header_keyword_match("原始分类", 4) >= bills_module.IMPORT_HEADER_EXACT_SCORE
@@ -295,7 +296,7 @@ def test_read_text_and_table_loaders_cover_failure_xlsx_xls_and_unsupported_path
             def __init__(self, rows: list[tuple[Any, ...]]) -> None:
                 self._rows = rows
 
-            def fillna(self, _value: str) -> "_FakeTable":
+            def fillna(self, _value: str) -> _FakeTable:
                 return self
 
             def itertuples(self, index: bool = False, name: Any = None) -> list[tuple[Any, ...]]:
@@ -392,13 +393,21 @@ def test_misc_parse_helpers_cover_empty_datetime_custom_separators_and_context_e
     assert bills_module._infer_generic_import_type_from_context(["工资补发"], ["摘要"]) == "收入"
     assert bills_module._infer_generic_import_type_from_context(["超市消费"], ["摘要"]) == "支出"
     assert bills_module._infer_generic_import_type_from_context(["工资补发", "还款"], ["摘要", "备注"]) is None
+    assert bills_module._infer_generic_import_type_from_context(["工资补发"], [""]) == "收入"
 
     assert bills_module._find_generic_import_header_index(["", "   "], [""]) is None
     assert bills_module._find_generic_import_header_index(["交易时间"], ["不存在"]) is None
+    assert bills_module._find_generic_import_header_index(["交易时间"], ["交易时间"]) == 0
 
     assert bills_module._build_generic_import_trade_time(["2026-03-01"], [], {"1": "bad"}, "2026-03-01") == "2026-03-01"
     assert bills_module._build_generic_import_trade_time(["2026-03-01", "08:30:00"], ["交易日期", "交易时间"], {"1": 9}, "") == "2026-03-01 08:30:00"
     assert bills_module._build_generic_import_trade_time(["", "08:30:00"], ["交易日期", "交易时间"], {"1": 9}, "") == "08:30:00"
+    assert (
+        bills_module._build_generic_import_trade_time(
+            ["2026-03-01 08:30:00"], ["交易时间"], {"1": 0}, "2026-03-01 08:30:00"
+        )
+        == "2026-03-01 08:30:00"
+    )
     assert bills_module._is_generic_import_repeated_header_row([], []) is False
 
     class _BadIdentifier:
@@ -445,6 +454,37 @@ def test_build_import_mapping_suggestion_combines_keyword_and_history_scores() -
     assert suggestion["columnMapping"] == {"1": 0, "3": 1, "8": 2, "6": 3, "14": 4}
     assert suggestion["transactionTypeMapping"]["支出"] == 3
     assert any(item["score"] >= 10 for item in suggestion["suggestions"])
+
+
+def test_build_import_mapping_suggestion_skips_duplicate_column_type_candidates_and_empty_time() -> None:
+    """列映射建议应跳过重复列类型候选，并处理空时间值。"""
+    suggestion = bills_module._build_import_mapping_suggestion(
+        ["金额", "交易金额", "备注"],
+        configs=[],
+        sample_rows=[],
+    )
+
+    assert suggestion["columnMapping"]["8"] in {0, 1}
+    assert len([item for item in suggestion["suggestions"] if item["columnType"] == 8]) == 1
+    assert isinstance(bills_module._parse_generic_import_time(""), int)
+
+
+def test_helper_scoring_and_matching_cover_empty_keyword_low_score_and_no_context_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """评分与匹配 helper 应覆盖空关键字、低分候选和无有效上下文路径。"""
+    monkeypatch.setattr(bills_module, "IMPORT_COLUMN_TYPE_KEYWORDS", {1: ("", "交易时间")})
+    assert bills_module._score_header_keyword_match("交易时间", 1) >= bills_module.IMPORT_HEADER_EXACT_SCORE
+
+    monkeypatch.setattr(bills_module, "IMPORT_COLUMN_TYPE_KEYWORDS", {1: ("交易时间",)})
+    monkeypatch.setattr(bills_module, "_score_header_keyword_match", lambda *_args, **_kwargs: 1.0)
+    low_score_suggestion = bills_module._build_import_mapping_suggestion(["低分列"], configs=[], sample_rows=[])
+    assert low_score_suggestion["columnMapping"] == {}
+
+    assert bills_module._auto_detect_and_normalize_amount("1.234.567,89") == "1234567.89"
+    assert bills_module._infer_generic_import_type_from_context(["", "   "], ["摘要"]) is None
+    assert bills_module._find_generic_import_header_index(["交易时间"], [""]) is None
+    assert bills_module._match_account_by_name([{"name": "", "aliases": "", "comment": ""}], "不存在") is None
 
 
 def test_parse_form_helpers_and_identifier_helpers_cover_json_bool_and_id_edges() -> None:
@@ -1117,6 +1157,25 @@ def test_prepare_backend_bill_for_create_supports_rule_match_and_missing_account
             _AsyncRunnerLoop(),
             1,
         )
+
+    default_category_backend_data, _ = bills_module._prepare_backend_bill_for_create(
+        {},
+        _FakePrepareDB(accounts=[{"id": 1, "name": "微信"}], category=None),
+        _FakePrepareCategoryEngine((None, None)),
+        _FakePrepareAdapter(
+            backend_data={
+                "type": "未知类型",
+                "amount": 9.9,
+                "payment_method": "微信",
+                "source_account_id": 1,
+            },
+            metadata={},
+        ),
+        _AsyncRunnerLoop(),
+        1,
+    )
+    assert default_category_backend_data["main_category"] == "其他"
+    assert default_category_backend_data["sub_category"] == ""
 
 
 def test_create_bill_and_build_response_handles_success_and_failed_creation() -> None:

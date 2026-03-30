@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -239,3 +240,89 @@ def test_backup_routes_cover_directory_creation_restore_fallback_and_error_paths
         response, status = asyncio.run(restore_backup("backup_broken.zip"))
         assert status == 500
         assert response.get_json()["success"] is False
+
+
+def test_backup_metadata_and_restore_verify_cover_checksum_and_validation(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """备份列表与恢复预验证应暴露校验信息，并识别元信息不匹配与坏包。"""
+    backup_dir = tmp_path / "verify_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    valid_backup = backup_dir / "backup_valid.zip"
+    with ZipFile(valid_backup, "w") as zip_file:
+        zip_file.writestr("data/restored.txt", "restored")
+
+    broken_backup = backup_dir / "backup_broken.zip"
+    broken_backup.write_bytes(b"not-a-zip")
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+
+    get_backups = _unwrap(backup_module.get_backups)
+    verify_backup = _unwrap(backup_module.verify_backup_restore)
+
+    metadata = backup_module._persist_backup_metadata(valid_backup)
+    assert metadata["checksum"]
+    assert metadata["ready_to_restore"] is True
+
+    with backup_route_app.test_request_context("/api/backup/"):
+        payload = get_backups().get_json() or {}
+        assert payload["success"] is True
+        listed_valid = next(item for item in payload["data"] if item["filename"] == "backup_valid.zip")
+        assert listed_valid["checksum"] == metadata["checksum"]
+        assert listed_valid["valid_zip"] is True
+        assert listed_valid["ready_to_restore"] is True
+
+    with backup_route_app.test_request_context("/api/backup/restore/verify", method="POST", json={}):
+        response, status = verify_backup()
+        assert status == 400
+        assert response.get_json()["error"] == "filename is required"
+
+    with backup_route_app.test_request_context(
+        "/api/backup/restore/verify",
+        method="POST",
+        json={"filename": "not-valid.txt"},
+    ):
+        response, status = verify_backup()
+        assert status == 400
+        assert response.get_json()["error"] == "无效的文件名"
+
+    with backup_route_app.test_request_context(
+        "/api/backup/restore/verify",
+        method="POST",
+        json={"filename": "backup_missing.zip"},
+    ):
+        response, status = verify_backup()
+        assert status == 404
+        assert response.get_json()["error"] == "文件不存在"
+
+    metadata_path = backup_module._get_backup_metadata_path(valid_backup)
+    metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata_payload["checksum"] = "mismatch"
+    metadata_path.write_text(json.dumps(metadata_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with backup_route_app.test_request_context(
+        "/api/backup/restore/verify",
+        method="POST",
+        json={"filename": "backup_valid.zip"},
+    ):
+        payload = verify_backup().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["valid_zip"] is True
+        assert payload["data"]["ready_to_restore"] is True
+        assert payload["data"]["metadata_checksum_matched"] is False
+        assert payload["data"]["contains_data_dir"] is True
+
+    with backup_route_app.test_request_context(
+        "/api/backup/restore/verify",
+        method="POST",
+        json={"filename": "backup_broken.zip"},
+    ):
+        response, status = verify_backup()
+        assert status == 400
+        payload = response.get_json() or {}
+        assert payload["success"] is False
+        assert payload["data"]["valid_zip"] is False
+        assert payload["data"]["ready_to_restore"] is False
