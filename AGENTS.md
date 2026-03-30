@@ -109,6 +109,13 @@ npm run lint
 
 提交前最低检查：受影响的 pytest 用例通过；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
 
+## Audit gate for business-code changes
+
+- 任何业务代码变更（包括 `src/bill_analyser/**` 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次完整测试套件：`./.venv/Scripts/python.exe -m pytest tests/ -v`
+- 开发过程中可以先跑受影响用例做快速反馈，但这不能替代最终的全量测试验收。
+- 只有在全量 pytest 套件执行完成且全部通过时，才可以视为通过审计验收。
+- 如果没有执行全量测试，或全量测试存在任何失败/错误，则该改动必须打回重做，不得以“局部测试通过”代替。
+
 ## Asset inventory
 
 - Copilot instructions, agents, prompts, and hooks: `.github/`

@@ -48,7 +48,7 @@ class CMBCParser(ParserBase):
             try:
                 if file_path.endswith(".csv"):
                     # CSV文件，尝试多种编码
-                    for encoding in ["gbk", "utf-8", "gb2312"]:
+                    for encoding in self.TEXT_READ_ENCODINGS:
                         try:
                             df = pd.read_csv(file_path, encoding=encoding, nrows=15)
                             break
@@ -117,12 +117,12 @@ class CMBCParser(ParserBase):
             is_cmbc = (has_cmbc_strong or has_cmbc_columns) and not has_other_bank
 
             if is_cmbc:
-                self.logger.info(f"识别为民生银行文件: {file_path}")
+                self.logger.info("识别为民生银行文件: %s", file_path)
 
             return is_cmbc
 
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.debug(f"判断民生银行文件失败: {file_path}, 错误: {e}")
+            self.logger.debug("判断民生银行文件失败: %s, 错误: %s", file_path, e)
             return False
 
     def _is_html_file(self, file_path: str) -> bool:
@@ -150,7 +150,7 @@ class CMBCParser(ParserBase):
 
             # 民生银行通常只有一个表格
             df = tables[0]
-            self.logger.info(f"[民生银行HTML] 读取到 {len(df)} 行数据")
+            self.logger.info("[民生银行HTML] 读取到 %d 行数据", len(df))
 
             # 查找表头行（包含"交易时间"的行）
             header_row_idx = None
@@ -173,7 +173,7 @@ class CMBCParser(ParserBase):
                 else:
                     headers.append(str(val).strip())
 
-            self.logger.info(f"[民生银行HTML] 列名: {headers}")
+            self.logger.info("[民生银行HTML] 列名: %s", headers)
 
             # 从表头下一行开始解析数据
             for idx in range(header_row_idx + 1, len(df)):
@@ -239,13 +239,13 @@ class CMBCParser(ParserBase):
                     bills.append(bill)
 
                 except Exception as e:  # pylint: disable=broad-except
-                    self.logger.debug(f"解析民生银行HTML行失败: {e}")
+                    self.logger.debug("解析民生银行HTML行失败: %s", e)
                     continue
 
-            self.logger.info(f"[民生银行HTML] 解析完成: {len(bills)} 条账单")
+            self.logger.info("[民生银行HTML] 解析完成: %d 条账单", len(bills))
 
         except Exception as e:  # pylint: disable=broad-except
-            self.logger.error(f"解析民生银行HTML账单失败: {e}")
+            self.logger.error("解析民生银行HTML账单失败: %s", e)
             return []
 
         return bills
@@ -262,54 +262,55 @@ class CMBCParser(ParserBase):
             # 读取文件
             if file_path.endswith(".csv"):
                 # CSV格式
-                with open(file_path, encoding="gbk") as f:
-                    lines = f.readlines()
+                lines, encoding = self.read_lines_with_fallback(file_path)
 
-                    data_start = 0
-                    for i, line in enumerate(lines):
-                        if "交易日期" in line or "记账日期" in line or "交易时间" in line:
-                            data_start = i
-                            break
+                data_start = 0
+                for i, line in enumerate(lines):
+                    if "交易日期" in line or "记账日期" in line or "交易时间" in line:
+                        data_start = i
+                        break
 
-                    if data_start == 0:
-                        self.logger.warning("未找到数据起始行")
-                        return []
+                if data_start == 0:
+                    self.logger.warning("未找到数据起始行")
+                    return []
 
-                    reader = csv.DictReader(lines[data_start:])
+                reader = csv.DictReader(lines[data_start:])
 
-                    for row in reader:
-                        try:
-                            date_field = row.get("交易日期") or row.get("记账日期") or row.get("交易时间") or ""
-                            if not date_field.strip():
-                                continue
+                for row in reader:
+                    try:
+                        date_field = row.get("交易日期") or row.get("记账日期") or row.get("交易时间") or ""
+                        if not date_field.strip():
+                            continue
 
-                            amount_str = (row.get("交易金额") or row.get("金额") or "0").strip()
+                        amount_str = (row.get("交易金额") or row.get("金额") or "0").strip()
 
-                            # 判断收支
-                            transaction_type = "支出"
-                            explicit_type = (row.get("收/支") or "").strip()
-                            if explicit_type in {"收入", "支出"}:
-                                transaction_type = explicit_type
-                            elif float(amount_str.replace(",", "")) > 0:
-                                transaction_type = "收入"
+                        # 判断收支
+                        transaction_type = "支出"
+                        explicit_type = (row.get("收/支") or "").strip()
+                        if explicit_type in {"收入", "支出"}:
+                            transaction_type = explicit_type
+                        elif float(amount_str.replace(",", "")) > 0:
+                            transaction_type = "收入"
 
-                            bill = {
-                                "date": date_field,
-                                "type": transaction_type,
-                                "counterparty": row.get("交易对手") or row.get("对方户名") or row.get("对方名称") or "",
-                                "description": row.get("交易说明") or row.get("摘要") or "",
-                                "amount": amount_str.replace("-", ""),
-                                "channel": "民生银行",
-                            }
+                        bill = {
+                            "date": date_field,
+                            "type": transaction_type,
+                            "counterparty": row.get("交易对手") or row.get("对方户名") or row.get("对方名称") or "",
+                            "description": row.get("交易说明") or row.get("摘要") or "",
+                            "amount": amount_str.replace("-", ""),
+                            "channel": "民生银行",
+                        }
 
-                            bills.append(bill)
+                        bills.append(bill)
 
-                        except Exception as e:  # pylint: disable=broad-except
-                            self.logger.error("解析CSV行数据失败: %s", e)
+                    except Exception as e:  # pylint: disable=broad-except
+                        self.logger.error("解析CSV行数据失败: %s", e)
+
+                self.logger.info("民生银行CSV账单读取编码: %s", encoding)
             else:
                 # Excel格式 - 先检查是否为HTML伪装的.xls
                 if self._is_html_file(file_path):
-                    self.logger.info(f"检测到HTML格式的.xls文件: {file_path}")
+                    self.logger.info("检测到HTML格式的.xls文件: %s", file_path)
                     bills = self._parse_html_xls(file_path)
                     return self.post_process(bills)
 

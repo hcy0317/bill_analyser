@@ -164,6 +164,32 @@ def test_internal_calculation_helpers_cover_summary_categories_type_trend_and_to
     assert analyzer._get_top_income(pd.DataFrame([{"amount": 10.0}])) == []
 
 
+def test_period_dates_and_category_aggregation_cover_tail_branches(tmp_path: Path) -> None:
+    """日期范围 helper 和无子分类分类聚合应覆盖剩余尾分支。"""
+    analyzer = Analyzer(db=cast(Any, FakeAnalyzerDB(default_response=[])), output_dir=tmp_path)
+
+    quarter_start, quarter_end = analyzer._get_period_dates("quarter")
+    year_start, year_end = analyzer._get_period_dates("year")
+    fallback_start, fallback_end = analyzer._get_period_dates("unsupported")
+
+    assert quarter_start.endswith("-01")
+    assert quarter_end.endswith("-01")
+    assert year_start.endswith("-01-01")
+    assert year_end.endswith("-01-01")
+    assert fallback_start <= fallback_end
+
+    categorized_df = pd.DataFrame(
+        [
+            {"main_category": "餐饮", "sub_category": None, "amount": 88.0},
+            {"main_category": "餐饮", "sub_category": "午餐", "amount": 12.0},
+        ]
+    )
+    categorized = analyzer._calculate_by_category(categorized_df)
+
+    assert categorized["餐饮"]["count"] == 2
+    assert categorized["餐饮"]["sub_categories"] == {"午餐": {"count": 1, "total": 12.0}}
+
+
 @pytest.mark.asyncio
 async def test_chart_entrypoints_cover_report_with_charts_heatmap_and_dashboard(
     tmp_path: Path,

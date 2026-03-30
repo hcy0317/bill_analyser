@@ -41,6 +41,7 @@ def test_normalize_keyword_list_handles_invalid_json_and_blank_text() -> None:
     """非法 JSON 文本和空白字符串也应稳定回退。"""
     assert investment_settings_module.normalize_keyword_list("[bad json") == ["[bad json"]
     assert investment_settings_module.normalize_keyword_list("   ", ["理财", "理财", "基金"]) == ["理财", "基金"]
+    assert investment_settings_module.normalize_keyword_list(123, ["基金", "ETF", "基金"]) == ["基金", "ETF"]
 
 
 

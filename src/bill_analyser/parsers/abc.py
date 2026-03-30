@@ -156,8 +156,7 @@ class ABCParser(ParserBase):
         """解析CSV格式账单"""
         bills = []
 
-        with open(file_path, encoding="gbk") as f:
-            lines = f.readlines()
+        lines, encoding = self.read_lines_with_fallback(file_path)
 
         data_start = 0
         for i, line in enumerate(lines):
@@ -179,6 +178,7 @@ class ABCParser(ParserBase):
             except Exception as e:  # pylint: disable=broad-except
                 self.logger.error("解析CSV行数据失败: %s", e)
 
+        self.logger.info("农业银行CSV账单读取编码: %s", encoding)
         return bills
 
     def _find_header_row(self, df: pd.DataFrame) -> int:
@@ -255,7 +255,7 @@ class ABCParser(ParserBase):
             # 尝试读取文件内容
             try:
                 if file_path.endswith(".csv"):
-                    for encoding in ["gbk", "utf-8", "gb2312"]:
+                    for encoding in self.TEXT_READ_ENCODINGS:
                         try:
                             df = pd.read_csv(file_path, encoding=encoding, nrows=15)
                             break

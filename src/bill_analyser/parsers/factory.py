@@ -28,6 +28,16 @@ from .icbc import ICBCParser
 from .wechat import WeChatParser
 
 
+PARSER_CLASS_REGISTRY: dict[str, type[ParserBase]] = {
+    "wechat": WeChatParser,
+    "alipay": AlipayParser,
+    "icbc": ICBCParser,
+    "cmbc": CMBCParser,
+    "abc": ABCParser,
+    "ccb": CCBParser,
+}
+
+
 class ParserFactory:
     """解析器工厂
 
@@ -41,24 +51,10 @@ class ParserFactory:
 
         # 注册所有解析器（按优先级顺序）
         # 支付平台在前（信息更丰富），银行在后
-        self.parsers: list[ParserBase] = [
-            WeChatParser(),
-            AlipayParser(),
-            ICBCParser(),
-            CMBCParser(),
-            ABCParser(),
-            CCBParser(),
-        ]
+        self.parsers: list[ParserBase] = [parser_class() for parser_class in PARSER_CLASS_REGISTRY.values()]
 
         # 解析器ID到类的映射
-        self._parser_map = {
-            "wechat": WeChatParser,
-            "alipay": AlipayParser,
-            "icbc": ICBCParser,
-            "cmbc": CMBCParser,
-            "abc": ABCParser,
-            "ccb": CCBParser,
-        }
+        self._parser_map = dict(PARSER_CLASS_REGISTRY)
 
         self.logger.info(
             "[解析器工厂] 初始化完成，注册了 %d 个解析器: %s",

@@ -3706,10 +3706,12 @@ def parse_import_file():
 
         # 获取解析器类型
         requested_file_type = str(request.form.get("fileType", "auto") or "auto").strip().lower()
-        force_generic_parser = requested_file_type == "generic"
-        parser_type = requested_file_type
-        if parser_type in ("auto", "generic"):
-            parser_type = None  # None表示自动检测
+        from bill_analyser.parsers.factory import PARSER_CLASS_REGISTRY
+
+        dedicated_parser_types = set(PARSER_CLASS_REGISTRY)
+        generic_file_types = {"csv", "xlsx", "xls", "txt"}
+        force_generic_parser = requested_file_type == "generic" or requested_file_type in generic_file_types
+        parser_type = requested_file_type if requested_file_type in dedicated_parser_types else None
 
         # v6.89: 支持前端列映射通用表格解析
         column_mapping = _parse_json_form_field(request.form.get("columnMapping"), {})

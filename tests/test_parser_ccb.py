@@ -52,3 +52,28 @@ def test_ccb_parser_handles_content_detection_and_missing_headers(tmp_path, monk
     assert parser.can_parse(str(neutral_xlsx)) is True
 
     assert parser.parse(str(bad_xlsx)) == []
+
+
+def test_ccb_parser_detects_content_without_filename_and_skips_zero_amount_rows(tmp_path, monkeypatch) -> None:
+    parser = CCBParser()
+    dataframe = pd.DataFrame(
+        [
+            ['中国建设银行', '', '', '', '', '', '', ''],
+            ['开户机构：测试支行', '', '', '', '', '', '', ''],
+            ['', '', '', '', '', '', '', ''],
+            ['记账日', '交易日期', '交易时间', '摘要', '支出', '收入', '账户余额', '对方户名'],
+            ['20260112', '20260112', '081500', '无效零金额', '', '', '1000.0', ''],
+            ['20260112', '20260112', '182000', '工资入账', '', '200.0', '1200.0', ''],
+        ]
+    )
+    statement_path = tmp_path / 'statement.xlsx'
+    statement_path.write_bytes(b'placeholder')
+    monkeypatch.setattr('bill_analyser.parsers.ccb.pd.read_excel', lambda *_args, **_kwargs: dataframe)
+
+    assert parser.can_parse(str(statement_path)) is True
+
+    bills = parser.parse(str(statement_path))
+
+    assert len(bills) == 1
+    assert bills[0]['counterparty'] == '工资入账'
+    assert bills[0]['amount'] == 200.0

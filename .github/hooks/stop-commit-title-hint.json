@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "type": "command",
+        "bash": "python3 scripts/hooks/stop_commit_title_hint.py",
+        "powershell": "python scripts/hooks/stop_commit_title_hint.py",
+        "cwd": ".",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}

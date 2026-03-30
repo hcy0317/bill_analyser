@@ -31,6 +31,8 @@ Use this skill when you are:
 ## Verification Baseline
 
 - Run targeted pytest coverage for affected areas.
+- After any business-code change, rerun the full repository pytest suite (`./.venv/Scripts/python.exe -m pytest tests/ -v`) before claiming audit acceptance.
+- Targeted tests are for fast feedback only; audit acceptance requires the full pytest suite to finish green with no failures or errors.
 - Use pylint for changed Python modules.
 - Prefer minimal, focused changes over broad refactors.
 - Before ending a session with any git diff, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title for the current change set.

@@ -7,7 +7,7 @@ Flask Web API Server - 账单分析系统Web API服务器
 import asyncio
 import sys
 
-from flask import Flask, send_from_directory
+from flask import Flask, abort, send_from_directory
 from flask_cors import CORS
 
 from bill_analyser import __version__
@@ -159,6 +159,10 @@ def create_app():
     @flask_app.route("/", defaults={"path": ""})
     @flask_app.route("/<path:path>")
     def serve_frontend(path):
+        normalized_path = str(path or "").lstrip("/")
+        if normalized_path == "api" or normalized_path.startswith("api/"):
+            abort(404)
+
         if path and (STATIC_DIR / path).is_file():
             return send_from_directory(STATIC_DIR, path)
         return send_from_directory(STATIC_DIR, "index.html")

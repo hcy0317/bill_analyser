@@ -83,3 +83,20 @@ def test_icbc_parser_handles_bad_inputs_and_reader_fallbacks(tmp_path, monkeypat
     assert parser.parse(str(bad_csv)) == []
     assert is_html is False
     assert error is not None
+
+
+def test_icbc_parser_detects_neutral_utf8sig_csv_and_reads_html_content(tmp_path) -> None:
+    parser = ICBCParser()
+    neutral_csv = tmp_path / 'statement.csv'
+    neutral_csv.write_text(
+        '中国工商银行历史明细,,,,,,\n'
+        '交易日期,交易金额,对方户名,对方账号,摘要,交易流水号,收/支\n'
+        '2026-01-10 08:00:00,-15.50,测试早餐店,6222000000000001,早餐消费,ICBC-0001,支出\n'
+        '2026-01-11 19:30:00,1200.00,测试工资账户,6222000000000002,工资入账,ICBC-0002,收入\n',
+        encoding='utf-8-sig',
+    )
+    html_xls = build_icbc_html_xls(tmp_path / 'statement.xls')
+
+    assert parser.can_parse(str(neutral_csv)) is True
+    assert len(parser.parse(str(neutral_csv))) == 2
+    assert '中国工商银行' in parser._read_html_content(str(html_xls))  # pylint: disable=protected-access

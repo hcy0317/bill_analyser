@@ -1,6 +1,7 @@
 from __future__ import annotations
 # pyright: reportPrivateUsage=false, reportUnusedVariable=false, reportUnusedImport=false
 
+import json
 from datetime import datetime
 from typing import Any, cast
 
@@ -46,6 +47,12 @@ class FakeBillServiceDB:
         self.rule_usage_updates: list[tuple[list[int], int]] = []
         self.saved_annotation_samples: list[tuple[str, list[dict[str, Any]], int]] = []
         self.promoted_annotation_sessions: list[tuple[str, list[int] | None, int]] = []
+        self.preview_rows: list[dict[str, Any]] = []
+        self.annotation_samples: list[dict[str, Any]] = []
+        self.preview_selection_updates: list[tuple[list[int], bool]] = []
+        self.cleared_sessions: list[str] = []
+        self.session_status_updates: list[tuple[str, str]] = []
+        self.preview_classification_updates: list[list[dict[str, Any]]] = []
         self.category_by_name: dict[tuple[str, str], dict[str, Any]] = {
             ("餐饮", "早餐"): {"id": 77, "keywords": "早餐,豆浆"},
         }
@@ -146,6 +153,31 @@ class FakeBillServiceDB:
         self.promoted_annotation_sessions.append((session_id, preview_ids, user_id))
         return {"saved_rule_count": len(preview_ids or []), "skipped_count": 0}
 
+    async def get_preview_by_session(self, _session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
+        if not selected_only:
+            return list(self.preview_rows)
+        return [preview for preview in self.preview_rows if bool(preview.get("preview_selected", 1))]
+
+    async def get_import_annotation_samples(self, _session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
+        _ = user_id
+        return list(self.annotation_samples)
+
+    async def update_preview_selection(self, preview_ids: list[int], selected: bool) -> int:
+        self.preview_selection_updates.append((list(preview_ids), selected))
+        return len(preview_ids)
+
+    async def clear_session_data(self, session_id: str) -> int:
+        self.cleared_sessions.append(session_id)
+        return 3
+
+    async def update_import_session_status(self, session_id: str, status: str, total_parsed: int = 0) -> None:
+        _ = total_parsed
+        self.session_status_updates.append((session_id, status))
+
+    async def batch_update_preview_classification(self, updates: list[dict[str, Any]]) -> int:
+        self.preview_classification_updates.append(list(updates))
+        return len(updates)
+
     @staticmethod
     def build_composite_match_hash(
         parser_id: Any = "",
@@ -159,6 +191,25 @@ class FakeBillServiceDB:
             f"p={str(parser_id or '').strip()}|"
             f"m={str(payment_method or '').strip()}"
         )
+
+    @staticmethod
+    def build_composite_match_features(
+        parser_id: Any = "",
+        counterparty: Any = "",
+        description: Any = "",
+        payment_method: Any = "",
+    ) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for key, value in {
+            "parser_id": parser_id,
+            "counterparty": counterparty,
+            "description": description,
+            "payment_method": payment_method,
+        }.items():
+            normalized = BillService._normalize_learning_text(value)
+            if normalized:
+                result[key] = normalized
+        return result
 
     async def insert_bills(self, bills: list[dict[str, Any]], batch_id: str, user_id: int = 1) -> int:
         self.inserted_batches.append((list(bills), batch_id, user_id))
@@ -512,3 +563,377 @@ async def test_batch_import_preview_confirmed_and_simple_db_wrappers(monkeypatch
     assert await service.get_statistics() == {"total": 99}
     await service.close()
     assert fake_db.closed is True
+
+
+@pytest.mark.asyncio
+async def test_import_preview_selection_updates_and_cancel_session_helpers() -> None:
+    """预览读取、选中状态更新和取消会话 helper 应返回前端期望字段。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 1,
+            "user_id": 1,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": -12.3,
+            "preview_destination_amount": 12.3,
+            "preview_main_category": "资金管理",
+            "preview_sub_category": "存取现金",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": 3,
+            "preview_counterparty": "现金",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "ATM取现",
+            "preview_parser_id": "cmbc",
+            "preview_selected": 1,
+            "dedup_type": "transfer",
+        },
+        {
+            "id": 2,
+            "user_id": 1,
+            "preview_date": "2025-01-03 09:00:00",
+            "preview_type": "投资",
+            "preview_amount": -88.0,
+            "preview_destination_amount": 0,
+            "preview_main_category": "投资理财",
+            "preview_sub_category": "基金",
+            "preview_source_account_id": 4,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "蚂蚁财富",
+            "preview_payment_method": "支付宝",
+            "preview_description": "黄金ETF 自动定投",
+            "preview_parser_id": "alipay",
+            "preview_selected": 0,
+            "dedup_type": "",
+        },
+    ]
+    fake_db.annotation_samples = [{"preview_id": 1}]
+    service = _make_service(fake_db)
+
+    preview_items = await service.get_import_preview("session-preview", selected_only=False)
+    selected_items = await service.get_import_preview("session-preview", selected_only=True)
+    updated_count = await service.update_preview_selections("session-preview", {1: True, 2: False})
+    cancel_result = await service.cancel_import_session("session-preview")
+
+    assert len(preview_items) == 2
+    assert preview_items[0]["preview_is_manually_annotated"] is True
+    assert preview_items[0]["suggested_preview_type"] == "转账"
+    assert preview_items[0]["transfer_suggestion_score"] >= 0.55
+    assert preview_items[1]["investment_signal_score"] >= 0.55
+    assert preview_items[1]["investment_platform"]
+    assert preview_items[1]["investment_product"]
+    assert [item["id"] for item in selected_items] == [1]
+    assert updated_count == 2
+    assert fake_db.preview_selection_updates == [([1], True), ([2], False)]
+    assert cancel_result == {"success": True, "session_id": "session-preview", "cleared": 3}
+    assert fake_db.cleared_sessions == ["session-preview"]
+    assert fake_db.session_status_updates == [("session-preview", "cancelled")]
+
+
+@pytest.mark.asyncio
+async def test_reclassify_preview_bills_replays_annotations_and_updates_preview_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重新分类应保存会话样本、回放人工标注并批量更新 preview 表。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 11,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 12.3,
+            "preview_counterparty": "早餐铺",
+            "preview_payment_method": "支付宝",
+            "preview_description": "共同描述",
+            "preview_parser_id": "wechat",
+            "dedup_type": "remaining",
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+        }
+    ]
+    fake_db.annotation_samples = [
+        {
+            "preview_id": 11,
+            "annotated_type": "转账",
+            "annotated_category_id": 10,
+            "annotated_source_account_id": 2,
+            "annotated_destination_account_id": 3,
+        }
+    ]
+    service = _make_service(fake_db)
+
+    class ReclassifyCategoryEngine:
+        def __init__(self) -> None:
+            self.rules = [{"type": TransactionType.TRANSFER, "main": "资金管理", "sub": "存取现金"}]
+
+        async def load_rules_from_db(self, _db: object, user_id: int = 1) -> None:
+            _ = user_id
+
+        async def batch_match_categories(self, bills: list[dict[str, Any]], types: Any = None) -> list[dict[str, Any]]:
+            _ = types
+            for bill in bills:
+                bill.setdefault("main_category", "资金管理")
+                bill.setdefault("sub_category", "存取现金")
+            return bills
+
+    service.category_engine = cast(Any, ReclassifyCategoryEngine())
+
+    async def zero_learning(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    async def identity_step(bills: list[dict[str, Any]], user_id: int = 1):
+        _ = user_id
+        return bills
+
+    async def empty_session_rule_lookup(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(service, "_build_session_annotation_rule_lookup", empty_session_rule_lookup)
+    monkeypatch.setattr(service, "_apply_session_annotation_learning_rules", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(service, "_apply_import_learning_rules", zero_learning)
+    monkeypatch.setattr(service, "_detect_investment_candidates", identity_step)
+    monkeypatch.setattr(service, "_match_accounts", identity_step)
+    monkeypatch.setattr(service, "_detect_cash_transfers", identity_step)
+
+    result = await service.reclassify_preview_bills(
+        "session-reclassify",
+        preview_updates=[{"id": 11, "preview_type": "转账"}],
+        user_id=1,
+    )
+
+    assert result["success"] is True
+    assert result["total"] == 1
+    assert result["session_samples_saved"] == 1
+    assert result["annotation_applied"] == 1
+    assert result["categorized"] == 1
+    assert result["account_matched"] == 1
+    assert fake_db.saved_annotation_samples[0][0] == "session-reclassify"
+    assert fake_db.preview_classification_updates[0] == [
+        {
+            "id": 11,
+            "preview_type": "转账",
+            "preview_main_category": "资金管理",
+            "preview_sub_category": "存取现金",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": 3,
+        }
+    ]
+
+
+def test_learning_similarity_helpers_cover_deserialize_scoring_summary_and_signal() -> None:
+    """长期学习相似度 helper 应覆盖特征反序列化、打分、摘要和预览推荐。"""
+    fake_db = FakeBillServiceDB()
+    service = _make_service(fake_db)
+
+    assert service._deserialize_learning_match_features({"match_features_json": "{bad"}) == {}
+    assert service._deserialize_learning_match_features({"match_features_json": '[1, 2]'}) == {}
+
+    parsed_features = service._deserialize_learning_match_features(
+        {
+            "match_features_json": json.dumps(
+                {
+                    "parser_id": " wechat ",
+                    "counterparty": " 早餐铺 ",
+                    "description": "共同描述",
+                    "payment_method": " 微信支付 ",
+                },
+                ensure_ascii=False,
+            )
+        }
+    )
+    assert parsed_features == {
+        "parser_id": "wechat",
+        "counterparty": "早餐铺",
+        "description": "共同描述",
+        "payment_method": "微信支付",
+    }
+
+    assert BillService._calculate_learning_feature_similarity("parser_id", "wechat", "alipay") == 0.0
+    assert BillService._calculate_learning_feature_similarity("description", "共同描述扩展", "共同描述") == 0.92
+    assert BillService._score_learning_rule_similarity({"parser_id": "wechat"}, {"parser_id": "wechat"}) is None
+
+    score_payload = BillService._score_learning_rule_similarity(
+        {
+            "parser_id": "wechat",
+            "counterparty": "早餐铺",
+            "description": "共同描述",
+            "payment_method": "微信支付",
+        },
+        {
+            "parser_id": "wechat",
+            "counterparty": "早餐铺",
+            "description": "共同描述",
+            "payment_method": "微信支付",
+        },
+    )
+    assert score_payload is not None
+    assert score_payload["score"] == 1.0
+
+    summary = BillService._build_learning_rule_result_summary(
+        {
+            "learned_type": "支出",
+            "learned_category_id": 77,
+            "learned_source_account_id": 2,
+            "learned_destination_account_id": 4,
+        },
+        {77: {"main_category": "餐饮", "sub_category": "早餐"}},
+        {2: {"name": "招商银行卡"}, 4: {"name": "支付宝"}},
+    )
+    assert summary == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+
+    preview = {
+        "id": 11,
+        "preview_parser_id": "wechat",
+        "preview_counterparty": "早餐铺",
+        "preview_description": "共同描述",
+        "preview_payment_method": "微信支付",
+    }
+    learning_rule = {
+        "id": 1,
+        "match_features_json": json.dumps(parsed_features, ensure_ascii=False),
+        "composite_match_hash": "different-hash",
+        "learned_type": "支出",
+        "learned_category_id": 77,
+        "learned_source_account_id": 2,
+        "learned_destination_account_id": 4,
+        "applied_count": 5,
+    }
+    signal = service._build_learning_similarity_signal_from_preview(
+        preview,
+        [learning_rule],
+        categories_by_id={77: {"main_category": "餐饮", "sub_category": "早餐"}},
+        accounts_by_id={2: {"name": "招商银行卡"}, 4: {"name": "支付宝"}},
+    )
+    assert signal["rule_id"] == 1
+    assert signal["level"] == "high"
+    assert signal["recommended_type"] == "支出"
+    assert signal["summary"] == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+
+    learning_rule["composite_match_hash"] = fake_db.build_composite_match_hash(
+        parser_id="wechat",
+        counterparty="早餐铺",
+        description="共同描述",
+        payment_method="微信支付",
+    )
+    assert service._build_learning_similarity_signal_from_preview(
+        preview,
+        [learning_rule],
+        categories_by_id={77: {"main_category": "餐饮", "sub_category": "早餐"}},
+        accounts_by_id={2: {"name": "招商银行卡"}, 4: {"name": "支付宝"}},
+    ) == {}
+
+
+def test_transfer_and_investment_signals_cover_threshold_levels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """转账/投资信号应覆盖空结果、low、medium、high 三档阈值。"""
+    service = _make_service()
+
+    assert service._build_transfer_suggestion_from_preview({"preview_type": "转账"}) == {}
+
+    low_signal = service._build_transfer_suggestion_from_preview(
+        {
+            "preview_type": "支出",
+            "preview_source_account_id": 1,
+            "preview_destination_account_id": 2,
+            "preview_destination_amount": 0,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_counterparty": "转账对手",
+            "preview_payment_method": "",
+            "preview_description": "提现",
+            "dedup_type": "",
+        }
+    )
+    assert low_signal["level"] == "low"
+
+    medium_signal = service._build_transfer_suggestion_from_preview(
+        {
+            "preview_type": "支出",
+            "preview_source_account_id": 1,
+            "preview_destination_account_id": 2,
+            "preview_destination_amount": 10,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_counterparty": "普通账户",
+            "preview_payment_method": "",
+            "preview_description": "转账记录",
+            "dedup_type": "",
+        }
+    )
+    assert medium_signal["level"] == "medium"
+
+    high_signal = service._build_transfer_suggestion_from_preview(
+        {
+            "preview_type": "支出",
+            "preview_source_account_id": 1,
+            "preview_destination_account_id": 2,
+            "preview_destination_amount": 10,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_counterparty": "普通账户",
+            "preview_payment_method": "",
+            "preview_description": "无关描述",
+            "dedup_type": "transfer",
+        }
+    )
+    assert high_signal["level"] == "high"
+
+    assert service._build_investment_signal_from_preview({"preview_type": "支出"}) == {}
+
+    monkeypatch.setattr(service, "_score_investment_candidate", lambda *_args, **_kwargs: None)
+    assert service._build_investment_signal_from_preview({"preview_type": "投资"}) == {}
+
+    monkeypatch.setattr(
+        service,
+        "_score_investment_candidate",
+        lambda *_args, **_kwargs: {"score": 0.66, "reason": "candidate", "platform": "蚂蚁财富", "product": "黄金ETF"},
+    )
+    assert service._build_investment_signal_from_preview({"preview_type": "investment"})["level"] == "medium"
+
+    monkeypatch.setattr(
+        service,
+        "_score_investment_candidate",
+        lambda *_args, **_kwargs: {"score": 0.81, "reason": "candidate", "platform": "蚂蚁财富", "product": "黄金ETF"},
+    )
+    assert service._build_investment_signal_from_preview({"preview_type": "5"})["level"] == "high"
+
+
+def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """长期学习推荐在分差过小或候选过于接近时应抑制输出。"""
+    fake_db = FakeBillServiceDB()
+    service = _make_service(fake_db)
+    preview = {
+        "id": 21,
+        "preview_parser_id": "wechat",
+        "preview_counterparty": "早餐铺",
+        "preview_description": "共同描述",
+        "preview_payment_method": "微信支付",
+    }
+    rules = [
+        {"id": 1, "match_features_json": "rule-1", "learned_type": "支出", "applied_count": 5},
+        {"id": 2, "match_features_json": "rule-2", "learned_type": "支出", "applied_count": 4},
+    ]
+
+    monkeypatch.setattr(
+        service,
+        "_deserialize_learning_match_features",
+        lambda _rule: {
+            "parser_id": "wechat",
+            "counterparty": "早餐铺",
+            "description": "共同描述",
+            "payment_method": "微信支付",
+        },
+    )
+    score_payloads = iter(
+        [
+            {"score": 0.83, "matched_fields": ["counterparty", "description"], "reason_parts": ["counterparty:exact"]},
+            {"score": 0.78, "matched_fields": ["counterparty", "description"], "reason_parts": ["counterparty:similar(0.90)"]},
+        ]
+    )
+    monkeypatch.setattr(service, "_score_learning_rule_similarity", lambda *_args, **_kwargs: next(score_payloads))
+
+    assert service._build_learning_similarity_signal_from_preview(
+        preview,
+        rules,
+        categories_by_id={},
+        accounts_by_id={},
+    ) == {}

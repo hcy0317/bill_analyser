@@ -66,3 +66,21 @@ def test_cmbc_parser_handles_bad_excel_input(tmp_path, monkeypatch) -> None:
 
     assert parser.parse(str(bad_xlsx)) == []
     assert parser._is_html_file(str(bad_xlsx)) is False  # pylint: disable=protected-access
+
+
+def test_cmbc_parser_detects_utf8sig_neutral_csv_and_skips_blank_dates(tmp_path) -> None:
+    parser = CMBCParser()
+    neutral_csv = tmp_path / 'cmbc_statement_utf8sig.csv'
+    neutral_csv.write_text(
+        '中国民生银行股份有限公司个人账户对账单,,,,,\n'
+        '交易时间,交易金额,收/支,交易对手,交易说明,摘要\n'
+        ',32.80,支出,测试午餐店,工作餐,门店消费\n'
+        '20170102 09:30:00,88.00,收入,测试报销账户,报销到账,公司报销\n',
+        encoding='utf-8-sig',
+    )
+
+    bills = parser.parse(str(neutral_csv))
+
+    assert parser.can_parse(str(neutral_csv)) is True
+    assert len(bills) == 1
+    assert bills[0]['amount'] == 88.0

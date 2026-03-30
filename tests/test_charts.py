@@ -2,25 +2,22 @@
 测试图表生成模块
 """
 
-import pytest
-from pathlib import Path
 from datetime import datetime, timedelta
-import sys
 
-# 添加项目根目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import pytest
 
-from src.utils.charts import ChartGenerator
+from bill_analyser.utils import charts as charts_module
+from bill_analyser.utils.charts import ChartGenerator
 
 
-@pytest.fixture
-def chart_generator(tmp_path):
+@pytest.fixture(name="chart_generator")
+def chart_generator_fixture(tmp_path):
     """创建图表生成器实例"""
     return ChartGenerator(output_dir=tmp_path, dpi=72)
 
 
-@pytest.fixture
-def sample_trend_data():
+@pytest.fixture(name="sample_trend_data")
+def sample_trend_data_fixture():
     """示例趋势数据"""
     base_date = datetime(2024, 1, 1)
     data = []
@@ -35,8 +32,8 @@ def sample_trend_data():
     return data
 
 
-@pytest.fixture
-def sample_category_data():
+@pytest.fixture(name="sample_category_data")
+def sample_category_data_fixture():
     """示例分类数据"""
     return {
         '餐饮': {'total': 3500, 'count': 45, 'average': 77.78},
@@ -47,8 +44,8 @@ def sample_category_data():
     }
 
 
-@pytest.fixture
-def sample_top_expenses():
+@pytest.fixture(name="sample_top_expenses")
+def sample_top_expenses_fixture():
     """示例Top支出数据"""
     return [
         {
@@ -75,8 +72,8 @@ def sample_top_expenses():
     ]
 
 
-@pytest.fixture
-def sample_summary():
+@pytest.fixture(name="sample_summary")
+def sample_summary_fixture():
     """示例汇总数据"""
     return {
         'total_income': 15000,
@@ -85,8 +82,8 @@ def sample_summary():
     }
 
 
-@pytest.fixture
-def sample_bills():
+@pytest.fixture(name="sample_bills")
+def sample_bills_fixture():
     """示例账单数据"""
     base_date = datetime(2024, 1, 1)
     bills = []
@@ -207,6 +204,10 @@ def test_empty_data_handling(chart_generator):
     filepath = chart_generator.generate_top_merchants_chart([])
     assert filepath is None
 
+    # 空预算数据
+    filepath = chart_generator.generate_budget_progress_chart({})
+    assert filepath is None
+
 
 def test_custom_filename(chart_generator, sample_trend_data):
     """测试自定义文件名"""
@@ -227,6 +228,79 @@ def test_output_directory_creation(tmp_path):
 
     assert generator.output_dir.exists()
     assert generator.output_dir.is_dir()
+
+
+def test_generate_heatmap_returns_none_when_only_income_exists(chart_generator):
+    """热力图在没有支出数据时应直接返回 None。"""
+    filepath = chart_generator.generate_heatmap(
+        [
+            {
+                'date': '2024-01-01 08:00:00',
+                'type': '收入',
+                'amount': 200,
+                'counterparty': '工资账户',
+                'description': '工资',
+                'channel': '银行卡',
+            }
+        ]
+    )
+
+    assert filepath is None
+
+
+def test_generate_category_pie_chart_returns_none_when_no_positive_totals(chart_generator):
+    """分类总额全为非正数时，不应生成饼图。"""
+    filepath = chart_generator.generate_category_pie_chart(
+        {
+            '餐饮': {'total': 0, 'count': 2, 'average': 0},
+            '退款': {'total': -10, 'count': 1, 'average': -10},
+        }
+    )
+
+    assert filepath is None
+
+
+def test_generate_budget_progress_chart_handles_valid_and_invalid_categories(chart_generator):
+    """预算进度图应过滤无效分类，并能生成有效图表。"""
+    filepath = chart_generator.generate_budget_progress_chart(
+        {
+            '餐饮': {'budget': 1000, 'actual': 920},
+            '交通': {'budget': 500, 'actual': 620},
+            '无效项': {'budget': 300},
+            '坏值': 'oops',
+        },
+        filename='budget_progress_test.png',
+    )
+
+    assert filepath is not None
+    assert filepath.exists()
+    assert filepath.name == 'budget_progress_test.png'
+
+    assert chart_generator.generate_budget_progress_chart({'无效项': {'budget': 300}}) is None
+
+
+def test_generate_dashboard_empty_input_and_generate_all_charts(tmp_path):
+    """空仪表盘应返回 None，而全量图表生成器应只生成可用图。"""
+    generator = ChartGenerator(output_dir=tmp_path)
+    assert generator.generate_comprehensive_dashboard({}) is None
+
+    report_data = {
+        'summary': {
+            'total_income': 1500,
+            'total_expense': 1200,
+            'net_income': 300,
+        },
+        'trend': [
+            {'date': '2024-01-01', 'income': 1000, 'expense': 800, 'net': 200},
+            {'date': '2024-01-02', 'income': 500, 'expense': 400, 'net': 100},
+        ],
+        'period': 'year',
+    }
+
+    charts = charts_module.generate_all_charts(report_data, output_dir=tmp_path)
+
+    assert set(charts.keys()) == {'trend', 'comparison', 'dashboard'}
+    assert all(path is not None and path.exists() for path in charts.values())
 
 
 if __name__ == '__main__':

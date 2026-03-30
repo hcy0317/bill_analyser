@@ -7,7 +7,6 @@ import sys
 from datetime import datetime, timedelta
 from logging.handlers import QueueHandler
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -244,6 +243,78 @@ def test_shutdown_async_logger_ignores_stop_failures(monkeypatch: pytest.MonkeyP
     logger_module._shutdown_async_logger()
 
 
+def test_shutdown_async_logger_handles_missing_global_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """全局 logger 实例为空时，退出钩子应直接返回。"""
+    monkeypatch.setattr(logger_module, "_logger_instance", None)
+    logger_module._shutdown_async_logger()
+
+
+def test_async_logger_cleanup_logs_unlink_and_glob_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """清理旧日志应覆盖删除失败与目录遍历失败分支。"""
+    async_logger = logger_module.AsyncLogger()
+    fake_logger = FakeLogger()
+    async_logger.logger = fake_logger  # type: ignore[assignment]
+    async_logger.log_dir = tmp_path
+    async_logger.max_log_age_days = 7
+
+    old_log = tmp_path / "old.log"
+    old_log.write_text("old", encoding="utf-8")
+    old_timestamp = (datetime.now() - timedelta(days=10)).timestamp()
+    os.utime(old_log, (old_timestamp, old_timestamp))
+
+    original_unlink = Path.unlink
+
+    def fail_old_unlink(self: Path) -> None:
+        if self == old_log:
+            raise OSError("locked")
+        original_unlink(self)
+
+    monkeypatch.setattr(Path, "unlink", fail_old_unlink)
+    async_logger._cleanup_old_logs()
+
+    class BrokenLogDir:
+        def glob(self, _pattern: str):
+            raise RuntimeError("boom")
+
+    async_logger.log_dir = BrokenLogDir()  # type: ignore[assignment]
+    async_logger._cleanup_old_logs()
+
+    assert any("删除日志文件失败" in message for message in fake_logger.error_messages)
+    assert any("清理日志目录失败" in message for message in fake_logger.error_messages)
+
+
+def test_async_logger_stop_is_idempotent_and_module_get_logger_uses_global_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stop 应吞掉 stop/flush/close 异常且可重复调用；模块级 get_logger 应委托全局实例。"""
+    async_logger = logger_module.AsyncLogger()
+
+    class BrokenHandler:
+        def flush(self) -> None:
+            raise RuntimeError("flush")
+
+        def close(self) -> None:
+            raise RuntimeError("close")
+
+    class BrokenQueueListener:
+        def __init__(self) -> None:
+            self.handlers = [BrokenHandler()]
+
+        def stop(self) -> None:
+            raise RuntimeError("stop")
+
+    async_logger.queue_listener = BrokenQueueListener()  # type: ignore[assignment]
+    async_logger.stop()
+    async_logger.stop()
+
+    sentinel = object()
+    monkeypatch.setattr(logger_module, "_logger_instance", type("Stub", (), {"get_logger": lambda self, name=None: sentinel})())
+    assert logger_module.get_logger() is sentinel
+
+
 @pytest.mark.asyncio
 async def test_log_method_wraps_sync_and_async_functions_and_logs_exceptions(
     monkeypatch: pytest.MonkeyPatch,
@@ -276,6 +347,47 @@ async def test_log_method_wraps_sync_and_async_functions_and_logs_exceptions(
     assert any("进入方法" in message for message in fake_logger.debug_messages)
     assert any("退出方法" in message for message in fake_logger.debug_messages)
     assert any("ValueError" in message for message in fake_logger.error_messages)
+
+
+@pytest.mark.asyncio
+async def test_log_method_handles_uninspectable_params_and_unreprable_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """当参数签名或返回值 repr 失败时，log_method 应降级为友好日志而不是抛异常。"""
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(logger_module, "get_logger", lambda name=None: fake_logger)
+    monkeypatch.setattr(logger_module, "LOG_METHOD_VERBOSE", True)
+
+    original_signature = logger_module.inspect.signature
+
+    def flaky_signature(func):
+        if getattr(func, "__name__", "") in {"bad_sync", "bad_async"}:
+            raise ValueError("bad signature")
+        return original_signature(func)
+
+    monkeypatch.setattr(logger_module.inspect, "signature", flaky_signature)
+
+    class BadRepr:
+        def __repr__(self) -> str:
+            raise RuntimeError("boom")
+
+    class DemoService:
+        @logger_module.log_method
+        def bad_sync(self, value: int) -> BadRepr:
+            _ = value
+            return BadRepr()
+
+        @logger_module.log_method
+        async def bad_async(self, value: int) -> BadRepr:
+            _ = value
+            return BadRepr()
+
+    service = DemoService()
+
+    assert isinstance(service.bad_sync(1), BadRepr)
+    assert isinstance(await service.bad_async(2), BadRepr)
+    assert any("无法解析参数" in message for message in fake_logger.debug_messages)
+    assert any("无法解析返回值" in message for message in fake_logger.debug_messages)
 
 
 @pytest.mark.asyncio

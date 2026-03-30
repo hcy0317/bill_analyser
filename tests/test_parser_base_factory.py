@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from bill_analyser.parsers.base import ParserBase, StandardBill
 from bill_analyser.parsers import factory as factory_module
 from bill_analyser.parsers.factory import ParserFactory
@@ -119,6 +121,47 @@ def test_parser_base_handles_directory_and_bad_records(tmp_path: Path) -> None:
     assert parser.validate_file(str(directory)) is False
     assert parser.aggregate_description({'description': '/', 'remark': 'nan'}) == ''
     assert parser.post_process([None]) == []  # type: ignore[list-item]
+
+
+def test_parser_base_fallback_readers_and_zero_amount_records(tmp_path: Path) -> None:
+    parser = DummyParser()
+    parser.supported_extensions.append('.txt')
+
+    utf8sig_file = tmp_path / 'utf8sig.txt'
+    utf8sig_file.write_text('第一行\n第二行', encoding='utf-8-sig')
+    gbk_file = tmp_path / 'gbk.txt'
+    gbk_file.write_text('编码回退', encoding='gbk')
+
+    text, text_encoding = parser.read_text_with_fallback(
+        str(utf8sig_file),
+        encodings=('', 'utf-8', 'utf-8-sig', 'utf-8'),
+    )
+    lines, lines_encoding = parser.read_lines_with_fallback(str(utf8sig_file), encodings=('utf-8-sig',))
+    gbk_text, gbk_encoding = parser.read_text_with_fallback(str(gbk_file))
+
+    undecodable_file = tmp_path / 'bad.bin'
+    undecodable_file.write_bytes(b'\xff\xff')
+
+    with pytest.raises(UnicodeDecodeError):
+        parser.read_text_with_fallback(str(undecodable_file), encodings=('utf-8',))
+
+    processed = parser.post_process(
+        [
+            {'date': '2026-01-04', 'amount': '-5.00', 'type': '转账备注'},
+            {'date': '2026-01-05', 'amount': '0', 'type': '收入'},
+        ]
+    )
+
+    assert text == '第一行\n第二行'
+    assert text_encoding == 'utf-8'
+    assert lines == ['第一行\n', '第二行']
+    assert lines_encoding == 'utf-8-sig'
+    assert gbk_text == '编码回退'
+    assert gbk_encoding in {'gbk', 'gb18030', 'gb2312'}
+    assert parser.normalize_type('转账备注') == '转账'
+    assert len(processed) == 1
+    assert processed[0]['type'] == '支出'
+    assert processed[0]['amount'] == -5.0
 
 
 def test_factory_explicit_selection_and_error_paths(monkeypatch, tmp_path: Path) -> None:

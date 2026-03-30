@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
 
+from bill_analyser.core import report as report_module
 from bill_analyser.core.report import ReportGenerator
 
 
@@ -49,6 +50,19 @@ def test_report_generator_initializes_output_directory_and_matplotlib(tmp_path: 
     assert plt.rcParams["axes.unicode_minus"] is False
     assert tuple(plt.rcParams["figure.figsize"]) == (12.0, 8.0)
     assert "SimHei" in plt.rcParams["font.sans-serif"]
+
+
+def test_report_generator_uses_default_output_dir_when_not_provided(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未传 output_dir 时应回退到模块默认 OUTPUT_DIR。"""
+    monkeypatch.setattr(report_module, "OUTPUT_DIR", tmp_path / "default_reports")
+
+    generator = ReportGenerator()
+
+    assert generator.output_dir == tmp_path / "default_reports"
+    assert generator.output_dir.exists() is True
 
 
 
@@ -111,6 +125,25 @@ async def test_export_report_dispatches_by_format_and_rejects_unknown_types(
         await generator.export_report(sample_report_data, format_type="csv", filename="demo")
 
     assert called_formats == [("pdf", "demo"), ("excel", "demo"), ("html", "demo")]
+
+
+@pytest.mark.asyncio
+async def test_export_report_generates_default_filename_when_omitted(
+    tmp_path: Path,
+    sample_report_data: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未传文件名时应自动生成 report_ 时间戳前缀。"""
+    generator = ReportGenerator(output_dir=str(tmp_path))
+
+    async def fake_export_pdf(_data: dict[str, Any], filename: str) -> str:
+        return filename
+
+    monkeypatch.setattr(generator, "_export_pdf", fake_export_pdf)
+
+    generated_filename = await generator.export_report(sample_report_data, format_type="pdf")
+
+    assert generated_filename.startswith("report_")
 
 
 @pytest.mark.asyncio

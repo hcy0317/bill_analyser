@@ -57,8 +57,8 @@ class ICBCParser(ParserBase):
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV是否为工商银行账单"""
         try:
-            with open(file_path, encoding="gbk") as f:
-                first_lines = "".join([f.readline() for _ in range(10)])
+            text, _encoding = self.read_text_with_fallback(file_path)
+            first_lines = "\n".join(text.splitlines()[:10])
 
             # 工商银行强特征
             icbc_indicators = ["工商银行", "ICBC", "中国工商银行"]
@@ -97,15 +97,12 @@ class ICBCParser(ParserBase):
 
     def _read_html_content(self, file_path: str) -> str:
         """读取HTML格式文件内容，尝试多种编码"""
-        for encoding in ["utf-8", "gbk", "gb2312", "gb18030"]:
-            try:
-                with open(file_path, encoding=encoding) as f:
-                    content = f.read(5000)
-                self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
-                return content
-            except (OSError, UnicodeDecodeError):
-                continue
-        return ""
+        try:
+            content, encoding = self.read_text_with_fallback(file_path)
+            self.logger.debug("HTML文件使用 %s 编码读取成功", encoding)
+            return content[:5000]
+        except (OSError, UnicodeDecodeError):
+            return ""
 
     def _read_excel_content(self, file_path: str) -> str:
         """读取Excel格式文件内容"""
@@ -327,28 +324,27 @@ class ICBCParser(ParserBase):
         bills = []
 
         try:
-            with open(file_path, encoding="gbk") as f:
-                lines = f.readlines()
+            lines, encoding = self.read_lines_with_fallback(file_path)
 
-                # 查找数据起始行
-                data_start = 0
-                for i, line in enumerate(lines):
-                    if "交易日期" in line or "记账日期" in line:
-                        data_start = i
-                        break
+            # 查找数据起始行
+            data_start = 0
+            for i, line in enumerate(lines):
+                if "交易日期" in line or "记账日期" in line:
+                    data_start = i
+                    break
 
-                if data_start == 0:
-                    self.logger.warning("未找到数据起始行")
-                    return []
+            if data_start == 0:
+                self.logger.warning("未找到数据起始行")
+                return []
 
-                reader = csv.DictReader(lines[data_start:])
+            reader = csv.DictReader(lines[data_start:])
 
-                for row in reader:
-                    bill = self._extract_bill_from_csv_row(row)
-                    if bill:
-                        bills.append(bill)
+            for row in reader:
+                bill = self._extract_bill_from_csv_row(row)
+                if bill:
+                    bills.append(bill)
 
-            self.logger.info("CSV工商银行账单解析完成: %d 条", len(bills))
+            self.logger.info("CSV工商银行账单解析完成: %d 条 (encoding=%s)", len(bills), encoding)
 
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("解析CSV工商银行账单失败: %s", e)
@@ -364,6 +360,10 @@ class ICBCParser(ParserBase):
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             ws = wb.active
+            if ws is None:
+                self.logger.error("未找到活动工作表")
+                wb.close()
+                return []
 
             # 第2行是列名
             header_row = next(ws.iter_rows(min_row=2, max_row=2, values_only=True), None)

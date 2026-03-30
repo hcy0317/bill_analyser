@@ -51,9 +51,14 @@ class WeChatParser(ParserBase):
     def _can_parse_csv(self, file_path: str) -> bool:
         """判断CSV文件是否为微信账单"""
         try:
-            with open(file_path, encoding="utf-8") as f:
-                first_lines = "".join([f.readline() for _ in range(5)])
-                return "微信支付账单" in first_lines or "交易时间" in first_lines
+            text, _encoding = self.read_text_with_fallback(file_path, ("utf-8", "utf-8-sig", "gbk", "gb18030"))
+            first_lines = "\n".join(text.splitlines()[:8])
+
+            if "微信支付账单" in first_lines:
+                return True
+
+            required_header_tokens = ["交易时间", "交易类型", "交易对方", "收/支", "金额(元)"]
+            return all(token in first_lines for token in required_header_tokens)
         except Exception:  # pylint: disable=broad-except
             return False
 
@@ -62,6 +67,9 @@ class WeChatParser(ParserBase):
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True)
             ws = wb.active
+            if ws is None:
+                wb.close()
+                return False
             # 检查前几行是否包含微信账单特征
             for row in ws.iter_rows(max_row=5, values_only=True):
                 if row[0] and "微信支付账单明细" in str(row[0]):
@@ -142,6 +150,10 @@ class WeChatParser(ParserBase):
         try:
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             ws = wb.active
+            if ws is None:
+                self.logger.error("未找到活动工作表")
+                wb.close()
+                return []
 
             # 找到列名行（通常在第17行左右）
             header_row = None
@@ -160,7 +172,7 @@ class WeChatParser(ParserBase):
                 return []
 
             # 创建列名到索引的映射
-            column_map = {col: i for i, col in enumerate(header_row) if col}
+            column_map = {str(col): i for i, col in enumerate(header_row) if col}
             self.logger.debug("列名映射: %s", column_map)
 
             # 解析数据行

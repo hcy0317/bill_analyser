@@ -109,6 +109,7 @@ class ParserBase(ABC):
     # 解析器标识符，子类必须覆盖
     PARSER_ID: str = "unknown"
     PARSER_NAME: str = "未知解析器"
+    TEXT_READ_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gbk", "gb18030", "gb2312")
 
     def __init__(self):
         """初始化解析器"""
@@ -180,6 +181,34 @@ class ParserBase(ABC):
             return False
 
         return True
+
+    def read_text_with_fallback(
+        self, file_path: str, encodings: list[str] | tuple[str, ...] | None = None
+    ) -> tuple[str, str]:
+        """按多种编码回退读取文本文件。"""
+        candidates = list(encodings or self.TEXT_READ_ENCODINGS)
+        seen: set[str] = set()
+
+        for encoding in candidates:
+            normalized = str(encoding or "").strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+
+            try:
+                with open(file_path, encoding=normalized) as file_obj:
+                    return file_obj.read().lstrip("\ufeff"), normalized
+            except UnicodeDecodeError:
+                continue
+
+        raise UnicodeDecodeError("unknown", b"", 0, 1, f"unable to decode text file: {file_path}")
+
+    def read_lines_with_fallback(
+        self, file_path: str, encodings: list[str] | tuple[str, ...] | None = None
+    ) -> tuple[list[str], str]:
+        """按多种编码回退读取文本文件并保留原始换行。"""
+        text, encoding = self.read_text_with_fallback(file_path, encodings)
+        return text.splitlines(keepends=True), encoding
 
     def normalize_date(self, date_str: str) -> str:
         """
