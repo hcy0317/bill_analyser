@@ -120,6 +120,66 @@ describe('forecastDisplay helpers', () => {
         expect(result[0]!.categoryName).toBe('娱乐');
     });
 
+    test('filterAndSortForecasts uses category name as the final tie-breaker for confidence sorting', () => {
+        const tiedForecasts: BudgetForecastItem[] = [
+            {
+                ...SAMPLE_FORECASTS[2]!,
+                categoryId: '5',
+                categoryName: '电影',
+                backtestMape: 18,
+                confidence: 'medium',
+                projectedOverBudget: false
+            },
+            {
+                ...SAMPLE_FORECASTS[2]!,
+                categoryId: '6',
+                categoryName: '游戏',
+                backtestMape: 18,
+                confidence: 'medium',
+                projectedOverBudget: false
+            }
+        ];
+
+        const result = filterAndSortForecasts(tiedForecasts, {
+            sortBy: 'confidence'
+        });
+
+        expect(result.map(item => item.categoryName)).toStrictEqual(['电影', '游戏']);
+    });
+
+    test('filterAndSortForecasts defaults to backtest sorting for unknown runtime sort values', () => {
+        const result = filterAndSortForecasts(SAMPLE_FORECASTS, {
+            sortBy: 'unexpected' as never
+        });
+
+        expect(result.map(item => item.categoryName)).toStrictEqual(['交通', '餐饮', '娱乐', '医疗']);
+    });
+
+    test('filterAndSortForecasts uses confidence as the tie-breaker for backtest sorting', () => {
+        const tiedForecasts: BudgetForecastItem[] = [
+            {
+                ...SAMPLE_FORECASTS[0]!,
+                categoryId: '7',
+                categoryName: '高置信',
+                backtestMape: 10,
+                confidence: 'high'
+            },
+            {
+                ...SAMPLE_FORECASTS[0]!,
+                categoryId: '8',
+                categoryName: '低置信',
+                backtestMape: 10,
+                confidence: 'low'
+            }
+        ];
+
+        const result = filterAndSortForecasts(tiedForecasts, {
+            sortBy: 'backtest'
+        });
+
+        expect(result.map(item => item.categoryName)).toStrictEqual(['高置信', '低置信']);
+    });
+
     test('summarizeForecastRisks returns total, risk counts and filtered count', () => {
         const filtered = filterAndSortForecasts(SAMPLE_FORECASTS, {
             sortBy: 'category',

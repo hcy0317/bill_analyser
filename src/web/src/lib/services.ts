@@ -26,6 +26,11 @@ import {
     BAIDU_MAP_JAVASCRIPT_URL,
     AMAP_JAVASCRIPT_URL
 } from '@/consts/api.ts';
+import {
+    DEFAULT_BUDGET_ALERT_THRESHOLD,
+    DEFAULT_BUDGET_ENABLED,
+    DEFAULT_BUDGET_FORECAST_HISTORY_PERIODS
+} from '@/config/budget.ts';
 
 import type {
     AccountCreateRequest,
@@ -151,6 +156,11 @@ import type {
 import type {
     RecognizedReceiptImageResponse
 } from '@/models/large_language_model.ts';
+import {
+    BudgetForecastStrategy,
+    BudgetPeriodType,
+    BudgetType
+} from '@/models/budget.ts';
 
 import {
     getCurrentToken,
@@ -214,7 +224,7 @@ function toBudgetAmountInCents(value: unknown): number {
     return Math.round(amount * 100);
 }
 
-function mapRestBudgetToFrontend(item: any, fallbackType = 3): any {
+function mapRestBudgetToFrontend(item: any, fallbackType = BudgetType.Expense): any {
     const categoryInfo = item?.category_info || {};
 
     return {
@@ -223,12 +233,12 @@ function mapRestBudgetToFrontend(item: any, fallbackType = 3): any {
         category: item?.category || '',
         subCategory: item?.subCategory || item?.sub_category || '',
         categoryId: String(item?.categoryId || categoryInfo?.id || ''),
-        periodType: item?.periodType || item?.period_type || 'monthly',
+        periodType: item?.periodType || item?.period_type || BudgetPeriodType.Monthly,
         amount: toBudgetAmountInCents(item?.amount ?? item?.budget_amount ?? 0),
         startDate: item?.startDate || item?.start_date || '',
         endDate: item?.endDate || item?.end_date || '',
-        alertThreshold: item?.alertThreshold ?? item?.alert_threshold ?? 80,
-        enabled: item?.enabled ?? true,
+        alertThreshold: item?.alertThreshold ?? item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
+        enabled: item?.enabled ?? DEFAULT_BUDGET_ENABLED,
         type: item?.type ?? fallbackType,
         createdAt: item?.createdAt || item?.created_at || '',
         updatedAt: item?.updatedAt || item?.updated_at || '',
@@ -329,7 +339,7 @@ function buildBudgetHistoryQuery(req?: {
     return queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
 }
 
-function mapRestExecutionToBudgetList(restResult: any, fallbackType = 3): any {
+function mapRestExecutionToBudgetList(restResult: any, fallbackType = BudgetType.Expense): any {
     const items = Array.isArray(restResult?.items) ? restResult.items : [];
     const summary = restResult?.summary || {};
 
@@ -359,9 +369,9 @@ function mapRestExecutionToFrontend(restResult: any): any {
             spentAmount: toBudgetAmountInCents(item?.spent_amount ?? 0),
             remainingAmount: toBudgetAmountInCents(item?.remaining_amount ?? 0),
             executionRate: item?.execution_rate ?? 0,
-            alertThreshold: item?.alert_threshold ?? 80,
+            alertThreshold: item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
             isOverBudget: Number(item?.spent_amount ?? 0) > Number(item?.budget_amount ?? 0),
-            alertTriggered: Number(item?.execution_rate ?? 0) >= Number(item?.alert_threshold ?? 80)
+            alertTriggered: Number(item?.execution_rate ?? 0) >= Number(item?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD)
         })),
         periodStart: restResult?.periodStart || restResult?.period_start || '',
         periodEnd: restResult?.periodEnd || restResult?.period_end || ''
@@ -404,8 +414,8 @@ function mapRestForecastToFrontend(restResult: any): any {
         periodEnd: restResult?.periodEnd || restResult?.period_end || '',
         daysRemaining: restResult?.daysRemaining ?? 0,
         daysElapsed: restResult?.daysElapsed ?? 0,
-        forecastStrategy: summary?.forecast_strategy || summary?.forecastStrategy || 'historical_average',
-        historyPeriods: summary?.history_periods ?? summary?.historyPeriods ?? 6,
+        forecastStrategy: summary?.forecast_strategy || summary?.forecastStrategy || BudgetForecastStrategy.HistoricalAverage,
+        historyPeriods: summary?.history_periods ?? summary?.historyPeriods ?? DEFAULT_BUDGET_FORECAST_HISTORY_PERIODS,
         avgBacktestMape: summary?.avg_backtest_mape ?? summary?.avgBacktestMape ?? null
     };
 }
@@ -421,7 +431,7 @@ function mapRestHistoryToFrontend(restResult: any): any {
             name: item?.name || '',
             category: item?.category || '',
             subCategory: item?.sub_category || item?.subCategory || '',
-            periodType: item?.period_type || item?.periodType || 'monthly',
+            periodType: item?.period_type || item?.periodType || BudgetPeriodType.Monthly,
             periodStart: item?.period_start || item?.periodStart || '',
             periodEnd: item?.period_end || item?.periodEnd || '',
             budgetAmount: toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0),
@@ -431,8 +441,8 @@ function mapRestHistoryToFrontend(restResult: any): any {
             status: item?.status || '',
             filterSummary: item?.filter_summary || item?.filterSummary || '',
             calculatedAt: item?.calculated_at || item?.calculatedAt || '',
-            alertThreshold: item?.alert_threshold ?? item?.alertThreshold ?? 80,
-            enabled: item?.enabled ?? true
+            alertThreshold: item?.alert_threshold ?? item?.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
+            enabled: item?.enabled ?? DEFAULT_BUDGET_ENABLED
         })),
         count: summary?.count ?? items.length,
         periodStart: summary?.period_start || summary?.periodStart || '',
@@ -445,12 +455,12 @@ function mapBudgetRequestToRest(req: any): any {
         name: req?.name || '',
         category: req?.category || '',
         sub_category: req?.subCategory || '',
-        period_type: req?.periodType || 'monthly',
+        period_type: req?.periodType || BudgetPeriodType.Monthly,
         amount: Number(req?.amount ?? 0) / 100,
         start_date: req?.startDate,
         end_date: req?.endDate,
-        alert_threshold: req?.alertThreshold ?? 80,
-        enabled: req?.enabled ?? true
+        alert_threshold: req?.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
+        enabled: req?.enabled ?? DEFAULT_BUDGET_ENABLED
     };
 }
 
@@ -464,12 +474,12 @@ function mapImportedBudgetToRest(budget: any): any {
         name: budget?.name || '',
         category: budget?.category || '',
         sub_category: budget?.subCategory || budget?.sub_category || '',
-        period_type: budget?.periodType || budget?.period_type || 'monthly',
+        period_type: budget?.periodType || budget?.period_type || BudgetPeriodType.Monthly,
         amount: usesFrontendShape ? amount / 100 : amount,
         start_date: budget?.startDate || budget?.start_date,
         end_date: budget?.endDate || budget?.end_date,
-        alert_threshold: budget?.alertThreshold ?? budget?.alert_threshold ?? 80,
-        enabled: budget?.enabled ?? true
+        alert_threshold: budget?.alertThreshold ?? budget?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
+        enabled: budget?.enabled ?? DEFAULT_BUDGET_ENABLED
     };
 }
 

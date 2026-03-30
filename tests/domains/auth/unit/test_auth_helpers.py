@@ -1,11 +1,11 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import re
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import bcrypt
 import jwt
@@ -13,6 +13,8 @@ import pytest
 from flask import Flask
 
 from bill_analyser.api.routes import auth as auth_module
+
+auth_module = cast("Any", auth_module)
 
 
 @pytest.fixture(name="auth_helper_app")
@@ -38,7 +40,7 @@ class FakeUploadedFile:
 class FakeQRCode:
     """Minimal QR image stub."""
 
-    def save(self, buffer: io.BytesIO, fmt: str) -> None:
+    def save(self, buffer, fmt: str) -> None:
         assert fmt == "PNG"
         buffer.write(b"fake-png-bytes")
 
@@ -125,6 +127,20 @@ def test_request_helpers_cover_ip_bearer_url_and_token_type_variants(auth_helper
     with auth_helper_app.test_request_context("/", environ_overrides={"REMOTE_ADDR": "127.0.0.1"}):
         assert auth_module.get_client_ip() == "127.0.0.1"
 
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(auth_module, "get_required_request_int", lambda name: 12 if name == "user_id" else 34)
+    monkeypatch.setattr(
+        auth_module,
+        "get_required_request_str",
+        lambda name: "alice" if name == "username" else "",
+    )
+    try:
+        assert auth_module._get_request_user_id() == 12
+        assert auth_module._get_request_username() == "alice"
+        assert auth_module._get_request_session_id() == 34
+    finally:
+        monkeypatch.undo()
+
     assert auth_module._get_token_user_agent("api") == "Bill Analyser API Token"
     assert auth_module._get_token_user_agent("mcp") == "Bill Analyser MCP Token"
     assert auth_module._infer_token_type("Bill Analyser API Token") == auth_module.TOKEN_TYPE_API
@@ -148,12 +164,25 @@ def test_token_generation_password_validation_and_action_token_helpers() -> None
     }
 
     access_payload = auth_module.generate_access_token(1, "alice", config, expires_in_seconds=90, token_kind="api")
-    decoded_access = jwt.decode(access_payload["access_token"], config["jwt_secret"], algorithms=[config["jwt_algorithm"]])
+    decoded_access = jwt.decode(
+        access_payload["access_token"],
+        config["jwt_secret"],
+        algorithms=[config["jwt_algorithm"]],
+    )
     assert decoded_access["user_id"] == 1
     assert decoded_access["username"] == "alice"
     assert decoded_access["token_kind"] == "api"
     assert decoded_access["type"] == "access"
     assert decoded_access["exp"] > decoded_access["iat"]
+
+    long_lived_access = auth_module.generate_access_token(1, "alice", config)
+    decoded_long_lived = jwt.decode(
+        long_lived_access["access_token"],
+        config["jwt_secret"],
+        algorithms=[config["jwt_algorithm"]],
+    )
+    assert decoded_long_lived["token_kind"] == "session"
+    assert decoded_long_lived["exp"] - decoded_long_lived["iat"] > 60 * 60 * 24 * 365
 
     session_tokens = auth_module.generate_jwt_token(2, "bob", config)
     decoded_session_access = jwt.decode(
@@ -203,11 +232,26 @@ def test_token_generation_password_validation_and_action_token_helpers() -> None
     [
         ({"settingKey": "", "settingValue": ""}, "settingKey is required"),
         ({"settingKey": "unknown", "settingValue": "1"}, "Unsupported setting key: unknown"),
-        ({"settingKey": "autoSaveTransactionDraft", "settingValue": 123}, "Invalid setting value for autoSaveTransactionDraft"),
-        ({"settingKey": "timezoneUsedForStatisticsInHomePage", "settingValue": "not-a-number"}, "Invalid number value for timezoneUsedForStatisticsInHomePage"),
-        ({"settingKey": "showAmountInHomePage", "settingValue": "yes"}, "Invalid boolean value for showAmountInHomePage"),
-        ({"settingKey": "overviewAccountFilterInHomePage", "settingValue": '{"a":"true"}'}, "Invalid map value for overviewAccountFilterInHomePage"),
-        ({"settingKey": "overviewAccountFilterInHomePage", "settingValue": '[1,2,3]'}, "Invalid map value for overviewAccountFilterInHomePage"),
+        (
+            {"settingKey": "autoSaveTransactionDraft", "settingValue": 123},
+            "Invalid setting value for autoSaveTransactionDraft",
+        ),
+        (
+            {"settingKey": "timezoneUsedForStatisticsInHomePage", "settingValue": "not-a-number"},
+            "Invalid number value for timezoneUsedForStatisticsInHomePage",
+        ),
+        (
+            {"settingKey": "showAmountInHomePage", "settingValue": "yes"},
+            "Invalid boolean value for showAmountInHomePage",
+        ),
+        (
+            {"settingKey": "overviewAccountFilterInHomePage", "settingValue": '{"a":"true"}'},
+            "Invalid map value for overviewAccountFilterInHomePage",
+        ),
+        (
+            {"settingKey": "overviewAccountFilterInHomePage", "settingValue": "[1,2,3]"},
+            "Invalid map value for overviewAccountFilterInHomePage",
+        ),
         ({"settingKey": "autoSaveTransactionDraft", "settingValue": "manual"}, ""),
         ({"settingKey": "timezoneUsedForStatisticsInHomePage", "settingValue": "1.5"}, ""),
         ({"settingKey": "showAmountInHomePage", "settingValue": "true"}, ""),
@@ -333,8 +377,8 @@ def test_avatar_qrcode_export_and_misc_parsing_helpers(
     assert auth_module._parse_export_datetime("0") is None
     assert auth_module._parse_export_datetime("bad") is None
 
-    min_time = int(datetime(2026, 3, 1, 0, 0, 0).timestamp() * 1000)
-    max_time = int(datetime(2026, 3, 31, 23, 59, 59).timestamp() * 1000)
+    min_time = int(datetime(2026, 3, 1, 0, 0, 0, tzinfo=UTC).timestamp() * 1000)
+    max_time = int(datetime(2026, 3, 31, 23, 59, 59, tzinfo=UTC).timestamp() * 1000)
     categories = [
         {"id": 10, "main_category": "餐饮", "sub_category": "早餐"},
         {"id": 11, "main_category": "交通", "sub_category": "地铁"},

@@ -1,3 +1,5 @@
+import { BUDGET_HISTORY_CHART_CONFIG } from '@/config/budget.ts';
+
 export interface HistoricalCategoryChartPoint {
     category: string;
     primaryCategory: string;
@@ -53,15 +55,14 @@ export interface HistoricalPrimaryBand {
     state: HistoricalPrimaryLegendState;
 }
 
-export interface HistoricalPrimaryLabelGlyph {
+export interface HistoricalPrimaryLabel {
     key: string;
-    character: string;
-    x: number;
-    y: number;
+    label: string;
     rotate: number;
     fontSize: number;
     color: string;
     angle: number;
+    radiusValue: number;
 }
 
 export interface HistoricalPolarChartModel {
@@ -71,7 +72,7 @@ export interface HistoricalPolarChartModel {
     amountAxisMax: number;
     amountAxisInterval: number;
     averageExecutionRate: number;
-    primaryLabelGlyphs: HistoricalPrimaryLabelGlyph[];
+    primaryLabels: HistoricalPrimaryLabel[];
     primaryPadAngle: number;
     executionAxisMax: number;
 }
@@ -86,24 +87,31 @@ export interface HistoricalPolarChartOptionArgs {
     showPrimaryRing: boolean;
 }
 
-const START_ANGLE = 90;
-const MAX_EXECUTION_RATE = 120;
-const EXECUTION_AXIS_MAX = 125;
-const EXECUTION_AXIS_INTERVAL = 25;
-const PRIMARY_RING_PAD_ANGLE = 3.2;
-const VIEWBOX_CENTER_X = 50;
-const VIEWBOX_CENTER_Y = 46;
-const POLAR_CENTER = ['50%', '46%'] as const;
-const BAR_POLAR_RADIUS = ['20%', '74%'] as const;
-const EXECUTION_POLAR_RADIUS = ['20%', '74%'] as const;
-const PRIMARY_RING_RADIUS = ['80%', '86%'] as const;
-const PRIMARY_LABEL_RADIUS_VIEWBOX = 46;
-const PRIMARY_LABEL_EDGE_PADDING_ANGLE = 8;
-const PRIMARY_LABEL_MAX_STEP_ANGLE = 5.8;
-const PRIMARY_LABEL_MIN_FONT_SIZE = 2.05;
-const PRIMARY_LABEL_MAX_FONT_SIZE = 2.55;
-const SECONDARY_LABEL_BUFFER_INTERVAL_RATIO = 0.18;
-const SECONDARY_LABEL_MAX_AXIS_RATIO = 0.93;
+const {
+    START_ANGLE,
+    MAX_EXECUTION_RATE,
+    EXECUTION_AXIS_MAX,
+    EXECUTION_AXIS_INTERVAL,
+    PRIMARY_RING_PAD_ANGLE,
+    POLAR_CENTER,
+    BAR_POLAR_RADIUS,
+    EXECUTION_POLAR_RADIUS,
+    PRIMARY_RING_RADIUS,
+    PRIMARY_LABEL_POLAR_RADIUS,
+    PRIMARY_LABEL_RADIUS_AXIS_MAX,
+    PRIMARY_LABEL_RADIUS_VALUE,
+    PRIMARY_LABEL_MIN_FONT_SIZE,
+    PRIMARY_LABEL_MAX_FONT_SIZE,
+    PRIMARY_LABEL_TRUNCATE_WIDTH,
+    SECONDARY_LABEL_BUFFER_INTERVAL_RATIO,
+    SECONDARY_LABEL_MAX_AXIS_RATIO,
+    BOTTOM_LABEL_FLIP_START,
+    BOTTOM_LABEL_FLIP_END,
+    AMOUNT_AXIS_LABEL_DARK_COLOR,
+    AMOUNT_AXIS_LABEL_LIGHT_COLOR,
+    EXECUTION_SPLIT_LINE_DARK_COLOR,
+    EXECUTION_SPLIT_LINE_LIGHT_COLOR
+} = BUDGET_HISTORY_CHART_CONFIG;
 
 interface InternalPrimaryGroupItem extends HistoricalCategoryChartPoint {
     secondaryKey: string;
@@ -149,11 +157,12 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function withAlpha(color: string, alpha: number): string {
-    const matched = color.replace('#', '').match(/.{2}/g);
-    if (!matched) {
+    const normalizedColor = color.replace('#', '').trim();
+    if (!/^[0-9a-fA-F]{6}$/.test(normalizedColor)) {
         return `rgba(0,0,0,${alpha})`;
     }
 
+    const matched = normalizedColor.match(/.{2}/g)!;
     const [red, green, blue] = matched.map(item => parseInt(item, 16));
     return `rgba(${red},${green},${blue},${alpha})`;
 }
@@ -162,78 +171,56 @@ function normalizeCircleAngle(angle: number): number {
     return ((angle % 360) + 360) % 360;
 }
 
-function getCartesianPoint(angle: number, radius: number): { x: number; y: number } {
-    const normalized = normalizeCircleAngle(angle);
-    const radians = normalized * Math.PI / 180;
-
-    return {
-        x: Number((VIEWBOX_CENTER_X + radius * Math.cos(radians)).toFixed(2)),
-        y: Number((VIEWBOX_CENTER_Y - radius * Math.sin(radians)).toFixed(2))
-    };
-}
-
-function isBottomHalf(angle: number): boolean {
+function shouldFlipTangentialLabel(angle: number): boolean {
     const normalized = normalizeCircleAngle(angle);
 
-    return normalized > 180 && normalized < 360;
+    return normalized >= BOTTOM_LABEL_FLIP_START && normalized <= BOTTOM_LABEL_FLIP_END;
 }
 
-function getTangentialTextRotation(angle: number): number {
-    let rotation = 90 - normalizeCircleAngle(angle);
-
-    if (rotation > 180) {
-        rotation -= 360;
-    }
-    if (rotation <= -180) {
-        rotation += 360;
-    }
-
-    if (rotation > 90) {
-        rotation -= 180;
-    }
-    if (rotation <= -90) {
-        rotation += 180;
-    }
-
-    return Number(rotation.toFixed(2));
+function normalizeRotation(rotation: number): number {
+    return ((rotation + 180) % 360 + 360) % 360 - 180;
 }
 
-function buildPrimaryLabelGlyphs(primaryBands: HistoricalPrimaryBand[]): HistoricalPrimaryLabelGlyph[] {
-    return primaryBands.flatMap(band => {
-        const characters = Array.from(band.label.trim()).filter(character => !!character);
-        if (characters.length < 1) {
-            return [];
-        }
+export function getTangentialTextRotation(angle: number): number {
+    const normalizedAngle = normalizeCircleAngle(angle);
+    const baseRotation = normalizeRotation(normalizedAngle - 90);
+    const flippedRotation = shouldFlipTangentialLabel(normalizedAngle)
+        ? normalizeRotation(baseRotation + 180)
+        : baseRotation;
 
-        const midAngle = band.startAngle - (band.spanAngle / 2);
-        const availableSpan = Math.max(0, band.spanAngle - (PRIMARY_LABEL_EDGE_PADDING_ANGLE * 2));
-        const stepAngle = characters.length > 1
-            ? Math.min(PRIMARY_LABEL_MAX_STEP_ANGLE, availableSpan / (characters.length - 1))
-            : 0;
-        const direction = isBottomHalf(midAngle) ? 1 : -1;
-        const centerIndex = (characters.length - 1) / 2;
-        const fontSize = Number(clamp(
-            1.8 + (stepAngle * 0.18),
-            PRIMARY_LABEL_MIN_FONT_SIZE,
-            PRIMARY_LABEL_MAX_FONT_SIZE
-        ).toFixed(2));
+    return Number(clamp(flippedRotation, -90, 90).toFixed(2));
+}
 
-        return characters.map((character, index) => {
-            const angle = midAngle + ((index - centerIndex) * stepAngle * direction);
-            const point = getCartesianPoint(angle, PRIMARY_LABEL_RADIUS_VIEWBOX);
+function buildPrimaryLabels(primaryBands: HistoricalPrimaryBand[]): HistoricalPrimaryLabel[] {
+    return primaryBands
+        .map(band => {
+            const label = band.label.trim();
+            if (!label) {
+                return null;
+            }
+
+            const angle = band.startAngle - (band.spanAngle / 2);
+            const fontSize = Number(clamp(
+                10.6 + (Math.min(band.spanAngle, 180) * 0.02),
+                PRIMARY_LABEL_MIN_FONT_SIZE,
+                PRIMARY_LABEL_MAX_FONT_SIZE
+            ).toFixed(2));
 
             return {
-                key: `${band.key}-${index}-${character}`,
-                character,
-                x: point.x,
-                y: point.y,
+                key: band.key,
+                label,
                 rotate: getTangentialTextRotation(angle),
                 fontSize,
                 color: band.color,
-                angle
+                angle,
+                radiusValue: Number(PRIMARY_LABEL_RADIUS_VALUE)
             };
-        });
-    });
+        })
+        .filter((label): label is HistoricalPrimaryLabel => label !== null);
+}
+
+function getPolarAngleAxisValue(angle: number): number {
+    return Number(normalizeCircleAngle(START_ANGLE - angle).toFixed(2));
 }
 
 function getSecondaryLabelValue(slot: HistoricalChartSlot, model: HistoricalPolarChartModel): number {
@@ -243,7 +230,7 @@ function getSecondaryLabelValue(slot: HistoricalChartSlot, model: HistoricalPola
     return Math.min(bufferedValue, cappedValue);
 }
 
-function getHistoricalAmountAxisInterval(maxAmount: number): number {
+export function getHistoricalAmountAxisInterval(maxAmount: number): number {
     if (maxAmount <= 0) {
         return 25;
     }
@@ -328,9 +315,6 @@ function buildPrimaryBandsAndSlots(
 
     const primaryPadAngle = groups.length > 1 ? PRIMARY_RING_PAD_ANGLE : 0;
     const totalVisibleSlotCount = groups.reduce((sum, group) => sum + group.items.length, 0);
-    if (!totalVisibleSlotCount) {
-        return { primaryBands: [], slots: [], primaryPadAngle };
-    }
 
     const totalPaddingAngle = primaryPadAngle * groups.length;
     const usableAngle = 360 - totalPaddingAngle;
@@ -457,7 +441,7 @@ export function buildHistoricalPolarChartModel(
     const averageExecutionRate = slots.length > 0
         ? Number((slots.reduce((sum, slot) => sum + slot.executionRate, 0) / slots.length).toFixed(1))
         : 0;
-    const primaryLabelGlyphs = buildPrimaryLabelGlyphs(primaryBands);
+    const primaryLabels = buildPrimaryLabels(primaryBands);
 
     return {
         slots,
@@ -466,7 +450,7 @@ export function buildHistoricalPolarChartModel(
         amountAxisMax,
         amountAxisInterval: interval,
         averageExecutionRate,
-        primaryLabelGlyphs,
+        primaryLabels,
         primaryPadAngle,
         executionAxisMax: EXECUTION_AXIS_MAX
     };
@@ -478,6 +462,71 @@ export function buildHistoricalPolarChartOption(
 ): Record<string, unknown> {
     const slotLabels = model.slots.map(slot => slot.key);
     const series: Array<Record<string, unknown>> = [];
+    const polar: Array<Record<string, unknown>> = [
+        { center: POLAR_CENTER, radius: BAR_POLAR_RADIUS },
+        { center: POLAR_CENTER, radius: EXECUTION_POLAR_RADIUS }
+    ];
+    const angleAxis: Array<Record<string, unknown>> = [
+        {
+            type: 'category',
+            data: slotLabels,
+            startAngle: START_ANGLE,
+            clockwise: true,
+            boundaryGap: true,
+            polarIndex: 0,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { show: false }
+        },
+        {
+            type: 'category',
+            data: slotLabels,
+            startAngle: START_ANGLE,
+            clockwise: true,
+            boundaryGap: true,
+            polarIndex: 1,
+            show: false
+        }
+    ];
+    const radiusAxis: Array<Record<string, unknown>> = [
+        {
+            type: 'value',
+            min: 0,
+            max: model.amountAxisMax,
+            interval: model.amountAxisInterval,
+            splitNumber: 4,
+            polarIndex: 0,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: {
+                color: args.isDarkMode ? AMOUNT_AXIS_LABEL_DARK_COLOR : AMOUNT_AXIS_LABEL_LIGHT_COLOR,
+                margin: 10,
+                fontSize: 10,
+                fontWeight: 700,
+                align: 'center',
+                verticalAlign: 'bottom',
+                formatter: (value: number) => args.formatAmount(value)
+            },
+            splitLine: { show: false }
+        },
+        {
+            type: 'value',
+            min: 0,
+            max: model.executionAxisMax,
+            interval: EXECUTION_AXIS_INTERVAL,
+            splitNumber: 5,
+            polarIndex: 1,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { show: false },
+            splitLine: {
+                lineStyle: {
+                    color: args.isDarkMode ? EXECUTION_SPLIT_LINE_DARK_COLOR : EXECUTION_SPLIT_LINE_LIGHT_COLOR,
+                    type: 'dashed'
+                }
+            }
+        }
+    ];
 
     if (args.showPrimaryRing) {
         series.push({
@@ -504,6 +553,69 @@ export function buildHistoricalPolarChartOption(
                     color: band.color,
                     borderColor: args.isDarkMode ? '#121212' : '#ffffff',
                     borderWidth: 1.5
+                }
+            }))
+        });
+
+        polar.push({
+            center: POLAR_CENTER,
+            radius: PRIMARY_LABEL_POLAR_RADIUS
+        });
+
+        angleAxis.push({
+            type: 'value',
+            min: 0,
+            max: 360,
+            startAngle: START_ANGLE,
+            clockwise: true,
+            polarIndex: 2,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { show: false },
+            splitLine: { show: false }
+        });
+
+        radiusAxis.push({
+            type: 'value',
+            min: 0,
+            max: PRIMARY_LABEL_RADIUS_AXIS_MAX,
+            polarIndex: 2,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { show: false },
+            splitLine: { show: false }
+        });
+
+        series.push({
+            name: 'primary-labels',
+            type: 'scatter',
+            coordinateSystem: 'polar',
+            polarIndex: 2,
+            symbolSize: 1,
+            z: 4,
+            silent: true,
+            animationDurationUpdate: 720,
+            animationEasingUpdate: 'cubicInOut',
+            universalTransition: { enabled: true },
+            itemStyle: {
+                color: 'rgba(0,0,0,0)'
+            },
+            tooltip: { show: false },
+            data: model.primaryLabels.map(label => ({
+                value: [label.radiusValue, getPolarAngleAxisValue(label.angle)],
+                label: {
+                    show: true,
+                    position: 'inside',
+                    distance: 0,
+                    color: label.color,
+                    fontSize: label.fontSize,
+                    fontWeight: 700,
+                    width: PRIMARY_LABEL_TRUNCATE_WIDTH,
+                    overflow: 'truncate',
+                    rotate: label.rotate,
+                    align: 'center',
+                    verticalAlign: 'middle',
+                    formatter: label.label
                 }
             }))
         });
@@ -553,6 +665,7 @@ export function buildHistoricalPolarChartOption(
             z: 4,
             animationDurationUpdate: 720,
             animationEasingUpdate: 'cubicInOut',
+            universalTransition: { enabled: true },
             itemStyle: {
                 color: 'rgba(0,0,0,0)'
             },
@@ -614,71 +727,9 @@ export function buildHistoricalPolarChartOption(
                 ].join('<br/>');
             }
         },
-        polar: [
-            { center: POLAR_CENTER, radius: BAR_POLAR_RADIUS },
-            { center: POLAR_CENTER, radius: EXECUTION_POLAR_RADIUS }
-        ],
-        angleAxis: [
-            {
-                type: 'category',
-                data: slotLabels,
-                startAngle: START_ANGLE,
-                clockwise: true,
-                boundaryGap: true,
-                polarIndex: 0,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: { show: false }
-            },
-            {
-                type: 'category',
-                data: slotLabels,
-                startAngle: START_ANGLE,
-                clockwise: true,
-                boundaryGap: true,
-                polarIndex: 1,
-                show: false
-            }
-        ],
-        radiusAxis: [
-            {
-                type: 'value',
-                min: 0,
-                max: model.amountAxisMax,
-                interval: model.amountAxisInterval,
-                splitNumber: 4,
-                polarIndex: 0,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: {
-                    color: args.isDarkMode ? '#888' : '#666',
-                    margin: 10,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    align: 'center',
-                    verticalAlign: 'bottom',
-                    formatter: (value: number) => args.formatAmount(value)
-                },
-                splitLine: { show: false }
-            },
-            {
-                type: 'value',
-                min: 0,
-                max: model.executionAxisMax,
-                interval: EXECUTION_AXIS_INTERVAL,
-                splitNumber: 5,
-                polarIndex: 1,
-                axisLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: { show: false },
-                splitLine: {
-                    lineStyle: {
-                        color: args.isDarkMode ? 'rgba(220, 220, 220, 0.18)' : 'rgba(79, 79, 79, 0.18)',
-                        type: 'dashed'
-                    }
-                }
-            }
-        ],
+        polar,
+        angleAxis,
+        radiusAxis,
         graphic: [
             {
                 type: 'group',

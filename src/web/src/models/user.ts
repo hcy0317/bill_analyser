@@ -136,6 +136,9 @@ export class User {
     public static of(userInfo: UserBasicInfo): User {
         const normalized = normalizeUserBasicInfo(userInfo);
         const user = new User(normalized.language, normalized.defaultCurrency, normalized.firstDayOfWeek);
+        user.username = normalized.username;
+        user.email = normalized.email;
+        user.nickname = normalized.nickname;
         user.defaultAccountId = normalized.defaultAccountId;
         user.transactionEditScope = normalized.transactionEditScope;
         user.fiscalYearStart = normalized.fiscalYearStart;

@@ -725,28 +725,6 @@
                                         <span class="text-medium-emphasis">{{ tt('All categories hidden') }}</span>
                                     </div>
 
-                                    <svg
-                                        v-if="historicalBudgetLevel === 'secondary' && historicalChartModel.primaryLabelGlyphs.length > 0"
-                                        class="budget-history-label-overlay"
-                                        viewBox="0 0 100 100"
-                                        preserveAspectRatio="xMidYMid meet"
-                                        aria-hidden="true"
-                                    >
-                                        <g v-for="glyph in historicalChartModel.primaryLabelGlyphs" :key="glyph.key">
-                                            <text
-                                                :x="glyph.x"
-                                                :y="glyph.y"
-                                                :fill="glyph.color"
-                                                :font-size="glyph.fontSize"
-                                                font-weight="600"
-                                                text-anchor="middle"
-                                                dominant-baseline="middle"
-                                                :transform="`rotate(${glyph.rotate} ${glyph.x} ${glyph.y})`"
-                                            >
-                                                {{ glyph.character }}
-                                            </text>
-                                        </g>
-                                    </svg>
                                 </div>
 
                                 <div v-if="historicalLegendGroups.length > 0" class="budget-history-legend">
@@ -3516,15 +3494,6 @@ watch(filterKeyword, (newVal) => {
 
 .budget-history-chart-shell {
     position: relative;
-}
-
-.budget-history-label-overlay {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
 }
 
 .budget-history-legend {

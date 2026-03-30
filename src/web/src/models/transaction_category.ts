@@ -145,7 +145,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             json.color,
             json.comment,
             json.displayOrder,
-            json.visible,
+            json.hidden !== true,
             json.keywords,
             subCategories
         );

@@ -4,6 +4,11 @@
  * @description 支持预算CRUD、执行度统计、周期预计、导入导出功能
  */
 
+import {
+    DEFAULT_BUDGET_ALERT_THRESHOLD,
+    DEFAULT_BUDGET_ENABLED
+} from '@/config/budget.ts';
+
 // ============================================================================
 // 枚举定义
 // ============================================================================
@@ -308,8 +313,8 @@ export class Budget {
     public amount: number = 0;  // 以分为单位
     public startDate: string = '';
     public endDate: string = '';
-    public alertThreshold: number = 80;
-    public enabled: boolean = true;
+    public alertThreshold: number = DEFAULT_BUDGET_ALERT_THRESHOLD;
+    public enabled: boolean = DEFAULT_BUDGET_ENABLED;
     public type: BudgetType = BudgetType.Expense;
     public createdAt: string = '';
     public updatedAt: string = '';
@@ -339,8 +344,8 @@ export class Budget {
         budget.amount = response.amount || 0;
         budget.startDate = response.startDate || '';
         budget.endDate = response.endDate || '';
-        budget.alertThreshold = response.alertThreshold ?? 80;
-        budget.enabled = response.enabled ?? true;
+        budget.alertThreshold = response.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD;
+        budget.enabled = response.enabled ?? DEFAULT_BUDGET_ENABLED;
         budget.type = response.type || BudgetType.Expense;
         budget.createdAt = response.createdAt || '';
         budget.updatedAt = response.updatedAt || '';
@@ -374,8 +379,8 @@ export class Budget {
         const budget = new Budget();
         budget.type = type;
         budget.periodType = BudgetPeriodType.Monthly;
-        budget.alertThreshold = 80;
-        budget.enabled = true;
+        budget.alertThreshold = DEFAULT_BUDGET_ALERT_THRESHOLD;
+        budget.enabled = DEFAULT_BUDGET_ENABLED;
         return budget;
     }
 
