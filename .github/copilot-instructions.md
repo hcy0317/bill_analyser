@@ -37,6 +37,7 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Copilot prompts: `.github/prompts/`
 - Copilot-local skills: `.github/skills/`
 - Shared repository skills: `.agents/skills/`
+- Shared interruption-resume skill: `.agents/skills/session-resume/`
 - Copilot hooks: `.github/hooks/`
 - Copilot workflow health check: `.github/workflows/agent-stack-health.yml`
 
@@ -54,6 +55,11 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Keep `CLAUDE.md`, `.github/copilot-instructions.md`, and `.codex/AGENTS.md` as platform adapters, not competing rule stores.
 - When a rule applies across tools, move it to `AGENTS.md` or a shared skill first, then keep only the platform-native delta here.
 
+## Default workflow baseline
+
+- For routine work, restore context from `AGENTS.md` plus `.agents/skills/bill-analyser-conventions/SKILL.md` before reaching for prompt or agent catalogs.
+- Treat `.github/prompts/` as convenience entrypoints and `.github/agents/` as specialized escalations, not as competing repository-wide rule sources.
+
 ## Reviewer Subagent Contract
 
 - When invoking `code-reviewer`, `python-reviewer`, or `security-reviewer`, always pass an explicit `Review Context`.
@@ -65,6 +71,11 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Before ending a session, check whether the workspace still has staged or unstaged git diff.
 - If any git diff remains, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title for the current change set.
 - Only skip this step when there is no staged or unstaged diff left.
+
+## Interrupted-session recovery
+
+- Copilot-side hooks refresh `.git/ai/last-session.md` after meaningful edits and again at stop time.
+- If a chat is interrupted by network issues or there is no retry button, read `.git/ai/last-session.md`, inspect `git status` / `git diff`, then continue with the shared `session-resume` workflow in `.agents/skills/session-resume/SKILL.md`.
 
 ## Build and test reminder
 

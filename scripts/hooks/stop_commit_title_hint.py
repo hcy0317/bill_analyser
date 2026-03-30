@@ -6,6 +6,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
+from scripts.hooks.session_snapshot import write_session_snapshot
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOC_FILES = {"README.md", "AGENTS.md", "CLAUDE.md"}
 HOOK_SCOPE_PATHS = (
@@ -190,18 +192,34 @@ def _build_commit_title(changed_files: list[str], diff_text: str) -> str:
     return f"{commit_type}{scope_segment}: {description}"
 
 
-def _print_hint(source: str, changed_files: list[str], title: str) -> None:
-    print("[hook] 检测到 git diff，已生成中文 Conventional Commit 标题建议：")
-    print(f"[hook] 来源：{source}")
-    print(f"[hook] 建议：{title}")
+def build_stop_messages(source: str, changed_files: list[str], diff_text: str) -> list[str]:
+    if not source or not changed_files:
+        return []
+
+    title = _build_commit_title(changed_files, diff_text)
+    lines = [
+        "[hook] 检测到 git diff，已生成中文 Conventional Commit 标题建议：",
+        f"[hook] 来源：{source}",
+        f"[hook] 建议：{title}",
+    ]
+
     if len(changed_files) <= 8:
-        print("[hook] 影响文件：")
-        for path_text in changed_files:
-            print(f"  - {path_text}")
+        lines.append("[hook] 影响文件：")
+        lines.extend(f"  - {path_text}" for path_text in changed_files)
     else:
-        print(f"[hook] 影响文件数量：{len(changed_files)}")
+        lines.append(f"[hook] 影响文件数量：{len(changed_files)}")
+
     if len({_classify_scope(changed_files), "tests" if any(_is_test_path(path_text) for path_text in changed_files) else None} - {None}) > 1:
-        print("[hook] 提示：本次改动跨多个区域，若提交意图不止一个，建议拆分提交。")
+        lines.append("[hook] 提示：本次改动跨多个区域，若提交意图不止一个，建议拆分提交。")
+
+    snapshot = write_session_snapshot(trigger="stop-hook", recent_files=changed_files, repo_root=REPO_ROOT)
+    if snapshot is not None:
+        lines.append(
+            f"[hook] 已刷新 `{snapshot.snapshot_display_path}`；如果会话中断，可先读取它，再检查 `git status` / `git diff`，并按 `session-resume` workflow 继续。"
+        )
+        lines.append(f"[hook] 建议下一步：{snapshot.next_step}")
+
+    return lines
 
 
 def main() -> int:
@@ -211,8 +229,7 @@ def main() -> int:
     if not source or not changed_files:
         return 0
 
-    title = _build_commit_title(changed_files, diff_text)
-    _print_hint(source, changed_files, title)
+    print("\n".join(build_stop_messages(source, changed_files, diff_text)))
     return 0
 
 

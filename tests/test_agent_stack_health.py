@@ -80,6 +80,7 @@ def test_repo_scan_reports_expected_contracts() -> None:
     assert checks["repo.cursor-removed"]["status"] == "pass"
     assert checks["repo.hooks-baseline"]["status"] == "pass"
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
+    assert checks["repo.session-resume-skill"]["status"] == "pass"
     assert checks["repo.codex-baseline"]["status"] == "pass"
 
 
@@ -114,6 +115,7 @@ def test_probe_catalog_exposes_manual_behavior_checks() -> None:
         "money-unit-convention",
         "repo-guard-banned-command",
         "repo-guard-protected-path",
+        "session-resume-recovery",
     } <= probe_ids
 
 
@@ -186,6 +188,28 @@ def test_workspace_instructions_require_diff_commit_skill() -> None:
 
     for contract_text in (repo_skill_text, claude_skill_text):
         _assert_session_completion_contract(contract_text, skill_requirements)
+
+
+def test_workspace_guides_require_session_resume_recovery_path() -> None:
+    tracked_texts = {
+        "AGENTS.md": (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
+        ".github/copilot-instructions.md": (REPO_ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8"),
+        "CLAUDE.md": (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
+        ".codex/AGENTS.md": (REPO_ROOT / ".codex" / "AGENTS.md").read_text(encoding="utf-8"),
+        ".agents/skills/bill-analyser-conventions/SKILL.md": (
+            REPO_ROOT / ".agents" / "skills" / "bill-analyser-conventions" / "SKILL.md"
+        ).read_text(encoding="utf-8"),
+        ".claude/skills/bill-analyser/SKILL.md": (
+            REPO_ROOT / ".claude" / "skills" / "bill-analyser" / "SKILL.md"
+        ).read_text(encoding="utf-8"),
+        ".agents/skills/session-resume/SKILL.md": (
+            REPO_ROOT / ".agents" / "skills" / "session-resume" / "SKILL.md"
+        ).read_text(encoding="utf-8"),
+    }
+
+    for relative_path, text in tracked_texts.items():
+        assert "session-resume" in text, f"{relative_path} must reference session-resume"
+        assert ".git/ai/last-session.md" in text, f"{relative_path} must reference .git/ai/last-session.md"
 
 
 def test_agent_stack_workflow_uses_runner_compatible_python() -> None:

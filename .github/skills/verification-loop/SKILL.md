@@ -1,7 +1,6 @@
 ---
 name: verification-loop
 description: "A comprehensive verification system for Claude Code sessions."
-origin: ECC
 ---
 
 # Verification Loop Skill
@@ -18,72 +17,59 @@ Invoke this skill:
 
 ## Verification Phases
 
-### Phase 1: Build Verification
-```bash
-# Check if project builds
-npm run build 2>&1 | tail -20
-# OR
-pnpm build 2>&1 | tail -20
+### Phase 0: Scope Detection
+
+Inspect `git status`, staged diff, and unstaged diff first. Verification should follow the touched paths instead of running a generic one-size-fits-all pipeline.
+
+### Phase 1: Python / Runtime Verification
+
+Run these when `src/bill_analyser/**`, `tests/**`, or other Python runtime files changed:
+
+```powershell
+./.venv/Scripts/python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py
+./.venv/Scripts/python.exe -m pytest tests/affected_scope -v
 ```
 
-If build fails, STOP and fix before continuing.
+If the diff touches business runtime code under `src/bill_analyser/**`, audit acceptance still requires:
 
-### Phase 2: Type Check
-```bash
-# TypeScript projects
-npx tsc --noEmit 2>&1 | head -30
-
-# Python projects
-pyright . 2>&1 | head -30
+```powershell
+./.venv/Scripts/python.exe -m pytest tests/ -v
 ```
 
-Report all type errors. Fix critical ones before continuing.
+### Phase 2: Frontend Verification
 
-### Phase 3: Lint Check
-```bash
-# JavaScript/TypeScript
-npm run lint 2>&1 | head -30
+Run this when `src/web/**` changed:
 
-# Python
-ruff check . 2>&1 | head -30
+```powershell
+Set-Location src\web
+npm run lint
 ```
 
-### Phase 4: Test Suite
-```bash
-# Run tests with coverage
-npm run test -- --coverage 2>&1 | tail -50
+If the change is UI-heavy or contract-sensitive, add the smallest useful build or test validation on top.
 
-# Check coverage threshold
-# Target: 80% minimum
+### Phase 3: AI Customization / Hook Verification
+
+Run this when `.github/**`, `.agents/**`, `.claude/**`, `scripts/hooks/**`, or `scripts/agent_stack_health.py` changed:
+
+```powershell
+./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo
+./.venv/Scripts/python.exe -m pytest tests/test_agent_stack_health.py tests/test_pre_tool_repo_guard.py -v
 ```
 
-Report:
-- Total tests: X
-- Passed: X
-- Failed: X
-- Coverage: X%
+Add the most relevant hook-specific tests if post-tool or stop-hook behavior changed.
 
-### Phase 5: Security Scan
-```bash
-# Check for secrets
-grep -rn "sk-" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
-grep -rn "api_key" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
+### Phase 4: Contract and Money Review
 
-# Check for console.log
-grep -rn "console.log" --include="*.ts" --include="*.tsx" src/ 2>/dev/null | head -10
-```
+- If API routes or adapters changed, confirm `src/web/src/lib/services.ts` and related stores still match the backend contract.
+- If amount fields, budget math, import normalization, or statistics changed, manually review yuan/cents conversion once.
 
-### Phase 6: Diff Review
-```bash
-# Show what changed
-git diff --stat
-git diff HEAD~1 --name-only
-```
+### Phase 5: Diff Review
 
 Review each changed file for:
-- Unintended changes
-- Missing error handling
-- Potential edge cases
+- unintended edits
+- missing error handling
+- verification gaps
+- hidden API or money-unit drift
 
 ## Output Format
 
@@ -93,11 +79,12 @@ After running all phases, produce a verification report:
 VERIFICATION REPORT
 ==================
 
-Build:     [PASS/FAIL]
-Types:     [PASS/FAIL] (X errors)
-Lint:      [PASS/FAIL] (X warnings)
-Tests:     [PASS/FAIL] (X/Y passed, Z% coverage)
-Security:  [PASS/FAIL] (X issues)
+Scope:     [backend/frontend/ai-customization/mixed]
+Pylint:    [PASS/FAIL/N-A]
+Frontend:  [PASS/FAIL/N-A]
+Pytest:    [PASS/FAIL/N-A]
+Hooks:     [PASS/FAIL/N-A]
+Contracts: [PASS/FAIL/N-A]
 Diff:      [X files changed]
 
 Overall:   [READY/NOT READY] for PR

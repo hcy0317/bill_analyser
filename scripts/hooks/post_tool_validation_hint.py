@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from scripts.hooks.session_snapshot import write_session_snapshot
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_RUNTIME_PREFIX = "src/bill_analyser/"
 API_ROUTE_PREFIX = "src/bill_analyser/api/routes/"
@@ -91,22 +93,33 @@ def build_messages(relative_path: str) -> list[str]:
     return messages
 
 
-def main() -> int:
-    payload = load_payload(sys.stdin.read())
-    if payload is None:
-        return 0
-
+def build_hook_messages(payload: dict[str, Any]) -> list[str]:
     tool_name = get_tool_name(payload)
     if tool_name not in PYTHON_EDIT_TOOL_NAMES:
-        return 0
+        return []
 
     tool_input = get_tool_input(payload)
     candidate_path = resolve_candidate_path(tool_input, payload.get("cwd"))
     relative_path = to_repo_relative(candidate_path)
     if not relative_path:
-        return 0
+        return []
 
     messages = build_messages(relative_path)
+    snapshot = write_session_snapshot(trigger="post-tool", recent_files=[relative_path], repo_root=REPO_ROOT)
+    if snapshot is not None:
+        messages.append(
+            f"[hook] 已刷新 `{snapshot.snapshot_display_path}`；如果会话因网络中断，可先读取该快照再继续。"
+        )
+
+    return messages
+
+
+def main() -> int:
+    payload = load_payload(sys.stdin.read())
+    if payload is None:
+        return 0
+
+    messages = build_hook_messages(payload)
     if not messages:
         return 0
 

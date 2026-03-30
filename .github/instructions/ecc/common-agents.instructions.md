@@ -22,13 +22,14 @@ Located in `~/.claude/agents/`:
 | refactor-cleaner | Dead code cleanup | Code maintenance |
 | doc-updater | Documentation | Updating docs |
 
-## Immediate Agent Usage
+## Default Agent Usage
 
-No user prompt needed:
-1. Complex feature requests - Use **planner** agent
-2. Code just written/modified - Use **code-reviewer** agent
-3. Bug fix or new feature - Use **tdd-guide** agent
+Start with the current agent for ordinary tasks and only escalate when a specialist provides clear value:
+1. Cross-module feature work, major refactors, unclear requirements - Use **planner** agent
+2. Non-trivial code changes that are ready for review - Use **code-reviewer** agent with explicit Review Context
+3. Bug fixes or new behavior that should be driven by tests first - Use **tdd-guide** agent
 4. Architectural decision - Use **architect** agent
+5. Build/lint/type failures - Use **build-error-resolver** agent
 
 ## Reviewer Invocation Contract
 
@@ -46,7 +47,7 @@ If the diff is too large, pass the changed file list, the most relevant hunks, a
 
 ## Parallel Task Execution
 
-ALWAYS use parallel Task execution for independent operations:
+Use parallel Task execution for independent read-only or clearly separable operations:
 
 ```markdown
 # GOOD: Parallel execution
@@ -58,6 +59,8 @@ Launch 3 agents in parallel:
 # BAD: Sequential when unnecessary
 First agent 1, then agent 2, then agent 3
 ```
+
+Keep stateful edits, terminal runs, and verification steps sequential when they depend on each other.
 
 ## Multi-Perspective Analysis
 

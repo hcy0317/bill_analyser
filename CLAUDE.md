@@ -31,6 +31,8 @@ Shared repository rules live in [AGENTS.md](AGENTS.md); keep this file Claude-sp
 - Prefer `.claude/rules/` for Claude path-scoped guidance; do not turn it into another full copy of `AGENTS.md`.
 - If a reusable workflow should work in Claude Code, Copilot, OpenCode, and Codex, prefer `.agents/skills/` as the canonical source and keep `.claude/skills/` as a thin discovery bridge.
 - Use `.claude/settings.json` for hard enforcement (permissions, hooks, plugin/MCP policy), not long-form behavioral guidance.
+- For routine repository work, restore context from `AGENTS.md` plus `.agents/skills/bill-analyser-conventions/SKILL.md` before escalating to specialized agents.
+- If a session is interrupted, inspect `.git/ai/last-session.md`, then resume with `.agents/skills/session-resume/SKILL.md`.
 
 ## Claude Code Support Files
 

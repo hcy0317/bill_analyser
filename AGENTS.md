@@ -110,12 +110,29 @@ npm run lint
 
 提交前最低检查：受影响的 pytest 用例通过；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
 
+## Default AI workflow
+
+- 默认先读取 `AGENTS.md` 与 `docs/PROJECT_OVERVIEW.md`，再加载共享 skill `.agents/skills/bill-analyser-conventions/SKILL.md`。
+- `prompts` 是快捷入口，`agents` 是专项能力；不要把它们当成第二套仓库级规则来源。
+- 普通任务优先保持单 agent、小步修改、就地验证；只有在架构设计、显式代码评审、安全审查、构建故障、关键 E2E 等场景才升级为专项 agent。
+- 按改动路径选择验证动作：
+	- `src/bill_analyser/**`：先跑受影响 pytest / pylint；业务代码验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`
+	- `src/web/**`：至少运行 `npm run lint`，必要时做最小构建验证
+	- `.github/**`、`.agents/**`、`.claude/**`、`scripts/hooks/**`：运行 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` 与相关 hook / 健康检查 pytest
+
 ## Audit gate for business-code changes
 
 - 任何业务代码变更（包括 `src/bill_analyser/**` 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次完整测试套件：`./.venv/Scripts/python.exe -m pytest tests/ -v`
 - 开发过程中可以先跑受影响用例做快速反馈，但这不能替代最终的全量测试验收。
 - 只有在全量 pytest 套件执行完成且全部通过时，才可以视为通过审计验收。
 - 如果没有执行全量测试，或全量测试存在任何失败/错误，则该改动必须打回重做，不得以“局部测试通过”代替。
+
+## Interrupted-session recovery
+
+- hooks 会把最近一次工作快照写到 `.git/ai/last-session.md`。
+- 如果会话因网络波动、窗口关闭或没有重试按钮而中断，先读取该快照，再查看 `git status` / `git diff`。
+- 继续任务时优先使用共享 skill `.agents/skills/session-resume/SKILL.md`，基于快照、当前分支、HEAD 与工作区 diff 恢复上下文。
+- 快照只记录分支、HEAD、路径、建议下一步和验证提示；不要写入密钥、环境变量或完整 diff。
 
 ## Asset inventory
 

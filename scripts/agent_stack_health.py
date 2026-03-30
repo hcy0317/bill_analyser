@@ -15,6 +15,7 @@ CURSOR_REMOVAL_NOTES = (
 )
 ALLOWED_CURSOR_ADAPTERS = {".cursor\\mcp.json", ".cursor/mcp.json"}
 DIFF_COMMIT_SKILL = "zh-conventional-commit-from-diff"
+SESSION_RESUME_SKILL = "session-resume"
 ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS = {
     "section": ("## Session Completion", "Session Completion"),
     "session": ("会话结束前", "结束会话时", "会话完成前", "ending a session", "Before ending a session"),
@@ -27,6 +28,10 @@ SKILL_SESSION_COMPLETION_REQUIREMENTS = {
     "diff": ("git diff", "diff", "staged", "unstaged"),
     "skill": (DIFF_COMMIT_SKILL,),
     "title": ("中文 Conventional Commit 标题", "中文约定式提交标题", "Chinese Conventional Commit title"),
+}
+SESSION_RESUME_REQUIREMENTS = {
+    "skill": (SESSION_RESUME_SKILL,),
+    "snapshot": (".git/ai/last-session.md",),
 }
 
 
@@ -317,6 +322,67 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
             )
         )
 
+    session_resume_skill_path = repo_root / ".agents" / "skills" / SESSION_RESUME_SKILL / "SKILL.md"
+    session_resume_contract_paths = {
+        "AGENTS.md": repo_root / "AGENTS.md",
+        ".github/copilot-instructions.md": repo_root / ".github" / "copilot-instructions.md",
+        "CLAUDE.md": repo_root / "CLAUDE.md",
+        ".codex/AGENTS.md": repo_root / ".codex" / "AGENTS.md",
+        ".agents/skills/bill-analyser-conventions/SKILL.md": (
+            repo_root / ".agents" / "skills" / "bill-analyser-conventions" / "SKILL.md"
+        ),
+        ".claude/skills/bill-analyser/SKILL.md": (
+            repo_root / ".claude" / "skills" / "bill-analyser" / "SKILL.md"
+        ),
+        ".agents/skills/session-resume/SKILL.md": session_resume_skill_path,
+    }
+    if not session_resume_skill_path.exists():
+        checks.append(
+            _result(
+                "repo.session-resume-skill",
+                "repo",
+                "fail",
+                "共享的断线续作 skill 缺失，无法稳定恢复被中断的任务。",
+                [str(session_resume_skill_path.relative_to(repo_root))],
+                "新增 `.agents/skills/session-resume/SKILL.md`，并让关键入口引用它和 `.git/ai/last-session.md`。",
+            )
+        )
+    else:
+        missing_resume_labels = {
+            relative_path: _missing_requirement_labels(_read_text(path), SESSION_RESUME_REQUIREMENTS)
+            for relative_path, path in session_resume_contract_paths.items()
+            if path.exists()
+        }
+        missing_resume_labels = {
+            relative_path: missing_labels
+            for relative_path, missing_labels in missing_resume_labels.items()
+            if missing_labels
+        }
+        if not missing_resume_labels:
+            checks.append(
+                _result(
+                    "repo.session-resume-skill",
+                    "repo",
+                    "pass",
+                    "共享断线续作 skill 已存在，且关键入口都声明了快照恢复链路。",
+                    [*session_resume_contract_paths.keys()],
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.session-resume-skill",
+                    "repo",
+                    "fail",
+                    "断线续作链路未被关键入口完整声明。",
+                    [
+                        f"{relative_path}: missing={missing_labels}"
+                        for relative_path, missing_labels in sorted(missing_resume_labels.items())
+                    ],
+                    "在关键入口与仓库技能中同时提到 `session-resume` 和 `.git/ai/last-session.md`。",
+                )
+            )
+
     codex_config = _load_toml(repo_root / ".codex" / "config.toml")
     mcp_servers = codex_config.get("mcp_servers", {})
     features = codex_config.get("features", {})
@@ -574,6 +640,25 @@ def build_manual_probes() -> list[ManualProbe]:
             failure_signals=[
                 "编辑直接落盘",
                 "完全没有 hook 执行证据",
+            ],
+        ),
+        ManualProbe(
+            id="session-resume-recovery",
+            surface="skill",
+            goal="验证会话因网络中断后仍能通过快照恢复到最近工作状态。",
+            prompt=(
+                "编辑一个仓库文件后模拟中断，确认 `.git/ai/last-session.md` 已刷新；"
+                "重新开始会话时读取该文件，再对照 `git status` / `git diff`，观察能否正确恢复下一步动作。"
+            ),
+            expected_signals=[
+                "存在 `.git/ai/last-session.md` 快照文件",
+                "快照中包含最近编辑文件、建议验证动作和下一步建议",
+                "恢复回答明确引用 session-resume workflow 或等价续作步骤",
+            ],
+            failure_signals=[
+                "没有快照文件",
+                "快照缺少最近文件或下一步提示",
+                "恢复时仍然需要从零重新分析整个仓库",
             ],
         ),
     ]

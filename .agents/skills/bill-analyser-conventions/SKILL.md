@@ -28,14 +28,29 @@ Use this skill when you are:
 - After stable business behavior, API contracts, or module relationships change, update the relevant section of `docs/PROJECT_OVERVIEW.md` immediately.
 - Write `docs/PROJECT_OVERVIEW.md` as current-state business/architecture documentation, not as an update log, bug-fix diary, or dated session summary.
 
+## Default Execution Loop
+
+1. Restore context from `AGENTS.md`, `docs/PROJECT_OVERVIEW.md`, and the current `git diff`.
+2. Prefer one focused agent and minimal edits unless the task clearly needs planner/reviewer/security/build-fix escalation.
+3. Add or update the most relevant regression test before risky behavior changes.
+4. Implement the smallest change that satisfies the verified scenario.
+5. Run path-sensitive verification before moving on.
+
 ## Verification Baseline
 
-- Run targeted pytest coverage for affected areas.
-- After any business-code change, rerun the full repository pytest suite (`./.venv/Scripts/python.exe -m pytest tests/ -v`) before claiming audit acceptance.
-- Targeted tests are for fast feedback only; audit acceptance requires the full pytest suite to finish green with no failures or errors.
-- Use pylint for changed Python modules.
+- `src/bill_analyser/**`：先跑受影响 pytest 与 pylint；业务代码验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`。
+- `src/web/**`：至少在 `src/web` 下运行 `npm run lint`，必要时补最小构建验证。
+- `.github/**`、`.agents/**`、`.claude/**`、`scripts/hooks/**`：运行 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` 与相关 hook / 健康检查 pytest。
+- API 路由或契约相关改动要复核 `src/web/src/lib/services.ts` 与相关 store。
+- 涉及金额字段、统计口径、导入链路时要人工复核元/分转换与调用顺序。
 - Prefer minimal, focused changes over broad refactors.
 - Before ending a session with any git diff, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title for the current change set.
+
+## Interrupted-session recovery
+
+- If the session is interrupted, first inspect `.git/ai/last-session.md`.
+- Compare the snapshot with current `git status` / `git diff`, then continue with `.agents/skills/session-resume/SKILL.md`.
+- Treat the snapshot as metadata only; never store secrets, environment variables, or full patch contents inside it.
 
 ## Common Commands
 

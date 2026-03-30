@@ -6,30 +6,28 @@ Run comprehensive verification on current codebase state.
 
 Execute verification in this exact order:
 
-1. **Build Check**
-   - Run the build command for this project
-   - If it fails, report errors and STOP
+1. **Detect Scope First**
+   - Inspect `git status`, staged diff, and unstaged diff
+   - Group changed files into `src/bill_analyser/**`, `src/web/**`, and AI customization / hook paths
 
-2. **Type Check**
-   - Run TypeScript/type checker
-   - Report all errors with file:line
+2. **Python / Runtime Checks**
+   - For `src/bill_analyser/**` or Python runtime changes, run affected pytest and repository-baseline pylint
+   - If business runtime code changed, require full `./.venv/Scripts/python.exe -m pytest tests/ -v` before reporting PASS
 
-3. **Lint Check**
-   - Run linter
-   - Report warnings and errors
+3. **Frontend Checks**
+   - For `src/web/**`, run `npm run lint` inside `src/web`
+   - If the UI or contract change is broad, add the smallest useful build/test verification
 
-4. **Test Suite**
-   - Run all tests
-   - Report pass/fail count
-   - Report coverage percentage
+4. **AI Customization / Hook Checks**
+   - For `.github/**`, `.agents/**`, `.claude/**`, `scripts/hooks/**`, or `scripts/agent_stack_health.py`, run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`
+   - Run relevant hook / health pytest files for the changed scripts
 
-5. **Console.log Audit**
-   - Search for console.log in source files
-   - Report locations
+5. **Contract & Money Review**
+   - If API routes changed, confirm `src/web/src/lib/services.ts` and related stores are still aligned
+   - If money, budget, import, or statistics logic changed, explicitly review yuan/cents conversion once
 
-6. **Git Status**
-   - Show uncommitted changes
-   - Show files modified since last commit
+6. **Git Status Review**
+   - Show uncommitted changes and summarize any remaining verification gaps
 
 ## Output
 
@@ -38,12 +36,12 @@ Produce a concise verification report:
 ```
 VERIFICATION: [PASS/FAIL]
 
-Build:    [OK/FAIL]
-Types:    [OK/X errors]
-Lint:     [OK/X issues]
-Tests:    [X/Y passed, Z% coverage]
-Secrets:  [OK/X found]
-Logs:     [OK/X console.logs]
+Scope:    [backend/frontend/ai-customization/mixed]
+Pylint:   [OK/FAIL/N-A]
+Frontend: [OK/FAIL/N-A]
+Pytest:   [OK/FAIL/N-A]
+Hooks:    [OK/FAIL/N-A]
+Contract: [OK/FAIL/N-A]
 
 Ready for PR: [YES/NO]
 ```
