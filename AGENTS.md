@@ -84,6 +84,7 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 - 不要在没有充分理由的情况下改动构建产物、历史快照目录或第三方参考代码。
 - 不要把同一套仓库级规则完整复制到多个平台入口文件里；共享规则优先回收到 `AGENTS.md`。
 - Legacy `.cursor/` compatibility mirrors were intentionally removed；不要重新引入整套镜像目录。
+- 如必须兼容 Cursor，仅允许保留单文件 `.cursor/mcp.json` 作为 MCP 薄适配器；不要继续扩展为 `.cursor/hooks*`、`.cursor/skills*`、`.cursor/commands*` 等镜像树。
 
 ## Build and test baseline
 

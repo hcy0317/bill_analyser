@@ -11,7 +11,7 @@
 它验证：
 
 - 仓库级入口文件是否齐全：`AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`、`.codex/AGENTS.md`、`.codex/config.toml`、`opencode.json`
-- `.cursor/` 兼容镜像是否真的已经被移除
+- legacy `.cursor/` 兼容镜像是否真的已经被移除，且最多只保留单文件 `.cursor/mcp.json` 薄适配器
 - 最小 hooks 基线是否齐全：`.github/hooks/*.json`、项目级 `.claude/settings.json`、`scripts/hooks/*`
 - Codex 的多 agent / MCP 基线是否还在
 - Codex / Claude 的仓库专属 skill 入口是否还在
