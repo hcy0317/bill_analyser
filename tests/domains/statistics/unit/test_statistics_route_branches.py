@@ -120,9 +120,14 @@ def test_basic_statistics_routes_transform_analyzer_outputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """概览/趋势/对比/分类/趋势图路由应正确转换 analyzer 输出。"""
+    analyzer_db = object()
+
+    def _get_analyzer_db() -> object:
+        return analyzer_db
+
     monkeypatch.setattr(statistics_module, "Analyzer", FakeAnalyzer)
     monkeypatch.setattr(statistics_module, "_run_async", lambda value: value)
-    monkeypatch.setattr(statistics_module, "get_app_context", lambda: object())
+    monkeypatch.setattr(statistics_module, "get_app_context", _get_analyzer_db)
 
     get_overview = _unwrap(statistics_module.get_overview)
     get_trends = _unwrap(statistics_module.get_trends)
@@ -339,6 +344,10 @@ def test_statistics_routes_cover_helpers_and_error_handlers(
     """统计路由应覆盖 helper 与主要异常兜底分支。"""
     get_request_user_id_helper = getattr(statistics_module, "_get_request_user_id")
     db = FakeStatisticsDB()
+    analyzer_db = object()
+
+    def _get_analyzer_db() -> object:
+        return analyzer_db
 
     with statistics_route_app.app_context():
         statistics_route_app.config["DB_INSTANCE"] = db
@@ -367,7 +376,7 @@ def test_statistics_routes_cover_helpers_and_error_handlers(
 
     monkeypatch.setattr(statistics_module, "Analyzer", ExplodingAnalyzer)
     monkeypatch.setattr(statistics_module, "_run_async", lambda value: value)
-    monkeypatch.setattr(statistics_module, "get_app_context", lambda: object())
+    monkeypatch.setattr(statistics_module, "get_app_context", _get_analyzer_db)
 
     get_overview = _unwrap(statistics_module.get_overview)
     get_trends = _unwrap(statistics_module.get_trends)

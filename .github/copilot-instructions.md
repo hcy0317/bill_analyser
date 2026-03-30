@@ -1,32 +1,58 @@
 # Bill Analyser Copilot / VS Code Adapter
 
 Shared repository rules live in [AGENTS.md](../AGENTS.md).
-This file exists only for Copilot / VS Code-specific discovery and should stay thinner than `AGENTS.md`.
+This file is the Copilot / VS Code discovery adapter for this repository and should remain thinner than `AGENTS.md`.
 
-## What Copilot should load here
+## Start here
 
-- Universal repository rules: `AGENTS.md`
-- Always-on Copilot delta: this file
+1. Read [AGENTS.md](../AGENTS.md) for canonical shared repository rules.
+2. Use this file only for Copilot / VS Code-specific discovery and runtime notes.
+3. Keep cross-tool guidance in `AGENTS.md` or shared skills instead of duplicating it here.
+
+## What Copilot should discover in this repository
+
+- Canonical shared rules: `AGENTS.md`
+- Copilot / VS Code adapter: `.github/copilot-instructions.md`
 - File-scoped instructions: `.github/instructions/**/*.instructions.md`
-- Custom agents: `.github/agents/*.agent.md`
+- Copilot custom agents: `.github/agents/*.agent.md`
 - Prompt library: `.github/prompts/*.prompt.md`
-- Copilot-native hooks (if used): `.github/hooks/*.json`
+- Copilot-native hooks: `.github/hooks/*.json`
+- Copilot workflows and health checks: `.github/workflows/*`
 - Shared cross-tool skills: `.agents/skills/`
+- Copilot-local skills: `.github/skills/`
 
-## Copilot-specific notes
+## Copilot-specific guidance
 
-- VS Code also discovers `AGENTS.md`, `CLAUDE.md`, `.claude/rules/`, `.claude/agents/`, `.agents/skills/`, and hook config from `.claude/settings.json`. Keep adapters thin to avoid repeating the same always-on context.
-- Prefer `AGENTS.md` for repository-wide rules.
-- Prefer `.instructions.md` files only when Copilot needs `applyTo`-style file scoping.
-- New shared skills should prefer `.agents/skills/`; use `.github/skills/` only for Copilot-only skills or during migration.
-- Use `.github/prompts/` for repeatable task templates rather than expanding `AGENTS.md` with prompt-like content.
+- VS Code also discovers `AGENTS.md`, `CLAUDE.md`, `.claude/rules/`, `.claude/agents/`, `.agents/skills/`, and project-level Claude hook wiring from `.claude/settings.json`.
+- Prefer `AGENTS.md` for repository-wide behavior, architecture boundaries, and workflow policy.
+- Prefer `.github/instructions/**/*.instructions.md` only when Copilot needs `applyTo`-style scoping or file-family-specific guidance.
+- Prefer `.agents/skills/` for reusable cross-tool workflows; use `.github/skills/` only for Copilot-only or migration-stage skills.
+- Prefer `.github/prompts/` for repeatable task entrypoints rather than growing this adapter or `AGENTS.md` into prompt catalogs.
+- Keep this adapter focused on discovery, runtime wiring, and Copilot-specific deltas; if it starts reading like a second `AGENTS.md`, it has eaten too much spinach.
 
-## Current Bill Analyser overlays
+## Current Bill Analyser Copilot surfaces
 
-- Modular workspace rules: `.github/instructions/ecc/`
-- Copilot custom agents: `.github/agents/`
+- Modular workspace instructions: `.github/instructions/ecc/`
+- Copilot agents: `.github/agents/`
 - Copilot prompts: `.github/prompts/`
-- Existing Copilot-local skills: `.github/skills/`
+- Copilot-local skills: `.github/skills/`
+- Shared repository skills: `.agents/skills/`
+- Copilot hooks: `.github/hooks/`
+- Copilot workflow health check: `.github/workflows/agent-stack-health.yml`
+
+## Hook baseline
+
+- Copilot repo guard is declared in `.github/hooks/repo-guard.json`.
+- The shared guard implementation lives in `scripts/hooks/pre_tool_repo_guard.py`.
+- Project-level Claude settings in `.claude/settings.json` point at the same repo guard so Copilot and Claude stay aligned.
+- Post-edit and stop-session reminders live under `.github/hooks/` and should stay thin, deterministic, and repository-specific.
+
+## Thin-adapter rules
+
+- Treat `AGENTS.md` as the canonical source for shared repository rules.
+- Treat `.agents/skills/` as the canonical source for shared repository workflows.
+- Keep `CLAUDE.md`, `.github/copilot-instructions.md`, and `.codex/AGENTS.md` as platform adapters, not competing rule stores.
+- When a rule applies across tools, move it to `AGENTS.md` or a shared skill first, then keep only the platform-native delta here.
 
 ## Reviewer Subagent Contract
 
@@ -42,4 +68,4 @@ This file exists only for Copilot / VS Code-specific discovery and should stay t
 
 ## Build and test reminder
 
-For project build / test commands, architecture boundaries, reviewer handoff rules, and session-completion expectations, follow [AGENTS.md](../AGENTS.md).
+For build and test commands, architecture boundaries, reviewer handoff rules, and session-completion expectations, follow [AGENTS.md](../AGENTS.md) first.
