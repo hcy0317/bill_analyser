@@ -230,6 +230,6 @@ def test_agent_stack_workflow_uses_runner_compatible_python() -> None:
     match = re.search(r'python-version:\s*["\']?(?P<version>[^"\'\s]+)["\']?', workflow_text)
 
     assert match is not None, "agent-stack-health workflow must declare setup-python version"
-    assert match.group("version") == "3.13", (
-        "agent-stack-health workflow should stay on Python 3.13 until the runner reliably supports 3.14 setup"
+    assert match.group("version") == "3.14", (
+        "agent-stack-health workflow should stay on Python 3.14 so repo-level AI customization checks match the current runtime baseline"
     )

@@ -2819,7 +2819,7 @@ class Database:
                             value2 = float(parts[2])
                             count_query += " AND amount BETWEEN ? AND ?"
                             params.extend([value1, value2])
-                    except ValueError, IndexError:
+                    except (ValueError, IndexError):
                         pass
 
         async with conn.execute(count_query, params) as cursor:
@@ -6238,7 +6238,7 @@ class Database:
 
         try:
             return datetime.strptime(str(date_text)[:10], "%Y-%m-%d").date()
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
 
     @staticmethod
@@ -7396,7 +7396,7 @@ class Database:
             parsed = json.loads(raw_value)
             if isinstance(parsed, dict):
                 return parsed
-        except TypeError, ValueError, json.JSONDecodeError:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
 
         return default.copy() if default else {}
