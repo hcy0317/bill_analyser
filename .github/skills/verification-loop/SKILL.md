@@ -7,6 +7,12 @@ description: "A comprehensive verification system for Claude Code sessions."
 
 A comprehensive verification system for Claude Code sessions.
 
+## Entry Point Positioning
+
+- Prefer `/verify` as the default, repository-facing verification entrypoint.
+- Use `/quality-gate` only for quick path-scoped lint/format/type checks.
+- Reach for this `verification-loop` skill directly only when you are refining verification behavior or working on the underlying workflow assets themselves.
+
 ## When to Use
 
 Invoke this skill:

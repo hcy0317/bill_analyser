@@ -1,6 +1,10 @@
+---
+description: Quick path-scoped quality check for one file or folder. Prefer /verify for comprehensive repository-aware verification.
+---
+
 # Quality Gate Command
 
-Run the ECC quality pipeline on demand for a file or project scope.
+Run a lightweight, path-scoped quality check on demand.
 
 ## Usage
 
@@ -9,6 +13,12 @@ Run the ECC quality pipeline on demand for a file or project scope.
 - default target: current directory (`.`)
 - `--fix`: allow auto-format/fix where configured
 - `--strict`: fail on warnings where supported
+
+## Positioning
+
+- Use `/quality-gate` for **quick local feedback** on one file or folder.
+- Use `/verify` for **repository-default comprehensive verification** before handoff, review, or PR.
+- `verification-loop` is the underlying deep workflow; most day-to-day usage should prefer `/verify` rather than invoking overlapping verification entrypoints mentally.
 
 ## Pipeline
 
@@ -19,7 +29,11 @@ Run the ECC quality pipeline on demand for a file or project scope.
 
 ## Notes
 
-This command mirrors hook behavior but is operator-invoked.
+This command mirrors hook behavior but stays intentionally narrower than `/verify`:
+
+- it does **not** replace full pytest audit acceptance
+- it does **not** replace API contract or yuan/cents manual review
+- it does **not** replace AI customization health checks for `.github/**`, `.agents/**`, `.claude/**`, or `scripts/hooks/**`
 
 ## Arguments
 

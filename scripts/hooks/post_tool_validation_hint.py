@@ -5,9 +5,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scripts.hooks.session_snapshot import write_session_snapshot
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_RUNTIME_PREFIX = "src/bill_analyser/"
 API_ROUTE_PREFIX = "src/bill_analyser/api/routes/"
 SERVICES_TS_PATH = "src/web/src/lib/services.ts"
@@ -85,10 +88,16 @@ def build_messages(relative_path: str) -> list[str]:
         messages.append("[hook] Python 文件已编辑：建议运行受影响 pytest，并对改动模块执行 pylint。")
 
     if relative_path.startswith(PYTHON_RUNTIME_PREFIX):
-        messages.append("[hook] 检测到业务运行时代码变更：最终验收前必须跑全量 `./.venv/Scripts/python.exe -m pytest tests/ -v`。")
+        messages.append(
+            "[hook] 检测到业务运行时代码变更：最终验收前必须跑全量 "
+            "`./.venv/Scripts/python.exe -m pytest tests/ -v`。"
+        )
 
     if relative_path.startswith(API_ROUTE_PREFIX) or relative_path == "src/bill_analyser/api/app.py":
-        messages.append(f"[hook] 检测到 API 路由/契约相关文件变更：请确认 `{SERVICES_TS_PATH}` 和相关 store 是否需要同步更新。")
+        messages.append(
+            f"[hook] 检测到 API 路由/契约相关文件变更：请确认 `{SERVICES_TS_PATH}` "
+            "和相关 store 是否需要同步更新。"
+        )
 
     return messages
 
@@ -123,7 +132,7 @@ def main() -> int:
     if not messages:
         return 0
 
-    print("\n".join(messages))
+    sys.stdout.write("\n".join(messages) + "\n")
     return 0
 
 

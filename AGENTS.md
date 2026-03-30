@@ -151,6 +151,7 @@ npm run lint
 ## Reference docs
 
 - 详细架构与模块地图见 `docs/PROJECT_OVERVIEW.md`
+- 人类可读的 AI 工作流说明见 `docs/AI_WORKFLOW.md`
 - Copilot / VS Code 自定义入口见 `.github/`
 - Claude Code 入口见 `CLAUDE.md` 与 `.claude/`
 - Codex 入口见 `.codex/`

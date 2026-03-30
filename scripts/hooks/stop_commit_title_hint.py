@@ -6,9 +6,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Sequence
 
-from scripts.hooks.session_snapshot import write_session_snapshot
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.hooks.session_snapshot import write_session_snapshot
 DOC_FILES = {"README.md", "AGENTS.md", "CLAUDE.md"}
 HOOK_SCOPE_PATHS = (
     ".github/hooks/",
@@ -229,7 +231,7 @@ def main() -> int:
     if not source or not changed_files:
         return 0
 
-    print("\n".join(build_stop_messages(source, changed_files, diff_text)))
+    sys.stdout.write("\n".join(build_stop_messages(source, changed_files, diff_text)) + "\n")
     return 0
 
 

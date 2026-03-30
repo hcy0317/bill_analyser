@@ -1,6 +1,16 @@
+---
+description: Default repository-aware verification entrypoint. Use for final scoped verification before review, handoff, or PR.
+---
+
 # Verification Command
 
 Run comprehensive verification on current codebase state.
+
+`/verify` is the **default verification entrypoint** for this repository.
+
+- Prefer `/verify` for comprehensive, path-aware validation.
+- Use `/quality-gate` only for quick file/folder checks.
+- Treat `verification-loop` as the underlying deep workflow that powers this verification style.
 
 ## Instructions
 
