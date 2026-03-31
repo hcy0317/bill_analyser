@@ -336,3 +336,45 @@ def test_tag_routes_cover_helpers_success_paths_and_error_handlers(
         response, status = update_display_orders()
         assert status == 500
         assert response.get_json()["error"] == "order boom"
+
+
+def test_tag_batch_create_continues_when_created_tag_lookup_returns_none(
+    tags_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """批量创建标签时，即使某次创建后详情回查为空，也应继续处理后续标签。"""
+    db = FakeTagsDB()
+    missing_lookup_ids: set[int] = set()
+
+    original_create_tag = db.create_tag
+    original_get_tag_by_id = db.get_tag_by_id
+
+    def create_tag_and_mark_missing(payload: dict[str, Any], user_id: int = 0) -> int:
+        tag_id = original_create_tag(payload, user_id=user_id)
+        if payload.get("name") == "空回查标签":
+            missing_lookup_ids.add(tag_id)
+        return tag_id
+
+    def get_tag_by_id_with_gap(tag_id: int, user_id: int = 0) -> dict[str, Any] | None:
+        if int(tag_id) in missing_lookup_ids:
+            return None
+        return original_get_tag_by_id(tag_id, user_id=user_id)
+
+    monkeypatch.setattr(tags_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(tags_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(tags_module, "_get_request_user_id", lambda: 13)
+    monkeypatch.setattr(db, "create_tag", create_tag_and_mark_missing)
+    monkeypatch.setattr(db, "get_tag_by_id", get_tag_by_id_with_gap)
+
+    create_tags_batch = _unwrap(tags_module.create_tags_batch)
+
+    with tags_route_app.test_request_context(
+        "/api/tags/batch",
+        method="POST",
+        json={"tags": [{"name": "空回查标签"}, {"name": "正常标签"}]},
+    ):
+        response, status = create_tags_batch()
+        payload = response.get_json() or {}
+        assert status == 201
+        assert payload["success"] is True
+        assert [item["name"] for item in payload["result"]] == ["正常标签"]

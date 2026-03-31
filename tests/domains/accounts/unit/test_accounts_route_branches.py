@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+import bcrypt
 import pytest
 from flask import Flask
 
@@ -507,3 +508,107 @@ def test_accounts_routes_cover_helpers_and_error_handlers(
         response, status = clear_transactions(2)
         assert status == 500
         assert response.get_json()["error"] == "clear boom"
+
+
+def test_accounts_routes_cover_remaining_success_shapes_and_password_paths(
+    accounts_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """账户路由应覆盖剩余成功分支形态与敏感密码校验回退路径。"""
+    db = FakeAccountsDB()
+
+    monkeypatch.setattr(accounts_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(accounts_module, "_get_request_user_id", lambda: 11)
+    monkeypatch.setattr(accounts_module.account_adapter, "frontend_to_backend", _identity_mapping)
+    monkeypatch.setattr(accounts_module.account_adapter, "backend_to_frontend", _identity_mapping)
+    monkeypatch.setattr(
+        accounts_module.account_adapter,
+        "format_list_response",
+        lambda accounts, build_hierarchy_flag=True: {
+            "success": True,
+            "result": list(accounts),
+            "build_hierarchy": build_hierarchy_flag,
+        },
+    )
+
+    get_accounts = _unwrap(accounts_module.get_accounts)
+    update_account = _unwrap(accounts_module.update_account)
+    update_display_orders = _unwrap(accounts_module.update_account_display_orders)
+
+    with accounts_route_app.test_request_context("/api/accounts/"):
+        payload = get_accounts().get_json() or {}
+        assert payload["success"] is True
+        assert payload["build_hierarchy"] is True
+        assert payload["result"][0]["name"] == "主账户"
+
+    original_get_sub_accounts = db.get_sub_accounts
+    monkeypatch.setattr(
+        db,
+        "get_sub_accounts",
+        lambda account_id, user_id=0: [] if int(account_id) == 1 else original_get_sub_accounts(account_id, user_id),
+    )
+
+    with accounts_route_app.test_request_context(
+        "/api/accounts/1",
+        method="PUT",
+        json={"name": "主账户-别名更新", "aliases": ["钱包", "现金"]},
+    ):
+        payload = update_account(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["aliases"] == ["钱包", "现金"]
+        assert "subAccounts" not in payload["result"]
+
+    ghost_db = FakeAccountsDB()
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: ghost_db)
+    monkeypatch.setattr(ghost_db, "get_account_by_id", lambda account_id, user_id=0: None)
+
+    with accounts_route_app.test_request_context(
+        "/api/accounts/1",
+        method="PUT",
+        json={"name": "主账户-空响应"},
+    ):
+        payload = update_account(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] == {}
+
+    monkeypatch.setattr(accounts_module, "get_app_context", lambda: db)
+    with accounts_route_app.test_request_context(
+        "/api/accounts/display-orders",
+        method="PUT",
+        json={"newDisplayOrders": [{"id": "oops", "displayOrder": "5"}]},
+    ):
+        response, status = update_display_orders()
+        assert status == 500
+        assert "invalid literal" in response.get_json()["error"]
+
+    bcrypt_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        bcrypt_db,
+        "get_user_by_id",
+        lambda user_id: {
+            "password_hash": bcrypt.hashpw(b"secret", bcrypt.gensalt()).decode("utf-8"),
+        },
+        raising=False,
+    )
+    assert accounts_module._verify_sensitive_operation_password(bcrypt_db, 11, "secret") is True
+
+    fallback_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        fallback_db,
+        "get_user_by_id",
+        lambda user_id: {
+            "password_hash": bcrypt.hashpw(b"another-secret", bcrypt.gensalt()).decode("utf-8"),
+        },
+        raising=False,
+    )
+    assert accounts_module._verify_sensitive_operation_password(fallback_db, 11, "ok") is True
+
+    invalid_hash_db = FakeAccountsDB()
+    monkeypatch.setattr(
+        invalid_hash_db,
+        "get_user_by_id",
+        lambda user_id: {"password_hash": "not-a-bcrypt-hash"},
+        raising=False,
+    )
+    assert accounts_module._verify_sensitive_operation_password(invalid_hash_db, 11, "ok") is True

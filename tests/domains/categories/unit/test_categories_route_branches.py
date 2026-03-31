@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Callable, cast
 
 import pytest
@@ -651,3 +652,270 @@ def test_categories_routes_cover_error_paths(
         response, status = get_category("1")
         assert status == 500
         assert response.get_json()["error"] == "get boom"
+
+
+def test_categories_routes_cover_remaining_branch_closures(
+    categories_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类路由应覆盖剩余高收益分支，包括显式上下文、二级创建、字段映射与 parentId 兜底。"""
+    db = FakeCategoriesDB()
+    engine = FakeCategoryEngine()
+    original_get_app_context = categories_module.get_app_context
+
+    def format_list_response(categories: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"success": True, "result": list(categories)}
+
+    create_category = _unwrap(categories_module.create_category)
+    update_category = _unwrap(categories_module.update_category)
+    move_categories = _unwrap(categories_module.move_categories)
+    get_category_statistics = _unwrap(categories_module.get_category_statistics)
+    update_all_categories = _unwrap(categories_module.update_all_categories)
+    batch_create_categories = _unwrap(categories_module.batch_create_categories)
+    recategorize_all_bills = _unwrap(categories_module.recategorize_all_bills)
+    import_categories = _unwrap(categories_module.import_categories)
+    get_category = _unwrap(categories_module.get_category)
+
+    with categories_route_app.app_context():
+        categories_route_app.config["DB_INSTANCE"] = db
+        categories_route_app.config["BILL_SERVICE_INSTANCE"] = object()
+        categories_route_app.config["CATEGORY_ENGINE_INSTANCE"] = engine
+        app_db, app_bill_service, app_engine = original_get_app_context(user_id=99)
+        assert app_db is db
+        assert app_bill_service is not None
+        assert app_engine is engine
+
+    monkeypatch.setattr(categories_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (db, object(), engine))
+    monkeypatch.setattr(categories_module, "_get_request_user_id", lambda: 21)
+    monkeypatch.setattr(categories_module.category_adapter, "format_list_response", format_list_response)
+    monkeypatch.setattr(categories_module.category_adapter, "get_flat_list", lambda categories: list(categories))
+    monkeypatch.setattr(categories_module, "get_categories", _unwrap(categories_module.get_categories))
+
+    with categories_route_app.test_request_context(
+        "/api/categories/",
+        method="POST",
+        json={"name": "早餐", "parentId": "1"},
+    ):
+        payload = create_category().get_json() or {}
+        assert payload["success"] is True
+        assert payload["message"] == "Category already exists"
+        assert payload["result"]["parentId"] == "1"
+
+    exploding_parent_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (exploding_parent_db, object(), engine))
+    monkeypatch.setattr(exploding_parent_db, "get_category_by_id", lambda *args, **kwargs: _raise_runtime_error("parent lookup boom"))
+    with categories_route_app.test_request_context(
+        "/api/categories/",
+        method="POST",
+        json={"name": "异常子类", "parentId": "3"},
+    ):
+        response, status = create_category()
+        assert status == 500
+        assert response.get_json()["error"] == "parent lookup boom"
+
+    missing_create_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (missing_create_db, object(), engine))
+    monkeypatch.setattr(missing_create_db, "create_category", lambda *args, **kwargs: None)
+    with categories_route_app.test_request_context(
+        "/api/categories/",
+        method="POST",
+        json={"name": "公交", "parentId": "3"},
+    ):
+        response, status = create_category()
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to create category"
+
+    virtual_create_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (virtual_create_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_新主类",
+        method="PUT",
+        json={"comment": "created-from-virtual", "visible": False, "icon": "mdi-star", "color": "#123456"},
+    ):
+        payload = update_category("virtual_新主类").get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["name"] == "新主类"
+        created = next(item for item in virtual_create_db.categories.values() if item["main_category"] == "新主类" and not item["sub_category"])
+        assert created["hidden"] is True
+        assert created["icon"] == "mdi-star"
+        assert created["color"] == "#123456"
+
+    normal_update_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (normal_update_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/2",
+        method="PUT",
+        json={
+            "name": "早午餐",
+            "comment": "更新描述",
+            "displayOrder": 8,
+            "keywords": "早午餐",
+            "type": 2,
+            "visible": False,
+            "icon": "mdi-food-outline",
+            "color": "#abcdef",
+        },
+    ):
+        payload = update_category("2").get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["name"] == "早午餐"
+        assert payload["result"]["visible"] is False
+        assert normal_update_db.categories[2]["sub_category"] == "早午餐"
+        assert normal_update_db.categories[2]["priority"] == 8
+        assert normal_update_db.categories[2]["keywords"] == "早午餐"
+        assert normal_update_db.categories[2]["type"] == 2
+        assert normal_update_db.categories[2]["hidden"] is True
+        assert normal_update_db.categories[2]["icon"] == "mdi-food-outline"
+        assert normal_update_db.categories[2]["color"] == "#abcdef"
+
+    same_name_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (same_name_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        json={"name": "餐饮", "comment": "同名更新"},
+    ):
+        payload = update_category("1").get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["name"] == "餐饮"
+        assert same_name_db.categories[1]["main_category"] == "餐饮"
+        assert same_name_db.categories[1]["description"] == "同名更新"
+
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (normal_update_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        json={"name": "餐饮新", "comment": "主类改名"},
+    ):
+        payload = update_category("1").get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["name"] == "餐饮新"
+        assert normal_update_db.categories[1]["main_category"] == "餐饮新"
+        assert normal_update_db.categories[2]["main_category"] == "餐饮新"
+
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (normal_update_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/move",
+        method="POST",
+        json={"newDisplayOrders": [{"id": None, "displayOrder": 99}, {"id": "1", "displayOrder": 12}]},
+    ):
+        payload = move_categories().get_json() or {}
+        assert payload["success"] is True
+        assert normal_update_db.categories[1]["priority"] == 12
+
+    stats_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (stats_db, object(), engine))
+    monkeypatch.setattr(
+        stats_db,
+        "get_category_statistics",
+        lambda *args, **kwargs: [
+            {"main_category": "餐饮", "sub_category": "早餐", "total_amount": -10, "count": 1},
+            {"main_category": "餐饮", "sub_category": "午餐", "total_amount": -20, "count": 2},
+            {"main_category": "餐饮", "sub_category": "", "total_amount": -5, "count": 1},
+        ],
+    )
+    with categories_route_app.test_request_context("/api/categories/statistics?period=month"):
+        payload = get_category_statistics().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["餐饮"]["total_amount"] == 35.0
+        assert payload["result"]["餐饮"]["count"] == 4
+        assert payload["result"]["餐饮"]["sub_categories"]["午餐"]["count"] == 2
+
+    with categories_route_app.test_request_context(
+        "/api/categories/all",
+        method="PUT",
+        data="null",
+        content_type="application/json",
+    ):
+        response, status = update_all_categories()
+        assert status == 400
+        assert response.get_json()["error"] == "categories are required"
+
+    with categories_route_app.test_request_context(
+        "/api/categories/all",
+        method="PUT",
+        json={"categories": []},
+    ):
+        with monkeypatch.context() as local_patch:
+            failing_request = SimpleNamespace(get_json=lambda *args, **kwargs: _raise_runtime_error("update all boom"))
+            local_patch.setattr(categories_module, "request", failing_request)
+            response, status = update_all_categories()
+            assert status == 500
+            assert response.get_json()["error"] == "update all boom"
+
+    batch_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (batch_db, object(), engine))
+    original_batch_create = batch_db.create_category
+
+    def create_category_with_failures(payload: dict[str, Any], user_id: int = 0) -> int | None:
+        if payload.get("main_category") == "创建失败主类" and payload.get("sub_category") == "":
+            return None
+        if payload.get("main_category") == "子类失败主类" and payload.get("sub_category") == "失败子类":
+            return None
+        return original_batch_create(payload, user_id=user_id)
+
+    monkeypatch.setattr(batch_db, "create_category", create_category_with_failures)
+    with categories_route_app.test_request_context(
+        "/api/categories/batch",
+        method="POST",
+        json={
+            "categories": [
+                {"subCategories": [{"name": "应跳过的孤儿子类"}]},
+                {"name": "餐饮", "subCategories": [{"name": "早餐"}, {}]},
+                {"name": "娱乐", "subCategories": [{"name": "桌游", "type": 4}]},
+                {"name": "创建失败主类", "subCategories": [{"name": "补偿子类"}]},
+                {"name": "子类失败主类", "subCategories": [{"name": "失败子类"}, {"name": "成功子类"}]},
+            ]
+        },
+    ):
+        payload = _unwrap_response(batch_create_categories()).get_json() or {}
+        assert payload["success"] is True
+        assert any(item["main_category"] == "娱乐" for item in batch_db.categories.values())
+        assert any(item["sub_category"] == "桌游" and item["type"] == 4 for item in batch_db.categories.values())
+        assert any(item["main_category"] == "创建失败主类" and item["sub_category"] == "补偿子类" for item in batch_db.categories.values())
+        assert any(item["main_category"] == "子类失败主类" and item["sub_category"] == "成功子类" for item in batch_db.categories.values())
+
+    import_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (import_db, object(), engine))
+    with categories_route_app.test_request_context(
+        "/api/categories/import",
+        method="POST",
+        json={
+            "categories": [
+                {"main_category": "交通", "sub_category": "公交", "type": 3},
+                {"main_category": "交通", "sub_category": "", "description": "更新交通"},
+            ]
+        },
+    ):
+        payload = import_categories().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] == {"imported": 1, "updated": 1, "skipped": 0}
+
+    parent_fallback_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (parent_fallback_db, object(), engine))
+    monkeypatch.setattr(parent_fallback_db, "get_category_by_name", lambda main_category, sub_category, user_id=0: None if not sub_category else FakeCategoriesDB.get_category_by_name(parent_fallback_db, main_category, sub_category, user_id))
+    with categories_route_app.test_request_context("/api/categories/2"):
+        payload = _unwrap_response(get_category("2")).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parentId"] == "virtual_餐饮"
+
+    with categories_route_app.test_request_context("/api/categories/3"):
+        payload = _unwrap_response(get_category("3")).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["parentId"] == "0"
+
+    class EmptyMatchEngine(FakeCategoryEngine):
+        def match_category(self, bill: dict[str, Any]) -> tuple[str, str]:
+            _ = bill
+            return ("", "")
+
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (db, object(), EmptyMatchEngine()))
+    with categories_route_app.test_request_context(
+        "/api/categories/update-all",
+        method="POST",
+        json={"force": True},
+    ):
+        payload = recategorize_all_bills().get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"] == {"total": 2, "updated": 0}

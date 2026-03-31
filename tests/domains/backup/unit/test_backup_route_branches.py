@@ -43,9 +43,26 @@ def _raise_runtime_error(message: str) -> Any:
 class FakeBackupDB:
     def __init__(self) -> None:
         self.audit_logs: list[dict[str, Any]] = []
+        self.backup_records: list[dict[str, Any]] = []
 
     async def create_audit_log(self, **payload: Any) -> None:
         self.audit_logs.append(payload)
+
+    async def create_backup_record(self, payload: dict[str, Any]) -> int:
+        record = dict(payload)
+        record["id"] = len(self.backup_records) + 1
+        self.backup_records.append(record)
+        return record["id"]
+
+    async def get_backup_records(self) -> list[dict[str, Any]]:
+        return [dict(record) for record in self.backup_records]
+
+    async def update_backup_record_by_filename(self, filename: str, updates: dict[str, Any]) -> bool:
+        for record in self.backup_records:
+            if record.get("backup_name") == filename:
+                record.update(updates)
+                return True
+        return False
 
 
 def test_backup_listing_download_delete_and_cleanup_branches(
@@ -107,6 +124,14 @@ def test_backup_listing_download_delete_and_cleanup_branches(
         assert payload["success"] is True
         assert older.exists() is False
 
+    sidecarless = backup_dir / "backup_sidecarless.zip"
+    sidecarless.write_bytes(b"sidecarless")
+
+    with backup_route_app.test_request_context("/api/backup/delete/backup_sidecarless.zip", method="DELETE"):
+        payload = delete_backup("backup_sidecarless.zip").get_json() or {}
+        assert payload["success"] is True
+        assert sidecarless.exists() is False
+
     extra_a = backup_dir / "backup_a.zip"
     extra_b = backup_dir / "backup_b.zip"
     extra_a.write_bytes(b"a")
@@ -161,6 +186,7 @@ def test_backup_create_and_restore_cover_success_empty_and_missing_cases(
         assert payload["success"] is True
         assert payload["data"]["filename"] == "backup_created.zip"
         assert fake_db.audit_logs[-1]["operation_type"] == "backup_created"
+        assert fake_db.audit_logs[-1]["details"]["filename"] == "backup_created.zip"
 
     with backup_route_app.test_request_context("/api/backup/restore/not-valid.txt", method="POST"):
         response, status = asyncio.run(restore_backup("not-valid.txt"))
@@ -182,6 +208,7 @@ def test_backup_create_and_restore_cover_success_empty_and_missing_cases(
         assert payload["data"]["filename"] == "backup_valid.zip"
         assert (data_dir / "restored.txt").read_text(encoding="utf-8") == "restored"
         assert fake_db.audit_logs[-1]["operation_type"] == "backup_restored"
+        assert fake_db.audit_logs[-1]["details"]["filename"] == "backup_valid.zip"
 
 
 def test_backup_routes_cover_directory_creation_restore_fallback_and_error_paths(
@@ -262,6 +289,66 @@ def test_backup_routes_cover_directory_creation_restore_fallback_and_error_paths
         assert response.get_json()["success"] is False
 
 
+def test_restore_backup_covers_missing_target_data_dir_and_inner_cleanup_false_branch(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """恢复备份应覆盖目标 data 目录不存在时的两条复制路径，以及异常时临时目录已不存在分支。"""
+    import shutil
+
+    backup_dir = tmp_path / "restore_missing_data_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "restore_missing_data_target"
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+    monkeypatch.setattr(backup_module, "DATA_DIR", data_dir)
+
+    restore_backup = _unwrap(backup_module.restore_backup)
+
+    zipped_backup = backup_dir / "backup_nested.zip"
+    with ZipFile(zipped_backup, "w") as zip_file:
+        zip_file.writestr("data/from_nested.txt", "nested")
+
+    with backup_route_app.test_request_context("/api/backup/restore/backup_nested.zip", method="POST"):
+        payload = asyncio.run(restore_backup("backup_nested.zip")).get_json() or {}
+        assert payload["success"] is True
+        assert (data_dir / "from_nested.txt").read_text(encoding="utf-8") == "nested"
+
+    shutil.rmtree(data_dir)
+
+    flat_backup = backup_dir / "backup_flat_missing_data.zip"
+    with ZipFile(flat_backup, "w") as zip_file:
+        zip_file.writestr("flat.txt", "flat-no-existing-data")
+
+    with backup_route_app.test_request_context("/api/backup/restore/backup_flat_missing_data.zip", method="POST"):
+        payload = asyncio.run(restore_backup("backup_flat_missing_data.zip")).get_json() or {}
+        assert payload["success"] is True
+        assert (data_dir / "flat.txt").read_text(encoding="utf-8") == "flat-no-existing-data"
+
+    shutil.rmtree(data_dir)
+
+    broken_after_cleanup = backup_dir / "backup_fail_after_temp_removed.zip"
+    with ZipFile(broken_after_cleanup, "w") as zip_file:
+        zip_file.writestr("data/will_fail.txt", "x")
+
+    original_copytree = shutil.copytree
+
+    def exploding_copytree(src: str | Path, dst: str | Path, *args: Any, **kwargs: Any) -> Any:
+        for restore_temp_dir in backup_dir.glob("restore_temp_*"):
+            shutil.rmtree(restore_temp_dir, ignore_errors=True)
+        raise RuntimeError("copy after cleanup boom")
+
+    monkeypatch.setattr(shutil, "copytree", exploding_copytree)
+
+    with backup_route_app.test_request_context("/api/backup/restore/backup_fail_after_temp_removed.zip", method="POST"):
+        response, status = asyncio.run(restore_backup("backup_fail_after_temp_removed.zip"))
+        assert status == 500
+        assert response.get_json()["error"] == "copy after cleanup boom"
+
+    monkeypatch.setattr(shutil, "copytree", original_copytree)
+
+
 def test_backup_metadata_and_restore_verify_cover_checksum_and_validation(
     backup_route_app: Flask,
     tmp_path: Path,
@@ -296,6 +383,7 @@ def test_backup_metadata_and_restore_verify_cover_checksum_and_validation(
         assert listed_valid["checksum"] == metadata["checksum"]
         assert listed_valid["valid_zip"] is True
         assert listed_valid["ready_to_restore"] is True
+        assert listed_valid["metadata_checksum_matched"] is True
 
     with backup_route_app.test_request_context("/api/backup/restore/verify", method="POST", json={}):
         response, status = verify_backup()

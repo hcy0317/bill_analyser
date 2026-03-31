@@ -122,6 +122,8 @@ def test_template_routes_cover_helper_crud_and_display_order_branches(
         assert get_template_type_helper() == 2
     with templates_route_app.test_request_context("/api/templates/", method="POST", json={"templateType": "bad"}):
         assert get_template_type_helper(default=1) == 1
+    with templates_route_app.test_request_context("/api/templates/?templateType=%20%20"):
+        assert get_template_type_helper(default=9) == 9
 
     with templates_route_app.test_request_context("/api/templates/?templateType=1"):
         payload = get_templates().get_json() or {}
