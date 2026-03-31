@@ -7467,7 +7467,22 @@ class Database:
         update_payload = dict(updates)
         update_payload["updated_at"] = datetime.now().isoformat()
         if "metadata" in update_payload:
-            update_payload["metadata_json"] = json.dumps(update_payload.pop("metadata") or {}, ensure_ascii=False)
+            metadata = dict(update_payload.pop("metadata") or {})
+            async with conn.execute(
+                "SELECT metadata_json FROM backup_records WHERE backup_name = ?",
+                (filename,),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            existing_metadata: dict[str, Any] = {}
+            if row and row[0]:
+                try:
+                    existing_metadata = json.loads(row[0])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    existing_metadata = {}
+
+            existing_metadata.update(metadata)
+            update_payload["metadata_json"] = json.dumps(existing_metadata, ensure_ascii=False)
 
         set_clause = ", ".join(f"{key} = ?" for key in update_payload.keys())
         values = list(update_payload.values())

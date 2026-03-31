@@ -61,7 +61,14 @@ class FakeBackupDB:
     async def update_backup_record_by_filename(self, filename: str, updates: dict[str, Any]) -> bool:
         for record in self.backup_records:
             if record.get("backup_name") == filename:
-                record.update(updates)
+                merged = dict(record)
+                if "metadata" in updates:
+                    merged_metadata = dict(record.get("metadata", {}) or {})
+                    merged_metadata.update(dict(updates.get("metadata") or {}))
+                    merged["metadata"] = merged_metadata
+                merged.update({key: value for key, value in updates.items() if key != "metadata"})
+                record.clear()
+                record.update(merged)
                 return True
         return False
 
@@ -80,7 +87,6 @@ class FakeBackupDB:
         created["id"] = len(self.backup_jobs) + 1
         self.backup_jobs.append(created)
         return int(created["id"])
-
 
 def test_backup_listing_download_delete_and_cleanup_branches(
     backup_route_app: Flask,
@@ -381,6 +387,122 @@ def test_backup_jobs_routes_cover_list_validation_create_and_update(
         assert fake_db.backup_jobs[0]["retention_days"] == 60
 
 
+def test_cleanup_old_backups_uses_backup_records_and_marks_deleted(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """清理旧备份应支持 .zip.enc，优先按 backup_records 决定淘汰项，并回写删除状态。"""
+    backup_dir = tmp_path / "cleanup_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+
+    fake_db = FakeBackupDB()
+    fake_db.backup_records = [
+        {
+            "id": 1,
+            "backup_name": "backup_old.zip",
+            "storage_type": "local",
+            "file_path": str(backup_dir / "backup_old.zip"),
+            "checksum": "old",
+            "encrypted": False,
+            "status": "created",
+            "metadata": {"valid_zip": True},
+        },
+        {
+            "id": 2,
+            "backup_name": "backup_new.zip.enc",
+            "storage_type": "local",
+            "file_path": str(backup_dir / "backup_new.zip.enc"),
+            "checksum": "new",
+            "encrypted": True,
+            "status": "created",
+            "metadata": {"valid_zip": True},
+        },
+    ]
+    (backup_dir / "backup_old.zip").write_bytes(b"old")
+    (backup_dir / "backup_new.zip.enc").write_bytes(b"new")
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: fake_db)
+
+    cleanup_backups = _unwrap(backup_module.cleanup_old_backups)
+
+    with backup_route_app.test_request_context("/api/backup/cleanup", method="POST", json={"keep_count": 1}):
+        payload = _unwrap_response(cleanup_backups())[0].get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["deleted_count"] == 1
+        assert payload["data"]["kept_count"] == 1
+        assert (backup_dir / "backup_old.zip").exists() is False
+        assert (backup_dir / "backup_new.zip.enc").exists() is True
+        assert fake_db.backup_records[0]["status"] == "deleted"
+        assert fake_db.backup_records[0]["metadata"]["deleted_reason"] == "retention_cleanup"
+        assert fake_db.backup_records[0]["metadata"]["valid_zip"] is True
+
+
+def test_delete_backup_marks_record_deleted_and_cleanup_reconciles_missing_files(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """手动删除应回写 deleted 状态，cleanup 还应收敛已缺失文件的旧记录。"""
+    backup_dir = tmp_path / "delete_cleanup_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+
+    fake_db = FakeBackupDB()
+    fake_db.backup_records = [
+        {
+            "id": 1,
+            "backup_name": "backup_manual.zip",
+            "storage_type": "local",
+            "file_path": str(backup_dir / "backup_manual.zip"),
+            "checksum": "manual",
+            "encrypted": False,
+            "status": "created",
+            "metadata": {"valid_zip": True},
+        },
+        {
+            "id": 2,
+            "backup_name": "backup_missing.zip",
+            "storage_type": "local",
+            "file_path": str(backup_dir / "backup_missing.zip"),
+            "checksum": "missing",
+            "encrypted": False,
+            "status": "created",
+            "metadata": {"valid_zip": True},
+        },
+        {
+            "id": 3,
+            "backup_name": "backup_keep.zip",
+            "storage_type": "local",
+            "file_path": str(backup_dir / "backup_keep.zip"),
+            "checksum": "keep",
+            "encrypted": False,
+            "status": "created",
+            "metadata": {"valid_zip": True},
+        },
+    ]
+    (backup_dir / "backup_manual.zip").write_bytes(b"manual")
+    (backup_dir / "backup_keep.zip").write_bytes(b"keep")
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: fake_db)
+
+    delete_backup = _unwrap(backup_module.delete_backup)
+    cleanup_backups = _unwrap(backup_module.cleanup_old_backups)
+
+    with backup_route_app.test_request_context("/api/backup/delete/backup_manual.zip", method="DELETE"):
+        payload = delete_backup("backup_manual.zip").get_json() or {}
+        assert payload["success"] is True
+        assert fake_db.backup_records[0]["status"] == "deleted"
+        assert fake_db.backup_records[0]["metadata"]["deleted_reason"] == "manual_delete"
+
+    with backup_route_app.test_request_context("/api/backup/cleanup", method="POST", json={"keep_count": 1}):
+        payload = _unwrap_response(cleanup_backups())[0].get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["deleted_count"] == 0
+        assert fake_db.backup_records[1]["status"] == "deleted"
+        assert fake_db.backup_records[1]["metadata"]["deleted_reason"] == "missing_file"
+        assert fake_db.backup_records[2]["status"] == "created"
+
+
 def test_encrypted_backup_create_verify_and_restore_flow(
     backup_route_app: Flask,
     tmp_path: Path,
@@ -447,6 +569,51 @@ def test_encrypted_backup_create_verify_and_restore_flow(
 
     assert (restored_target / "bill.txt").read_text(encoding="utf-8") == "secret-content"
     assert fake_db.backup_records[-1]["status"] == "restored"
+
+
+def test_backup_listing_with_encrypted_file_does_not_clobber_same_stem_plain_backup(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """扫描 `.zip.enc` 时，不应覆盖或删除同名明文 `.zip` 备份。"""
+    backup_dir = tmp_path / "collision_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = tmp_path / "collision_staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+    monkeypatch.setenv("BILL_ANALYSER_BACKUP_ENCRYPTION_KEY", "collision-test-key")
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: FakeBackupDB())
+
+    plain_backup = backup_dir / "backup_collision.zip"
+    with ZipFile(plain_backup, "w") as zip_file:
+        zip_file.writestr("data/plain.txt", "plain-original")
+
+    encrypted_source = staging_dir / "backup_collision.zip"
+    with ZipFile(encrypted_source, "w") as zip_file:
+        zip_file.writestr("data/encrypted.txt", "encrypted-only")
+
+    encrypted_source_path = backup_module._encrypt_backup_file(
+        encrypted_source,
+        "collision-test-key",
+    )
+    encrypted_backup = backup_dir / "backup_collision.zip.enc"
+    encrypted_backup.write_bytes(encrypted_source_path.read_bytes())
+
+    get_backups = _unwrap(backup_module.get_backups)
+
+    with backup_route_app.test_request_context("/api/backup/"):
+        payload = get_backups().get_json() or {}
+        assert payload["success"] is True
+        filenames = {item["filename"] for item in payload["data"]}
+        assert "backup_collision.zip" in filenames
+        assert "backup_collision.zip.enc" in filenames
+
+    assert plain_backup.exists() is True
+    assert encrypted_backup.exists() is True
+    with ZipFile(plain_backup, "r") as zip_file:
+        assert zip_file.read("data/plain.txt").decode("utf-8") == "plain-original"
 
 
 def test_restore_backup_covers_missing_target_data_dir_and_inner_cleanup_false_branch(
@@ -589,7 +756,7 @@ def test_backup_metadata_and_restore_verify_cover_checksum_and_validation(
         assert fake_db.audit_logs[-1]["operation_type"] == "backup_restore_verified"
 
     with backup_route_app.test_request_context("/api/backup/delete/backup_valid.zip", method="DELETE"):
-        payload = backup_module.delete_backup("backup_valid.zip").get_json() or {}
+        payload = _unwrap_response(backup_module.delete_backup("backup_valid.zip"))[0].get_json() or {}
         assert payload["success"] is True
         assert fake_db.audit_logs[-1]["operation_type"] == "backup_deleted"
 

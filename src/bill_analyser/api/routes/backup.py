@@ -6,9 +6,11 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 from base64 import urlsafe_b64encode
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 from zipfile import BadZipFile, ZipFile
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -109,9 +111,16 @@ def _encrypt_backup_file(file_path: Path, secret: str) -> Path:
 def _decrypt_backup_file_to_temp(file_path: Path, secret: str) -> Path:
     """将加密备份解密到临时 zip 文件。"""
     fernet = _build_backup_fernet(secret)
-    decrypted_path = file_path.with_suffix("")
-    decrypted_path.write_bytes(fernet.decrypt(file_path.read_bytes()))
-    return decrypted_path
+    temp_fd, temp_path = tempfile.mkstemp(prefix="bill-analyser-backup-", suffix=".zip")
+    os.close(temp_fd)
+    decrypted_path = Path(temp_path)
+    try:
+        decrypted_path.write_bytes(fernet.decrypt(file_path.read_bytes()))
+        return decrypted_path
+    except Exception:
+        if decrypted_path.exists():
+            decrypted_path.unlink()
+        raise
 
 
 def _calculate_file_checksum(file_path: Path) -> str:
@@ -297,6 +306,47 @@ def _merge_backup_records(backup_infos: list[dict]) -> list[dict]:
     return merged
 
 
+def _iter_local_backup_files(backup_dir: Path) -> list[Path]:
+    """返回本地备份文件列表，包含明文与加密备份。"""
+    backup_files = list(backup_dir.glob("backup_*.zip"))
+    backup_files.extend(backup_dir.glob("backup_*.zip.enc"))
+    unique_files = {str(file_path.resolve()): file_path for file_path in backup_files}
+    return list(unique_files.values())
+
+
+def _resolve_backup_path_in_dir(backup_dir: Path, filename: str) -> Path | None:
+    """基于备份目录安全解析备份文件路径。"""
+    safe_filename = secure_filename(filename)
+    if not safe_filename.startswith("backup_") or not (
+        safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
+    ):
+        return None
+
+    backup_dir_resolved = backup_dir.resolve()
+    resolved_path = (backup_dir / safe_filename).resolve()
+    try:
+        resolved_path.relative_to(backup_dir_resolved)
+    except ValueError:
+        return None
+
+    return resolved_path
+
+
+def _update_backup_record_sync(filename: str, updates: dict[str, object]) -> bool:
+    """同步包装 backup_records 更新。"""
+    db = get_app_context()
+    update_backup_record = getattr(db, "update_backup_record_by_filename", None)
+    if not callable(update_backup_record):
+        return False
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return bool(loop.run_until_complete(update_backup_record(filename, updates)))
+    finally:
+        loop.close()
+
+
 def get_backup_dir() -> Path:
     """获取备份目录"""
     backup_dir = BACKUP_DIR
@@ -317,7 +367,7 @@ def get_backups():
         backup_dir = get_backup_dir()
         backups = []
 
-        for file_path in backup_dir.glob("backup_*.zip"):
+        for file_path in _iter_local_backup_files(backup_dir):
             backups.append(_build_backup_info(file_path))
 
         backups = _merge_backup_records(backups)
@@ -484,6 +534,17 @@ def delete_backup(filename):
         if metadata_path.exists():
             metadata_path.unlink()
 
+        _update_backup_record_sync(
+            safe_filename,
+            {
+                "status": "deleted",
+                "metadata": {
+                    "deleted_reason": "manual_delete",
+                    "deleted_at": datetime.now().isoformat(),
+                },
+            },
+        )
+
         _write_backup_audit_log_sync(
             "backup_deleted",
             details={"filename": safe_filename},
@@ -621,25 +682,127 @@ def cleanup_old_backups():
     try:
         data = request.get_json() or {}
         keep_count = data.get("keep_count", 10)
+        try:
+            keep_count = int(keep_count)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "keep_count must be an integer"}), 400
+
+        if keep_count < 0:
+            return jsonify({"success": False, "error": "keep_count must be greater than or equal to 0"}), 400
 
         backup_dir = get_backup_dir()
-        backups = []
-
-        for file_path in backup_dir.glob("backup_*.zip"):
-            stat = file_path.stat()
-            backups.append({"path": file_path, "mtime": stat.st_mtime})
-
-        # 按时间排序
-        backups.sort(key=lambda x: x["mtime"], reverse=True)
-
-        # 删除超出保留数量的备份
         deleted_count = 0
-        for backup in backups[keep_count:]:
-            backup["path"].unlink()
-            deleted_count += 1
+        db = get_app_context()
+        get_backup_records = getattr(db, "get_backup_records", None)
+
+        if callable(get_backup_records):
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                backup_records = loop.run_until_complete(get_backup_records())
+            finally:
+                loop.close()
+
+            active_record_entries: list[dict[str, object]] = []
+            for record in backup_records:
+                if str(record.get("storage_type", "local") or "local") != "local":
+                    continue
+                if str(record.get("status", "") or "") == "deleted":
+                    continue
+
+                backup_name = str(record.get("backup_name") or "")
+                file_path = _resolve_backup_path_in_dir(backup_dir, backup_name)
+                if file_path is None:
+                    continue
+
+                if not file_path.exists():
+                    _update_backup_record_sync(
+                        backup_name,
+                        {
+                            "status": "deleted",
+                            "metadata": {
+                                "deleted_reason": "missing_file",
+                                "deleted_at": datetime.now().isoformat(),
+                            },
+                        },
+                    )
+                    continue
+
+                active_record_entries.append({**record, "path": file_path})
+
+            active_record_entries.sort(
+                key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)),
+                reverse=True,
+            )
+
+            kept_record_entries = active_record_entries[:keep_count]
+            retention_candidates = active_record_entries[keep_count:]
+            kept_record_names = {
+                str(cast("Path", item["path"]).name)
+                for item in kept_record_entries
+                if isinstance(item.get("path"), Path)
+            }
+
+            for backup in retention_candidates:
+                backup_name = str(backup.get("backup_name") or "")
+                file_path = cast("Path", backup["path"])
+                if file_path.exists():
+                    file_path.unlink()
+                metadata_path = _get_backup_metadata_path(file_path)
+                if metadata_path.exists():
+                    metadata_path.unlink()
+                _update_backup_record_sync(
+                    backup_name,
+                    {
+                        "status": "deleted",
+                        "metadata": {
+                            "deleted_reason": "retention_cleanup",
+                            "deleted_at": datetime.now().isoformat(),
+                        },
+                    },
+                )
+                deleted_count += 1
+
+            stray_files = [
+                file_path
+                for file_path in _iter_local_backup_files(backup_dir)
+                if file_path.name not in kept_record_names
+            ]
+            stray_files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+
+            remaining_slots = max(keep_count - len(kept_record_entries), 0)
+            for stray_file in stray_files[remaining_slots:]:
+                stray_file.unlink()
+                metadata_path = _get_backup_metadata_path(stray_file)
+                if metadata_path.exists():
+                    metadata_path.unlink()
+                deleted_count += 1
+
+            kept_count = min(len(kept_record_entries) + min(len(stray_files), remaining_slots), keep_count)
+        else:
+            backups = []
+            for file_path in _iter_local_backup_files(backup_dir):
+                stat = file_path.stat()
+                backups.append({"path": file_path, "mtime": stat.st_mtime})
+
+            backups.sort(key=lambda x: x["mtime"], reverse=True)
+
+            for backup in backups[keep_count:]:
+                backup["path"].unlink()
+                metadata_path = _get_backup_metadata_path(backup["path"])
+                if metadata_path.exists():
+                    metadata_path.unlink()
+                deleted_count += 1
+            kept_count = min(len(backups), keep_count)
+
+        _write_backup_audit_log_sync(
+            "backup_cleanup",
+            details={"keep_count": keep_count, "deleted_count": deleted_count},
+            affected_count=deleted_count,
+        )
 
         return jsonify(
-            {"success": True, "data": {"deleted_count": deleted_count, "kept_count": min(len(backups), keep_count)}}
+            {"success": True, "data": {"deleted_count": deleted_count, "kept_count": kept_count}}
         )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
