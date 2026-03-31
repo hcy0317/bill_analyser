@@ -68,6 +68,17 @@ typeCheckingMode = "standard"
 [tool.ruff]
 line-length = 120
 target-version = "py314"
+extend-exclude = [
+    ".venv",
+    "backup",
+    "bills",
+    "data",
+    "logs",
+    "output",
+    "uploads",
+    "src/web/dist",
+    "src/web/node_modules",
+]
 
 [tool.ruff.format]
 line-ending = "lf"
