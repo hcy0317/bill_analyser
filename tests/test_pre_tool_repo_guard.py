@@ -80,3 +80,29 @@ def test_hook_configs_share_the_same_repo_guard_script() -> None:
 
     assert any('scripts/hooks/pre_tool_repo_guard.py' in str(command) for command in github_commands)
     assert any('scripts/hooks/pre_tool_repo_guard.py' in str(command) for command in claude_commands)
+
+
+def test_hook_configs_also_wire_global_bridge_for_pre_tool() -> None:
+    repo_root = guard.REPO_ROOT
+    github_hooks = json.loads((repo_root / '.github' / 'hooks' / 'repo-guard.json').read_text(encoding='utf-8'))
+    claude_settings = json.loads((repo_root / '.claude' / 'settings.json').read_text(encoding='utf-8'))
+
+    github_commands = [
+        entry.get('bash')
+        for entry in github_hooks['hooks']['preToolUse']
+        if isinstance(entry, dict)
+    ] + [
+        entry.get('powershell')
+        for entry in github_hooks['hooks']['preToolUse']
+        if isinstance(entry, dict)
+    ]
+    claude_commands = [
+        hook.get('command')
+        for entry in claude_settings['hooks']['PreToolUse']
+        if isinstance(entry, dict)
+        for hook in entry.get('hooks', [])
+        if isinstance(hook, dict)
+    ]
+
+    assert any('scripts/hooks/copilot_global_hook_bridge.py pre-tool' in str(command) for command in github_commands)
+    assert any('scripts/hooks/copilot_global_hook_bridge.py pre-tool' in str(command) for command in claude_commands)

@@ -15,6 +15,8 @@ from flask import Blueprint, current_app, jsonify, request
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.api.routes.request_context_helpers import (
     get_required_request_int,
+)
+from bill_analyser.api.routes.request_context_helpers import (
     run_async_in_new_loop as _run_async,
 )
 from bill_analyser.core.analyzer import Analyzer
@@ -60,7 +62,7 @@ DEFAULT_EXCHANGE_RATE_PROVIDER_ORDER = ["boc_cn", "cmb_cn", "ecb", "rba"]
 
 def get_app_context():
     """获取应用上下文中的服务实例"""
-    return cast(Any, current_app.config.get("DB_INSTANCE"))
+    return cast("Any", current_app.config.get("DB_INSTANCE"))
 
 
 def _get_request_user_id() -> int:
@@ -940,10 +942,6 @@ def get_categorical_analysis():  # pylint: disable=too-many-locals,too-many-bran
 
         filters = {}
         if not is_all_mode:
-            if start_time is None or end_time is None:
-                logger.error("[分类分析] 时间参数缺失")
-                return jsonify({"success": False, "error": "Missing required time parameters"}), 400
-
             # 转换为整数
             try:
                 start_time = int(start_time)
@@ -1605,10 +1603,6 @@ def get_asset_trends():  # pylint: disable=too-many-locals,too-many-branches,too
             )
 
         # 转换为整数
-        if start_time is None or end_time is None:
-            logger.error("[资产趋势] 时间参数缺失")
-            return jsonify({"success": False, "error": "Missing required time parameters"}), 400
-
         try:
             start_time = int(start_time)
             end_time = int(end_time)
@@ -1798,8 +1792,6 @@ def get_asset_trends():  # pylint: disable=too-many-locals,too-many-branches,too
                     else 0
                 ),
             )
-        else:
-            logger.info("[资产趋势] 完成: 无数据")
 
         return jsonify({"success": True, "result": result})
 

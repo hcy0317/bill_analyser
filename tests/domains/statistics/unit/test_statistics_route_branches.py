@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import pytest
 from flask import Flask
@@ -99,15 +100,28 @@ class FakeStatisticsDB:
         return self.delete_result
 
 
+class TrackingStatisticsDB(FakeStatisticsDB):
+    """Fake DB that records query filters for route assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.query_filters: list[dict[str, Any]] = []
+
+    def query_bills(self, *args, **kwargs) -> tuple[list[dict[str, Any]], int]:
+        _ = args
+        self.query_filters.append(dict(kwargs.get("filters") or {}))
+        return super().query_bills(*args, **kwargs)
+
+
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
 
 
 def _raise_runtime_error(message: str) -> Any:
@@ -214,6 +228,64 @@ def test_collection_statistics_routes_cover_category_pie_top_merchants_and_amoun
                 }
             },
         }
+
+
+def test_collection_statistics_routes_apply_optional_dates_and_skip_invalid_amount_segments(
+    statistics_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """集合统计路由应透传可选日期筛选，并忽略非法 amounts 片段。"""
+    db = TrackingStatisticsDB()
+    monkeypatch.setattr(statistics_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: db)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    get_category_pie = _unwrap(statistics_module.get_category_pie)
+    get_top_merchants = _unwrap(statistics_module.get_top_merchants)
+    get_transaction_amounts = _unwrap(statistics_module.get_transaction_amounts)
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/category-pie?type=支出&start_date=2026-03-01&end_date=2026-03-31"
+    ):
+        payload = get_category_pie().get_json() or {}
+        assert payload["success"] is True
+
+    assert db.query_filters[0] == {
+        "type": "支出",
+        "start_date": "2026-03-01",
+        "end_date": "2026-03-31",
+    }
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/top-merchants?start_date=2026-03-01&end_date=2026-03-31"
+    ):
+        payload = get_top_merchants().get_json() or {}
+        assert payload["success"] is True
+
+    assert db.query_filters[1] == {
+        "start_date": "2026-03-01",
+        "end_date": "2026-03-31",
+    }
+
+    with statistics_route_app.test_request_context(
+        "/api/statistics/amounts?query=bad-segment|range_1740787200_1740873599"
+    ):
+        payload = get_transaction_amounts().get_json() or {}
+
+    assert payload == {
+        "success": True,
+        "result": {
+            "range": {
+                "startTime": 1740787200,
+                "endTime": 1740873599,
+                "amounts": [{"currency": "CNY", "incomeAmount": 1001, "expenseAmount": 400}],
+            }
+        },
+    }
+    assert db.query_filters[2] == {
+        "start_date": "2025-03-01",
+        "end_date": "2025-03-02",
+    }
 
 
 

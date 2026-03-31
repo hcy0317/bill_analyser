@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import pytest
 from flask import Flask
@@ -63,6 +64,19 @@ class FakeDeepStatisticsDB:
         return self.balances_before_date
 
 
+class TrackingDeepStatisticsDB(FakeDeepStatisticsDB):
+    """Deep DB stub that records query filters."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.query_filters: list[dict[str, Any]] = []
+
+    async def query_bills(self, *args, **kwargs) -> tuple[list[dict[str, Any]], int]:
+        _ = args
+        self.query_filters.append(dict(kwargs.get("filters") or {}))
+        return await super().query_bills(*args, **kwargs)
+
+
 
 def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
     monkeypatch.setattr(statistics_module.asyncio, "new_event_loop", lambda: loop)
@@ -71,13 +85,13 @@ def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
 
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
 
 
 
@@ -191,6 +205,135 @@ def test_get_categorical_analysis_covers_reverse_range_and_all_mode(
     }
 
 
+def test_get_categorical_analysis_defaults_current_month_and_covers_keyword_account_fallback_and_transfer(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类统计应覆盖默认月份、关键词筛选、账户回退与转账方向分支。"""
+    route = _unwrap(statistics_module.get_categorical_analysis)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class FixedMarchDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            _ = tz
+            return cls(2025, 3, 15, 9, 0, 0)
+
+    monkeypatch.setattr(statistics_module, "datetime", FixedMarchDateTime)
+    db = TrackingDeepStatisticsDB(
+        bills=[
+            {
+                "id": 1,
+                "date": "2025-03-01T08:00:00",
+                "type": "转账",
+                "amount": 18.5,
+                "channel": "现金",
+                "source_account_id": 999,
+                "destination_account": "银行卡",
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+            {
+                "id": 2,
+                "date": "2025-03-02T08:00:00",
+                "type": "转账",
+                "amount": 3.0,
+                "channel": "现金",
+                "source_account_id": 999,
+                "destination_account": "现金",
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+        ],
+        categories=[{"id": 1, "main_category": "餐饮", "sub_category": "早餐"}],
+        accounts=[{"id": 10, "name": "现金"}],
+    )
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: db)
+
+    with statistics_deep_app.test_request_context(
+        "/api/statistics/category-statistics?keyword=早餐"
+    ):
+        payload = route().get_json() or {}
+
+    assert payload == {
+        "success": True,
+        "result": {
+            "startTime": int(FixedMarchDateTime(2025, 3, 1, 0, 0, 0).timestamp()),
+            "endTime": int(FixedMarchDateTime(2025, 4, 1, 0, 0, 0).timestamp()) - 1,
+            "items": [{"categoryId": "1", "accountId": "10", "amount": -1550}],
+        },
+    }
+    assert db.query_filters[0] == {
+        "start_date": "2025-03-01",
+        "end_date": "2025-03-31",
+        "keyword": "早餐",
+    }
+
+
+def test_get_categorical_analysis_defaults_december_to_next_year_boundary(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类统计缺省月份在 12 月时应正确滚到下一年 1 月。"""
+    route = _unwrap(statistics_module.get_categorical_analysis)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class FixedDecemberDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            _ = tz
+            return cls(2025, 12, 15, 9, 0, 0)
+
+    monkeypatch.setattr(statistics_module, "datetime", FixedDecemberDateTime)
+    db = TrackingDeepStatisticsDB(bills=[], categories=[], accounts=[])
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: db)
+
+    with statistics_deep_app.test_request_context("/api/statistics/category-statistics"):
+        payload = route().get_json() or {}
+
+    assert payload == {
+        "success": True,
+        "result": {
+            "startTime": int(FixedDecemberDateTime(2025, 12, 1, 0, 0, 0).timestamp()),
+            "endTime": int(FixedDecemberDateTime(2026, 1, 1, 0, 0, 0).timestamp()) - 1,
+            "items": [],
+        },
+    }
+    assert db.query_filters[0] == {
+        "start_date": "2025-12-01",
+        "end_date": "2025-12-31",
+    }
+
+
+def test_get_categorical_analysis_returns_500_when_query_fails(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类统计出现底层异常时应返回统一 500。"""
+    route = _unwrap(statistics_module.get_categorical_analysis)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class ExplodingCategoryDB(FakeDeepStatisticsDB):
+        async def query_bills(self, *_, **__) -> tuple[list[dict[str, Any]], int]:
+            raise RuntimeError("category boom")
+
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: ExplodingCategoryDB())
+
+    with statistics_deep_app.test_request_context(
+        "/api/statistics/category-statistics?startTime=1740787200&endTime=1740873599"
+    ):
+        response, status = route()
+
+    assert status == 500
+    assert response.get_json() == {"success": False, "error": "category boom"}
+
+
 
 def test_get_trend_analysis_covers_invalid_format_range_all_mode_and_monthly_output(
     statistics_deep_app: Flask,
@@ -276,6 +419,15 @@ def test_get_trend_analysis_covers_all_mode_dynamic_range_and_bad_dates(
     db = FakeDeepStatisticsDB(
         bills=[
             {
+                "date": "",
+                "type": "支出",
+                "amount": 1,
+                "channel": "现金",
+                "source_account_id": 10,
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+            {
                 "date": "bad-date",
                 "type": "支出",
                 "amount": 1,
@@ -323,6 +475,110 @@ def test_get_trend_analysis_covers_all_mode_dynamic_range_and_bad_dates(
             {"year": 2026, "month": 5, "items": [{"categoryId": "1", "accountId": "10", "amount": 600}]},
         ],
     }
+
+
+def test_get_trend_analysis_defaults_year_range_and_covers_keyword_transfer_and_rollover(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """趋势统计应覆盖默认年份、关键词筛选、转账分支和年末进位。"""
+    route = _unwrap(statistics_module.get_trend_analysis)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class FixedYearDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            _ = tz
+            return cls(2025, 7, 1, 9, 0, 0)
+
+    monkeypatch.setattr(statistics_module, "datetime", FixedYearDateTime)
+    db = TrackingDeepStatisticsDB(
+        bills=[
+            {
+                "date": "",
+                "type": "支出",
+                "amount": 1,
+                "channel": "现金",
+                "source_account_id": 10,
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+            {
+                "date": "2025-01-02T08:00:00",
+                "type": "转账",
+                "amount": 10.0,
+                "channel": "现金",
+                "source_account_id": 999,
+                "destination_account": "银行卡",
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+            {
+                "date": "2025-12-02T08:00:00",
+                "type": "转账",
+                "amount": 3.0,
+                "channel": "现金",
+                "source_account_id": 999,
+                "destination_account": "现金",
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+            },
+        ],
+        categories=[{"id": 1, "main_category": "餐饮", "sub_category": "早餐"}],
+        accounts=[{"id": 10, "name": "现金"}],
+    )
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: db)
+
+    with statistics_deep_app.test_request_context(
+        "/api/statistics/category-statistics/trends?keyword=早餐"
+    ):
+        payload = route().get_json() or {}
+
+    assert payload["success"] is True
+    assert len(payload["result"]) == 12
+    assert payload["result"][0] == {
+        "year": 2025,
+        "month": 1,
+        "items": [{"categoryId": "1", "accountId": "10", "amount": -1000}],
+    }
+    assert payload["result"][-1] == {
+        "year": 2025,
+        "month": 12,
+        "items": [{"categoryId": "1", "accountId": "10", "amount": 300}],
+    }
+    assert all(month_payload["items"] == [] for month_payload in payload["result"][1:11])
+    assert db.query_filters[0] == {
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+        "keyword": "早餐",
+    }
+
+
+def test_get_trend_analysis_returns_500_when_query_fails(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """趋势统计出现底层异常时应返回统一 500。"""
+    route = _unwrap(statistics_module.get_trend_analysis)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class ExplodingTrendDB(FakeDeepStatisticsDB):
+        async def query_bills(self, *_, **__) -> tuple[list[dict[str, Any]], int]:
+            raise RuntimeError("trend boom")
+
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: ExplodingTrendDB())
+
+    with statistics_deep_app.test_request_context(
+        "/api/statistics/category-statistics/trends?startYearMonth=202603&endYearMonth=202604"
+    ):
+        response, status = route()
+
+    assert status == 500
+    assert response.get_json() == {"success": False, "error": "trend boom"}
 
 
 
@@ -435,6 +691,20 @@ def test_get_asset_trends_covers_invalid_timestamp_reverse_range_default_month_a
     all_mode_db = FakeDeepStatisticsDB(
         bills=[
             {
+                "date": "",
+                "type": "收入",
+                "amount": 1.0,
+                "source_account_id": 10,
+                "destination_account_id": 0,
+            },
+            {
+                "date": "bad-date",
+                "type": "收入",
+                "amount": 1.0,
+                "source_account_id": 10,
+                "destination_account_id": 0,
+            },
+            {
                 "date": "2025-03-02T12:00:00",
                 "type": "收入",
                 "amount": 20.0,
@@ -488,3 +758,49 @@ def test_get_asset_trends_covers_invalid_timestamp_reverse_range_default_month_a
             },
         ],
     }
+
+
+def test_get_asset_trends_defaults_december_month_and_returns_500_on_runtime_error(
+    statistics_deep_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """资产趋势应覆盖 12 月默认范围和统一 500 兜底。"""
+    route = _unwrap(statistics_module.get_asset_trends)
+    monkeypatch.setattr(statistics_module, "_get_request_user_id", lambda: 1)
+
+    class FixedDecemberDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            _ = tz
+            return cls(2025, 12, 15, 9, 0, 0)
+
+    monkeypatch.setattr(statistics_module, "datetime", FixedDecemberDateTime)
+    december_db = FakeDeepStatisticsDB(accounts=[])
+    december_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, december_loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: december_db)
+
+    with statistics_deep_app.test_request_context("/api/statistics/asset-trends"):
+        payload = route().get_json() or {}
+
+    assert payload["success"] is True
+    assert len(payload["result"]) == 31
+    assert payload["result"][0] == {"year": 2025, "month": 12, "day": 1, "items": []}
+    assert payload["result"][-1] == {"year": 2025, "month": 12, "day": 31, "items": []}
+
+    class ExplodingAssetDB(FakeDeepStatisticsDB):
+        async def get_all_accounts(self, user_id: int) -> list[dict[str, Any]]:
+            _ = user_id
+            raise RuntimeError("asset boom")
+
+    exploding_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, exploding_loop)
+    monkeypatch.setattr(statistics_module, "get_app_context", lambda: ExplodingAssetDB())
+
+    with statistics_deep_app.test_request_context(
+        "/api/statistics/asset-trends?startTime=1740787200&endTime=1740787200"
+    ):
+        response, status = route()
+
+    assert status == 500
+    assert response.get_json() == {"success": False, "error": "asset boom"}

@@ -146,6 +146,7 @@
 
 - `taskkill /f /im python.exe`
 - 改动受保护的第三方/参考目录
+- 如果当前机器存在 `~/.copilot/hooks/`，仓库还会通过 `scripts/hooks/copilot_global_hook_bridge.py` 额外桥接用户级 Copilot hooks（例如 config-protection / secret-scan / danger-guard）
 
 ### PostToolUse
 
@@ -154,6 +155,7 @@
 - 给出最相关的验证提示
 - 刷新会话快照
 - 刷新 `.git/ai/task-state.json`
+- 如果存在用户级 `~/.copilot/hooks/`，还会桥接额外的全局质量提醒
 
 ### Stop
 
@@ -163,6 +165,15 @@
 - 刷新会话快照
 - 刷新 `.git/ai/task-state.json`
 - 提示下一步恢复动作
+- 如果存在用户级 `~/.copilot/hooks/`，还会桥接全局 stop hook（例如 session snapshot 持久化）
+
+### `/hooks`
+
+如果你想知道“到底有哪些 hooks 真的可用”，使用 `/hooks`：
+
+- 它会区分仓库原生 hooks 与用户级 bridged hooks
+- 它会说明哪些 hook 已接线、哪些只是磁盘上存在但未激活
+- 它会给出下一步的健康检查或验证命令
 
 ## 会话中断后怎么继续
 

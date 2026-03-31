@@ -19,6 +19,7 @@ def test_ai_workflow_doc_exists_and_explains_default_entrypoints() -> None:
     assert ".git/ai/last-session.md" in text
     assert ".git/ai/task-state.json" in text
     assert "session-resume" in text
+    assert "/hooks" in text
 
 
 def test_verification_assets_define_non_overlapping_roles() -> None:

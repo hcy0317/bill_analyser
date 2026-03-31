@@ -784,6 +784,44 @@ class Database:
 
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_app_settings_key ON app_settings(key)")
 
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS backup_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            backup_name TEXT NOT NULL UNIQUE,
+            storage_type TEXT NOT NULL DEFAULT 'local',
+            file_path TEXT NOT NULL,
+            checksum TEXT,
+            encrypted BOOLEAN DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'created',
+            metadata_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """)
+
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_backup_records_status_created ON backup_records(status, created_at DESC)"
+        )
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS backup_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_type TEXT NOT NULL,
+            schedule_expr TEXT,
+            retention_days INTEGER DEFAULT 30,
+            retention_count INTEGER DEFAULT 10,
+            enabled BOOLEAN DEFAULT 1,
+            last_run_at TEXT,
+            last_status TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """)
+
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_backup_jobs_type_enabled ON backup_jobs(job_type, enabled)"
+        )
+
         # 为bills表添加模板和定期账单关联字段（如果不存在）
         try:
             await conn.execute("ALTER TABLE bills ADD COLUMN created_from_template INTEGER")
@@ -7362,6 +7400,148 @@ class Database:
                         pass
                 logs.append(log_dict)
             return logs
+
+    @log_method
+    async def create_backup_record(self, payload: dict[str, Any]) -> int:
+        """创建本地备份记录。"""
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        metadata_json = json.dumps(payload.get("metadata", {}), ensure_ascii=False)
+
+        cursor = await conn.execute(
+            """
+            INSERT INTO backup_records (
+                backup_name, storage_type, file_path, checksum,
+                encrypted, status, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(backup_name) DO UPDATE SET
+                storage_type = excluded.storage_type,
+                file_path = excluded.file_path,
+                checksum = excluded.checksum,
+                encrypted = excluded.encrypted,
+                status = excluded.status,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                payload.get("backup_name"),
+                payload.get("storage_type", "local"),
+                payload.get("file_path", ""),
+                payload.get("checksum", ""),
+                1 if payload.get("encrypted", False) else 0,
+                payload.get("status", "created"),
+                metadata_json,
+                now,
+                now,
+            ),
+        )
+        await conn.commit()
+        return int(cursor.lastrowid or 0)
+
+    @log_method
+    async def get_backup_records(self) -> list[dict[str, Any]]:
+        """获取备份记录列表。"""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT * FROM backup_records ORDER BY created_at DESC, id DESC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                record = dict(row)
+                try:
+                    record["metadata"] = json.loads(record.get("metadata_json") or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    record["metadata"] = {}
+                record["encrypted"] = bool(record.get("encrypted", 0))
+                result.append(record)
+            return result
+
+    @log_method
+    async def update_backup_record_by_filename(self, filename: str, updates: dict[str, Any]) -> bool:
+        """按备份文件名更新备份记录。"""
+        if not filename or not updates:
+            return False
+
+        conn = await self._get_connection()
+        update_payload = dict(updates)
+        update_payload["updated_at"] = datetime.now().isoformat()
+        if "metadata" in update_payload:
+            update_payload["metadata_json"] = json.dumps(update_payload.pop("metadata") or {}, ensure_ascii=False)
+
+        set_clause = ", ".join(f"{key} = ?" for key in update_payload.keys())
+        values = list(update_payload.values())
+        values.append(filename)
+        cursor = await conn.execute(
+            f"UPDATE backup_records SET {set_clause} WHERE backup_name = ?",
+            values,
+        )
+        await conn.commit()
+        return cursor.rowcount > 0
+
+    @log_method
+    async def get_backup_jobs(self) -> list[dict[str, Any]]:
+        """获取备份任务配置列表。"""
+        conn = await self._get_connection()
+        async with conn.execute("SELECT * FROM backup_jobs ORDER BY created_at DESC, id DESC") as cursor:
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                record = dict(row)
+                record["enabled"] = bool(record.get("enabled", 0))
+                result.append(record)
+            return result
+
+    @log_method
+    async def create_or_update_backup_job(self, payload: dict[str, Any]) -> int:
+        """创建或更新备份任务配置。"""
+        conn = await self._get_connection()
+        now = datetime.now().isoformat()
+        job_id = int(payload.get("id") or 0)
+
+        if job_id:
+            await conn.execute(
+                """
+                UPDATE backup_jobs
+                SET job_type = ?, schedule_expr = ?, retention_days = ?, retention_count = ?,
+                    enabled = ?, last_status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload.get("job_type"),
+                    payload.get("schedule_expr"),
+                    payload.get("retention_days", 30),
+                    payload.get("retention_count", 10),
+                    1 if payload.get("enabled", True) else 0,
+                    payload.get("last_status"),
+                    now,
+                    job_id,
+                ),
+            )
+            await conn.commit()
+            return job_id
+
+        cursor = await conn.execute(
+            """
+            INSERT INTO backup_jobs (
+                job_type, schedule_expr, retention_days, retention_count,
+                enabled, last_run_at, last_status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.get("job_type"),
+                payload.get("schedule_expr"),
+                payload.get("retention_days", 30),
+                payload.get("retention_count", 10),
+                1 if payload.get("enabled", True) else 0,
+                payload.get("last_run_at"),
+                payload.get("last_status"),
+                now,
+                now,
+            ),
+        )
+        await conn.commit()
+        return int(cursor.lastrowid or 0)
 
     # ==================== 密码验证相关方法 ====================
 

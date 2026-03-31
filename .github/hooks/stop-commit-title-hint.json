@@ -8,6 +8,13 @@
         "powershell": "python scripts/hooks/stop_commit_title_hint.py",
         "cwd": ".",
         "timeoutSec": 15
+      },
+      {
+        "type": "command",
+        "bash": "python3 scripts/hooks/copilot_global_hook_bridge.py stop",
+        "powershell": "python scripts/hooks/copilot_global_hook_bridge.py stop",
+        "cwd": ".",
+        "timeoutSec": 15
       }
     ]
   }

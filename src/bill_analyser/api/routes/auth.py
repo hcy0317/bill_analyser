@@ -171,6 +171,132 @@ def _verify_sensitive_operation_password(db, user: dict | None, password: str, l
     return False
 
 
+def _verify_step_up_token(config: dict, step_up_token: str, expected_user_id: int) -> bool:
+    """校验敏感操作使用的 step-up token。"""
+    payload = decode_action_token(step_up_token, config, "step_up")
+    if not payload:
+        return False
+
+    token_user_id = payload.get("user_id")
+    return isinstance(token_user_id, int) and token_user_id == expected_user_id
+
+
+def _resolve_sensitive_operation_auth(
+    *,
+    db,
+    user: dict | None,
+    config: dict,
+    payload: dict,
+    loop,
+) -> tuple[bool, str]:
+    """解析敏感操作鉴权：支持 password 或 stepUpToken。"""
+    password = str(payload.get("password", "") or "")
+    step_up_token = str(payload.get("stepUpToken", "") or "").strip()
+
+    if step_up_token:
+        user_id = int((user or {}).get("id") or 0)
+        if _verify_step_up_token(config, step_up_token, user_id):
+            return True, "step_up"
+        return False, "invalid_step_up"
+
+    if not password:
+        return False, "missing_credentials"
+
+    if _verify_sensitive_operation_password(db, user, password, loop):
+        return True, "password"
+
+    return False, "invalid_password"
+
+
+@bp.route("/security/step-up/verify", methods=["POST"])
+@log_method
+@require_auth
+def verify_security_step_up():
+    """为敏感操作签发短期 step-up token。"""
+    loop = None
+    try:
+        data = request.get_json(silent=True) or {}
+        password = str(data.get("password", "") or "")
+        passcode = str(data.get("passcode", "") or "").strip()
+
+        if not password and not passcode:
+            return jsonify(
+                {"success": False, "error": "Bad Request", "message": "password or passcode is required"}
+            ), 400
+
+        db = get_app_context()
+        config = load_auth_config()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        user_id = _get_request_user_id()
+        username = _get_request_username()
+        user = loop.run_until_complete(db.get_user_by_id(user_id))
+        if not user:
+            loop.close()
+            return jsonify({"success": False, "error": "User not found"}), 404
+
+        verified_via = ""
+        if password:
+            if not _verify_sensitive_operation_password(db, user, password, loop):
+                loop.close()
+                return jsonify(
+                    {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
+                ), 401
+            verified_via = "password"
+        else:
+            secret = str(user.get("two_factor_secret") or "").strip().replace(" ", "")
+            if not user.get("two_factor_enabled") or not secret:
+                loop.close()
+                return jsonify(
+                    {"success": False, "error": "Bad Request", "message": "Two-factor authentication is not enabled"}
+                ), 400
+
+            if not pyotp.TOTP(secret).verify(passcode, valid_window=1):
+                loop.close()
+                return jsonify(
+                    {"success": False, "error": "Invalid passcode", "message": "The current passcode is incorrect"}
+                ), 401
+            verified_via = "passcode"
+
+        step_up_token = generate_action_token(
+            user_id,
+            username,
+            user.get("email", ""),
+            config,
+            "step_up",
+            expires_in_hours=1,
+        )
+        loop.run_until_complete(
+            db.create_auth_log(
+                {
+                    "user_id": user_id,
+                    "username": username,
+                    "event_type": "step_up_verified",
+                    "ip_address": get_client_ip(),
+                    "user_agent": request.headers.get("User-Agent", ""),
+                    "success": True,
+                    "metadata": json.dumps({"verified_via": verified_via}, ensure_ascii=False),
+                }
+            )
+        )
+        loop.close()
+
+        return jsonify(
+            {
+                "success": True,
+                "result": {
+                    "stepUpToken": step_up_token,
+                    "verifiedVia": verified_via,
+                },
+            }
+        )
+    except Exception as exc:
+        if loop and not loop.is_closed():
+            loop.close()
+        logger.error("step-up 验证失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error", "message": str(exc)}), 500
+
+
 def _build_external_auth_info(external_auth: dict) -> dict:
     """构建统一的第三方登录响应。"""
     return {
@@ -2663,11 +2789,9 @@ def disable_2fa():
     loop = None
     try:
         data = request.get_json(silent=True) or {}
-        password = data.get("password", "")
-        if not password:
-            return jsonify({"success": False, "error": "Bad Request", "message": "Current password is required"}), 400
 
         db = get_app_context()
+        config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
@@ -2676,8 +2800,19 @@ def disable_2fa():
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not _verify_user_password(user, password):
+        auth_ok, auth_mode = _resolve_sensitive_operation_auth(
+            db=db,
+            user=user,
+            config=config,
+            payload=data,
+            loop=loop,
+        )
+        if not auth_ok:
             loop.close()
+            if auth_mode == "missing_credentials":
+                return jsonify(
+                    {"success": False, "error": "Bad Request", "message": "Current password or stepUpToken is required"}
+                ), 400
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
@@ -2697,7 +2832,7 @@ def disable_2fa():
             loop,
             operation_type="2fa_disabled",
             user_id=user_id,
-            details={"cleared_recovery_code_count": cleared_count},
+            details={"cleared_recovery_code_count": cleared_count, "auth_mode": auth_mode},
             affected_count=cleared_count,
         )
         loop.close()
@@ -2718,11 +2853,9 @@ def regenerate_2fa_recovery_codes():
     loop = None
     try:
         data = request.get_json(silent=True) or {}
-        password = data.get("password", "")
-        if not password:
-            return jsonify({"success": False, "error": "Bad Request", "message": "Current password is required"}), 400
 
         db = get_app_context()
+        config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
@@ -2731,8 +2864,19 @@ def regenerate_2fa_recovery_codes():
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not _verify_user_password(user, password):
+        auth_ok, auth_mode = _resolve_sensitive_operation_auth(
+            db=db,
+            user=user,
+            config=config,
+            payload=data,
+            loop=loop,
+        )
+        if not auth_ok:
             loop.close()
+            if auth_mode == "missing_credentials":
+                return jsonify(
+                    {"success": False, "error": "Bad Request", "message": "Current password or stepUpToken is required"}
+                ), 400
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
@@ -2760,7 +2904,7 @@ def regenerate_2fa_recovery_codes():
             loop,
             operation_type="2fa_recovery_regenerated",
             user_id=user_id,
-            details={"recovery_code_count": stored_count},
+            details={"recovery_code_count": stored_count, "auth_mode": auth_mode},
             affected_count=stored_count,
         )
         loop.close()
@@ -3020,13 +3164,9 @@ def clear_user_transactions():
     loop = None
     try:
         data = request.get_json(silent=True) or {}
-        password = data.get("password", "")
-        if not password:
-            return jsonify(
-                {"success": False, "error": "Invalid request", "message": "Current password is required"}
-            ), 400
 
         db = get_app_context()
+        config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
@@ -3035,8 +3175,19 @@ def clear_user_transactions():
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not _verify_sensitive_operation_password(db, user, password, loop):
+        auth_ok, auth_mode = _resolve_sensitive_operation_auth(
+            db=db,
+            user=user,
+            config=config,
+            payload=data,
+            loop=loop,
+        )
+        if not auth_ok:
             loop.close()
+            if auth_mode == "missing_credentials":
+                return jsonify(
+                    {"success": False, "error": "Invalid request", "message": "Current password or stepUpToken is required"}
+                ), 400
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
@@ -3046,8 +3197,8 @@ def clear_user_transactions():
             db.create_audit_log(
                 operation_type="clear_transactions",
                 operation_target="user_data",
-            target_id=user_id,
-                details={"deleted_count": result.get("deleted_count", 0)},
+                target_id=user_id,
+                details={"deleted_count": result.get("deleted_count", 0), "auth_mode": auth_mode},
                 affected_count=result.get("deleted_count", 0),
                 status="success" if result.get("success") else "failed",
                 error_message=None if result.get("success") else result.get("message"),
@@ -3083,13 +3234,9 @@ def clear_all_user_data():
     loop = None
     try:
         data = request.get_json(silent=True) or {}
-        password = data.get("password", "")
-        if not password:
-            return jsonify(
-                {"success": False, "error": "Invalid request", "message": "Current password is required"}
-            ), 400
 
         db = get_app_context()
+        config = load_auth_config()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         user_id = _get_request_user_id()
@@ -3098,8 +3245,19 @@ def clear_all_user_data():
             loop.close()
             return jsonify({"success": False, "error": "User not found"}), 404
 
-        if not _verify_sensitive_operation_password(db, user, password, loop):
+        auth_ok, auth_mode = _resolve_sensitive_operation_auth(
+            db=db,
+            user=user,
+            config=config,
+            payload=data,
+            loop=loop,
+        )
+        if not auth_ok:
             loop.close()
+            if auth_mode == "missing_credentials":
+                return jsonify(
+                    {"success": False, "error": "Invalid request", "message": "Current password or stepUpToken is required"}
+                ), 400
             return jsonify(
                 {"success": False, "error": "Invalid credentials", "message": "Current password is incorrect"}
             ), 401
@@ -3109,8 +3267,8 @@ def clear_all_user_data():
             db.create_audit_log(
                 operation_type="clear_all_user_data",
                 operation_target="user_data",
-            target_id=user_id,
-                details=result.get("counts", {}),
+                target_id=user_id,
+                details={**result.get("counts", {}), "auth_mode": auth_mode},
                 status="success" if result.get("success") else "failed",
                 error_message=None if result.get("success") else result.get("message"),
                 ip_address=get_client_ip(),

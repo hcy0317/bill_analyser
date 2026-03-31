@@ -62,3 +62,23 @@ def test_task_state_can_run_as_a_script() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert ".git/ai/task-state.json" in result.stdout
     assert "ImportError" not in result.stderr
+
+
+def test_copilot_global_hook_bridge_can_run_as_a_script() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "hooks" / "copilot_global_hook_bridge.py"),
+            "pre-tool",
+        ],
+        cwd=REPO_ROOT,
+        input="{}",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "Traceback" not in result.stderr

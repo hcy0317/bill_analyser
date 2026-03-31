@@ -575,6 +575,55 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
 def scan_global(home: Path, repo_root: Path) -> list[CheckResult]:
     checks: list[CheckResult] = []
 
+    copilot_root = home / ".copilot"
+    copilot_hooks_root = copilot_root / "hooks"
+    copilot_runner = copilot_hooks_root / "run-with-flags.js"
+    required_copilot_hook_dirs = [
+        copilot_hooks_root / "lib",
+        copilot_hooks_root / "pre-tool",
+        copilot_hooks_root / "post-tool",
+        copilot_hooks_root / "stop",
+    ]
+
+    if copilot_runner.exists() and all(path.exists() for path in required_copilot_hook_dirs):
+        checks.append(
+            _result(
+                "global.copilot.hooks",
+                "global",
+                "pass",
+                "发现用户级 Copilot hooks，可供仓库桥接层复用。",
+                [
+                    str(copilot_runner),
+                    *[str(path) for path in required_copilot_hook_dirs],
+                ],
+            )
+        )
+    elif copilot_root.exists():
+        checks.append(
+            _result(
+                "global.copilot.hooks",
+                "global",
+                "warn",
+                "检测到 `~/.copilot`，但 hooks 目录或 runner 不完整，仓库 bridge 无法稳定复用全局 hooks。",
+                [
+                    str(copilot_root),
+                    str(copilot_runner),
+                    *[str(path) for path in required_copilot_hook_dirs],
+                ],
+                "补齐 `~/.copilot/hooks/run-with-flags.js` 与各 stage 目录，或移除仓库对全局 hook bridge 的依赖。",
+            )
+        )
+    else:
+        checks.append(
+            _result(
+                "global.copilot.hooks",
+                "global",
+                "info",
+                "当前机器没有用户级 `~/.copilot/hooks`；仓库仍会保留原生 hooks，但不会桥接额外的全局 Copilot hooks。",
+                [str(copilot_root)],
+            )
+        )
+
     claude_root = home / ".claude"
     claude_settings = claude_root / "settings.json"
     if not claude_root.exists():
@@ -766,6 +815,24 @@ def build_manual_probes() -> list[ManualProbe]:
             failure_signals=[
                 "编辑直接落盘",
                 "完全没有 hook 执行证据",
+            ],
+        ),
+        ManualProbe(
+            id="copilot-global-hook-bridge",
+            surface="hook",
+            goal="验证仓库原生 hooks 是否真的桥接到了用户级 `~/.copilot/hooks`，而不是只有脚本躺在磁盘上。",
+            prompt=(
+                "执行 `/hooks` 或直接检查 `.github/hooks/*.json` 与 `scripts/hooks/copilot_global_hook_bridge.py`，"
+                "确认 preToolUse/postToolUse/stop 都已接到 bridge，且 bridge 能发现 `~/.copilot/hooks/run-with-flags.js`。"
+            ),
+            expected_signals=[
+                "明确区分 repo 原生 hooks 与 global bridged hooks",
+                "提到 `scripts/hooks/copilot_global_hook_bridge.py`",
+                "能说明 `~/.copilot/hooks` 缺失时 bridge 会静默降级而不是报假阳性",
+            ],
+            failure_signals=[
+                "只说磁盘上有 hook 文件，却说不清是否已接线",
+                "完全不提 bridge 或 `/hooks` 入口",
             ],
         ),
         ManualProbe(

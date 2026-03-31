@@ -45,8 +45,10 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 
 - Copilot repo guard is declared in `.github/hooks/repo-guard.json`.
 - The shared guard implementation lives in `scripts/hooks/pre_tool_repo_guard.py`.
+- Copilot native `preToolUse` / `postToolUse` / `stop` hooks also bridge to `scripts/hooks/copilot_global_hook_bridge.py`, which can dispatch optional user-level hooks from `~/.copilot/hooks/` when that global layer exists.
 - Project-level Claude settings in `.claude/settings.json` point at the same repo guard so Copilot and Claude stay aligned.
 - Post-edit and stop-session reminders live under `.github/hooks/` and should stay thin, deterministic, and repository-specific.
+- Use `/hooks` when you want a visible diagnostic entrypoint that explains which hooks are active, bridged, or missing.
 
 ## Thin-adapter rules
 

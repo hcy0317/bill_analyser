@@ -8,6 +8,13 @@
         "powershell": "python scripts/hooks/post_tool_validation_hint.py",
         "cwd": ".",
         "timeoutSec": 15
+      },
+      {
+        "type": "command",
+        "bash": "python3 scripts/hooks/copilot_global_hook_bridge.py post-tool",
+        "powershell": "python scripts/hooks/copilot_global_hook_bridge.py post-tool",
+        "cwd": ".",
+        "timeoutSec": 15
       }
     ]
   }

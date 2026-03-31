@@ -104,6 +104,28 @@ def test_global_scan_warns_when_claude_hook_settings_are_missing(tmp_path: Path)
 
     assert checks["global.claude.settings"]["status"] == "info"
     assert checks["global.codex.config"]["status"] == "pass"
+    assert checks["global.copilot.hooks"]["status"] == "info"
+
+
+def test_global_scan_detects_complete_copilot_hooks(tmp_path: Path) -> None:
+    fake_home = tmp_path / "home"
+    copilot_hooks = fake_home / ".copilot" / "hooks"
+    for relative in ("lib", "pre-tool", "post-tool", "stop"):
+        (copilot_hooks / relative).mkdir(parents=True, exist_ok=True)
+    (copilot_hooks / "run-with-flags.js").write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    (fake_home / ".codex").mkdir(parents=True)
+    (fake_home / ".codex" / "config.toml").write_text(
+        'model = "gpt-5.4"\n\n[mcp_servers.playwright]\ncommand = "npx"\n',
+        encoding="utf-8",
+    )
+
+    result = _run_agent_stack_health("--mode", "global", "--format", "json", "--home", str(fake_home))
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    checks = _checks_by_id(payload)
+
+    assert checks["global.copilot.hooks"]["status"] == "pass"
 
 
 def test_probe_catalog_exposes_manual_behavior_checks() -> None:
@@ -118,6 +140,7 @@ def test_probe_catalog_exposes_manual_behavior_checks() -> None:
         "money-unit-convention",
         "repo-guard-banned-command",
         "repo-guard-protected-path",
+        "copilot-global-hook-bridge",
         "session-resume-recovery",
         "handoff-task-state-refresh",
     } <= probe_ids

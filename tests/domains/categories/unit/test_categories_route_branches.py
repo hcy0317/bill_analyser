@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import pytest
 from flask import Flask
@@ -128,13 +129,13 @@ class FakeCategoriesDB:
 
 
 def _unwrap(func: Callable[..., Any]) -> Callable[..., Any]:
-    current = cast(Any, func)
+    current = cast("Any", func)
     first = getattr(current, "__wrapped__", None)
     if first is None:
-        return cast(Callable[..., Any], current)
+        return cast("Callable[..., Any]", current)
 
     second = getattr(first, "__wrapped__", None)
-    return cast(Callable[..., Any], second or first)
+    return cast("Callable[..., Any]", second or first)
 
 
 def _unwrap_response(result: Any) -> Any:

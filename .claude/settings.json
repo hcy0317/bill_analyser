@@ -8,6 +8,11 @@
             "type": "command",
             "command": "python scripts/hooks/pre_tool_repo_guard.py",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "python scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+            "timeout": 20
           }
         ]
       }

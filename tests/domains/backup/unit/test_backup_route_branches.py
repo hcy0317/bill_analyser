@@ -44,6 +44,7 @@ class FakeBackupDB:
     def __init__(self) -> None:
         self.audit_logs: list[dict[str, Any]] = []
         self.backup_records: list[dict[str, Any]] = []
+        self.backup_jobs: list[dict[str, Any]] = []
 
     async def create_audit_log(self, **payload: Any) -> None:
         self.audit_logs.append(payload)
@@ -63,6 +64,22 @@ class FakeBackupDB:
                 record.update(updates)
                 return True
         return False
+
+    async def get_backup_jobs(self) -> list[dict[str, Any]]:
+        return [dict(job) for job in self.backup_jobs]
+
+    async def create_or_update_backup_job(self, payload: dict[str, Any]) -> int:
+        job_id = int(payload.get("id") or 0)
+        if job_id:
+            for job in self.backup_jobs:
+                if int(job.get("id") or 0) == job_id:
+                    job.update(payload)
+                    return job_id
+
+        created = dict(payload)
+        created["id"] = len(self.backup_jobs) + 1
+        self.backup_jobs.append(created)
+        return int(created["id"])
 
 
 def test_backup_listing_download_delete_and_cleanup_branches(
@@ -287,6 +304,149 @@ def test_backup_routes_cover_directory_creation_restore_fallback_and_error_paths
         response, status = asyncio.run(restore_backup("backup_broken.zip"))
         assert status == 500
         assert response.get_json()["success"] is False
+
+
+def test_backup_jobs_routes_cover_list_validation_create_and_update(
+    backup_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """备份任务接口应支持列表、新建与更新 retention 配置。"""
+    fake_db = FakeBackupDB()
+    fake_db.backup_jobs = [
+        {
+            "id": 1,
+            "job_type": "daily",
+            "schedule_expr": "0 2 * * *",
+            "retention_days": 30,
+            "retention_count": 10,
+            "enabled": True,
+            "last_status": "success",
+        }
+    ]
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: fake_db)
+
+    list_jobs = _unwrap(backup_module.list_backup_jobs)
+    save_job = _unwrap(backup_module.save_backup_job)
+
+    with backup_route_app.test_request_context("/api/backup/jobs", method="GET"):
+        payload = list_jobs().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"][0]["job_type"] == "daily"
+
+    with backup_route_app.test_request_context("/api/backup/jobs", method="POST", json={}):
+        response, status = save_job()
+        assert status == 400
+        assert response.get_json()["error"] == "job_type is required"
+
+    with backup_route_app.test_request_context(
+        "/api/backup/jobs",
+        method="POST",
+        json={"job_type": "manual", "retention_days": "bad"},
+    ):
+        response, status = save_job()
+        assert status == 400
+        assert response.get_json()["error"] == "retention_days must be an integer"
+
+    with backup_route_app.test_request_context(
+        "/api/backup/jobs",
+        method="POST",
+        json={
+            "job_type": "weekly",
+            "schedule_expr": "0 3 * * 0",
+            "retention_days": 14,
+            "retention_count": 4,
+            "enabled": False,
+        },
+    ):
+        payload = save_job().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["id"] == 2
+        assert fake_db.backup_jobs[-1]["job_type"] == "weekly"
+
+    with backup_route_app.test_request_context(
+        "/api/backup/jobs",
+        method="POST",
+        json={
+            "id": 1,
+            "job_type": "daily",
+            "schedule_expr": "0 1 * * *",
+            "retention_days": 60,
+            "retention_count": 20,
+            "enabled": True,
+        },
+    ):
+        payload = save_job().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["id"] == 1
+        assert fake_db.backup_jobs[0]["retention_days"] == 60
+
+
+def test_encrypted_backup_create_verify_and_restore_flow(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """配置加密密钥后，备份应加密落盘并可预验证/恢复。"""
+    backup_dir = tmp_path / "encrypted_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "encrypted_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "bill.txt").write_text("secret-content", encoding="utf-8")
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+    monkeypatch.setattr(backup_module, "DATA_DIR", data_dir)
+    monkeypatch.setenv("BILL_ANALYSER_BACKUP_ENCRYPTION_KEY", "backup-test-key")
+
+    fake_db = FakeBackupDB()
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: fake_db)
+
+    source_zip = backup_dir / "backup_plain_source.zip"
+    with ZipFile(source_zip, "w") as zip_file:
+        zip_file.writestr("data/bill.txt", "secret-content")
+
+    class FakeSyncManager:
+        async def backup_local(self) -> str | None:
+            return str(source_zip)
+
+    monkeypatch.setattr(sync_module, "SyncManager", FakeSyncManager)
+
+    create_backup = _unwrap(backup_module.create_backup)
+    verify_backup = _unwrap(backup_module.verify_backup_restore)
+    restore_backup = _unwrap(backup_module.restore_backup)
+
+    with backup_route_app.test_request_context("/api/backup/create", method="POST"):
+        payload = asyncio.run(create_backup()).get_json() or {}
+        assert payload["success"] is True
+        encrypted_filename = payload["data"]["filename"]
+        assert payload["data"]["encrypted"] is True
+        assert encrypted_filename.endswith(".zip.enc")
+        assert fake_db.backup_records[-1]["encrypted"] is True
+
+    encrypted_path = backup_dir / encrypted_filename
+    assert encrypted_path.exists() is True
+    assert source_zip.exists() is False
+
+    with backup_route_app.test_request_context(
+        "/api/backup/restore/verify",
+        method="POST",
+        json={"filename": encrypted_filename},
+    ):
+        response, status = _unwrap_response(verify_backup())
+        assert status == 200
+        payload = response.get_json() or {}
+        assert payload["data"]["encrypted"] is True
+        assert payload["data"]["ready_to_restore"] is True
+
+    restored_target = tmp_path / "restore_target"
+    monkeypatch.setattr(backup_module, "DATA_DIR", restored_target)
+    with backup_route_app.test_request_context(f"/api/backup/restore/{encrypted_filename}", method="POST"):
+        response, status = _unwrap_response(asyncio.run(restore_backup(encrypted_filename)))
+        assert status == 200
+        payload = response.get_json() or {}
+        assert payload["success"] is True
+
+    assert (restored_target / "bill.txt").read_text(encoding="utf-8") == "secret-content"
+    assert fake_db.backup_records[-1]["status"] == "restored"
 
 
 def test_restore_backup_covers_missing_target_data_dir_and_inner_cleanup_false_branch(

@@ -1,6 +1,6 @@
 from __future__ import annotations
-# pyright: reportPrivateUsage=false
 
+# pyright: reportPrivateUsage=false
 from datetime import datetime
 from typing import Any
 
@@ -121,6 +121,20 @@ async def test_fetch_exchange_rates_from_providers_covers_success_fallback_and_u
 
     with pytest.raises(RuntimeError, match="Unsupported exchange rate provider"):
         await statistics_module._fetch_exchange_rates_from_providers("CNY", ["USD"], "bad-provider")
+
+
+@pytest.mark.asyncio
+async def test_fetch_exchange_rates_from_providers_raises_when_all_candidates_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """所有 provider 都失败或返回空时，应抛出统一运行时错误。"""
+    monkeypatch.setattr(statistics_module, "BOCChinaProvider", lambda: FakeProvider(error=RuntimeError("boc down")))
+    monkeypatch.setattr(statistics_module, "CMBChinaProvider", lambda: FakeProvider(rates={}))
+    monkeypatch.setattr(statistics_module, "ECBProvider", lambda: FakeProvider(error=RuntimeError("ecb down")))
+    monkeypatch.setattr(statistics_module, "RBAProvider", lambda: FakeProvider(error=RuntimeError("rba down")))
+
+    with pytest.raises(RuntimeError, match="所有汇率数据源都无法获取数据"):
+        await statistics_module._fetch_exchange_rates_from_providers("CNY", ["USD"], "auto")
 
 
 
