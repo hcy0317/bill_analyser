@@ -571,6 +571,40 @@ def test_encrypted_backup_create_verify_and_restore_flow(
     assert fake_db.backup_records[-1]["status"] == "restored"
 
 
+def test_encrypted_backup_restore_returns_400_when_key_is_wrong(
+    backup_route_app: Flask,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """加密备份在密钥错误时应返回明确的 400，而不是通用 500。"""
+    backup_dir = tmp_path / "wrong_key_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "wrong_key_restore_target"
+
+    monkeypatch.setattr(backup_module, "get_backup_dir", lambda: backup_dir)
+    monkeypatch.setattr(backup_module, "DATA_DIR", data_dir)
+
+    plain_backup = backup_dir / "backup_wrong_key_source.zip"
+    with ZipFile(plain_backup, "w") as zip_file:
+        zip_file.writestr("data/secret.txt", "classified")
+
+    encrypted_backup = backup_module._encrypt_backup_file(plain_backup, "correct-backup-key")
+    fake_db = FakeBackupDB()
+    monkeypatch.setattr(backup_module, "get_app_context", lambda: fake_db)
+    monkeypatch.setenv("BILL_ANALYSER_BACKUP_ENCRYPTION_KEY", "wrong-backup-key")
+
+    restore_backup = _unwrap(backup_module.restore_backup)
+
+    with backup_route_app.test_request_context(f"/api/backup/restore/{encrypted_backup.name}", method="POST"):
+        response, status = _unwrap_response(asyncio.run(restore_backup(encrypted_backup.name)))
+        assert status == 400
+        payload = response.get_json() or {}
+        assert payload["success"] is False
+        assert payload["error"] == "备份解密失败"
+        assert fake_db.audit_logs[-1]["operation_type"] == "backup_restored"
+        assert fake_db.audit_logs[-1]["status"] == "failed"
+
+
 def test_backup_listing_with_encrypted_file_does_not_clobber_same_stem_plain_backup(
     backup_route_app: Flask,
     tmp_path: Path,

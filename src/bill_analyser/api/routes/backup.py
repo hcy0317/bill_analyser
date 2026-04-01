@@ -2,6 +2,8 @@
 Backup Routes - 备份和恢复API路由
 """
 
+# pylint: disable=line-too-long,broad-exception-caught,too-many-locals,too-many-branches,too-many-statements
+
 import asyncio
 import hashlib
 import json
@@ -10,7 +12,7 @@ import tempfile
 from base64 import urlsafe_b64encode
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from zipfile import BadZipFile, ZipFile
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -39,20 +41,23 @@ async def _write_backup_audit_log_async(
 ) -> None:
     """异步写入备份相关审计日志；缺失数据库时静默跳过。"""
     db = get_app_context()
-    create_audit_log = getattr(db, "create_audit_log", None)
+    create_audit_log = cast("Any", getattr(db, "create_audit_log", None))
     if not callable(create_audit_log):
         return
 
     try:
-        await create_audit_log(
-            operation_type=operation_type,
-            operation_target="backup",
-            details=details,
-            affected_count=affected_count,
-            ip_address=request.remote_addr,
-            user_agent=request.headers.get("User-Agent", ""),
-            status=status,
-            error_message=error_message,
+        await cast(
+            "Any",
+            create_audit_log(
+                operation_type=operation_type,
+                operation_target="backup",
+                details=details,
+                affected_count=affected_count,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent", ""),
+                status=status,
+                error_message=error_message,
+            ),
         )
     except Exception:  # pylint: disable=broad-except
         return
@@ -256,40 +261,43 @@ def _build_backup_info(file_path: Path) -> dict:
 async def _upsert_backup_record_async(backup_info: dict) -> None:
     """将备份信息写入 backup_records。"""
     db = get_app_context()
-    create_backup_record = getattr(db, "create_backup_record", None)
+    create_backup_record = cast("Any", getattr(db, "create_backup_record", None))
     if not callable(create_backup_record):
         return
 
-    await create_backup_record(
-        {
-            "backup_name": backup_info["filename"],
-            "storage_type": "local",
-            "file_path": backup_info["path"],
-            "checksum": backup_info["checksum"],
-            "encrypted": backup_info["encrypted"],
-            "status": "created",
-            "metadata": {
-                "valid_zip": backup_info["valid_zip"],
-                "contains_data_dir": backup_info["contains_data_dir"],
-                "entry_count": backup_info["entry_count"],
-                "top_level_entries": backup_info["top_level_entries"],
-                "ready_to_restore": backup_info["ready_to_restore"],
-            },
-        }
+    await cast(
+        "Any",
+        create_backup_record(
+            {
+                "backup_name": backup_info["filename"],
+                "storage_type": "local",
+                "file_path": backup_info["path"],
+                "checksum": backup_info["checksum"],
+                "encrypted": backup_info["encrypted"],
+                "status": "created",
+                "metadata": {
+                    "valid_zip": backup_info["valid_zip"],
+                    "contains_data_dir": backup_info["contains_data_dir"],
+                    "entry_count": backup_info["entry_count"],
+                    "top_level_entries": backup_info["top_level_entries"],
+                    "ready_to_restore": backup_info["ready_to_restore"],
+                },
+            }
+        ),
     )
 
 
 def _merge_backup_records(backup_infos: list[dict]) -> list[dict]:
     """将 backup_records 中的稳定状态合并到备份列表响应。"""
     db = get_app_context()
-    get_backup_records = getattr(db, "get_backup_records", None)
+    get_backup_records = cast("Any", getattr(db, "get_backup_records", None))
     if not callable(get_backup_records):
         return backup_infos
 
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        records = loop.run_until_complete(get_backup_records())
+        records = loop.run_until_complete(cast("Any", get_backup_records()))
     finally:
         loop.close()
 
@@ -335,14 +343,14 @@ def _resolve_backup_path_in_dir(backup_dir: Path, filename: str) -> Path | None:
 def _update_backup_record_sync(filename: str, updates: dict[str, object]) -> bool:
     """同步包装 backup_records 更新。"""
     db = get_app_context()
-    update_backup_record = getattr(db, "update_backup_record_by_filename", None)
+    update_backup_record = cast("Any", getattr(db, "update_backup_record_by_filename", None))
     if not callable(update_backup_record):
         return False
 
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return bool(loop.run_until_complete(update_backup_record(filename, updates)))
+        return bool(loop.run_until_complete(cast("Any", update_backup_record(filename, updates))))
     finally:
         loop.close()
 
@@ -442,14 +450,12 @@ def verify_backup_restore():
         if not filename:
             return jsonify({"success": False, "error": "filename is required"}), 400
 
-        safe_filename = secure_filename(filename)
-        if not safe_filename.startswith("backup_") or not (
-            safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
-        ):
+        backup_dir = get_backup_dir()
+        file_path = _resolve_backup_path_in_dir(backup_dir, filename)
+        if file_path is None:
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
-        backup_dir = get_backup_dir()
-        file_path = backup_dir / safe_filename
+        safe_filename = file_path.name
         if not file_path.exists():
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
@@ -486,14 +492,12 @@ def download_backup(filename):
     """
     try:
         # 安全文件名检查
-        safe_filename = secure_filename(filename)
-        if not safe_filename.startswith("backup_") or not (
-            safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
-        ):
+        backup_dir = get_backup_dir()
+        file_path = _resolve_backup_path_in_dir(backup_dir, filename)
+        if file_path is None:
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
-        backup_dir = get_backup_dir()
-        file_path = backup_dir / safe_filename
+        safe_filename = file_path.name
 
         if not file_path.exists():
             return jsonify({"success": False, "error": "文件不存在"}), 404
@@ -517,14 +521,12 @@ def delete_backup(filename):
     """
     try:
         # 安全文件名检查
-        safe_filename = secure_filename(filename)
-        if not safe_filename.startswith("backup_") or not (
-            safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
-        ):
+        backup_dir = get_backup_dir()
+        file_path = _resolve_backup_path_in_dir(backup_dir, filename)
+        if file_path is None:
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
-        backup_dir = get_backup_dir()
-        file_path = backup_dir / safe_filename
+        safe_filename = file_path.name
 
         if not file_path.exists():
             return jsonify({"success": False, "error": "文件不存在"}), 404
@@ -578,14 +580,12 @@ async def restore_backup(filename):
         # pylint: disable=import-outside-toplevel
         import shutil
         # 安全文件名检查
-        safe_filename = secure_filename(filename)
-        if not safe_filename.startswith("backup_") or not (
-            safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
-        ):
+        backup_dir = get_backup_dir()
+        file_path = _resolve_backup_path_in_dir(backup_dir, filename)
+        if file_path is None:
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
-        backup_dir = get_backup_dir()
-        file_path = backup_dir / safe_filename
+        safe_filename = file_path.name
 
         if not file_path.exists():
             return jsonify({"success": False, "error": "文件不存在"}), 404
@@ -596,7 +596,16 @@ async def restore_backup(filename):
             encryption_secret = _get_backup_encryption_secret()
             if not encryption_secret:
                 return jsonify({"success": False, "error": "备份加密密钥未配置"}), 400
-            temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, encryption_secret)
+            try:
+                temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, encryption_secret)
+            except (InvalidToken, OSError, ValueError):
+                await _write_backup_audit_log_async(
+                    "backup_restored",
+                    details={"filename": safe_filename},
+                    status="failed",
+                    error_message="backup decrypt failed",
+                )
+                return jsonify({"success": False, "error": "备份解密失败"}), 400
             restore_source_path = temp_decrypted_path
 
         # 获取数据目录 - 固定为 data 文件夹
@@ -632,11 +641,14 @@ async def restore_backup(filename):
             shutil.rmtree(temp_restore_dir)
 
             restored_at = datetime.now().isoformat()
-            update_backup_record = getattr(get_app_context(), "update_backup_record_by_filename", None)
+            update_backup_record = cast("Any", getattr(get_app_context(), "update_backup_record_by_filename", None))
             if callable(update_backup_record):
-                await update_backup_record(
-                    safe_filename,
-                    {"status": "restored", "metadata": {"restored_at": restored_at}},
+                await cast(
+                    "Any",
+                    update_backup_record(
+                        safe_filename,
+                        {"status": "restored", "metadata": {"restored_at": restored_at}},
+                    ),
                 )
             await _write_backup_audit_log_async(
                 "backup_restored",
@@ -693,13 +705,13 @@ def cleanup_old_backups():
         backup_dir = get_backup_dir()
         deleted_count = 0
         db = get_app_context()
-        get_backup_records = getattr(db, "get_backup_records", None)
+        get_backup_records = cast("Any", getattr(db, "get_backup_records", None))
 
         if callable(get_backup_records):
             loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(loop)
-                backup_records = loop.run_until_complete(get_backup_records())
+                backup_records = loop.run_until_complete(cast("Any", get_backup_records()))
             finally:
                 loop.close()
 
@@ -730,10 +742,12 @@ def cleanup_old_backups():
 
                 active_record_entries.append({**record, "path": file_path})
 
-            active_record_entries.sort(
-                key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)),
-                reverse=True,
-            )
+            def _record_sort_key(item: dict[str, object]) -> tuple[str, int]:
+                record_id = item.get("id")
+                normalized_id = record_id if isinstance(record_id, int) else 0
+                return str(item.get("created_at") or ""), normalized_id
+
+            active_record_entries.sort(key=_record_sort_key, reverse=True)
 
             kept_record_entries = active_record_entries[:keep_count]
             retention_candidates = active_record_entries[keep_count:]
@@ -814,14 +828,14 @@ def list_backup_jobs():
     """获取备份任务配置列表。"""
     try:
         db = get_app_context()
-        get_backup_jobs = getattr(db, "get_backup_jobs", None)
+        get_backup_jobs = cast("Any", getattr(db, "get_backup_jobs", None))
         if not callable(get_backup_jobs):
             return jsonify({"success": True, "data": []})
 
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
-            jobs = loop.run_until_complete(get_backup_jobs())
+            jobs = loop.run_until_complete(cast("Any", get_backup_jobs)())
         finally:
             loop.close()
 
@@ -851,7 +865,7 @@ def save_backup_job():
             return jsonify({"success": False, "error": "retention_count must be an integer"}), 400
 
         db = get_app_context()
-        save_job_method = getattr(db, "create_or_update_backup_job", None)
+        save_job_method = cast("Any", getattr(db, "create_or_update_backup_job", None))
         if not callable(save_job_method):
             return jsonify({"success": False, "error": "backup job storage is unavailable"}), 503
 
@@ -868,7 +882,7 @@ def save_backup_job():
         loop = asyncio.new_event_loop()
         try:
             asyncio.set_event_loop(loop)
-            job_id = loop.run_until_complete(save_job_method(payload))
+            job_id = loop.run_until_complete(cast("Any", save_job_method)(payload))
         finally:
             loop.close()
 

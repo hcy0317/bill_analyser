@@ -52,6 +52,40 @@ class FakeLoop:
         return asyncio.run(coroutine)
 
 
+class FakeOperationPasswordDB:
+    """Minimal DB stub for sensitive-operation helper tests."""
+
+    def __init__(self, *, result: bool = False) -> None:
+        self.result = result
+
+    async def verify_operation_password(self, password: str) -> bool:
+        _ = password
+        return self.result
+
+
+class FakeRecoveryCodeDB:
+    """Minimal DB stub for persistent recovery code helper tests."""
+
+    def __init__(self, *, clear_result: int = 0, consume_result: bool = False) -> None:
+        self.clear_result = clear_result
+        self.consume_result = consume_result
+
+    async def clear_two_factor_recovery_codes(self, user_id: int) -> int:
+        _ = user_id
+        return self.clear_result
+
+    async def consume_two_factor_recovery_code(self, user_id: int, recovery_code: str) -> bool:
+        _ = (user_id, recovery_code)
+        return self.consume_result
+
+
+class ExplodingAuditLogDB:
+    """Minimal DB stub whose audit log write fails."""
+
+    async def create_audit_log(self, **_payload: Any) -> None:
+        raise RuntimeError("audit boom")
+
+
 class FakeCloudSettingsDB:
     """Minimal DB stub for cloud settings helpers."""
 
@@ -254,6 +288,90 @@ def test_token_generation_password_validation_and_action_token_helpers() -> None
         "Password must contain at least one special character",
     )
     assert auth_module.validate_password("Valid1!A", config) == (True, "")
+
+
+def test_sensitive_operation_and_recovery_code_helpers_cover_remaining_branches() -> None:
+    """敏感操作与恢复码 helper 应覆盖剩余回退分支。"""
+    loop = FakeLoop()
+    original_recovery_codes = {
+        user_id: list(codes) for user_id, codes in auth_module.TWO_FACTOR_RECOVERY_CODES.items()
+    }
+
+    try:
+        assert auth_module._verify_sensitive_operation_password(FakeOperationPasswordDB(result=False), None, "pw", loop) is False
+        assert auth_module._verify_sensitive_operation_password(object(), None, "pw", loop) is False
+
+        invalid_hash_user = {"id": 3, "password_hash": "not-a-valid-bcrypt-hash"}
+        assert auth_module._verify_sensitive_operation_password(
+            FakeOperationPasswordDB(result=False),
+            invalid_hash_user,
+            "pw",
+            loop,
+        ) is False
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: None)
+        try:
+            assert auth_module._verify_step_up_token({"jwt_secret": "secret"}, "bad-token", 1) is False
+            assert auth_module._resolve_sensitive_operation_auth(
+                db=object(),
+                user={"id": 1},
+                config={"jwt_secret": "secret"},
+                payload={"stepUpToken": "bad-token"},
+                loop=loop,
+            ) == (False, "invalid_step_up")
+        finally:
+            monkeypatch.undo()
+
+        auth_module.TWO_FACTOR_RECOVERY_CODES[5] = ["ABCD-1234"]
+        assert auth_module._clear_persistent_recovery_codes(FakeRecoveryCodeDB(clear_result=0), 5, loop) == 0
+        assert 5 not in auth_module.TWO_FACTOR_RECOVERY_CODES
+
+        assert auth_module._replace_persistent_recovery_codes(object(), 8, ["FALL-BACK"], loop) == 1
+        assert auth_module.TWO_FACTOR_RECOVERY_CODES[8] == ["FALL-BACK"]
+
+        auth_module.TWO_FACTOR_RECOVERY_CODES[6] = ["WXYZ-9999"]
+        assert auth_module._consume_persistent_recovery_code(
+            FakeRecoveryCodeDB(consume_result=False),
+            6,
+            "WXYZ-9999",
+            loop,
+        ) is True
+
+        auth_module.TWO_FACTOR_RECOVERY_CODES[7] = []
+        assert auth_module._consume_persistent_recovery_code(
+            FakeRecoveryCodeDB(consume_result=False),
+            7,
+            "MISS-0000",
+            loop,
+        ) is False
+    finally:
+        auth_module.TWO_FACTOR_RECOVERY_CODES.clear()
+        auth_module.TWO_FACTOR_RECOVERY_CODES.update(original_recovery_codes)
+
+
+def test_two_factor_audit_log_helper_covers_noop_and_warning_paths(
+    auth_helper_app: Flask,
+) -> None:
+    """2FA 审计日志 helper 在无实现或写入失败时应静默返回。"""
+    loop = FakeLoop()
+
+    with auth_helper_app.test_request_context("/", headers={"User-Agent": "Browser"}):
+        assert auth_module._create_two_factor_audit_log(
+            object(),
+            loop,
+            operation_type="noop",
+            user_id=1,
+        ) is None
+
+        assert auth_module._create_two_factor_audit_log(
+            ExplodingAuditLogDB(),
+            loop,
+            operation_type="explode",
+            user_id=1,
+            details={"k": "v"},
+            affected_count=1,
+        ) is None
 
 
 @pytest.mark.parametrize(

@@ -1271,6 +1271,44 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
         assert confirm_persist_error_db.updated_users[-1] == (1, {"two_factor_enabled": 0, "two_factor_secret": ""})
         assert confirm_persist_error_db.cleared_recovery_codes == [1]
 
+    class ConfirmPersistClearErrorDB(ConfirmPersistErrorDB):
+        async def clear_two_factor_recovery_codes(self, user_id: int) -> int:
+            _ = user_id
+            raise RuntimeError("clear boom")
+
+    confirm_persist_clear_error_db = ConfirmPersistClearErrorDB(user_by_id={"id": 1, "username": "alice"})
+    confirm_persist_clear_error_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, confirm_persist_clear_error_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: confirm_persist_clear_error_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/enable/confirm",
+        method="POST",
+        json={"secret": "SECRET123", "passcode": "111111"},
+    ):
+        response, status = _unwrap_response(confirm_route())
+        assert status == 500
+        assert response.get_json()["message"] == "persist boom"
+        assert confirm_persist_clear_error_db.updated_users[-1] == (1, {"two_factor_enabled": 0, "two_factor_secret": ""})
+
+    class ConfirmPersistMismatchDB(FakeAuthDB):
+        async def replace_two_factor_recovery_codes(self, user_id: int, recovery_codes: list[str]) -> int:
+            self.replaced_recovery_codes.append((user_id, list(recovery_codes)))
+            return 0
+
+    confirm_persist_mismatch_db = ConfirmPersistMismatchDB(user_by_id={"id": 1, "username": "alice"})
+    confirm_persist_mismatch_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, confirm_persist_mismatch_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: confirm_persist_mismatch_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/enable/confirm",
+        method="POST",
+        json={"secret": "SECRET123", "passcode": "111111"},
+    ):
+        response, status = _unwrap_response(confirm_route())
+        assert status == 500
+        assert response.get_json()["message"] == "Failed to persist two-factor recovery codes"
+        assert confirm_persist_mismatch_db.updated_users[-1] == (1, {"two_factor_enabled": 0, "two_factor_secret": ""})
+
     with auth_route_unit_app.test_request_context("/api/auth/2fa/disable", method="POST", json={}):
         response, status = _unwrap_response(disable_route())
         assert status == 400
@@ -1367,6 +1405,26 @@ def test_2fa_status_request_confirm_disable_recovery_and_cloud_settings_routes(
         response, status = _unwrap_response(regenerate_route())
         assert status == 200
         assert response.get_json()["result"]["recoveryCodes"] == ["WXYZ-9999"]
+
+    class RegenPersistMismatchDB(FakeAuthDB):
+        async def replace_two_factor_recovery_codes(self, user_id: int, recovery_codes: list[str]) -> int:
+            self.replaced_recovery_codes.append((user_id, list(recovery_codes)))
+            return 0
+
+    regen_mismatch_db = RegenPersistMismatchDB(
+        user_by_id={"id": 1, "password_hash": disable_user["password_hash"], "two_factor_enabled": 1}
+    )
+    regen_mismatch_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, regen_mismatch_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: regen_mismatch_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/auth/2fa/recovery/regenerate",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(regenerate_route())
+        assert status == 500
+        assert response.get_json()["message"] == "Failed to persist two-factor recovery codes"
 
     regen_step_up_db = FakeAuthDB(user_by_id={"id": 1, "password_hash": disable_user["password_hash"], "two_factor_enabled": 1})
     regen_step_up_loop = FakeLoop()
@@ -1907,6 +1965,24 @@ def test_security_step_up_verify_route_covers_password_and_passcode_paths(
         payload = response.get_json() or {}
         assert payload["result"]["stepUpToken"] == "step-up-token"
         assert payload["result"]["verifiedVia"] == "passcode"
+
+    class ExplodingStepUpDB(FakeAuthDB):
+        async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+            _ = user_id
+            raise RuntimeError("step up boom")
+
+    exploding_step_up_db = ExplodingStepUpDB(user_by_id={"id": 1, "username": "alice"})
+    exploding_step_up_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, exploding_step_up_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: exploding_step_up_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/security/step-up/verify",
+        method="POST",
+        json={"password": "Correct123!"},
+    ):
+        response, status = _unwrap_response(route())
+        assert status == 500
+        assert response.get_json()["message"] == "step up boom"
 
 
 def test_personal_token_routes_cover_validation_failures_and_success_paths(
@@ -2780,6 +2856,7 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
             "firstDayOfWeek": 1,
             "defaultAccountId": "11",
             "transactionEditScope": 2,
+            "fiscalYearStart": 99,
             "calendarDisplayType": 1,
             "dateDisplayType": 2,
             "longDateFormat": 3,
@@ -2797,6 +2874,8 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
             "incomeAmountColor": 15,
             "cashAccountId": "16",
             "cashTransferCategoryId": "17",
+            "investmentProductKeywords": ["ETF", "债券"],
+            "investmentExcludeKeywords": ["体验金"],
         },
     ):
         response, status = _unwrap_response(profile_route())
@@ -2807,6 +2886,7 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
         assert updated_fields["first_day_of_week"] == 1
         assert updated_fields["default_account_id"] == "11"
         assert updated_fields["transaction_edit_scope"] == 2
+        assert updated_fields["fiscal_year_start"] == 99
         assert updated_fields["calendar_display_type"] == 1
         assert updated_fields["date_display_type"] == 2
         assert updated_fields["long_date_format"] == 3
@@ -2824,6 +2904,8 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
         assert updated_fields["income_amount_color"] == 15
         assert updated_fields["cash_account_id"] == "16"
         assert updated_fields["cash_transfer_category_id"] == "17"
+        assert updated_fields["investment_product_keywords"] == "ETF|债券"
+        assert updated_fields["investment_exclude_keywords"] == "体验金"
 
     profile_error_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "email": "alice@example.com"})
     profile_error_db.get_user_by_id = _async_runtime_error("profile lookup boom")  # type: ignore[method-assign]
@@ -3069,6 +3151,47 @@ def test_auth_route_remaining_branch_closures_and_field_mapping(
         response, status = _unwrap_response(recovery_route())
         assert status == 500
         assert response.get_json()["message"] == "2fa recovery lookup boom"
+
+    recovery_not_enabled_db = FakeAuthDB(user_by_id={"id": 1, "username": "alice", "two_factor_enabled": 0})
+    recovery_not_enabled_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, recovery_not_enabled_loop)
+    monkeypatch.setattr(auth_module, "decode_action_token", lambda *_args, **_kwargs: {"user_id": 1, "email": "alice@example.com"})
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: recovery_not_enabled_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/2fa/recovery/verify",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        json={"recoveryCode": "ABCD-1234"},
+    ):
+        response, status = _unwrap_response(recovery_route())
+        assert status == 400
+        assert response.get_json()["message"] == "Two-factor authentication is not enabled"
+
+    clear_transactions_missing_db = FakeAuthDB(user_by_id=None)
+    clear_transactions_missing_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, clear_transactions_missing_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_transactions_missing_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/transactions",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_transactions_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    clear_all_missing_db = FakeAuthDB(user_by_id=None)
+    clear_all_missing_loop = FakeLoop()
+    _install_fake_loop(monkeypatch, clear_all_missing_loop)
+    monkeypatch.setattr(auth_module, "get_app_context", lambda: clear_all_missing_db)
+    with auth_route_unit_app.test_request_context(
+        "/api/data/clear/all",
+        method="POST",
+        json={"password": "ok"},
+    ):
+        response, status = _unwrap_response(clear_all_route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
 
     clear_transactions_error_db = FakeAuthDB(user_by_id={"id": 1})
     clear_transactions_error_db.verify_operation_password = _async_runtime_error("clear transactions verify boom")  # type: ignore[method-assign]
