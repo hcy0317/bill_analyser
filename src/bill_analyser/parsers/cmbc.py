@@ -11,6 +11,8 @@
 - source_account_id: 'cmbc'
 """
 
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
+
 import csv
 from typing import Any
 
@@ -264,13 +266,13 @@ class CMBCParser(ParserBase):
                 # CSV格式
                 lines, encoding = self.read_lines_with_fallback(file_path)
 
-                data_start = 0
+                data_start = -1
                 for i, line in enumerate(lines):
                     if "交易日期" in line or "记账日期" in line or "交易时间" in line:
                         data_start = i
                         break
 
-                if data_start == 0:
+                if data_start == -1:
                     self.logger.warning("未找到数据起始行")
                     return []
 
@@ -295,7 +297,9 @@ class CMBCParser(ParserBase):
                         bill = {
                             "date": date_field,
                             "type": transaction_type,
-                            "counterparty": row.get("交易对手") or row.get("对方户名") or row.get("对方名称") or "",
+                            "counterparty": (
+                                row.get("交易对手") or row.get("对方户名") or row.get("对方名称") or ""
+                            ),
                             "description": row.get("交易说明") or row.get("摘要") or "",
                             "amount": amount_str.replace("-", ""),
                             "channel": "民生银行",
@@ -321,7 +325,9 @@ class CMBCParser(ParserBase):
                 header_row = -1
                 for i in range(min(10, len(df))):
                     cols = df.columns
-                    row_text = " ".join(str(df.iloc[i, j]) for j in range(len(cols)) if not pd.isna(df.iloc[i, j]))
+                    row_text = " ".join(
+                        str(df.iloc[i, j]) for j in range(len(cols)) if not pd.isna(df.iloc[i, j])
+                    )
                     if "交易日期" in row_text or "交易时间" in row_text:
                         header_row = i
                         break
@@ -334,7 +340,9 @@ class CMBCParser(ParserBase):
                 headers = []
                 for j in range(len(df.columns)):
                     val = df.iloc[header_row, j]
-                    headers.append(str(val) if not pd.isna(val) else f"col_{j}")
+                    headers.append(
+                        str(val) if not pd.isna(val) else f"col_{j}"
+                    )
 
                 # 解析数据行
                 for i in range(header_row + 1, len(df)):
@@ -346,7 +354,10 @@ class CMBCParser(ParserBase):
 
                         # 获取日期
                         date_field = (
-                            row_dict.get("交易日期") or row_dict.get("交易时间") or row_dict.get("记账日期") or ""
+                            row_dict.get("交易日期")
+                            or row_dict.get("交易时间")
+                            or row_dict.get("记账日期")
+                            or ""
                         )
                         if not date_field.strip() or date_field == "nan":
                             continue
@@ -385,7 +396,9 @@ class CMBCParser(ParserBase):
                             continue
 
                         bill = {
-                            "date": date_field.split()[0] if " " in date_field else date_field,  # 去除可能的时间部分
+                            "date": (
+                                date_field.split()[0] if " " in date_field else date_field
+                            ),  # 去除可能的时间部分
                             "type": transaction_type,
                             "counterparty": row_dict.get("对方名称")
                             or row_dict.get("对方户名")

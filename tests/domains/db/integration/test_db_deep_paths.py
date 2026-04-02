@@ -1,6 +1,6 @@
 from __future__ import annotations
-# pyright: reportPrivateUsage=false
 
+# pyright: reportPrivateUsage=false
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -331,5 +331,287 @@ async def test_import_learning_rule_enable_usage_and_delete_paths(tmp_path: Path
 
         assert await db.delete_import_learning_rule(rule_id, user_id=user_id) is True
         assert await db.count_import_learning_rules(user_id=user_id, enabled_only=False) == 0
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_saved_filter_round_trip_covers_create_update_lookup_and_delete(tmp_path: Path) -> None:
+    """保存的筛选条件应覆盖创建、更新、查询与删除路径。"""
+    db = await _create_database(tmp_path)
+    try:
+        created_user_id = await _create_user(db, "db_saved_filters")
+        assert created_user_id == 1
+
+        filter_id = await db.save_filter(
+            "域测试筛选",
+            {"keyword": "奶茶", "amount_filter": "lt:0"},
+            description="初始描述",
+        )
+        assert filter_id > 0
+
+        by_id = await db.get_saved_filter(filter_id=filter_id)
+        assert by_id is not None
+        assert by_id["name"] == "域测试筛选"
+        assert by_id["description"] == "初始描述"
+        assert by_id["filter_data"] == {"keyword": "奶茶", "amount_filter": "lt:0"}
+
+        updated_filter_id = await db.save_filter(
+            "域测试筛选",
+            {"keyword": "咖啡", "categories": [{"main": "餐饮", "sub": "饮品"}]},
+            description="已更新描述",
+        )
+        assert updated_filter_id == filter_id
+
+        by_name = await db.get_saved_filter(name="域测试筛选")
+        assert by_name is not None
+        assert by_name["id"] == filter_id
+        assert by_name["description"] == "已更新描述"
+        assert by_name["filter_data"] == {
+            "keyword": "咖啡",
+            "categories": [{"main": "餐饮", "sub": "饮品"}],
+        }
+
+        second_filter_id = await db.save_filter(
+            "域测试第二筛选",
+            {"type": "支出", "account_ids": [1, 2]},
+            description=None,
+        )
+        assert second_filter_id > filter_id
+
+        saved_filters = await db.get_saved_filters()
+        assert {saved_filter["name"] for saved_filter in saved_filters} == {"域测试筛选", "域测试第二筛选"}
+        saved_filter_by_name = {saved_filter["name"]: saved_filter for saved_filter in saved_filters}
+        assert saved_filter_by_name["域测试筛选"]["filter_data"]["keyword"] == "咖啡"
+        assert saved_filter_by_name["域测试第二筛选"]["filter_data"] == {"type": "支出", "account_ids": [1, 2]}
+
+        assert await db.delete_saved_filter(filter_id=filter_id) is True
+        assert await db.get_saved_filter(filter_id=filter_id) is None
+        assert await db.delete_saved_filter(name="域测试第二筛选") is True
+        assert await db.get_saved_filter(name="域测试第二筛选") is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_saved_filter_missing_arguments_and_missing_rows_return_safe_defaults(tmp_path: Path) -> None:
+    """筛选条件查询/删除在缺少参数或记录不存在时应返回安全默认值。"""
+    db = await _create_database(tmp_path)
+    try:
+        created_user_id = await _create_user(db, "db_saved_filters_defaults")
+        assert created_user_id == 1
+
+        assert await db.get_saved_filter() is None
+        assert await db.delete_saved_filter() is False
+        assert await db.get_saved_filter(filter_id=999999) is None
+        assert await db.get_saved_filter(name="不存在的筛选") is None
+        assert await db.delete_saved_filter(filter_id=999999) is False
+        assert await db.delete_saved_filter(name="不存在的筛选") is False
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_batch_update_bills_and_categories_cover_empty_success_and_missing_ids(tmp_path: Path) -> None:
+    """批量更新账单应覆盖空输入、成功更新、缺失 ID 与分类包装路径。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_batch_update")
+        other_user_id = await _create_user(db, "db_batch_update_other")
+        first_bill_id = await _create_bill(db, user_id=user_id, description="待更新账单一")
+        second_bill_id = await _create_bill(db, user_id=user_id, description="待更新账单二")
+        other_user_bill_id = await _create_bill(db, user_id=other_user_id, description="其他用户账单")
+
+        assert await db.batch_update_bills([], {"description": "不会执行"}, user_id=user_id) == {
+            "success_count": 0,
+            "failed_count": 0,
+            "failed_ids": [],
+        }
+        assert await db.batch_update_bills([first_bill_id], {}, user_id=user_id) == {
+            "success_count": 0,
+            "failed_count": 0,
+            "failed_ids": [],
+        }
+        with pytest.raises(ValueError, match="unsupported batch update fields: user_id"):
+            await db.batch_update_bills([first_bill_id], {"user_id": other_user_id}, user_id=user_id)
+
+        update_result = await db.batch_update_bills(
+            [first_bill_id, second_bill_id, other_user_bill_id, 999999],
+            {"description": "批量更新后的描述", "payment_method": "云闪付"},
+            user_id=user_id,
+        )
+        assert update_result["success_count"] == 2
+        assert update_result["failed_count"] == 2
+        assert update_result["failed_ids"] == [other_user_bill_id, 999999]
+
+        updated_first_bill = await db.get_bill_by_id(first_bill_id, user_id=user_id)
+        updated_second_bill = await db.get_bill_by_id(second_bill_id, user_id=user_id)
+        untouched_other_user_bill = await db.get_bill_by_id(other_user_bill_id, user_id=other_user_id)
+        assert updated_first_bill is not None and updated_second_bill is not None
+        assert untouched_other_user_bill is not None
+        assert updated_first_bill["description"] == "批量更新后的描述"
+        assert updated_second_bill["payment_method"] == "云闪付"
+        assert untouched_other_user_bill["description"] == "其他用户账单"
+
+        category_result = await db.batch_update_categories(
+            [first_bill_id, 888888],
+            "批量分类",
+            "晚餐",
+            user_id=user_id,
+        )
+        assert category_result["success_count"] == 1
+        assert category_result["failed_count"] == 1
+        assert category_result["failed_ids"] == [888888]
+
+        recategorized_bill = await db.get_bill_by_id(first_bill_id, user_id=user_id)
+        assert recategorized_bill is not None
+        assert recategorized_bill["main_category"] == "批量分类"
+        assert recategorized_bill["sub_category"] == "晚餐"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_update_account_balance_covers_add_subtract_invalid_operation_and_missing_account(
+    tmp_path: Path,
+) -> None:
+    """账户余额更新应覆盖加减、非法操作和账户不存在分支。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_account_balance")
+        account_id = await _create_account(db, user_id=user_id, name="余额账户")
+
+        assert await db.update_account_balance(account_id, 25.5, operation="add") is True
+        account_after_add = await db.get_account_by_id(account_id, user_id=user_id)
+        assert account_after_add is not None
+        assert account_after_add["balance"] == pytest.approx(25.5)
+
+        assert await db.update_account_balance(account_id, 5.5, operation="subtract") is True
+        account_after_subtract = await db.get_account_by_id(account_id, user_id=user_id)
+        assert account_after_subtract is not None
+        assert account_after_subtract["balance"] == pytest.approx(20.0)
+
+        assert await db.update_account_balance(account_id, 1.0, operation="multiply") is False
+        assert await db.update_account_balance(999999, 10.0, operation="add") is False
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_and_backup_records_cover_filters_metadata_merge_and_invalid_json(
+    tmp_path: Path,
+) -> None:
+    """审计日志与备份记录应覆盖筛选、JSON 容错和 metadata 合并更新。"""
+    db = await _create_database(tmp_path)
+    try:
+        move_log_id = await db.create_audit_log(
+            operation_type="move_transactions",
+            operation_target="account",
+            target_id=10,
+            details={"from_account": 1, "to_account": 2},
+            affected_count=2,
+            status="success",
+        )
+        assert move_log_id > 0
+
+        await db.create_audit_log(
+            operation_type="delete_transactions",
+            operation_target="bill",
+            target_id=11,
+            details={"deleted_ids": [1, 2]},
+            affected_count=2,
+            status="failed",
+            error_message="permission denied",
+        )
+
+        conn = await db._get_connection()
+        await conn.execute(
+            """
+            INSERT INTO audit_logs (
+                operation_type, operation_target, target_id, details,
+                affected_count, ip_address, user_agent, session_id,
+                status, error_message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "backup_record",
+                "backup",
+                12,
+                "{broken-json",
+                0,
+                None,
+                None,
+                None,
+                "failed",
+                "broken payload",
+                datetime.now().isoformat(),
+            ),
+        )
+        await conn.commit()
+
+        filtered_logs = await db.get_audit_logs(
+            operation_type="move_transactions",
+            operation_target="account",
+            target_id=10,
+            status="success",
+        )
+        assert len(filtered_logs) == 1
+        assert filtered_logs[0]["details"] == {"from_account": 1, "to_account": 2}
+        assert filtered_logs[0]["affected_count"] == 2
+
+        failed_backup_logs = await db.get_audit_logs(operation_type="backup_record", status="failed")
+        assert len(failed_backup_logs) == 1
+        assert failed_backup_logs[0]["details"] == "{broken-json"
+
+        backup_record_id = await db.create_backup_record(
+            {
+                "backup_name": "backup-1.zip",
+                "storage_type": "local",
+                "file_path": "C:/tmp/backup-1.zip",
+                "checksum": "abc123",
+                "encrypted": False,
+                "status": "created",
+                "metadata": {"size": 123, "note": "initial"},
+            }
+        )
+        assert backup_record_id > 0
+
+        broken_record_id = await db.create_backup_record(
+            {
+                "backup_name": "broken.zip",
+                "storage_type": "local",
+                "file_path": "C:/tmp/broken.zip",
+                "checksum": "broken",
+                "encrypted": False,
+                "status": "created",
+                "metadata": {},
+            }
+        )
+        assert broken_record_id >= 0
+
+        await conn.execute(
+            "UPDATE backup_records SET metadata_json = ? WHERE backup_name = ?",
+            ("{broken-json", "broken.zip"),
+        )
+        await conn.commit()
+
+        assert await db.update_backup_record_by_filename(
+            "backup-1.zip",
+            {"status": "deleted", "encrypted": True, "metadata": {"deleted_by": "pytest"}},
+        ) is True
+        assert await db.update_backup_record_by_filename("backup-1.zip", {}) is False
+        assert await db.update_backup_record_by_filename("", {"status": "deleted"}) is False
+        assert await db.update_backup_record_by_filename("missing.zip", {"status": "deleted"}) is False
+
+        backup_records = await db.get_backup_records()
+        records_by_name = {record["backup_name"]: record for record in backup_records}
+        assert records_by_name["backup-1.zip"]["status"] == "deleted"
+        assert records_by_name["backup-1.zip"]["encrypted"] is True
+        assert records_by_name["backup-1.zip"]["metadata"] == {
+            "size": 123,
+            "note": "initial",
+            "deleted_by": "pytest",
+        }
+        assert records_by_name["broken.zip"]["metadata"] == {}
     finally:
         await db.close()

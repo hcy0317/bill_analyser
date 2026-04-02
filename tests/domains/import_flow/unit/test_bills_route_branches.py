@@ -66,7 +66,7 @@ class FakeBillsDB:
         self.matching_config: dict[str, Any] | None = None
         self.saved_payloads: list[tuple[dict[str, Any], int]] = []
         self.delete_import_config_result = True
-        self.batch_update_result = 2
+        self.batch_update_result = {"success_count": 2, "failed_count": 0, "failed_ids": []}
         self.batch_delete_result = 2
         self.bill_lookup: dict[int, Any] = {
             1: {"source_account_id": 11, "destination_account_id": 22},
@@ -215,7 +215,7 @@ class FakeBillsDB:
         _ = (config_id, user_id)
         return self.delete_import_config_result
 
-    async def batch_update_bills(self, ids: list[int], updates: dict[str, Any], *, user_id: int) -> int:
+    async def batch_update_bills(self, ids: list[int], updates: dict[str, Any], *, user_id: int) -> dict[str, Any]:
         _ = (ids, updates, user_id)
         return self.batch_update_result
 
@@ -1052,12 +1052,24 @@ def test_bills_preview_confirm_keyword_refresh_and_batch_routes_cover_lightweigh
     with bills_route_app.test_request_context(
         "/api/bills/batch/update",
         method="PUT",
+        json={"ids": [1], "updates": {"user_id": 999}},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(batch_update_route())
+        assert status == 400
+        assert response.get_json()["error"] == "unsupported update fields: user_id"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/batch/update",
+        method="PUT",
         json={"ids": [1, 2], "updates": {"description": "updated"}},
     ):
         _set_request_user_id()
         payload = batch_update_route().get_json() or {}
         assert payload["success"] is True
         assert payload["result"]["updated_count"] == 2
+        assert payload["result"]["failed_count"] == 0
+        assert payload["result"]["failed_ids"] == []
 
     async def _raise_batch_update_error(*_args: Any, **_kwargs: Any) -> int:
         raise RuntimeError("batch update boom")

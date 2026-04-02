@@ -2393,13 +2393,19 @@ class Database:
             return False
 
     @log_method
-    async def batch_update_bills(self, bill_ids: list[int], updates: dict[str, Any]) -> dict[str, Any]:
+    async def batch_update_bills(
+        self,
+        bill_ids: list[int],
+        updates: dict[str, Any],
+        user_id: int = 1,
+    ) -> dict[str, Any]:
         """
         批量更新账单
 
         Args:
         bill_ids: 账单ID列表
         updates: 更新字段字典
+        user_id: 用户ID (默认1, 用于多用户数据隔离)
 
         Returns:
         Dict: 包含成功数、失败数和失败ID列表的统计信息
@@ -2411,6 +2417,25 @@ class Database:
         if not updates:
             self.logger.warning("更新字段为空")
             return {"success_count": 0, "failed_count": 0, "failed_ids": []}
+
+        allowed_update_fields = {
+            "date",
+            "type",
+            "amount",
+            "counterparty",
+            "description",
+            "payment_method",
+            "main_category",
+            "sub_category",
+            "source_account_id",
+            "destination_account_id",
+            "destination_amount",
+        }
+        invalid_update_fields = sorted(set(updates) - allowed_update_fields)
+        if invalid_update_fields:
+            message = f"unsupported batch update fields: {', '.join(invalid_update_fields)}"
+            self.logger.warning("批量更新字段非法: %s", ", ".join(invalid_update_fields))
+            raise ValueError(message)
 
         self.logger.info(f"准备批量更新 {len(bill_ids)} 条账单")
         self.logger.debug(f"更新字段: {list(updates.keys())}")
@@ -2430,8 +2455,9 @@ class Database:
                 values = list(updates.values())
                 values.append(now)
                 values.append(bill_id)
+                values.append(user_id)
 
-                query = f"UPDATE bills SET {set_clause} WHERE id = ?"
+                query = f"UPDATE bills SET {set_clause} WHERE id = ? AND user_id = ?"
 
                 cursor = await conn.execute(query, values)
 
@@ -2455,7 +2481,11 @@ class Database:
 
     @log_method
     async def batch_update_categories(
-        self, bill_ids: list[int], main_category: str, sub_category: str
+        self,
+        bill_ids: list[int],
+        main_category: str,
+        sub_category: str,
+        user_id: int = 1,
     ) -> dict[str, Any]:
         """
         批量修改账单分类
@@ -2477,7 +2507,7 @@ class Database:
 
         updates = {"main_category": main_category, "sub_category": sub_category}
 
-        return await self.batch_update_bills(bill_ids, updates)
+        return await self.batch_update_bills(bill_ids, updates, user_id=user_id)
 
     @log_method
     @log_step("去除重复账单")

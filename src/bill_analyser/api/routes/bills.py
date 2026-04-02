@@ -3567,6 +3567,19 @@ def refresh_bill_categories():
 def batch_update_bills():
     """批量更新账单"""
     try:
+        allowed_update_fields = {
+            "date",
+            "type",
+            "amount",
+            "counterparty",
+            "description",
+            "payment_method",
+            "main_category",
+            "sub_category",
+            "source_account_id",
+            "destination_account_id",
+            "destination_amount",
+        }
         data = request.get_json()
         if not data or "ids" not in data or "updates" not in data:
             return jsonify({"success": False, "error": "ids and updates are required"}), 400
@@ -3575,14 +3588,33 @@ def batch_update_bills():
 
         ids = data["ids"]
         updates = data["updates"]
-        updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not isinstance(updates, dict):
+            return jsonify({"success": False, "error": "updates must be an object"}), 400
+
+        invalid_update_fields = sorted(set(updates) - allowed_update_fields)
+        if invalid_update_fields:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": f"unsupported update fields: {', '.join(invalid_update_fields)}",
+                }
+            ), 400
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         result = loop.run_until_complete(db.batch_update_bills(ids, updates, user_id=request.user_id))
         loop.close()
 
-        return jsonify({"success": True, "result": {"updated_count": result}})
+        if isinstance(result, dict):
+            response_result = {
+                "updated_count": int(result.get("success_count", 0)),
+                "failed_count": int(result.get("failed_count", 0)),
+                "failed_ids": result.get("failed_ids", []),
+            }
+        else:
+            response_result = {"updated_count": int(result)}
+
+        return jsonify({"success": True, "result": response_result})
 
     except Exception as e:
         logger.error("批量更新账单失败: %s", e)
