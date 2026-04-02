@@ -5,7 +5,7 @@ export const useEnvironmentsStore = defineStore('environments', () => {
     const framework7DarkMode = ref<boolean | undefined>(undefined);
 
     return {
-        // states
+        // 状态
         framework7DarkMode
     };
 });

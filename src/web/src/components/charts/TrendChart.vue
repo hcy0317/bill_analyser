@@ -7,7 +7,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as echarts from 'echarts';
 import type { EChartsOption, ECharts } from 'echarts';
 
-// Props
+// 属性
 const props = withDefaults(defineProps<{
     title?: string;
     data: Array<{ date: string; income?: number; expense?: number; net?: number }>;
@@ -24,11 +24,11 @@ const props = withDefaults(defineProps<{
     showZoom: true
 });
 
-// State
+// 状态
 const chartContainer = ref<HTMLElement | null>(null);
 let chartInstance: ECharts | null = null;
 
-// Methods
+// 方法
 const initChart = (): void => {
     if (!chartContainer.value) return;
 
@@ -61,7 +61,7 @@ const initChart = (): void => {
                 params.forEach((param: any) => {
                     const value = param.seriesName === '支出' ? -param.value : param.value;
                     result += `<div style="margin: 3px 0;">
-                        ${param.marker} ${param.seriesName}: 
+                        ${param.marker} ${param.seriesName}:
                         <span style="font-weight: bold;">¥${value.toFixed(2)}</span>
                     </div>`;
                 });
@@ -202,7 +202,7 @@ const initChart = (): void => {
 
 const updateChart = (): void => {
     if (!chartInstance) return;
-    
+
     const dates = props.data.map(item => item.date);
     const incomeData = props.data.map(item => item.income || 0);
     const expenseData = props.data.map(item => Math.abs(item.expense || 0));
@@ -226,7 +226,7 @@ const resizeChart = (): void => {
     }
 };
 
-// Lifecycle
+// 生命周期
 onMounted(() => {
     initChart();
     window.addEventListener('resize', resizeChart);
@@ -246,7 +246,7 @@ watch(() => props.data, () => {
     }
 }, { deep: true });
 
-// Expose
+// 暴露接口
 defineExpose({
     refresh: initChart,
     resize: resizeChart

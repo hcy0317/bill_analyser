@@ -460,9 +460,9 @@ export const useUserStore = defineStore('user', () => {
     }
 
     return {
-        // states
+        // 状态
         currentUserBasicInfo,
-        // computed states
+        // 计算状态
         currentUserNickname,
         currentUserAvatar,
         currentUserDefaultAccountId,
@@ -487,7 +487,7 @@ export const useUserStore = defineStore('user', () => {
         currentUserIncomeAmountColor,
         currentUserCashAccountId,
         currentUserCashTransferCategoryId,
-        // functions
+        // 函数
         generateNewUserModel,
         storeUserBasicInfo,
         resetUserBasicInfo,

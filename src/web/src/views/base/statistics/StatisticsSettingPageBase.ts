@@ -75,7 +75,7 @@ export function useStatisticsSettingPageBase() {
     });
 
     return {
-        // computed states
+        // 计算状态
         allChartDataTypes,
         allTimezoneTypesUsedForStatistics,
         allSortingTypes,

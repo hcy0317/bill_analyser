@@ -49,9 +49,9 @@ export function useMonthlyTrendsChartBase<T extends Year1BasedMonth>(props: Comm
     }
 
     return {
-        // computed states
+        // 计算状态
         allDateRanges,
-        // functions
+        // 函数
         getItemName
     }
 }

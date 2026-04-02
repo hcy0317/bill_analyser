@@ -54,7 +54,7 @@ export const useSystemsStore = defineStore('systems', () => {
     }
 
     return {
-        // functions
+        // 函数
         checkIfClientVersionMatchServerVersion,
     };
 });

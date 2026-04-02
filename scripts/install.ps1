@@ -1,6 +1,6 @@
-# Bill Analyser - Installation Script
+# Bill Analyser - 安装脚本
 # =====================================
-# This script sets up the complete development environment
+# 本脚本用于初始化完整开发环境
 # =====================================
 
 param(
@@ -17,7 +17,7 @@ Write-Host "  Bill Analyser - Installation Script" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Get project root
+# 获取项目根目录
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ProjectRoot) {
     $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -30,14 +30,14 @@ Set-Location $ProjectRoot
 Write-Host "Project root: $ProjectRoot" -ForegroundColor Gray
 
 # ============================================
-# Python Environment Setup
+# Python 环境设置
 # ============================================
 
 if (-not $SkipPython) {
     Write-Host ""
     Write-Host "[1/4] Setting up Python environment..." -ForegroundColor Yellow
     
-    # Check Python version
+    # 检查 Python 版本
     try {
         $pythonVersion = python --version 2>&1
         Write-Host "Python version: $pythonVersion" -ForegroundColor Gray
@@ -57,7 +57,7 @@ if (-not $SkipPython) {
         exit 1
     }
     
-    # Create virtual environment
+    # 创建虚拟环境
     $venvPath = Join-Path $ProjectRoot ".venv"
     if ((Test-Path $venvPath) -and -not $Force) {
         Write-Host "Virtual environment already exists. Use -Force to recreate." -ForegroundColor Gray
@@ -75,7 +75,7 @@ if (-not $SkipPython) {
         }
     }
     
-    # Install Python dependencies
+    # 安装 Python 依赖
     Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
     & ".\.venv\Scripts\pip.exe" install --upgrade pip -q
     & ".\.venv\Scripts\pip.exe" install -r requirements.txt -q
@@ -91,14 +91,14 @@ else {
 }
 
 # ============================================
-# Node.js Environment Setup
+# Node.js 环境设置
 # ============================================
 
 if (-not $SkipNode) {
     Write-Host ""
     Write-Host "[2/4] Setting up Node.js environment..." -ForegroundColor Yellow
     
-    # Check Node.js version
+    # 检查 Node.js 版本
     try {
         $nodeVersion = node --version 2>&1
         Write-Host "Node.js version: $nodeVersion" -ForegroundColor Gray
@@ -117,7 +117,7 @@ if (-not $SkipNode) {
         exit 1
     }
     
-    # Install frontend dependencies
+    # 安装前端依赖
     $frontendPath = Join-Path $ProjectRoot "src\web"
     Set-Location $frontendPath
     
@@ -146,7 +146,7 @@ else {
 }
 
 # ============================================
-# Create Required Directories
+# 创建所需目录
 # ============================================
 
 Write-Host ""
@@ -172,7 +172,7 @@ foreach ($dir in $directories) {
 Write-Host "Directories setup complete!" -ForegroundColor Green
 
 # ============================================
-# Initialize Configuration
+# 初始化配置
 # ============================================
 
 Write-Host ""
@@ -183,7 +183,7 @@ if (-not (Test-Path $configPath)) {
     New-Item -ItemType Directory -Path $configPath -Force | Out-Null
 }
 
-# Create default server config if not exists
+# 如不存在则创建默认服务端配置
 $serverConfigPath = Join-Path $configPath "server_config.json"
 if (-not (Test-Path $serverConfigPath)) {
     $defaultConfig = @{
@@ -198,7 +198,7 @@ if (-not (Test-Path $serverConfigPath)) {
 Write-Host "Configuration check complete!" -ForegroundColor Green
 
 # ============================================
-# Summary
+# 摘要
 # ============================================
 
 Write-Host ""

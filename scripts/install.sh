@@ -1,10 +1,10 @@
 #!/bin/bash
-# Bill Analyser - Installation Script for Linux/macOS
+# Bill Analyser - Linux/macOS 安装脚本
 # =====================================================
 
 set -e
 
-# Colors
+# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,7 +18,7 @@ echo -e "${CYAN}  Bill Analyser - Installation Script${NC}"
 echo -e "${CYAN}================================================${NC}"
 echo ""
 
-# Get project root
+# 获取项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
@@ -26,13 +26,13 @@ cd "$PROJECT_ROOT"
 echo -e "${GRAY}Project root: $PROJECT_ROOT${NC}"
 
 # ============================================
-# Python Environment Setup
+# Python 环境设置
 # ============================================
 
 echo ""
 echo -e "${YELLOW}[1/4] Setting up Python environment...${NC}"
 
-# Check Python version
+# 检查 Python 版本
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}Error: Python3 not found. Please install Python 3.10+${NC}"
     exit 1
@@ -49,7 +49,7 @@ if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 10 ]); then
     exit 1
 fi
 
-# Create virtual environment
+# 创建虚拟环境
 if [ ! -d ".venv" ] || [ "$1" == "--force" ]; then
     if [ -d ".venv" ]; then
         echo -e "${YELLOW}Removing existing virtual environment...${NC}"
@@ -59,7 +59,7 @@ if [ ! -d ".venv" ] || [ "$1" == "--force" ]; then
     python3 -m venv .venv
 fi
 
-# Install Python dependencies
+# 安装 Python 依赖
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
 source .venv/bin/activate
 pip install --upgrade pip -q
@@ -68,13 +68,13 @@ pip install -r requirements.txt -q
 echo -e "${GREEN}Python environment setup complete!${NC}"
 
 # ============================================
-# Node.js Environment Setup
+# Node.js 环境设置
 # ============================================
 
 echo ""
 echo -e "${YELLOW}[2/4] Setting up Node.js environment...${NC}"
 
-# Check Node.js version
+# 检查 Node.js 版本
 if ! command -v node &> /dev/null; then
     echo -e "${RED}Error: Node.js not found. Please install Node.js 18+${NC}"
     exit 1
@@ -88,7 +88,7 @@ if [ "$NODE_VERSION" -lt 18 ]; then
     exit 1
 fi
 
-# Install frontend dependencies
+# 安装前端依赖
 cd src/web
 if [ ! -d "node_modules" ] || [ "$1" == "--force" ]; then
     echo -e "${YELLOW}Installing frontend dependencies...${NC}"
@@ -99,7 +99,7 @@ cd "$PROJECT_ROOT"
 echo -e "${GREEN}Node.js environment setup complete!${NC}"
 
 # ============================================
-# Create Required Directories
+# 创建所需目录
 # ============================================
 
 echo ""
@@ -117,7 +117,7 @@ done
 echo -e "${GREEN}Directories setup complete!${NC}"
 
 # ============================================
-# Initialize Configuration
+# 初始化配置
 # ============================================
 
 echo ""
@@ -139,7 +139,7 @@ fi
 echo -e "${GREEN}Configuration check complete!${NC}"
 
 # ============================================
-# Summary
+# 摘要
 # ============================================
 
 echo ""

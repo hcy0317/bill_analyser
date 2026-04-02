@@ -1,12 +1,12 @@
 """
-ICBC Parser - 工商银行账单解析器
+工商银行账单解析器
 
 解析中国工商银行账单导出的 CSV/Excel 文件。
 支持格式：
 1. CSV格式（编码gbk）
 2. XLS/XLSX格式（第2行为列名，第3行开始为数据）
 
-输出标准格式:
+输出标准格式：
 - date: 交易时间 (YYYY-MM-DD HH:MM:SS)
 - amount: 金额 (支出为负, 收入为正)
 - type: 类型 (收入/支出/转账)
@@ -75,7 +75,7 @@ class ICBCParser(ParserBase):
     def _detect_file_format(self, file_path: str) -> tuple:
         """检测Excel文件格式
 
-        Returns:
+        返回：
             tuple: (is_html_format: bool, error: Optional[str])
         """
         try:

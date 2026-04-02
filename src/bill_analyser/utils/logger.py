@@ -1,5 +1,5 @@
 """
-Logger Module - 异步日志模块
+异步日志模块
 
 提供异步日志记录功能，支持按日期自动滚动和统一的日志格式。
 日志格式：时间戳 | 线程名 | 级别 | 类名.方法名 | 消息
@@ -60,7 +60,7 @@ class DailyFileHandler(logging.FileHandler):
     def __init__(self, log_dir: Path, prefix: str = "bill_analyser", encoding: str = "utf-8"):
         """初始化处理器
 
-        Args:
+        参数：
             log_dir: 日志目录
             prefix: 日志文件名前缀
             encoding: 文件编码
@@ -296,10 +296,10 @@ def get_logger(name: str | None = None) -> logging.Logger:
     """
     获取日志器
 
-    Args:
+    参数：
         name: 日志器名称
 
-    Returns:
+    返回：
         logging.Logger: 日志器实例
     """
     return _logger_instance.get_logger(name)
@@ -447,7 +447,7 @@ def log_step(step_name: str):
     """
     记录关键步骤
 
-    Args:
+    参数：
         step_name: 步骤名称
     """
 

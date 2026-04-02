@@ -543,7 +543,7 @@
                                                             {{ getGroupExecutionRateText(group) }}
                                                         </span>
                                                     </div>
-                                                    <!-- 一级分类预算操作按钮（hover时显示） -->
+                                                        <!-- 一级分类预算操作按钮（悬停时显示） -->
                                                     <div class="budget-row-actions d-flex align-center">
                                                         <!-- 如果没有一级分类预算，显示添加按钮 -->
                                                         <v-btn v-if="!group.primaryBudget"
@@ -933,7 +933,7 @@
             @settings:change="onCategoryFilterDialogChange" />
     </v-dialog>
 
-    <!-- 自定义日期范围对话框 - 使用DateRangeSelectionDialog组件 -->
+    <!-- 自定义日期范围对话框 - 使用日期范围选择对话框组件 -->
     <date-range-selection-dialog
         :title="tt('Select Custom Date Range')"
         :min-time="customMinDatetime"
@@ -1103,7 +1103,7 @@ const CATEGORY_CHART_PALETTE = [
 ];
 
 // ============================================================================
-// Props
+// 属性
 // ============================================================================
 
 const props = defineProps<{
@@ -1172,7 +1172,7 @@ const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
 // 周期筛选器
 const activePeriodFilter = ref<string>('thisMonth');
 
-// 自定义日期范围 - 使用DateRangeSelectionDialog组件
+// 自定义日期范围 - 使用日期范围选择对话框组件
 const showCustomDateDialog = ref<boolean>(false);
 const customMinDatetime = ref<number>(getTodayFirstUnixTime());  // Unix时间戳（秒）
 const customMaxDatetime = ref<number>(getCurrentUnixTime());      // Unix时间戳（秒）
@@ -1212,7 +1212,7 @@ interface FilterPreset {
 
 const filterPresets = ref<FilterPreset[]>([]);
 
-// 从localStorage加载预设
+// 从本地存储加载预设
 function loadPresetsFromStorage(): void {
     const stored = localStorage.getItem('budgetFilterPresets');
     if (stored) {
@@ -1224,7 +1224,7 @@ function loadPresetsFromStorage(): void {
     }
 }
 
-// 保存预设到localStorage
+// 将预设保存到本地存储
 function savePresetsToStorage(): void {
     localStorage.setItem('budgetFilterPresets', JSON.stringify(filterPresets.value));
 }
@@ -1282,7 +1282,7 @@ const visiblePeriodFilters = computed<PeriodFilter[]>(() => {
         : allPeriodFilters.value;
 });
 
-// 当前选中的周期筛选索引（用于 v-tabs）
+// 当前选中的周期筛选索引（用于标签页）
 const activePeriodFilterIndex = computed<number>(() => {
     return visiblePeriodFilters.value.findIndex(f => f.value === activePeriodFilter.value);
 });
@@ -2389,12 +2389,12 @@ function setPeriodFilter(filter: string): void {
  * 自定义日期范围变化处理
  */
 function onCustomDateRangeChange(minUnixTime: number, maxUnixTime: number): void {
-    // 更新Unix时间戳
+    // 更新时间戳
     customMinDatetime.value = minUnixTime;
     customMaxDatetime.value = maxUnixTime;
 
-    // 转换为日期字符串 (YYYY-MM-DD)
-    // Unix时间戳是秒，需要乘以1000转换为毫秒
+    // 转换为日期字符串（四位年-两位月-两位日）
+    // 时间戳单位是秒，需要乘以 1000 转换为毫秒
     const minDate = new Date(minUnixTime * 1000);
     const maxDate = new Date(maxUnixTime * 1000);
     customStartDate.value = `${minDate.getFullYear()}-${String(minDate.getMonth() + 1).padStart(2, '0')}-${String(minDate.getDate()).padStart(2, '0')}`;
@@ -2757,7 +2757,7 @@ function getExecutionRateColor(rate: number): string {
 function getBudgetProgressColor(budget: Budget): string {
     // 优先使用分类颜色
     if (budget.categoryColor) {
-        // 将hex颜色转换为CSS颜色值（添加#前缀）
+        // 将十六进制颜色转换为样式颜色值（添加 # 前缀）
         return `#${budget.categoryColor}`;
     }
     // 降级使用执行率颜色
@@ -2805,8 +2805,8 @@ function getExecutionRateColorClass(rate: number): string {
  *
  * 计算规则：
  * 1. 如果有一级分类预算且有已花费金额，使用一级分类的执行率
- * 2. 如果有一级分类预算但没有已花费，用 totalSpent / primaryAmount 计算
- * 3. 如果没有一级分类预算，用 totalSpent / totalAmount 计算（二级之和）
+ * 2. 如果有一级分类预算但没有已花费，则按“总已花费 / 一级预算金额”计算
+ * 3. 如果没有一级分类预算，则按“总已花费 / 总预算金额”计算（二级分类之和）
  */
 function getGroupExecutionRate(group: BudgetGroup): number {
     // 如果有一级分类预算
@@ -2815,7 +2815,7 @@ function getGroupExecutionRate(group: BudgetGroup): number {
         if (group.primaryBudget.executionRate > 0) {
             return group.primaryBudget.executionRate;
         }
-        // 否则用 totalSpent / primaryAmount 计算
+        // 否则按“总已花费 / 一级预算金额”计算
         if (group.primaryAmount > 0) {
             return (group.totalSpent / group.primaryAmount) * 100;
         }
@@ -2838,7 +2838,7 @@ function getGroupExecutionRateText(group: BudgetGroup): string {
 }
 
 /**
- * 获取预测置信等级文案 key
+ * 获取预测置信等级文案键
  */
 function getForecastConfidenceLabel(confidence?: 'high' | 'medium' | 'low' | null): string {
     switch (confidence) {
@@ -3188,7 +3188,7 @@ async function exportBudgets(): Promise<void> {
     try {
         const result = await budgetStore.exportBudgets();
 
-        // 下载JSON文件
+        // 下载导出的预算文件
         const dataStr = JSON.stringify(result.budgets, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -3358,7 +3358,7 @@ watch(filterKeyword, (newVal) => {
     width: 100%;
 }
 
-/* 使用 :deep() 穿透到子组件 */
+/* 使用深层穿透选择器作用到子组件 */
 .budget-nav-buttons:deep(.v-btn) {
     width: 100%;
 }

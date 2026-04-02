@@ -146,9 +146,9 @@ export function useNumberInputBase(props: NumberInputProps, emit: NumberInputEmi
     });
 
     return {
-        // states
+        // 状态
         currentValue,
-        // functions
+        // 函数
         onKeyUpDown,
         onPaste
     }

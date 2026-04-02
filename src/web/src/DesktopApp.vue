@@ -107,11 +107,11 @@ setExpenseAndIncomeAmountColor(userStore.currentUserExpenseAmountColor, userStor
 
 if (isUserLogined() && initialRoutePath !== '/verify_email' && initialRoutePath !== '/resetpassword' && initialRoutePath !== '/oauth2_callback') {
     if (!settingsStore.appSettings.applicationLock || isUserUnlocked()) {
-        // 禁用自动Token refresh - Token有效期7天，启动时不可能过期
-        // 如果真的过期，API请求会返回401，响应拦截器会处理
+        // 禁用自动刷新令牌 - 令牌有效期为 7 天，启动时不可能过期
+        // 如果真的过期，接口请求会返回 401，由响应拦截器处理
         logger.info('[DesktopApp] Skipping auto token refresh on app startup - token valid for 7 days');
 
-        // auto refresh exchange rates data
+        // 自动刷新汇率数据
         if (settingsStore.appSettings.autoUpdateExchangeRatesData) {
             exchangeRatesStore.getLatestExchangeRates({ silent: true, force: false });
         }

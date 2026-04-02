@@ -97,7 +97,7 @@ export interface TransactionTotalAmount {
 
 export interface TransactionMonthList {
     readonly year: number;
-    readonly month: number; // 1-based (1 = January, 12 = December)
+    readonly month: number; // 从 1 开始计数（1 = 一月，12 = 十二月）
     readonly yearDashMonth: TextualYearMonth;
     opened: boolean;
     readonly items: Transaction[];
@@ -388,13 +388,13 @@ export const useTransactionsStore = defineStore('transactions', () => {
                 dailyTotalAmount.income += amount;
             } else if (transaction.type === TransactionType.Transfer && totalAccountIdsCount > 0) {
                 if (allAccountIdsMap[transaction.sourceAccountId] && allAccountIdsMap[transaction.destinationAccountId]) {
-                    // Do Nothing
+                    // 不做处理
                 } else if (transaction.sourceAccount && transaction.destinationAccount && allAccountIdsMap[transaction.sourceAccount.parentId] && allAccountIdsMap[transaction.destinationAccount.parentId]) {
-                    // Do Nothing
+                    // 不做处理
                 } else if (transaction.sourceAccount && allAccountIdsMap[transaction.sourceAccount.parentId] && allAccountIdsMap[transaction.destinationAccountId]) {
-                    // Do Nothing
+                    // 不做处理
                 } else if (transaction.destinationAccount && allAccountIdsMap[transaction.sourceAccountId] && allAccountIdsMap[transaction.destinationAccount.parentId]) {
-                    // Do Nothing
+                    // 不做处理
                 } else if (allAccountIdsMap[transaction.sourceAccountId] || (transaction.sourceAccount && allAccountIdsMap[transaction.sourceAccount.parentId])) {
                     totalExpense += amount;
                     dailyTotalAmount.expense += amount;
@@ -429,7 +429,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             if (transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId]) {
                 transaction.setCategory(transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId]);
             } else {
-                // Fallback to default category if not found
+                // 若未找到分类，则回退到默认分类
                 const defaultCategory = TransactionCategory.createNewCategory(transaction.type);
                 defaultCategory.id = transaction.categoryId;
                 defaultCategory.name = 'Unknown';
@@ -1096,7 +1096,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     updateTransactionReconciliationStatementInvalidState(true);
                 }
 
-                // Force reload accounts to ensure balance is up to date
+                // 强制重新加载账户，确保余额为最新值
                 accountsStore.updateAccountListInvalidState(true);
                 accountsStore.loadAllAccounts({ force: true });
 
@@ -1279,11 +1279,11 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     updateTransactionReconciliationStatementInvalidState(true);
                 }
 
-                // Force reload accounts to ensure balance is up to date
+                // 强制重新加载账户，确保余额为最新值
                 accountsStore.updateAccountListInvalidState(true);
                 accountsStore.loadAllAccounts({ force: true });
 
-                // Force reload transaction list
+                // 强制重新加载交易列表
                 updateTransactionListInvalidState(true);
 
                 if (!overviewStore.transactionOverviewStateInvalid) {
@@ -1432,14 +1432,14 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
 
     return {
-        // states
+        // 状态
         transactionDraft,
         transactionsFilter,
         transactions,
         transactionsNextTimeId,
         transactionListStateInvalid,
         transactionReconciliationStatementStateInvalid,
-        // computed states
+        // 计算状态
         allFilterCategoryIds,
         allFilterAccountIds,
         allFilterTagIds,
@@ -1448,7 +1448,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         allFilterTagIdsCount,
         noTransaction,
         hasMoreTransaction,
-        // functions
+        // 函数
         initTransactionDraft,
         isTransactionDraftModified,
         saveTransactionDraft,

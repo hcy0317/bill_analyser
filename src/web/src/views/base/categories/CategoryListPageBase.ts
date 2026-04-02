@@ -19,10 +19,10 @@ export function useCategoryListPageBase() {
     });
 
     return {
-        // states
+        // 状态
         loading,
         primaryCategoryId,
-        // computed states
+        // 计算状态
         currentPrimaryCategory
     };
 }

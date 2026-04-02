@@ -64,9 +64,9 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
     }
 
     return {
-        // constants
+        // 常量
         version,
-        // states
+        // 状态
         username,
         password,
         passcode,
@@ -77,13 +77,13 @@ export function useLoginPageBase(platform: 'mobile' | 'desktop') {
         loggingInByPassword,
         loggingInByOAuth2,
         verifying,
-        // computed states
+        // 计算状态
         inputIsEmpty,
         twoFAInputIsEmpty,
         oauth2LoginUrl,
         oauth2LoginDisplayName,
         tips,
-        // functions
+        // 函数
         doAfterLogin
     }
 }

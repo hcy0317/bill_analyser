@@ -54,11 +54,11 @@ export function useScheduleFrequencySelectionBase() {
     }
 
     return {
-        // computed states
+        // 计算状态
         allTransactionScheduledFrequencyTypes,
         allWeekDays,
         allAvailableMonthDays,
-        // functions
+        // 函数
         getFrequencyValues
     };
 }

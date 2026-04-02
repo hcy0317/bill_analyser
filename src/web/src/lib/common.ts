@@ -185,9 +185,9 @@ export function getObjectOwnFieldCount(object: object): number {
 }
 
 export function replaceAll(value: string, originalValue: string, targetValue: string): string {
-    // Escape special characters in originalValue to safely use it in a regex pattern.
-    // This ensures that characters like . (dot), * (asterisk), +, ?, etc. are treated literally,
-    // rather than as special regex symbols.
+    // 对 originalValue 中的特殊字符进行转义，确保它能安全地用于正则表达式。
+    // 这样像 .（点）、*（星号）、+、? 等字符会按字面量处理，
+    // 而不会被当作正则特殊符号。
     const escapedOriginalValue = originalValue.replace(/([.*+?^=!:${}()|\-/\\])/g, '\\$1');
 
     return value.replace(new RegExp(escapedOriginalValue, 'g'), targetValue);

@@ -346,8 +346,8 @@ export function useTransactionListPageBase() {
         if (pageType.value !== type) {
             pageType.value = type;
 
-            // If switching to calendar view, we might need to load data differently
-            // But for now, just changing the view type is enough as the data is computed
+            // 如果切换到日历视图，理论上可能需要采用不同的数据加载方式
+            // 但目前只切换视图类型就足够了，因为数据本身已经通过计算属性得出
         }
     }
 
@@ -390,13 +390,13 @@ export function useTransactionListPageBase() {
     }
 
     return {
-        // states
+        // 状态
         pageType,
         loading,
         customMinDatetime,
         customMaxDatetime,
         currentCalendarDate,
-        // computed states
+        // 计算状态
         currentTimezoneOffsetMinutes,
         firstDayOfWeek,
         fiscalYearStart,
@@ -433,7 +433,7 @@ export function useTransactionListPageBase() {
         transactionCalendarMaxDate,
         currentMonthTransactionData,
         canAddTransaction,
-        // functions
+        // 函数
         getDisplayTime,
         getDisplayLongDate,
         getDisplayLongYearMonth,
@@ -442,7 +442,7 @@ export function useTransactionListPageBase() {
         getDisplayAmount,
         getDisplayMonthTotalAmount,
         getTransactionTypeName,
-        // actions
+        // 操作
         changePageType,
         changeDateFilter,
         changeTypeFilter,

@@ -1,4 +1,4 @@
-"""End-to-end acceptance checklist for Bill Analyser.
+r"""End-to-end acceptance checklist for Bill Analyser.
 
 Usage:
     .\.venv\Scripts\python tests\e2e_acceptance_check.py
@@ -129,7 +129,7 @@ def run_checklist(
     """Run full acceptance checklist and return result list."""
     results: list[CheckResult] = []
 
-    # 0) health
+    # 0) 健康检查
     try:
         health_status, _ = _request_json("GET", f"{base_url}/api/health")
     except URLError as error:
@@ -138,7 +138,7 @@ def run_checklist(
     if health_status != 200:
         raise RuntimeError(f"Backend health check failed: status={health_status}")
 
-    # 1) login
+    # 1) 登录
     login_status, login_body = _request_json(
         "POST",
         f"{base_url}/api/authorize.json",
@@ -171,7 +171,7 @@ def run_checklist(
 
     auth_headers = {"Authorization": f"Bearer {token}"}
 
-    # 2) exchange rates include CNY=1.0
+    # 2) 汇率结果中应包含 CNY=1.0
     rate_status, rate_body = _request_json(
         "GET",
         f"{base_url}/api/statistics/exchange-rates?base_currency=CNY",
@@ -188,7 +188,7 @@ def run_checklist(
         )
     )
 
-    # 3) statistics date filter pass-through
+    # 3) 统计日期筛选透传
     now = datetime.now()
     this_year_start = int(datetime(now.year, 1, 1).timestamp())
     this_year_end = int(datetime(now.year, 12, 31, 23, 59, 59).timestamp())
@@ -224,7 +224,7 @@ def run_checklist(
             )
         )
 
-    # 4) categories + keywords propagation
+    # 4) 分类接口与关键词透传
     category_status, category_body = _request_json(
         "GET",
         f"{base_url}/api/categories/",

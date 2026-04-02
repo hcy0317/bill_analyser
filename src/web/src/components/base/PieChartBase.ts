@@ -88,9 +88,9 @@ export function usePieChartBase(props: CommonPieChartProps) {
     });
 
     return {
-        // states
+        // 状态
         selectedIndex,
-        // computed states
+        // 计算状态
         validItems
     };
 }

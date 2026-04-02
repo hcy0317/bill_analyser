@@ -719,7 +719,7 @@ export const useAccountsStore = defineStore('accounts', () => {
             }
         }
 
-        if (subAccountId) { // not found specified id in sub accounts
+        if (subAccountId) { // 未在子账户中找到指定 id
             return null;
         }
 
@@ -1207,18 +1207,18 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
 
     return {
-        // states
+        // 状态
         allAccounts,
         allAccountsMap,
         allCategorizedAccountsMap,
         accountListStateInvalid,
-        // computed states
+        // 计算状态
         allPlainAccounts,
         allMixedPlainAccounts,
         allVisiblePlainAccounts,
         allAvailableAccountsCount,
         allVisibleAccountsCount,
-        // functions
+        // 函数
         updateAccountListInvalidState,
         resetAccounts,
         getFirstShowingIds,

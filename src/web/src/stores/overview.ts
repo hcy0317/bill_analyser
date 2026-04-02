@@ -379,14 +379,14 @@ export const useOverviewStore = defineStore('overview', () => {
     }
 
     return {
-        // states
+        // 状态
         transactionDataRange,
         transactionOverviewOptions,
         transactionOverviewData,
         transactionOverviewStateInvalid,
-        // computed states,
+        // 计算状态
         transactionOverview,
-        // functions
+        // 函数
         updateTransactionOverviewInvalidState,
         resetTransactionOverview,
         loadTransactionOverview,

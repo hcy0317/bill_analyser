@@ -1,5 +1,5 @@
-# Build Frontend Static Assets Script
-# Bill Analyser System
+# 构建前端静态资源脚本
+# Bill Analyser 系统
 
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  Build Frontend Static Assets" -ForegroundColor Cyan

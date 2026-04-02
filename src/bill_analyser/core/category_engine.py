@@ -1,5 +1,5 @@
 """
-Category Engine V2 Module - 升级版账单分类引擎
+分类引擎 V2 模块
 
 支持复杂关键词匹配: OR:|&NOT:|&AND:
 支持按金额正负匹配对应类型分类（正=收入, 负=支出）
@@ -14,8 +14,8 @@ v6.74: 缓存失效机制 - 确保修改分类关键词后能使用最新规则
        - KeywordMatcher.clear_cache(): 清空规则缓存和正则缓存
        - CategoryEngine.invalidate_cache(): 公开方法，供外部调用
        - _precompile_rules(): 在预编译前先清空缓存
-Author: Bill Analyser Team
-Updated: 2025-12-06
+作者：Bill Analyser Team
+更新时间：2025-12-06
 """
 
 import re
@@ -32,7 +32,7 @@ class CompiledRule:
 
     将规则字符串解析为结构化数据，避免每次匹配时重复解析。
 
-    Attributes:
+    属性：
         or_blocks: OR块列表，每个OR块是一个关键词列表，所有OR块必须匹配
         not_patterns: NOT模式列表，任一匹配则失败
         and_patterns: AND模式列表，必须全部匹配
@@ -94,10 +94,10 @@ class KeywordMatcher:
         v6.73新增：将规则字符串解析为CompiledRule对象，避免每次匹配时重复解析。
         结果会被缓存，相同规则只解析一次。
 
-        Args:
+        参数：
             rule: 关键词规则字符串
 
-        Returns:
+        返回：
             CompiledRule: 预编译的规则对象
         """
         # pylint: disable=too-many-branches
@@ -177,11 +177,11 @@ class KeywordMatcher:
         v6.73新增：使用预编译的CompiledRule对象进行快速匹配，
         避免每次匹配时重复解析规则字符串。
 
-        Args:
+        参数：
             text: 要匹配的文本
             compiled: 预编译的规则对象
 
-        Returns:
+        返回：
             bool: 是否匹配
         """
         # pylint: disable=too-many-return-statements

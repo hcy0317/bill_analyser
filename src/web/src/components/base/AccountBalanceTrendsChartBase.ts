@@ -251,7 +251,7 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
                     averageBalance: lastAverageBalance
                 });
             } else if (props.dateAggregationType === ChartDateAggregationType.Day.type) {
-                // If there is no data for this day, use the last closing balance
+                // 如果当天没有数据，则使用上一笔期末余额
                 // 优化：聚合连续无变动的天到一个点
                 consecutiveNoChangeCount++;
 
@@ -299,7 +299,7 @@ export function useAccountBalanceTrendsChartBase(props: CommonAccountBalanceTren
     });
 
     return {
-        // computed states
+        // 计算状态
         allDateRanges,
         allDataItems,
         allDisplayDateRanges

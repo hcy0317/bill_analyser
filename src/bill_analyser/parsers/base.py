@@ -1,11 +1,11 @@
 """
-Parser Base Module - 账单解析器基类
+解析器基类模块
 
 定义账单解析器的抽象接口和标准化输出格式。
 
-标准账单格式 (StandardBill):
-    - date: 交易时间 (str, YYYY-MM-DD HH:MM:SS格式, 必须包含时分秒)
-    - amount: 金额 (float, 带正负号: 支出为负, 收入为正)
+标准账单格式（StandardBill）：
+    - date: 交易时间 (str, YYYY-MM-DD HH:MM:SS 格式, 必须包含时分秒)
+    - amount: 金额 (float, 带正负号：支出为负, 收入为正)
     - type: 类型 (str, 收入/支出/转账/投资/退款)
     - description: 描述聚合字段 (str, 聚合商品说明/交易对方/对方账号/备注/交易摘要等)
     - source_account_id: 来源账户ID (str, 解析器标识如 'wechat'/'alipay'/'icbc' 等)
@@ -37,7 +37,7 @@ class StandardBill:
     amount: float  # 带正负号：支出为负，收入为正
     type: str  # 收入/支出/转账/投资/退款
     description: str  # 聚合描述字段
-    source_account_id: str  # 解析器标识: wechat/alipay/icbc/cmbc/abc/ccb
+    source_account_id: str  # 解析器标识：wechat/alipay/icbc/cmbc/abc/ccb
 
     # 可选字段
     counterparty: str = ""  # 交易对方
@@ -72,7 +72,7 @@ class StandardBill:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "StandardBill":
+    def from_dict(cls, data: dict[str, Any]) -> StandardBill:
         """从字典创建实例"""
         return cls(
             date=data.get("date", ""),
@@ -121,10 +121,10 @@ class ParserBase(ABC):
         """
         解析账单文件
 
-        Args:
+        参数：
             file_path: 账单文件路径
 
-        Returns:
+        返回：
             List[Dict]: 标准格式账单列表，每个账单包含以下字段:
                 - date: 交易时间 (str, YYYY-MM-DD HH:MM:SS格式)
                 - amount: 金额 (float, 支出为负, 收入为正)
@@ -143,10 +143,10 @@ class ParserBase(ABC):
         """
         判断是否能解析此文件
 
-        Args:
+        参数：
             file_path: 文件路径
 
-        Returns:
+        返回：
             bool: 是否能解析
         """
         raise NotImplementedError
@@ -156,10 +156,10 @@ class ParserBase(ABC):
         """
         验证文件是否存在且格式正确
 
-        Args:
+        参数：
             file_path: 文件路径
 
-        Returns:
+        返回：
             bool: 是否有效
         """
         path = Path(file_path)
@@ -214,10 +214,10 @@ class ParserBase(ABC):
         """
         规范化日期格式为 YYYY-MM-DD HH:MM:SS
 
-        Args:
+        参数：
             date_str: 日期字符串
 
-        Returns:
+        返回：
             str: 规范化后的日期字符串
         """
         # 常见日期格式
@@ -247,10 +247,10 @@ class ParserBase(ABC):
         """
         规范化金额格式
 
-        Args:
+        参数：
             amount_str: 金额字符串
 
-        Returns:
+        返回：
             float: 金额数值
         """
         try:
@@ -273,10 +273,10 @@ class ParserBase(ABC):
         """
         规范化交易类型
 
-        Args:
+        参数：
             type_str: 类型字符串
 
-        Returns:
+        返回：
             str: 规范化的类型（收入/支出/转账/退款）
         """
         type_map = {
@@ -315,10 +315,10 @@ class ParserBase(ABC):
         聚合字段包括：商品说明、交易对方、对方账号、备注、交易摘要等
         便于后续关键词匹配分类
 
-        Args:
+        参数：
             bill: 账单字典
 
-        Returns:
+        返回：
             str: 聚合后的描述字符串
         """
         # 可能包含有用信息的字段列表
@@ -371,10 +371,10 @@ class ParserBase(ABC):
         - original_type: 原始交易类型
         - original_category: 原始分类
 
-        Args:
+        参数：
             bills: 原始账单列表
 
-        Returns:
+        返回：
             List[Dict]: 标准格式账单列表
         """
         # pylint: disable=too-many-branches

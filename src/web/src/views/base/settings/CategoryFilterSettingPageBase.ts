@@ -168,18 +168,18 @@ export function useCategoryFilterSettingPageBase(type?: CategoryFilterType, allo
     }
 
     return {
-        // states
+        // 状态
         loading,
         showHidden,
         filterCategoryIds,
-        // computed states
+        // 计算状态
         title,
         applyText,
         allTransactionCategories,
         hasAnyAvailableCategory,
         hasAnyVisibleCategory,
         hasAvailableCategory,
-        // functions
+        // 函数
         isCategoryChecked,
         getCategoryTypeName,
         loadFilterCategoryIds,

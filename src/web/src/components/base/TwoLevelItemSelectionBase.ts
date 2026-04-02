@@ -148,12 +148,12 @@ export function useTwoLevelItemSelectionBase(props: TwoLevelItemSelectionBasePro
     }
 
     return {
-        // states
+        // 状态
         filterContent,
-        // computed states
+        // 计算状态
         visibleItemsCount,
         filteredItems,
-        // functions
+        // 函数
         getFilteredSubItems,
         isSecondaryValueSelected,
         getSelectedSecondaryItem,

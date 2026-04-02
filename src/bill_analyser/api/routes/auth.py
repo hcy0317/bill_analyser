@@ -1,7 +1,7 @@
 """
-Authentication Routes - 认证相关API端点
+认证路由
 
-提供用户登录、注册、登出等认证功能
+提供用户登录、注册、登出等认证功能。
 """
 
 # pylint: disable=too-many-lines,broad-exception-caught,line-too-long,import-outside-toplevel,duplicate-code
@@ -770,7 +770,7 @@ def generate_jwt_token(user_id: int, username: str, config: dict) -> dict:
     """
     生成JWT令牌和刷新令牌
 
-    Returns:
+    返回：
         dict: {
             'access_token': str,
             'refresh_token': str,
@@ -871,7 +871,7 @@ def validate_password(password: str, config: dict) -> tuple:
     """
     验证密码强度
 
-    Returns:
+    返回：
         tuple: (is_valid: bool, error_message: str)
     """
     min_length = config.get("password_min_length", 8)
@@ -1015,13 +1015,13 @@ def login():
     """
     用户登录端点
 
-    Request Body:
+    请求体：
         {
             "loginName": "username or email",
             "password": "password"
         }
 
-    Response:
+    响应：
         {
             "success": true,
             "result": {
@@ -1269,7 +1269,7 @@ def register():
     """
     用户注册端点
 
-    Request Body:
+    请求体：
         {
             "username": "username",
             "email": "email@example.com",
@@ -1737,7 +1737,7 @@ def logout():
     """
     用户登出端点
 
-    需要Authorization头
+    需要 Authorization 请求头。
     """
     try:
         auth_header = request.headers.get("Authorization", "")
@@ -1787,11 +1787,11 @@ def logout():
 
         loop.close()
 
-        # 🆕 返回result字段以匹配前端期望 (stores/index.ts Line 428)
+        # 🆕 返回 result 字段以匹配前端期望（stores/index.ts 第 428 行）
         return jsonify(
             {
                 "success": True,
-                "result": True,  # ← 前端检查这个字段！
+                "result": True,  # ← 前端会检查这个字段！
                 "message": "Logged out successfully",
             }
         )
@@ -1807,7 +1807,7 @@ def refresh_token():
     """
     刷新令牌端点
 
-    Request Body:
+    请求体：
         {
             "refreshToken": "refresh_token_string"
         }
@@ -1859,7 +1859,7 @@ def refresh_token():
             return jsonify({"success": False, "error": "User not found", "message": "User does not exist"}), 404
 
         # 查找旧会话并更新
-        # old_refresh_hash = calculate_token_hash(refresh_token_str)  # 保留以供将来使用
+        # old_refresh_hash = calculate_token_hash(refresh_token_str)  # 保留以便后续使用
         new_token_hash = calculate_token_hash(tokens["access_token"])
         new_refresh_hash = calculate_token_hash(tokens["refresh_token"])
 
@@ -2038,8 +2038,8 @@ def profile():
         logger.info("用户资料更新并返回: user_id=%s, updated_fields=%s", user_id, len(update_data))
         logger.debug("返回的用户资料: %s", user_info)
 
-        # v6.79: 前端 updateUserProfile() 期望 result.user 格式
-        # 见 index.ts 第 606 行: if (data.result.user && isObject(data.result.user))
+        # v6.79: 前端 updateUserProfile() 期望 result.user 结构
+        # 见 index.ts 第 606 行：if (data.result.user && isObject(data.result.user))
         return jsonify({"success": True, "result": {"user": user_info}})
 
     except Exception as e:
@@ -2515,7 +2515,7 @@ def list_tokens():
 
         # 转换为前端期望的格式
         tokens = []
-        # seen_devices = set()  # Unused
+        # seen_devices = set()  # 未使用
 
         for session in sessions:
             user_agent = session.get("user_agent", "")
@@ -2524,8 +2524,8 @@ def list_tokens():
             is_current = session["id"] == session_id
             last_seen = _datetime_to_unix_millis(session.get("last_activity_at") or session.get("created_at", ""))
 
-            # 简单的设备标识: IP + UA的前50个字符
-            # device_key = f"{ip_address}_{user_agent[:50]}" # Unused
+            # 简单设备标识：IP + UA 的前 50 个字符
+            # device_key = f"{ip_address}_{user_agent[:50]}" # 未使用
 
             # 解析User-Agent提取设备信息
             device_name = parse_user_agent(user_agent)

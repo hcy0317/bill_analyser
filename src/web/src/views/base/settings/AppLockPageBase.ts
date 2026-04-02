@@ -24,9 +24,9 @@ export function useAppLockPageBase() {
     });
 
     return {
-        // states
+        // 状态
         isSupportedWebAuthn,
-        // computed states
+        // 计算状态
         isEnableApplicationLock,
         isEnableApplicationLockWebAuthn
     };

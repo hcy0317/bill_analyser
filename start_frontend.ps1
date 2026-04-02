@@ -1,4 +1,4 @@
-# Frontend Server Launcher
+# 前端服务器启动脚本
 
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  Bill Analyser - Frontend Server" -ForegroundColor Cyan

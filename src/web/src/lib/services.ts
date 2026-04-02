@@ -732,9 +732,9 @@ axios.interceptors.response.use((response: any) => {
     }
 
     if (error.response && !error.response.config.ignoreError) {
-        // Handle standard 401 Unauthorized status
+        // 处理标准 401 未授权状态
         if (error.response.status === 401) {
-            // Only reload if we are not already on the login page
+            // 仅当当前不在登录页时才刷新
             if (!window.location.hash.includes('/login')) {
                 clearCurrentTokenAndUserInfo(false);
                 location.reload();
@@ -745,13 +745,13 @@ axios.interceptors.response.use((response: any) => {
         if (error.response.data && error.response.data.errorCode) {
             const errorCode = error.response.data.errorCode;
 
-            if (errorCode === 202001 // unauthorized access
-                || errorCode === 202002 // current token is invalid
-                || errorCode === 202003 // current token is expired
-                || errorCode === 202004 // current token type is invalid
-                || errorCode === 202005 // current token requires two-factor authorization
-                || errorCode === 202006 // current token does not require two-factor authorization
-                || errorCode === 202012 // token is empty
+            if (errorCode === 202001 // 未授权访问
+                || errorCode === 202002 // 当前 token 无效
+                || errorCode === 202003 // 当前 token 已过期
+                || errorCode === 202004 // 当前 token 类型无效
+                || errorCode === 202005 // 当前 token 需要双因素认证
+                || errorCode === 202006 // 当前 token 不需要双因素认证
+                || errorCode === 202012 // token 为空
             ) {
                 clearCurrentTokenAndUserInfo(false);
                 location.reload();
@@ -1012,7 +1012,7 @@ export default {
         logger.info('[getAllAccounts] Making request with visibleOnly=' + visibleOnly);
         return axios.get<ApiResponse<AccountInfoResponse[]>>('accounts?visible_only=' + visibleOnly, {
             headers: {} as AxiosRequestHeaders,  // 显式创建headers对象
-            ignoreError: true // Prevent global 401 handler from reloading page immediately
+            ignoreError: true // 防止全局 401 处理器立即刷新页面
         } as ApiRequestConfig);
     },
     getAccount: ({ id }: { id: string }): ApiResponsePromise<AccountInfoResponse> => {

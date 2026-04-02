@@ -78,7 +78,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
 
                 if (data.result.token) {
                     updateCurrentToken(data.result.token);
-                    
+
                     if (data.result.refreshToken && isString(data.result.refreshToken)) {
                         updateCurrentRefreshToken(data.result.refreshToken);
                     }
@@ -150,7 +150,7 @@ export const useTwoFactorAuthStore = defineStore('twoFactorAuth', () => {
     }
 
     return {
-        // functions
+        // 函数
         get2FAStatus,
         enable2FA,
         confirmEnable2FA,

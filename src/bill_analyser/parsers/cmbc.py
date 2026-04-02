@@ -1,9 +1,9 @@
 """
-CMBC Parser - 民生银行账单解析器
+民生银行账单解析器
 
 解析中国民生银行账单导出的 CSV/Excel 文件。
 
-输出标准格式:
+输出标准格式：
 - date: 交易时间 (YYYY-MM-DD HH:MM:SS)
 - amount: 金额 (支出为负, 收入为正)
 - type: 类型 (收入/支出)
@@ -137,7 +137,7 @@ class CMBCParser(ParserBase):
             return False
 
     def _parse_html_xls(self, file_path: str) -> list[dict[str, Any]]:
-        """解析HTML格式伪装的.xls文件（民生银行网银导出格式）"""
+        """解析伪装为 .xls 的 HTML 文件（民生银行网银导出格式）。"""
         bills = []
 
         try:

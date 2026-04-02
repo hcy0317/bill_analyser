@@ -1,5 +1,5 @@
 """
-Statistics API Routes - 统计分析相关API端点
+统计分析 API 路由
 """
 
 # pylint: disable=too-many-lines
@@ -215,7 +215,7 @@ def get_comparison():
     """获取对比数据"""
     try:
         period = request.args.get("period", "month")
-        compare_type = request.args.get("type", "category")  # category, month, year
+        compare_type = request.args.get("type", "category")  # 可选值：category、month、year
 
         db = get_app_context()
         analyzer = Analyzer(db=db)
@@ -254,7 +254,7 @@ def get_category_analysis():
 def get_trend():
     """获取趋势数据"""
     try:
-        granularity = request.args.get("granularity", "month")  # day/week/month
+        granularity = request.args.get("granularity", "month")  # 可选值：day/week/month
         category = request.args.get("category")
 
         db = get_app_context()
@@ -396,18 +396,18 @@ def get_transaction_amounts():  # pylint: disable=too-many-locals
     """
     获取多个时间段的交易金额统计
 
-    Query参数:
+    查询参数：
         query: 时间段查询字符串，格式: "period1_start_end|period2_start_end"
         use_transaction_timezone: 是否使用交易时区 (可选)
 
-    Returns:
+    返回：
         JSON响应，包含各时间段的收入/支出/净额统计
     """
     try:
         logger.info("Amounts API called with args: %s", request.args)
         query_str = request.args.get("query", "")
         if not query_str:
-            # 尝试兼容旧版API参数 'periods'
+            # 尝试兼容旧版 API 参数 'periods'
             query_str = request.args.get("periods", "")
 
         # use_transaction_timezone = request.args.get('use_transaction_timezone', 'false').lower() == 'true'  # noqa: E501 # pylint: disable=line-too-long
@@ -451,15 +451,15 @@ def get_transaction_amounts():  # pylint: disable=too-many-locals
             expense_cents = yuan_to_cents(total_expense)
 
             # 构造前端期望的数据格式
-            # 前端期望: { startTime, endTime, amounts: [{ currency, incomeAmount, expenseAmount }] }
+            # 前端期望结构：{ startTime, endTime, amounts: [{ currency, incomeAmount, expenseAmount }] }
             results[period_name] = {
                 "startTime": int(start_timestamp),
                 "endTime": int(end_timestamp),
                 "amounts": [
                     {
-                        "currency": "CNY",  # 默认人民币，后续可以支持多货币
-                        "incomeAmount": income_cents,  # 单位：分(cents)
-                        "expenseAmount": expense_cents,  # 单位：分(cents)
+                        "currency": "CNY",  # 默认人民币，后续可扩展多币种
+                        "incomeAmount": income_cents,  # 单位：分（cents）
+                        "expenseAmount": expense_cents,  # 单位：分（cents）
                     }
                 ],
             }
@@ -476,7 +476,7 @@ def get_transaction_amounts():  # pylint: disable=too-many-locals
 @require_auth
 def get_exchange_rates():
     """
-    获取最新汇率数据 (v6.79: 从网络获取实时汇率，支持3个以上数据源)
+    获取最新汇率数据（v6.79：从网络获取实时汇率，支持 3 个以上数据源）
 
     数据源优先级:
         1. ECB (欧洲央行) - 支持30+货币，包括CNY
@@ -485,13 +485,13 @@ def get_exchange_rates():
         4. NBP (波兰国家银行) - 支持主要欧洲货币
         5. SNB (瑞士国家银行) - 支持主要货币
 
-    Query Parameters:
+    查询参数：
         base_currency: 基准货币代码，默认为CNY
 
-    Returns:
+    返回：
         JSON响应，包含最新汇率信息
 
-    Response Format:
+    响应格式：
         {
             "success": true,
             "result": {
@@ -854,7 +854,7 @@ def _get_fallback_exchange_rates(base_currency: str):
     return jsonify({"success": True, "result": result})
 
 
-# ==================== V1 统计分析API (ezBookkeeping兼容) ====================
+# ==================== V1 统计分析 API（兼容 ezBookkeeping） ====================
 
 
 @bp.route("/category-statistics", methods=["GET"])
@@ -864,7 +864,7 @@ def get_categorical_analysis():  # pylint: disable=too-many-locals,too-many-bran
     """
     分类分析API - 按分类汇总收支统计
 
-    Query Parameters:
+    查询参数：
         startTime: 开始时间戳（秒）
         endTime: 结束时间戳（秒）
         tagIds: 标签ID列表（逗号分隔，可选）
@@ -872,8 +872,8 @@ def get_categorical_analysis():  # pylint: disable=too-many-locals,too-many-bran
         keyword: 关键词搜索（可选）
         useTransactionTimezone: 是否使用交易时区（可选）
 
-    Returns:
-        JSON响应格式:
+    返回：
+        JSON 响应格式：
         {
             "success": true,
             "result": {
@@ -1133,7 +1133,7 @@ def get_trend_analysis():  # pylint: disable=too-many-locals,too-many-branches,t
     """
     趋势分析API - 按年月分组的分类统计
 
-    Query Parameters:
+    查询参数：
         startYearMonth: 开始年月（格式: 202411）
         endYearMonth: 结束年月（格式: 202412）
         tagIds: 标签ID列表（逗号分隔，可选）
@@ -1141,8 +1141,8 @@ def get_trend_analysis():  # pylint: disable=too-many-locals,too-many-branches,t
         keyword: 关键词搜索（可选）
         useTransactionTimezone: 是否使用交易时区（可选）
 
-    Returns:
-        JSON响应格式:
+    返回：
+        JSON 响应格式：
         {
             "success": true,
             "result": [
@@ -1335,7 +1335,7 @@ def get_trend_analysis():  # pylint: disable=too-many-locals,too-many-branches,t
             valid_account_ids.add(str(acc["id"]))
 
         # 按年月分组统计
-        # 结构: {(year, month): {(category_id, account_id): amount}}
+        # 结构：{(year, month): {(category_id, account_id): amount}}
         monthly_stats = {}
 
         for bill in bills:
@@ -1489,12 +1489,12 @@ def get_asset_trends():  # pylint: disable=too-many-locals,too-many-branches,too
     """
     资产趋势API - 每日账户余额变化统计
 
-    Query Parameters:
+    查询参数：
         startTime: 开始时间戳（秒）
         endTime: 结束时间戳（秒）
 
-    Returns:
-        JSON响应格式:
+    返回：
+        JSON 响应格式：
         {
             "success": true,
             "result": [

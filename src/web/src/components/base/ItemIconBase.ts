@@ -38,7 +38,7 @@ export function useItemIconBase(props: CommonIconProps) {
     });
 
     function getAccountIcon(iconId: string | number | null | undefined): string {
-        // Handle null/undefined icon IDs
+        // 处理空图标 ID
         if (iconId === null || iconId === undefined) {
             return DEFAULT_ACCOUNT_ICON.icon;
         }
@@ -57,7 +57,7 @@ export function useItemIconBase(props: CommonIconProps) {
     }
 
     function getCategoryIcon(iconId: string | number | null | undefined): string {
-        // Handle null/undefined icon IDs
+        // 处理空图标 ID
         if (iconId === null || iconId === undefined) {
             return DEFAULT_CATEGORY_ICON.icon;
         }

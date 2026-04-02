@@ -46,12 +46,12 @@ export function useMoveAllTransactionsPageBase() {
     });
 
     return {
-        // states
+        // 状态
         moving,
         fromAccount,
         toAccountId,
         toAccountName,
-        // computed states
+        // 计算状态
         allAccounts,
         allVisibleAccounts,
         allVisibleCategorizedAccounts,

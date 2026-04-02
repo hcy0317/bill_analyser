@@ -69,13 +69,13 @@ export function useUnlockPageBase() {
     }
 
     return {
-        // constants
+        // 常量
         version,
-        // states
+        // 状态
         pinCode,
-        // computed states
+        // 计算状态
         isWebAuthnAvailable,
-        // methods
+        // 方法
         isPinCodeValid,
         doAfterUnlocked,
         doRelogin

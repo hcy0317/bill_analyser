@@ -122,7 +122,7 @@ import '@/styles/desktop/amount-color.scss';
 import App from './DesktopApp.vue';
 import { initializeAxiosAuth } from '@/lib/services.ts';
 
-// 初始化Axios Authorization（在创建app之前）
+// 初始化 Axios 授权（在创建 app 之前）
 initializeAxiosAuth();
 
 const app = createApp(App);
@@ -364,7 +364,7 @@ const vuetify = createVuetify({
                     'high-emphasis-opacity': 0.9,
                     'medium-emphasis-opacity': 0.7,
 
-                    // 👉 shadows
+                    // 👉 阴影
                     'shadow-key-umbra-color': '#413935',
                     'shadow-xs-opacity': '0.16',
                     'shadow-sm-opacity': '0.18',
@@ -436,7 +436,7 @@ const vuetify = createVuetify({
                     'high-emphasis-opacity': 0.9,
                     'medium-emphasis-opacity': 0.7,
 
-                    // 👉 Shadows
+                    // 👉 阴影
                     'shadow-key-umbra-color': '#383736',
                     'shadow-xs-opacity': '0.20',
                     'shadow-sm-opacity': '0.22',
@@ -492,7 +492,7 @@ const vuetify = createVuetify({
     }
 });
 
-// key is in the original i18n text of vuetify (in vuetify/lib/locale/en.js), value is the text in the bill analyser i18n files
+// 键来自 Vuetify 原始 i18n 文本（见 vuetify/lib/locale/en.js），值为账单分析器 i18n 文件中的对应文本
 const vuetifyI18nTextKeyMap: Record<string, string> = {
     'open': 'Open',
     'close': 'Close'

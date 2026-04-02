@@ -1,7 +1,7 @@
 """
-Authentication Middleware - 认证中间件
+认证中间件
 
-提供JWT令牌验证装饰器，用于保护需要认证的API端点
+提供 JWT 令牌验证装饰器，用于保护需要认证的 API 端点。
 """
 
 import hashlib

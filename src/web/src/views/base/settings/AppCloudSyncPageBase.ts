@@ -195,18 +195,18 @@ export function useAppCloudSyncBase() {
     }
 
     return {
-        // constants
+        // 常量
         ALL_APPLICATION_CLOUD_SETTINGS,
-        // states
+        // 状态
         loading,
         enabling,
         disabling,
         enabledApplicationCloudSettings,
-        // computed states
+        // 计算状态
         isEnableCloudSync,
         hasEnabledApplicationCloudSettings,
         enabledApplicationCloudSettingKeys,
-        // functions
+        // 函数
         isAllSettingsSelected,
         hasSettingSelectedButNotAllChecked,
         updateSettingsSelected,

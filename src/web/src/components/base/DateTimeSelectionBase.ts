@@ -80,15 +80,15 @@ export function useDateTimeSelectionBase() {
     }
 
     return {
-        // states
+        // 状态
         is24Hour,
         isHourTwoDigits,
         isMinuteTwoDigits,
         isSecondTwoDigits,
         isMeridiemIndicatorFirst,
-        // computed
+        // 计算属性
         meridiemItems,
-        // functions
+        // 函数
         getDisplayTimeValue,
         generateAllHours,
         generateAllMinutesOrSeconds

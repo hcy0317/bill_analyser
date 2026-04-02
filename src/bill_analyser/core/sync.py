@@ -1,7 +1,7 @@
 """
-Sync Module - 同步与备份模块
+同步模块
 
-本地备份和云同步功能。
+提供本地备份与云同步功能。
 """
 
 # pylint: disable=import-outside-toplevel
@@ -33,10 +33,10 @@ class SyncManager:
         """
         计算目录哈希值
 
-        Args:
+        参数：
             directory: 目录路径
 
-        Returns:
+        返回：
             str: 哈希值
         """
         hasher = hashlib.md5()
@@ -55,7 +55,7 @@ class SyncManager:
         """
         备份数据到本地
 
-        Returns:
+        返回：
             Optional[str]: 备份文件路径，如果没有变化则返回 None
         """
         if not self.data_dir.exists():
@@ -86,7 +86,7 @@ class SyncManager:
         return str(backup_path)
 
     def _create_backup_zip(self, backup_path: Path):
-        """创建备份ZIP文件"""
+        """创建备份 ZIP 文件。"""
         with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             for file_path in self.data_dir.rglob("*"):
                 if file_path.is_file():
@@ -164,10 +164,10 @@ class SyncManager:
             # 创建认证对象
             auth = oss2.Auth(config.get("access_key"), config.get("secret_key"))
 
-            # 创建Bucket对象
+            # 创建 Bucket 对象
             bucket = oss2.Bucket(auth, config.get("endpoint"), config.get("bucket"))
 
-            # 生成对象key
+            # 生成对象 key
             prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
@@ -192,7 +192,7 @@ class SyncManager:
 
             self.logger.info("使用AWS S3上传")
 
-            # 创建S3客户端
+            # 创建 S3 客户端
             s3_client = boto3.client(
                 "s3",
                 endpoint_url=config.get("endpoint"),
@@ -200,7 +200,7 @@ class SyncManager:
                 aws_secret_access_key=config.get("secret_key"),
             )
 
-            # 生成对象key
+            # 生成对象 key
             prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
@@ -225,7 +225,7 @@ class SyncManager:
 
             self.logger.info("使用腾讯云COS上传")
 
-            # 解析region
+            # 解析 region
             import re
 
             region_match = re.search(r"cos\.([^.]+)\.myqcloud\.com", config.get("endpoint", ""))
@@ -241,7 +241,7 @@ class SyncManager:
             # 创建客户端
             client = CosS3Client(cos_config)
 
-            # 生成对象key
+            # 生成对象 key
             prefix = config.get("prefix", "bill_analyser_backups/")
             object_key = f"{prefix}{file_path.name}"
 
@@ -261,7 +261,7 @@ class SyncManager:
             return False
 
     async def _upload_to_azure_blob(self, file_path: Path, config: dict) -> bool:
-        """上传到Azure Blob Storage"""
+        """上传到 Azure Blob 存储。"""
         try:
             from azure.storage.blob import BlobServiceClient
 
@@ -279,7 +279,7 @@ class SyncManager:
             blob_service_client = BlobServiceClient.from_connection_string(connection_string)
             container_client = blob_service_client.get_container_client(config.get("bucket"))
 
-            # 生成blob名称
+            # 生成 Blob 名称
             prefix = config.get("prefix", "bill_analyser_backups/")
             blob_name = f"{prefix}{file_path.name}"
 
@@ -306,7 +306,7 @@ class SyncManager:
 
             self.logger.info("使用WebDAV上传")
 
-            # 创建WebDAV客户端
+            # 创建 WebDAV 客户端
             options = {
                 "webdav_hostname": config.get("endpoint"),
                 "webdav_login": config.get("access_key"),
@@ -340,10 +340,10 @@ class SyncManager:
         """
         从备份恢复
 
-        Args:
+        参数：
             backup_path: 备份文件路径
 
-        Returns:
+        返回：
             bool: 是否成功
         """
         backup_file = Path(backup_path)
@@ -384,7 +384,7 @@ class SyncManager:
         """
         清理旧备份，只保留最新的N个
 
-        Args:
+        参数：
             keep_count: 保留的备份数量
         """
         backups = sorted(self.backup_dir.glob("backup_*.zip"), reverse=True)

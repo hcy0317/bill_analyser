@@ -332,7 +332,7 @@ import { mdiPlus, mdiPencil, mdiDelete } from '@mdi/js';
 
 const { tt } = useI18n();
 
-// Types
+// 类型
 interface Budget {
     id?: number;
     name: string;
@@ -361,19 +361,19 @@ interface BudgetStatus {
     };
 }
 
-// Props
+// 属性
 const props = defineProps<{
     modelValue: boolean;
     persistent?: boolean;
 }>();
 
-// Emits
+// 事件
 const emit = defineEmits<{
     'update:modelValue': [value: boolean];
     'updated': [];
 }>();
 
-// State
+// 状态
 const showDialog = computed({
     get: () => props.modelValue,
     set: (val: boolean) => emit('update:modelValue', val)
@@ -402,7 +402,7 @@ const snackbar = ref({
     color: 'success'
 });
 
-// Table headers
+// 表头
 const headers = [
     { title: '名称', key: 'name', sortable: true },
     { title: '分类', key: 'category', sortable: true },
@@ -414,7 +414,7 @@ const headers = [
     { title: '操作', key: 'actions', sortable: false }
 ];
 
-// Period types
+// 周期类型
 const periodTypes = [
     { name: '每日', value: 'daily' },
     { name: '每周', value: 'weekly' },
@@ -424,13 +424,13 @@ const periodTypes = [
     { name: '自定义', value: 'custom' }
 ];
 
-// Validation rules
+// 校验规则
 const rules = {
     required: (v: any) => !!v || '此项为必填',
     positive: (v: number) => v > 0 || '金额必须大于0'
 };
 
-// Methods
+// 方法
 const formatAmount = (amount: number): string => {
     return new Intl.NumberFormat('zh-CN', {
         style: 'currency',
@@ -602,7 +602,7 @@ const showSnackbar = (message: string, color: string = 'success'): void => {
     snackbar.value = { show: true, message, color };
 };
 
-// Lifecycle
+// 生命周期
 onMounted(() => {
     if (showDialog.value) {
         loadBudgetStatus();
@@ -615,7 +615,7 @@ watch(showDialog, (newVal: boolean) => {
     }
 });
 
-// Expose
+// 暴露接口
 defineExpose({
     open: () => {
         showDialog.value = true;

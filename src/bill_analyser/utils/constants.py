@@ -1,10 +1,10 @@
 """
-API Constants and Mappings - API常量和映射定义
+API 常量与映射定义
 
-统一管理前后端之间的类型映射和常量定义，遵循ezBookkeeping标准。
+统一管理前后端之间的类型映射和常量定义，遵循 ezBookkeeping 标准。
 
-Author: Bill Analyser Team
-Created: 2025-11-21
+作者：Bill Analyser Team
+创建时间：2025-11-21
 """
 
 from enum import IntEnum

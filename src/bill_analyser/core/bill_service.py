@@ -1,5 +1,5 @@
 """
-Bill Service Module - 账单导入服务
+账单服务模块
 
 异步账单导入、识别、分类和写入数据库的服务模块。
 支持：
@@ -13,8 +13,8 @@ import asyncio
 import json
 import re
 import warnings
-from difflib import SequenceMatcher
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Any
 
 from ..parsers.factory import ParserFactory
@@ -52,7 +52,7 @@ class BillService:
         """
         初始化服务
 
-        Args:
+        参数：
             db: 数据库实例，如果为 None 则创建新实例
             deduplication_mode: 已弃用，仅为兼容旧调用签名保留
             use_smart_dedup: 已弃用，仅为兼容旧调用签名保留
@@ -104,13 +104,13 @@ class BillService:
         """
         导入账单文件
 
-        Args:
+        参数：
             file_path: 账单文件路径
             parser_type: 解析器类型（auto/wechat/alipay/icbc/cmbc/abc/ccb）
             preview_only: 是否仅预览，不实际写入数据库
             user_id: 用户ID（多用户隔离）
 
-        Returns:
+        返回：
             Dict: 导入结果统计，包含：
                 - success: 是否成功
                 - total: 原始解析数量
@@ -417,11 +417,11 @@ class BillService:
         注意：转账/投资类型的账户已在 SmartDeduplicationEngine 配对时设置，
         此方法主要处理收入/支出类型的源账户匹配。
 
-        Args:
+        参数：
             bills: 账单列表
             user_id: 用户ID
 
-        Returns:
+        返回：
             List[Dict]: 添加了账户信息的账单列表
         """
         # 获取用户的账户别名映射
@@ -1387,11 +1387,11 @@ class BillService:
         """
         批量导入多个文件
 
-        Args:
+        参数：
             file_paths: 文件路径列表
             user_id: 用户ID
 
-        Returns:
+        返回：
             Dict: 汇总结果
         """
         summary = {
@@ -1435,11 +1435,11 @@ class BillService:
 
         用户在预览后确认，可能修改了分类，然后调用此方法实际导入
 
-        Args:
+        参数：
             preview_bills: 经用户确认（可能修改）的预览账单列表
             user_id: 用户ID
 
-        Returns:
+        返回：
             Dict: 导入结果
         """
         if not self._initialized:

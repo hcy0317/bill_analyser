@@ -21,9 +21,9 @@ export interface BaseApplicationSetting {
 }
 
 export interface ApplicationSettings extends BaseApplicationSetting {
-    // Debug Settings
+    // 调试设置
     debug: boolean;
-    // Basic Settings
+    // 基础设置
     theme: string;
     fontSize: number;
     timeZone: string;
@@ -31,29 +31,29 @@ export interface ApplicationSettings extends BaseApplicationSetting {
     showAccountBalance: boolean;
     swipeBack: boolean;
     animate: boolean;
-    // Application Lock
+    // 应用锁
     applicationLock: boolean;
     applicationLockWebAuthn: boolean;
-    // Navigation Bar
+    // 导航栏
     showAddTransactionButtonInDesktopNavbar: boolean;
-    // Overview Page
+    // 概览页
     showAmountInHomePage: boolean;
     timezoneUsedForStatisticsInHomePage: number;
     overviewAccountFilterInHomePage: Record<string, boolean>;
     overviewTransactionCategoryFilterInHomePage: Record<string, boolean>;
-    // Transaction List Page
+    // 交易列表页
     itemsCountInTransactionListPage: number;
     showTotalAmountInTransactionListPage: boolean;
     showTagInTransactionListPage: boolean;
-    // Transaction Edit Page
+    // 交易编辑页
     autoSaveTransactionDraft: string;
     autoGetCurrentGeoLocation: boolean;
     alwaysShowTransactionPicturesInMobileTransactionEditPage: boolean;
-    // Account List Page
+    // 账户列表页
     totalAmountExcludeAccountIds: Record<string, boolean>;
-    // Exchange Rates Data Page
+    // 汇率数据页
     currencySortByInExchangeRatesPage: number;
-    // Statistics Settings
+    // 统计设置
     statistics: {
         defaultChartDataType: number;
         defaultTimezoneType: number;
@@ -96,26 +96,26 @@ export interface WebAuthnConfig {
 }
 
 export const ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES: Record<string, UserApplicationCloudSettingType> = {
-    // Basic Settings
+    // 基础设置
     'showAccountBalance': UserApplicationCloudSettingType.Boolean,
-    // Overview Page
+    // 概览页
     'showAmountInHomePage': UserApplicationCloudSettingType.Boolean,
     'timezoneUsedForStatisticsInHomePage': UserApplicationCloudSettingType.Number,
     'overviewAccountFilterInHomePage': UserApplicationCloudSettingType.StringBooleanMap,
     'overviewTransactionCategoryFilterInHomePage': UserApplicationCloudSettingType.StringBooleanMap,
-    // Transaction List Page
+    // 交易列表页
     'itemsCountInTransactionListPage': UserApplicationCloudSettingType.Number,
     'showTotalAmountInTransactionListPage': UserApplicationCloudSettingType.Boolean,
     'showTagInTransactionListPage': UserApplicationCloudSettingType.Boolean,
-    // Transaction Edit Page
+    // 交易编辑页
     'autoSaveTransactionDraft': UserApplicationCloudSettingType.String,
     'autoGetCurrentGeoLocation': UserApplicationCloudSettingType.Boolean,
     'alwaysShowTransactionPicturesInMobileTransactionEditPage': UserApplicationCloudSettingType.Boolean,
-    // Account List Page
+    // 账户列表页
     'totalAmountExcludeAccountIds': UserApplicationCloudSettingType.StringBooleanMap,
-    // Exchange Rates Data Page
+    // 汇率数据页
     'currencySortByInExchangeRatesPage': UserApplicationCloudSettingType.Number,
-    // Statistics Settings
+    // 统计设置
     'statistics.defaultChartDataType': UserApplicationCloudSettingType.Number,
     'statistics.defaultTimezoneType': UserApplicationCloudSettingType.Number,
     'statistics.defaultAccountFilter': UserApplicationCloudSettingType.StringBooleanMap,
@@ -130,9 +130,9 @@ export const ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES: Record<string, UserAp
 };
 
 export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
-    // Debug Settings
+    // 调试设置
     debug: false,
-    // Basic Settings
+    // 基础设置
     theme: 'auto',
     fontSize: 1,
     timeZone: '',
@@ -140,29 +140,29 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
     showAccountBalance: true,
     swipeBack: true,
     animate: true,
-    // Application Lock
+    // 应用锁
     applicationLock: false,
     applicationLockWebAuthn: false,
-    // Navigation Bar
+    // 导航栏
     showAddTransactionButtonInDesktopNavbar: true,
-    // Overview Page
+    // 概览页
     showAmountInHomePage: true,
     timezoneUsedForStatisticsInHomePage: TimezoneTypeForStatistics.Default.type,
     overviewAccountFilterInHomePage: {},
     overviewTransactionCategoryFilterInHomePage: {},
-    // Transaction List Page
+    // 交易列表页
     itemsCountInTransactionListPage: 15,
     showTotalAmountInTransactionListPage: true,
     showTagInTransactionListPage: true,
-    // Transaction Edit Page
+    // 交易编辑页
     autoSaveTransactionDraft: 'disabled',
     autoGetCurrentGeoLocation: false,
     alwaysShowTransactionPicturesInMobileTransactionEditPage: false,
-    // Account List Page
+    // 账户列表页
     totalAmountExcludeAccountIds: {},
-    // Exchange Rates Data Page
+    // 汇率数据页
     currencySortByInExchangeRatesPage: CurrencySortingType.Default.type,
-    // Statistics Settings
+    // 统计设置
     statistics: {
         defaultChartDataType: ChartDataType.Default.type,
         defaultTimezoneType: TimezoneTypeForStatistics.Default.type,

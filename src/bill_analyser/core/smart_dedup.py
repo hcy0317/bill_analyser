@@ -1,4 +1,4 @@
-"""Smart Deduplication Engine - 智能去重引擎
+"""智能去重引擎
 
 v6.57 版本 (2025-12-01):
 处理多来源账单的智能去重，包含以下5种机制：
@@ -148,10 +148,10 @@ class SmartDeduplicationEngine:
     def _bills_to_dataframe(self, bills: list[dict[str, Any]]) -> pd.DataFrame:
         """将账单列表转换为 pandas DataFrame，批量解析日期
 
-        Args:
+        参数：
             bills: 账单字典列表
 
-        Returns:
+        返回：
             pd.DataFrame: 包含解析后日期的 DataFrame
         """
         if not bills:
@@ -201,12 +201,12 @@ class SmartDeduplicationEngine:
     ) -> pd.DataFrame:
         """使用向量化操作查找时间接近的账单对
 
-        Args:
+        参数：
             df1: 第一组账单 DataFrame
             df2: 第二组账单 DataFrame
             tolerance_seconds: 时间容差（秒）
 
-        Returns:
+        返回：
             pd.DataFrame: 匹配的账单对，包含 _idx_1 和 _idx_2 列
         """
         if df1.empty or df2.empty:

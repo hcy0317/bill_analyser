@@ -77,12 +77,12 @@ export interface YearMonthRange {
 
 export interface YearMonthDay extends MonthDay {
     readonly year: number;
-    readonly month: number; // 1-based (1 = January, 12 = December)
+    readonly month: number; // 从 1 开始计数（1 = 一月，12 = 十二月）
     readonly day: number;
 }
 
 export interface MonthDay {
-    readonly month: number; // 1-based (1 = January, 12 = December
+    readonly month: number; // 从 1 开始计数（1 = 一月，12 = 十二月）
     readonly day: number;
 }
 
@@ -124,7 +124,7 @@ export interface RecentMonthDateRange {
     readonly minTime: number;
     readonly maxTime: number;
     readonly year: number;
-    readonly month: number; // 1-based (1 = January, 12 = December)
+    readonly month: number; // 从 1 开始计数（1 = 一月，12 = 十二月）
 }
 
 export interface PresetDateRange {
@@ -245,7 +245,7 @@ export class Month {
     public static readonly November = new Month(11, 'November');
     public static readonly December = new Month(12, 'December');
 
-    public readonly month: MonthValue; // 1-based (1 = January, 12 = December)
+    public readonly month: MonthValue; // 从 1 开始计数（1 = 一月，12 = 十二月）
     public readonly name: string;
 
     private constructor(month: MonthValue, name: string) {
@@ -593,26 +593,26 @@ export class DateRange implements TypeAndName {
     private static readonly allInstances: DateRange[] = [];
     private static readonly allInstancesByType: Record<number, DateRange> = {};
 
-    // All date range
+    // 全部日期范围
     public static readonly All = new DateRange(0, 'All', false, false, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
 
-    // Date ranges for normal scene only (今天、昨天、最近7天、最近30天已删除，使用其他实现)
+    // 仅用于常规场景的日期范围（今天、昨天、最近7天、最近30天已删除，改由其他实现提供）
     public static readonly ThisWeek = new DateRange(5, 'This week', false, false, DateRangeScene.Normal, DateRangeScene.AssetTrends);
     public static readonly LastWeek = new DateRange(6, 'Last week', false, false, DateRangeScene.Normal, DateRangeScene.AssetTrends);
     public static readonly ThisMonth = new DateRange(7, 'This month', false, false, DateRangeScene.Normal, DateRangeScene.AssetTrends);
     public static readonly LastMonth = new DateRange(8, 'Last month', false, false, DateRangeScene.Normal, DateRangeScene.AssetTrends);
 
-    // Date ranges for normal and trend analysis scene
+    // 常规场景与趋势分析场景共用的日期范围
     public static readonly ThisYear = new DateRange(9, 'This year', false, false, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly LastYear = new DateRange(10, 'Last year', false, false, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly ThisFiscalYear = new DateRange(11, 'This fiscal year', false, true, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly LastFiscalYear = new DateRange(12, 'Last fiscal year', false, true, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
 
-    // Billing cycle date ranges for normal scene only
+    // 仅用于常规场景的账单周期日期范围
     public static readonly CurrentBillingCycle = new DateRange(51, 'Current Billing Cycle', true, true, DateRangeScene.Normal);
     public static readonly PreviousBillingCycle = new DateRange(52, 'Previous Billing Cycle', true, true, DateRangeScene.Normal);
 
-    // Date ranges for trend analysis scene only
+    // 仅用于趋势分析场景的日期范围
     public static readonly RecentTwelveMonths = new DateRange(101, 'Recent 12 months', false, false, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly RecentTwentyFourMonths = new DateRange(102, 'Recent 24 months', false, false, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly RecentThirtySixMonths = new DateRange(103, 'Recent 36 months', false, false, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
@@ -620,7 +620,7 @@ export class DateRange implements TypeAndName {
     public static readonly RecentThreeYears = new DateRange(105, 'Recent 3 years', false, false, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
     public static readonly RecentFiveYears = new DateRange(106, 'Recent 5 years', false, false, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
 
-    // Custom date range
+    // 自定义日期范围
     public static readonly Custom = new DateRange(255, 'Custom Date', false, true, DateRangeScene.Normal, DateRangeScene.TrendAnalysis, DateRangeScene.AssetTrends);
 
     public readonly type: number;

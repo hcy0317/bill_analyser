@@ -128,9 +128,9 @@ export function useTrendsChartBase<T extends TrendsChartDateType>(props: CommonT
     }
 
     return {
-        // computed states
+        // 计算状态
         allDateRanges,
-        // functions
+        // 函数
         getItemName
     };
 }

@@ -584,16 +584,16 @@ export const useTransactionCategoriesStore = defineStore('transactionCategories'
     }
 
     return {
-        // states
+        // 状态
         allTransactionCategories,
         allTransactionCategoriesMap,
         transactionCategoryListStateInvalid,
-        // computed states
+        // 计算状态
         hasAvailableExpenseCategories,
         hasAvailableIncomeCategories,
         hasAvailableTransferCategories,
         hasAvailableInvestmentCategories,
-        // functions
+        // 函数
         updateTransactionCategoryListInvalidState,
         resetTransactionCategories,
         loadAllCategories,

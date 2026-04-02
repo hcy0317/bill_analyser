@@ -642,7 +642,7 @@ let rejectFunc: ((reason?: unknown) => void) | null = null;
 
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 
-// Simplified file type options
+// 精简后的文件类型选项
 // const fileTypeOptions = [
 //     { title: 'Auto', value: 'auto' },
 //     { title: 'Alipay', value: 'alipay' },
@@ -1015,7 +1015,7 @@ async function executeColumnMappingImport(): Promise<void> {
         return;
     }
 
-    // 使用新的 v2/parse_generic 接口，将通用解析结果写入同一个 session
+    // 使用新的 v2/parse_generic 接口，将通用解析结果写入同一个会话
     const response = await services.parseGenericIntoSession({
         sessionId: serverSessionId.value,
         tempPath: currentFile.tempPath,
@@ -1226,7 +1226,7 @@ async function executeStage2Dedup(): Promise<void> {
  * v7: 三阶段导入 - 解析并去重（含逐文件列映射）
  *
  * 新流程：
- * 1. 所有文件先送 v2/parse，特定解析器匹配的直接写入 session
+ * 1. 所有文件先送入 v2/parse，命中特定解析器的直接写入同一会话
  * 2. 未匹配的文件列表返回给前端，逐个进行人工列映射
  * 3. 列映射完成后统一进入 v2/dedup 去重预览
  */
@@ -1324,7 +1324,7 @@ async function parseData(): Promise<void> {
 }
 
 /**
- * 将后端预览数据转换为前端 ImportTransaction 格式
+ * 将后端预览数据转换为前端导入交易格式
  */
 function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: number): ImportTransaction {
     const type = getPreviewTransactionType(item.preview_type) ?? 3;
@@ -1337,7 +1337,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const amountInCents = Math.round(Math.abs(item.preview_amount || 0) * 100);
     const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
 
-    // 根据分类名称查找categoryId
+    // 根据分类名称查找分类 ID
     let categoryId = '';
     const mainCat = item.preview_main_category || '';
     const subCat = item.preview_sub_category || '';
@@ -1417,7 +1417,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
 
 /**
  * v6.55: 处理重新分类后的数据更新
- * @param previewData 后端返回的原始预览数据数组（preview_* 字段格式）
+ * @param previewData 后端返回的原始预览数据数组（使用 preview_* 字段）
  */
 function onReclassified(previewData: ImportPreviewRecord[]): void {
     if (!previewData || previewData.length === 0) {
@@ -1426,7 +1426,7 @@ function onReclassified(previewData: ImportPreviewRecord[]): void {
 
     logger.info(`[三阶段导入] 收到重新分类结果: ${previewData.length} 条预览数据`);
 
-    // 将后端预览数据转换为前端 ImportTransaction 格式
+    // 将后端预览数据转换为前端导入交易格式
     const convertedTransactions = previewData.map((item, idx) => {
         return convertPreviewToImportTransaction(item, idx);
     });
@@ -1535,7 +1535,7 @@ function submit(): void {
                 return;
             }
 
-            // v6.48+: 使用三阶段确认API作为唯一主链
+            // v6.48+: 使用三阶段确认接口作为唯一主链
             logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
 
             // 收集用户编辑后的数据
@@ -1603,7 +1603,7 @@ function submit(): void {
             await cleanupServerSession();
             serverSessionId.value = '';
 
-            // 刷新相关store
+            // 刷新相关状态仓库
             accountsStore.updateAccountListInvalidState(true);
             transactionsStore.updateTransactionListInvalidState(true);
             overviewStore.updateTransactionOverviewInvalidState(true);

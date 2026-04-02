@@ -256,12 +256,12 @@ export function useReconciliationStatementPageBase() {
     }
 
     return {
-        // states
+        // 状态
         accountId,
         startTime,
         endTime,
         reconciliationStatements,
-        // computed states
+        // 计算状态
         firstDayOfWeek,
         fiscalYearStart,
         currentTimezoneOffsetMinutes,
@@ -281,7 +281,7 @@ export function useReconciliationStatementPageBase() {
         displayTotalBalance,
         displayOpeningBalance,
         displayClosingBalance,
-        // functions
+        // 函数
         getDisplayTransactionType,
         getDisplayDateTime,
         getDisplayDate,

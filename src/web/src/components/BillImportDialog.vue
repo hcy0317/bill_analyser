@@ -138,19 +138,19 @@
             </div>
 
             <div class="d-flex justify-sm-space-between gap-4 flex-wrap justify-center mt-10">
-                <v-btn 
+                <v-btn
                     v-if="currentStep > 1 && currentStep < 3"
-                    color="secondary" 
+                    color="secondary"
                     variant="tonal"
                     :disabled="previewing || importing"
                     @click="currentStep--"
                 >
                     上一步
                 </v-btn>
-                <v-btn 
+                <v-btn
                     v-if="currentStep < 3"
-                    color="secondary" 
-                    variant="tonal" 
+                    color="secondary"
+                    variant="tonal"
                     :disabled="previewing || importing"
                     @click="closeDialog"
                 >
@@ -196,7 +196,7 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 
-// Types
+// 类型
 interface ParserInfo {
     id: string;
     name: string;
@@ -227,19 +227,19 @@ interface ImportResult {
     error?: string;
 }
 
-// Props
+// 属性
 const props = defineProps<{
     modelValue: boolean;
     persistent?: boolean;
 }>();
 
-// Emits
+// 事件
 const emit = defineEmits<{
     'update:modelValue': [value: boolean];
     'imported': [];
 }>();
 
-// State
+// 状态
 const showDialog = computed({
     get: () => props.modelValue,
     set: (val: boolean) => emit('update:modelValue', val)
@@ -264,7 +264,7 @@ const uploadError = ref('');
 const previewData = ref<PreviewData>({});
 const importResult = ref<ImportResult | null>(null);
 
-// Headers for preview table
+// 预览表表头
 const previewHeaders = [
     { title: '日期', key: 'date', sortable: false },
     { title: '类型', key: 'type', sortable: false },
@@ -274,7 +274,7 @@ const previewHeaders = [
     { title: '渠道', key: 'channel', sortable: false }
 ];
 
-// Computed
+// 计算属性
 const fileName = computed(() => {
     if (selectedFile.value && selectedFile.value.length > 0) {
         return selectedFile.value[0]?.name || '';
@@ -307,7 +307,7 @@ const canProceed = computed(() => {
     return true;
 });
 
-// Methods
+// 方法
 const getAmountClass = (item: PreviewBill): string => {
     return item.type === '支出' ? 'text-red' : 'text-green';
 };
@@ -437,12 +437,12 @@ const formatAmount = (amount: number): string => {
     }).format(amount);
 };
 
-// Lifecycle
+// 生命周期
 onMounted(() => {
     loadParsers();
 });
 
-// Expose
+// 暴露接口
 defineExpose({
     open: () => {
         showDialog.value = true;

@@ -297,7 +297,7 @@ export function useI18n() {
     const userStore = useUserStore();
     const exchangeRatesStore = useExchangeRatesStore();
 
-    // private functions
+    // 私有函数
     function getLanguageDisplayName(languageName: string): string {
         return t(`language.${languageName}`);
     }
@@ -313,12 +313,12 @@ export function useI18n() {
             return DEFAULT_LANGUAGE;
         }
 
-        // try to match the full browser language tag with full language tag in i18n file
+        // 尝试用完整的浏览器语言标签匹配国际化文件中的完整语言标签
         if (ALL_LANGUAGES[browserLanguage]) {
             return browserLanguage;
         }
 
-        // try to match the full browser language tag with language alias tags in i18n file
+        // 尝试用完整的浏览器语言标签匹配国际化文件中的语言别名标签
         let alternativeLanguage = getLanguageKeyFromLanguageAlias(browserLanguage);
 
         if (alternativeLanguage && ALL_LANGUAGES[alternativeLanguage]) {
@@ -327,17 +327,17 @@ export function useI18n() {
 
         const languageTagParts = browserLanguage.split('-');
 
-        // maybe browser language is language-script-region format
+        // 浏览器语言标签可能是“语言-脚本-地区”这种格式
         if (languageTagParts.length > 2) {
-            // fallback to use language tag with language-script / language-region format
+            // 兜底改用“语言-脚本”/“语言-地区”形式的语言标签
             browserLanguage = languageTagParts[0] + '-' + languageTagParts[1];
 
-            // try to match language tag in language-script / language-region format with full language tag in i18n file
+            // 尝试用“语言-脚本”/“语言-地区”格式的语言标签匹配国际化文件中的完整语言标签
             if (ALL_LANGUAGES[browserLanguage]) {
                 return browserLanguage;
             }
 
-            // try to match language tag in language-script / language-region format with language alias tags in i18n file
+            // 尝试用“语言-脚本”/“语言-地区”格式的语言标签匹配国际化文件中的语言别名标签
             alternativeLanguage = getLanguageKeyFromLanguageAlias(browserLanguage);
 
             if (alternativeLanguage && ALL_LANGUAGES[alternativeLanguage]) {
@@ -345,16 +345,16 @@ export function useI18n() {
             }
         }
 
-        // fallback to use marco language tag
+        // 兜底改用宏语言标签
         if (languageTagParts.length > 1) {
             browserLanguage = languageTagParts[0] as string;
 
-            // try to match marco language tag with full language tag in i18n file
+            // 尝试用宏语言标签匹配国际化文件中的完整语言标签
             if (ALL_LANGUAGES[browserLanguage]) {
                 return browserLanguage;
             }
 
-            // try to match marco language tag with language alias tags in i18n file
+            // 尝试用宏语言标签匹配国际化文件中的语言别名标签
             alternativeLanguage = getLanguageKeyFromLanguageAlias(browserLanguage);
 
             if (alternativeLanguage && ALL_LANGUAGES[alternativeLanguage]) {
@@ -362,14 +362,14 @@ export function useI18n() {
             }
         }
 
-        // fallback to match marco language tag with marco language tag in i18n file
+        // 兜底用宏语言标签匹配国际化文件中的宏语言标签
         alternativeLanguage = getLanguageKeyFromMarcoLanguageTag(browserLanguage);
 
         if (alternativeLanguage && ALL_LANGUAGES[alternativeLanguage]) {
             return alternativeLanguage;
         }
 
-        // fallback to use the default language
+        // 兜底使用默认语言
         return DEFAULT_LANGUAGE;
     }
 
@@ -836,7 +836,7 @@ export function useI18n() {
         return alternateDate;
     }
 
-    // public functions
+    // 公共函数
     function translateIf(text: string | undefined, isTranslate?: boolean): string {
         if (!isDefined(text)) {
             return '';
@@ -2311,21 +2311,21 @@ export function useI18n() {
     }
 
     return {
-        // common functions
+        // 通用函数
         tt: t,
         ti: translateIf,
         te: translateError,
         joinMultiText,
         getServerMultiLanguageConfigContent,
-        // get current language info
+        // 获取当前语言信息
         getCurrentLanguageTag,
         getCurrentLanguageInfo,
         getCurrentLanguageDisplayName,
         getCurrentLanguageTextDirection,
-        // get localization default type
+        // 获取本地化默认类型
         getDefaultCurrency,
         getDefaultFirstDayOfWeek,
-        // get all localized info of specified type
+        // 获取指定类型的全部本地化信息
         getAllLanguageOptions,
         getAllEnableDisableOptions,
         getAllCurrencies,
@@ -2372,7 +2372,7 @@ export function useI18n() {
         getAllTransactionDefaultCategories,
         getAllDisplayExchangeRates,
         getAllSupportedImportFileCagtegoryAndTypes,
-        // get localized info
+        // 获取本地化信息
         getLanguageInfo,
         getMonthShortName,
         getMonthLongName,
@@ -2407,11 +2407,11 @@ export function useI18n() {
         isLongTimeHourTwoDigits,
         isLongTimeMinuteTwoDigits,
         isLongTimeSecondTwoDigits,
-        // format date time (by calendar display type) functions
+        // 日期时间格式化函数（按日历显示类型）
         getCalendarDisplayShortYearFromUnixTime: (unixTime: number, numeralSystem?: NumeralSystem, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedShortYearFormat(), getDateTimeFormatOptions({ calendarType: getCurrentCalendarDisplayType().primaryCalendarType, numeralSystem: numeralSystem }), utcOffset, currentUtcOffset),
         getCalendarDisplayShortMonthFromUnixTime: (unixTime: number, numeralSystem?: NumeralSystem, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, 'MMM', getDateTimeFormatOptions({ calendarType: getCurrentCalendarDisplayType().primaryCalendarType, numeralSystem: numeralSystem }), utcOffset, currentUtcOffset),
         getCalendarDisplayDayOfMonthFromUnixTime: (unixTime: number, numeralSystem?: NumeralSystem, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedShortDayFormat(), getDateTimeFormatOptions({ calendarType: getCurrentCalendarDisplayType().primaryCalendarType, numeralSystem: numeralSystem }), utcOffset, currentUtcOffset),
-        // format date time (by date display type) functions
+        // 日期时间格式化函数（按日期显示类型）
         parseDateTimeFromLongDateTime: (dateTime: string) => parseDateTimeFromString(dateTime, getLocalizedLongDateFormat() + ' ' + getLocalizedLongTimeFormat()),
         parseDateTimeFromShortDateTime: (dateTime: string) => parseDateTimeFromString(dateTime, getLocalizedShortDateFormat() + ' ' + getLocalizedShortTimeFormat()),
         formatUnixTimeToLongDateTime: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedLongDateFormat() + ' ' + getLocalizedLongTimeFormat(), getDateTimeFormatOptions(), utcOffset, currentUtcOffset),
@@ -2423,7 +2423,7 @@ export function useI18n() {
         formatUnixTimeToLongTime: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedLongTimeFormat(), getDateTimeFormatOptions(), utcOffset, currentUtcOffset),
         formatUnixTimeToShortTime: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedShortTimeFormat(), getDateTimeFormatOptions(), utcOffset, currentUtcOffset),
         formatGregorianTextualYearMonthDayToLongDate: (date: TextualYearMonthDay) => formatGregorianCalendarYearDashMonthDashDay(date, getLocalizedLongDateFormat(), getDateTimeFormatOptions()),
-        // format date time (Gregorian calendar and Gregorian-like calendar) functions
+        // 日期时间格式化函数（公历与类公历）
         formatUnixTimeToGregorianLikeLongYear: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedLongYearFormat(), getDateTimeFormatOptions({ calendarType: getGregorianLikeCalendarType() }), utcOffset, currentUtcOffset),
         formatUnixTimeToGregorianLikeShortYear: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedShortYearFormat(), getDateTimeFormatOptions({ calendarType: getGregorianLikeCalendarType() }), utcOffset, currentUtcOffset),
         formatUnixTimeToGregorianLikeLongYearMonth: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, getLocalizedLongYearMonthFormat(), getDateTimeFormatOptions({ calendarType: getGregorianLikeCalendarType() }), utcOffset, currentUtcOffset),
@@ -2436,14 +2436,14 @@ export function useI18n() {
         formatUnixTimeToGregorianLikeFiscalYear,
         formatGregorianYearToGregorianLikeFiscalYear,
         formatFiscalYearStartToGregorianLikeLongMonth,
-        // format date time (Gregorian calendar) functions
+        // 日期时间格式化函数（公历）
         formatUnixTimeToGregorianDefaultDateTime: (unixTime: number, utcOffset?: number, currentUtcOffset?: number) => formatUnixTime(unixTime, KnownDateTimeFormat.DefaultDateTime.format, getDateTimeFormatOptions({ numeralSystem: NumeralSystem.WesternArabicNumerals, calendarType: CalendarType.Gregorian }), utcOffset, currentUtcOffset),
-        // other format date time functions
+        // 其他日期时间格式化函数
         formatDateRange,
         getTimezoneDifferenceDisplayText,
         getCalendarAlternateDates,
         getCalendarAlternateDate,
-        // format amount/number functions
+        // 金额/数字格式化函数
         parseAmountFromLocalizedNumerals: (value: string) => getParsedAmountNumber(value),
         parseAmountFromWesternArabicNumerals: (value: string) => getParsedAmountNumber(value, NumeralSystem.WesternArabicNumerals),
         formatAmountToLocalizedNumerals: (value: number, currencyCode?: string) => getFormattedAmount(value, undefined, undefined, currencyCode),
@@ -2461,10 +2461,10 @@ export function useI18n() {
         getAdaptiveAmountRate,
         getAmountPrependAndAppendText,
         getCategorizedAccountsWithDisplayBalance,
-        // other format functions
+        // 其他格式化函数
         getLocalizedOAuth2ProviderName,
         getLocalizedOAuth2LoginText,
-        // localization setting functions
+        // 本地化设置函数
         setLanguage,
         setTimeZone,
         initLocale

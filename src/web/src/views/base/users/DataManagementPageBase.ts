@@ -47,11 +47,11 @@ export function useDataManagementPageBase() {
     }
 
     return {
-        // states
+        // 状态
         dataStatistics,
-        // computed states
+        // 计算状态
         displayDataStatistics,
-        // functions
+        // 函数
         getExportFileName
     }
 }

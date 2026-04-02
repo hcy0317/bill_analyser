@@ -53,16 +53,16 @@ export function useExchangeRatesPageBase() {
     }
 
     return {
-        // states
+        // 状态
         baseCurrency,
         baseAmount,
-        // computed states
+        // 计算状态
         defaultCurrency,
         exchangeRatesData,
         isUserCustomExchangeRates,
         exchangeRatesDataUpdateTime,
         availableExchangeRates,
-        // functions
+        // 函数
         getConvertedAmount,
         setAsBaseline
     };

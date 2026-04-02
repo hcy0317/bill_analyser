@@ -7,7 +7,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as echarts from 'echarts';
 import type { EChartsOption, ECharts } from 'echarts';
 
-// Props
+// 属性
 const props = withDefaults(defineProps<{
     title?: string;
     data: Array<{ name: string; value: number }>;
@@ -24,11 +24,11 @@ const props = withDefaults(defineProps<{
     color: '#5470c6'
 });
 
-// State
+// 状态
 const chartContainer = ref<HTMLElement | null>(null);
 let chartInstance: ECharts | null = null;
 
-// Methods
+// 方法
 const initChart = (): void => {
     if (!chartContainer.value) return;
 
@@ -162,7 +162,7 @@ const resizeChart = (): void => {
     }
 };
 
-// Lifecycle
+// 生命周期
 onMounted(() => {
     initChart();
     window.addEventListener('resize', resizeChart);
@@ -188,7 +188,7 @@ watch(() => props.horizontal, () => {
     }
 });
 
-// Expose
+// 暴露接口
 defineExpose({
     refresh: initChart,
     resize: resizeChart

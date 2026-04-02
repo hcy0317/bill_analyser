@@ -211,10 +211,10 @@ export function useAppSettingPageBase() {
     }
 
     return {
-        // states
+        // 状态
         loadingAccounts,
         loadingTransactionCategories,
-        // computed states
+        // 计算状态
         allThemes,
         allTimezones,
         allTimezoneTypesUsedForStatistics,

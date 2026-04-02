@@ -122,19 +122,19 @@ export function useTransactionTagFilterSettingPageBase(type?: string) {
     }
 
     return {
-        // states
+        // 状态
         loading,
         showHidden,
         filterTagIds,
         tagFilterType,
-        // computed states
+        // 计算状态
         title,
         applyText,
         allTags,
         allTagFilterTypes,
         hasAnyAvailableTag,
         hasAnyVisibleTag,
-        // functions
+        // 函数
         loadFilterTagIds,
         saveFilterTagIds
     };

@@ -159,18 +159,18 @@ export function useAccountFilterSettingPageBase(type?: AccountFilterType) {
     }
 
     return {
-        // states
+        // 状态
         loading,
         showHidden,
         filterAccountIds,
-        // computed states
+        // 计算状态
         title,
         applyText,
         allowHiddenAccount,
         allCategorizedAccounts,
         hasAnyAvailableAccount,
         hasAnyVisibleAccount,
-        // functions
+        // 函数
         isAccountChecked,
         loadFilterAccountIds,
         saveFilterAccountIds

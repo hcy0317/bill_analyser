@@ -1,5 +1,5 @@
 """
-Accounts API Routes - 账户相关API端点
+账户 API 路由
 
 重构后使用统一账户适配器处理账户数据格式转换。
 """
@@ -161,7 +161,7 @@ def create_account():
 @log_method
 @require_auth
 def update_account(account_id: int):  # pylint: disable=too-many-locals,too-many-statements
-    """更新账户 - RESTful API（支持父账户和子账户更新）"""
+    """更新账户 - REST API（支持父账户和子账户更新）"""
     try:
         user_id = _get_request_user_id()
         logger.info("[账户更新] 开始: account_id=%s, user_id=%s", account_id, user_id)
@@ -258,7 +258,7 @@ def update_account(account_id: int):  # pylint: disable=too-many-locals,too-many
 @log_method
 @require_auth
 def delete_account(account_id: int):
-    """删除账户 - RESTful API（支持级联删除子账户）"""
+    """删除账户 - REST API（支持级联删除子账户）"""
     try:
         user_id = _get_request_user_id()
         logger.info("[账户删除] 开始: account_id=%s, user_id=%s", account_id, user_id)

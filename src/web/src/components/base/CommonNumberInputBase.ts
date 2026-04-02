@@ -170,9 +170,9 @@ export function useCommonNumberInputBase(props: CommonNumberInputProps, maxDecim
     }
 
     return {
-        // states
+        // 状态
         currentValue,
-        // functions
+        // 函数
         onKeyUpDown,
         onPaste
     };

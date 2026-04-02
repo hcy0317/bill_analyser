@@ -124,10 +124,10 @@ export function useSignupPageBase() {
     }
 
     return {
-        // states
+        // 状态
         user,
         submitting,
-        // computed states
+        // 计算状态
         languageTitle,
         currentLocale,
         currentLanguageName,
@@ -135,7 +135,7 @@ export function useSignupPageBase() {
         inputInvalidProblemMessage,
         inputIsEmpty,
         inputIsInvalid,
-        // functions
+        // 函数
         getCategoryTypeName,
         doAfterSignupSuccess
     };

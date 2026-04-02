@@ -419,8 +419,8 @@ const chartOptions = computed<object>(() => {
 
                     if (isArray(param.data)) {
                         const dataArray = param.data as number[];
-                        // For candlestick chart, the data is [open, close, min, max]
-                        // We use close value (index 1) as the amount
+                        // 对于 K 线图，数据格式为 [open, close, min, max]
+                        // 我们使用 close 值（索引 1）作为金额
                         if (dataArray.length >= 2) {
                             amount = dataArray[1] ?? 0;
                         }

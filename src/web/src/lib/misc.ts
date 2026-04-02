@@ -101,7 +101,7 @@ export function generateRandomString(): string {
 export function generateRandomUUID(): string {
     const randomString = generateRandomString();
 
-    // convert hash string to UUID Version 8
+    // 将哈希字符串转换为第 8 版 UUID
     const uuid = randomString.substring(0, 8) + '-'
         + randomString.substring(8, 12) + '-'
         + '8' + randomString.substring(13, 16) + '-'

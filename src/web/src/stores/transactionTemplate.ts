@@ -451,15 +451,15 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
     }
 
     return {
-        // states
+        // 状态
         allTransactionTemplates,
         allTransactionTemplatesMap,
         transactionTemplateListStatesInvalid,
-        // computed states
+        // 计算状态
         allVisibleTemplates,
         allAvailableTemplatesCount,
         allVisibleTemplatesCount,
-        // functions
+        // 函数
         updateTransactionTemplateListInvalidState,
         resetTransactionTemplates,
         loadAllTemplates,

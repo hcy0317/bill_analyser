@@ -792,7 +792,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             const missingDays: number = getDayDifference(lastAssetTrendItem, assetTrendItem) - 1;
             const lastAssetTrendItemDate: DateTime = getYearMonthDayDateTime(lastAssetTrendItem.year, lastAssetTrendItem.month, lastAssetTrendItem.day);
 
-            // fill in missing days with last known balance
+            // 用已知的上一笔余额补齐缺失日期
             for (let i = 1; i <= missingDays; i++) {
                 const missingStatisticResponseItems: TransactionStatisticResponseItem[] = [];
                 const dateTime: DateTime = lastAssetTrendItemDate.getDateTimeAfterDays(i);
@@ -819,7 +819,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 finalAssetTrendsData.push(finalAssetTrendItem);
             }
 
-            // fill in current day data
+            // 填充当天数据
             for (const item of assetTrendItem.items) {
                 const statisticResponseItem: TransactionStatisticResponseItem = {
                     categoryId: '',
@@ -833,7 +833,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 statisticResponseItems.push(statisticResponseItem);
             }
 
-            // fill in missing accounts with last known balance
+            // 用已知的上一笔余额补齐缺失账户
             for (const item of values(lastAssetTrendItemMap)) {
                 if (existedAccountIds[item.accountId]) {
                     continue;
@@ -1156,7 +1156,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                     continue;
                 }
             } else if (transactionStatisticsFilter.chartDataType === ChartDataType.NetCashFlow.type) {
-                // Do Nothing
+                // 不做处理
             } else if (transactionStatisticsFilter.chartDataType === ChartDataType.NetIncome.type) {
                 if (item.category.type === CategoryType.Transfer) {
                     continue;
@@ -1197,7 +1197,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
                     let includeInTotal: boolean = true;
 
-                    // total outflows / inflows do not include transfer transactions between unfiltered accounts
+                    // 总流出 / 总流入不包含未被筛选账户之间的转账交易
                     if (transactionStatisticsFilter.chartDataType === ChartDataType.OutflowsByAccount.type ||
                         transactionStatisticsFilter.chartDataType === ChartDataType.InflowsByAccount.type) {
                         if (item.relatedAccount && (!transactionStatisticsFilter.filterAccountIds || !transactionStatisticsFilter.filterAccountIds[item.relatedAccount.id])) {
@@ -1284,7 +1284,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                         amount = -amount;
                     }
 
-                    // total outflows / inflows do not include transfer transactions between unfiltered accounts
+                    // 总流出 / 总流入不包含未被筛选账户之间的转账交易
                     if (transactionStatisticsFilter.chartDataType === ChartDataType.TotalOutflows.type ||
                         transactionStatisticsFilter.chartDataType === ChartDataType.TotalInflows.type ||
                         transactionStatisticsFilter.chartDataType === ChartDataType.NetCashFlow.type) {
@@ -1393,7 +1393,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
-        // Categorical Analysis filter initialization
+        // 分类分析筛选条件初始化
         if (filter && isInteger(filter.categoricalChartType)) {
             transactionStatisticsFilter.value.categoricalChartType = filter.categoricalChartType;
         } else {
@@ -1439,7 +1439,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
-        // Trend Analysis filter initialization
+        // 趋势分析筛选条件初始化
         if (filter && isInteger(filter.trendChartType)) {
             transactionStatisticsFilter.value.trendChartType = filter.trendChartType;
         } else {
@@ -1490,7 +1490,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
-        // Asset Trends filter initialization
+        // 资产趋势筛选条件初始化
         if (filter && isInteger(filter.assetTrendsChartType)) {
             transactionStatisticsFilter.value.assetTrendsChartType = filter.assetTrendsChartType;
         } else {
@@ -1536,7 +1536,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
-        // Other filter initialization
+        // 其他筛选条件初始化
         if (filter && isObject(filter.filterAccountIds)) {
             transactionStatisticsFilter.value.filterAccountIds = filter.filterAccountIds;
         } else {
@@ -1586,7 +1586,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
-        // Categorical Analysis filter update
+        // 分类分析筛选条件更新
         if (filter && isInteger(filter.categoricalChartType) && transactionStatisticsFilter.value.categoricalChartType !== filter.categoricalChartType) {
             transactionStatisticsFilter.value.categoricalChartType = filter.categoricalChartType;
             changed = true;
@@ -1616,7 +1616,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
-        // Trend Analysis filter update
+        // 趋势分析筛选条件更新
         if (filter && isInteger(filter.trendChartType) && transactionStatisticsFilter.value.trendChartType !== filter.trendChartType) {
             transactionStatisticsFilter.value.trendChartType = filter.trendChartType;
             changed = true;
@@ -1651,7 +1651,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
-        // Asset Trends filter update
+        // 资产趋势筛选条件更新
         if (filter && isInteger(filter.assetTrendsChartType) && transactionStatisticsFilter.value.assetTrendsChartType !== filter.assetTrendsChartType) {
             transactionStatisticsFilter.value.assetTrendsChartType = filter.assetTrendsChartType;
             changed = true;
@@ -1681,7 +1681,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
-        // Other filter update
+        // 其他筛选条件更新
         if (filter && isObject(filter.filterAccountIds) && !isEquals(transactionStatisticsFilter.value.filterAccountIds, filter.filterAccountIds)) {
             transactionStatisticsFilter.value.filterAccountIds = filter.filterAccountIds;
             changed = true;
@@ -2036,18 +2036,18 @@ export const useStatisticsStore = defineStore('statistics', () => {
     }
 
     return {
-        // states
+        // 状态
         transactionStatisticsFilter,
         transactionCategoryStatisticsData,
         transactionCategoryTrendsData,
         transactionStatisticsStateInvalid,
-        // computed states
+        // 计算状态
         categoricalAnalysisChartDataCategory,
         categoricalOverviewAnalysisData,
         categoricalAnalysisData,
         trendsAnalysisData,
         assetTrendsData,
-        // functions
+        // 函数
         updateTransactionStatisticsInvalidState,
         resetTransactionStatistics,
         initTransactionStatisticsFilter,

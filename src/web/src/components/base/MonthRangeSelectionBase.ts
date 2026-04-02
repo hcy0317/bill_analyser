@@ -79,12 +79,12 @@ export function useMonthRangeSelectionBase(props: CommonMonthRangeSelectionProps
     }
 
     return {
-        // states
+        // 状态
         dateRange,
-        // computed states
+        // 计算状态
         beginDateTime,
         endDateTime,
-        // functions
+        // 函数
         getFinalMonthRange
     };
 }

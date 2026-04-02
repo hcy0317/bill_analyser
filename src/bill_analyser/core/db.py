@@ -1,7 +1,7 @@
 """
-Database Module - 异步数据库管理模块
+数据库模块
 
-使用 aiosqlite 实现异步数据库操作,支持 WAL 模式、批量写入和去重。
+使用 aiosqlite 实现异步数据库操作，支持 WAL 模式、批量写入和去重。
 """
 
 import hashlib
@@ -88,7 +88,7 @@ class Database:
         """
         初始化数据库管理器
 
-        Args:
+        参数：
             db_path: 数据库文件路径，如果为 None 则使用默认路径
         """
         self.logger = get_logger("Database")

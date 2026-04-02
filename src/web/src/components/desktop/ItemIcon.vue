@@ -43,7 +43,7 @@ const classes = computed<string>(() => {
     } else if (props.iconType === 'category') {
         allClasses += getCategoryIcon(props.iconId);
     } else if (props.iconType === 'fixed') {
-        // Handle null/undefined icon IDs
+        // 处理空图标 ID
         if (props.iconId !== null && props.iconId !== undefined) {
             allClasses += props.iconId;
         }

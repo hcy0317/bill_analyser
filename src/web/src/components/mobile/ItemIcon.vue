@@ -13,7 +13,7 @@ const { style, getAccountIcon, getCategoryIcon } = useItemIconBase(props);
 
 const f7IconValue = computed<string>(() => {
     if (props.iconType === 'fixed-f7') {
-        // Handle null/undefined icon IDs
+        // 处理空图标 ID
         if (props.iconId === null || props.iconId === undefined) {
             return '';
         }
@@ -29,7 +29,7 @@ const icon = computed<string>(() => {
     } else if (props.iconType === 'category') {
         return getCategoryIcon(props.iconId);
     } else if (props.iconType === 'fixed') {
-        // Handle null/undefined icon IDs
+        // 处理空图标 ID
         if (props.iconId === null || props.iconId === undefined) {
             return '';
         }

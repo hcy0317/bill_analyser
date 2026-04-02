@@ -24,7 +24,7 @@ const appLockStateSessionStorageKey: string = 'ebk_user_app_lock_state'; // { 'u
 
 function getAppLockSecret(pinCode: string): string {
     const hashedPinCode = CryptoJS.SHA256(appLockSecretBaseStringPrefix + pinCode).toString();
-    return hashedPinCode.substring(0, 24); // put secret into user id of webauthn (user id total length must less 64 bytes)
+    return hashedPinCode.substring(0, 24); // 将 secret 放入 WebAuthn 的 user id（user id 总长度必须小于 64 字节）
 }
 
 function getEncryptedToken(token: string, appLockState: ApplicationLockState): string {
@@ -176,22 +176,22 @@ export function getCurrentToken(): string | null {
         logger.debug(`[getCurrentToken] AppLock mode: hasSessionEnc=${!!usedEncryptedToken}, hasLocalEnc=${!!currentEncryptedToken}, hasSessionPlain=${!!sessionToken}`);
 
         if (!usedEncryptedToken || !currentEncryptedToken) {
-            // Fallback: If we are in a state where application lock is enabled but we don't have session keys,
-            // check if the token in localStorage is actually a plain token (not encrypted).
-            // This can happen if we just logged in and forced applicationLock=false in settings,
-            // but the settings store hasn't updated yet or isEnableApplicationLock() is reading stale data.
-            // Or if we saved a plain token because we didn't have the lock state yet.
+            // 兜底：如果应用锁已启用，但当前没有 session key，
+            // 则检查 localStorage 中的 token 是否其实是明文 token（未加密）。
+            // 这种情况可能发生在刚登录并强制将 settings 中的 applicationLock 设为 false 时，
+            // 但 settings store 尚未更新，或者 isEnableApplicationLock() 读到了过期数据。
+            // 也可能是因为当时还没有锁状态，所以保存的是明文 token。
 
             if (currentEncryptedToken) {
-                // Improved heuristic: If it looks like a JWT (starts with eyJ), it's definitely a plain token.
+                // 改进后的启发式判断：如果它看起来像 JWT（以 eyJ 开头），那基本可以确定是明文 token。
                 if (currentEncryptedToken.startsWith('eyJ')) {
                     logger.info(`[getCurrentToken] Fallback: Returning JWT from localStorage (length=${currentEncryptedToken.length})`);
                     return currentEncryptedToken;
                 }
 
-                // If it doesn't look like a JWT, it might be encrypted or just a different format.
-                // But returning null guarantees failure (Missing Header).
-                // Returning it gives a chance (if it's plain but not JWT, or if backend handles it).
+                // 如果它看起来不像 JWT，那它可能是加密后的，也可能只是另一种格式。
+                // 但直接返回 null 一定会失败（Missing Header）。
+                // 返回原值至少还有成功机会（比如它是明文但不是 JWT，或者后端能处理这种格式）。
                 logger.warn(`[getCurrentToken] Fallback: Returning non-JWT token from localStorage. AppLock=${enableAppLock}`);
                 return currentEncryptedToken;
             }
@@ -209,7 +209,7 @@ export function getCurrentToken(): string | null {
             }
         }
 
-        // re-decrypt token
+        // 重新解密 token
         logger.info('[getCurrentToken] Encrypted token changed, re-decrypting...');
 
         const appLockState = getUserAppLockState();

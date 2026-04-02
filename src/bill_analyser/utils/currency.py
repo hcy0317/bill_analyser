@@ -1,11 +1,11 @@
-"""Currency Conversion Utilities - 货币单位转换工具
+"""货币单位转换工具
 
 统一管理前后端之间的货币单位转换：
-- 前端: 分(cents) 整数
-- 后端: 元(yuan) 浮点数
+- 前端：分（cents）整数
+- 后端：元（yuan）浮点数
 
-Author: Bill Analyser Team
-Created: 2025-11-21
+作者：Bill Analyser Team
+创建时间：2025-11-21
 """
 
 import math
@@ -19,13 +19,13 @@ logger = get_logger("CurrencyUtils")
 def cents_to_yuan(cents: int | str | None) -> float:
     """将分转换为元
 
-    Args:
+    参数：
         cents: 分(整数或字符串)，前端金额单位
 
-    Returns:
+    返回：
         float: 元(浮点数)，后端存储单位
 
-    Examples:
+    示例：
         >>> cents_to_yuan(10050)
         100.50
         >>> cents_to_yuan("5000")
@@ -40,11 +40,11 @@ def cents_to_yuan(cents: int | str | None) -> float:
         if isinstance(cents, str):
             cents = int(cents) if cents else 0
 
-        # 使用Decimal确保精度
+        # 使用 Decimal 确保精度
         decimal_cents = Decimal(str(cents))
         decimal_yuan = decimal_cents / Decimal("100")
 
-        # 转换为float，保留2位小数
+        # 转换为 float，保留 2 位小数
         return float(decimal_yuan.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
     except (ValueError, TypeError) as e:
@@ -55,13 +55,13 @@ def cents_to_yuan(cents: int | str | None) -> float:
 def yuan_to_cents(yuan: float | str | None) -> int:
     """将元转换为分
 
-    Args:
+    参数：
         yuan: 元(浮点数/整数/字符串)，后端存储单位
 
-    Returns:
+    返回：
         int: 分(整数)，前端金额单位
 
-    Examples:
+    示例：
         >>> yuan_to_cents(100.50)
         10050
         >>> yuan_to_cents("50.0")
@@ -76,7 +76,7 @@ def yuan_to_cents(yuan: float | str | None) -> int:
         if isinstance(yuan, str):
             yuan = float(yuan) if yuan else 0.0
 
-        # 使用Decimal确保精度
+        # 使用 Decimal 确保精度
         decimal_yuan = Decimal(str(yuan))
         decimal_cents = decimal_yuan * Decimal("100")
 
@@ -91,14 +91,14 @@ def yuan_to_cents(yuan: float | str | None) -> int:
 def format_currency_display(yuan: float | None, currency: str = "CNY") -> str:
     """格式化货币显示
 
-    Args:
+    参数：
         yuan: 金额(元)
         currency: 货币代码，默认CNY
 
-    Returns:
+    返回：
         str: 格式化的货币字符串
 
-    Examples:
+    示例：
         >>> format_currency_display(1234.56)
         '¥1,234.56'
         >>> format_currency_display(1234.56, 'USD')
@@ -123,12 +123,12 @@ def validate_amount(
 ) -> bool:
     """验证金额是否合法
 
-    Args:
+    参数：
         amount: 待验证金额(元)
         min_value: 最小值(默认0.01元)
         max_value: 最大值(默认10亿元)
 
-    Returns:
+    返回：
         bool: 是否合法
     """
     if amount is None or amount == "":

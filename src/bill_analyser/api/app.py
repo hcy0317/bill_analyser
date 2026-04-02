@@ -1,7 +1,7 @@
 """
-Flask Web API Server - 账单分析系统Web API服务器
+Flask Web API 服务器 - 账单分析系统
 
-提供RESTful API接口供Vue前端调用
+提供 REST API 接口供 Vue 前端调用。
 """
 
 import asyncio

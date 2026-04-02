@@ -5,21 +5,21 @@ export class FiscalYearStart {
     public static readonly Default = FiscalYearStart.JanuaryFirstDay;
 
     private static readonly MONTH_MAX_DAYS: number[] = [
-        31, // January
-        28, // February (Disallow fiscal year start on leap day)
-        31, // March
-        30, // April
-        31, // May
-        30, // June
-        31, // July
-        31, // August
-        30, // September
-        31, // October
-        30, // November
-        31 // December
+        31, // 一月
+        28, // 二月（不允许将闰日作为财年起始日）
+        31, // 三月
+        30, // 四月
+        31, // 五月
+        30, // 六月
+        31, // 七月
+        31, // 八月
+        30, // 九月
+        31, // 十月
+        30, // 十一月
+        31 // 十二月
     ];
 
-    public readonly month: number; // 1-based (1 = January, 12 = December)
+    public readonly month: number; // 从 1 开始计数（1 = 一月，12 = 十二月）
     public readonly day: number;
     public readonly value: number;
 
@@ -38,25 +38,25 @@ export class FiscalYearStart {
     }
 
     /**
-     * Create a FiscalYearStart from a uint16 value (two bytes - month high, day low)
-     * @param value uint16 value (month in high byte, day in low byte)
-     * @returns FiscalYearStart instance or undefined if the value is out of range
+     * 通过 uint16 数值创建 FiscalYearStart（两个字节：高位为月份，低位为日期）
+     * @param value uint16 数值（高字节表示月份，低字节表示日期）
+     * @returns FiscalYearStart 实例；如果值超出范围则返回 undefined
      */
     public static valueOf(value: number): FiscalYearStart | undefined {
         if (value < 0x0101 || value > 0x0C1F) {
             return undefined;
         }
 
-        const month = (value >> 8) & 0xFF;  // high byte
-        const day = value & 0xFF;           // low byte
+        const month = (value >> 8) & 0xFF;  // 高字节
+        const day = value & 0xFF;           // 低字节
 
         return FiscalYearStart.of(month, day);
     }
 
     /**
-     * Create a FiscalYearStart from a month/day string
-     * @param monthDay MM-dd string (e.g. "04-01" = 1 April)
-     * @returns FiscalYearStart instance or undefined if the monthDay is invalid
+     * 通过 month/day 字符串创建 FiscalYearStart
+     * @param monthDay MM-dd 字符串（例如 "04-01" 表示 4 月 1 日）
+     * @returns FiscalYearStart 实例；如果 monthDay 无效则返回 undefined
      */
     public static parse(monthDay: string): FiscalYearStart | undefined {
         if (!monthDay || !monthDay.includes('-')) {

@@ -57,7 +57,7 @@ export const useUserExternalAuthStore = defineStore('userExternalAUth', () => {
     }
 
     return {
-        // functions
+        // 函数
         getExternalAuths,
         unlinkExternalAuth
     };

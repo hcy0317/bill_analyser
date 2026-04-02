@@ -128,7 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
         });
     }
 
-    // Basic Settings
+    // 基础设置
     function setTheme(value: string): void {
         updateApplicationSettingsValue('theme', value);
         appSettings.value.theme = value;
@@ -165,7 +165,7 @@ export const useSettingsStore = defineStore('settings', () => {
         appSettings.value.animate = value;
     }
 
-    // Application Lock
+    // 应用锁
     function setEnableApplicationLock(value: boolean): void {
         updateApplicationSettingsValue('applicationLock', value);
         appSettings.value.applicationLock = value;
@@ -176,13 +176,13 @@ export const useSettingsStore = defineStore('settings', () => {
         appSettings.value.applicationLockWebAuthn = value;
     }
 
-    // Navigation Bar
+    // 导航栏
     function setShowAddTransactionButtonInDesktopNavbar(value: boolean): void {
         updateApplicationSettingsValue('showAddTransactionButtonInDesktopNavbar', value);
         appSettings.value.showAddTransactionButtonInDesktopNavbar = value;
     }
 
-    // Overview Page
+    // 概览页
     function setShowAmountInHomePage(value: boolean): void {
         updateApplicationSettingsValue('showAmountInHomePage', value);
         appSettings.value.showAmountInHomePage = value;
@@ -207,7 +207,7 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('overviewTransactionCategoryFilterInHomePage', value);
     }
 
-    // Transaction List Page
+    // 交易列表页
     function setItemsCountInTransactionListPage(value: number): void {
         updateApplicationSettingsValue('itemsCountInTransactionListPage', value);
         appSettings.value.itemsCountInTransactionListPage = value;
@@ -226,7 +226,7 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('showTagInTransactionListPage', value);
     }
 
-    // Transaction Edit Page
+    // 交易编辑页
     function setAutoSaveTransactionDraft(value: string): void {
         updateApplicationSettingsValue('autoSaveTransactionDraft', value);
         appSettings.value.autoSaveTransactionDraft = value;
@@ -245,21 +245,21 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('alwaysShowTransactionPicturesInMobileTransactionEditPage', value);
     }
 
-    // Account List Page
+    // 账户列表页
     function setTotalAmountExcludeAccountIds(value: Record<string, boolean>): void {
         updateApplicationSettingsValue('totalAmountExcludeAccountIds', value);
         appSettings.value.totalAmountExcludeAccountIds = value;
         updateUserApplicationCloudSettingValue('totalAmountExcludeAccountIds', value);
     }
 
-    // Exchange Rates Data Page
+    // 汇率数据页
     function setCurrencySortByInExchangeRatesPage(value: number): void {
         updateApplicationSettingsValue('currencySortByInExchangeRatesPage', value);
         appSettings.value.currencySortByInExchangeRatesPage = value;
         updateUserApplicationCloudSettingValue('currencySortByInExchangeRatesPage', value);
     }
 
-    // Statistics Settings
+    // 统计设置
     function setStatisticsDefaultChartDataType(value: number): void {
         updateApplicationSettingsSubValue('statistics', 'defaultChartDataType', value);
         appSettings.value.statistics.defaultChartDataType = value;
@@ -434,14 +434,14 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     return {
-        // states
+        // 状态
         appSettings,
         syncedAppSettings,
         localeDefaultSettings,
-        // computed states
+        // 计算状态
         enableApplicationCloudSync,
-        // functions
-        // -- Basic Settings
+        // 函数
+        // -- 基础设置
         setTheme,
         setFontSize,
         setTimeZone,
@@ -449,29 +449,29 @@ export const useSettingsStore = defineStore('settings', () => {
         setShowAccountBalance,
         setEnableSwipeBack,
         setEnableAnimate,
-        // -- Application Lock
+        // -- 应用锁
         setEnableApplicationLock,
         setEnableApplicationLockWebAuthn,
-        // -- Navigation Bar
+        // -- 导航栏
         setShowAddTransactionButtonInDesktopNavbar,
-        // -- Overview Page
+        // -- 概览页
         setShowAmountInHomePage,
         setTimezoneUsedForStatisticsInHomePage,
         setOverviewAccountFilterInHomePage,
         setOverviewTransactionCategoryFilterInHomePage,
-        // -- Transaction List Page
+        // -- 交易列表页
         setItemsCountInTransactionListPage,
         setShowTotalAmountInTransactionListPage,
         setShowTagInTransactionListPage,
-        // -- Transaction Edit Page
+        // -- 交易编辑页
         setAutoSaveTransactionDraft,
         setAutoGetCurrentGeoLocation,
         setAlwaysShowTransactionPicturesInMobileTransactionEditPage,
-        // -- Account List Page
+        // -- 账户列表页
         setTotalAmountExcludeAccountIds,
-        // -- Exchange Rates Data Page
+        // -- 汇率数据页
         setCurrencySortByInExchangeRatesPage,
-        // -- Statistics Settings
+        // -- 统计设置
         setStatisticsDefaultChartDataType,
         setStatisticsDefaultTimezoneType,
         setStatisticsDefaultAccountFilter,

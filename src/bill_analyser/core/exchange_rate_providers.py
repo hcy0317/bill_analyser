@@ -1,5 +1,5 @@
 """
-Exchange Rate Providers - 汇率数据源提供者
+汇率数据源提供者
 
 支持多个央行和金融机构的汇率数据获取
 
@@ -122,12 +122,12 @@ class ExchangeRateProvider(ABC):
         """
         获取汇率
 
-        Args:
+        参数：
             base_currency: 基准货币代码
             target_currencies: 目标货币列表
             date: 日期 (YYYY-MM-DD)，None表示最新
 
-        Returns:
+        返回：
             Dict[str, float]: {货币代码: 汇率}
         """
         raise NotImplementedError
@@ -156,7 +156,7 @@ class ExchangeRateProvider(ABC):
 
         将以 original_base 为基准的汇率转换为以 target_base 为基准的汇率
 
-        Args:
+        参数：
             rates: 原始汇率字典 {货币: 汇率}
             original_base: 原始基准货币 (如 EUR, CAD)
             target_base: 目标基准货币 (如 CNY)
@@ -167,7 +167,7 @@ class ExchangeRateProvider(ABC):
                 - 'target_to_base': rates[X] = "1 X = ? original_base"
                   例如 BOC: rates['USD']=1.38 表示 1 USD = 1.38 CAD
 
-        Returns:
+        返回：
             Dict[str, float]: {货币: 相对于target_base的汇率}，格式为 "1 target_base = ? currency"
         """
         if original_base == target_base:
@@ -210,7 +210,7 @@ class ExchangeRateProvider(ABC):
 
 
 class ECBProvider(ExchangeRateProvider):
-    """欧洲央行 (European Central Bank)"""
+    """欧洲央行（European Central Bank）。"""
 
     BASE_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     HIST_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml"

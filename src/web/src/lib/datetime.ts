@@ -879,12 +879,12 @@ export function getAllYearsStartAndEndUnixTimes(startYearMonth: Year0BasedMonth 
 }
 
 export function getAllFiscalYearsStartAndEndUnixTimes(startYearMonth: Year0BasedMonth | Year1BasedMonth | TextualYearMonth | '', endYearMonth: Year0BasedMonth | Year1BasedMonth | TextualYearMonth | '', fiscalYearStartValue: number): FiscalYearUnixTime[] {
-    // user selects date range: start=2024-01 and end=2026-12
-    // result should be 4x FiscalYearUnixTime made up of:
-    // - 2024-01->2024-06 (FY 24) - input start year-month->end of fiscal year in which the input start year-month falls
-    // - 2024-07->2025-06 (FY 25) - complete fiscal year
-    // - 2025-07->2026-06 (FY 26) - complete fiscal year
-    // - 2026-07->2026-12 (FY 27) - start of fiscal year->end of fiscal year in which the input end year-month falls
+    // 用户选择的日期范围：start=2024-01，end=2026-12
+    // 结果应拆分为 4 个 FiscalYearUnixTime：
+    // - 2024-01->2024-06（FY 24）- 输入起始年月到其所在财年的结束
+    // - 2024-07->2025-06（FY 25）- 完整财年
+    // - 2025-07->2026-06（FY 26）- 完整财年
+    // - 2026-07->2026-12（FY 27）- 该财年的起始到输入结束年月
 
     const allFiscalYearTimes: FiscalYearUnixTime[] = [];
     const range = getStartEndYearMonthRange(startYearMonth, endYearMonth);
@@ -901,8 +901,8 @@ export function getAllFiscalYearsStartAndEndUnixTimes(startYearMonth: Year0Based
         fiscalYearStart = FiscalYearStart.Default;
     }
 
-    // Loop over 1 year before and 1 year after the input date range
-    // to include fiscal years that start in the previous calendar year.
+    // 在输入日期范围前后各多遍历 1 年，
+    // 以覆盖那些起始于上一公历年的财年。
     for (let year = range.startYearMonth.year - 1; year <= range.endYearMonth.year + 1; year++) {
         const thisYearMonthUnixTime = getYearMonthFirstUnixTime({ year: year, month1base: fiscalYearStart.month });
         const fiscalStartTime = getFiscalYearStartUnixTime(thisYearMonthUnixTime, fiscalYearStart.value);
@@ -1034,7 +1034,7 @@ export function getShiftedDateRange(minTime: number, maxTime: number, scale: num
     const firstDayOfMonth = minDateTime.clone().startOf('month');
     const lastDayOfMonth = maxDateTime.clone().endOf('month');
 
-    // check whether the date range matches full months
+    // 检查日期范围是否正好覆盖整月
     if (firstDayOfMonth.unix() === minDateTime.unix() && lastDayOfMonth.unix() === maxDateTime.unix()) {
         const months = maxDateTime.year() * 12 + (maxDateTime.month() + 1) - minDateTime.year() * 12 - (minDateTime.month() + 1) + 1;
         const newMinDateTime = minDateTime.add(months * scale, 'months');
@@ -1046,7 +1046,7 @@ export function getShiftedDateRange(minTime: number, maxTime: number, scale: num
         };
     }
 
-    // check whether the date range matches one full year
+    // 检查日期范围是否正好覆盖完整一年
     if (minDateTime.clone().add(1, 'years').subtract(1, 'seconds').unix() === maxDateTime.unix() ||
         maxDateTime.clone().subtract(1, 'years').add(1, 'seconds').unix() === minDateTime.unix()) {
         const newMinDateTime = minDateTime.add(1 * scale, 'years');
@@ -1058,7 +1058,7 @@ export function getShiftedDateRange(minTime: number, maxTime: number, scale: num
         };
     }
 
-    // check whether the date range matches one full month
+    // 检查日期范围是否正好覆盖完整一个月
     if (minDateTime.clone().add(1, 'months').subtract(1, 'seconds').unix() === maxDateTime.unix() ||
         maxDateTime.clone().subtract(1, 'months').add(1, 'seconds').unix() === minDateTime.unix()) {
         const newMinDateTime = minDateTime.add(1 * scale, 'months');
@@ -1157,34 +1157,34 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
         console.log(`[getDateRangeByDateType] dateType=${dateType}, fiscalYearStart=${fiscalYearStart}`);
     }
 
-    if (dateType === DateRange.All.type) { // All
+    if (dateType === DateRange.All.type) { // 全部
         maxTime = 0;
         minTime = 0;
-    } else if (dateType === DateRange.ThisWeek.type) { // This week
+    } else if (dateType === DateRange.ThisWeek.type) { // 本周
         maxTime = getThisWeekLastUnixTime(firstDayOfWeek);
         minTime = getThisWeekFirstUnixTime(firstDayOfWeek);
-    } else if (dateType === DateRange.LastWeek.type) { // Last week
+    } else if (dateType === DateRange.LastWeek.type) { // 上周
         maxTime = getUnixTimeBeforeUnixTime(getThisWeekLastUnixTime(firstDayOfWeek), 7, 'days');
         minTime = getUnixTimeBeforeUnixTime(getThisWeekFirstUnixTime(firstDayOfWeek), 7, 'days');
-    } else if (dateType === DateRange.ThisMonth.type) { // This month
+    } else if (dateType === DateRange.ThisMonth.type) { // 本月
         maxTime = getThisMonthLastUnixTime();
         minTime = getThisMonthFirstUnixTime();
-    } else if (dateType === DateRange.LastMonth.type) { // Last month
+    } else if (dateType === DateRange.LastMonth.type) { // 上月
         maxTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 1, 'seconds');
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 1, 'months');
-    } else if (dateType === DateRange.ThisYear.type) { // This year - 自然年（1月1日开始）
+    } else if (dateType === DateRange.ThisYear.type) { // 今年 - 自然年（1月1日开始）
         console.log(`[getDateRangeByDateType] ThisYear (自然年) - fiscalYearStart参数值=${fiscalYearStart}（但自然年不使用此参数）`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().startOf('year').unix();
         console.log(`[getDateRangeByDateType] ThisYear range: ${new Date(minTime * 1000).toISOString()} - ${new Date(maxTime * 1000).toISOString()}`);
-    } else if (dateType === DateRange.LastYear.type) { // Last year - 去年自然年
+    } else if (dateType === DateRange.LastYear.type) { // 去年 - 自然年
         console.log(`[getDateRangeByDateType] LastYear (去年自然年) - fiscalYearStart参数值=${fiscalYearStart}（但去年不使用此参数）`);
         const lastYear = moment().subtract(1, 'years');
         maxTime = lastYear.clone().endOf('year').unix();
         minTime = lastYear.clone().startOf('year').unix();
         console.log(`[getDateRangeByDateType] LastYear range: ${new Date(minTime * 1000).toISOString()} - ${new Date(maxTime * 1000).toISOString()}`);
-    } else if (dateType === DateRange.ThisFiscalYear.type) { // This fiscal year
+    } else if (dateType === DateRange.ThisFiscalYear.type) { // 本财年
         console.log(`[getDateRangeByDateType] ThisFiscalYear - using fiscalYearStart=${fiscalYearStart}`);
         maxTime = getFiscalYearEndUnixTime(getTodayFirstUnixTime(), fiscalYearStart);
         minTime = getFiscalYearStartUnixTime(getTodayFirstUnixTime(), fiscalYearStart);
@@ -1194,7 +1194,7 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
         console.log(`[getDateRangeByDateType] ThisFiscalYear range (Local Time): ${minDate.toLocaleString('zh-CN')} - ${maxDate.toLocaleString('zh-CN')}`);
         console.log(`[getDateRangeByDateType] ThisFiscalYear range (UTC): ${minDate.toISOString()} - ${maxDate.toISOString()}`);
         console.log(`[getDateRangeByDateType] ThisFiscalYear unix timestamps: ${minTime} - ${maxTime}`);
-    } else if (dateType === DateRange.LastFiscalYear.type) { // Last fiscal year
+    } else if (dateType === DateRange.LastFiscalYear.type) { // 上一财年
         console.log(`[getDateRangeByDateType] LastFiscalYear - using fiscalYearStart=${fiscalYearStart}`);
         maxTime = getUnixTimeBeforeUnixTime(getFiscalYearEndUnixTime(getTodayFirstUnixTime(), fiscalYearStart), 1, 'years');
         minTime = getUnixTimeBeforeUnixTime(getFiscalYearStartUnixTime(getTodayFirstUnixTime(), fiscalYearStart), 1, 'years');
@@ -1204,30 +1204,30 @@ export function getDateRangeByDateType(dateType: number | undefined, firstDayOfW
         console.log(`[getDateRangeByDateType] LastFiscalYear range (Local Time): ${lastMinDate.toLocaleString('zh-CN')} - ${lastMaxDate.toLocaleString('zh-CN')}`);
         console.log(`[getDateRangeByDateType] LastFiscalYear range (UTC): ${lastMinDate.toISOString()} - ${lastMaxDate.toISOString()}`);
         console.log(`[getDateRangeByDateType] LastFiscalYear unix timestamps: ${minTime} - ${maxTime}`);
-    } else if (dateType === DateRange.RecentTwelveMonths.type) { // Recent 12 months
+    } else if (dateType === DateRange.RecentTwelveMonths.type) { // 最近 12 个月
         maxTime = getThisMonthLastUnixTime();
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 11, 'months');
-    } else if (dateType === DateRange.RecentTwentyFourMonths.type) // Recent 24 months
+    } else if (dateType === DateRange.RecentTwentyFourMonths.type) // 最近 24 个月
     {
         maxTime = getThisMonthLastUnixTime();
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 23, 'months');
-    } else if (dateType === DateRange.RecentThirtySixMonths.type) // Recent 36 months
+    } else if (dateType === DateRange.RecentThirtySixMonths.type) // 最近 36 个月
     {
         maxTime = getThisMonthLastUnixTime();
         minTime = getUnixTimeBeforeUnixTime(getThisMonthFirstUnixTime(), 35, 'months');
-    } else if (dateType === DateRange.RecentTwoYears.type) // Recent 2 years - 最近2个自然年
+    } else if (dateType === DateRange.RecentTwoYears.type) // 最近 2 年 - 最近 2 个自然年
     {
         console.log(`[getDateRangeByDateType] RecentTwoYears (最近2个自然年)`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().subtract(1, 'years').startOf('year').unix();
-    } else if (dateType === DateRange.RecentThreeYears.type) // Recent 3 years - 最近3个自然年
+    } else if (dateType === DateRange.RecentThreeYears.type) // 最近 3 年 - 最近 3 个自然年
     {
         console.log(`[getDateRangeByDateType] RecentThreeYears (最近3个自然年)`);
         const now = moment();
         maxTime = now.clone().endOf('year').unix();
         minTime = now.clone().subtract(2, 'years').startOf('year').unix();
-    } else if (dateType === DateRange.RecentFiveYears.type) // Recent 5 years - 最近5个自然年
+    } else if (dateType === DateRange.RecentFiveYears.type) // 最近 5 年 - 最近 5 个自然年
     {
         console.log(`[getDateRangeByDateType] RecentFiveYears (最近5个自然年)`);
         const now = moment();
@@ -1248,7 +1248,7 @@ export function getDateRangeByBillingCycleDateType(dateType: number, firstDayOfW
     let maxTime = 0;
     let minTime = 0;
 
-    if (dateType === DateRange.PreviousBillingCycle.type || dateType === DateRange.CurrentBillingCycle.type) { // Previous Billing Cycle | Current Billing Cycle
+    if (dateType === DateRange.PreviousBillingCycle.type || dateType === DateRange.CurrentBillingCycle.type) { // 上一个账单周期 | 当前账单周期
         if (statementDate) {
             if (getCurrentDateTime().getGregorianCalendarDay() <= statementDate) {
                 maxTime = getThisMonthSpecifiedDayLastUnixTime(statementDate);
@@ -1265,9 +1265,9 @@ export function getDateRangeByBillingCycleDateType(dateType: number, firstDayOfW
         } else {
             let fallbackDateRange = null;
 
-            if (dateType === DateRange.CurrentBillingCycle.type) { // same as This Month
+            if (dateType === DateRange.CurrentBillingCycle.type) { // 等同于本月
                 fallbackDateRange = getDateRangeByDateType(DateRange.ThisMonth.type, firstDayOfWeek, fiscalYearStart);
-            } else if (dateType === DateRange.PreviousBillingCycle.type) { // same as Last Month
+            } else if (dateType === DateRange.PreviousBillingCycle.type) { // 等同于上月
                 fallbackDateRange = getDateRangeByDateType(DateRange.LastMonth.type, firstDayOfWeek, fiscalYearStart);
             }
 
@@ -1453,13 +1453,13 @@ export function isDateRangeMatchOneMonth(minTime: number, maxTime: number): bool
 export function getFiscalYearFromUnixTime(unixTime: number, fiscalYearStartValue: number): number {
     const date = moment.unix(unixTime);
 
-    // For January 1 fiscal year start, fiscal year matches calendar year
+    // 若财年从 1 月 1 日开始，则财年与公历年一致
     if (fiscalYearStartValue === FiscalYearStart.JanuaryFirstDay.value) {
         return date.year();
     }
 
-    // Get date components
-    const month = date.month() + 1; // 1-index
+    // 获取日期组成部分
+    const month = date.month() + 1; // 从 1 开始计数
     const day = date.date();
     const year = date.year();
 
@@ -1469,23 +1469,23 @@ export function getFiscalYearFromUnixTime(unixTime: number, fiscalYearStartValue
         fiscalYearStart = FiscalYearStart.Default;
     }
 
-    // For other fiscal year starts:
-    // If input time comes before the fiscal year start day in the calendar year,
-    // it belongs to the fiscal year that ends in the current calendar year
+    // 对于其他财年起始日：
+    // 如果输入时间早于该公历年的财年起始日，
+    // 则它属于在当前公历年结束的那个财年
     if (month < fiscalYearStart.month || (month === fiscalYearStart.month && day < fiscalYearStart.day)) {
         return year;
     }
 
-    // If input time is on or after the fiscal year start day in the calendar year,
-    // it belongs to the fiscal year that ends in the next calendar year
+    // 如果输入时间在该公历年的财年起始日当天或之后，
+    // 则它属于在下一公历年结束的那个财年
     return year + 1;
 }
 
 export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValue: number): number {
     const date = moment.unix(unixTime);
 
-    // For January 1 fiscal year start, fiscal year start time is always January 1 in the input calendar year
-    // Note: We use loose equality check here to handle potential type mismatches (string vs number)
+    // 若财年从 1 月 1 日开始，则财年起点总是输入公历年的 1 月 1 日
+    // 注意：这里使用宽松相等，以兼容潜在的类型不匹配（string vs number）
 
     if (fiscalYearStartValue == FiscalYearStart.JanuaryFirstDay.value) {
         return moment().year(date.year()).month(0).date(1).hour(0).minute(0).second(0).millisecond(0).unix();
@@ -1497,15 +1497,15 @@ export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValu
         fiscalYearStart = FiscalYearStart.Default;
     }
 
-    const month = date.month() + 1; // 1-index
+    const month = date.month() + 1; // 从 1 开始计数
     const day = date.date();
     const year = date.year();
 
-    // For other fiscal year starts:
-    // If input time comes before the fiscal year start day in the calendar year,
-    // the relevant fiscal year has a start date in Calendar Year = Input Year, and end date in Calendar Year = Input Year + 1.
-    // If input time comes on or after the fiscal year start day in the calendar year,
-    // the relevant fiscal year has a start date in Calendar Year = Input Year - 1, and end date in Calendar Year = Input Year.
+    // 对于其他财年起始日：
+    // 如果输入时间早于该公历年的财年起始日，
+    // 则对应财年的开始日期位于“输入年份”，结束日期位于“输入年份 + 1”。
+    // 如果输入时间在该公历年的财年起始日当天或之后，
+    // 则对应财年的开始日期位于“输入年份 - 1”，结束日期位于“输入年份”。
     let startYear = year - 1;
     if (month > fiscalYearStart.month || (month === fiscalYearStart.month && day >= fiscalYearStart.day)) {
         startYear = year;
@@ -1513,7 +1513,7 @@ export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValu
 
     return moment().set({
         year: startYear,
-        month: fiscalYearStart.month - 1, // 0-index
+        month: fiscalYearStart.month - 1, // 从 0 开始计数
         date: fiscalYearStart.day,
         hour: 0,
         minute: 0,
@@ -1550,14 +1550,14 @@ export function getFiscalYearTimeRangeFromYear(year: number, fiscalYearStartValu
         fiscalYearStart = FiscalYearStart.Default;
     }
 
-    // For a specified fiscal year (e.g., 2023), the start date is in the previous calendar year
-    // unless fiscal year starts on January 1
+    // 对于指定财年（例如 2023），其开始日期位于前一个公历年，
+    // 除非财年起始日就是 1 月 1 日
     const calendarStartYear = fiscalYearStartValue === FiscalYearStart.JanuaryFirstDay.value ? fiscalYear : fiscalYear - 1;
 
-    // Create the timestamp for the start of the fiscal year
+    // 生成财年起始时刻的时间戳
     const fiscalYearStartUnixTime = moment().set({
         year: calendarStartYear,
-        month: fiscalYearStart.month - 1, // 0-index
+        month: fiscalYearStart.month - 1, // 从 0 开始计数
         date: fiscalYearStart.day,
         hour: 0,
         minute: 0,
@@ -1565,7 +1565,7 @@ export function getFiscalYearTimeRangeFromYear(year: number, fiscalYearStartValu
         millisecond: 0,
     }).unix();
 
-    // Fiscal year end is one year after start minus 1 second
+    // 财年结束时刻 = 财年开始后一年再减 1 秒
     const fiscalYearEndUnixTime = moment.unix(fiscalYearStartUnixTime).add(1, 'years').subtract(1, 'seconds').unix();
 
     return {

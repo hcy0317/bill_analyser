@@ -62,11 +62,11 @@ export function useLanguageSelectButtonBase(props: LanguageSelectBaseProps, emit
     }
 
     return {
-        // computed states
+        // 计算状态
         allLanguages,
         currentLocale,
         currentLanguageName,
-        // functions
+        // 函数
         updateLanguage,
         isLanguageSelected
     }

@@ -49,13 +49,13 @@ export function useCategoryEditPageBase(type?: CategoryType, parentId?: string) 
     const inputIsEmpty = computed<boolean>(() => !!inputEmptyProblemMessage.value);
 
     return {
-        // states
+        // 状态
         editCategoryId,
         clientSessionId,
         loading,
         submitting,
         category,
-        // computed states
+        // 计算状态
         allAvailableCategories,
         title,
         saveButtonTitle,

@@ -349,12 +349,12 @@ export function useStatisticsTransactionPageBase() {
     }
 
     return {
-        // states
+        // 状态
         loading,
         analysisType,
         trendDateAggregationType,
         assetTrendsDateAggregationType,
-        // computed states
+        // 计算状态
         showAccountBalance,
         defaultCurrency,
         firstDayOfWeek,
@@ -389,7 +389,7 @@ export function useStatisticsTransactionPageBase() {
         categoricalAnalysisData,
         trendsAnalysisData,
         assetTrendsData,
-        // functions
+        // 函数
         canShowCustomDateRange,
         getTransactionCategoricalAnalysisDataItemDisplayColor,
         getDisplayAmount

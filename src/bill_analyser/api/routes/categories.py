@@ -1,5 +1,5 @@
 """
-Categories API Routes - 分类相关API端点
+分类 API 路由
 """
 
 import json
@@ -11,6 +11,8 @@ from bill_analyser.api.adapters.category_adapter import CategoryAdapter
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.api.routes.request_context_helpers import (
     get_required_request_int,
+)
+from bill_analyser.api.routes.request_context_helpers import (
     run_async_in_new_loop as _run_async,
 )
 from bill_analyser.utils.config import save_config
@@ -74,12 +76,12 @@ def _get_request_user_id() -> int:
 def get_app_context(user_id: int | None = None):
     """获取应用上下文中的服务实例
 
-    Args:
+    参数：
         user_id: 用户ID (如果为None，自动从request获取)
     """
-    db = cast(Any, current_app.config.get("DB_INSTANCE"))
-    bill_service = cast(Any, current_app.config.get("BILL_SERVICE_INSTANCE"))
-    category_engine = cast(Any, current_app.config.get("CATEGORY_ENGINE_INSTANCE"))
+    db = cast("Any", current_app.config.get("DB_INSTANCE"))
+    bill_service = cast("Any", current_app.config.get("BILL_SERVICE_INSTANCE"))
+    category_engine = cast("Any", current_app.config.get("CATEGORY_ENGINE_INSTANCE"))
 
     # 自动获取user_id
     if user_id is None:

@@ -60,7 +60,7 @@ function toPostfixExprTokens(expr: string): string[] | null {
     for (let i = 0; i < expr.length; i++) {
         const ch = expr[i] as string;
 
-        // number
+        // 数字
         if ('0' <= ch && ch <= '9' || ch === '.') {
             currentNumberBuilder += ch;
             continue
@@ -69,7 +69,7 @@ function toPostfixExprTokens(expr: string): string[] | null {
             continue
         }
 
-        // operator or parenthesis
+        // 运算符或括号
         if (currentNumberBuilder.length > 0) {
             finalTokens.push(currentNumberBuilder);
             currentNumberBuilder = '';
@@ -165,17 +165,17 @@ function evaluatePostfixExpr(tokens: string[]): number | null {
             case '+':
             case '-':
             case '*':
-            case '/': // operators
+            case '/': // 运算符
                 if (stack.length < 2) {
                     logger.warn(`cannot evaluate expression "${tokens.join(' ')}", because not enough operands`);
                     return null;
                 }
 
-                // pop the top two operands
+                // 弹出栈顶两个操作数
                 const b = stack.pop() as number;
                 const a = stack.pop() as number;
 
-                // evaluate the operation
+                // 执行运算
                 let result: number;
                 switch (token) {
                     case '+':
@@ -200,10 +200,10 @@ function evaluatePostfixExpr(tokens: string[]): number | null {
 
                 checkNumberRange(result);
 
-                // push the result back to the stack
+                // 将结果重新压回栈中
                 stack.push(result);
                 break;
-            default: // operands
+            default: // 操作数
                 const normalizedNum = normalizeNumber(token);
                 checkNumberRange(normalizedNum);
                 stack.push(normalizedNum);

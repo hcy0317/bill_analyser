@@ -1,5 +1,5 @@
-# Backend Server Startup Script
-# Bill Analyser System
+# 后端服务器启动脚本
+# Bill Analyser 系统
 
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  Bill Analyser - Backend Server" -ForegroundColor Cyan

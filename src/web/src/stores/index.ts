@@ -147,7 +147,7 @@ export const useRootStore = defineStore('root', () => {
                         logger.info('[Login] Step 2: Clear AppLock state only');
                         sessionStorage.removeItem('ebk_user_app_lock_state');
 
-                        // Force update localStorage directly to ensure isEnableApplicationLock() returns false immediately
+                        // 强制直接更新 localStorage，确保 isEnableApplicationLock() 立刻返回 false
                         updateApplicationSettingsValue('applicationLock', false);
                         updateApplicationSettingsValue('applicationLockWebAuthn', false);
 
@@ -163,8 +163,8 @@ export const useRootStore = defineStore('root', () => {
                     logger.info('[Login] AppLock not enabled, skipping AppLock logic');
                 }
 
-                // Filter out application lock settings from cloud sync to prevent immediate lockout
-                // because we don't have the PIN/Secret to encrypt the token yet.
+                // 从云同步设置中过滤应用锁相关项，避免立即把用户锁死
+                // 因为此时我们还没有用于加密 token 的 PIN/Secret。
                 let applicationCloudSettings = data.result.applicationCloudSettings;
                 if (applicationCloudSettings) {
                     applicationCloudSettings = applicationCloudSettings.filter(
@@ -283,8 +283,8 @@ export const useRootStore = defineStore('root', () => {
                     }
                 }
 
-                // Filter out application lock settings from cloud sync to prevent immediate lockout
-                // because we don't have the PIN/Secret to encrypt the token yet.
+                // 从云同步设置中过滤应用锁相关项，避免立即把用户锁死
+                // 因为此时我们还没有用于加密 token 的 PIN/Secret。
                 let applicationCloudSettings = data.result.applicationCloudSettings;
                 if (applicationCloudSettings) {
                     applicationCloudSettings = applicationCloudSettings.filter(
@@ -798,9 +798,9 @@ export const useRootStore = defineStore('root', () => {
     }
 
     return {
-        // states
+        // 状态
         currentNotification,
-        // functions
+        // 函数
         setNotificationContent,
         generateOAuth2LoginUrl,
         generateOAuth2LinkUrl,

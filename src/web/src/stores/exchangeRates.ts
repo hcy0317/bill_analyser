@@ -298,15 +298,15 @@ export const useExchangeRatesStore = defineStore('exchangeRates', () => {
     }
 
     return {
-        // states
+        // 状态
         latestExchangeRates,
         selectedExchangeRateProvider,
-        // computed states
+        // 计算状态
         isUserCustomExchangeRates,
         exchangeRatesLastUpdateTime,
         latestExchangeRateMap,
         effectiveRequestedProvider,
-        // functions
+        // 函数
         resetLatestExchangeRates,
         setSelectedExchangeRateProvider,
         getLatestExchangeRates,

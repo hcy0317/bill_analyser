@@ -65,8 +65,8 @@ function injectFramework7CssFile({ htmlFileName, placeHolders }: { htmlFileName:
 export default defineConfig(() => {
     const licenseContent = fs.readFileSync('./LICENSE', { encoding: 'utf-8' });
     const buildUnixTime = process.env['buildUnixTime'] || '';
-    
-    // Get git commit hash, fallback to 'dev' if not in a git repository
+
+    // 获取 git 提交哈希；如果当前不在 git 仓库中，则回退为 'dev'
     let commitHash = 'dev';
     try {
         commitHash = git.short();
@@ -290,7 +290,7 @@ export default defineConfig(() => {
                     target: 'http://127.0.0.1:5000',
                     changeOrigin: true,
                     secure: false,
-                    // 修复：避免末尾斜杠导致的308重定向（会丢失Authorization头）
+                    // 修复：避免末尾斜杠导致的 308 重定向（否则会丢失授权请求头）
                     rewrite: (path: string) => path.replace(/^\/api/, '/api'),
                     // 配置详细日志以便调试
                     configure: (proxy: any, _options: any) => {
@@ -299,7 +299,7 @@ export default defineConfig(() => {
                         });
                         proxy.on('proxyReq', (proxyReq: any, req: any, _res: any) => {
                             console.log(`[Vite Proxy] ${req.method} ${req.url} → ${proxyReq.path}`);
-                            // 确保Authorization头被转发
+                            // 确保授权请求头被转发
                             if (req.headers.authorization) {
                                 console.log('[Vite Proxy] Authorization header present: YES');
                             } else {

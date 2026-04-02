@@ -113,13 +113,13 @@ export function useDateRangeSelectionBase(props: CommonDateRangeSelectionProps) 
     }
 
     return {
-        // states
+        // 状态
         dateRange,
-        // computed states
+        // 计算状态
         beginDateTime,
         endDateTime,
         presetRanges,
-        // functions
+        // 函数
         getFinalDateRange
     };
 }

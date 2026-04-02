@@ -84,11 +84,11 @@ export function useAccountListPageBase() {
     }
 
     return {
-        // states
+        // 状态
         loading,
         showHidden,
         displayOrderModified,
-        // computed states
+        // 计算状态
         showAccountBalance,
         firstDayOfWeek,
         fiscalYearStart,
@@ -99,7 +99,7 @@ export function useAccountListPageBase() {
         netAssets,
         totalAssets,
         totalLiabilities,
-        // functions
+        // 函数
         accountCategoryTotalBalance,
         accountBalance
     };

@@ -93,7 +93,7 @@ export function useHomePageBase() {
     }
 
     return {
-        // computed states
+        // 计算状态
         showAmountInHomePage,
         defaultCurrency,
         allAccounts,
@@ -102,7 +102,7 @@ export function useHomePageBase() {
         totalLiabilities,
         displayDateRange,
         transactionOverview,
-        // functions
+        // 函数
         getDisplayAmount,
         getDisplayIncomeAmount,
         getDisplayExpenseAmount

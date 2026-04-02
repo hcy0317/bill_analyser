@@ -48,7 +48,7 @@ export const useTokensStore = defineStore('tokens', () => {
     function refreshTokenAndRevokeOldToken(): Promise<TokenRefreshResponse> {
         return new Promise((resolve, reject) => {
             logger.info('[TokenStore] Starting token refresh and revoke old token');
-            
+
             services.refreshToken().then(response => {
                 const data = response.data;
 
@@ -62,7 +62,7 @@ export const useTokensStore = defineStore('tokens', () => {
                 if (data.result.newToken) {
                     logger.info(`[TokenStore] Updating token immediately, length=${data.result.newToken.length}`);
                     updateCurrentToken(data.result.newToken);
-                    
+
                     if (data.result.refreshToken && isString(data.result.refreshToken)) {
                         updateCurrentRefreshToken(data.result.refreshToken);
                     }
@@ -185,7 +185,7 @@ export const useTokensStore = defineStore('tokens', () => {
     }
 
     return {
-        // functions
+        // 函数
         getAllTokens,
         refreshTokenAndRevokeOldToken,
         generateToken,

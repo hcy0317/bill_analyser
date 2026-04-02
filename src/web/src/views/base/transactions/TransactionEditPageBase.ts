@@ -407,9 +407,9 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
     });
 
     return {
-        // constants
+        // 常量
         isSupportGeoLocation,
-        // states
+        // 状态
         mode,
         editId,
         addByTemplateId,
@@ -421,7 +421,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         geoLocationStatus,
         setGeoLocationByClickMap,
         transaction,
-        // computed states
+        // 计算状态
         numeralSystem,
         currentTimezoneOffsetMinutes,
         showAccountBalance,
@@ -460,7 +460,7 @@ export function useTransactionEditPageBase(type: TransactionEditPageType, initMo
         geoLocationStatusInfo,
         inputEmptyProblemMessage,
         inputIsEmpty,
-        // functions
+        // 函数
         createNewTransactionModel,
         swapTransactionData,
         getDisplayAmount,

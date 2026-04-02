@@ -46,7 +46,7 @@ export function useFiscalYearStartSelectionBase(props: CommonFiscalYearStartSele
     const { getCurrentNumeralSystemType, formatGregorianTextualMonthDayToGregorianLikeLongMonthDay } = useI18n();
 
     const disabledDates = (date: Date) => {
-        // Disable February 29 (leap day)
+        // 禁用 2 月 29 日（闰日）
         return date.getMonth() === 1 && date.getDate() === 29;
     };
 
@@ -92,11 +92,11 @@ export function useFiscalYearStartSelectionBase(props: CommonFiscalYearStartSele
     const allowedMaxDate = computed<Date>(() => getLocalDatetimeFromUnixTime(getThisYearLastUnixTime()));
 
     return {
-        // constants
+        // 常量
         disabledDates,
-        // states,
+        // 状态
         selectedFiscalYearStart,
-        // computed states
+        // 计算状态
         selectedFiscalYearStartValue,
         displayFiscalYearStartDate,
         allowedMinDate,

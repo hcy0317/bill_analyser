@@ -146,14 +146,14 @@ export function useAccountEditPageBase() {
     });
 
     return {
-        // states
+        // 状态
         editAccountId,
         clientSessionId,
         loading,
         submitting,
         account,
         subAccounts,
-        // computed states
+        // 计算状态
         title,
         saveButtonTitle,
         inputEmptyProblemMessage,
@@ -162,7 +162,7 @@ export function useAccountEditPageBase() {
         allAccountTypes,
         allAvailableMonthDays,
         isAccountSupportCreditCardStatementDate,
-        // functions
+        // 函数
         getAccountCreditCardStatementDate,
         isNewAccount,
         addSubAccount,

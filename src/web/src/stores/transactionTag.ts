@@ -358,15 +358,15 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
     }
 
     return {
-        // states
+        // 状态
         allTransactionTags,
         allTransactionTagsMap,
         transactionTagListStateInvalid,
-        // computed states
+        // 计算状态
         allVisibleTags,
         allAvailableTagsCount,
         allVisibleTagsCount,
-        // functions
+        // 函数
         updateTransactionTagListInvalidState,
         resetTransactionTags,
         loadAllTags,

@@ -211,14 +211,14 @@ export function useUserProfilePageBase() {
     }
 
     return {
-        // states
+        // 状态
         newProfile,
         oldProfile,
         emailVerified,
         loading,
         resending,
         saving,
-        // computed states
+        // 计算状态
         allAccounts,
         allVisibleAccounts,
         allVisibleCategorizedAccounts,
@@ -249,7 +249,7 @@ export function useUserProfilePageBase() {
         inputIsInvalid,
         langAndRegionInputIsInvalid,
         extendInputIsInvalid,
-        // functions
+        // 函数
         setCurrentUserProfile,
         reset,
         doAfterProfileUpdate

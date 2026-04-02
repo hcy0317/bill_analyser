@@ -70,11 +70,11 @@ export function useAboutPageBase() {
     }
 
     return {
-        // constants
+        // 常量
         clientVersion,
-        // states
+        // 状态
         clientVersionMatchServerVersion,
-        // computed states
+        // 计算状态
         serverDisplayVersion,
         clientBuildTime,
         exchangeRatesData,
@@ -83,7 +83,7 @@ export function useAboutPageBase() {
         mapProviderWebsite,
         licenseLines,
         thirdPartyLicenses,
-        // functions
+        // 函数
         refreshBrowserCache,
         init
     };

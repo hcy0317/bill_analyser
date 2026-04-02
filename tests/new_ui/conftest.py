@@ -48,7 +48,7 @@ async def app(initialize_app):
 
     yield app
 
-    # Cleanup: 确保所有资源正确释放
+    # 清理：确保所有资源正确释放
     if db:
         await db.close()
 
