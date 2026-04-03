@@ -946,3 +946,314 @@ async def test_budget_history_exact_match_filters_out_only_overlapping_snapshots
         assert history_items[0]["spent_amount"] == pytest.approx(10.0)
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_lookup_normalizes_blank_sub_category_and_syncs_groups_when_secondary_moves(
+    tmp_path: Path,
+) -> None:
+    """预算查询应归一化空白子分类，并在二级预算迁组后同步新旧父预算。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_group_move")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="旧预算分类",
+            sub_category="",
+            icon="",
+            color="",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="旧预算分类",
+            sub_category="午餐",
+            icon="fork-spoon",
+            color="#ffaa00",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="新预算分类",
+            sub_category="",
+            icon="",
+            color="",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="新预算分类",
+            sub_category="通勤",
+            icon="train",
+            color="#00aaff",
+        )
+
+        secondary_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="待迁移二级预算",
+            category="旧预算分类",
+            sub_category="午餐",
+            amount=50.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+
+        primary_before_move = await db.get_primary_category_budget(
+            "旧预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        assert primary_before_move is not None
+        assert primary_before_move["amount"] == pytest.approx(50.0)
+
+        blank_sub_category_lookup = await db.get_budget_by_category(
+            "旧预算分类",
+            "   ",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        assert blank_sub_category_lookup is not None
+        assert int(blank_sub_category_lookup["id"]) == int(primary_before_move["id"])
+
+        assert (
+            await db.update_budget(
+                secondary_budget_id,
+                {
+                    "category": "新预算分类",
+                    "sub_category": "通勤",
+                    "amount": 70.0,
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                user_id=user_id,
+            )
+            is True
+        )
+
+        old_primary_after_move = await db.get_primary_category_budget(
+            "旧预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        new_primary_after_move = await db.get_primary_category_budget(
+            "新预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        moved_secondary_budget = await db.get_budget_by_category(
+            "新预算分类",
+            "通勤",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+
+        assert old_primary_after_move is not None
+        assert old_primary_after_move["amount"] == pytest.approx(50.0)
+        assert await db.get_sub_category_budgets_total(
+            "旧预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        ) == pytest.approx(0.0)
+        assert new_primary_after_move is not None
+        assert new_primary_after_move["amount"] == pytest.approx(70.0)
+        assert moved_secondary_budget is not None
+        assert int(moved_secondary_budget["id"]) == secondary_budget_id
+        assert (
+            await db.get_budget_by_category(
+                "旧预算分类",
+                "午餐",
+                "monthly",
+                "2026-03-01",
+                user_id=user_id,
+            )
+            is None
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_delete_keeps_primary_after_secondary_delete_and_cascades_on_primary_delete(
+    tmp_path: Path,
+) -> None:
+    """删除二级预算不应误删父预算，删除父预算时应级联删除同组预算。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_delete_group")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="删除预算分类",
+            sub_category="",
+            icon="",
+            color="",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="删除预算分类",
+            sub_category="午餐",
+            icon="fork-spoon",
+            color="#ffaa00",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="删除预算分类",
+            sub_category="晚餐",
+            icon="food",
+            color="#ff6699",
+        )
+
+        lunch_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="午餐预算",
+            category="删除预算分类",
+            sub_category="午餐",
+            amount=20.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+        dinner_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="晚餐预算",
+            category="删除预算分类",
+            sub_category="晚餐",
+            amount=30.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+
+        primary_budget = await db.get_primary_category_budget(
+            "删除预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        assert primary_budget is not None
+        assert primary_budget["amount"] == pytest.approx(50.0)
+
+        assert await db.delete_budget(lunch_budget_id, user_id=user_id) is True
+
+        primary_after_secondary_delete = await db.get_primary_category_budget(
+            "删除预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        remaining_secondary_budget = await db.get_budget_by_category(
+            "删除预算分类",
+            "晚餐",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+
+        assert primary_after_secondary_delete is not None
+        assert primary_after_secondary_delete["amount"] == pytest.approx(50.0)
+        assert remaining_secondary_budget is not None
+        assert int(remaining_secondary_budget["id"]) == dinner_budget_id
+        assert await db.get_sub_category_budgets_total(
+            "删除预算分类",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        ) == pytest.approx(30.0)
+
+        assert await db.delete_budget(int(primary_budget["id"]), user_id=user_id) is True
+        assert (
+            await db.get_primary_category_budget(
+                "删除预算分类",
+                "monthly",
+                "2026-03-01",
+                user_id=user_id,
+            )
+            is None
+        )
+        assert (
+            await db.get_budget_by_category(
+                "删除预算分类",
+                "晚餐",
+                "monthly",
+                "2026-03-01",
+                user_id=user_id,
+            )
+            is None
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_group_sync_preserves_raw_category_values_across_create_and_lookup(
+    tmp_path: Path,
+) -> None:
+    """预算分组联动应对齐写库值，不能在 helper 里偷偷改写分类键语义。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_raw_group_key")
+        raw_category = "  原样预算分类  "
+
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category=raw_category,
+            sub_category="",
+            icon="",
+            color="",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category=raw_category,
+            sub_category="午餐",
+            icon="fork-spoon",
+            color="#ffaa00",
+        )
+
+        secondary_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="原样键二级预算",
+            category=raw_category,
+            sub_category="午餐",
+            amount=20.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+
+        primary_budget = await db.get_primary_category_budget(
+            raw_category,
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+        secondary_budget = await db.get_budget_by_category(
+            raw_category,
+            "午餐",
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        )
+
+        assert primary_budget is not None
+        assert primary_budget["amount"] == pytest.approx(20.0)
+        assert secondary_budget is not None
+        assert int(secondary_budget["id"]) == secondary_budget_id
+        assert await db.get_sub_category_budgets_total(
+            raw_category,
+            "monthly",
+            "2026-03-01",
+            user_id=user_id,
+        ) == pytest.approx(20.0)
+    finally:
+        await db.close()

@@ -20,6 +20,8 @@ from bill_analyser.constants import DATA_DIR, TEST_DB_DIR_ENV
 
 from ..utils.logger import get_logger, log_method, log_step
 
+BudgetGroupKey = tuple[str, str, str, int]
+
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
     """兼容 Python 版本差异的 Path 前缀判断。"""
@@ -5585,36 +5587,54 @@ class Database:
             return None
 
         normalized_sub_category = self._normalize_budget_sub_category(sub_category)
-        primary_by_key = category_context["primary_by_key"]
-        sub_by_key = category_context["sub_by_key"]
-        fallback_by_key = category_context["fallback_by_key"]
         candidate_types = list(category_context["types_by_name"].get(normalized_category_name, ()))
 
+        if not candidate_types:
+            return preferred_type if preferred_type is not None else None
+
         if preferred_type is not None and preferred_type in candidate_types:
-            if normalized_sub_category:
-                if (preferred_type, normalized_category_name, normalized_sub_category) in sub_by_key:
-                    return preferred_type
-            elif (
-                (preferred_type, normalized_category_name) in primary_by_key
-                or (preferred_type, normalized_category_name) in fallback_by_key
+            if self._matches_budget_category_type(
+                normalized_category_name,
+                normalized_sub_category,
+                category_context,
+                preferred_type,
             ):
                 return preferred_type
 
         for candidate_type in candidate_types:
-            if normalized_sub_category:
-                if (candidate_type, normalized_category_name, normalized_sub_category) in sub_by_key:
-                    return candidate_type
-                continue
-
-            if (candidate_type, normalized_category_name) in primary_by_key:
+            if self._matches_budget_category_type(
+                normalized_category_name,
+                normalized_sub_category,
+                category_context,
+                candidate_type,
+            ):
                 return candidate_type
-            if (candidate_type, normalized_category_name) in fallback_by_key:
-                return candidate_type
-
-        if not candidate_types and preferred_type is not None:
-            return preferred_type
 
         return None
+
+    @staticmethod
+    def _matches_budget_category_type(
+        normalized_category_name: str,
+        normalized_sub_category: str,
+        category_context: dict[str, Any],
+        candidate_type: int,
+    ) -> bool:
+        """判断给定预算类型是否命中当前分类上下文。"""
+        primary_by_key = category_context["primary_by_key"]
+        sub_by_key = category_context["sub_by_key"]
+        fallback_by_key = category_context["fallback_by_key"]
+
+        if normalized_sub_category:
+            return (
+                candidate_type,
+                normalized_category_name,
+                normalized_sub_category,
+            ) in sub_by_key
+
+        return (
+            (candidate_type, normalized_category_name) in primary_by_key
+            or (candidate_type, normalized_category_name) in fallback_by_key
+        )
 
     def _resolve_budget_category_info(
         self,
@@ -5659,6 +5679,91 @@ class Database:
             return ""
 
         return str(sub_category).strip()
+
+    @staticmethod
+    def _build_budget_group_key(
+        category: Any,
+        period_type: Any,
+        start_date: Any,
+        user_id: int,
+    ) -> BudgetGroupKey | None:
+        """构建预算联动/查询共用的分组键。"""
+        raw_category = "" if category is None else str(category)
+        raw_period_type = "" if period_type is None else str(period_type)
+        raw_start_date = "" if start_date is None else str(start_date)
+
+        if not (raw_category.strip() and raw_period_type.strip() and raw_start_date.strip()):
+            return None
+
+        return (
+            raw_category,
+            raw_period_type,
+            raw_start_date,
+            int(user_id),
+        )
+
+    def _normalize_budget_update_data(
+        self,
+        existing_budget: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """归一化预算更新载荷，保持一级/二级预算子分类语义稳定。"""
+        return {
+            **data,
+            "sub_category": self._normalize_budget_sub_category(
+                data.get("sub_category", existing_budget.get("sub_category"))
+            ),
+        }
+
+    @staticmethod
+    def _build_budget_update_assignments(data: dict[str, Any]) -> tuple[list[str], list[Any]]:
+        """构建预算更新 SQL 的字段赋值片段。"""
+        assignments: list[str] = []
+        values: list[Any] = []
+
+        for key in [
+            "name",
+            "category",
+            "sub_category",
+            "period_type",
+            "amount",
+            "start_date",
+            "end_date",
+            "alert_threshold",
+            "enabled",
+        ]:
+            if key in data:
+                assignments.append(f"{key} = ?")
+                values.append(data[key])
+
+        if "updated_at" in data:
+            assignments.append("updated_at = ?")
+            values.append(data["updated_at"])
+
+        return assignments, values
+
+    def _collect_budget_sync_group_keys(
+        self,
+        user_id: int,
+        *budgets: dict[str, Any] | None,
+    ) -> set[BudgetGroupKey]:
+        """收集预算更新前后需要联动同步的分组键。"""
+        group_keys: set[BudgetGroupKey] = set()
+
+        for budget in budgets:
+            if not budget:
+                continue
+
+            group_key = self._build_budget_group_key(
+                budget.get("category"),
+                budget.get("period_type"),
+                budget.get("start_date"),
+                user_id,
+            )
+            if group_key is not None:
+                group_keys.add(group_key)
+
+        return group_keys
 
     @staticmethod
     def _normalize_budget_query_end_date(end_date: str | None) -> str | None:
@@ -5759,11 +5864,9 @@ class Database:
     async def _get_primary_category_budget_with_conn(
         self,
         conn: aiosqlite.Connection,
-        category: str,
-        period_type: str,
-        start_date: str,
-        user_id: int,
+        group_key: BudgetGroupKey,
     ) -> dict[str, Any] | None:
+        category, period_type, start_date, user_id = group_key
         async with conn.execute(
             """
             SELECT * FROM budgets
@@ -5781,11 +5884,9 @@ class Database:
     async def _get_sub_category_budgets_total_with_conn(
         self,
         conn: aiosqlite.Connection,
-        category: str,
-        period_type: str,
-        start_date: str,
-        user_id: int,
+        group_key: BudgetGroupKey,
     ) -> float:
+        category, period_type, start_date, user_id = group_key
         async with conn.execute(
             """
             SELECT COALESCE(SUM(amount), 0) as total
@@ -5805,29 +5906,22 @@ class Database:
     async def _synchronize_primary_budget_for_group(
         self,
         conn: aiosqlite.Connection,
-        category: str | None,
-        period_type: str | None,
-        start_date: str | None,
-        user_id: int,
+        group_key: BudgetGroupKey | None,
         reference_data: dict[str, Any] | None = None,
     ) -> None:
         """确保一级预算遵循“总额不小于二级预算之和”的联动规则。"""
-        if not category or not period_type or not start_date:
+        if group_key is None:
             return
+
+        category, period_type, start_date, user_id = group_key
 
         sub_total = await self._get_sub_category_budgets_total_with_conn(
             conn,
-            category,
-            period_type,
-            start_date,
-            user_id,
+            group_key,
         )
         primary_budget = await self._get_primary_category_budget_with_conn(
             conn,
-            category,
-            period_type,
-            start_date,
-            user_id,
+            group_key,
         )
 
         if sub_total <= 0:
@@ -5883,10 +5977,12 @@ class Database:
         budget_id = await self._insert_budget_record(conn, normalized_data, user_id)
         await self._synchronize_primary_budget_for_group(
             conn,
-            normalized_data.get("category"),
-            normalized_data.get("period_type"),
-            normalized_data.get("start_date"),
-            user_id,
+            self._build_budget_group_key(
+                normalized_data.get("category"),
+                normalized_data.get("period_type"),
+                normalized_data.get("start_date"),
+                user_id,
+            ),
             reference_data=normalized_data,
         )
 
@@ -5911,7 +6007,11 @@ class Database:
         """
         conn = await self._get_connection()
 
-        return await self._get_primary_category_budget_with_conn(conn, category, period_type, start_date, user_id)
+        group_key = self._build_budget_group_key(category, period_type, start_date, user_id)
+        if group_key is None:
+            return None
+
+        return await self._get_primary_category_budget_with_conn(conn, group_key)
 
     @log_method
     async def get_budget_by_category(
@@ -5931,8 +6031,14 @@ class Database:
             预算记录，如果不存在则返回None
         """
         conn = await self._get_connection()
+        normalized_sub_category = self._normalize_budget_sub_category(sub_category)
+        group_key = self._build_budget_group_key(category, period_type, start_date, user_id)
+        if group_key is None:
+            return None
 
-        if sub_category:
+        normalized_category, normalized_period_type, normalized_start_date, normalized_user_id = group_key
+
+        if normalized_sub_category:
             # 查找二级分类预算
             async with conn.execute(
                 """
@@ -5943,25 +6049,36 @@ class Database:
                   AND start_date = ?
                   AND user_id = ?
             """,
-                (category, sub_category, period_type, start_date, user_id),
+                (
+                    normalized_category,
+                    normalized_sub_category,
+                    normalized_period_type,
+                    normalized_start_date,
+                    normalized_user_id,
+                ),
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
-        else:
-            # 查找一级分类预算
-            async with conn.execute(
-                """
-                SELECT * FROM budgets
-                WHERE category = ?
-                  AND (sub_category IS NULL OR sub_category = '')
-                  AND period_type = ?
-                  AND start_date = ?
-                  AND user_id = ?
-            """,
-                (category, period_type, start_date, user_id),
-            ) as cursor:
-                row = await cursor.fetchone()
-                return dict(row) if row else None
+
+        # 查找一级分类预算
+        async with conn.execute(
+            """
+            SELECT * FROM budgets
+            WHERE category = ?
+              AND (sub_category IS NULL OR sub_category = '')
+              AND period_type = ?
+              AND start_date = ?
+              AND user_id = ?
+        """,
+            (
+                normalized_category,
+                normalized_period_type,
+                normalized_start_date,
+                normalized_user_id,
+            ),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     @log_method
     async def get_sub_category_budgets_total(
@@ -5981,7 +6098,11 @@ class Database:
         """
         conn = await self._get_connection()
 
-        return await self._get_sub_category_budgets_total_with_conn(conn, category, period_type, start_date, user_id)
+        group_key = self._build_budget_group_key(category, period_type, start_date, user_id)
+        if group_key is None:
+            return 0.0
+
+        return await self._get_sub_category_budgets_total_with_conn(conn, group_key)
 
     @log_method
     async def update_budget(self, budget_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
@@ -5997,39 +6118,14 @@ class Database:
         if not existing_budget:
             return False
 
-        # 构建更新字段
-        fields = []
-        values = []
-        normalized_data = {
-            **data,
-            "sub_category": self._normalize_budget_sub_category(data.get("sub_category", existing_budget.get("sub_category"))),
-        }
-
-        for key in [
-            "name",
-            "category",
-            "sub_category",
-            "period_type",
-            "amount",
-            "start_date",
-            "end_date",
-            "alert_threshold",
-            "enabled",
-        ]:
-            if key in normalized_data:
-                fields.append(f"{key} = ?")
-                values.append(normalized_data[key])
-
-        if "updated_at" in normalized_data:
-            fields.append("updated_at = ?")
-            values.append(normalized_data["updated_at"])
-
-        if not fields:
+        normalized_data = self._normalize_budget_update_data(existing_budget, data)
+        assignments, values = self._build_budget_update_assignments(normalized_data)
+        if not assignments:
             return False
 
         values.extend([budget_id, user_id])
 
-        query = f"UPDATE budgets SET {', '.join(fields)} WHERE id = ? AND user_id = ?"
+        query = f"UPDATE budgets SET {', '.join(assignments)} WHERE id = ? AND user_id = ?"
         cursor = await conn.execute(query, values)
 
         if cursor.rowcount > 0:
@@ -6037,29 +6133,16 @@ class Database:
                 **existing_budget,
                 **normalized_data,
             }
-            group_keys = {
-                (
-                    existing_budget.get("category"),
-                    existing_budget.get("period_type"),
-                    existing_budget.get("start_date"),
-                )
-            }
-
-            group_keys.add(
-                (
-                    updated_budget.get("category"),
-                    updated_budget.get("period_type"),
-                    updated_budget.get("start_date"),
-                )
+            group_keys = self._collect_budget_sync_group_keys(
+                user_id,
+                existing_budget,
+                updated_budget,
             )
 
-            for category, period_type, start_date in group_keys:
+            for group_key in group_keys:
                 await self._synchronize_primary_budget_for_group(
                     conn,
-                    category,
-                    period_type,
-                    start_date,
-                    user_id,
+                    group_key,
                     reference_data=updated_budget or normalized_data,
                 )
 
@@ -6101,10 +6184,7 @@ class Database:
             cursor = await conn.execute("DELETE FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id))
             await self._synchronize_primary_budget_for_group(
                 conn,
-                category,
-                period_type,
-                start_date,
-                user_id,
+                self._build_budget_group_key(category, period_type, start_date, user_id),
                 reference_data=budget,
             )
 
