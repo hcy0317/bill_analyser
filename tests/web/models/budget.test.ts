@@ -208,6 +208,8 @@ describe('Budget model', () => {
 
     test('Budget enum display-name maps stay stable', () => {
         expect(BudgetPeriodTypeNames).toStrictEqual({
+            [BudgetPeriodType.Daily]: '日度',
+            [BudgetPeriodType.Weekly]: '周度',
             [BudgetPeriodType.Monthly]: '月度',
             [BudgetPeriodType.Quarterly]: '季度',
             [BudgetPeriodType.Yearly]: '年度'

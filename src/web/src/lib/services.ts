@@ -387,7 +387,7 @@ function mapRestForecastToFrontend(restResult: any): any {
             const forecastAmount = toBudgetAmountInCents(item?.forecast_amount ?? item?.forecastAmount ?? 0);
             const historicalAverage = toBudgetAmountInCents(item?.average_amount ?? item?.averageAmount ?? 0);
             const currentSpent = toBudgetAmountInCents(
-                item?.periods?.[item?.periods?.length - 1]?.amount ?? item?.current_spent ?? item?.total_amount ?? item?.totalAmount ?? 0
+                item?.current_spent ?? item?.periods?.[item?.periods?.length - 1]?.amount ?? item?.total_amount ?? item?.totalAmount ?? 0
             );
             const budgetAmount = toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0);
 
@@ -1610,7 +1610,17 @@ export default {
      * 获取周期预计（基于历史数据预测）
      * @param req 查询条件
      */
-    getBudgetForecast: (req?: { type?: number, periodType?: string, monthsHistory?: number, forecastStrategy?: string }): ApiResponsePromise<any> => {
+    getBudgetForecast: (req?: {
+        type?: number,
+        periodType?: string,
+        year?: number,
+        month?: number,
+        quarter?: number,
+        monthsHistory?: number,
+        forecastStrategy?: string,
+        startDate?: string,
+        endDate?: string,
+    }): ApiResponsePromise<any> => {
         const queryParams: string[] = [];
 
         if (req?.type !== undefined) {
@@ -1619,11 +1629,26 @@ export default {
         if (req?.periodType) {
             queryParams.push(`period_type=${req.periodType}`);
         }
+        if (req?.year !== undefined) {
+            queryParams.push(`year=${req.year}`);
+        }
+        if (req?.month !== undefined) {
+            queryParams.push(`month=${req.month}`);
+        }
+        if (req?.quarter !== undefined) {
+            queryParams.push(`quarter=${req.quarter}`);
+        }
         if (req?.monthsHistory !== undefined) {
             queryParams.push(`months_history=${req.monthsHistory}`);
         }
         if (req?.forecastStrategy) {
             queryParams.push(`forecast_strategy=${encodeURIComponent(req.forecastStrategy)}`);
+        }
+        if (req?.startDate) {
+            queryParams.push(`start_date=${encodeURIComponent(req.startDate)}`);
+        }
+        if (req?.endDate) {
+            queryParams.push(`end_date=${encodeURIComponent(req.endDate)}`);
         }
 
         const queryString = queryParams.length > 0 ? '?' + queryParams.join('&') : '';

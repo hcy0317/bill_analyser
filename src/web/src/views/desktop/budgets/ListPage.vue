@@ -987,6 +987,7 @@ import TransactionTagFilterSettingsCard from '@/views/desktop/common/cards/Trans
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
+import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
@@ -3099,12 +3100,16 @@ async function reload(force: boolean): Promise<void> {
  */
 async function loadForecast(): Promise<void> {
     try {
-        await budgetStore.loadBudgetForecast({
-            type: activeBudgetType.value,
-            periodType: getCurrentPeriodType(),
-            monthsHistory: forecastMonthsHistory.value,
-            forecastStrategy: forecastStrategy.value
-        });
+        const periodRequest = getCurrentPeriodRequest();
+
+        await budgetStore.loadBudgetForecast(
+            buildBudgetForecastLoadRequest({
+                budgetType: activeBudgetType.value,
+                periodRequest,
+                monthsHistory: forecastMonthsHistory.value,
+                forecastStrategy: forecastStrategy.value
+            })
+        );
     } catch (error: unknown) {
         const err = error as { message?: string };
         snackbar.value?.showError(err.message || tt('Failed to load forecast'));

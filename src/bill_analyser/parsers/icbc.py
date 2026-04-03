@@ -68,7 +68,16 @@ class ICBCParser(ParserBase):
             other_bank = ["民生银行", "农业银行", "建设银行"]
             has_other = any(bank in first_lines for bank in other_bank)
 
-            return has_icbc and not has_other
+            csv_header_patterns = [
+                ["交易日期", "交易金额", "对方户名", "对方账号", "交易流水号"],
+                ["记账日期", "金额", "对方户名", "对方账号", "交易流水号"],
+            ]
+            has_icbc_header = any(
+                all(column in first_lines for column in pattern)
+                for pattern in csv_header_patterns
+            )
+
+            return (has_icbc or has_icbc_header) and not has_other
         except Exception:  # pylint: disable=broad-except
             return False
 
@@ -161,7 +170,10 @@ class ICBCParser(ParserBase):
             return True
 
         has_icbc_strong = any(ind in content for ind in icbc_strong_indicators)
-        has_icbc_columns = any(all(col in content for col in pattern) for pattern in icbc_column_patterns)
+        has_icbc_columns = any(
+            all(col in content for col in pattern)
+            for pattern in icbc_column_patterns
+        )
         has_other_bank = any(ind in content for ind in other_bank_indicators)
 
         return (has_icbc_strong or has_icbc_columns) and not has_other_bank
@@ -289,7 +301,12 @@ class ICBCParser(ParserBase):
             # 通常第一个表格是账单数据
             df = dfs[0]
 
-            self.logger.info("读取到 %d 行数据，列名: %s，编码: %s", len(df), df.columns.tolist(), encoding_used)
+            self.logger.info(
+                "读取到 %d 行数据，列名: %s，编码: %s",
+                len(df),
+                df.columns.tolist(),
+                encoding_used,
+            )
 
             # 查找列名(可能在不同行)
             column_row_idx = None
@@ -327,13 +344,13 @@ class ICBCParser(ParserBase):
             lines, encoding = self.read_lines_with_fallback(file_path)
 
             # 查找数据起始行
-            data_start = 0
+            data_start = -1
             for i, line in enumerate(lines):
                 if "交易日期" in line or "记账日期" in line:
                     data_start = i
                     break
 
-            if data_start == 0:
+            if data_start < 0:
                 self.logger.warning("未找到数据起始行")
                 return []
 
@@ -413,7 +430,8 @@ class ICBCParser(ParserBase):
 
             # 获取金额和类型
             amount_str = row.get("交易金额") or row.get("金额") or "0"
-            transaction_type = "支出"
+            amount_value = float(str(amount_str).replace(",", ""))
+            transaction_type = "收入" if amount_value > 0 else "支出"
 
             # 判断收支类型
             if row.get("收/支"):
@@ -436,7 +454,11 @@ class ICBCParser(ParserBase):
             self.logger.error("提取CSV账单信息失败: %s", e)
             return None
 
-    def _extract_bill_from_excel_row(self, row: tuple, column_map: dict[str, int]) -> dict[str, Any] | None:
+    def _extract_bill_from_excel_row(
+        self,
+        row: tuple,
+        column_map: dict[str, int],
+    ) -> dict[str, Any] | None:
         """从Excel行数据提取账单信息"""
         try:
 

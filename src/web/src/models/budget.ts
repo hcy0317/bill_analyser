@@ -17,6 +17,8 @@ import {
  * 预算周期类型
  */
 export enum BudgetPeriodType {
+    Daily = 'daily',         // 日度预算
+    Weekly = 'weekly',       // 周度预算
     Monthly = 'monthly',     // 月度预算
     Quarterly = 'quarterly', // 季度预算
     Yearly = 'yearly'        // 年度预算
@@ -224,8 +226,13 @@ export interface BudgetHistoryResponse {
 export interface BudgetForecastRequest {
     readonly type?: BudgetType;            // 预算类型
     readonly periodType?: BudgetPeriodType;// 周期类型
+    readonly year?: number;                // 年份
+    readonly month?: number;               // 月份（1-12）
+    readonly quarter?: number;             // 季度（1-4）
     readonly monthsHistory?: number;       // 历史数据月数（默认6）
     readonly forecastStrategy?: BudgetForecastStrategy; // 预测策略
+    readonly startDate?: string;           // 自定义开始日期
+    readonly endDate?: string;             // 自定义结束日期
 }
 
 /**
@@ -477,6 +484,8 @@ export class Budget {
  * 预算周期类型显示名称
  */
 export const BudgetPeriodTypeNames: Record<BudgetPeriodType, string> = {
+    [BudgetPeriodType.Daily]: '日度',
+    [BudgetPeriodType.Weekly]: '周度',
     [BudgetPeriodType.Monthly]: '月度',
     [BudgetPeriodType.Quarterly]: '季度',
     [BudgetPeriodType.Yearly]: '年度'

@@ -325,11 +325,26 @@ export const useBudgetStore = defineStore('budget', () => {
     /**
      * 加载周期预计
      */
-    function loadBudgetForecast({ type, periodType, monthsHistory, forecastStrategy }: {
+    function loadBudgetForecast({
+        type,
+        periodType,
+        year,
+        month,
+        quarter,
+        monthsHistory,
+        forecastStrategy,
+        startDate,
+        endDate
+    }: {
         type?: BudgetType,
         periodType?: BudgetPeriodType,
+        year?: number,
+        month?: number,
+        quarter?: number,
         monthsHistory?: number,
-        forecastStrategy?: BudgetForecastStrategy
+        forecastStrategy?: BudgetForecastStrategy,
+        startDate?: string,
+        endDate?: string,
     } = {}): Promise<BudgetForecastResponse> {
         return new Promise((resolve, reject) => {
             forecastLoading.value = true;
@@ -337,8 +352,13 @@ export const useBudgetStore = defineStore('budget', () => {
             const req: any = {};
             if (type !== undefined) req.type = type;
             if (periodType !== undefined) req.periodType = periodType;
+            if (year !== undefined) req.year = year;
+            if (month !== undefined) req.month = month;
+            if (quarter !== undefined) req.quarter = quarter;
             if (monthsHistory !== undefined) req.monthsHistory = monthsHistory;
             if (forecastStrategy !== undefined) req.forecastStrategy = forecastStrategy;
+            if (startDate !== undefined) req.startDate = startDate;
+            if (endDate !== undefined) req.endDate = endDate;
 
             services.getBudgetForecast(req).then(response => {
                 const data = response.data;

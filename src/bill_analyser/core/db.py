@@ -3361,8 +3361,6 @@ class Database:
             Dict[str, int]: 别名 -> 账户ID 映射
             例如: {"微信零钱": 1, "支付宝余额": 2, "余额宝": 2}
         """
-        import json
-
         conn = await self._get_connection()
 
         alias_map: dict[str, int] = {}
@@ -3390,9 +3388,9 @@ class Database:
                                     alias_map[alias.lower()] = account_id
                                     alias_map[alias] = account_id  # 保留原始大小写
                     except json.JSONDecodeError:
-                        self.logger.warning(f"账户 {account_id} 的别名JSON解析失败: {aliases_json}")
+                        self.logger.warning("账户 %s 的别名JSON解析失败: %s", account_id, aliases_json)
 
-        self.logger.info(f"加载账户别名映射: {len(alias_map)} 条")
+        self.logger.info("加载账户别名映射: %s 条", len(alias_map))
         return alias_map
 
     @log_method
@@ -5444,7 +5442,7 @@ class Database:
 
     @log_method
     async def get_auth_logs(
-        self, user_id: int = None, event_type: str = None, limit: int = 100
+        self, user_id: int | None = None, event_type: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         """获取认证日志"""
         conn = await self._get_connection()
@@ -5488,7 +5486,7 @@ class Database:
 
     # === 预算管理方法 ===
     @log_method
-    async def get_budgets(self, filters: dict[str, Any] = None, user_id: int = 1) -> list[dict[str, Any]]:
+    async def get_budgets(self, filters: dict[str, Any] | None = None, user_id: int = 1) -> list[dict[str, Any]]:
         """获取预算列表
 
         Args:
@@ -5661,6 +5659,70 @@ class Database:
             return ""
 
         return str(sub_category).strip()
+
+    @staticmethod
+    def _normalize_budget_query_end_date(end_date: str | None) -> str | None:
+        """将仅包含日期的结束边界扩展到当天 23:59:59。"""
+        if not end_date:
+            return None
+
+        normalized_end_date = str(end_date).strip()
+        if len(normalized_end_date) <= 10:
+            return f"{normalized_end_date} 23:59:59"
+
+        return normalized_end_date
+
+    @classmethod
+    def _expand_forecast_history_window(
+        cls,
+        period_type: str,
+        start_date: str | None,
+        end_date: str | None,
+        history_periods: int,
+    ) -> tuple[str | None, str | None]:
+        """根据周期类型向前扩展预测所需的历史窗口。"""
+        if history_periods <= 1:
+            return start_date, end_date
+
+        parsed_start_date = cls._parse_budget_history_date(start_date)
+        parsed_end_date = cls._parse_budget_history_date(end_date)
+        if not parsed_start_date or not parsed_end_date:
+            return start_date, end_date
+
+        periods_back = history_periods - 1
+        if period_type == "daily":
+            history_start_date = parsed_start_date - timedelta(days=periods_back)
+        elif period_type == "weekly":
+            history_start_date = parsed_start_date - timedelta(weeks=periods_back)
+        elif period_type == "quarterly":
+            history_start_date = cls._add_months(parsed_start_date, -(periods_back * 3))
+        elif period_type == "yearly":
+            history_start_date = date(
+                parsed_start_date.year - periods_back,
+                parsed_start_date.month,
+                parsed_start_date.day,
+            )
+        else:
+            history_start_date = cls._add_months(parsed_start_date, -periods_back)
+
+        return history_start_date.strftime("%Y-%m-%d"), parsed_end_date.strftime("%Y-%m-%d")
+
+    @classmethod
+    def _build_forecast_period_key(cls, period_type: str, start_date: str | None) -> str | None:
+        """根据周期类型生成预测结果中的当前周期 key。"""
+        parsed_start_date = cls._parse_budget_history_date(start_date)
+        if not parsed_start_date:
+            return None
+
+        if period_type == "daily":
+            return parsed_start_date.strftime("%Y-%m-%d")
+        if period_type == "weekly":
+            return parsed_start_date.strftime("%Y-%W")
+        if period_type == "quarterly":
+            return f"{parsed_start_date.year}-Q{((parsed_start_date.month - 1) // 3) + 1}"
+        if period_type == "yearly":
+            return parsed_start_date.strftime("%Y")
+        return parsed_start_date.strftime("%Y-%m")
 
     async def _insert_budget_record(
         self,
@@ -6054,12 +6116,13 @@ class Database:
     async def get_budget_execution_details(
         self,
         budget_type: int = 3,
-        start_date: str = None,
-        end_date: str = None,
-        budget_id: int = None,
-        category_id: int = None,
-        account_ids: list[int] = None,
-        tag_ids: list[int] = None,
+        period_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> list[dict[str, Any]]:
         """
@@ -6067,6 +6130,7 @@ class Database:
 
         Args:
             budget_type: 预算类型 (3=支出, 5=投资)
+            period_type: 预算周期类型
             start_date: 开始日期 YYYY-MM-DD
             end_date: 结束日期 YYYY-MM-DD
             budget_id: 预算ID筛选
@@ -6078,9 +6142,17 @@ class Database:
             预算执行详情列表
         """
         self.logger.info(
-            f"[get_budget_execution_details] 参数: type={budget_type}, "
-            f"dates={start_date}~{end_date}, budget_id={budget_id}, category={category_id}, "
-            f"accounts={account_ids}, tags={tag_ids}, user_id={user_id}"
+            "[get_budget_execution_details] 参数: type=%s, period=%s, dates=%s~%s, budget_id=%s, "
+            "category=%s, accounts=%s, tags=%s, user_id=%s",
+            budget_type,
+            period_type,
+            start_date,
+            end_date,
+            budget_id,
+            category_id,
+            account_ids,
+            tag_ids,
+            user_id,
         )
 
         conn = await self._get_connection()
@@ -6089,12 +6161,16 @@ class Database:
 
         # 1. 获取符合条件的预算 - 添加 user_id 过滤
         budget_query = "SELECT * FROM budgets WHERE enabled = 1 AND user_id = ?"
-        budget_params = [user_id]
+        budget_params: list[Any] = [user_id]
 
         if budget_type == 3:
             budget_query += " AND (period_type IS NOT NULL)"  # 支出预算
         elif budget_type == 5:
             budget_query += " AND (period_type IS NOT NULL)"  # 投资预算
+
+        if period_type:
+            budget_query += " AND period_type = ?"
+            budget_params.append(period_type)
 
         if budget_id:
             budget_query += " AND id = ?"
@@ -6103,13 +6179,15 @@ class Database:
         if category_id:
             # 根据category_id获取分类名称
             cat_info = await self.get_category_by_id(category_id, user_id=user_id)
-            if cat_info:
-                budget_query += " AND category = ?"
-                budget_params.append(cat_info["main_category"])
-                normalized_sub_category = self._normalize_budget_sub_category(cat_info.get("sub_category"))
-                if normalized_sub_category:
-                    budget_query += " AND sub_category = ?"
-                    budget_params.append(normalized_sub_category)
+            if not cat_info:
+                return []
+
+            budget_query += " AND category = ?"
+            budget_params.append(cat_info["main_category"])
+            normalized_sub_category = self._normalize_budget_sub_category(cat_info.get("sub_category"))
+            if normalized_sub_category:
+                budget_query += " AND sub_category = ?"
+                budget_params.append(normalized_sub_category)
 
         async with conn.execute(budget_query, budget_params) as cursor:
             raw_budgets = [dict(row) for row in await cursor.fetchall()]
@@ -6123,6 +6201,13 @@ class Database:
                 preferred_type=budget_type,
             )
             if resolved_budget_type != budget_type:
+                continue
+            if start_date and end_date and not self._budget_overlaps_period(
+                budget.get("start_date"),
+                budget.get("end_date"),
+                start_date,
+                end_date,
+            ):
                 continue
 
             budgets.append(
@@ -6138,9 +6223,13 @@ class Database:
         results = []
         for budget in budgets:
             self.logger.debug(
-                f"[get_budget_execution_details] 处理预算: id={budget['id']}, "
-                f"category={budget.get('category')}, sub_category={budget.get('sub_category')}, "
-                f"start_date={budget.get('start_date')}, end_date={budget.get('end_date')}"
+                "[get_budget_execution_details] 处理预算: id=%s, category=%s, sub_category=%s, "
+                "start_date=%s, end_date=%s",
+                budget["id"],
+                budget.get("category"),
+                budget.get("sub_category"),
+                budget.get("start_date"),
+                budget.get("end_date"),
             )
 
             # 构建账单查询 - 添加 user_id 过滤
@@ -6160,9 +6249,18 @@ class Database:
                 bill_query += " AND sub_category = ?"
                 bill_params.append(budget["sub_category"])
 
-            # 日期筛选 - 使用预算自身的日期范围
-            budget_start = start_date or budget.get("start_date")
-            budget_end = end_date or budget.get("end_date")
+            # 日期筛选 - 使用请求区间与预算自身区间的交集
+            budget_defined_start = str(budget.get("start_date") or "").strip() or None
+            budget_defined_end = str(budget.get("end_date") or "").strip() or None
+            budget_start = start_date or budget_defined_start
+            budget_end = end_date or budget_defined_end
+
+            if start_date and budget_defined_start:
+                budget_start = max(start_date, budget_defined_start)
+            if end_date and budget_defined_end:
+                budget_end = min(end_date, budget_defined_end)
+
+            budget_end = self._normalize_budget_query_end_date(budget_end)
 
             if budget_start:
                 bill_query += " AND date >= ?"
@@ -6180,7 +6278,13 @@ class Database:
                 )
                 bill_params.extend(account_ids * 2)
 
-            self.logger.debug(f"[get_budget_execution_details] 查询SQL: {bill_query}, 参数: {bill_params}")
+            # 标签筛选
+            if tag_ids:
+                placeholders = ",".join(["?"] * len(tag_ids))
+                bill_query += f" AND id IN (SELECT bill_id FROM bill_tags WHERE tag_id IN ({placeholders}))"
+                bill_params.extend(tag_ids)
+
+            self.logger.debug("[get_budget_execution_details] 查询SQL: %s, 参数: %s", bill_query, bill_params)
 
             # 执行查询
             async with conn.execute(bill_query, bill_params) as cursor:
@@ -6188,8 +6292,10 @@ class Database:
                 spent = abs(row["spent"]) if row else 0
 
             self.logger.debug(
-                f"[get_budget_execution_details] 预算 {budget.get('category')}/{budget.get('sub_category')} "
-                f"查询结果: spent={spent}"
+                "[get_budget_execution_details] 预算 %s/%s 查询结果: spent=%s",
+                budget.get("category"),
+                budget.get("sub_category"),
+                spent,
             )
 
             # 计算执行度
@@ -6225,7 +6331,7 @@ class Database:
                 }
             )
 
-        self.logger.info(f"[get_budget_execution_details] 返回{len(results)}条预算执行详情")
+        self.logger.info("[get_budget_execution_details] 返回%s条预算执行详情", len(results))
         return results
 
     @staticmethod
@@ -6253,17 +6359,18 @@ class Database:
         self,
         budget_type: int = 3,
         period_type: str = "monthly",
-        start_date: str = None,
-        end_date: str = None,
-        budget_id: int = None,
-        category_id: int = None,
-        account_ids: list[int] = None,
-        tag_ids: list[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """创建预算执行快照。"""
         snapshots = await self.get_budget_execution_details(
             budget_type=budget_type,
+            period_type=period_type,
             start_date=start_date,
             end_date=end_date,
             budget_id=budget_id,
@@ -6334,30 +6441,15 @@ class Database:
         self,
         budget_type: int = 3,
         period_type: str = "monthly",
-        start_date: str = None,
-        end_date: str = None,
-        budget_id: int = None,
-        category_id: int = None,
-        account_ids: list[int] = None,
-        tag_ids: list[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> list[dict[str, Any]]:
         """获取预算执行快照历史。"""
-        if start_date and end_date:
-            history_items = await self._build_budget_execution_history_on_demand(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=start_date,
-                end_date=end_date,
-                budget_id=budget_id,
-                category_id=category_id,
-                account_ids=account_ids,
-                tag_ids=tag_ids,
-                user_id=user_id,
-            )
-            if history_items:
-                return history_items
-
         conn = await self._get_connection()
         filter_summary = self._build_budget_history_filter_summary(
             budget_type=budget_type,
@@ -6398,11 +6490,11 @@ class Database:
             params.append(budget_id)
 
         if start_date:
-            query += " AND bh.period_start >= ?"
+            query += " AND bh.period_end >= ?"
             params.append(start_date)
 
         if end_date:
-            query += " AND bh.period_end <= ?"
+            query += " AND bh.period_start <= ?"
             params.append(end_date)
 
         query += " AND bh.filter_summary = ?"
@@ -6412,7 +6504,52 @@ class Database:
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
 
-        return [dict(row) for row in rows]
+        history_items = [dict(row) for row in rows]
+        if not start_date or not end_date:
+            return history_items
+
+        exact_history_items = [
+            item
+            for item in history_items
+            if item.get("period_start") == start_date and item.get("period_end") == end_date
+        ]
+        if exact_history_items:
+            return exact_history_items
+
+        on_demand_items = await self._build_budget_execution_history_on_demand(
+            budget_type=budget_type,
+            period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
+            budget_id=budget_id,
+            category_id=category_id,
+            account_ids=account_ids,
+            tag_ids=tag_ids,
+            user_id=user_id,
+        )
+        if not history_items:
+            return on_demand_items
+
+        history_keys = {
+            (item.get("budget_id"), item.get("period_start"), item.get("period_end"))
+            for item in history_items
+        }
+        for item in on_demand_items:
+            item_key = (item.get("budget_id"), item.get("period_start"), item.get("period_end"))
+            if item_key not in history_keys:
+                history_items.append(item)
+
+        history_items.sort(
+            key=lambda item: (
+                item.get("period_start", ""),
+                item.get("period_end", ""),
+                str(item.get("category", "")),
+                str(item.get("sub_category", "")),
+                int(item.get("budget_id", 0) or 0),
+            ),
+            reverse=True,
+        )
+        return history_items
 
     @staticmethod
     def _parse_budget_history_date(date_text: str | None) -> date | None:
@@ -6445,6 +6582,31 @@ class Database:
             return []
 
         period_ranges: list[dict[str, str]] = []
+
+        if period_type == "daily":
+            current_start = start
+            while current_start <= end:
+                period_ranges.append(
+                    {
+                        "start_date": current_start.strftime("%Y-%m-%d"),
+                        "end_date": current_start.strftime("%Y-%m-%d"),
+                    }
+                )
+                current_start += timedelta(days=1)
+            return period_ranges
+
+        if period_type == "weekly":
+            current_start = start - timedelta(days=start.weekday())
+            while current_start <= end:
+                current_end = current_start + timedelta(days=6)
+                period_ranges.append(
+                    {
+                        "start_date": current_start.strftime("%Y-%m-%d"),
+                        "end_date": current_end.strftime("%Y-%m-%d"),
+                    }
+                )
+                current_start += timedelta(days=7)
+            return period_ranges
 
         if period_type == "yearly":
             current_start = date(start.year, 1, 1)
@@ -6506,12 +6668,12 @@ class Database:
         self,
         budget_type: int = 3,
         period_type: str = "monthly",
-        start_date: str = None,
-        end_date: str = None,
-        budget_id: int = None,
-        category_id: int = None,
-        account_ids: list[int] = None,
-        tag_ids: list[int] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> list[dict[str, Any]]:
         """按查询周期动态计算预算历史，避免仅依赖已落库快照。"""
@@ -6542,6 +6704,7 @@ class Database:
             period_end = period_range["end_date"]
             execution_details = await self.get_budget_execution_details(
                 budget_type=budget_type,
+                period_type=period_type,
                 start_date=period_start,
                 end_date=period_end,
                 budget_id=budget_id,
@@ -6601,8 +6764,8 @@ class Database:
         self,
         budget_type: int = 3,
         period_type: str = "monthly",
-        start_date: str = None,
-        end_date: str = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         forecast_strategy: str = "historical_average",
         history_periods: int = 6,
         user_id: int = 1,
@@ -6620,26 +6783,39 @@ class Database:
             周期预测列表
         """
         self.logger.info(
-            f"[get_period_forecast] 参数: type={budget_type}, "
-            f"period={period_type}, dates={start_date}~{end_date}, "
-            f"strategy={forecast_strategy}, history_periods={history_periods}, user_id={user_id}"
+            "[get_period_forecast] 参数: type=%s, period=%s, dates=%s~%s, strategy=%s, "
+            "history_periods=%s, user_id=%s",
+            budget_type,
+            period_type,
+            start_date,
+            end_date,
+            forecast_strategy,
+            history_periods,
+            user_id,
         )
 
         conn = await self._get_connection()
         type_name = "支出" if budget_type == 3 else "投资"
+        history_start_date, history_end_date = self._expand_forecast_history_window(
+            period_type,
+            start_date,
+            end_date,
+            history_periods,
+        )
 
         # 根据周期类型确定分组方式
         if period_type == "daily":
-            date_format = "%Y-%m-%d"
-            group_by = "date"
+            group_by = "date(date)"
         elif period_type == "weekly":
-            date_format = "%Y-%W"
             group_by = "strftime('%Y-%W', date)"
+        elif period_type == "quarterly":
+            group_by = (
+                "strftime('%Y', date) || '-Q' || "
+                "(CAST(((CAST(strftime('%m', date) AS INTEGER) - 1) / 3) AS INTEGER) + 1)"
+            )
         elif period_type == "monthly":
-            date_format = "%Y-%m"
             group_by = "strftime('%Y-%m', date)"
         else:  # yearly
-            date_format = "%Y"
             group_by = "strftime('%Y', date)"
 
         # 查询历史数据
@@ -6654,13 +6830,13 @@ class Database:
         """
         params = [type_name, user_id]
 
-        if start_date:
+        if history_start_date:
             query += " AND date >= ?"
-            params.append(start_date)
+            params.append(history_start_date)
 
-        if end_date:
+        if history_end_date:
             query += " AND date <= ?"
-            params.append(end_date)
+            params.append(self._normalize_budget_query_end_date(history_end_date))
 
         query += f" GROUP BY {group_by}, main_category ORDER BY period DESC, total_amount DESC"
 
@@ -6669,6 +6845,7 @@ class Database:
 
         normalized_strategy = forecast_strategy or "historical_average"
         normalized_history_periods = max(int(history_periods or 0), 1)
+        target_period_key = self._build_forecast_period_key(period_type, start_date)
 
         # 按分类汇总
         category_totals = {}
@@ -6732,6 +6909,10 @@ class Database:
         for category, data in category_totals.items():
             sorted_periods = sorted(data["periods"], key=lambda item: item["period"])
             recent_periods = sorted_periods[-normalized_history_periods:]
+            current_period_amounts = {
+                item["period"]: item["amount"]
+                for item in sorted_periods
+            }
 
             if not recent_periods:
                 continue
@@ -6759,13 +6940,19 @@ class Database:
                 history_slice = recent_amounts[:index]
                 if normalized_strategy == "moving_average":
                     window_size = min(3, len(history_slice))
-                    predicted_amount = sum(history_slice[-window_size:]) / window_size if window_size > 0 else 0
+                    predicted_amount = (
+                        sum(history_slice[-window_size:]) / window_size if window_size > 0 else 0
+                    )
                 else:
                     predicted_amount = sum(history_slice) / len(history_slice)
 
                 backtest_errors.append(abs(actual_amount - predicted_amount) / actual_amount)
 
-            backtest_mape = round((sum(backtest_errors) / len(backtest_errors)) * 100, 2) if backtest_errors else None
+            backtest_mape = (
+                round((sum(backtest_errors) / len(backtest_errors)) * 100, 2)
+                if backtest_errors
+                else None
+            )
             if backtest_mape is None:
                 confidence = "low"
             elif backtest_mape <= 10:
@@ -6793,9 +6980,11 @@ class Database:
             budget_amount = 0.0
             if category in budget_map:
                 budget_info = budget_map[category]
-                budget_amount = budget_info["primary"] if budget_info["primary"] > 0 else budget_info["sub_total"]
+                budget_amount = (
+                    budget_info["primary"] if budget_info["primary"] > 0 else budget_info["sub_total"]
+                )
 
-            current_spent = latest_amount
+            current_spent = current_period_amounts.get(target_period_key, 0.0)
             projected_over_budget = budget_amount > 0 and forecast_amount > budget_amount
 
             results.append(
@@ -6822,7 +7011,7 @@ class Database:
         # 按预测金额排序
         results.sort(key=lambda x: x["forecast_amount"], reverse=True)
 
-        self.logger.info(f"[get_period_forecast] 返回{len(results)}条预测数据")
+        self.logger.info("[get_period_forecast] 返回%s条预测数据", len(results))
         return results
 
     @log_method
@@ -6836,7 +7025,7 @@ class Database:
         Returns:
             导入结果统计
         """
-        self.logger.info(f"[import_budgets] 开始导入{len(budgets_data)}条预算")
+        self.logger.info("[import_budgets] 开始导入%s条预算", len(budgets_data))
 
         conn = await self._get_connection()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -6857,7 +7046,8 @@ class Database:
                 # 检查是否存在同名预算
                 existing = None
                 async with conn.execute(
-                    "SELECT id FROM budgets WHERE name = ? AND user_id = ?", (data["name"], user_id)
+                    "SELECT id FROM budgets WHERE name = ? AND user_id = ?",
+                    (data["name"], user_id),
                 ) as cursor:
                     existing = await cursor.fetchone()
 
@@ -6922,13 +7112,23 @@ class Database:
             except Exception as e:
                 errors.append(f"第{idx + 1}条: {e!s}")
                 error_count += 1
-                self.logger.error(f"导入预算失败: {e}")
+                self.logger.error("导入预算失败: %s", e)
 
         await conn.commit()
 
-        result = {"created": created_count, "updated": updated_count, "errors": error_count, "error_details": errors}
+        result = {
+            "created": created_count,
+            "updated": updated_count,
+            "errors": error_count,
+            "error_details": errors,
+        }
 
-        self.logger.info(f"[import_budgets] 导入完成: 创建={created_count}, 更新={updated_count}, 错误={error_count}")
+        self.logger.info(
+            "[import_budgets] 导入完成: 创建=%s, 更新=%s, 错误=%s",
+            created_count,
+            updated_count,
+            error_count,
+        )
         return result
 
     @log_method
@@ -6954,14 +7154,21 @@ class Database:
             "enabled",
         ]
 
-        async with conn.execute("SELECT * FROM budgets WHERE user_id = ? ORDER BY created_at", (user_id,)) as cursor:
+        async with conn.execute(
+            "SELECT * FROM budgets WHERE user_id = ? ORDER BY created_at",
+            (user_id,),
+        ) as cursor:
             rows = await cursor.fetchall()
             budgets = []
             for row in rows:
-                budget = {field: row[field] for field in export_fields if field in row.keys()}
+                budget = {
+                    field: row[field]
+                    for field in export_fields
+                    if field in row.keys()
+                }
                 budgets.append(budget)
 
-        self.logger.info(f"[export_budgets] 导出{len(budgets)}条预算")
+        self.logger.info("[export_budgets] 导出%s条预算", len(budgets))
         return budgets
 
     @log_method
@@ -6971,10 +7178,10 @@ class Database:
         try:
             await conn.execute("DELETE FROM categories WHERE main_category = ?", (main_category,))
             await conn.commit()
-            self.logger.info(f"已删除主分类及其子分类: {main_category}")
+            self.logger.info("已删除主分类及其子分类: %s", main_category)
             return True
         except Exception as e:
-            self.logger.error(f"删除主分类失败: {e}")
+            self.logger.error("删除主分类失败: %s", e)
             return False
 
     @log_method
@@ -6984,7 +7191,7 @@ class Database:
         try:
             await conn.execute("UPDATE categories SET main_category = ? WHERE main_category = ?", (new_name, old_name))
             await conn.commit()
-            self.logger.info(f"已更新主分类名称: {old_name} -> {new_name}")
+            self.logger.info("已更新主分类名称: %s -> %s", old_name, new_name)
 
             # 清除缓存
             self._clear_cache("account_mappings")
@@ -6992,7 +7199,7 @@ class Database:
 
             return True
         except Exception as e:
-            self.logger.error(f"更新主分类名称失败: {e}")
+            self.logger.error("更新主分类名称失败: %s", e)
             return False
 
     # ==================== 缓存方法 ====================
