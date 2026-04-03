@@ -4,15 +4,15 @@
     "postToolUse": [
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/post_tool_validation_hint.py",
-        "powershell": "python scripts/hooks/post_tool_validation_hint.py",
+        "bash": "python3 -X utf8 scripts/hooks/post_tool_validation_hint.py",
+        "powershell": "python -X utf8 scripts/hooks/post_tool_validation_hint.py",
         "cwd": ".",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/copilot_global_hook_bridge.py post-tool",
-        "powershell": "python scripts/hooks/copilot_global_hook_bridge.py post-tool",
+        "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
+        "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
         "cwd": ".",
         "timeoutSec": 15
       }

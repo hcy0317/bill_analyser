@@ -4,15 +4,15 @@
     "stop": [
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/stop_commit_title_hint.py",
-        "powershell": "python scripts/hooks/stop_commit_title_hint.py",
+        "bash": "python3 -X utf8 scripts/hooks/stop_commit_title_hint.py",
+        "powershell": "python -X utf8 scripts/hooks/stop_commit_title_hint.py",
         "cwd": ".",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/copilot_global_hook_bridge.py stop",
-        "powershell": "python scripts/hooks/copilot_global_hook_bridge.py stop",
+        "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
+        "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
         "cwd": ".",
         "timeoutSec": 15
       }

@@ -4,15 +4,15 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/pre_tool_repo_guard.py",
-        "powershell": "python scripts/hooks/pre_tool_repo_guard.py",
+        "bash": "python3 -X utf8 scripts/hooks/pre_tool_repo_guard.py",
+        "powershell": "python -X utf8 scripts/hooks/pre_tool_repo_guard.py",
         "cwd": ".",
         "timeoutSec": 20
       },
       {
         "type": "command",
-        "bash": "python3 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
-        "powershell": "python scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+        "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+        "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
         "cwd": ".",
         "timeoutSec": 20
       }

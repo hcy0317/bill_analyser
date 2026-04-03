@@ -25,6 +25,28 @@ class CCBParser(ParserBase):
     # 解析器标识符
     PARSER_ID = "ccb"
     PARSER_NAME = "建设银行"
+    CCB_STRONG_INDICATORS = (
+        "China Construction Bank",
+        "中国建设银行",
+        "开户机构：",
+        "账\u3000\u3000号：",
+        "币\u3000\u3000种：",
+    )
+    CCB_COLUMN_PATTERNS = (
+        ("记账日", "交易日期", "支出", "收入"),
+        ("记账日", "摘要", "账户余额"),
+        ("交易日期", "支出", "收入", "账户余额"),
+    )
+    OTHER_BANK_INDICATORS = (
+        "储种",
+        "对方开户行",
+        "凭证类型",
+        "⼾名",
+        "账⼾",
+        "对⼿信息",
+        "支出金额",
+        "存入金额",
+    )
 
     def __init__(self):
         """初始化"""
@@ -50,6 +72,139 @@ class CCBParser(ParserBase):
 
         return date_str
 
+    @staticmethod
+    def _clean_text(value: str | None) -> str:
+        """清理单元格文本并过滤空值占位。"""
+        text = (value or "").strip()
+        return "" if text == "nan" else text
+
+    def _read_probe_content(self, file_path: str) -> str:
+        """读取探测区内容并拼接为文本。"""
+        dataframe = pd.read_excel(file_path, header=None, nrows=15)
+        fragments: list[str] = []
+
+        for row_index in range(len(dataframe)):
+            for column_index in range(len(dataframe.columns)):
+                cell_value = dataframe.iloc[row_index, column_index]
+                if not pd.isna(cell_value):
+                    fragments.append(str(cell_value))
+
+        return " ".join(fragments)
+
+    def _is_ccb_content(self, content: str) -> bool:
+        """根据内容特征判断是否为建设银行账单。"""
+        has_ccb_strong = any(indicator in content for indicator in self.CCB_STRONG_INDICATORS)
+        has_ccb_columns = any(
+            all(column_name in content for column_name in pattern)
+            for pattern in self.CCB_COLUMN_PATTERNS
+        )
+        has_other_bank = any(indicator in content for indicator in self.OTHER_BANK_INDICATORS)
+        return (has_ccb_strong or has_ccb_columns) and not has_other_bank
+
+    def _find_header_row(self, dataframe: pd.DataFrame) -> int:
+        """查找表头所在行。"""
+        for row_index in range(min(10, len(dataframe))):
+            row_text = " ".join(
+                str(dataframe.iloc[row_index, column_index])
+                for column_index in range(len(dataframe.columns))
+                if not pd.isna(dataframe.iloc[row_index, column_index])
+            )
+            if "记账日" in row_text and "交易日期" in row_text:
+                return row_index
+
+        return -1
+
+    def _extract_headers(self, dataframe: pd.DataFrame, header_row: int) -> list[str]:
+        """提取表头列名。"""
+        headers: list[str] = []
+
+        for column_index in range(len(dataframe.columns)):
+            cell_value = dataframe.iloc[header_row, column_index]
+            headers.append(
+                str(cell_value).strip() if not pd.isna(cell_value) else f"col_{column_index}"
+            )
+
+        return headers
+
+    def _build_row_dict(
+        self,
+        dataframe: pd.DataFrame,
+        headers: list[str],
+        row_index: int,
+    ) -> dict[str, str]:
+        """将 Excel 数据行映射为字典。"""
+        return {
+            header: self._clean_text(
+                str(dataframe.iloc[row_index, column_index])
+                if not pd.isna(dataframe.iloc[row_index, column_index])
+                else ""
+            )
+            for column_index, header in enumerate(headers)
+        }
+
+    def _parse_transaction_amount(self, row_dict: dict[str, str]) -> tuple[str, str] | None:
+        """解析收支金额并返回交易类型与金额字符串。"""
+        debit_str = row_dict.get("支出", "0").strip()
+        credit_str = row_dict.get("收入", "0").strip()
+
+        try:
+            debit = float(debit_str) if debit_str else 0.0
+            credit = float(credit_str) if credit_str else 0.0
+        except (TypeError, ValueError):
+            return None
+
+        if credit > 0:
+            return "收入", str(credit)
+        if debit > 0:
+            return "支出", str(debit)
+
+        return None
+
+    def _build_bill(self, row_dict: dict[str, str]) -> dict[str, Any] | None:
+        """将原始行数据转换为建设银行账单记录。"""
+        trade_time = self._build_trade_time(row_dict)
+        if not trade_time:
+            return None
+
+        amount_details = self._parse_transaction_amount(row_dict)
+        if amount_details is None:
+            return None
+
+        transaction_type, amount_str = amount_details
+        description = self._clean_text(row_dict.get("摘要", ""))
+        counterparty = self._clean_text(row_dict.get("对方户名", "")) or description
+
+        return {
+            "date": trade_time,
+            "type": transaction_type,
+            "counterparty": counterparty,
+            "description": description,
+            "amount": amount_str,
+            "channel": "建设银行",
+        }
+
+    def _parse_data_rows(
+        self,
+        dataframe: pd.DataFrame,
+        headers: list[str],
+        start_row: int,
+    ) -> list[dict[str, Any]]:
+        """解析表头后的所有数据行。"""
+        bills: list[dict[str, Any]] = []
+
+        for row_index in range(start_row, len(dataframe)):
+            try:
+                row_dict = self._build_row_dict(dataframe, headers, row_index)
+                bill = self._build_bill(row_dict)
+            except Exception as exc:  # pylint: disable=broad-except
+                self.logger.error("解析建设银行行数据失败: %s", exc)
+                continue
+
+            if bill is not None:
+                bills.append(bill)
+
+        return bills
+
     @log_method
     def can_parse(self, file_path: str) -> bool:
         """判断是否为建设银行账单"""
@@ -61,63 +216,16 @@ class CCBParser(ParserBase):
             if "ccb" in file_path.lower() or "建设" in file_path:
                 return True
 
-            # 读取文件内容进行判断
-            df = pd.read_excel(file_path, header=None, nrows=15)
-
-            # 检查内容是否包含建设银行特征
-            content = ""
-            for i in range(len(df)):
-                for j in range(len(df.columns)):
-                    cell_value = str(df.iloc[i, j]) if not pd.isna(df.iloc[i, j]) else ""
-                    content += cell_value + " "
-
-            # 建设银行强特征标识
-            ccb_strong_indicators = [
-                "China Construction Bank",
-                "中国建设银行",
-                "开户机构：",
-                "账\u3000\u3000号：",  # 特殊格式的"账号："
-                "币\u3000\u3000种：",  # 特殊格式的"币种："
-            ]
-
-            # 建设银行特有列名组合（核心识别依据）
-            ccb_column_patterns = [
-                ["记账日", "交易日期", "支出", "收入"],  # 经典格式
-                ["记账日", "摘要", "账户余额"],
-                ["交易日期", "支出", "收入", "账户余额"],
-            ]
-
-            # 排除其他银行特征
-            other_bank_indicators = [
-                "储种",  # 工商银行特有
-                "对方开户行",  # 民生银行
-                "凭证类型",  # 民生银行
-                "⼾名",
-                "账⼾",
-                "对⼿信息",  # 农业银行特殊编码
-                "支出金额",
-                "存入金额",  # 民生银行（建设用"支出"、"收入"）
-            ]
-
-            # 检查强特征
-            has_ccb_strong = any(indicator in content for indicator in ccb_strong_indicators)
-
-            # 检查列名组合（任一组合全匹配即可）
-            has_ccb_columns = any(all(col in content for col in pattern) for pattern in ccb_column_patterns)
-
-            # 检查是否有其他银行特征
-            has_other_bank = any(indicator in content for indicator in other_bank_indicators)
-
-            # 建设银行判定：有强标识或列名组合，且无其他银行特征
-            is_ccb = (has_ccb_strong or has_ccb_columns) and not has_other_bank
+            content = self._read_probe_content(file_path)
+            is_ccb = self._is_ccb_content(content)
 
             if is_ccb:
-                self.logger.info(f"识别为建设银行文件: {file_path}")
+                self.logger.info("识别为建设银行文件: %s", file_path)
 
             return is_ccb
 
-        except Exception as e:  # pylint: disable=broad-except
-            self.logger.debug(f"判断建设银行文件失败: {file_path}, 错误: {e}")
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.debug("判断建设银行文件失败: %s, 错误: %s", file_path, exc)
             return False
 
     @log_method
@@ -126,97 +234,21 @@ class CCBParser(ParserBase):
         if not self.validate_file(file_path):
             return []
 
-        bills = []
-
         try:
-            # 读取Excel文件
-            df = pd.read_excel(file_path, header=None)
-
-            # 查找表头行（包含"记账日"或"交易日期"）
-            header_row = -1
-            for i in range(min(10, len(df))):
-                row_text = " ".join(str(df.iloc[i, j]) for j in range(len(df.columns)) if not pd.isna(df.iloc[i, j]))
-                if "记账日" in row_text and "交易日期" in row_text:
-                    header_row = i
-                    break
+            dataframe = pd.read_excel(file_path, header=None)
+            header_row = self._find_header_row(dataframe)
 
             if header_row == -1:
                 self.logger.warning("未找到表头行")
                 return []
 
-            # 提取列名
-            headers = []
-            for j in range(len(df.columns)):
-                val = df.iloc[header_row, j]
-                header_text = str(val).strip() if not pd.isna(val) else f"col_{j}"
-                headers.append(header_text)
-
-            # 解析数据行
-            for i in range(header_row + 1, len(df)):
-                try:
-                    row_dict = {}
-                    for j, header in enumerate(headers):
-                        val = df.iloc[i, j]
-                        row_dict[header] = str(val) if not pd.isna(val) else ""
-
-                    # 获取交易日期与时间
-                    trade_time = self._build_trade_time(row_dict)
-                    if not trade_time:
-                        continue
-
-                    # 获取收支金额
-                    debit_str = row_dict.get("支出", "0").strip()
-                    credit_str = row_dict.get("收入", "0").strip()
-
-                    # 确定交易类型和金额
-                    transaction_type = "支出"
-                    amount_str = "0"
-
-                    try:
-                        debit = float(debit_str) if debit_str and debit_str != "nan" else 0
-                        credit = float(credit_str) if credit_str and credit_str != "nan" else 0
-
-                        if credit > 0:
-                            transaction_type = "收入"
-                            amount_str = str(credit)
-                        elif debit > 0:
-                            transaction_type = "支出"
-                            amount_str = str(debit)
-                        else:
-                            continue  # 跳过金额为0的记录
-
-                    except (ValueError, TypeError):
-                        continue
-
-                    # 获取摘要
-                    description = row_dict.get("摘要", "").strip()
-                    if not description or description == "nan":
-                        description = ""
-
-                    # 获取对方信息（建设银行文件中可能没有单独的对方字段，使用摘要）
-                    counterparty = row_dict.get("对方户名", "").strip()
-                    if not counterparty or counterparty == "nan":
-                        counterparty = description  # 使用摘要作为对方
-
-                    bill = {
-                        "date": trade_time,
-                        "type": transaction_type,
-                        "counterparty": counterparty,
-                        "description": description,
-                        "amount": amount_str,
-                        "channel": "建设银行",
-                    }
-
-                    bills.append(bill)
-
-                except Exception as e:  # pylint: disable=broad-except
-                    self.logger.error("解析建设银行行数据失败: %s", e)
-                    continue
+            headers = self._extract_headers(dataframe, header_row)
+            bills = self._parse_data_rows(dataframe, headers, header_row + 1)
 
             self.logger.info("建设银行账单解析完成: %d 条", len(bills))
 
-        except Exception as e:  # pylint: disable=broad-except
-            self.logger.error("解析建设银行账单失败: %s", e)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.error("解析建设银行账单失败: %s", exc)
             return []
 
         return self.post_process(bills)

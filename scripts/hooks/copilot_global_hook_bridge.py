@@ -6,7 +6,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
+from typing import TextIO
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -65,6 +65,11 @@ STAGE_ALIASES = {
     "stophook": "stop",
 }
 
+UTF8 = "utf-8"
+ENCODING_TRIGGER = "hook-bridge:windows-stdio-encoding"
+ENCODING_ACTION = "force-utf8-stdio-or-buffer-fallback"
+OBSERVATION_KEYS_EMITTED: set[str] = set()
+
 
 def normalize_stage(raw_stage: str) -> str | None:
     key = str(raw_stage or "").strip().lower().replace("_", "-")
@@ -76,8 +81,132 @@ def locate_runner(home: Path | None = None) -> Path:
     return base_home / ".copilot" / "hooks" / "run-with-flags.js"
 
 
+def locate_learning_engine(home: Path | None = None) -> Path:
+    base_home = home or Path.home()
+    return base_home / ".copilot" / "scripts" / "learning-engine.js"
+
+
 def locate_node() -> str | None:
     return shutil.which("node") or shutil.which("node.exe")
+
+
+def record_learning_observation(
+    description: str,
+    *,
+    context: dict[str, object] | None = None,
+    once_key: str | None = None,
+) -> None:
+    if once_key and once_key in OBSERVATION_KEYS_EMITTED:
+        return
+
+    node_binary = locate_node()
+    learning_engine = locate_learning_engine()
+    if not node_binary or not learning_engine.exists():
+        return
+
+    if once_key:
+        OBSERVATION_KEYS_EMITTED.add(once_key)
+
+    payload = {
+        "trigger": ENCODING_TRIGGER,
+        "action": ENCODING_ACTION,
+        "domain": "environment-issue",
+        "description": description,
+        "context": context or {},
+    }
+
+    try:
+        subprocess.Popen(
+            [
+                node_binary,
+                str(learning_engine),
+                "observe",
+                "bill-analyser",
+                "pattern-detected",
+                json.dumps(payload, ensure_ascii=False),
+            ],
+            cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        if once_key:
+            OBSERVATION_KEYS_EMITTED.discard(once_key)
+        return
+
+
+def _is_utf8_encoding(value: str | None) -> bool:
+    return str(value or "").strip().lower().replace("_", "-") == UTF8
+
+
+def ensure_utf8_text_stream(stream: TextIO, stream_name: str, *, record: bool = True) -> bool:
+    encoding = getattr(stream, "encoding", None)
+    if _is_utf8_encoding(encoding):
+        return False
+
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding=UTF8, errors="replace")
+            return True
+        except Exception:
+            return False
+
+    return False
+
+
+def prepare_standard_streams_for_unicode(
+    *,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> tuple[str, ...]:
+    changed: list[str] = []
+    stdout_stream = stdout or sys.stdout
+    stderr_stream = stderr or sys.stderr
+    if ensure_utf8_text_stream(stdout_stream, "stdout", record=False):
+        changed.append("stdout")
+    if ensure_utf8_text_stream(stderr_stream, "stderr", record=False):
+        changed.append("stderr")
+    if changed:
+        record_learning_observation(
+            f"Hook bridge auto-reconfigured {', '.join(changed)} to utf-8 for Unicode-safe hook output.",
+            context={"streams": changed, "strategy": "reconfigure"},
+            once_key="stdio-reconfigure",
+        )
+    return tuple(changed)
+
+
+def write_text(stream: TextIO, text: str, stream_name: str) -> None:
+    if not text:
+        return
+
+    try:
+        stream.write(text)
+        return
+    except UnicodeEncodeError:
+        pass
+
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        buffer.write(text.encode(UTF8, errors="replace"))
+        record_learning_observation(
+            f"Hook bridge used UTF-8 buffer fallback for {stream_name} after UnicodeEncodeError.",
+            context={"stream": stream_name, "strategy": "buffer-fallback"},
+            once_key=f"{stream_name}-buffer-fallback",
+        )
+        return
+
+    encoding = getattr(stream, "encoding", None) or UTF8
+    safe_text = text.encode(encoding, "backslashreplace").decode(encoding, "strict")
+    stream.write(safe_text)
+    record_learning_observation(
+        f"Hook bridge used backslashreplace fallback for {stream_name} because no binary buffer was available.",
+        context={"stream": stream_name, "strategy": "backslashreplace", "encoding": encoding},
+        once_key=f"{stream_name}-backslashreplace",
+    )
 
 
 def _strip_raw_passthrough(stdout_text: str, payload_raw: str) -> str:
@@ -180,17 +309,18 @@ def execute_stage(stage: str, payload_raw: str) -> StageResult:
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     stage = args[0] if args else ""
+    prepare_standard_streams_for_unicode()
     payload_raw = sys.stdin.read()
     result = execute_stage(stage, payload_raw)
 
     if result.stdout:
-        sys.stdout.write(result.stdout)
+        write_text(sys.stdout, result.stdout, "stdout")
         if not result.stdout.endswith("\n"):
-            sys.stdout.write("\n")
+            write_text(sys.stdout, "\n", "stdout")
     if result.stderr:
-        sys.stderr.write(result.stderr)
+        write_text(sys.stderr, result.stderr, "stderr")
         if not result.stderr.endswith("\n"):
-            sys.stderr.write("\n")
+            write_text(sys.stderr, "\n", "stderr")
     return result.exit_code
 
 
