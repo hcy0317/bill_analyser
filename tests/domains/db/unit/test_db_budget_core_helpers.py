@@ -1,3 +1,5 @@
+import json
+
 from bill_analyser.core.db import Database
 
 
@@ -96,6 +98,36 @@ def test_budget_category_type_falls_back_to_preferred_type_when_context_missing(
         category_context,
         preferred_type=5,
     ) == 5
+
+
+def test_budget_history_filter_summary_is_order_insensitive_for_id_filters() -> None:
+    """预算历史 filter summary 应对 account/tag 顺序不敏感，保证快照键稳定。"""
+    summary_a = Database._build_budget_history_filter_summary(
+        budget_type=3,
+        period_type="monthly",
+        budget_id=9,
+        category_id=18,
+        account_ids=[5, 1, 3],
+        tag_ids=[9, 7],
+    )
+    summary_b = Database._build_budget_history_filter_summary(
+        budget_type=3,
+        period_type="monthly",
+        budget_id=9,
+        category_id=18,
+        account_ids=[3, 5, 1],
+        tag_ids=[7, 9],
+    )
+
+    assert summary_a == summary_b
+    assert json.loads(summary_a) == {
+        "account_ids": [1, 3, 5],
+        "budget_id": 9,
+        "budget_type": 3,
+        "category_id": 18,
+        "period_type": "monthly",
+        "tag_ids": [7, 9],
+    }
 
 
 

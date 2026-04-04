@@ -630,6 +630,118 @@ async def test_budget_history_merges_snapshots_with_missing_periods(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_budget_execution_uses_destination_account_filter_and_budget_window_intersection(
+    tmp_path: Path,
+) -> None:
+    """预算执行应命中 destination_account_id，并只统计请求区间与预算定义交集内的账单。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_destination_overlap")
+        included_account_id = await _create_account(db, user_id=user_id, name="目标命中账户")
+        excluded_account_id = await _create_account(db, user_id=user_id, name="目标排除账户")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="交集预算分类",
+            sub_category="",
+            icon="wallet",
+            color="#4455ff",
+        )
+        budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="交集预算",
+            category="交集预算分类",
+            sub_category="",
+            amount=100.0,
+            start_date="2026-03-10",
+            end_date="2026-03-20",
+        )
+
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-09 08:00:00",
+            amount=-7.0,
+            main_category="交集预算分类",
+            sub_category="",
+            destination_account_id=included_account_id,
+            description="预算前账单",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-10 08:00:00",
+            amount=-11.0,
+            main_category="交集预算分类",
+            sub_category="",
+            destination_account_id=included_account_id,
+            description="预算起始日账单",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-20 21:00:00",
+            amount=-13.0,
+            main_category="交集预算分类",
+            sub_category="",
+            destination_account_id=included_account_id,
+            description="预算结束日账单",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-21 08:00:00",
+            amount=-17.0,
+            main_category="交集预算分类",
+            sub_category="",
+            destination_account_id=included_account_id,
+            description="预算后账单",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-15 08:00:00",
+            amount=-19.0,
+            main_category="交集预算分类",
+            sub_category="",
+            destination_account_id=excluded_account_id,
+            description="其他目标账户账单",
+        )
+
+        execution_details = await db.get_budget_execution_details(
+            budget_type=3,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            budget_id=budget_id,
+            account_ids=[included_account_id],
+            user_id=user_id,
+        )
+        history_items = await db.get_budget_execution_history(
+            budget_type=3,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            budget_id=budget_id,
+            account_ids=[included_account_id],
+            user_id=user_id,
+        )
+
+        assert len(execution_details) == 1
+        assert execution_details[0]["spent_amount"] == pytest.approx(24.0)
+        assert execution_details[0]["remaining_amount"] == pytest.approx(76.0)
+        assert execution_details[0]["execution_rate"] == pytest.approx(24.0)
+
+        assert len(history_items) == 1
+        assert history_items[0]["spent_amount"] == pytest.approx(24.0)
+        assert history_items[0]["period_start"] == "2026-03-01"
+        assert history_items[0]["period_end"] == "2026-03-31"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_budget_execution_filters_same_category_budgets_by_period_type(tmp_path: Path) -> None:
     """同分类多周期预算查询时，应只返回与查询周期一致的预算。"""
     db = await _create_database(tmp_path)

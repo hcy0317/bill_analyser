@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from dataclasses import dataclass
 
 # import threading  # 已移除
 from datetime import date, datetime, timedelta
@@ -21,6 +22,21 @@ from bill_analyser.constants import DATA_DIR, TEST_DB_DIR_ENV
 from ..utils.logger import get_logger, log_method, log_step
 
 BudgetGroupKey = tuple[str, str, str, int]
+
+
+@dataclass(frozen=True)
+class BudgetExecutionRequest:
+    """Immutable request bundle for budget execution, snapshot, and history flows."""
+
+    budget_type: int = 3
+    period_type: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    budget_id: int | None = None
+    category_id: int | None = None
+    account_ids: tuple[int, ...] = ()
+    tag_ids: tuple[int, ...] = ()
+    user_id: int = 1
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -5927,7 +5943,7 @@ class Database:
         if sub_total <= 0:
             return
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = self._current_budget_timestamp_text()
         if not primary_budget:
             reference = reference_data or {}
             await self._insert_budget_record(
@@ -6192,73 +6208,39 @@ class Database:
 
         return cursor.rowcount > 0
 
-    @log_method
-    async def get_budget_execution_details(
+    @staticmethod
+    def _current_budget_timestamp_text() -> str:
+        """Return the normalized timestamp text used by budget records."""
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _get_budget_type_name(budget_type: int) -> str:
+        """Map budget type ids to bill type names."""
+        return "支出" if budget_type == 3 else "投资"
+
+    async def _fetch_budget_execution_candidates(
         self,
-        budget_type: int = 3,
-        period_type: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        budget_id: int | None = None,
-        category_id: int | None = None,
-        account_ids: list[int] | None = None,
-        tag_ids: list[int] | None = None,
-        user_id: int = 1,
+        conn: aiosqlite.Connection,
+        request: BudgetExecutionRequest,
+        category_context: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """
-        获取预算执行详情
-
-        Args:
-            budget_type: 预算类型 (3=支出, 5=投资)
-            period_type: 预算周期类型
-            start_date: 开始日期 YYYY-MM-DD
-            end_date: 结束日期 YYYY-MM-DD
-            budget_id: 预算ID筛选
-            category_id: 分类ID筛选
-            account_ids: 账户ID列表筛选
-            tag_ids: 标签ID列表筛选
-
-        Returns:
-            预算执行详情列表
-        """
-        self.logger.info(
-            "[get_budget_execution_details] 参数: type=%s, period=%s, dates=%s~%s, budget_id=%s, "
-            "category=%s, accounts=%s, tags=%s, user_id=%s",
-            budget_type,
-            period_type,
-            start_date,
-            end_date,
-            budget_id,
-            category_id,
-            account_ids,
-            tag_ids,
-            user_id,
-        )
-
-        conn = await self._get_connection()
-        categories = await self.get_all_categories(user_id=user_id)
-        category_context = self._build_budget_category_context(categories)
-
-        # 1. 获取符合条件的预算 - 添加 user_id 过滤
+        """Fetch raw budgets and keep only candidates matching execution request semantics."""
         budget_query = "SELECT * FROM budgets WHERE enabled = 1 AND user_id = ?"
-        budget_params: list[Any] = [user_id]
+        budget_params: list[Any] = [request.user_id]
 
-        if budget_type == 3:
-            budget_query += " AND (period_type IS NOT NULL)"  # 支出预算
-        elif budget_type == 5:
-            budget_query += " AND (period_type IS NOT NULL)"  # 投资预算
+        if request.budget_type in {3, 5}:
+            budget_query += " AND (period_type IS NOT NULL)"
 
-        if period_type:
+        if request.period_type:
             budget_query += " AND period_type = ?"
-            budget_params.append(period_type)
+            budget_params.append(request.period_type)
 
-        if budget_id:
+        if request.budget_id:
             budget_query += " AND id = ?"
-            budget_params.append(budget_id)
+            budget_params.append(request.budget_id)
 
-        if category_id:
-            # 根据category_id获取分类名称
-            cat_info = await self.get_category_by_id(category_id, user_id=user_id)
+        if request.category_id:
+            cat_info = await self.get_category_by_id(request.category_id, user_id=request.user_id)
             if not cat_info:
                 return []
 
@@ -6272,35 +6254,192 @@ class Database:
         async with conn.execute(budget_query, budget_params) as cursor:
             raw_budgets = [dict(row) for row in await cursor.fetchall()]
 
+        return self._filter_budget_execution_candidates(raw_budgets, request, category_context)
+
+    def _filter_budget_execution_candidates(
+        self,
+        raw_budgets: list[dict[str, Any]],
+        request: BudgetExecutionRequest,
+        category_context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Filter budgets by resolved type and period overlap."""
         budgets: list[dict[str, Any]] = []
         for budget in raw_budgets:
             resolved_budget_type = self._resolve_budget_category_type(
                 budget.get("category"),
                 budget.get("sub_category"),
                 category_context,
-                preferred_type=budget_type,
+                preferred_type=request.budget_type,
             )
-            if resolved_budget_type != budget_type:
+            if resolved_budget_type != request.budget_type:
                 continue
-            if start_date and end_date and not self._budget_overlaps_period(
+            if request.start_date and request.end_date and not self._budget_overlaps_period(
                 budget.get("start_date"),
                 budget.get("end_date"),
-                start_date,
-                end_date,
+                request.start_date,
+                request.end_date,
             ):
                 continue
 
-            budgets.append(
-                {
-                    **budget,
-                    "_resolved_budget_type": resolved_budget_type,
-                }
+            budgets.append({**budget, "_resolved_budget_type": resolved_budget_type})
+
+        return budgets
+
+    def _resolve_budget_execution_window(
+        self,
+        budget: dict[str, Any],
+        request: BudgetExecutionRequest,
+    ) -> tuple[str | None, str | None]:
+        """Resolve the intersection window between a budget and the request range."""
+        budget_defined_start = str(budget.get("start_date") or "").strip() or None
+        budget_defined_end = str(budget.get("end_date") or "").strip() or None
+        budget_start = request.start_date or budget_defined_start
+        budget_end = request.end_date or budget_defined_end
+
+        if request.start_date and budget_defined_start:
+            budget_start = max(request.start_date, budget_defined_start)
+        if request.end_date and budget_defined_end:
+            budget_end = min(request.end_date, budget_defined_end)
+
+        return budget_start, self._normalize_budget_query_end_date(budget_end)
+
+    def _build_budget_spent_query(
+        self,
+        budget: dict[str, Any],
+        type_name: str,
+        request: BudgetExecutionRequest,
+    ) -> tuple[str, list[Any]]:
+        """Build the spent-amount query for a single budget execution row."""
+        bill_query = """
+            SELECT COALESCE(SUM(amount), 0) as spent
+            FROM bills
+            WHERE type = ? AND user_id = ?
+        """
+        bill_params: list[Any] = [type_name, request.user_id]
+
+        if budget.get("category"):
+            bill_query += " AND main_category = ?"
+            bill_params.append(budget["category"])
+
+        if budget.get("sub_category"):
+            bill_query += " AND sub_category = ?"
+            bill_params.append(budget["sub_category"])
+
+        budget_start, budget_end = self._resolve_budget_execution_window(budget, request)
+        if budget_start:
+            bill_query += " AND date >= ?"
+            bill_params.append(budget_start)
+
+        if budget_end:
+            bill_query += " AND date <= ?"
+            bill_params.append(budget_end)
+
+        if request.account_ids:
+            placeholders = ",".join("?" * len(request.account_ids))
+            bill_query += (
+                " AND ("
+                f"source_account_id IN ({placeholders}) "
+                f"OR destination_account_id IN ({placeholders})"
+                ")"
             )
+            bill_params.extend(request.account_ids * 2)
 
-        # 2. 对每个预算计算实际支出
-        type_name = "支出" if budget_type == 3 else "投资"
+        if request.tag_ids:
+            placeholders = ",".join("?" * len(request.tag_ids))
+            bill_query += (
+                " AND id IN (SELECT bill_id FROM bill_tags "
+                f"WHERE tag_id IN ({placeholders}))"
+            )
+            bill_params.extend(request.tag_ids)
 
-        results = []
+        return bill_query, bill_params
+
+    async def _get_budget_spent_amount(
+        self,
+        conn: aiosqlite.Connection,
+        budget: dict[str, Any],
+        type_name: str,
+        request: BudgetExecutionRequest,
+    ) -> float:
+        """Execute the spent-amount query for a single budget."""
+        bill_query, bill_params = self._build_budget_spent_query(budget, type_name, request)
+        self.logger.debug("[get_budget_execution_details] 查询SQL: %s, 参数: %s", bill_query, bill_params)
+
+        async with conn.execute(bill_query, bill_params) as cursor:
+            row = await cursor.fetchone()
+            spent = abs(row["spent"]) if row else 0
+
+        self.logger.debug(
+            "[get_budget_execution_details] 预算 %s/%s 查询结果: spent=%s",
+            budget.get("category"),
+            budget.get("sub_category"),
+            spent,
+        )
+        return spent
+
+    def _build_budget_execution_item(
+        self,
+        budget: dict[str, Any],
+        spent: float,
+        category_context: dict[str, Any],
+        fallback_budget_type: int,
+    ) -> dict[str, Any]:
+        """Build the API-facing execution detail item."""
+        budget_amount = budget.get("amount", 0)
+        execution_rate = (spent / budget_amount * 100) if budget_amount > 0 else 0
+        resolved_budget_type = int(budget.get("_resolved_budget_type") or fallback_budget_type)
+        category_info = self._resolve_budget_category_info(
+            budget.get("category"),
+            budget.get("sub_category"),
+            category_context,
+            resolved_budget_type,
+        )
+
+        return {
+            "id": budget["id"],
+            "name": budget["name"],
+            "category": budget.get("category", ""),
+            "sub_category": budget.get("sub_category", ""),
+            "category_info": category_info,
+            "category_id": str(category_info.get("id") or "") if category_info else "",
+            "period_type": budget.get("period_type", "monthly"),
+            "budget_amount": budget_amount,
+            "spent_amount": spent,
+            "remaining_amount": budget_amount - spent,
+            "execution_rate": round(execution_rate, 2),
+            "type": resolved_budget_type,
+            "alert_threshold": budget.get("alert_threshold", 80),
+            "start_date": budget.get("start_date"),
+            "end_date": budget.get("end_date"),
+            "enabled": budget.get("enabled", 1),
+        }
+
+    async def _get_budget_execution_details_for_request(
+        self,
+        request: BudgetExecutionRequest,
+    ) -> list[dict[str, Any]]:
+        """Core implementation for budget execution detail queries."""
+        self.logger.info(
+            "[get_budget_execution_details] 参数: type=%s, period=%s, dates=%s~%s, budget_id=%s, "
+            "category=%s, accounts=%s, tags=%s, user_id=%s",
+            request.budget_type,
+            request.period_type,
+            request.start_date,
+            request.end_date,
+            request.budget_id,
+            request.category_id,
+            list(request.account_ids),
+            list(request.tag_ids),
+            request.user_id,
+        )
+
+        conn = await self._get_connection()
+        categories = await self.get_all_categories(user_id=request.user_id)
+        category_context = self._build_budget_category_context(categories)
+        budgets = await self._fetch_budget_execution_candidates(conn, request, category_context)
+        type_name = self._get_budget_type_name(request.budget_type)
+
+        results: list[dict[str, Any]] = []
         for budget in budgets:
             self.logger.debug(
                 "[get_budget_execution_details] 处理预算: id=%s, category=%s, sub_category=%s, "
@@ -6311,108 +6450,45 @@ class Database:
                 budget.get("start_date"),
                 budget.get("end_date"),
             )
-
-            # 构建账单查询 - 添加 user_id 过滤
-            bill_query = """
-                SELECT COALESCE(SUM(amount), 0) as spent
-                FROM bills
-                WHERE type = ? AND user_id = ?
-            """
-            bill_params = [type_name, user_id]
-
-            # 分类筛选
-            if budget.get("category"):
-                bill_query += " AND main_category = ?"
-                bill_params.append(budget["category"])
-
-            if budget.get("sub_category"):
-                bill_query += " AND sub_category = ?"
-                bill_params.append(budget["sub_category"])
-
-            # 日期筛选 - 使用请求区间与预算自身区间的交集
-            budget_defined_start = str(budget.get("start_date") or "").strip() or None
-            budget_defined_end = str(budget.get("end_date") or "").strip() or None
-            budget_start = start_date or budget_defined_start
-            budget_end = end_date or budget_defined_end
-
-            if start_date and budget_defined_start:
-                budget_start = max(start_date, budget_defined_start)
-            if end_date and budget_defined_end:
-                budget_end = min(end_date, budget_defined_end)
-
-            budget_end = self._normalize_budget_query_end_date(budget_end)
-
-            if budget_start:
-                bill_query += " AND date >= ?"
-                bill_params.append(budget_start)
-
-            if budget_end:
-                bill_query += " AND date <= ?"
-                bill_params.append(budget_end)
-
-            # 账户筛选
-            if account_ids:
-                placeholders = ",".join("?" * len(account_ids))
-                bill_query += (
-                    f" AND (source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
-                )
-                bill_params.extend(account_ids * 2)
-
-            # 标签筛选
-            if tag_ids:
-                placeholders = ",".join(["?"] * len(tag_ids))
-                bill_query += f" AND id IN (SELECT bill_id FROM bill_tags WHERE tag_id IN ({placeholders}))"
-                bill_params.extend(tag_ids)
-
-            self.logger.debug("[get_budget_execution_details] 查询SQL: %s, 参数: %s", bill_query, bill_params)
-
-            # 执行查询
-            async with conn.execute(bill_query, bill_params) as cursor:
-                row = await cursor.fetchone()
-                spent = abs(row["spent"]) if row else 0
-
-            self.logger.debug(
-                "[get_budget_execution_details] 预算 %s/%s 查询结果: spent=%s",
-                budget.get("category"),
-                budget.get("sub_category"),
-                spent,
-            )
-
-            # 计算执行度
-            budget_amount = budget.get("amount", 0)
-            execution_rate = (spent / budget_amount * 100) if budget_amount > 0 else 0
-
-            resolved_budget_type = int(budget.get("_resolved_budget_type") or budget_type)
-            category_info = self._resolve_budget_category_info(
-                budget.get("category"),
-                budget.get("sub_category"),
-                category_context,
-                resolved_budget_type,
-            )
-
+            spent = await self._get_budget_spent_amount(conn, budget, type_name, request)
             results.append(
-                {
-                    "id": budget["id"],
-                    "name": budget["name"],
-                    "category": budget.get("category", ""),
-                    "sub_category": budget.get("sub_category", ""),
-                    "category_info": category_info,
-                    "category_id": str(category_info.get("id") or "") if category_info else "",
-                    "period_type": budget.get("period_type", "monthly"),
-                    "budget_amount": budget_amount,
-                    "spent_amount": spent,
-                    "remaining_amount": budget_amount - spent,
-                    "execution_rate": round(execution_rate, 2),
-                    "type": resolved_budget_type,
-                    "alert_threshold": budget.get("alert_threshold", 80),
-                    "start_date": budget.get("start_date"),
-                    "end_date": budget.get("end_date"),
-                    "enabled": budget.get("enabled", 1),
-                }
+                self._build_budget_execution_item(
+                    budget,
+                    spent,
+                    category_context,
+                    request.budget_type,
+                )
             )
 
         self.logger.info("[get_budget_execution_details] 返回%s条预算执行详情", len(results))
         return results
+
+    @log_method
+    async def get_budget_execution_details(
+        self,
+        budget_type: int = 3,
+        period_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """获取预算执行详情。"""
+        request = BudgetExecutionRequest(
+            budget_type=budget_type,
+            period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
+            budget_id=budget_id,
+            category_id=category_id,
+            account_ids=tuple(account_ids or ()),
+            tag_ids=tuple(tag_ids or ()),
+            user_id=user_id,
+        )
+        return await self._get_budget_execution_details_for_request(request)
 
     @staticmethod
     def _build_budget_history_filter_summary(
@@ -6434,42 +6510,30 @@ class Database:
         }
         return json.dumps(summary, ensure_ascii=False, sort_keys=True)
 
-    @log_method
-    async def create_budget_execution_snapshots(
-        self,
-        budget_type: int = 3,
-        period_type: str = "monthly",
-        start_date: str | None = None,
-        end_date: str | None = None,
-        budget_id: int | None = None,
-        category_id: int | None = None,
-        account_ids: list[int] | None = None,
-        tag_ids: list[int] | None = None,
-        user_id: int = 1,
-    ) -> dict[str, Any]:
-        """创建预算执行快照。"""
-        snapshots = await self.get_budget_execution_details(
-            budget_type=budget_type,
-            period_type=period_type,
-            start_date=start_date,
-            end_date=end_date,
-            budget_id=budget_id,
-            category_id=category_id,
-            account_ids=account_ids,
-            tag_ids=tag_ids,
-            user_id=user_id,
+    @classmethod
+    def _build_budget_history_filter_summary_for_request(
+        cls,
+        request: BudgetExecutionRequest,
+    ) -> str:
+        """Build the stable filter summary for a budget execution request."""
+        return cls._build_budget_history_filter_summary(
+            budget_type=request.budget_type,
+            period_type=request.period_type,
+            budget_id=request.budget_id,
+            category_id=request.category_id,
+            account_ids=list(request.account_ids),
+            tag_ids=list(request.tag_ids),
         )
 
+    async def _create_budget_execution_snapshots_for_request(
+        self,
+        request: BudgetExecutionRequest,
+    ) -> dict[str, Any]:
+        """Core implementation for budget execution snapshot creation."""
+        snapshots = await self._get_budget_execution_details_for_request(request)
         conn = await self._get_connection()
-        calculated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filter_summary = self._build_budget_history_filter_summary(
-            budget_type=budget_type,
-            period_type=period_type,
-            budget_id=budget_id,
-            category_id=category_id,
-            account_ids=account_ids,
-            tag_ids=tag_ids,
-        )
+        calculated_at = self._current_budget_timestamp_text()
+        filter_summary = self._build_budget_history_filter_summary_for_request(request)
 
         created_count = 0
         for snapshot in snapshots:
@@ -6479,7 +6543,13 @@ class Database:
                 WHERE user_id = ? AND budget_id = ? AND period_start = ? AND period_end = ?
                   AND filter_summary = ?
                 """,
-                (user_id, snapshot["id"], start_date, end_date, filter_summary),
+                (
+                    request.user_id,
+                    snapshot["id"],
+                    request.start_date,
+                    request.end_date,
+                    filter_summary,
+                ),
             )
 
             status = "over_budget" if snapshot["spent_amount"] > snapshot["budget_amount"] else "within_budget"
@@ -6492,10 +6562,10 @@ class Database:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    user_id,
+                    request.user_id,
                     snapshot["id"],
-                    start_date,
-                    end_date,
+                    request.start_date,
+                    request.end_date,
                     snapshot["budget_amount"],
                     snapshot["spent_amount"],
                     snapshot["remaining_amount"],
@@ -6510,14 +6580,14 @@ class Database:
         await conn.commit()
         return {
             "created_count": created_count,
-            "period_start": start_date,
-            "period_end": end_date,
+            "period_start": request.start_date,
+            "period_end": request.end_date,
             "filter_summary": filter_summary,
             "calculated_at": calculated_at,
         }
 
     @log_method
-    async def get_budget_execution_history(
+    async def create_budget_execution_snapshots(
         self,
         budget_type: int = 3,
         period_type: str = "monthly",
@@ -6528,18 +6598,28 @@ class Database:
         account_ids: list[int] | None = None,
         tag_ids: list[int] | None = None,
         user_id: int = 1,
-    ) -> list[dict[str, Any]]:
-        """获取预算执行快照历史。"""
-        conn = await self._get_connection()
-        filter_summary = self._build_budget_history_filter_summary(
+    ) -> dict[str, Any]:
+        """创建预算执行快照。"""
+        request = BudgetExecutionRequest(
             budget_type=budget_type,
             period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
             budget_id=budget_id,
             category_id=category_id,
-            account_ids=account_ids,
-            tag_ids=tag_ids,
+            account_ids=tuple(account_ids or ()),
+            tag_ids=tuple(tag_ids or ()),
+            user_id=user_id,
         )
+        return await self._create_budget_execution_snapshots_for_request(request)
 
+    async def _fetch_budget_execution_history_items(
+        self,
+        conn: aiosqlite.Connection,
+        request: BudgetExecutionRequest,
+        filter_summary: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch stored budget history rows matching the request scope."""
         query = """
             SELECT
                 bh.id,
@@ -6563,19 +6643,19 @@ class Database:
             INNER JOIN budgets b ON b.id = bh.budget_id
             WHERE bh.user_id = ? AND b.user_id = ?
         """
-        params: list[Any] = [user_id, user_id]
+        params: list[Any] = [request.user_id, request.user_id]
 
-        if budget_id:
+        if request.budget_id:
             query += " AND bh.budget_id = ?"
-            params.append(budget_id)
+            params.append(request.budget_id)
 
-        if start_date:
+        if request.start_date:
             query += " AND bh.period_end >= ?"
-            params.append(start_date)
+            params.append(request.start_date)
 
-        if end_date:
+        if request.end_date:
             query += " AND bh.period_start <= ?"
-            params.append(end_date)
+            params.append(request.end_date)
 
         query += " AND bh.filter_summary = ?"
         params.append(filter_summary)
@@ -6584,42 +6664,49 @@ class Database:
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
 
-        history_items = [dict(row) for row in rows]
-        if not start_date or not end_date:
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _extract_exact_budget_history_items(
+        history_items: list[dict[str, Any]],
+        request: BudgetExecutionRequest,
+    ) -> list[dict[str, Any]]:
+        """Return exact period matches when the request specifies a concrete period window."""
+        if not request.start_date or not request.end_date:
             return history_items
 
-        exact_history_items = [
+        return [
             item
             for item in history_items
-            if item.get("period_start") == start_date and item.get("period_end") == end_date
+            if item.get("period_start") == request.start_date and item.get("period_end") == request.end_date
         ]
-        if exact_history_items:
-            return exact_history_items
 
-        on_demand_items = await self._build_budget_execution_history_on_demand(
-            budget_type=budget_type,
-            period_type=period_type,
-            start_date=start_date,
-            end_date=end_date,
-            budget_id=budget_id,
-            category_id=category_id,
-            account_ids=account_ids,
-            tag_ids=tag_ids,
-            user_id=user_id,
-        )
+    @staticmethod
+    def _merge_budget_execution_history_items(
+        history_items: list[dict[str, Any]],
+        on_demand_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Merge stored and on-demand history rows without duplicating the same period key."""
         if not history_items:
-            return on_demand_items
+            return list(on_demand_items)
 
         history_keys = {
             (item.get("budget_id"), item.get("period_start"), item.get("period_end"))
             for item in history_items
         }
+        merged_items = list(history_items)
         for item in on_demand_items:
             item_key = (item.get("budget_id"), item.get("period_start"), item.get("period_end"))
             if item_key not in history_keys:
-                history_items.append(item)
+                merged_items.append(item)
 
-        history_items.sort(
+        return merged_items
+
+    @staticmethod
+    def _sort_budget_execution_history_items(history_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return history items in the repository-standard reverse chronological order."""
+        return sorted(
+            history_items,
             key=lambda item: (
                 item.get("period_start", ""),
                 item.get("period_end", ""),
@@ -6629,7 +6716,56 @@ class Database:
             ),
             reverse=True,
         )
-        return history_items
+
+    async def _get_budget_execution_history_for_request(
+        self,
+        request: BudgetExecutionRequest,
+    ) -> list[dict[str, Any]]:
+        """Core implementation for budget execution history queries."""
+        conn = await self._get_connection()
+        filter_summary = self._build_budget_history_filter_summary_for_request(request)
+        history_items = await self._fetch_budget_execution_history_items(conn, request, filter_summary)
+
+        if not request.start_date or not request.end_date:
+            return history_items
+
+        exact_history_items = self._extract_exact_budget_history_items(history_items, request)
+        if exact_history_items:
+            return exact_history_items
+
+        on_demand_items = await self._build_budget_execution_history_on_demand_for_request(request)
+        if not history_items:
+            return on_demand_items
+
+        merged_items = self._merge_budget_execution_history_items(history_items, on_demand_items)
+        return self._sort_budget_execution_history_items(merged_items)
+
+    @log_method
+    async def get_budget_execution_history(
+        self,
+        budget_type: int = 3,
+        period_type: str = "monthly",
+        start_date: str | None = None,
+        end_date: str | None = None,
+        budget_id: int | None = None,
+        category_id: int | None = None,
+        account_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """获取预算执行快照历史。"""
+        request = BudgetExecutionRequest(
+            budget_type=budget_type,
+            period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
+            budget_id=budget_id,
+            category_id=category_id,
+            account_ids=tuple(account_ids or ()),
+            tag_ids=tuple(tag_ids or ()),
+            user_id=user_id,
+        )
+        return await self._get_budget_execution_history_for_request(request)
 
     @staticmethod
     def _parse_budget_history_date(date_text: str | None) -> date | None:
@@ -6638,7 +6774,7 @@ class Database:
             return None
 
         try:
-            return datetime.strptime(str(date_text)[:10], "%Y-%m-%d").date()
+            return date.fromisoformat(str(date_text)[:10])
         except (TypeError, ValueError):
             return None
 
@@ -6743,6 +6879,98 @@ class Database:
 
         return True
 
+    @staticmethod
+    def _build_budget_history_item_from_detail(
+        detail: dict[str, Any],
+        period_range: dict[str, str],
+        request: BudgetExecutionRequest,
+        filter_summary: str,
+    ) -> dict[str, Any]:
+        """Build a history row from a single execution detail row."""
+        period_start = period_range["start_date"]
+        period_end = period_range["end_date"]
+        spent_amount = detail.get("spent_amount", 0)
+        budget_amount = detail.get("budget_amount", 0)
+        return {
+            "id": f"{detail.get('id', '')}_{period_start}_{period_end}",
+            "budget_id": detail.get("id"),
+            "period_start": period_start,
+            "period_end": period_end,
+            "budget_amount": budget_amount,
+            "spent_amount": spent_amount,
+            "remaining_amount": detail.get("remaining_amount", 0),
+            "execution_rate": detail.get("execution_rate", 0),
+            "status": "over_budget" if spent_amount > budget_amount else "within_budget",
+            "filter_summary": filter_summary,
+            "calculated_at": "",
+            "name": detail.get("name", ""),
+            "category": detail.get("category", ""),
+            "sub_category": detail.get("sub_category", ""),
+            "category_id": detail.get("category_id", ""),
+            "category_info": detail.get("category_info"),
+            "type": detail.get("type", request.budget_type),
+            "period_type": detail.get("period_type", request.period_type or "monthly"),
+            "alert_threshold": detail.get("alert_threshold", 80),
+            "enabled": detail.get("enabled", 1),
+        }
+
+    async def _build_budget_execution_history_on_demand_for_request(
+        self,
+        request: BudgetExecutionRequest,
+    ) -> list[dict[str, Any]]:
+        """Dynamically compute history rows for a budget request when snapshots are missing."""
+        period_ranges = self._iter_budget_history_period_ranges(
+            request.period_type or "monthly",
+            request.start_date,
+            request.end_date,
+        )
+        if not period_ranges:
+            return []
+
+        filter_summary = self._build_budget_history_filter_summary_for_request(request)
+        history_items: list[dict[str, Any]] = []
+        self.logger.info(
+            "[预算历史] 动态计算区间数=%d, period_type=%s, range=%s~%s",
+            len(period_ranges),
+            request.period_type,
+            request.start_date,
+            request.end_date,
+        )
+
+        for period_range in period_ranges:
+            period_request = BudgetExecutionRequest(
+                budget_type=request.budget_type,
+                period_type=request.period_type,
+                start_date=period_range["start_date"],
+                end_date=period_range["end_date"],
+                budget_id=request.budget_id,
+                category_id=request.category_id,
+                account_ids=request.account_ids,
+                tag_ids=request.tag_ids,
+                user_id=request.user_id,
+            )
+            execution_details = await self._get_budget_execution_details_for_request(period_request)
+
+            for detail in execution_details:
+                if not self._budget_overlaps_period(
+                    detail.get("start_date"),
+                    detail.get("end_date"),
+                    period_range["start_date"],
+                    period_range["end_date"],
+                ):
+                    continue
+
+                history_items.append(
+                    self._build_budget_history_item_from_detail(
+                        detail,
+                        period_range,
+                        request,
+                        filter_summary,
+                    )
+                )
+
+        return self._sort_budget_execution_history_items(history_items)
+
     @log_method
     async def _build_budget_execution_history_on_demand(
         self,
@@ -6757,87 +6985,18 @@ class Database:
         user_id: int = 1,
     ) -> list[dict[str, Any]]:
         """按查询周期动态计算预算历史，避免仅依赖已落库快照。"""
-        period_ranges = self._iter_budget_history_period_ranges(period_type, start_date, end_date)
-        if not period_ranges:
-            return []
-
-        filter_summary = self._build_budget_history_filter_summary(
+        request = BudgetExecutionRequest(
             budget_type=budget_type,
             period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
             budget_id=budget_id,
             category_id=category_id,
-            account_ids=account_ids,
-            tag_ids=tag_ids,
+            account_ids=tuple(account_ids or ()),
+            tag_ids=tuple(tag_ids or ()),
+            user_id=user_id,
         )
-
-        history_items: list[dict[str, Any]] = []
-        self.logger.info(
-            "[预算历史] 动态计算区间数=%d, period_type=%s, range=%s~%s",
-            len(period_ranges),
-            period_type,
-            start_date,
-            end_date,
-        )
-
-        for period_range in period_ranges:
-            period_start = period_range["start_date"]
-            period_end = period_range["end_date"]
-            execution_details = await self.get_budget_execution_details(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=period_start,
-                end_date=period_end,
-                budget_id=budget_id,
-                category_id=category_id,
-                account_ids=account_ids,
-                tag_ids=tag_ids,
-                user_id=user_id,
-            )
-
-            for detail in execution_details:
-                if not self._budget_overlaps_period(
-                    detail.get("start_date"), detail.get("end_date"), period_start, period_end
-                ):
-                    continue
-
-                history_items.append(
-                    {
-                        "id": f"{detail.get('id', '')}_{period_start}_{period_end}",
-                        "budget_id": detail.get("id"),
-                        "period_start": period_start,
-                        "period_end": period_end,
-                        "budget_amount": detail.get("budget_amount", 0),
-                        "spent_amount": detail.get("spent_amount", 0),
-                        "remaining_amount": detail.get("remaining_amount", 0),
-                        "execution_rate": detail.get("execution_rate", 0),
-                        "status": "over_budget"
-                        if detail.get("spent_amount", 0) > detail.get("budget_amount", 0)
-                        else "within_budget",
-                        "filter_summary": filter_summary,
-                        "calculated_at": "",
-                        "name": detail.get("name", ""),
-                        "category": detail.get("category", ""),
-                        "sub_category": detail.get("sub_category", ""),
-                        "category_id": detail.get("category_id", ""),
-                        "category_info": detail.get("category_info"),
-                        "type": detail.get("type", budget_type),
-                        "period_type": detail.get("period_type", period_type),
-                        "alert_threshold": detail.get("alert_threshold", 80),
-                        "enabled": detail.get("enabled", 1),
-                    }
-                )
-
-        history_items.sort(
-            key=lambda item: (
-                item.get("period_start", ""),
-                item.get("period_end", ""),
-                str(item.get("category", "")),
-                str(item.get("sub_category", "")),
-                int(item.get("budget_id", 0) or 0),
-            ),
-            reverse=True,
-        )
-        return history_items
+        return await self._build_budget_execution_history_on_demand_for_request(request)
 
     @log_method
     async def get_period_forecast(
@@ -7108,7 +7267,7 @@ class Database:
         self.logger.info("[import_budgets] 开始导入%s条预算", len(budgets_data))
 
         conn = await self._get_connection()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = self._current_budget_timestamp_text()
 
         created_count = 0
         updated_count = 0
