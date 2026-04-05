@@ -4586,7 +4586,9 @@ def import_stage3_confirm():
             # 这确保只有前端传入的选中账单才会被导入，未选中的不会被导入
             if preview_updates:
                 # 第一步：重置该会话所有账单的选中状态为未选中
-                reset_count = loop.run_until_complete(db.reset_session_preview_selection(session_id))
+                reset_count = loop.run_until_complete(
+                    db.reset_session_preview_selection(session_id, user_id)
+                )
                 logger.info("[阶段3-确认] 已重置 %s 条账单的选中状态", reset_count)
 
                 # 第二步：更新前端传入的选中账单
@@ -4690,9 +4692,9 @@ def cancel_import_session(session_id: str):
         asyncio.set_event_loop(loop)
 
         try:
-            success = loop.run_until_complete(db.clear_session_data(session_id, user_id))
+            result = loop.run_until_complete(db.clear_session_data(session_id, user_id))
 
-            return jsonify({"success": success, "message": "Session cleared" if success else "Session not found"})
+            return jsonify({"success": True, "message": "Session cleared", "result": result})
 
         finally:
             loop.close()

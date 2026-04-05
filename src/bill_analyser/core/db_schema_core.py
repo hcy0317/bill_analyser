@@ -1,0 +1,423 @@
+"""Core business-table schema helpers and legacy migrations."""
+
+# pylint: disable=line-too-long,wrong-import-position,too-many-branches,too-many-statements
+
+from __future__ import annotations
+
+import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import aiosqlite
+
+from .db_shared import DatabaseFacadeBase
+
+
+class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
+    """Core business-table schema creation and migrations."""
+
+    async def _init_core_business_schema(self, conn: aiosqlite.Connection) -> None:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                counterparty TEXT NOT NULL,
+                description TEXT NOT NULL,
+                payment_method TEXT DEFAULT '',
+                main_category TEXT,
+                sub_category TEXT,
+                batch_id TEXT,
+                hash TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                source_account_id INTEGER DEFAULT 0,
+                destination_account_id INTEGER DEFAULT 0,
+                destination_amount REAL DEFAULT 0,
+                created_from_template INTEGER,
+                created_from_recurring INTEGER,
+                import_history_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                type INTEGER DEFAULT 1,
+                main_category TEXT NOT NULL,
+                sub_category TEXT NOT NULL,
+                description TEXT,
+                priority INTEGER DEFAULT 0,
+                keywords TEXT,
+                hidden BOOLEAN DEFAULT 0,
+                icon TEXT,
+                color TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, main_category, sub_category),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        async with conn.execute("PRAGMA table_info(categories)") as cursor:
+            columns = [row[1] for row in await cursor.fetchall()]
+        if "type" not in columns:
+            self.logger.info("添加 type 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN type INTEGER DEFAULT 1")
+            await conn.execute("UPDATE categories SET type = 2 WHERE main_category = '收入'")
+            await conn.execute("UPDATE categories SET type = 3 WHERE main_category = '转账'")
+        if "priority" not in columns:
+            self.logger.info("添加 priority 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN priority INTEGER DEFAULT 0")
+        if "keywords" not in columns:
+            self.logger.info("添加 keywords 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN keywords TEXT")
+        if "hidden" not in columns:
+            self.logger.info("添加 hidden 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN hidden BOOLEAN DEFAULT 0")
+        if "icon" not in columns:
+            self.logger.info("添加 icon 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN icon TEXT")
+        if "color" not in columns:
+            self.logger.info("添加 color 字段到 categories 表")
+            await conn.execute("ALTER TABLE categories ADD COLUMN color TEXT")
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                type INTEGER NOT NULL,
+                icon TEXT,
+                display_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                type INTEGER NOT NULL,
+                category INTEGER,
+                currency TEXT DEFAULT 'CNY',
+                icon TEXT,
+                color TEXT,
+                balance REAL DEFAULT 0,
+                initial_balance REAL DEFAULT 0,
+                hidden BOOLEAN DEFAULT 0,
+                display_order INTEGER DEFAULT 0,
+                comment TEXT,
+                aliases TEXT,
+                parent_id INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        async with conn.execute("PRAGMA table_info(accounts)") as cursor:
+            columns = [row[1] for row in await cursor.fetchall()]
+        if "parent_id" not in columns:
+            self.logger.info("添加 parent_id 列到 accounts 表")
+            await conn.execute("ALTER TABLE accounts ADD COLUMN parent_id INTEGER DEFAULT 0")
+        if "aliases" not in columns:
+            self.logger.info("添加 aliases 列到 accounts 表 (用于账户别名匹配)")
+            await conn.execute("ALTER TABLE accounts ADD COLUMN aliases TEXT")
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_transfers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                from_account_id INTEGER NOT NULL,
+                to_account_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                transfer_date TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+                FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                color TEXT,
+                icon TEXT,
+                display_order INTEGER DEFAULT 0,
+                hidden BOOLEAN DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, name),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        async with conn.execute("PRAGMA table_info(tags)") as cursor:
+            columns = [row[1] for row in await cursor.fetchall()]
+        if "hidden" not in columns:
+            self.logger.info("添加 hidden 字段到 tags 表")
+            await conn.execute("ALTER TABLE tags ADD COLUMN hidden BOOLEAN DEFAULT 0")
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bill_tags (
+                bill_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (bill_id, tag_id),
+                FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+                FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                category TEXT,
+                sub_category TEXT,
+                period_type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT,
+                alert_threshold INTEGER DEFAULT 80,
+                enabled BOOLEAN DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budget_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                budget_id INTEGER NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                budget_amount REAL DEFAULT 0,
+                spent_amount REAL DEFAULT 0,
+                remaining_amount REAL,
+                execution_rate REAL DEFAULT 0,
+                status TEXT,
+                filter_summary TEXT DEFAULT '',
+                calculated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+            )
+            """
+        )
+        async with conn.execute("PRAGMA table_info(budget_history)") as cursor:
+            budget_history_columns = [row[1] for row in await cursor.fetchall()]
+        for column_name, alter_sql in [
+            ("budget_amount", "ALTER TABLE budget_history ADD COLUMN budget_amount REAL DEFAULT 0"),
+            ("execution_rate", "ALTER TABLE budget_history ADD COLUMN execution_rate REAL DEFAULT 0"),
+            ("filter_summary", "ALTER TABLE budget_history ADD COLUMN filter_summary TEXT DEFAULT ''"),
+        ]:
+            if column_name in budget_history_columns:
+                continue
+            await conn.execute(alter_sql)
+            self.logger.info("成功为 budget_history 表添加 %s 字段", column_name)
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_filters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                description TEXT,
+                filter_data TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, name),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_exchange_rates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_currency TEXT NOT NULL,
+                to_currency TEXT NOT NULL,
+                rate REAL NOT NULL,
+                source TEXT DEFAULT 'manual',
+                effective_date TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(from_currency, to_currency, effective_date)
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exchange_rate_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                type TEXT NOT NULL,
+                base_url TEXT,
+                enabled BOOLEAN DEFAULT 1,
+                priority INTEGER DEFAULT 0,
+                last_sync_at TEXT,
+                config TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_type ON bills(type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_hidden ON accounts(hidden)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_types_user ON account_types(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_types_type ON account_types(type)")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_account_transfers_from ON account_transfers(from_account_id)"
+        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_transfers_to ON account_transfers(to_account_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_account_transfers_date ON account_transfers(transfer_date)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_bill ON bill_tags(bill_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_tag ON bill_tags(tag_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category, sub_category)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_budget_history_budget ON budget_history(budget_id)")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_budget_history_period ON budget_history(period_start, period_end)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies "
+            "ON user_exchange_rates(from_currency, to_currency)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_date ON user_exchange_rates(effective_date DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rate_sources_enabled ON exchange_rate_sources(enabled, priority)"
+        )
+
+        try:
+            await conn.execute("ALTER TABLE accounts ADD COLUMN currency TEXT DEFAULT 'CNY'")
+            self.logger.info("成功为 accounts 表添加 currency 字段")
+        except sqlite3.OperationalError:
+            self.logger.debug("accounts 表已有 currency 字段")
+
+        for description, statement in [
+            ("created_from_template", "ALTER TABLE bills ADD COLUMN created_from_template INTEGER"),
+            ("created_from_recurring", "ALTER TABLE bills ADD COLUMN created_from_recurring INTEGER"),
+            ("import_history_id", "ALTER TABLE bills ADD COLUMN import_history_id INTEGER"),
+            ("destination_amount", "ALTER TABLE bills ADD COLUMN destination_amount REAL DEFAULT 0"),
+            ("destination_account_id", "ALTER TABLE bills ADD COLUMN destination_account_id INTEGER DEFAULT 0"),
+            ("source_account_id", "ALTER TABLE bills ADD COLUMN source_account_id INTEGER DEFAULT 0"),
+            ("payment_method", "ALTER TABLE bills ADD COLUMN payment_method TEXT DEFAULT ''"),
+        ]:
+            try:
+                await conn.execute(statement)
+                self.logger.info("成功为 bills 表添加 %s 字段", description)
+            except sqlite3.OperationalError:
+                self.logger.debug("bills 表已有 %s 字段", description)
+
+    async def _migrate_user_id_field(self, conn: aiosqlite.Connection, table_name: str) -> None:
+        """为表添加 user_id 字段（如果不存在）。"""
+        try:
+            async with conn.execute(f"PRAGMA table_info({table_name})") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+            if "user_id" in columns:
+                return
+
+            self.logger.info("为 %s 表添加 user_id 字段", table_name)
+            await conn.execute(f"ALTER TABLE {table_name} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+            await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_user_id ON {table_name}(user_id)")
+        except sqlite3.OperationalError as exc:
+            self.logger.warning("迁移 %s.user_id 字段失败: %s", table_name, exc)
+
+    async def _migrate_categories_unique_constraint(self, conn: aiosqlite.Connection) -> None:
+        """修复 categories 表 UNIQUE 约束以包含 user_id。"""
+        async with conn.execute("PRAGMA index_list(categories)") as cursor:
+            indexes = await cursor.fetchall()
+        unique_index_names = [row[1] for row in indexes if row[2]]
+
+        async with conn.execute("PRAGMA table_info(categories)") as cursor:
+            columns_info = await cursor.fetchall()
+        column_names = [column[1] for column in columns_info]
+
+        if not unique_index_names:
+            return
+
+        constraint_needs_migration = False
+        for index_name in unique_index_names:
+            async with conn.execute(f"PRAGMA index_info({index_name})") as cursor:
+                indexed_columns = [row[2] for row in await cursor.fetchall()]
+            if indexed_columns == ["main_category", "sub_category"]:
+                constraint_needs_migration = True
+                break
+
+        if not constraint_needs_migration:
+            return
+
+        self.logger.info("开始迁移 categories 表 UNIQUE 约束: 添加 user_id")
+        select_columns = [column for column in column_names if column != "id"]
+        if "user_id" not in select_columns:
+            select_columns.append("user_id")
+        column_sql = ", ".join(select_columns)
+
+        await conn.execute(
+            """
+            CREATE TABLE categories_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                type INTEGER DEFAULT 1,
+                main_category TEXT NOT NULL,
+                sub_category TEXT NOT NULL,
+                description TEXT,
+                priority INTEGER DEFAULT 0,
+                keywords TEXT,
+                hidden BOOLEAN DEFAULT 0,
+                icon TEXT,
+                color TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, main_category, sub_category),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            f"INSERT OR IGNORE INTO categories_new ({column_sql}) SELECT {column_sql} FROM categories"
+        )
+        await conn.execute("DROP TABLE categories")
+        await conn.execute("ALTER TABLE categories_new RENAME TO categories")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
+        self.logger.info("categories 表 UNIQUE 约束迁移完成")
