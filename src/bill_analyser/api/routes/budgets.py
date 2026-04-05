@@ -7,6 +7,7 @@ Budgets API Routes - 预算管理API端点
 import asyncio
 import calendar
 import json
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
@@ -20,6 +21,29 @@ VALID_BUDGET_PERIOD_TYPES = {"daily", "weekly", "monthly", "quarterly", "yearly"
 
 # RESTful API 蓝图
 bp = Blueprint("budgets", __name__)
+
+
+@dataclass(frozen=True)
+class BudgetPeriodScope:
+    """Immutable resolved period scope used by budget routes."""
+
+    budget_type: int
+    period_type: str
+    start_date: str
+    end_date: str
+    year: int | None = None
+    month: int | None = None
+    quarter: int | None = None
+
+
+@dataclass(frozen=True)
+class BudgetRouteFilters:
+    """Immutable route-level filters shared by execution/history/snapshot endpoints."""
+
+    budget_id: int | None = None
+    category_id: int | None = None
+    account_ids: tuple[int, ...] = ()
+    tag_ids: tuple[int, ...] = ()
 
 
 def get_app_context():
@@ -95,8 +119,8 @@ def _validate_budget_date_range(start_date: str | None, end_date: str | None) ->
     if not start_date or not end_date:
         return
 
-    start_value = datetime.strptime(start_date[:10], "%Y-%m-%d").date()
-    end_value = datetime.strptime(end_date[:10], "%Y-%m-%d").date()
+    start_value = date.fromisoformat(start_date[:10])
+    end_value = date.fromisoformat(end_date[:10])
     if start_value > end_value:
         raise ValueError("Invalid date range: start_date must be <= end_date")
 
@@ -183,6 +207,90 @@ def _validate_budget_period_args(
         raise ValueError(f"Invalid quarter: {quarter}")
     if months_history is not None and months_history < 1:
         raise ValueError(f"Invalid months_history: {months_history}")
+
+
+def _build_budget_period_scope(
+    *,
+    budget_type: int,
+    period_type: str | None,
+    year: int | None = None,
+    month: int | None = None,
+    quarter: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    months_history: int | None = None,
+) -> BudgetPeriodScope:
+    """Parse and validate a request period scope, returning resolved start/end dates."""
+    normalized_period_type = "monthly" if period_type is None else period_type
+    _validate_budget_period_args(
+        normalized_period_type,
+        month=month,
+        quarter=quarter,
+        months_history=months_history,
+    )
+    resolved_start_date, resolved_end_date = _resolve_budget_period_range(
+        normalized_period_type,
+        year=year,
+        month=month,
+        quarter=quarter,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return BudgetPeriodScope(
+        budget_type=budget_type,
+        period_type=normalized_period_type,
+        start_date=resolved_start_date,
+        end_date=resolved_end_date,
+        year=year,
+        month=month,
+        quarter=quarter,
+    )
+
+
+def _parse_budget_query_filters() -> BudgetRouteFilters:
+    """Parse integer and CSV filters from the current request query string."""
+    return BudgetRouteFilters(
+        budget_id=_get_optional_int(request.args.get("budget_id"), "budget_id"),
+        category_id=_get_optional_int(request.args.get("category_id"), "category_id"),
+        account_ids=tuple(_parse_csv_int_list(request.args.get("account_ids", ""), "account_ids") or ()),
+        tag_ids=tuple(_parse_csv_int_list(request.args.get("tag_ids", ""), "tag_ids") or ()),
+    )
+
+
+def _parse_budget_json_filters(data: dict[str, Any]) -> BudgetRouteFilters:
+    """Parse integer and JSON-array filters from a request body payload."""
+    return BudgetRouteFilters(
+        budget_id=_get_optional_int(data.get("budget_id"), "budget_id"),
+        category_id=_get_optional_int(data.get("category_id"), "category_id"),
+        account_ids=tuple(_parse_json_int_list(data.get("account_ids", []), "account_ids")),
+        tag_ids=tuple(_parse_json_int_list(data.get("tag_ids", []), "tag_ids")),
+    )
+
+
+def _to_optional_int_list(values: tuple[int, ...]) -> list[int] | None:
+    """Convert immutable tuple filters to DB-friendly optional lists."""
+    return list(values) or None
+
+
+def _calculate_budget_period_progress(period_start: str, period_end: str) -> tuple[int, int]:
+    """Calculate elapsed/remaining days for the resolved budget period."""
+    today = date.today()
+    start_dt = date.fromisoformat(period_start[:10])
+    end_dt = date.fromisoformat(period_end[:10])
+    total_days = max((end_dt - start_dt).days + 1, 1)
+    if today < start_dt:
+        return 0, total_days
+    if today > end_dt:
+        return total_days, 0
+    return (today - start_dt).days + 1, max((end_dt - today).days, 0)
+
+
+def _calculate_avg_backtest_mape(results: list[dict[str, Any]]) -> float | None:
+    """Average only non-null forecast backtest MAPE values."""
+    mape_values = [item["backtest_mape"] for item in results if item.get("backtest_mape") is not None]
+    if not mape_values:
+        return None
+    return round(sum(mape_values) / len(mape_values), 2)
 
 
 @bp.route("/", methods=["GET"])
@@ -419,60 +527,43 @@ def get_budget_execution():  # pylint: disable=too-many-locals
     logger.info("[get_budget_execution] 开始获取预算执行详情")
 
     try:
-        budget_type = _get_optional_int(request.args.get("budget_type"), "budget_type") or 3
-        period_type = request.args.get("period_type", "monthly")
-        year = _get_optional_int(request.args.get("year"), "year")
-        month = _get_optional_int(request.args.get("month"), "month")
-        quarter = _get_optional_int(request.args.get("quarter"), "quarter")
-        budget_id = _get_optional_int(request.args.get("budget_id"), "budget_id")
-        start_date = request.args.get("start_date")
-        end_date = request.args.get("end_date")
-        category_id = request.args.get("category_id")
-        account_ids_str = request.args.get("account_ids", "")
-        tag_ids_str = request.args.get("tag_ids", "")
-
-        start_date, end_date = _resolve_budget_period_range(
-            period_type,
-            year=year,
-            month=month,
-            quarter=quarter,
-            start_date=start_date,
-            end_date=end_date,
+        period_scope = _build_budget_period_scope(
+            budget_type=_get_optional_int(request.args.get("budget_type"), "budget_type") or 3,
+            period_type=request.args.get("period_type"),
+            year=_get_optional_int(request.args.get("year"), "year"),
+            month=_get_optional_int(request.args.get("month"), "month"),
+            quarter=_get_optional_int(request.args.get("quarter"), "quarter"),
+            start_date=request.args.get("start_date"),
+            end_date=request.args.get("end_date"),
         )
-
-        # 解析ID列表
-        account_ids = _parse_csv_int_list(account_ids_str, "account_ids")
-        tag_ids = _parse_csv_int_list(tag_ids_str, "tag_ids")
-
-        category_id_int = _get_optional_int(category_id, "category_id")
-        _validate_budget_period_args(period_type, month=month, quarter=quarter)
+        filters = _parse_budget_query_filters()
 
         logger.info(
             (
                 "[get_budget_execution] 参数: type=%s, period=%s, dates=%s~%s, "
                 "category=%s, accounts=%s, tags=%s"
             ),
-            budget_type,
-            period_type,
-            start_date,
-            end_date,
-            category_id_int,
-            account_ids,
-            tag_ids,
+            period_scope.budget_type,
+            period_scope.period_type,
+            period_scope.start_date,
+            period_scope.end_date,
+            filters.category_id,
+            list(filters.account_ids) or None,
+            list(filters.tag_ids) or None,
         )
 
         db = get_app_context()
         user_id = _get_request_user_id()
         results = _run_async(
             db.get_budget_execution_details(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=start_date,
-                end_date=end_date,
-                budget_id=budget_id,
-                category_id=category_id_int,
-                account_ids=account_ids,
-                tag_ids=tag_ids,
+                budget_type=period_scope.budget_type,
+                period_type=period_scope.period_type,
+                start_date=period_scope.start_date,
+                end_date=period_scope.end_date,
+                budget_id=filters.budget_id,
+                category_id=filters.category_id,
+                account_ids=_to_optional_int_list(filters.account_ids),
+                tag_ids=_to_optional_int_list(filters.tag_ids),
                 user_id=user_id,
             )
         )
@@ -496,8 +587,8 @@ def get_budget_execution():  # pylint: disable=too-many-locals
                         "overall_execution_rate": round(overall_execution_rate, 2),
                         "count": len(results),
                     },
-                    "period_start": start_date,
-                    "period_end": end_date,
+                    "period_start": period_scope.start_date,
+                    "period_end": period_scope.end_date,
                 },
             }
         )
@@ -528,23 +619,20 @@ def get_period_forecast():  # pylint: disable=too-many-locals
     logger.info("[get_period_forecast] 开始获取周期预计")
 
     try:
-        budget_type = _get_optional_int(request.args.get("budget_type"), "budget_type") or 3
-        period_type = request.args.get("period_type", "monthly")
-        year = _get_optional_int(request.args.get("year"), "year")
-        month = _get_optional_int(request.args.get("month"), "month")
-        quarter = _get_optional_int(request.args.get("quarter"), "quarter")
-        start_date = request.args.get("start_date")
-        end_date = request.args.get("end_date")
         forecast_strategy = request.args.get("forecast_strategy", "historical_average")
         months_history_value = _get_optional_int(
             request.args.get("months_history"),
             "months_history",
         )
         months_history = 6 if months_history_value is None else months_history_value
-        _validate_budget_period_args(
-            period_type,
-            month=month,
-            quarter=quarter,
+        period_scope = _build_budget_period_scope(
+            budget_type=_get_optional_int(request.args.get("budget_type"), "budget_type") or 3,
+            period_type=request.args.get("period_type"),
+            year=_get_optional_int(request.args.get("year"), "year"),
+            month=_get_optional_int(request.args.get("month"), "month"),
+            quarter=_get_optional_int(request.args.get("quarter"), "quarter"),
+            start_date=request.args.get("start_date"),
+            end_date=request.args.get("end_date"),
             months_history=months_history,
         )
 
@@ -553,45 +641,26 @@ def get_period_forecast():  # pylint: disable=too-many-locals
                 "[get_period_forecast] 参数: type=%s, period=%s, dates=%s~%s, "
                 "strategy=%s, months_history=%s"
             ),
-            budget_type,
-            period_type,
-            start_date,
-            end_date,
+            period_scope.budget_type,
+            period_scope.period_type,
+            period_scope.start_date,
+            period_scope.end_date,
             forecast_strategy,
             months_history,
         )
-
-        period_start, period_end = _resolve_budget_period_range(
-            period_type,
-            year=year,
-            month=month,
-            quarter=quarter,
-            start_date=start_date,
-            end_date=end_date,
+        days_elapsed, days_remaining = _calculate_budget_period_progress(
+            period_scope.start_date,
+            period_scope.end_date,
         )
-
-        today = date.today()
-        start_dt = datetime.strptime(period_start, "%Y-%m-%d").date()
-        end_dt = datetime.strptime(period_end, "%Y-%m-%d").date()
-        total_days = max((end_dt - start_dt).days + 1, 1)
-        if today < start_dt:
-            days_elapsed = 0
-            days_remaining = total_days
-        elif today > end_dt:
-            days_elapsed = total_days
-            days_remaining = 0
-        else:
-            days_elapsed = (today - start_dt).days + 1
-            days_remaining = max((end_dt - today).days, 0)
 
         db = get_app_context()
         user_id = _get_request_user_id()
         results = _run_async(
             db.get_period_forecast(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=period_start,
-                end_date=period_end,
+                budget_type=period_scope.budget_type,
+                period_type=period_scope.period_type,
+                start_date=period_scope.start_date,
+                end_date=period_scope.end_date,
                 forecast_strategy=forecast_strategy,
                 history_periods=months_history,
                 user_id=user_id,
@@ -600,8 +669,7 @@ def get_period_forecast():  # pylint: disable=too-many-locals
 
         # 计算汇总
         total_forecast = sum(r["forecast_amount"] for r in results)
-        mape_values = [r["backtest_mape"] for r in results if r.get("backtest_mape") is not None]
-        avg_backtest_mape = round(sum(mape_values) / len(mape_values), 2) if mape_values else None
+        avg_backtest_mape = _calculate_avg_backtest_mape(results)
 
         logger.info("[get_period_forecast] 返回%s条预测数据", len(results))
 
@@ -610,10 +678,10 @@ def get_period_forecast():  # pylint: disable=too-many-locals
                 "success": True,
                 "result": {
                     "items": results,
-                    "period_start": period_start,
-                    "period_end": period_end,
-                    "periodStart": period_start,
-                    "periodEnd": period_end,
+                    "period_start": period_scope.start_date,
+                    "period_end": period_scope.end_date,
+                    "periodStart": period_scope.start_date,
+                    "periodEnd": period_scope.end_date,
                     "daysElapsed": days_elapsed,
                     "daysRemaining": days_remaining,
                     "summary": {
@@ -651,37 +719,29 @@ def create_budget_history_snapshot():  # pylint: disable=too-many-locals
         else:
             raise ValueError("Invalid JSON body. Expected object.")
 
-        budget_type = _get_optional_int(data.get("budget_type"), "budget_type") or 3
-        period_type = data.get("period_type", "monthly")
-        year = _get_optional_int(data.get("year"), "year")
-        month = _get_optional_int(data.get("month"), "month")
-        quarter = _get_optional_int(data.get("quarter"), "quarter")
-        budget_id = _get_optional_int(data.get("budget_id"), "budget_id")
-        category_id = _get_optional_int(data.get("category_id"), "category_id")
-        account_ids = _parse_json_int_list(data.get("account_ids", []), "account_ids")
-        tag_ids = _parse_json_int_list(data.get("tag_ids", []), "tag_ids")
-        _validate_budget_period_args(period_type, month=month, quarter=quarter)
-        start_date, end_date = _resolve_budget_period_range(
-            period_type,
-            year=year,
-            month=month,
-            quarter=quarter,
+        period_scope = _build_budget_period_scope(
+            budget_type=_get_optional_int(data.get("budget_type"), "budget_type") or 3,
+            period_type=data.get("period_type"),
+            year=_get_optional_int(data.get("year"), "year"),
+            month=_get_optional_int(data.get("month"), "month"),
+            quarter=_get_optional_int(data.get("quarter"), "quarter"),
             start_date=data.get("start_date"),
             end_date=data.get("end_date"),
         )
+        filters = _parse_budget_json_filters(data)
 
         db = get_app_context()
         user_id = _get_request_user_id()
         result = _run_async(
             db.create_budget_execution_snapshots(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=start_date,
-                end_date=end_date,
-                budget_id=budget_id,
-                category_id=category_id,
-                account_ids=account_ids or None,
-                tag_ids=tag_ids or None,
+                budget_type=period_scope.budget_type,
+                period_type=period_scope.period_type,
+                start_date=period_scope.start_date,
+                end_date=period_scope.end_date,
+                budget_id=filters.budget_id,
+                category_id=filters.category_id,
+                account_ids=_to_optional_int_list(filters.account_ids),
+                tag_ids=_to_optional_int_list(filters.tag_ids),
                 user_id=user_id,
             )
         )
@@ -704,39 +764,29 @@ def get_budget_history():  # pylint: disable=too-many-locals
     logger.info("[get_budget_history] 开始获取预算执行历史")
 
     try:
-        budget_type = _get_optional_int(request.args.get("budget_type"), "budget_type") or 3
-        period_type = request.args.get("period_type", "monthly")
-        year = _get_optional_int(request.args.get("year"), "year")
-        month = _get_optional_int(request.args.get("month"), "month")
-        quarter = _get_optional_int(request.args.get("quarter"), "quarter")
-        budget_id = _get_optional_int(request.args.get("budget_id"), "budget_id")
-        category_id = _get_optional_int(request.args.get("category_id"), "category_id")
-        account_ids_str = request.args.get("account_ids", "")
-        tag_ids_str = request.args.get("tag_ids", "")
-        account_ids = _parse_csv_int_list(account_ids_str, "account_ids")
-        tag_ids = _parse_csv_int_list(tag_ids_str, "tag_ids")
-        _validate_budget_period_args(period_type, month=month, quarter=quarter)
-        start_date, end_date = _resolve_budget_period_range(
-            period_type,
-            year=year,
-            month=month,
-            quarter=quarter,
+        period_scope = _build_budget_period_scope(
+            budget_type=_get_optional_int(request.args.get("budget_type"), "budget_type") or 3,
+            period_type=request.args.get("period_type"),
+            year=_get_optional_int(request.args.get("year"), "year"),
+            month=_get_optional_int(request.args.get("month"), "month"),
+            quarter=_get_optional_int(request.args.get("quarter"), "quarter"),
             start_date=request.args.get("start_date"),
             end_date=request.args.get("end_date"),
         )
+        filters = _parse_budget_query_filters()
 
         db = get_app_context()
         user_id = _get_request_user_id()
         items = _run_async(
             db.get_budget_execution_history(
-                budget_type=budget_type,
-                period_type=period_type,
-                start_date=start_date,
-                end_date=end_date,
-                budget_id=budget_id,
-                category_id=category_id,
-                account_ids=account_ids,
-                tag_ids=tag_ids,
+                budget_type=period_scope.budget_type,
+                period_type=period_scope.period_type,
+                start_date=period_scope.start_date,
+                end_date=period_scope.end_date,
+                budget_id=filters.budget_id,
+                category_id=filters.category_id,
+                account_ids=_to_optional_int_list(filters.account_ids),
+                tag_ids=_to_optional_int_list(filters.tag_ids),
                 user_id=user_id,
             )
         )
@@ -748,8 +798,8 @@ def get_budget_history():  # pylint: disable=too-many-locals
                     "items": items,
                     "summary": {
                         "count": len(items),
-                        "period_start": start_date,
-                        "period_end": end_date,
+                        "period_start": period_scope.start_date,
+                        "period_end": period_scope.end_date,
                     },
                 },
             }

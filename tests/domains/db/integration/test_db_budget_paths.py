@@ -488,6 +488,168 @@ async def test_budget_forecast_import_and_export_cover_strategy_trend_and_invali
 
 
 @pytest.mark.asyncio
+async def test_budget_forecast_defaults_empty_strategy_and_uses_sub_totals_for_secondary_only_budget(
+    tmp_path: Path,
+) -> None:
+    """forecast 在只有二级预算时应回落到 sub_total，并将空策略归一为 historical_average。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_forecast_secondary_only")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="低样本预测分类",
+            sub_category="",
+            icon="wallet",
+            color="#3366ff",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="低样本预测分类",
+            sub_category="午餐",
+            icon="fork-spoon",
+            color="#3366ff",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="低样本二级预算",
+            category="低样本预测分类",
+            sub_category="午餐",
+            amount=60.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-05 12:00:00",
+            amount=-22.0,
+            main_category="低样本预测分类",
+            sub_category="午餐",
+            description="低样本预测账单",
+        )
+
+        forecast_items = await db.get_period_forecast(
+            budget_type=3,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            forecast_strategy="",
+            history_periods=6,
+            user_id=user_id,
+        )
+
+        assert len(forecast_items) == 1
+        forecast_item = forecast_items[0]
+        assert forecast_item["category"] == "低样本预测分类"
+        assert forecast_item["forecast_strategy"] == "historical_average"
+        assert forecast_item["budget_amount"] == pytest.approx(60.0)
+        assert forecast_item["current_spent"] == pytest.approx(22.0)
+        assert forecast_item["backtest_mape"] is None
+        assert forecast_item["confidence"] == "low"
+        assert forecast_item["trend"] == "stable"
+        assert forecast_item["projected_over_budget"] is False
+        assert forecast_item["sample_periods"] == 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_forecast_supports_investment_type_and_prefers_primary_budget_amount(
+    tmp_path: Path,
+) -> None:
+    """投资 forecast 应走 budget_type=5 主链，并优先使用一级预算金额而不是二级合计。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_forecast_investment")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="投资预测分类",
+            sub_category="",
+            category_type=5,
+            icon="chart-line",
+            color="#11aa88",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="投资预测分类",
+            sub_category="基金",
+            category_type=5,
+            icon="briefcase",
+            color="#11aa88",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="投资一级预算",
+            category="投资预测分类",
+            sub_category="",
+            amount=120.0,
+            start_date="2026-02-01",
+            end_date="2026-03-31",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="投资二级预算",
+            category="投资预测分类",
+            sub_category="基金",
+            amount=40.0,
+            start_date="2026-02-01",
+            end_date="2026-03-31",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-02-05 12:00:00",
+            type="投资",
+            amount=30.0,
+            main_category="投资预测分类",
+            sub_category="基金",
+            description="投资预测-二月",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-08 12:00:00",
+            type="投资",
+            amount=50.0,
+            main_category="投资预测分类",
+            sub_category="基金",
+            description="投资预测-三月",
+        )
+
+        forecast_items = await db.get_period_forecast(
+            budget_type=5,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            forecast_strategy="historical_average",
+            history_periods=2,
+            user_id=user_id,
+        )
+
+        assert len(forecast_items) == 1
+        forecast_item = forecast_items[0]
+        assert forecast_item["category"] == "投资预测分类"
+        assert forecast_item["budget_amount"] == pytest.approx(120.0)
+        assert forecast_item["current_spent"] == pytest.approx(50.0)
+        assert forecast_item["total_amount"] == pytest.approx(80.0)
+        assert forecast_item["average_amount"] == pytest.approx(40.0)
+        assert forecast_item["period_count"] == 2
+        assert forecast_item["sample_periods"] == 2
+        assert forecast_item["forecast_amount"] == pytest.approx(40.0)
+        assert forecast_item["projected_over_budget"] is False
+        assert forecast_item["category_info"] is not None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_budget_queries_include_bills_on_end_date_with_time_component(tmp_path: Path) -> None:
     """预算执行与预测应包含 end_date 当天带时间的账单。"""
     db = await _create_database(tmp_path)

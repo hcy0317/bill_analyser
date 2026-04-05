@@ -597,6 +597,26 @@ def test_budget_route_validation_and_not_found_branches(client, auth_headers):  
     assert missing_category_response.get_json()["result"]["items"] == []
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("GET", "/api/budgets/execution?period_type=", None),
+        ("GET", "/api/budgets/forecast?period_type=", None),
+        ("GET", "/api/budgets/history?period_type=", None),
+        ("POST", "/api/budgets/history/snapshot", {"period_type": ""}),
+    ],
+)
+def test_budget_routes_reject_blank_period_type(client, auth_headers, method, path, payload):
+    """空字符串 period_type 不应被静默归一为 monthly。"""
+    if method == "GET":
+        response = client.get(path, headers=auth_headers)
+    else:
+        response = client.post(path, json=payload, headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "period_type" in response.get_json()["error"]
+
+
 def test_budget_route_period_resolution_and_forecast_day_branches(client, auth_headers):
     """预算路由应覆盖显式区间、季度/年度解析以及 forecast 的过去/未来天数分支。"""
     explicit_execution_response = client.get(

@@ -39,6 +39,19 @@ class BudgetExecutionRequest:
     user_id: int = 1
 
 
+@dataclass(frozen=True)
+class BudgetForecastRequest:
+    """Immutable request bundle for budget forecast queries."""
+
+    budget_type: int = 3
+    period_type: str = "monthly"
+    start_date: str | None = None
+    end_date: str | None = None
+    forecast_strategy: str = "historical_average"
+    history_periods: int = 6
+    user_id: int = 1
+
+
 def _is_relative_to(path: Path, parent: Path) -> bool:
     """兼容 Python 版本差异的 Path 前缀判断。"""
     try:
@@ -6998,6 +7011,339 @@ class Database:
         )
         return await self._build_budget_execution_history_on_demand_for_request(request)
 
+    @staticmethod
+    def _build_budget_forecast_group_by(period_type: str) -> str:
+        """Return the SQL group-by expression used by budget forecasts."""
+        if period_type == "daily":
+            return "date(date)"
+        if period_type == "weekly":
+            return "strftime('%Y-%W', date)"
+        if period_type == "quarterly":
+            return (
+                "strftime('%Y', date) || '-Q' || "
+                "(CAST(((CAST(strftime('%m', date) AS INTEGER) - 1) / 3) AS INTEGER) + 1)"
+            )
+        if period_type == "monthly":
+            return "strftime('%Y-%m', date)"
+        return "strftime('%Y', date)"
+
+    async def _fetch_budget_forecast_rows(
+        self,
+        conn: aiosqlite.Connection,
+        request: BudgetForecastRequest,
+    ) -> list[dict[str, Any]]:
+        """Fetch grouped historical bill rows used for forecasting."""
+        history_start_date, history_end_date = self._expand_forecast_history_window(
+            request.period_type,
+            request.start_date,
+            request.end_date,
+            request.history_periods,
+        )
+        group_by = self._build_budget_forecast_group_by(request.period_type)
+        query = f"""
+            SELECT
+                {group_by} as period,
+                main_category,
+                COALESCE(SUM(amount), 0) as total_amount,
+                COUNT(*) as transaction_count
+            FROM bills
+            WHERE type = ? AND user_id = ?
+        """
+        params: list[Any] = [self._get_budget_type_name(request.budget_type), request.user_id]
+
+        if history_start_date:
+            query += " AND date >= ?"
+            params.append(history_start_date)
+
+        if history_end_date:
+            query += " AND date <= ?"
+            params.append(self._normalize_budget_query_end_date(history_end_date))
+
+        query += f" GROUP BY {group_by}, main_category ORDER BY period DESC, total_amount DESC"
+
+        async with conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _aggregate_budget_forecast_rows(
+        rows: list[dict[str, Any]],
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Aggregate grouped bill rows into per-category period histories."""
+        category_totals: dict[str, dict[str, Any]] = {}
+        period_keys: set[str] = set()
+
+        for row in rows:
+            period = row["period"]
+            category = row["main_category"] or "未分类"
+            amount = abs(row["total_amount"])
+
+            period_keys.add(period)
+            category_bucket = category_totals.setdefault(category, {"total": 0.0, "periods": []})
+            category_bucket["total"] += amount
+            category_bucket["periods"].append({"period": period, "amount": amount})
+
+        return category_totals, len(period_keys) if period_keys else 1
+
+    def _build_budget_forecast_budget_map(
+        self,
+        budget_rows: list[dict[str, Any]],
+        category_context: dict[str, Any],
+        budget_type: int,
+    ) -> dict[str, dict[str, float]]:
+        """Build the forecast-time budget amount map for the requested budget type."""
+        budget_map: dict[str, dict[str, float]] = {}
+        for row in budget_rows:
+            category_name = row["category"] or "未分类"
+            resolved_budget_type = self._resolve_budget_category_type(
+                category_name,
+                row["sub_category"],
+                category_context,
+                preferred_type=budget_type,
+            )
+            if int(resolved_budget_type or 0) != int(budget_type):
+                continue
+
+            budget_info = budget_map.setdefault(category_name, {"primary": 0.0, "sub_total": 0.0})
+            amount_value = float(row["amount"] or 0)
+            if not row["sub_category"]:
+                budget_info["primary"] += amount_value
+            else:
+                budget_info["sub_total"] += amount_value
+
+        return budget_map
+
+    async def _fetch_budget_forecast_budget_map(
+        self,
+        conn: aiosqlite.Connection,
+        request: BudgetForecastRequest,
+        category_context: dict[str, Any],
+    ) -> dict[str, dict[str, float]]:
+        """Fetch and aggregate matching budgets for a forecast request."""
+        budget_query = """
+            SELECT category, sub_category, amount
+            FROM budgets
+            WHERE period_type = ? AND enabled = 1 AND user_id = ?
+        """
+        budget_params: list[Any] = [request.period_type, request.user_id]
+
+        if request.start_date:
+            budget_query += " AND (end_date IS NULL OR end_date = '' OR end_date >= ?)"
+            budget_params.append(request.start_date)
+
+        if request.end_date:
+            budget_query += " AND (start_date IS NULL OR start_date = '' OR start_date <= ?)"
+            budget_params.append(request.end_date)
+
+        async with conn.execute(budget_query, budget_params) as cursor:
+            budget_rows = [dict(row) for row in await cursor.fetchall()]
+
+        return self._build_budget_forecast_budget_map(
+            budget_rows,
+            category_context,
+            request.budget_type,
+        )
+
+    @staticmethod
+    def _normalize_forecast_strategy(strategy: str) -> str:
+        """Normalize empty strategy values to the repository default."""
+        return strategy or "historical_average"
+
+    @staticmethod
+    def _normalize_forecast_history_periods(history_periods: int) -> int:
+        """Clamp history periods to at least one sample."""
+        return max(int(history_periods or 0), 1)
+
+    @staticmethod
+    def _calculate_forecast_amount(
+        recent_amounts: list[float],
+        normalized_strategy: str,
+    ) -> tuple[float, float, str]:
+        """Calculate forecast amount and strategy explanation from recent amounts."""
+        average_amount = sum(recent_amounts) / len(recent_amounts)
+        moving_window_size = min(3, len(recent_amounts))
+        moving_average_amount = (
+            sum(recent_amounts[-moving_window_size:]) / moving_window_size if moving_window_size > 0 else 0
+        )
+
+        if normalized_strategy == "moving_average":
+            return (
+                average_amount,
+                moving_average_amount,
+                f"基于最近{moving_window_size}个周期的移动平均",
+            )
+
+        return (
+            average_amount,
+            average_amount,
+            f"基于最近{len(recent_amounts)}个周期的历史均值",
+        )
+
+    @classmethod
+    def _calculate_forecast_backtest_mape(
+        cls,
+        recent_amounts: list[float],
+        normalized_strategy: str,
+    ) -> float | None:
+        """Backtest forecast accuracy using the recent sample window."""
+        backtest_errors: list[float] = []
+        for index in range(1, len(recent_amounts)):
+            actual_amount = recent_amounts[index]
+            if actual_amount <= 0:
+                continue
+
+            history_slice = recent_amounts[:index]
+            if normalized_strategy == "moving_average":
+                window_size = min(3, len(history_slice))
+                predicted_amount = (
+                    sum(history_slice[-window_size:]) / window_size if window_size > 0 else 0
+                )
+            else:
+                predicted_amount = sum(history_slice) / len(history_slice)
+
+            backtest_errors.append(abs(actual_amount - predicted_amount) / actual_amount)
+
+        if not backtest_errors:
+            return None
+        return round((sum(backtest_errors) / len(backtest_errors)) * 100, 2)
+
+    @staticmethod
+    def _resolve_forecast_confidence(backtest_mape: float | None) -> str:
+        """Convert backtest MAPE into the public confidence band."""
+        if backtest_mape is None:
+            return "low"
+        if backtest_mape <= 10:
+            return "high"
+        if backtest_mape <= 20:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _resolve_forecast_trend(recent_amounts: list[float]) -> str:
+        """Determine whether the latest amount trends up/down/stable."""
+        if len(recent_amounts) < 2:
+            return "stable"
+
+        latest_amount = recent_amounts[-1]
+        baseline_amounts = recent_amounts[:-1]
+        baseline_avg = sum(baseline_amounts) / len(baseline_amounts)
+        if baseline_avg > 0 and latest_amount > baseline_avg * 1.05:
+            return "up"
+        if baseline_avg > 0 and latest_amount < baseline_avg * 0.95:
+            return "down"
+        return "stable"
+
+    @staticmethod
+    def _resolve_forecast_budget_amount(
+        budget_map: dict[str, dict[str, float]],
+        category: str,
+    ) -> float:
+        """Prefer primary budget amount, otherwise fall back to the summed secondary budgets."""
+        if category not in budget_map:
+            return 0.0
+
+        budget_info = budget_map[category]
+        return budget_info["primary"] if budget_info["primary"] > 0 else budget_info["sub_total"]
+
+    def _build_budget_forecast_item(
+        self,
+        category: str,
+        data: dict[str, Any],
+        budget_map: dict[str, dict[str, float]],
+        category_context: dict[str, Any],
+        request: BudgetForecastRequest,
+        normalized_strategy: str,
+        normalized_history_periods: int,
+        target_period_key: str | None,
+        num_periods: int,
+    ) -> dict[str, Any] | None:
+        """Build a single forecast response item from aggregated category history."""
+        sorted_periods = sorted(data["periods"], key=lambda item: item["period"])
+        recent_periods = sorted_periods[-normalized_history_periods:]
+        if not recent_periods:
+            return None
+
+        recent_amounts = [float(item["amount"]) for item in recent_periods]
+        average_amount, forecast_amount, strategy_explanation = self._calculate_forecast_amount(
+            recent_amounts,
+            normalized_strategy,
+        )
+        backtest_mape = self._calculate_forecast_backtest_mape(recent_amounts, normalized_strategy)
+        confidence = self._resolve_forecast_confidence(backtest_mape)
+        trend = self._resolve_forecast_trend(recent_amounts)
+        current_period_amounts = {item["period"]: item["amount"] for item in sorted_periods}
+        current_spent = current_period_amounts.get(target_period_key, 0.0)
+        budget_amount = self._resolve_forecast_budget_amount(budget_map, category)
+        category_info = self._resolve_budget_category_info(category, "", category_context, request.budget_type)
+
+        return {
+            "category": category,
+            "category_info": category_info,
+            "total_amount": round(sum(recent_amounts), 2),
+            "average_amount": round(average_amount, 2),
+            "period_count": num_periods,
+            "sample_periods": len(recent_amounts),
+            "current_spent": round(current_spent, 2),
+            "budget_amount": round(budget_amount, 2),
+            "forecast_amount": round(forecast_amount, 2),
+            "projected_over_budget": budget_amount > 0 and forecast_amount > budget_amount,
+            "forecast_strategy": normalized_strategy,
+            "strategy_explanation": strategy_explanation,
+            "backtest_mape": backtest_mape,
+            "confidence": confidence,
+            "trend": trend,
+            "periods": recent_periods,
+        }
+
+    async def _get_period_forecast_for_request(
+        self,
+        request: BudgetForecastRequest,
+    ) -> list[dict[str, Any]]:
+        """Core implementation for budget forecast queries."""
+        self.logger.info(
+            "[get_period_forecast] 参数: type=%s, period=%s, dates=%s~%s, strategy=%s, "
+            "history_periods=%s, user_id=%s",
+            request.budget_type,
+            request.period_type,
+            request.start_date,
+            request.end_date,
+            request.forecast_strategy,
+            request.history_periods,
+            request.user_id,
+        )
+
+        conn = await self._get_connection()
+        rows = await self._fetch_budget_forecast_rows(conn, request)
+        normalized_strategy = self._normalize_forecast_strategy(request.forecast_strategy)
+        normalized_history_periods = self._normalize_forecast_history_periods(request.history_periods)
+        target_period_key = self._build_forecast_period_key(request.period_type, request.start_date)
+        category_totals, num_periods = self._aggregate_budget_forecast_rows(rows)
+
+        categories = await self.get_all_categories(user_id=request.user_id)
+        category_context = self._build_budget_category_context(categories)
+        budget_map = await self._fetch_budget_forecast_budget_map(conn, request, category_context)
+
+        results: list[dict[str, Any]] = []
+        for category, data in category_totals.items():
+            forecast_item = self._build_budget_forecast_item(
+                category,
+                data,
+                budget_map,
+                category_context,
+                request,
+                normalized_strategy,
+                normalized_history_periods,
+                target_period_key,
+                num_periods,
+            )
+            if forecast_item is not None:
+                results.append(forecast_item)
+
+        results.sort(key=lambda item: item["forecast_amount"], reverse=True)
+        self.logger.info("[get_period_forecast] 返回%s条预测数据", len(results))
+        return results
+
     @log_method
     async def get_period_forecast(
         self,
@@ -7021,237 +7367,16 @@ class Database:
         Returns:
             周期预测列表
         """
-        self.logger.info(
-            "[get_period_forecast] 参数: type=%s, period=%s, dates=%s~%s, strategy=%s, "
-            "history_periods=%s, user_id=%s",
-            budget_type,
-            period_type,
-            start_date,
-            end_date,
-            forecast_strategy,
-            history_periods,
-            user_id,
+        request = BudgetForecastRequest(
+            budget_type=budget_type,
+            period_type=period_type,
+            start_date=start_date,
+            end_date=end_date,
+            forecast_strategy=forecast_strategy,
+            history_periods=history_periods,
+            user_id=user_id,
         )
-
-        conn = await self._get_connection()
-        type_name = "支出" if budget_type == 3 else "投资"
-        history_start_date, history_end_date = self._expand_forecast_history_window(
-            period_type,
-            start_date,
-            end_date,
-            history_periods,
-        )
-
-        # 根据周期类型确定分组方式
-        if period_type == "daily":
-            group_by = "date(date)"
-        elif period_type == "weekly":
-            group_by = "strftime('%Y-%W', date)"
-        elif period_type == "quarterly":
-            group_by = (
-                "strftime('%Y', date) || '-Q' || "
-                "(CAST(((CAST(strftime('%m', date) AS INTEGER) - 1) / 3) AS INTEGER) + 1)"
-            )
-        elif period_type == "monthly":
-            group_by = "strftime('%Y-%m', date)"
-        else:  # yearly
-            group_by = "strftime('%Y', date)"
-
-        # 查询历史数据
-        query = f"""
-            SELECT
-                {group_by} as period,
-                main_category,
-                COALESCE(SUM(amount), 0) as total_amount,
-                COUNT(*) as transaction_count
-            FROM bills
-            WHERE type = ? AND user_id = ?
-        """
-        params = [type_name, user_id]
-
-        if history_start_date:
-            query += " AND date >= ?"
-            params.append(history_start_date)
-
-        if history_end_date:
-            query += " AND date <= ?"
-            params.append(self._normalize_budget_query_end_date(history_end_date))
-
-        query += f" GROUP BY {group_by}, main_category ORDER BY period DESC, total_amount DESC"
-
-        async with conn.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-
-        normalized_strategy = forecast_strategy or "historical_average"
-        normalized_history_periods = max(int(history_periods or 0), 1)
-        target_period_key = self._build_forecast_period_key(period_type, start_date)
-
-        # 按分类汇总
-        category_totals = {}
-        period_count = set()
-
-        for row in rows:
-            period = row["period"]
-            category = row["main_category"] or "未分类"
-            amount = abs(row["total_amount"])
-
-            period_count.add(period)
-
-            if category not in category_totals:
-                category_totals[category] = {"total": 0, "periods": []}
-            category_totals[category]["total"] += amount
-            category_totals[category]["periods"].append({"period": period, "amount": amount})
-
-        categories = await self.get_all_categories(user_id=user_id)
-        category_context = self._build_budget_category_context(categories)
-
-        budget_query = """
-            SELECT category, sub_category, amount
-            FROM budgets
-            WHERE period_type = ? AND enabled = 1 AND user_id = ?
-        """
-        budget_params = [period_type, user_id]
-
-        if start_date:
-            budget_query += " AND (end_date IS NULL OR end_date = '' OR end_date >= ?)"
-            budget_params.append(start_date)
-
-        if end_date:
-            budget_query += " AND (start_date IS NULL OR start_date = '' OR start_date <= ?)"
-            budget_params.append(end_date)
-
-        async with conn.execute(budget_query, budget_params) as cursor:
-            budget_rows = await cursor.fetchall()
-
-        budget_map = {}
-        for row in budget_rows:
-            category_name = row["category"] or "未分类"
-            resolved_budget_type = self._resolve_budget_category_type(
-                category_name,
-                row["sub_category"],
-                category_context,
-                preferred_type=budget_type,
-            )
-            if int(resolved_budget_type or 0) != int(budget_type):
-                continue
-            budget_map.setdefault(category_name, {"primary": 0.0, "sub_total": 0.0})
-            amount_value = float(row["amount"] or 0)
-            if not row["sub_category"]:
-                budget_map[category_name]["primary"] += amount_value
-            else:
-                budget_map[category_name]["sub_total"] += amount_value
-
-        # 计算平均值和预测
-        num_periods = len(period_count) if period_count else 1
-        results = []
-
-        for category, data in category_totals.items():
-            sorted_periods = sorted(data["periods"], key=lambda item: item["period"])
-            recent_periods = sorted_periods[-normalized_history_periods:]
-            current_period_amounts = {
-                item["period"]: item["amount"]
-                for item in sorted_periods
-            }
-
-            if not recent_periods:
-                continue
-
-            recent_amounts = [float(item["amount"]) for item in recent_periods]
-            avg_amount = sum(recent_amounts) / len(recent_amounts)
-            moving_window_size = min(3, len(recent_amounts))
-            moving_average_amount = (
-                sum(recent_amounts[-moving_window_size:]) / moving_window_size if moving_window_size > 0 else 0
-            )
-
-            if normalized_strategy == "moving_average":
-                forecast_amount = moving_average_amount
-                strategy_explanation = f"基于最近{moving_window_size}个周期的移动平均"
-            else:
-                forecast_amount = avg_amount
-                strategy_explanation = f"基于最近{len(recent_amounts)}个周期的历史均值"
-
-            backtest_errors = []
-            for index in range(1, len(recent_amounts)):
-                actual_amount = recent_amounts[index]
-                if actual_amount <= 0:
-                    continue
-
-                history_slice = recent_amounts[:index]
-                if normalized_strategy == "moving_average":
-                    window_size = min(3, len(history_slice))
-                    predicted_amount = (
-                        sum(history_slice[-window_size:]) / window_size if window_size > 0 else 0
-                    )
-                else:
-                    predicted_amount = sum(history_slice) / len(history_slice)
-
-                backtest_errors.append(abs(actual_amount - predicted_amount) / actual_amount)
-
-            backtest_mape = (
-                round((sum(backtest_errors) / len(backtest_errors)) * 100, 2)
-                if backtest_errors
-                else None
-            )
-            if backtest_mape is None:
-                confidence = "low"
-            elif backtest_mape <= 10:
-                confidence = "high"
-            elif backtest_mape <= 20:
-                confidence = "medium"
-            else:
-                confidence = "low"
-
-            latest_amount = recent_amounts[-1] if recent_amounts else 0
-            if len(recent_amounts) >= 2:
-                baseline_amounts = recent_amounts[:-1]
-                baseline_avg = sum(baseline_amounts) / len(baseline_amounts)
-                if baseline_avg > 0 and latest_amount > baseline_avg * 1.05:
-                    trend = "up"
-                elif baseline_avg > 0 and latest_amount < baseline_avg * 0.95:
-                    trend = "down"
-                else:
-                    trend = "stable"
-            else:
-                trend = "stable"
-
-            category_info = self._resolve_budget_category_info(category, "", category_context, budget_type)
-
-            budget_amount = 0.0
-            if category in budget_map:
-                budget_info = budget_map[category]
-                budget_amount = (
-                    budget_info["primary"] if budget_info["primary"] > 0 else budget_info["sub_total"]
-                )
-
-            current_spent = current_period_amounts.get(target_period_key, 0.0)
-            projected_over_budget = budget_amount > 0 and forecast_amount > budget_amount
-
-            results.append(
-                {
-                    "category": category,
-                    "category_info": category_info,
-                    "total_amount": round(sum(recent_amounts), 2),
-                    "average_amount": round(avg_amount, 2),
-                    "period_count": num_periods,
-                    "sample_periods": len(recent_amounts),
-                    "current_spent": round(current_spent, 2),
-                    "budget_amount": round(budget_amount, 2),
-                    "forecast_amount": round(forecast_amount, 2),
-                    "projected_over_budget": projected_over_budget,
-                    "forecast_strategy": normalized_strategy,
-                    "strategy_explanation": strategy_explanation,
-                    "backtest_mape": backtest_mape,
-                    "confidence": confidence,
-                    "trend": trend,
-                    "periods": recent_periods,
-                }
-            )
-
-        # 按预测金额排序
-        results.sort(key=lambda x: x["forecast_amount"], reverse=True)
-
-        self.logger.info("[get_period_forecast] 返回%s条预测数据", len(results))
-        return results
+        return await self._get_period_forecast_for_request(request)
 
     @log_method
     async def import_budgets(self, budgets_data: list[dict[str, Any]], user_id: int = 1) -> dict[str, Any]:

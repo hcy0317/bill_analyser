@@ -24,6 +24,9 @@ def test_budget_route_parses_csv_and_json_integer_lists() -> None:
 
 def test_budget_route_validates_import_payload_and_period_args() -> None:
     """预算导入校验与周期参数校验应覆盖缺字段与非法取值分支。"""
+    with pytest.raises(ValueError, match="index 1"):
+        budgets_route._validate_import_budget_item("bad-item", 1)
+
     budgets_route._validate_import_budget_item(
         {
             "category": "餐饮",
@@ -43,6 +46,16 @@ def test_budget_route_validates_import_payload_and_period_args() -> None:
                 "start_date": "2026-01-01",
             },
             2,
+        )
+
+    with pytest.raises(ValueError, match="amount"):
+        budgets_route._validate_import_budget_item(
+            {
+                "category": "餐饮",
+                "period_type": "monthly",
+                "start_date": "2026-01-01",
+            },
+            3,
         )
 
     with pytest.raises(ValueError, match="period_type"):
