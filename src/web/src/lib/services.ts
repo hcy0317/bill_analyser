@@ -361,6 +361,7 @@ function mapRestExecutionToFrontend(restResult: any): any {
         totalSpent: toBudgetAmountInCents(summary?.total_spent ?? 0),
         totalExecutionRate: summary?.overall_execution_rate ?? 0,
         categories: items.map((item: any) => ({
+            budgetId: String(item?.id || ''),
             categoryId: String(item?.category_id || item?.category_info?.id || ''),
             categoryName: item?.sub_category ? `${item.category}-${item.sub_category}` : (item?.category || ''),
             categoryIcon: item?.category_info?.icon || '',

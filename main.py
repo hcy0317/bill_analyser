@@ -1,13 +1,11 @@
-"""
-Main Entry Point - 主程序入口
-
-支持CLI和GUI两种模式。
-"""
+"""Main entry point for Bill Analyser CLI and desktop startup."""
 
 import argparse
 import asyncio
+import calendar
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -15,12 +13,136 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from bill_analyser.core.analyzer import Analyzer
 from bill_analyser.core.bill_service import BillService
-from bill_analyser.core.budget import BudgetManager
-from bill_analyser.core.report import ReportGenerator
+from bill_analyser.core.budget_execution_summary import (
+    build_budget_execution_summary,
+    select_budget_detail_items,
+)
 from bill_analyser.core.sync import SyncManager
 from bill_analyser.utils.logger import get_logger
+from bill_analyser.utils.report_export import ReportExporter
 
 logger = get_logger("Main")
+
+_CLI_TO_BUDGET_PERIOD_TYPE = {
+    "month": "monthly",
+    "quarter": "quarterly",
+    "year": "yearly",
+}
+
+
+def _resolve_budget_status(budget_amount: float, spent_amount: float) -> str:
+    """Resolve the legacy CLI status label from budget/spent amounts."""
+    if budget_amount <= 0:
+        return "normal"
+
+    ratio = spent_amount / budget_amount
+    if ratio >= 1.0:
+        return "exceeded"
+    if ratio >= 0.9:
+        return "critical"
+    if ratio >= 0.8:
+        return "warning"
+    return "normal"
+
+
+def _resolve_budget_period_window(period: str) -> tuple[str, str, str]:
+    """Resolve the current budget period type and date window for CLI reporting."""
+    now = datetime.now()
+    if period == "year":
+        return "yearly", f"{now.year}-01-01", f"{now.year}-12-31"
+
+    if period == "quarter":
+        quarter = (now.month - 1) // 3 + 1
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        end_day = calendar.monthrange(now.year, end_month)[1]
+        return (
+            "quarterly",
+            f"{now.year}-{start_month:02d}-01",
+            f"{now.year}-{end_month:02d}-{end_day:02d}",
+        )
+
+    end_day = calendar.monthrange(now.year, now.month)[1]
+    return "monthly", f"{now.year}-{now.month:02d}-01", f"{now.year}-{now.month:02d}-{end_day:02d}"
+
+
+def _format_budget_item_label(item: dict[str, object]) -> str:
+    """Choose a stable CLI display label for a budget execution item."""
+    name = str(item.get("name") or "").strip()
+    if name:
+        return name
+
+    category = str(item.get("category") or "").strip()
+    sub_category = str(item.get("sub_category") or "").strip()
+    if category and sub_category:
+        return f"{category}/{sub_category}"
+    if category:
+        return category
+    return "未命名预算"
+
+
+def _select_cli_budget_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Prefer leaf budgets over synchronized primary budgets within the same group."""
+    return select_budget_detail_items(items)
+
+
+def _ensure_unique_budget_label(
+    item: dict[str, object],
+    used_labels: set[str],
+) -> str:
+    """Keep CLI labels stable when budget names are duplicated or empty."""
+    base_label = _format_budget_item_label(item)
+    if base_label not in used_labels:
+        return base_label
+
+    category = str(item.get("category") or "").strip()
+    sub_category = str(item.get("sub_category") or "").strip()
+    path_label = "/".join(part for part in (category, sub_category) if part)
+    if path_label:
+        candidate = f"{base_label} [{path_label}]"
+        if candidate not in used_labels:
+            return candidate
+
+    return f"{base_label} #{item.get('id', 'unknown')}"
+
+
+def _build_budget_cli_report(period: str, items: list[dict[str, object]]) -> dict[str, object]:
+    """Build the legacy CLI report structure from budget execution items."""
+    detail_items = _select_cli_budget_items(items)
+    summary = {
+        **build_budget_execution_summary(items),
+        "count": len(detail_items),
+        "normal_count": 0,
+        "warning_count": 0,
+        "critical_count": 0,
+        "exceeded_count": 0,
+    }
+    categories: dict[str, dict[str, object]] = {}
+    used_labels: set[str] = set()
+
+    for item in detail_items:
+        budget_amount = float(item.get("budget_amount") or 0.0)
+        spent_amount = float(item.get("spent_amount") or 0.0)
+        status = _resolve_budget_status(budget_amount, spent_amount)
+        label = _ensure_unique_budget_label(item, used_labels)
+        used_labels.add(label)
+
+        categories[label] = {
+            "budget": budget_amount,
+            "spent": spent_amount,
+            "remaining": float(item.get("remaining_amount") or (budget_amount - spent_amount)),
+            "usage_ratio": float(item.get("execution_rate") or 0.0),
+            "status": status,
+        }
+
+        summary[f"{status}_count"] += 1
+
+    return {
+        "period": period,
+        "categories": categories,
+        "summary": summary,
+        "generated_at": datetime.now().isoformat(),
+    }
 
 
 async def import_command(args):
@@ -71,7 +193,7 @@ async def report_command(args):
         logger.info("净收入: ¥%.2f", data["summary"]["net_income"])
 
         # 导出报告
-        generator = ReportGenerator()
+        generator = ReportExporter()
         output_path = await generator.export_report(data, args.format)
 
         logger.info("报告已生成: %s", output_path)
@@ -87,10 +209,14 @@ async def budget_command(args):
     logger.info("开始检查预算")
 
     async with BillService() as service:
-        manager = BudgetManager(service.db)
-        await manager.load_budgets()
-
-        report = await manager.get_budget_report(args.period)
+        resolved_period_type, start_date, end_date = _resolve_budget_period_window(args.period)
+        execution_items = await service.db.get_budget_execution_details(
+            budget_type=3,
+            period_type=_CLI_TO_BUDGET_PERIOD_TYPE.get(args.period, resolved_period_type),
+            start_date=start_date,
+            end_date=end_date,
+        )
+        report = _build_budget_cli_report(args.period, execution_items)
 
         logger.info("预算报告:")
         logger.info("总预算: ¥%.2f", report["summary"]["total_budget"])

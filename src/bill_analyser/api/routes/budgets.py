@@ -14,6 +14,7 @@ from typing import Any, cast
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from bill_analyser.api.middleware.auth import require_auth
+from bill_analyser.core.budget_execution_summary import build_budget_execution_summary
 from bill_analyser.utils.logger import get_logger, log_method
 
 logger = get_logger("BudgetsAPI")
@@ -209,6 +210,7 @@ def _validate_budget_period_args(
         raise ValueError(f"Invalid months_history: {months_history}")
 
 
+# pylint: disable=too-many-arguments
 def _build_budget_period_scope(
     *,
     budget_type: int,
@@ -245,6 +247,7 @@ def _build_budget_period_scope(
         month=month,
         quarter=quarter,
     )
+# pylint: enable=too-many-arguments
 
 
 def _parse_budget_query_filters() -> BudgetRouteFilters:
@@ -252,7 +255,10 @@ def _parse_budget_query_filters() -> BudgetRouteFilters:
     return BudgetRouteFilters(
         budget_id=_get_optional_int(request.args.get("budget_id"), "budget_id"),
         category_id=_get_optional_int(request.args.get("category_id"), "category_id"),
-        account_ids=tuple(_parse_csv_int_list(request.args.get("account_ids", ""), "account_ids") or ()),
+        account_ids=tuple(
+            _parse_csv_int_list(request.args.get("account_ids", ""), "account_ids")
+            or ()
+        ),
         tag_ids=tuple(_parse_csv_int_list(request.args.get("tag_ids", ""), "tag_ids") or ()),
     )
 
@@ -287,7 +293,11 @@ def _calculate_budget_period_progress(period_start: str, period_end: str) -> tup
 
 def _calculate_avg_backtest_mape(results: list[dict[str, Any]]) -> float | None:
     """Average only non-null forecast backtest MAPE values."""
-    mape_values = [item["backtest_mape"] for item in results if item.get("backtest_mape") is not None]
+    mape_values = [
+        item["backtest_mape"]
+        for item in results
+        if item.get("backtest_mape") is not None
+    ]
     if not mape_values:
         return None
     return round(sum(mape_values) / len(mape_values), 2)
@@ -568,10 +578,7 @@ def get_budget_execution():  # pylint: disable=too-many-locals
             )
         )
 
-        # 计算汇总
-        total_budget = sum(r["budget_amount"] for r in results)
-        total_spent = sum(r["spent_amount"] for r in results)
-        overall_execution_rate = (total_spent / total_budget * 100) if total_budget > 0 else 0
+        summary = build_budget_execution_summary(results)
 
         logger.info("[get_budget_execution] 返回%s条执行详情", len(results))
 
@@ -580,13 +587,7 @@ def get_budget_execution():  # pylint: disable=too-many-locals
                 "success": True,
                 "result": {
                     "items": results,
-                    "summary": {
-                        "total_budget": total_budget,
-                        "total_spent": total_spent,
-                        "total_remaining": total_budget - total_spent,
-                        "overall_execution_rate": round(overall_execution_rate, 2),
-                        "count": len(results),
-                    },
+                    "summary": summary,
                     "period_start": period_scope.start_date,
                     "period_end": period_scope.end_date,
                 },

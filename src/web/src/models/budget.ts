@@ -40,6 +40,7 @@ export enum BudgetType {
  * 预算分类执行详情
  */
 export interface BudgetCategoryExecution {
+    readonly budgetId: string;             // 预算ID
     readonly categoryId: string;           // 分类ID
     readonly categoryName: string;         // 分类名称（主分类-子分类格式）
     readonly budgetAmount: number;         // 预算金额（分）

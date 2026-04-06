@@ -508,7 +508,7 @@
                             <template v-for="(group, gIdx) in groupedBudgets" :key="group.category">
                                 <!-- 一级分类行（可折叠） -->
                                 <tr class="budget-group-header budget-list-row"
-                                    :class="{ 'budget-group-last-row': gIdx < groupedBudgets.length - 1 && (group.isCollapsed || group.subBudgets.length === 0) }"
+                                    :class="{ 'budget-group-last-row': gIdx < groupedBudgets.length - 1 && (group.isCollapsed || !groupHasExpandedRows(group)) }"
                                     @click="toggleCategoryCollapse(group.category)"
                                     tabindex="0">
                                     <td colspan="4" class="pa-0">
@@ -546,7 +546,7 @@
                                                         <!-- 一级分类预算操作按钮（悬停时显示） -->
                                                     <div class="budget-row-actions d-flex align-center">
                                                         <!-- 如果没有一级分类预算，显示添加按钮 -->
-                                                        <v-btn v-if="!group.primaryBudget"
+                                                        <v-btn v-if="group.primaryBudgets.length === 0"
                                                                density="compact" color="default" variant="text" size="x-small"
                                                                :icon="mdiPlusCircleOutline"
                                                                :disabled="loading || updating"
@@ -555,20 +555,20 @@
                                                             <v-tooltip activator="parent">{{ tt('Add Primary Budget') }}</v-tooltip>
                                                         </v-btn>
                                                         <!-- 如果有一级分类预算，显示编辑和删除按钮 -->
-                                                        <v-btn v-if="group.primaryBudget"
+                                                        <v-btn v-if="group.primaryBudgets.length === 1"
                                                                density="compact" color="default" variant="text" size="x-small"
                                                                :icon="mdiPencilOutline"
                                                                :disabled="loading || updating"
-                                                               @click.stop="edit(group.primaryBudget)">
+                                                               @click.stop="edit(getPrimaryBudgetForHeader(group)!)">
                                                             <v-icon :icon="mdiPencilOutline" size="16" />
                                                             <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
                                                         </v-btn>
-                                                        <v-btn v-if="group.primaryBudget"
+                                                        <v-btn v-if="group.primaryBudgets.length === 1"
                                                                density="compact" color="default" variant="text" size="x-small"
                                                                :icon="mdiDeleteOutline"
-                                                               :loading="budgetRemoving[group.primaryBudget.id]"
+                                                               :loading="budgetRemoving[getPrimaryBudgetForHeader(group)!.id]"
                                                                :disabled="loading || updating"
-                                                               @click.stop="remove(group.primaryBudget)">
+                                                               @click.stop="remove(getPrimaryBudgetForHeader(group)!)">
                                                             <template #loader>
                                                                 <v-progress-circular indeterminate size="14" width="2"/>
                                                             </template>
@@ -589,7 +589,7 @@
                                                 </div>
                                                 <!-- 一级分类进度条（始终显示，无论是否有一级分类预算，点击跳转到账单列表） -->
                                                 <div class="budget-progress-container cursor-pointer"
-                                                     @click.stop="navigateToTransactions(group.category, null, group.primaryBudget)"
+                                                       @click.stop="navigateToTransactions(group.category, null, getPrimaryBudgetForHeader(group))"
                                                      :title="tt('Click to view transactions')">
                                                     <v-progress-linear
                                                         :model-value="Math.min(getGroupExecutionRate(group), 100)"
@@ -607,6 +607,85 @@
 
                                 <!-- 二级分类预算列表（展开时显示） -->
                                 <template v-if="!group.isCollapsed">
+                                    <tr v-for="(budget, pIdx) in getExpandedPrimaryBudgets(group)" :key="budget.id"
+                                        class="budget-list-row budget-sub-row budget-primary-row"
+                                        :class="{ 'budget-group-last-row': gIdx < groupedBudgets.length - 1 && pIdx === getExpandedPrimaryBudgets(group).length - 1 && group.subBudgets.length === 0 }"
+                                        @dblclick="edit(budget)" tabindex="0"
+                                        @keydown.delete="remove(budget)" @keydown.enter="edit(budget)">
+                                        <td colspan="4" class="pa-0">
+                                            <div class="budget-item budget-secondary d-flex px-4 py-2"
+                                                 style="padding-left: 56px !important;">
+                                                <item-icon
+                                                    v-if="budget.categoryIcon"
+                                                    class="me-3 flex-shrink-0"
+                                                    icon-type="category"
+                                                    :icon-id="budget.categoryIcon"
+                                                    :color="budget.categoryColor"
+                                                    :size="28"
+                                                />
+                                                <div class="d-flex flex-column flex-grow-1">
+                                                    <div class="d-flex align-center justify-space-between mb-1">
+                                                        <div class="d-flex align-center flex-grow-1">
+                                                            <span class="budget-category-name text-body-2 font-weight-medium">
+                                                                {{ budget.name || group.category }}
+                                                            </span>
+                                                            <span class="budget-percent text-body-2 ms-2"
+                                                                  :class="getExecutionRateTextClass(budget.executionRate)">
+                                                                {{ budget.executionRateText }}
+                                                            </span>
+                                                            <v-icon v-if="budget.alertTriggered && !budget.isOverBudget"
+                                                                    :icon="mdiAlertCircle" color="warning" class="ms-1" size="14" />
+                                                            <v-icon v-if="budget.isOverBudget"
+                                                                    :icon="mdiAlertOctagon" color="error" class="ms-1" size="14" />
+                                                        </div>
+                                                        <div class="budget-row-actions d-flex align-center">
+                                                            <v-btn density="compact" color="default" variant="text" size="x-small"
+                                                                   :icon="mdiPencilOutline"
+                                                                   :disabled="loading || updating"
+                                                                   @click.stop="edit(budget)">
+                                                                <v-icon :icon="mdiPencilOutline" size="16" />
+                                                                <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
+                                                            </v-btn>
+                                                            <v-btn density="compact" color="default" variant="text" size="x-small"
+                                                                   :icon="mdiDeleteOutline"
+                                                                   :loading="budgetRemoving[budget.id]"
+                                                                   :disabled="loading || updating"
+                                                                   @click.stop="remove(budget)">
+                                                                <template #loader>
+                                                                    <v-progress-circular indeterminate size="14" width="2"/>
+                                                                </template>
+                                                                <v-icon :icon="mdiDeleteOutline" size="16" />
+                                                                <v-tooltip activator="parent">{{ tt('Delete') }}</v-tooltip>
+                                                            </v-btn>
+                                                        </div>
+                                                        <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
+                                                            <span class="budget-spent text-body-2"
+                                                                  :class="{ 'text-error font-weight-bold': budget.isOverBudget }">
+                                                                {{ formatAmount(budget.spentAmountInYuan) }}
+                                                            </span>
+                                                            <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
+                                                            <span class="budget-total text-body-2 text-medium-emphasis">
+                                                                {{ formatAmount(budget.amountInYuan) }}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="budget-progress-container cursor-pointer"
+                                                         @click.stop="navigateToTransactions(budget.category, null, budget)"
+                                                         :title="tt('Click to view transactions')">
+                                                        <v-progress-linear
+                                                            :model-value="Math.min(budget.executionRate, 100)"
+                                                            :color="getBudgetProgressColor(budget)"
+                                                            :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
+                                                            :bg-opacity="1"
+                                                            :height="4"
+                                                            :rounded="false"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+
                                     <tr v-for="(budget, bIdx) in group.subBudgets" :key="budget.id"
                                         class="budget-list-row budget-sub-row"
                                         :class="{ 'budget-group-last-row': gIdx < groupedBudgets.length - 1 && bIdx === group.subBudgets.length - 1 }"
@@ -1389,7 +1468,7 @@ interface BudgetGroup {
     category: string;          // 一级分类名称
     categoryIcon: string;      // 分类图标
     categoryColor: string;     // 分类颜色
-    primaryBudget: Budget | null;  // 一级分类预算（可能不存在）
+    primaryBudgets: Budget[];  // 一级分类预算列表（可能存在多条）
     subBudgets: Budget[];      // 二级分类预算列表
     totalAmount: number;       // 显示的总预算金额（分）- 优先使用一级分类预算，否则使用二级之和
     totalSpent: number;        // 显示的总已花费（分）- 优先使用一级分类已花费，否则使用二级之和
@@ -1425,7 +1504,7 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
                 category: categoryKey,
                 categoryIcon: categoryIcon,
                 categoryColor: categoryColor,
-                primaryBudget: null,
+                primaryBudgets: [],
                 subBudgets: [],
                 totalAmount: 0,
                 totalSpent: 0,
@@ -1441,10 +1520,9 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
 
         // 判断是一级分类预算还是二级分类预算
         if (!budget.subCategory) {
-            // 一级分类预算
-            group.primaryBudget = budget;
-            group.primaryAmount = budget.amount;
-            group.primarySpent = budget.spentAmount;
+            group.primaryBudgets.push(budget);
+            group.primaryAmount += budget.amount;
+            group.primarySpent += budget.spentAmount;
         } else {
             // 二级分类预算
             group.subBudgets.push(budget);
@@ -1460,7 +1538,10 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
     // 2. 如果没有一级分类预算，使用二级分类之和
     // 3. 已花费金额：优先使用一级分类的已花费，否则使用二级之和
     for (const group of groups.values()) {
-        if (group.primaryBudget) {
+        if (group.primaryBudgets.length > 1) {
+            group.totalAmount = group.primaryAmount + group.subTotalAmount;
+            group.totalSpent = group.primarySpent + group.subTotalSpent;
+        } else if (group.primaryBudgets.length > 0) {
             // 有一级分类预算：使用一级分类的预算金额
             group.totalAmount = group.primaryAmount;
             // 已花费：如果一级分类有值就用一级的，否则用二级之和
@@ -1479,6 +1560,18 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
     // 转换为数组并按分类名称排序
     return Array.from(groups.values()).sort((a, b) => a.category.localeCompare(b.category));
 });
+
+function getPrimaryBudgetForHeader(group: BudgetGroup): Budget | null {
+    return group.primaryBudgets[0] || null;
+}
+
+function getExpandedPrimaryBudgets(group: BudgetGroup): Budget[] {
+    return group.primaryBudgets.length > 1 ? group.primaryBudgets : [];
+}
+
+function groupHasExpandedRows(group: BudgetGroup): boolean {
+    return getExpandedPrimaryBudgets(group).length > 0 || group.subBudgets.length > 0;
+}
 
 /**
  * 切换分类折叠状态
@@ -2774,8 +2867,9 @@ function getGroupProgressColor(group: BudgetGroup): string {
         return `#${group.categoryColor}`;
     }
     // 如果有一级分类预算，使用其分类颜色
-    if (group.primaryBudget && group.primaryBudget.categoryColor) {
-        return `#${group.primaryBudget.categoryColor}`;
+    const primaryBudget = getPrimaryBudgetForHeader(group);
+    if (primaryBudget && primaryBudget.categoryColor) {
+        return `#${primaryBudget.categoryColor}`;
     }
     // 降级使用执行率颜色
     return getExecutionRateColor(getGroupExecutionRate(group));
@@ -2811,10 +2905,14 @@ function getExecutionRateColorClass(rate: number): string {
  */
 function getGroupExecutionRate(group: BudgetGroup): number {
     // 如果有一级分类预算
-    if (group.primaryBudget) {
+    const primaryBudget = getPrimaryBudgetForHeader(group);
+    if (group.primaryBudgets.length > 1 && group.totalAmount > 0) {
+        return (group.totalSpent / group.totalAmount) * 100;
+    }
+    if (primaryBudget) {
         // 如果一级分类预算有执行率（后端已计算），使用它
-        if (group.primaryBudget.executionRate > 0) {
-            return group.primaryBudget.executionRate;
+        if (group.primaryBudgets.length === 1 && primaryBudget.executionRate > 0) {
+            return primaryBudget.executionRate;
         }
         // 否则按“总已花费 / 一级预算金额”计算
         if (group.primaryAmount > 0) {

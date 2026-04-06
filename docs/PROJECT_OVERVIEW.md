@@ -60,13 +60,18 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - `db_schema.py` + `db_schema_core.py` + `db_schema_users_security.py` + `db_schema_templates_imports.py`：schema 初始化与迁移编排；核心业务表、用户安全表、模板/导入相关表分别维护
 - `db_bills.py` / `db_categories.py` / `db_accounts.py` / `db_tags.py` / `db_templates.py`：账单、分类、账户、标签、模板域的 CRUD、批量操作与查询辅助
 - `db_users_auth.py` / `db_user_data.py` / `db_audit_backup.py`：用户与会话、2FA 与应用设置、用户数据管理、审计/备份域持久化逻辑
-- `db_budgets_core.py` / `db_budgets_reporting.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询
+- `db_budgets_core.py` / `db_budgets_execution.py` / `db_budgets_forecast.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询
+- `db_budgets_reporting.py`：预算 reporting 兼容聚合层；运行时通过它组合 execution/history 与 forecast/import/export 两个预算域 mixin
 - `db_import_configs.py` / `db_import_sessions.py` / `db_import_preview.py` / `db_import_learning.py`：导入模板配置、三阶段会话、预览编辑/确认、长期学习规则与复合匹配特征
 - `bill_service.py`：导入主流程编排（含 v2 三阶段导入）
 - `smart_dedup.py`：智能去重引擎（转账配对、平台银行去重、相似去重、分账去重）
 - `category_engine.py`：关键词规则解析与分类匹配（含类型过滤与预编译优化）
 - `exchange_rate_providers.py`：多汇率提供者聚合
-- `budget.py` / `sync.py` / `analyzer.py` / `report*.py`：预算、同步、分析、报表
+- `budget.py`：历史预算管理兼容层，保留 `BudgetManager` 供旧 CLI / 旧测试路径复用；当前 CLI 预算报告主链直接走 `Database.get_budget_execution_details()`
+- `sync.py`：同步相关编排
+- `analyzer.py`：统计分析、聚合与图表/报表数据生成主服务，仍是统计域的活跃运行时代码
+- `report.py` / `utils/report_export.py`：`core.report` 保留旧导入路径兼容壳，真实 PDF / Excel / HTML 报告导出实现已归并到 `utils.report_export`
+- `smart_dedup.py`：智能去重引擎主实现，仍在导入主链中承担平台银行配对、相似去重与分账去重
 - `smart_dedup_v641_backup.py` 等历史版本备份文件已从运行时代码树移除
 
 ### 3.2.1 Database façade 关系

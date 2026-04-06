@@ -1,7 +1,5 @@
 """Thin Database facade composed from domain-specific persistence mixins."""
 
-# pylint: disable=too-many-ancestors,duplicate-code
-
 from __future__ import annotations
 
 from .db_accounts import DatabaseAccountsMixin
@@ -22,20 +20,44 @@ from .db_user_data import DatabaseUserDataMixin
 from .db_users_auth import DatabaseUsersAuthMixin
 
 
-class Database(
+class DatabaseBudgetImportMixin(  # pylint: disable=too-many-ancestors
     DatabaseBudgetsReportingMixin,
     DatabaseImportPreviewMixin,
     DatabaseImportSessionsMixin,
     DatabaseImportConfigsMixin,
     DatabaseImportLearningMixin,
+):
+    """Aggregate the budget and import-related persistence mixins."""
+
+
+class DatabaseUserSecurityMixin(
     DatabaseUserDataMixin,
     DatabaseUsersAuthMixin,
+):
+    """Aggregate user-profile and authentication persistence helpers."""
+
+
+class DatabaseTransactionalDataMixin(  # pylint: disable=too-many-ancestors
     DatabaseTemplatesMixin,
     DatabaseTagsMixin,
     DatabaseAccountsMixin,
     DatabaseCategoriesMixin,
     DatabaseBillsMixin,
     DatabaseAuditBackupMixin,
+):
+    """Aggregate core transactional, taxonomy, and audit persistence helpers."""
+
+
+class DatabaseDomainMixin(  # pylint: disable=too-many-ancestors
+    DatabaseUserSecurityMixin,
+    DatabaseTransactionalDataMixin,
+):
+    """Aggregate non-runtime/non-schema business persistence domains."""
+
+
+class Database(  # pylint: disable=too-many-ancestors
+    DatabaseBudgetImportMixin,
+    DatabaseDomainMixin,
     DatabaseSchemaMixin,
     DatabaseRuntimeMixin,
 ):

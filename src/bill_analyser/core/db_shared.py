@@ -183,13 +183,10 @@ class DatabaseFacadeBase:  # pylint: disable=too-many-public-methods
     def _normalize_budget_query_end_date(end_date: str | None) -> str | None:
         ...
 
-    @staticmethod
+    @classmethod
     def _build_budget_history_filter_summary(
-        budget_type: int | None = None,
-        period_type: str | None = None,
-        budget_id: int | None = None,
-        category_id: int | None = None,
-        account_ids: list[int] | None = None,
-        tag_ids: list[int] | None = None,
+        cls,
+        request: BudgetExecutionRequest | None = None,
+        **kwargs: Any,
     ) -> str:
         ...

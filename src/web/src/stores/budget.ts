@@ -147,15 +147,20 @@ export const useBudgetStore = defineStore('budget', () => {
             return;
         }
 
-        // 构建分类执行映射
-        const executionMap: Record<string, BudgetCategoryExecution> = {};
+        const executionByBudgetId: Record<string, BudgetCategoryExecution> = {};
+        const executionByCategoryId: Record<string, BudgetCategoryExecution> = {};
         for (const cat of execution.categories) {
-            executionMap[cat.categoryId] = cat;
+            if (cat.budgetId) {
+                executionByBudgetId[cat.budgetId] = cat;
+            }
+            if (cat.categoryId && !executionByCategoryId[cat.categoryId]) {
+                executionByCategoryId[cat.categoryId] = cat;
+            }
         }
 
         // 更新预算的执行数据
         for (const budget of allBudgets.value) {
-            const exec = executionMap[budget.categoryId];
+            const exec = executionByBudgetId[budget.id] || executionByCategoryId[budget.categoryId];
             if (exec) {
                 budget.updateExecution(exec);
             } else {

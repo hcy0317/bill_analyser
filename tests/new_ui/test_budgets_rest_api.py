@@ -100,6 +100,28 @@ def _create_budget_support_category(user_id, main_category, sub_category):
     return asyncio.run(_create())
 
 
+def _create_budget_support_sub_category(user_id, main_category, sub_category):
+    """为预算测试创建额外子分类，避免重复创建父分类。"""
+    from src.api.app import db
+
+    async def _create():
+        sub_category_id = await db.create_category({
+            "type": 3,
+            "main_category": main_category,
+            "sub_category": sub_category,
+            "description": sub_category,
+            "priority": 0,
+            "keywords": "",
+            "hidden": False,
+            "icon": "tag",
+            "color": "#ffaa00",
+        }, user_id=user_id)
+        assert sub_category_id is not None
+        return int(sub_category_id)
+
+    return asyncio.run(_create())
+
+
 def _create_budget_support_tag(user_id, name):
     """为预算测试创建标签。"""
     from src.api.app import db
@@ -392,6 +414,59 @@ def test_budget_primary_secondary_rules(client, auth_headers):
     final_items = final_list.get_json()["result"]
     assert final_items == []
 
+def test_budget_execution_summary_avoids_double_counting_synced_primary_budget(client, auth_headers):
+    """预算执行 summary 不应把自动同步的一级预算与子预算重复累计。"""
+    category_name = f"REST执行汇总分类-{int(time.time())}"
+    user_id = _get_current_user_id(client, auth_headers)
+    parent_category_id = _create_budget_support_category(user_id, category_name, "")
+    _create_budget_support_sub_category(user_id, category_name, "子分类A")
+
+    create_secondary = client.post(
+        "/api/budgets/",
+        json={
+            "name": "执行汇总子预算",
+            "category": category_name,
+            "sub_category": "子分类A",
+            "period_type": "monthly",
+            "amount": 100.0,
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-31",
+            "alert_threshold": 80,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert create_secondary.status_code == 201
+
+    _insert_budget_support_bill(
+        user_id,
+        main_category=category_name,
+        sub_category="子分类A",
+        amount=-60.0,
+        description="执行汇总账单",
+        date_text="2026-03-12 12:00:00",
+        tag_ids=[],
+    )
+
+    execution_response = client.get(
+        (
+            "/api/budgets/execution?budget_type=3&period_type=monthly"
+            "&start_date=2026-03-01&end_date=2026-03-31"
+            f"&category_id={parent_category_id}"
+        ),
+        headers=auth_headers,
+    )
+    assert execution_response.status_code == 200
+    execution_data = execution_response.get_json()
+    assert execution_data["success"] is True
+    assert len(execution_data["result"]["items"]) == 2
+    assert execution_data["result"]["summary"] == {
+        "total_budget": 100.0,
+        "total_spent": 60.0,
+        "total_remaining": 40.0,
+        "overall_execution_rate": 60.0,
+        "count": 1,
+    }
 
 def test_budget_route_validation_and_not_found_branches(client, auth_headers):  # pylint: disable=too-many-statements
     """预算路由应覆盖空请求、缺字段、404 与非法导入格式分支。"""

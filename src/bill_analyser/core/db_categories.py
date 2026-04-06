@@ -1,7 +1,5 @@
 """Category-domain persistence helpers for the split database facade."""
 
-# pylint: disable=line-too-long,broad-exception-caught
-
 from __future__ import annotations
 
 import sqlite3
@@ -23,9 +21,15 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
 
-        self.logger.debug("[get_all_categories] 查询分类 (user_id=%s)，排序：priority ASC", user_id)
+        self.logger.debug(
+            "[get_all_categories] 查询分类 (user_id=%s)，排序：priority ASC",
+            user_id,
+        )
         async with conn.execute(
-            "SELECT * FROM categories WHERE user_id = ? ORDER BY priority ASC, main_category, sub_category",
+            (
+                "SELECT * FROM categories WHERE user_id = ? "
+                "ORDER BY priority ASC, main_category, sub_category"
+            ),
             (user_id,),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -48,8 +52,9 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         self.logger.info("categories 表为空，从 bills 表提取分类")
         async with conn.execute(
             "SELECT DISTINCT main_category, sub_category FROM bills "
-            "WHERE main_category IS NOT NULL "
-            "ORDER BY main_category, sub_category"
+            "WHERE main_category IS NOT NULL AND user_id = ? "
+            "ORDER BY main_category, sub_category",
+            (user_id,),
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -88,7 +93,12 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         main_category = category_data.get("main_category")
         sub_category = category_data.get("sub_category", "")
 
-        self.logger.info("开始创建分类: %s/%s (user_id=%s)", main_category, sub_category, user_id)
+        self.logger.info(
+            "开始创建分类: %s/%s (user_id=%s)",
+            main_category,
+            sub_category,
+            user_id,
+        )
 
         try:
             columns = [
@@ -130,14 +140,24 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             self.logger.info("创建分类成功: ID=%s, %s/%s", category_id, main_category, sub_category)
             return category_id
         except sqlite3.IntegrityError as exc:
-            self.logger.warning("分类已存在（UNIQUE约束）: %s/%s - %s", main_category, sub_category, exc)
+            self.logger.warning(
+                "分类已存在（UNIQUE约束）: %s/%s - %s",
+                main_category,
+                sub_category,
+                exc,
+            )
             return None
-        except Exception as exc:  # pragma: no cover - defensive logging branch
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("创建分类失败: %s: %s", type(exc).__name__, exc, exc_info=True)
             return None
 
     @log_method
-    async def update_category(self, category_id: int, updates: dict[str, Any], user_id: int = 1) -> bool:
+    async def update_category(
+        self,
+        category_id: int,
+        updates: dict[str, Any],
+        user_id: int = 1,
+    ) -> bool:
         """更新分类。"""
         conn = await self._get_connection()
         try:
@@ -158,12 +178,15 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
 
             set_clause = ", ".join(f"{key} = ?" for key in safe_updates)
             values = [*safe_updates.values(), category_id, user_id]
-            await conn.execute(f"UPDATE categories SET {set_clause} WHERE id = ? AND user_id = ?", values)
+            await conn.execute(
+                f"UPDATE categories SET {set_clause} WHERE id = ? AND user_id = ?",
+                values,
+            )
             await conn.commit()
 
             self.logger.info("已更新分类 ID: %s (user_id=%s)", category_id, user_id)
             return True
-        except Exception as exc:  # pragma: no cover - defensive logging branch
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("更新分类失败: %s", exc)
             return False
 
@@ -174,13 +197,20 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         try:
             conn.row_factory = aiosqlite.Row
             async with conn.execute(
-                "SELECT id, main_category, sub_category FROM categories WHERE id = ? AND user_id = ?",
+                (
+                    "SELECT id, main_category, sub_category FROM categories "
+                    "WHERE id = ? AND user_id = ?"
+                ),
                 (category_id, user_id),
             ) as cursor:
                 category = await cursor.fetchone()
 
             if not category:
-                self.logger.warning("分类ID %s 不存在或不属于用户 %s", category_id, user_id)
+                self.logger.warning(
+                    "分类ID %s 不存在或不属于用户 %s",
+                    category_id,
+                    user_id,
+                )
                 return False
 
             category_dict = dict(category)
@@ -188,7 +218,11 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             sub_category = category_dict["sub_category"]
 
             if sub_category in {"", None}:
-                self.logger.info("删除父级分类 '%s' 及其所有子分类 (user_id=%s)", main_category, user_id)
+                self.logger.info(
+                    "删除父级分类 '%s' 及其所有子分类 (user_id=%s)",
+                    main_category,
+                    user_id,
+                )
                 async with conn.execute(
                     "SELECT COUNT(*) as count FROM categories "
                     "WHERE main_category = ? AND sub_category != '' AND user_id = ?",
@@ -222,7 +256,10 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
                 category_id,
                 user_id,
             )
-            await conn.execute("DELETE FROM categories WHERE id = ? AND user_id = ?", (category_id, user_id))
+            await conn.execute(
+                "DELETE FROM categories WHERE id = ? AND user_id = ?",
+                (category_id, user_id),
+            )
             await conn.commit()
             self.logger.info(
                 "已删除子分类 '%s/%s' (ID: %s, user_id=%s)",
@@ -233,7 +270,7 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             )
             self._clear_cache("category_mappings")
             return True
-        except Exception as exc:  # pragma: no cover - defensive logging branch
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("删除分类失败: %s", exc, exc_info=True)
             return False
 
@@ -298,7 +335,7 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             await conn.commit()
             self.logger.info("已删除主分类及其子分类: %s", main_category)
             return True
-        except Exception as exc:  # pragma: no cover - defensive logging branch
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("删除主分类失败: %s", exc)
             return False
 
@@ -312,10 +349,14 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
                 (new_name, old_name),
             )
             await conn.commit()
-            self.logger.info("已更新主分类名称: %s -> %s", old_name, new_name)
+            self.logger.info(
+                "已更新主分类名称: %s -> %s",
+                old_name,
+                new_name,
+            )
             self._clear_cache("account_mappings")
             self._clear_cache("category_mappings")
             return True
-        except Exception as exc:  # pragma: no cover - defensive logging branch
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("更新主分类名称失败: %s", exc)
             return False

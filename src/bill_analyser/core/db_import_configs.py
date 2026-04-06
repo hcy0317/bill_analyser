@@ -1,18 +1,16 @@
 """Import-config template persistence and header-matching helpers."""
 
-# pylint: disable=missing-function-docstring,line-too-long,wrong-import-position,too-many-locals
-
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    import aiosqlite
-
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+
+if TYPE_CHECKING:
+    import aiosqlite
 
 
 class DatabaseImportConfigsMixin(DatabaseFacadeBase):
@@ -20,11 +18,13 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
 
     @staticmethod
     def _normalize_import_config_header(value: Any) -> str:
+        """Normalize one header cell into the canonical matching form."""
         if value is None:
             return ""
         return " ".join(str(value).strip().lower().split())
 
     def _normalize_import_config_headers(self, headers: list[Any] | None) -> list[str]:
+        """Normalize a header list while dropping empty header values."""
         if not headers:
             return []
         normalized_headers: list[str] = []
@@ -35,6 +35,7 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         return normalized_headers
 
     def _build_import_config_header_signature(self, headers: list[Any] | None) -> str:
+        """Build a stable header signature used by exact-template matching."""
         normalized_headers = self._normalize_import_config_headers(headers)
         if not normalized_headers:
             return ""
@@ -42,6 +43,7 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
 
     @staticmethod
     def _parse_json_object(raw_value: Any, default: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Parse a JSON object field while falling back to a safe default mapping."""
         if raw_value in (None, ""):
             return default.copy() if default else {}
         if isinstance(raw_value, dict):
@@ -59,15 +61,19 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         custom_rules: Any,
         sample_headers: list[Any] | None = None,
     ) -> str:
+        """Serialize custom rules and attach normalized header metadata."""
         custom_rules_data = self._parse_json_object(custom_rules)
         normalized_headers = self._normalize_import_config_headers(sample_headers)
         if normalized_headers:
             custom_rules_data["sample_headers"] = normalized_headers
-            custom_rules_data["header_signature"] = self._build_import_config_header_signature(normalized_headers)
+            custom_rules_data["header_signature"] = self._build_import_config_header_signature(
+                normalized_headers
+            )
             custom_rules_data["header_count"] = len(normalized_headers)
         return json.dumps(custom_rules_data, ensure_ascii=False)
 
     def _deserialize_import_config_row(self, row: aiosqlite.Row) -> dict[str, Any]:
+        """Hydrate one import-config database row into the API-facing payload shape."""
         result = dict(row)
         result["field_mappings"] = self._parse_json_object(result.get("field_mappings"))
         result["custom_rules"] = self._parse_json_object(result.get("custom_rules"))
@@ -82,6 +88,7 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
 
     @staticmethod
     def _build_import_config_description_summary(config: dict[str, Any]) -> str:
+        """Build a concise description used by import-config list responses."""
         field_mappings = config.get("field_mappings") or {}
         sample_headers = config.get("sample_headers") or []
         display_labels = {
@@ -118,7 +125,9 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
                 header_text = str(header_name or "").strip()
                 if not header_text:
                     continue
-                mapped_entries.append(f"{display_labels.get(str(field_name), str(field_name))}->{header_text}")
+                mapped_entries.append(
+                    f"{display_labels.get(str(field_name), str(field_name))}->{header_text}"
+                )
                 if len(mapped_entries) >= 4:
                     break
             if mapped_entries:
@@ -134,7 +143,10 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         return " | ".join(summary_parts)
 
     @staticmethod
-    def _mark_import_config_default_recommendation(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _mark_import_config_default_recommendation(
+        configs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Mark the most recently useful config when no explicit default exists."""
         if not configs:
             return configs
         if any(bool(config.get("is_default")) for config in configs):
@@ -151,14 +163,13 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         recommended["default_recommendation"] = True
         return configs
 
-    @log_method
-    async def save_import_config(self, data: dict[str, Any], user_id: int = 1) -> int:
-        conn = await self._get_connection()
-        now = utc_now_iso()
-        config_id = int(data.get("id", 0) or 0)
-        name = str(data.get("name", "")).strip()
-        file_format = str(data.get("file_format", "")).strip().lower()
-        field_mappings = data.get("field_mappings") or {}
+    @staticmethod
+    def _validate_import_config_payload(
+        name: str,
+        file_format: str,
+        field_mappings: Any,
+    ) -> None:
+        """Validate the minimum payload required to save one import config."""
         if not name:
             raise ValueError("name is required")
         if not file_format:
@@ -166,24 +177,71 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         if not isinstance(field_mappings, dict) or not field_mappings:
             raise ValueError("field_mappings is required")
 
-        description = str(data.get("description", "") or "").strip()
-        date_format = str(data.get("date_format", "") or "").strip()
-        encoding = str(data.get("encoding", "utf-8") or "utf-8").strip()
-        delimiter = data.get("delimiter")
-        skip_rows = int(data.get("skip_rows", 0) or 0)
-        has_header = 1 if bool(data.get("has_header", True)) else 0
-        is_default = 1 if bool(data.get("is_default", False)) else 0
-        sample_headers = data.get("sample_headers") or data.get("headers") or []
-        custom_rules_json = self._serialize_import_config_custom_rules(data.get("custom_rules"), sample_headers)
-        field_mappings_json = json.dumps(field_mappings, ensure_ascii=False)
+    def _build_import_config_write_payload(
+        self,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize and serialize one import-config payload before persistence."""
+        name = str(data.get("name", "")).strip()
+        file_format = str(data.get("file_format", "")).strip().lower()
+        field_mappings = data.get("field_mappings") or {}
+        self._validate_import_config_payload(name, file_format, field_mappings)
 
-        if is_default:
+        sample_headers = data.get("sample_headers") or data.get("headers") or []
+        return {
+            "id": int(data.get("id", 0) or 0),
+            "name": name,
+            "file_format": file_format,
+            "description": str(data.get("description", "") or "").strip(),
+            "field_mappings_json": json.dumps(field_mappings, ensure_ascii=False),
+            "date_format": str(data.get("date_format", "") or "").strip(),
+            "encoding": str(data.get("encoding", "utf-8") or "utf-8").strip(),
+            "delimiter": data.get("delimiter"),
+            "skip_rows": int(data.get("skip_rows", 0) or 0),
+            "has_header": 1 if bool(data.get("has_header", True)) else 0,
+            "custom_rules_json": self._serialize_import_config_custom_rules(
+                data.get("custom_rules"),
+                sample_headers,
+            ),
+            "is_default": 1 if bool(data.get("is_default", False)) else 0,
+        }
+
+    async def _increment_import_config_usage(
+        self,
+        conn: aiosqlite.Connection,
+        config_id: int,
+        user_id: int,
+        now: str,
+    ) -> None:
+        """Update usage counters and timestamps for one matched import config."""
+        await conn.execute(
+            """
+            UPDATE import_configs
+            SET use_count = COALESCE(use_count, 0) + 1,
+                last_used_at = ?,
+                updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (now, now, config_id, user_id),
+        )
+
+    @log_method
+    async def save_import_config(self, data: dict[str, Any], user_id: int = 1) -> int:
+        """Create or update an import-config template for one user."""
+        conn = await self._get_connection()
+        now = utc_now_iso()
+        payload = self._build_import_config_write_payload(data)
+
+        if payload["is_default"]:
             await conn.execute(
-                "UPDATE import_configs SET is_default = 0, updated_at = ? WHERE user_id = ? AND file_format = ?",
-                (now, user_id, file_format),
+                (
+                    "UPDATE import_configs SET is_default = 0, updated_at = ? "
+                    "WHERE user_id = ? AND file_format = ?"
+                ),
+                (now, user_id, payload["file_format"]),
             )
 
-        if config_id:
+        if payload["id"]:
             cursor = await conn.execute(
                 """
                 UPDATE import_configs
@@ -193,25 +251,25 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
                 WHERE id = ? AND user_id = ?
                 """,
                 (
-                    name,
-                    file_format,
-                    description,
-                    field_mappings_json,
-                    date_format,
-                    encoding,
-                    delimiter,
-                    skip_rows,
-                    has_header,
-                    custom_rules_json,
-                    is_default,
+                    payload["name"],
+                    payload["file_format"],
+                    payload["description"],
+                    payload["field_mappings_json"],
+                    payload["date_format"],
+                    payload["encoding"],
+                    payload["delimiter"],
+                    payload["skip_rows"],
+                    payload["has_header"],
+                    payload["custom_rules_json"],
+                    payload["is_default"],
                     now,
-                    config_id,
+                    payload["id"],
                     user_id,
                 ),
             )
             if cursor.rowcount == 0:
                 raise ValueError("import config not found")
-            saved_id = config_id
+            saved_id = payload["id"]
         else:
             cursor = await conn.execute(
                 """
@@ -223,17 +281,17 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
                 """,
                 (
                     user_id,
-                    name,
-                    file_format,
-                    description,
-                    field_mappings_json,
-                    date_format,
-                    encoding,
-                    delimiter,
-                    skip_rows,
-                    has_header,
-                    custom_rules_json,
-                    is_default,
+                    payload["name"],
+                    payload["file_format"],
+                    payload["description"],
+                    payload["field_mappings_json"],
+                    payload["date_format"],
+                    payload["encoding"],
+                    payload["delimiter"],
+                    payload["skip_rows"],
+                    payload["has_header"],
+                    payload["custom_rules_json"],
+                    payload["is_default"],
                     0,
                     now,
                     now,
@@ -251,6 +309,7 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         file_format: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        """List saved import-config templates for one user and optional file format."""
         conn = await self._get_connection()
         params: list[Any] = [user_id]
         query = "SELECT * FROM import_configs WHERE user_id = ?"
@@ -266,19 +325,24 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         return self._mark_import_config_default_recommendation(configs)
 
     @log_method
-    async def find_matching_import_config(
+    async def find_matching_import_config(  # pylint: disable=too-many-locals
         self,
         file_format: str,
         headers: list[Any],
         user_id: int = 1,
         min_score: float = 0.6,
     ) -> dict[str, Any] | None:
+        """Find the best matching import template for the incoming headers."""
         conn = await self._get_connection()
         normalized_headers = self._normalize_import_config_headers(headers)
         if not normalized_headers:
             return None
 
-        configs = await self.get_import_configs(user_id=user_id, file_format=file_format, limit=200)
+        configs = await self.get_import_configs(
+            user_id=user_id,
+            file_format=file_format,
+            limit=200,
+        )
         if not configs:
             return None
 
@@ -323,41 +387,30 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
             matched["match_score"] = 0.0
             matched["match_reason"] = "default_template_fallback"
             matched["matched_header_count"] = 0
-            await conn.execute(
-                """
-                UPDATE import_configs
-                SET use_count = COALESCE(use_count, 0) + 1,
-                    last_used_at = ?,
-                    updated_at = ?
-                WHERE id = ? AND user_id = ?
-                """,
-                (now, now, int(default_match["id"]), user_id),
-            )
+            await self._increment_import_config_usage(conn, int(default_match["id"]), user_id, now)
             await conn.commit()
             return matched
 
         matched = dict(best_match)
         matched["match_score"] = round(min(best_score, 1.0), 4)
         matched["match_reason"] = best_reason
-        matched["matched_header_count"] = len(
-            incoming_set & set(self._normalize_import_config_headers(best_match.get("sample_headers")))
-        )
-        await conn.execute(
-            """
-            UPDATE import_configs
-            SET use_count = COALESCE(use_count, 0) + 1,
-                last_used_at = ?,
-                updated_at = ?
-            WHERE id = ? AND user_id = ?
-            """,
-            (now, now, int(best_match["id"]), user_id),
-        )
+        matched_headers = self._normalize_import_config_headers(best_match.get("sample_headers"))
+        matched["matched_header_count"] = len(incoming_set & set(matched_headers))
+        await self._increment_import_config_usage(conn, int(best_match["id"]), user_id, now)
         await conn.commit()
         return matched
 
     @log_method
-    async def delete_import_config(self, config_id: int, user_id: int = 1) -> bool:
+    async def delete_import_config(
+        self,
+        config_id: int,
+        user_id: int = 1,
+    ) -> bool:
+        """Delete one saved import-config template for the target user."""
         conn = await self._get_connection()
-        cursor = await conn.execute("DELETE FROM import_configs WHERE id = ? AND user_id = ?", (config_id, user_id))
+        cursor = await conn.execute(
+            "DELETE FROM import_configs WHERE id = ? AND user_id = ?",
+            (config_id, user_id),
+        )
         await conn.commit()
         return cursor.rowcount > 0
