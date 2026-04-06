@@ -264,6 +264,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             """
             CREATE TABLE IF NOT EXISTS user_exchange_rates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 from_currency TEXT NOT NULL,
                 to_currency TEXT NOT NULL,
                 rate REAL NOT NULL,
@@ -271,7 +272,8 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
                 effective_date TEXT NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(from_currency, to_currency, effective_date)
+                UNIQUE(user_id, from_currency, to_currency, effective_date),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """
         )
@@ -421,3 +423,64 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("ALTER TABLE categories_new RENAME TO categories")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
         self.logger.info("categories 表 UNIQUE 约束迁移完成")
+
+    async def _migrate_user_exchange_rates_unique_constraint(self, conn: aiosqlite.Connection) -> None:
+        """修复 user_exchange_rates 的 UNIQUE 约束以包含 user_id。"""
+        async with conn.execute("PRAGMA index_list(user_exchange_rates)") as cursor:
+            indexes = await cursor.fetchall()
+        unique_index_names = [row[1] for row in indexes if row[2]]
+
+        constraint_needs_migration = False
+        for index_name in unique_index_names:
+            async with conn.execute(f"PRAGMA index_info({index_name})") as cursor:
+                indexed_columns = [row[2] for row in await cursor.fetchall()]
+            if indexed_columns == ["from_currency", "to_currency", "effective_date"]:
+                constraint_needs_migration = True
+                break
+
+        if not constraint_needs_migration:
+            return
+
+        self.logger.info("开始迁移 user_exchange_rates 表 UNIQUE 约束: 添加 user_id")
+        async with conn.execute("PRAGMA table_info(user_exchange_rates)") as cursor:
+            columns_info = await cursor.fetchall()
+        column_names = [column[1] for column in columns_info]
+        select_columns = [column for column in column_names if column != "id"]
+        if "user_id" not in select_columns:
+            select_columns.insert(0, "user_id")
+        column_sql = ", ".join(select_columns)
+
+        await conn.execute(
+            """
+            CREATE TABLE user_exchange_rates_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                from_currency TEXT NOT NULL,
+                to_currency TEXT NOT NULL,
+                rate REAL NOT NULL,
+                source TEXT DEFAULT 'manual',
+                effective_date TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, from_currency, to_currency, effective_date),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO user_exchange_rates_new "
+            f"({column_sql}) SELECT {column_sql} FROM user_exchange_rates"
+        )
+        await conn.execute("DROP TABLE user_exchange_rates")
+        await conn.execute("ALTER TABLE user_exchange_rates_new RENAME TO user_exchange_rates")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies "
+            "ON user_exchange_rates(from_currency, to_currency)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exchange_rates_date ON user_exchange_rates(effective_date DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id)"
+        )
+        self.logger.info("user_exchange_rates 表 UNIQUE 约束迁移完成")

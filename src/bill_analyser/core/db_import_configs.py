@@ -231,76 +231,79 @@ class DatabaseImportConfigsMixin(DatabaseFacadeBase):
         conn = await self._get_connection()
         now = utc_now_iso()
         payload = self._build_import_config_write_payload(data)
+        try:
+            if payload["is_default"]:
+                await conn.execute(
+                    (
+                        "UPDATE import_configs SET is_default = 0, updated_at = ? "
+                        "WHERE user_id = ? AND file_format = ?"
+                    ),
+                    (now, user_id, payload["file_format"]),
+                )
 
-        if payload["is_default"]:
-            await conn.execute(
-                (
-                    "UPDATE import_configs SET is_default = 0, updated_at = ? "
-                    "WHERE user_id = ? AND file_format = ?"
-                ),
-                (now, user_id, payload["file_format"]),
-            )
+            if payload["id"]:
+                cursor = await conn.execute(
+                    """
+                    UPDATE import_configs
+                    SET name = ?, file_format = ?, description = ?, field_mappings = ?,
+                        date_format = ?, encoding = ?, delimiter = ?, skip_rows = ?,
+                        has_header = ?, custom_rules = ?, is_default = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (
+                        payload["name"],
+                        payload["file_format"],
+                        payload["description"],
+                        payload["field_mappings_json"],
+                        payload["date_format"],
+                        payload["encoding"],
+                        payload["delimiter"],
+                        payload["skip_rows"],
+                        payload["has_header"],
+                        payload["custom_rules_json"],
+                        payload["is_default"],
+                        now,
+                        payload["id"],
+                        user_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    raise ValueError("import config not found")
+                saved_id = payload["id"]
+            else:
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO import_configs (
+                        user_id, name, file_format, description, field_mappings,
+                        date_format, encoding, delimiter, skip_rows, has_header,
+                        custom_rules, is_default, use_count, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        payload["name"],
+                        payload["file_format"],
+                        payload["description"],
+                        payload["field_mappings_json"],
+                        payload["date_format"],
+                        payload["encoding"],
+                        payload["delimiter"],
+                        payload["skip_rows"],
+                        payload["has_header"],
+                        payload["custom_rules_json"],
+                        payload["is_default"],
+                        0,
+                        now,
+                        now,
+                    ),
+                )
+                saved_id = int(cursor.lastrowid or 0)
 
-        if payload["id"]:
-            cursor = await conn.execute(
-                """
-                UPDATE import_configs
-                SET name = ?, file_format = ?, description = ?, field_mappings = ?,
-                    date_format = ?, encoding = ?, delimiter = ?, skip_rows = ?,
-                    has_header = ?, custom_rules = ?, is_default = ?, updated_at = ?
-                WHERE id = ? AND user_id = ?
-                """,
-                (
-                    payload["name"],
-                    payload["file_format"],
-                    payload["description"],
-                    payload["field_mappings_json"],
-                    payload["date_format"],
-                    payload["encoding"],
-                    payload["delimiter"],
-                    payload["skip_rows"],
-                    payload["has_header"],
-                    payload["custom_rules_json"],
-                    payload["is_default"],
-                    now,
-                    payload["id"],
-                    user_id,
-                ),
-            )
-            if cursor.rowcount == 0:
-                raise ValueError("import config not found")
-            saved_id = payload["id"]
-        else:
-            cursor = await conn.execute(
-                """
-                INSERT INTO import_configs (
-                    user_id, name, file_format, description, field_mappings,
-                    date_format, encoding, delimiter, skip_rows, has_header,
-                    custom_rules, is_default, use_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    user_id,
-                    payload["name"],
-                    payload["file_format"],
-                    payload["description"],
-                    payload["field_mappings_json"],
-                    payload["date_format"],
-                    payload["encoding"],
-                    payload["delimiter"],
-                    payload["skip_rows"],
-                    payload["has_header"],
-                    payload["custom_rules_json"],
-                    payload["is_default"],
-                    0,
-                    now,
-                    now,
-                ),
-            )
-            saved_id = int(cursor.lastrowid or 0)
-
-        await conn.commit()
-        return saved_id
+            await conn.commit()
+            return saved_id
+        except Exception:  # pylint: disable=broad-exception-caught
+            await conn.rollback()
+            raise
 
     @log_method
     async def get_import_configs(
