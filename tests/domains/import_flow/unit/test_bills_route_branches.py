@@ -145,7 +145,7 @@ class FakeBillsDB:
             "preview_count": 1,
             "file_paths": "a.csv;b.csv",
         }
-        self.clear_session_result = True
+        self.clear_session_result: Any = {"parser_count": 1, "preview_count": 1, "annotation_count": 0}
         self.preview_rows = [
             {
                 "id": 1,
@@ -357,8 +357,10 @@ class FakeBillsDB:
         _ = (session_id, user_id)
         return dict(self.import_session_result) if self.import_session_result else None
 
-    async def clear_session_data(self, session_id: str, user_id: int) -> bool:
+    async def clear_session_data(self, session_id: str, user_id: int) -> Any:
         _ = (session_id, user_id)
+        if isinstance(self.clear_session_result, dict):
+            return dict(self.clear_session_result)
         return self.clear_session_result
 
     async def get_preview_by_session(self, session_id: str, user_id: int) -> list[dict[str, Any]]:
@@ -2497,19 +2499,35 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         assert status == 500
         assert response.get_json()["error"] == "session boom"
 
-    monkeypatch.setattr(db, "get_import_session", FakeBillsDB().get_import_session)
-    db.clear_session_result = True
+    monkeypatch.setattr(db, "get_import_session", db.__class__.get_import_session.__get__(db, db.__class__))
+    db.import_session_result = {
+        "session_id": "sess-4",
+        "status": "parsed",
+        "created_at": "2026-03-30 10:00:00",
+        "parsed_count": 1,
+        "preview_count": 1,
+        "file_paths": "a.csv",
+    }
+    db.clear_session_result = {"parser_count": 1, "preview_count": 1, "annotation_count": 0}
     with bills_route_app.test_request_context("/api/bills/import/v2/session/sess-4", method="DELETE"):
         _set_request_user_id(4)
         payload = cancel_session_route("sess-4").get_json() or {}
         assert payload == {"success": True, "message": "Session cleared"}
 
-    db.clear_session_result = False
+    db.import_session_result = None
     with bills_route_app.test_request_context("/api/bills/import/v2/session/sess-5", method="DELETE"):
         _set_request_user_id()
         payload = cancel_session_route("sess-5").get_json() or {}
         assert payload == {"success": False, "message": "Session not found"}
 
+    db.import_session_result = {
+        "session_id": "sess-6",
+        "status": "parsed",
+        "created_at": "2026-03-30 10:00:00",
+        "parsed_count": 1,
+        "preview_count": 1,
+        "file_paths": "a.csv",
+    }
     async def _raise_clear_error(*_args: Any, **_kwargs: Any) -> bool:
         raise RuntimeError("clear session boom")
 

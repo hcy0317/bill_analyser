@@ -313,47 +313,67 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                 if not preview_id:
                     continue
                 update_parts: list[str] = []
-                    user_id: int = 1,
+                params: list[Any] = []
+                field_mapping = {
+                    "date": "preview_date",
+                    "type": "preview_type",
+                    "amount": "preview_amount",
+                    "destinationAmount": "preview_destination_amount",
+                    "mainCategory": "preview_main_category",
+                    "subCategory": "preview_sub_category",
+                    "sourceAccountId": "preview_source_account_id",
+                    "destinationAccountId": "preview_destination_account_id",
+                    "counterparty": "preview_counterparty",
+                    "paymentMethod": "preview_payment_method",
+                    "description": "preview_description",
+                    "isSelected": "preview_selected",
+                    "preview_date": "preview_date",
                     "preview_type": "preview_type",
                     "preview_amount": "preview_amount",
                     "preview_destination_amount": "preview_destination_amount",
+                    "preview_main_category": "preview_main_category",
+                    "preview_sub_category": "preview_sub_category",
                     "preview_source_account_id": "preview_source_account_id",
                     "preview_destination_account_id": "preview_destination_account_id",
+                    "preview_counterparty": "preview_counterparty",
+                    "preview_payment_method": "preview_payment_method",
+                    "preview_description": "preview_description",
                     "preview_recurring_id": "preview_recurring_id",
                     "preview_recurring_name": "preview_recurring_name",
                     "preview_recurring_candidate_count": "preview_recurring_candidate_count",
                     "preview_recurring_match_score": "preview_recurring_match_score",
                     "preview_recurring_match_reasons": "preview_recurring_match_reasons",
                     "preview_recurring_matched_date": "preview_recurring_matched_date",
-                    "category_id": None,
+                    "preview_selected": "preview_selected",
+                    "is_selected": "preview_selected",
                     "selected": "preview_selected",
                 }
                 for key, column in field_mapping.items():
                     if key not in update_item:
                         continue
                     value = update_item[key]
-                    if key == "category_id":
-                        if value:
-                            category = await self.get_category_by_id(value, user_id=user_id)
-                            if category:
-                                update_parts.extend(["preview_main_category = ?", "preview_sub_category = ?"])
-                                params.extend([category.get("main_category", ""), category.get("sub_category", "")])
-                    elif key == "selected":
+                    if column == "preview_selected":
                         update_parts.append("preview_selected = ?")
                         params.append(1 if value else 0)
                     else:
                         update_parts.append(f"{column} = ?")
                         params.append(value)
+                if "category_id" in update_item and update_item.get("category_id"):
+                    category = await self.get_category_by_id(update_item["category_id"], user_id=user_id)
+                    if category:
+                        update_parts.extend(["preview_main_category = ?", "preview_sub_category = ?"])
+                        params.extend([category.get("main_category", ""), category.get("sub_category", "")])
                 if update_parts:
                     params.extend([preview_id, session_id, user_id])
-                    await conn.execute(
+                    cursor = await conn.execute(
                         (
                             f"UPDATE bills_preview SET {', '.join(update_parts)} "
                             "WHERE id = ? AND session_id = ? AND user_id = ?"
                         ),
                         tuple(params),
                     )
-                    updated_count += 1
+                    if cursor.rowcount > 0:
+                        updated_count += 1
             except Exception as exc:  # pragma: no cover - defensive logging branch
                 self.logger.error("[批量更新预览失败] id=%s, error=%s", update_item.get("id"), exc)
 

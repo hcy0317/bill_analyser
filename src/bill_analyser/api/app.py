@@ -71,6 +71,7 @@ def create_app():
     # 配置
     flask_app.config["JSON_AS_ASCII"] = False
     flask_app.config["JSON_SORT_KEYS"] = False
+    flask_app.json.sort_keys = False
 
     # 启用CORS - 修改为特定源，包含自定义请求头
     CORS(

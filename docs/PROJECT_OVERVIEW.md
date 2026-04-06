@@ -13,8 +13,10 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
   - 通过事件循环桥接调用异步服务
 - **业务层（Core）**：`src/bill_analyser/core/`
   - 账单导入编排、去重、分类、统计、汇率等核心逻辑
-- **数据层（Database）**：`src/bill_analyser/core/db.py`
-  - 基于 `aiosqlite` 的异步数据库访问
+- **数据层（Database）**：`src/bill_analyser/core/db.py` + `src/bill_analyser/core/db_*.py`
+  - `db.py` 只暴露公共 `Database` façade
+  - 真实持久化能力按 runtime / schema / 业务域 mixin 拆分到多个 `db_*.py` 模块
+  - 底层仍保持基于 `aiosqlite` 的异步数据库访问
 - **前端层（Vue3 + TS）**：`src/web/src/`
   - 视图、状态管理（Pinia stores）、服务层（axios）
 
@@ -53,13 +55,25 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 静态回归：`tests/new_ui/test_no_direct_legacy_adapter_usage.py` 会阻止重新引入 `V1*Adapter` / `V1ResponseBuilder` 旧命名、直接导入 `v1_* adapter` 模块，或重新提交这些 wrapper 文件
 
 ### 3.2 核心业务模块（`src/bill_analyser/core/`）
-- `db.py`：数据库初始化、迁移、查询、写入、缓存
+- `db.py`：薄 `Database` façade；对外维持统一导入入口，内部按 mixin 组装数据库能力
+- `db_runtime.py` / `db_shared.py` / `db_time.py`：数据库连接生命周期、共享请求/分组数据结构、UTC 时间与缓存辅助
+- `db_schema.py` + `db_schema_core.py` + `db_schema_users_security.py` + `db_schema_templates_imports.py`：schema 初始化与迁移编排；核心业务表、用户安全表、模板/导入相关表分别维护
+- `db_bills.py` / `db_categories.py` / `db_accounts.py` / `db_tags.py` / `db_templates.py`：账单、分类、账户、标签、模板域的 CRUD、批量操作与查询辅助
+- `db_users_auth.py` / `db_user_data.py` / `db_audit_backup.py`：用户与会话、2FA 与应用设置、用户数据管理、审计/备份域持久化逻辑
+- `db_budgets_core.py` / `db_budgets_reporting.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询
+- `db_import_configs.py` / `db_import_sessions.py` / `db_import_preview.py` / `db_import_learning.py`：导入模板配置、三阶段会话、预览编辑/确认、长期学习规则与复合匹配特征
 - `bill_service.py`：导入主流程编排（含 v2 三阶段导入）
 - `smart_dedup.py`：智能去重引擎（转账配对、平台银行去重、相似去重、分账去重）
 - `category_engine.py`：关键词规则解析与分类匹配（含类型过滤与预编译优化）
 - `exchange_rate_providers.py`：多汇率提供者聚合
 - `budget.py` / `sync.py` / `analyzer.py` / `report*.py`：预算、同步、分析、报表
 - `smart_dedup_v641_backup.py` 等历史版本备份文件已从运行时代码树移除
+
+### 3.2.1 Database façade 关系
+- 外部调用方（API 路由、服务、测试）继续只从 `src/bill_analyser/core/db.py` 导入 `Database`
+- `Database` 通过多继承顺序组合各域 mixin：预算 reporting → 导入 preview / session / config / learning → 用户数据 / 认证 → 模板 / 标签 / 账户 / 分类 / 账单 → 审计备份 → schema → runtime
+- schema 初始化由 `DatabaseSchemaMixin.init_db()` 统一编排，并在运行时通过 `DatabaseRuntimeMixin` 提供连接、路径重定向、缓存与上下文管理
+- 这种结构保持了公共 API 稳定，同时把预算域、导入链路、账户/标签/模板、认证安全等高耦合逻辑拆到独立文件维护
 
 ### 3.3 解析器模块（`src/bill_analyser/parsers/`）
 - 已有解析器：`wechat.py`、`alipay.py`、`icbc.py`、`abc.py`、`ccb.py`、`cmbc.py`
@@ -190,7 +204,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ## 6. 数据库与数据流
 
-### 6.1 主要业务表（`db.py` 初始化）
+### 6.1 主要业务表（由 `db.py` façade 通过 `DatabaseSchemaMixin` 初始化）
 - 交易域：`bills`
 - 分类域：`categories`
 - 账户域：`accounts`、`account_types`、`account_transfers`
@@ -200,6 +214,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
+- 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件
 
 ### 6.1.1 模板域当前漂移清单
 - 前端期望字段：`templateType/categoryId/sourceAccountId/destinationAccountId/sourceAmount/destinationAmount/hideAmount/tagIds/displayOrder/hidden/scheduled*`。

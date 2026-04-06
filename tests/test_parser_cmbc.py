@@ -276,3 +276,59 @@ def test_cmbc_parse_excel_covers_missing_headers_invalid_rows_and_new_old_amount
     assert len(old_format_bills) == 1
     assert old_format_bills[0]["counterparty"] == "最终有效"
     assert old_format_bills[0]["amount"] == 18.5
+
+
+def test_cmbc_parser_covers_remaining_html_csv_and_excel_branch_shapes(monkeypatch) -> None:
+    parser = CMBCParser()
+
+    html_df = pd.DataFrame(
+        [
+            ["交易时间", "支出金额", "存入金额", "账户余额", "对方账号", "对方名称", "交易方式", "摘要"],
+            ["2026-01-03 08:00:00", "32.80", "", "100.00", "6226", "测试商户", "手机银行", "工作餐"],
+            ["20170103", "32.80", "", "100.00", "6227", "仅日期商户", "手机银行", "无时间"],
+        ]
+    )
+    monkeypatch.setattr("bill_analyser.parsers.cmbc.pd.read_html", lambda *_args, **_kwargs: [html_df])
+    html_bills = parser._parse_html_xls("html_branch.xls")  # pylint: disable=protected-access
+
+    assert len(html_bills) == 2
+    assert html_bills[0]["date"] == "2026-01-03 08:00:00"
+    assert html_bills[1]["date"] == "2017-01-03"
+
+    monkeypatch.setattr(parser, "validate_file", lambda _file_path: True)
+    monkeypatch.setattr(
+        parser,
+        "read_lines_with_fallback",
+        lambda _file_path: (
+            [
+                "中国民生银行股份有限公司个人账户对账单\n",
+                "交易日期,交易金额,收/支,交易对手,交易说明\n",
+                "2026-01-03,-8.80,,便利店,早餐\n",
+            ],
+            "utf-8",
+        ),
+    )
+    csv_bills = parser.parse("negative_old_style.csv")
+
+    assert len(csv_bills) == 1
+    assert csv_bills[0]["type"] == "支出"
+    assert csv_bills[0]["amount"] == -8.8
+
+    parser = CMBCParser()
+    monkeypatch.setattr(parser, "validate_file", lambda _file_path: True)
+    monkeypatch.setattr(parser, "_is_html_file", lambda _file_path: False)
+    monkeypatch.setattr(
+        "bill_analyser.parsers.cmbc.pd.read_excel",
+        lambda *_args, **_kwargs: pd.DataFrame(
+            [
+                ["交易时间", "支出金额", "存入金额", "账户余额", "对方名称", "摘要"],
+                ["2026-01-03", "", "", "100", "零金额行", "应跳过"],
+                ["2026-01-04", "-12.50", "", "100", "借方有效", "借方有效"],
+            ]
+        ),
+    )
+    excel_bills = parser.parse("new_format_debit.xlsx")
+
+    assert len(excel_bills) == 1
+    assert excel_bills[0]["type"] == "支出"
+    assert excel_bills[0]["amount"] == -12.5

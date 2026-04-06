@@ -8,6 +8,7 @@
 import asyncio
 import base64
 import csv
+import inspect
 import json
 import mimetypes
 import os
@@ -2897,7 +2898,13 @@ def reclassify_preview_session(session_id: str):
                 ), 500
 
             # 2. 获取更新后的预览数据
-            preview_data = loop.run_until_complete(bill_service.get_import_preview(session_id))
+            preview_method_params = inspect.signature(bill_service.get_import_preview).parameters
+            if "user_id" in preview_method_params:
+                preview_data = loop.run_until_complete(
+                    bill_service.get_import_preview(session_id, user_id=request.user_id)
+                )
+            else:
+                preview_data = loop.run_until_complete(bill_service.get_import_preview(session_id))
 
             logger.info(
                 "[v2重新分类] 完成 session=%s, total=%s, categorized=%s, account_matched=%s",
@@ -4504,7 +4511,15 @@ def import_stage2_dedup():
             # 获取预览数据返回给前端
             preview_data = []
             if result.get("success"):
-                preview_data = loop.run_until_complete(bill_service.get_import_preview(session_id, selected_only=False))
+                preview_method_params = inspect.signature(bill_service.get_import_preview).parameters
+                if "user_id" in preview_method_params:
+                    preview_data = loop.run_until_complete(
+                        bill_service.get_import_preview(session_id, selected_only=False, user_id=user_id)
+                    )
+                else:
+                    preview_data = loop.run_until_complete(
+                        bill_service.get_import_preview(session_id, selected_only=False)
+                    )
 
             logger.info(
                 "[阶段2-去重] 完成: session=%s, 原始=%s, 去重后=%s, 预览数据=%s条",
@@ -4586,9 +4601,13 @@ def import_stage3_confirm():
             # 这确保只有前端传入的选中账单才会被导入，未选中的不会被导入
             if preview_updates:
                 # 第一步：重置该会话所有账单的选中状态为未选中
-                reset_count = loop.run_until_complete(
-                    db.reset_session_preview_selection(session_id, user_id)
-                )
+                reset_selection_params = inspect.signature(db.reset_session_preview_selection).parameters
+                if "user_id" in reset_selection_params:
+                    reset_count = loop.run_until_complete(
+                        db.reset_session_preview_selection(session_id, user_id)
+                    )
+                else:
+                    reset_count = loop.run_until_complete(db.reset_session_preview_selection(session_id))
                 logger.info("[阶段3-确认] 已重置 %s 条账单的选中状态", reset_count)
 
                 # 第二步：更新前端传入的选中账单
@@ -4692,9 +4711,12 @@ def cancel_import_session(session_id: str):
         asyncio.set_event_loop(loop)
 
         try:
-            result = loop.run_until_complete(db.clear_session_data(session_id, user_id))
+            session = loop.run_until_complete(db.get_import_session(session_id, user_id))
+            if not session:
+                return jsonify({"success": False, "message": "Session not found"})
 
-            return jsonify({"success": True, "message": "Session cleared", "result": result})
+            loop.run_until_complete(db.clear_session_data(session_id, user_id))
+            return jsonify({"success": True, "message": "Session cleared"})
 
         finally:
             loop.close()

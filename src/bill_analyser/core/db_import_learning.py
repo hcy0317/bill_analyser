@@ -181,7 +181,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         preview_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> dict[str, int]:
-        previews = await self.get_preview_by_session(session_id)
+        previews = await self.get_preview_by_session(session_id, user_id=user_id)
         preview_map = {int(preview["id"]): preview for preview in previews if preview.get("id")}
         samples = await self.get_import_annotation_samples(session_id, user_id=user_id)
 

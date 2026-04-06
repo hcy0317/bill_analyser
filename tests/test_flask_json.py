@@ -1,44 +1,52 @@
-import flask
+"""Flask jsonify 字段顺序回归。"""
+
 import json
 
-print(f'Flask版本: {flask.__version__}')
-from flask import Flask
-app = Flask(__name__)
-app.config['JSON_SORT_KEYS'] = False
-print(f'Flask JSON_SORT_KEYS配置: {app.config.get("JSON_SORT_KEYS")}')
-
-# 测试jsonify
 from flask import jsonify
-export_fields = ['type', 'main_category', 'sub_category', 'priority',
-                'keywords', 'description', 'icon', 'color', 'hidden']
-default_values = {
-    'type': 3,
-    'main_category': '',
-    'sub_category': '',
-    'priority': 0,
-    'keywords': '',
-    'description': '',
-    'icon': '',
-    'color': '',
-    'hidden': False
-}
-cat = {
-    'type': 2,
-    'main_category': '测试',
-    'sub_category': '',
-    'priority': 0,
-    'keywords': 'test',
-    'description': 'desc',
-    'icon': 'icon1',
-    'color': 'ff0000',
-    'hidden': False
-}
 
-cleaned_cat = {field: cat.get(field, default_values[field]) for field in export_fields}
-print(f'\n字典键顺序: {list(cleaned_cat.keys())}')
+from bill_analyser.api.app import create_app
 
-with app.app_context():
-    response = jsonify({'result': [cleaned_cat]})
-    json_str = response.get_data(as_text=True)
-    print(f'\nFlask jsonify输出 (前200字符):')
-    print(json_str[:200])
+
+def test_jsonify_preserves_export_field_order_when_sort_is_disabled() -> None:
+    """真实 create_app() 关闭排序后，jsonify 输出应保持字段构造顺序。"""
+    app = create_app()
+
+    export_fields = ["type", "main_category", "sub_category", "priority", "keywords", "description", "icon", "color", "hidden"]
+    default_values = {
+        "type": 3,
+        "main_category": "",
+        "sub_category": "",
+        "priority": 0,
+        "keywords": "",
+        "description": "",
+        "icon": "",
+        "color": "",
+        "hidden": False,
+    }
+    cat = {
+        "type": 2,
+        "main_category": "测试",
+        "sub_category": "",
+        "priority": 0,
+        "keywords": "test",
+        "description": "desc",
+        "icon": "icon1",
+        "color": "ff0000",
+        "hidden": False,
+    }
+
+    cleaned_cat = {field: cat.get(field, default_values[field]) for field in export_fields}
+
+    with app.app_context():
+        response = jsonify({"result": [cleaned_cat]})
+        payload = response.get_json()
+        raw_json = response.get_data(as_text=True)
+
+    assert app.config["JSON_SORT_KEYS"] is False
+    assert app.json.sort_keys is False
+    assert list(cleaned_cat.keys()) == export_fields
+    assert payload == {"result": [cleaned_cat]}
+    serialized_category = json.dumps(cleaned_cat, ensure_ascii=True, separators=(",", ":"))
+    expected_positions = [raw_json.index(f'"{field}"') for field in export_fields]
+    assert expected_positions == sorted(expected_positions)
+    assert serialized_category in raw_json.replace(" ", "").replace("\n", "")

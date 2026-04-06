@@ -125,7 +125,12 @@ class DatabaseFacadeBase:  # pylint: disable=too-many-public-methods
     ) -> bool:
         ...
 
-    async def get_preview_by_session(self, session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
+    async def get_preview_by_session(
+        self,
+        session_id: str,
+        user_id: int = 1,
+        selected_only: bool = False,
+    ) -> list[dict[str, Any]]:
         ...
 
     async def get_import_annotation_samples(self, session_id: str, user_id: int = 1) -> list[dict[str, Any]]:

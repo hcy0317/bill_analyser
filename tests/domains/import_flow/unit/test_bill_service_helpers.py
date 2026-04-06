@@ -1,6 +1,6 @@
 from __future__ import annotations
-# pyright: reportPrivateUsage=false, reportUnusedVariable=false, reportUnusedImport=false
 
+# pyright: reportPrivateUsage=false, reportUnusedVariable=false, reportUnusedImport=false
 import json
 from datetime import datetime
 from typing import Any, cast
@@ -51,6 +51,8 @@ class FakeBillServiceDB:
         self.annotation_samples: list[dict[str, Any]] = []
         self.preview_selection_updates: list[tuple[list[int], bool]] = []
         self.cleared_sessions: list[str] = []
+        self.cleared_session_calls: list[tuple[str, int]] = []
+        self.preview_query_calls: list[tuple[str, int, bool]] = []
         self.session_status_updates: list[tuple[str, str]] = []
         self.preview_classification_updates: list[list[dict[str, Any]]] = []
         self.category_by_name: dict[tuple[str, str], dict[str, Any]] = {
@@ -153,10 +155,22 @@ class FakeBillServiceDB:
         self.promoted_annotation_sessions.append((session_id, preview_ids, user_id))
         return {"saved_rule_count": len(preview_ids or []), "skipped_count": 0}
 
-    async def get_preview_by_session(self, _session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
+    async def get_preview_by_session(
+        self,
+        session_id: str,
+        user_id: int = 1,
+        selected_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        self.preview_query_calls.append((session_id, user_id, selected_only))
+        previews = [
+            preview
+            for preview in self.preview_rows
+            if preview.get("session_id") in (None, session_id)
+            and preview.get("user_id") in (None, user_id)
+        ]
         if not selected_only:
-            return list(self.preview_rows)
-        return [preview for preview in self.preview_rows if bool(preview.get("preview_selected", 1))]
+            return list(previews)
+        return [preview for preview in previews if bool(preview.get("preview_selected", 1))]
 
     async def get_import_annotation_samples(self, _session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         _ = user_id
@@ -166,8 +180,9 @@ class FakeBillServiceDB:
         self.preview_selection_updates.append((list(preview_ids), selected))
         return len(preview_ids)
 
-    async def clear_session_data(self, session_id: str) -> int:
+    async def clear_session_data(self, session_id: str, user_id: int = 1) -> int:
         self.cleared_sessions.append(session_id)
+        self.cleared_session_calls.append((session_id, user_id))
         return 3
 
     async def update_import_session_status(self, session_id: str, status: str, total_parsed: int = 0) -> None:
@@ -241,7 +256,7 @@ class FakeCategoryEngine:
 
 
 def _make_service(fake_db: FakeBillServiceDB | None = None) -> BillService:
-    return BillService(db=cast(Any, fake_db or FakeBillServiceDB()))
+    return BillService(db=cast("Any", fake_db or FakeBillServiceDB()))
 
 
 
@@ -310,7 +325,7 @@ async def test_detect_cash_transfers_and_type_category_consistency() -> None:
     """存取转账检测和类型/分类一致性修复应覆盖收入支出两种方向。"""
     fake_db = FakeBillServiceDB()
     service = _make_service(fake_db)
-    service.category_engine = cast(Any, FakeCategoryEngine())
+    service.category_engine = cast("Any", FakeCategoryEngine())
 
     bills = [
         {
@@ -627,7 +642,149 @@ async def test_import_preview_selection_updates_and_cancel_session_helpers() -> 
     assert fake_db.preview_selection_updates == [([1], True), ([2], False)]
     assert cancel_result == {"success": True, "session_id": "session-preview", "cleared": 3}
     assert fake_db.cleared_sessions == ["session-preview"]
+    assert fake_db.cleared_session_calls == [("session-preview", 1)]
     assert fake_db.session_status_updates == [("session-preview", "cancelled")]
+
+
+@pytest.mark.asyncio
+async def test_preview_reclassify_and_session_cleanup_respect_non_default_user_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非默认用户的 preview / reclassify / confirm / cancel 路径必须显式透传 user_id。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 11,
+            "session_id": "session-user-7",
+            "user_id": 7,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 12.3,
+            "preview_destination_amount": 0,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "早餐铺",
+            "preview_payment_method": "支付宝",
+            "preview_description": "共同描述",
+            "preview_parser_id": "wechat",
+            "preview_selected": 1,
+            "dedup_type": "remaining",
+        },
+        {
+            "id": 12,
+            "session_id": "session-user-7",
+            "user_id": 1,
+            "preview_date": "2025-01-03 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 99.0,
+            "preview_destination_amount": 0,
+            "preview_main_category": "其他",
+            "preview_sub_category": "其他",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "默认用户账单",
+            "preview_payment_method": "银行卡",
+            "preview_description": "不应读到",
+            "preview_parser_id": "alipay",
+            "preview_selected": 1,
+            "dedup_type": "remaining",
+        },
+    ]
+    fake_db.annotation_samples = [
+        {
+            "preview_id": 11,
+            "annotated_type": "转账",
+            "annotated_category_id": 10,
+            "annotated_source_account_id": 2,
+            "annotated_destination_account_id": 3,
+        }
+    ]
+    service = _make_service(fake_db)
+    service._initialized = True
+
+    class ReclassifyCategoryEngine:
+        def __init__(self) -> None:
+            self.rules = [{"type": TransactionType.TRANSFER, "main": "资金管理", "sub": "存取现金"}]
+
+        async def load_rules_from_db(self, _db: object, user_id: int = 1) -> None:
+            _ = user_id
+
+        async def batch_match_categories(self, bills: list[dict[str, Any]], types: Any = None) -> list[dict[str, Any]]:
+            _ = types
+            for bill in bills:
+                bill["main_category"] = "资金管理"
+                bill["sub_category"] = "存取现金"
+                bill["source_account_id"] = 2
+                bill["destination_account_id"] = 3
+            return bills
+
+    service.category_engine = cast("Any", ReclassifyCategoryEngine())
+
+    async def zero_learning(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    async def identity_step(bills: list[dict[str, Any]], user_id: int = 1):
+        _ = user_id
+        return bills
+
+    async def confirm_preview_to_bills(session_id: str, user_id: int) -> dict[str, Any]:
+        assert session_id == "session-user-7"
+        assert user_id == 7
+        return {"confirmed_count": 1, "duplicate_count": 0, "errors": []}
+
+    async def clear_session_data_for_confirm(session_id: str, user_id: int = 1) -> dict[str, int]:
+        fake_db.cleared_sessions.append(session_id)
+        fake_db.cleared_session_calls.append((session_id, user_id))
+        return {"parser_count": 1, "preview_count": 1}
+
+    monkeypatch.setattr(service, "_build_session_annotation_rule_lookup", zero_learning)
+    monkeypatch.setattr(service, "_apply_session_annotation_learning_rules", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(service, "_apply_import_learning_rules", zero_learning)
+    monkeypatch.setattr(service, "_detect_investment_candidates", identity_step)
+    monkeypatch.setattr(service, "_match_accounts", identity_step)
+    monkeypatch.setattr(service, "_detect_cash_transfers", identity_step)
+    monkeypatch.setattr(fake_db, "confirm_preview_to_bills", confirm_preview_to_bills, raising=False)
+    monkeypatch.setattr(fake_db, "clear_session_data", clear_session_data_for_confirm)
+
+    preview_items = await service.get_import_preview("session-user-7", user_id=7)
+    reclassify_result = await service.reclassify_preview_bills("session-user-7", user_id=7)
+    confirm_result = await service.import_stage3_confirm("session-user-7", user_id=7, selected_ids=[11])
+    cancel_result = await service.cancel_import_session("session-user-7", user_id=7)
+
+    assert [item["id"] for item in preview_items] == [11]
+    assert reclassify_result["success"] is True
+    assert reclassify_result["total"] == 1
+    assert reclassify_result["categorized"] == 1
+    assert reclassify_result["account_matched"] == 1
+    assert confirm_result["success"] is True
+    assert confirm_result["imported_count"] == 1
+    assert cancel_result == {
+        "success": True,
+        "session_id": "session-user-7",
+        "cleared": {"parser_count": 1, "preview_count": 1},
+    }
+    assert fake_db.preview_query_calls == [
+        ("session-user-7", 7, False),
+        ("session-user-7", 7, False),
+    ]
+    assert fake_db.preview_classification_updates == [
+        [
+            {
+                "id": 11,
+                "preview_type": "转账",
+                "preview_main_category": "资金管理",
+                "preview_sub_category": "存取现金",
+                "preview_source_account_id": 2,
+                "preview_destination_account_id": 3,
+            }
+        ]
+    ]
+    assert fake_db.cleared_session_calls == [
+        ("session-user-7", 7),
+        ("session-user-7", 7),
+    ]
 
 
 @pytest.mark.asyncio
@@ -676,7 +833,7 @@ async def test_reclassify_preview_bills_replays_annotations_and_updates_preview_
                 bill.setdefault("sub_category", "存取现金")
             return bills
 
-    service.category_engine = cast(Any, ReclassifyCategoryEngine())
+    service.category_engine = cast("Any", ReclassifyCategoryEngine())
 
     async def zero_learning(*_args: object, **_kwargs: object) -> int:
         return 0
@@ -726,7 +883,7 @@ def test_learning_similarity_helpers_cover_deserialize_scoring_summary_and_signa
     service = _make_service(fake_db)
 
     assert service._deserialize_learning_match_features({"match_features_json": "{bad"}) == {}
-    assert service._deserialize_learning_match_features({"match_features_json": '[1, 2]'}) == {}
+    assert service._deserialize_learning_match_features({"match_features_json": "[1, 2]"}) == {}
 
     parsed_features = service._deserialize_learning_match_features(
         {

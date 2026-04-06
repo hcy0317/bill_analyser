@@ -159,3 +159,43 @@ def test_ccb_parser_skips_bad_rows_and_uses_date_and_counterparty_fallbacks(
     assert bills[0]["amount"] == -18.6
     assert bills[1]["counterparty"] == "工资入账"
     assert bills[1]["amount"] == 200.0
+
+
+def test_ccb_parser_covers_missing_headers_row_errors_and_parse_failures(monkeypatch) -> None:
+    parser = CCBParser()
+    assert parser._find_header_row(pd.DataFrame([["无效表头"]])) == -1  # pylint: disable=protected-access
+
+    dataframe = pd.DataFrame(
+        [
+            ["记账日", "交易日期", "支出", "收入", "账户余额"],
+            ["20260112", "20260112", "18.6", "", "1000.0"],
+        ]
+    )
+
+    monkeypatch.setattr(
+        parser,
+        "_build_bill",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad ccb row")),
+    )
+    assert parser._parse_data_rows(dataframe, ["记账日", "交易日期", "支出", "收入", "账户余额"], 1) == []  # pylint: disable=protected-access
+
+    parser.validate_file = lambda _file_path: False  # type: ignore[method-assign]
+    assert parser.parse("ignored.xlsx") == []
+
+    parser = CCBParser()
+    monkeypatch.setattr(parser, "validate_file", lambda _file_path: True)
+    monkeypatch.setattr("bill_analyser.parsers.ccb.pd.read_excel", lambda *_args, **_kwargs: pd.DataFrame([["无效表头"]]))
+    assert parser.parse("missing_header.xlsx") == []
+
+    monkeypatch.setattr(parser, "validate_file", lambda _file_path: True)
+    monkeypatch.setattr(
+        "bill_analyser.parsers.ccb.pd.read_excel",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("broken parse")),
+    )
+    assert parser.parse("broken.xlsx") == []
+
+
+def test_ccb_build_trade_time_accepts_preformatted_date_and_time() -> None:
+    parser = CCBParser()
+
+    assert parser._build_trade_time({"交易日期": "2026-01-12", "交易时间": "08:15:00"}) == "2026-01-12 08:15:00"  # pylint: disable=protected-access

@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import inspect
 import json
 import re
 import warnings
@@ -2239,7 +2240,11 @@ class BillService:
             result["errors"].extend(confirm_result.get("errors", []))
 
             # 清理临时数据
-            clear_result = await self.db.clear_session_data(session_id)
+            clear_session_params = inspect.signature(self.db.clear_session_data).parameters
+            if "user_id" in clear_session_params:
+                clear_result = await self.db.clear_session_data(session_id, user_id=user_id)
+            else:
+                clear_result = await self.db.clear_session_data(session_id)
             self.logger.info(
                 "[阶段3] 清理临时数据: parser=%d, preview=%d",
                 clear_result.get("parser_count", 0),
@@ -2262,7 +2267,12 @@ class BillService:
         return result
 
     @log_method
-    async def get_import_preview(self, session_id: str, selected_only: bool = False) -> list[dict[str, Any]]:
+    async def get_import_preview(
+        self,
+        session_id: str,
+        selected_only: bool = False,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
         """
         获取导入预览数据
 
@@ -2273,7 +2283,15 @@ class BillService:
         Returns:
             List[Dict]: 预览账单列表
         """
-        previews = await self.db.get_preview_by_session(session_id, selected_only)
+        preview_method_params = inspect.signature(self.db.get_preview_by_session).parameters
+        if "user_id" in preview_method_params:
+            previews = await self.db.get_preview_by_session(
+                session_id,
+                user_id=user_id,
+                selected_only=selected_only,
+            )
+        else:
+            previews = await self.db.get_preview_by_session(session_id, selected_only=selected_only)
         if not previews:
             return []
 
@@ -2751,12 +2769,13 @@ class BillService:
         return updated
 
     @log_method
-    async def cancel_import_session(self, session_id: str) -> dict[str, Any]:
+    async def cancel_import_session(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         """
         取消导入会话，清理临时数据
 
         Args:
             session_id: 导入会话ID
+            user_id: 用户ID
 
         Returns:
             Dict: 清理结果
@@ -2764,7 +2783,11 @@ class BillService:
         self.logger.info("[取消导入] session_id=%s", session_id)
 
         # 清理临时数据
-        clear_result = await self.db.clear_session_data(session_id)
+        clear_session_params = inspect.signature(self.db.clear_session_data).parameters
+        if "user_id" in clear_session_params:
+            clear_result = await self.db.clear_session_data(session_id, user_id=user_id)
+        else:
+            clear_result = await self.db.clear_session_data(session_id)
 
         # 更新会话状态
         await self.db.update_import_session_status(session_id, "cancelled")
@@ -2822,7 +2845,11 @@ class BillService:
 
             # 2. 获取所有预览账单
             self.logger.info("[重新分类] 步骤2: 读取预览账单")
-            previews = await self.db.get_preview_by_session(session_id)
+            preview_method_params = inspect.signature(self.db.get_preview_by_session).parameters
+            if "user_id" in preview_method_params:
+                previews = await self.db.get_preview_by_session(session_id, user_id=user_id)
+            else:
+                previews = await self.db.get_preview_by_session(session_id)
             result["total"] = len(previews)
             self.logger.info("[重新分类] 读取到 %d 条预览账单", len(previews))
 
