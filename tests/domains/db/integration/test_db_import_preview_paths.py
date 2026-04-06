@@ -1,3 +1,5 @@
+"""DB integration coverage for import-preview editing, guards, and confirm edge paths."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -5,6 +7,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from bill_analyser.core.db import Database
+
+# pylint: disable=protected-access,too-many-locals
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +36,13 @@ async def _create_user(db: Database, username: str) -> int:
     )
 
 
-async def _create_category(db: Database, *, user_id: int, main_category: str, sub_category: str = "") -> int:
+async def _create_category(
+    db: Database,
+    *,
+    user_id: int,
+    main_category: str,
+    sub_category: str = "",
+) -> int:
     category_id = await db.create_category(
         {
             "type": 3,
@@ -52,7 +62,9 @@ async def _create_category(db: Database, *, user_id: int, main_category: str, su
 
 
 @pytest.mark.asyncio
-async def test_preview_edit_confirm_and_cleanup_paths_cover_alias_fields_and_counts(tmp_path: Path) -> None:
+async def test_preview_edit_confirm_and_cleanup_paths_cover_alias_fields_and_counts(
+    tmp_path: Path,
+) -> None:
     """导入预览链路应覆盖插入、批量编辑、确认入账和清理计数。"""
     db = await _create_database(tmp_path)
     try:
@@ -172,7 +184,11 @@ async def test_preview_edit_confirm_and_cleanup_paths_cover_alias_fields_and_cou
 
         selected_preview_ids = {
             int(item["id"])
-            for item in await db.get_preview_by_session(session_id, user_id=user_id, selected_only=True)
+            for item in await db.get_preview_by_session(
+                session_id,
+                user_id=user_id,
+                selected_only=True,
+            )
         }
         assert first_preview_id in selected_preview_ids
         assert second_preview_id not in selected_preview_ids
@@ -180,9 +196,23 @@ async def test_preview_edit_confirm_and_cleanup_paths_cover_alias_fields_and_cou
 
         reset_count = await db.reset_session_preview_selection(session_id, user_id=user_id)
         assert reset_count == 3
-        assert await db.get_preview_by_session(session_id, user_id=user_id, selected_only=True) == []
+        assert (
+            await db.get_preview_by_session(
+                session_id,
+                user_id=user_id,
+                selected_only=True,
+            )
+            == []
+        )
 
-        assert await db.update_preview_selection([first_preview_id, second_preview_id], True, user_id=user_id) == 2
+        assert (
+            await db.update_preview_selection(
+                [first_preview_id, second_preview_id],
+                True,
+                user_id=user_id,
+            )
+            == 2
+        )
 
         conn = await db._get_connection()
         await conn.execute(
@@ -243,5 +273,133 @@ async def test_preview_edit_confirm_and_cleanup_paths_cover_alias_fields_and_cou
             "annotation_count": 1,
         }
         assert await db.get_preview_by_session(session_id, user_id=user_id) == []
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_guard_paths_return_empty_or_false_without_side_effects(
+    tmp_path: Path,
+) -> None:
+    """预览链路的空输入/无效输入 guard 分支应返回安全默认值。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_guard_user")
+        session_id = "preview-guard-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-05-01 08:00:00",
+                "preview_type": "支出",
+                "preview_amount": 12.5,
+                "preview_counterparty": "安全默认值商户",
+                "preview_description": "安全默认值备注",
+            },
+            user_id=user_id,
+        )
+        assert preview_id > 0
+
+        assert await db.insert_preview_bills_batch(session_id, [], user_id=user_id) == 0
+        assert await db.update_preview_selection([], True, user_id=user_id) == 0
+        assert await db.update_preview_bill(preview_id, {}, user_id=user_id) is False
+        assert (
+            await db.update_preview_bill(
+                preview_id,
+                {"category_id": 999999},
+                user_id=user_id,
+            )
+            is False
+        )
+        assert await db.update_preview_bills_batch(session_id, [], user_id=user_id) == 0
+        assert await db.update_preview_bills_batch(
+            session_id,
+            [{"preview_type": "收入"}],
+            user_id=user_id,
+        ) == 0
+        assert await db.get_recurring_candidates_for_preview(999999, user_id=user_id) == {
+            "preview": None,
+            "linked_recurring_id": None,
+            "candidates": [],
+        }
+
+        preview = await db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        assert preview is not None
+        assert preview["preview_type"] == "支出"
+        assert preview["preview_description"] == "安全默认值备注"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_confirm_handles_income_duplicates_missing_recurring_and_dedup_query_window(
+    tmp_path: Path,
+) -> None:
+    """确认预览应覆盖收入正数化、重复 hash、缺失 recurring 和 dedup 时间窗口查询。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_duplicate_user")
+        session_id = "preview-duplicate-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=3)
+
+        duplicate_preview = {
+            "preview_date": "2026-05-01 09:00:00",
+            "preview_type": "收入",
+            "preview_amount": 88.0,
+            "preview_counterparty": "工资账户",
+            "preview_payment_method": "银行卡",
+            "preview_description": "五月奖金",
+        }
+        first_preview_id = await db.insert_preview_bill(
+            session_id,
+            duplicate_preview,
+            user_id=user_id,
+        )
+        second_preview_id = await db.insert_preview_bill(
+            session_id,
+            duplicate_preview,
+            user_id=user_id,
+        )
+        recurring_preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-05-31 18:00:00",
+                "preview_type": "transfer",
+                "preview_amount": 66.0,
+                "preview_counterparty": "月底调拨",
+                "preview_payment_method": "余额转账",
+                "preview_description": "月底转账收入",
+                "preview_recurring_id": 999999,
+                "preview_recurring_name": "不存在的 recurring",
+            },
+            user_id=user_id,
+        )
+        assert first_preview_id > 0
+        assert second_preview_id > 0
+        assert recurring_preview_id > 0
+
+        confirm_result = await db.confirm_preview_to_bills(session_id, user_id=user_id)
+        assert confirm_result == {
+            "confirmed_count": 2,
+            "skipped_count": 0,
+            "duplicate_count": 1,
+            "errors": [],
+        }
+
+        session = await db.get_import_session(session_id, user_id=user_id)
+        assert session is not None
+        assert session["status"] == "completed"
+        assert int(session["total_confirmed"]) == 2
+
+        existing_bills = await db.get_existing_bills_for_dedup(
+            user_id,
+            "2026-05-01",
+            "2026-05-31",
+        )
+        assert [(bill["date"], bill["type"], bill["amount"]) for bill in existing_bills] == [
+            ("2026-05-01 09:00:00", "收入", 88.0),
+            ("2026-05-31 18:00:00", "transfer", 66.0),
+        ]
     finally:
         await db.close()
