@@ -1,5 +1,11 @@
+"""Route-level branch coverage for categories endpoints."""
+
 from __future__ import annotations
 
+import sqlite3
+
+# pylint: disable=missing-module-docstring,missing-function-docstring,missing-class-docstring
+# pylint: disable=line-too-long,too-many-locals,too-many-statements,unnecessary-lambda,duplicate-code,too-many-lines
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
@@ -49,6 +55,8 @@ class FakeCategoriesDB:
             {"id": 102, "main_category": "已有分类", "sub_category": "已有子类", "comment": "地铁站"},
         ]
         self.updated_bills: list[tuple[int, dict[str, Any]]] = []
+        self.last_main_category_update_user_id: int | None = None
+        self.last_main_category_delete_user_id: int | None = None
 
     def get_all_categories(self, user_id: int = 0) -> list[dict[str, Any]]:
         _ = user_id
@@ -76,7 +84,8 @@ class FakeCategoriesDB:
         category = self.categories.get(int(category_id))
         return dict(category) if category else None
 
-    def update_main_category_name(self, old_name: str, new_name: str) -> bool:
+    def update_main_category_name(self, old_name: str, new_name: str, user_id: int = 0) -> bool:
+        self.last_main_category_update_user_id = user_id
         for category in self.categories.values():
             if category["main_category"] == old_name:
                 category["main_category"] = new_name
@@ -90,7 +99,8 @@ class FakeCategoriesDB:
         category.update(payload)
         return True
 
-    def delete_categories_by_main_category(self, main_category: str) -> bool:
+    def delete_categories_by_main_category(self, main_category: str, user_id: int = 0) -> bool:
+        self.last_main_category_delete_user_id = user_id
         original = len(self.categories)
         self.categories = {
             key: value for key, value in self.categories.items() if value["main_category"] != main_category
@@ -252,6 +262,26 @@ def test_categories_routes_cover_crud_rules_statistics_and_batch_create(
         assert response.get_json()["error"] == "Invalid category ID"
 
     with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        data="null",
+        content_type="application/json",
+    ):
+        response, status = update_category("1")
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        data="{invalid-json",
+        content_type="application/json",
+    ):
+        response, status = update_category("1")
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with categories_route_app.test_request_context(
         "/api/categories/virtual_交通",
         method="PUT",
         json={"name": "出行", "comment": "updated"},
@@ -259,6 +289,34 @@ def test_categories_routes_cover_crud_rules_statistics_and_batch_create(
         payload = update_category("virtual_交通").get_json() or {}
         assert payload["success"] is True
         assert payload["result"]["name"] == "出行"
+        assert db.last_main_category_update_user_id == 7
+
+    virtual_target_conflict_db = FakeCategoriesDB()
+    virtual_target_conflict_db.categories[10] = {
+        "id": 10,
+        "main_category": "已存在主类",
+        "sub_category": "",
+        "type": 3,
+        "priority": 4,
+        "hidden": False,
+    }
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (virtual_target_conflict_db, object(), engine),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "已存在主类"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 409
+        assert response.get_json()["error"] == "Category rename conflict"
+        assert virtual_target_conflict_db.categories[3]["main_category"] == "交通"
+        assert virtual_target_conflict_db.categories[10]["main_category"] == "已存在主类"
+
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (db, object(), engine))
 
     with categories_route_app.test_request_context(
         "/api/categories/999",
@@ -268,6 +326,37 @@ def test_categories_routes_cover_crud_rules_statistics_and_batch_create(
         response, status = update_category("999")
         assert status == 404
         assert response.get_json()["error"] == "Category not found"
+
+    with categories_route_app.test_request_context(
+        "/api/categories/999",
+        method="PUT",
+        json={"comment": "missing without name"},
+    ):
+        response, status = update_category("999")
+        assert status == 404
+        assert response.get_json()["error"] == "Category not found"
+
+    subcategory_conflict_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (subcategory_conflict_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        subcategory_conflict_db,
+        "update_category",
+        lambda *args, **kwargs: (_ for _ in ()).throw(sqlite3.IntegrityError("duplicate subcategory")),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/2",
+        method="PUT",
+        json={"name": "重名子分类"},
+    ):
+        response, status = update_category("2")
+        assert status == 409
+        assert response.get_json()["error"] == "Category update conflict"
+
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (db, object(), engine))
 
     with categories_route_app.test_request_context(
         "/api/categories/move",
@@ -305,6 +394,7 @@ def test_categories_routes_cover_crud_rules_statistics_and_batch_create(
         payload = delete_category("virtual_餐饮").get_json() or {}
         assert payload["success"] is True
         assert all(item["main_category"] != "餐饮" for item in db.categories.values())
+        assert db.last_main_category_delete_user_id == 7
 
     with categories_route_app.test_request_context("/api/categories/999", method="DELETE"):
         response, status = delete_category("999")
@@ -524,7 +614,7 @@ def test_categories_routes_cover_error_paths(
     ):
         response, status = update_category("1")
         assert status == 500
-        assert response.get_json()["error"] == "update boom"
+        assert response.get_json()["error"] == "Failed to update category"
 
     monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (update_fail_db, object(), FakeCategoryEngine()))
     with categories_route_app.test_request_context(
@@ -534,7 +624,7 @@ def test_categories_routes_cover_error_paths(
     ):
         response, status = move_categories()
         assert status == 500
-        assert response.get_json()["error"] == "update boom"
+        assert response.get_json()["error"] == "Failed to move categories"
 
     delete_fail_db = FakeCategoriesDB()
     monkeypatch.setattr(
@@ -546,7 +636,7 @@ def test_categories_routes_cover_error_paths(
     with categories_route_app.test_request_context("/api/categories/1", method="DELETE"):
         response, status = delete_category("1")
         assert status == 500
-        assert response.get_json()["error"] == "delete boom"
+        assert response.get_json()["error"] == "Failed to delete category"
 
     monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (list_fail_db, object(), FakeCategoryEngine()))
     with categories_route_app.test_request_context("/api/categories/flat"):
@@ -640,7 +730,7 @@ def test_categories_routes_cover_error_paths(
     ):
         response, status = import_categories()
         assert status == 500
-        assert response.get_json()["error"] == "import boom"
+        assert response.get_json()["error"] == "Failed to import categories"
 
     get_fail_db = FakeCategoriesDB()
     monkeypatch.setattr(
@@ -673,7 +763,6 @@ def test_categories_routes_cover_remaining_branch_closures(
     get_category_statistics = _unwrap(categories_module.get_category_statistics)
     update_all_categories = _unwrap(categories_module.update_all_categories)
     batch_create_categories = _unwrap(categories_module.batch_create_categories)
-    recategorize_all_bills = _unwrap(categories_module.recategorize_all_bills)
     import_categories = _unwrap(categories_module.import_categories)
     get_category = _unwrap(categories_module.get_category)
 
@@ -742,6 +831,139 @@ def test_categories_routes_cover_remaining_branch_closures(
         assert created["icon"] == "mdi-star"
         assert created["color"] == "#123456"
 
+    race_virtual_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (race_virtual_db, object(), engine))
+
+    def race_create_category(payload: dict[str, Any], user_id: int = 0) -> int | None:
+        if payload.get("main_category") == "竞态主类" and payload.get("sub_category") == "":
+            race_virtual_db.categories[99] = {"id": 99, **payload}
+            return None
+        return FakeCategoriesDB.create_category(race_virtual_db, payload, user_id=user_id)
+
+    monkeypatch.setattr(race_virtual_db, "create_category", race_create_category)
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_不存在的虚拟主类",
+        method="PUT",
+        json={"name": "竞态主类", "comment": "raced create"},
+    ):
+        payload = update_category("virtual_不存在的虚拟主类").get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["name"] == "竞态主类"
+        assert race_virtual_db.categories[99]["description"] == "raced create"
+
+    rollback_virtual_db = FakeCategoriesDB()
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (rollback_virtual_db, object(), engine))
+    monkeypatch.setattr(rollback_virtual_db, "create_category", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        rollback_virtual_db,
+        "get_category_by_name",
+        lambda main_category, sub_category, user_id=0: None,
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "回滚主类"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to save category"
+        assert rollback_virtual_db.categories[3]["main_category"] == "交通"
+
+    rollback_virtual_exception_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (rollback_virtual_exception_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        rollback_virtual_exception_db,
+        "get_category_by_name",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("virtual save boom")),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "回滚异常主类"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to save category"
+        assert rollback_virtual_exception_db.categories[3]["main_category"] == "交通"
+
+    no_rename_rollback_db = FakeCategoriesDB()
+    no_rename_rollback_db.categories[10] = {
+        "id": 10,
+        "main_category": "已存在主类",
+        "sub_category": "",
+        "type": 3,
+        "priority": 4,
+        "hidden": False,
+    }
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (no_rename_rollback_db, object(), engine),
+    )
+
+    original_update_category = no_rename_rollback_db.update_category
+
+    def fail_existing_root_update(category_id: int, payload: dict[str, Any], user_id: int = 0) -> bool:
+        if int(category_id) == 10:
+            return False
+        return original_update_category(category_id, payload, user_id=user_id)
+
+    monkeypatch.setattr(no_rename_rollback_db, "update_category", fail_existing_root_update)
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_不存在旧主类",
+        method="PUT",
+        json={"name": "已存在主类", "comment": "should not rollback"},
+    ):
+        response, status = update_category("virtual_不存在旧主类")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to save category"
+        assert no_rename_rollback_db.categories[10]["main_category"] == "已存在主类"
+
+    bills_fallback_db = FakeCategoriesDB()
+    bills_fallback_db.categories[10] = {
+        "id": 10,
+        "main_category": "已存在主类",
+        "sub_category": "",
+        "type": 3,
+        "priority": 4,
+        "hidden": False,
+    }
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (bills_fallback_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        bills_fallback_db,
+        "get_all_categories",
+        lambda user_id=0: [
+            {"id": 0, "main_category": "账单回退旧主类", "sub_category": "", "type": 3},
+            *FakeCategoriesDB.get_all_categories(bills_fallback_db, user_id=user_id),
+        ],
+    )
+
+    original_bills_fallback_update = bills_fallback_db.update_category
+
+    def fail_bills_fallback_root_update(category_id: int, payload: dict[str, Any], user_id: int = 0) -> bool:
+        if int(category_id) == 10:
+            return False
+        return original_bills_fallback_update(category_id, payload, user_id=user_id)
+
+    monkeypatch.setattr(bills_fallback_db, "update_category", fail_bills_fallback_root_update)
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_账单回退旧主类",
+        method="PUT",
+        json={"name": "已存在主类", "comment": "no bills fallback rollback"},
+    ):
+        response, status = update_category("virtual_账单回退旧主类")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to save category"
+        assert bills_fallback_db.categories[10]["main_category"] == "已存在主类"
+
     normal_update_db = FakeCategoriesDB()
     monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (normal_update_db, object(), engine))
     with categories_route_app.test_request_context(
@@ -794,6 +1016,7 @@ def test_categories_routes_cover_remaining_branch_closures(
         assert payload["result"]["name"] == "餐饮新"
         assert normal_update_db.categories[1]["main_category"] == "餐饮新"
         assert normal_update_db.categories[2]["main_category"] == "餐饮新"
+        assert normal_update_db.last_main_category_update_user_id == 21
 
     monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (normal_update_db, object(), engine))
     with categories_route_app.test_request_context(
@@ -905,6 +1128,163 @@ def test_categories_routes_cover_remaining_branch_closures(
         payload = _unwrap_response(get_category("3")).get_json() or {}
         assert payload["success"] is True
         assert payload["result"]["parentId"] == "0"
+
+
+def test_categories_routes_cover_virtual_bulk_conflict_and_noop_delete(
+    categories_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """虚拟主分类批量改名冲突与空删除应返回受控状态码。"""
+    db = FakeCategoriesDB()
+    engine = FakeCategoryEngine()
+
+    monkeypatch.setattr(categories_module, "_run_async", lambda value: value)
+    monkeypatch.setattr(categories_module, "get_app_context", lambda user_id=None: (db, object(), engine))
+    monkeypatch.setattr(categories_module, "_get_request_user_id", lambda: 42)
+
+    update_category = _unwrap(categories_module.update_category)
+    delete_category = _unwrap(categories_module.delete_category)
+    recategorize_all_bills = _unwrap(categories_module.recategorize_all_bills)
+
+    monkeypatch.setattr(db, "update_main_category_name", lambda *args, **kwargs: False)
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "出行"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 409
+        assert response.get_json()["error"] == "Category rename conflict"
+
+    normal_parent_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (normal_parent_db, object(), engine),
+    )
+    monkeypatch.setattr(normal_parent_db, "update_main_category_name", lambda *args, **kwargs: False)
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        json={"name": "餐饮新"},
+    ):
+        response, status = update_category("1")
+        assert status == 409
+        assert response.get_json()["error"] == "Category rename conflict"
+
+    rollback_normal_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (rollback_normal_db, object(), engine),
+    )
+    monkeypatch.setattr(rollback_normal_db, "update_category", lambda *args, **kwargs: False)
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        json={"name": "餐饮新"},
+    ):
+        response, status = update_category("1")
+        assert status == 404
+        assert response.get_json()["error"] == "Category not found"
+        assert rollback_normal_db.categories[1]["main_category"] == "餐饮"
+        assert rollback_normal_db.categories[2]["main_category"] == "餐饮"
+
+    rollback_normal_exception_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (rollback_normal_exception_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        rollback_normal_exception_db,
+        "update_category",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("normal save boom")),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/1",
+        method="PUT",
+        json={"name": "餐饮新"},
+    ):
+        response, status = update_category("1")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to update category"
+        assert rollback_normal_exception_db.categories[1]["main_category"] == "餐饮"
+        assert rollback_normal_exception_db.categories[2]["main_category"] == "餐饮"
+
+    error_update_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (error_update_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        error_update_db,
+        "update_main_category_name",
+        lambda *args, **kwargs: _raise_runtime_error("rename boom"),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "出行"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to rename category"
+
+    precheck_error_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (precheck_error_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        precheck_error_db,
+        "get_all_categories",
+        lambda *args, **kwargs: _raise_runtime_error("precheck boom"),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_交通",
+        method="PUT",
+        json={"name": "出行"},
+    ):
+        response, status = update_category("virtual_交通")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to rename category"
+
+    delete_noop_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (delete_noop_db, object(), engine),
+    )
+    monkeypatch.setattr(delete_noop_db, "delete_categories_by_main_category", lambda *args, **kwargs: False)
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_不存在",
+        method="DELETE",
+    ):
+        response, status = delete_category("virtual_不存在")
+        assert status == 404
+        assert response.get_json()["error"] == "Category not found or delete failed"
+
+    delete_error_db = FakeCategoriesDB()
+    monkeypatch.setattr(
+        categories_module,
+        "get_app_context",
+        lambda user_id=None: (delete_error_db, object(), engine),
+    )
+    monkeypatch.setattr(
+        delete_error_db,
+        "delete_categories_by_main_category",
+        lambda *args, **kwargs: _raise_runtime_error("delete main boom"),
+    )
+    with categories_route_app.test_request_context(
+        "/api/categories/virtual_餐饮",
+        method="DELETE",
+    ):
+        response, status = delete_category("virtual_餐饮")
+        assert status == 500
+        assert response.get_json()["error"] == "Failed to delete category"
 
     class EmptyMatchEngine(FakeCategoryEngine):
         def match_category(self, bill: dict[str, Any]) -> tuple[str, str]:

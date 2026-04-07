@@ -315,7 +315,8 @@ class FakeBillsDB:
     async def get_account_mappings(self) -> dict[str, Any]:
         return {"id_to_name": {int(item["id"]): item["name"] for item in self.accounts}}
 
-    async def get_category_mappings(self) -> dict[str, Any]:
+    async def get_category_mappings(self, *, user_id: int) -> dict[str, Any]:
+        _ = user_id
         return {"id_to_category": {int(item["id"]): dict(item) for item in self.categories}}
 
     async def count_import_learning_rules(self, *, user_id: int, enabled_only: bool) -> int:
@@ -3797,7 +3798,11 @@ def test_bills_batch_delete_reconciliation_and_stage1_generic_cleanup_cover_more
     monkeypatch.setattr(db, "query_bills", _query_bills_for_reconciliation)
     monkeypatch.setattr(db, "get_account_by_id", _get_account_by_id)
     monkeypatch.setattr(db, "get_account_mappings", lambda: asyncio.sleep(0, result={}))
-    monkeypatch.setattr(db, "get_category_mappings", lambda: asyncio.sleep(0, result={"id_to_category": {}}))
+    monkeypatch.setattr(
+        db,
+        "get_category_mappings",
+        lambda *, user_id: asyncio.sleep(0, result={"id_to_category": {}}),
+    )
     monkeypatch.setattr(
         adapter,
         "backend_to_frontend",
@@ -4002,7 +4007,11 @@ def test_bills_reconciliation_statements_cover_opening_balance_no_history_branch
     monkeypatch.setattr(db, "query_bills", _query_bills_for_opening_balance)
     monkeypatch.setattr(db, "get_account_by_id", _get_account_by_id)
     monkeypatch.setattr(db, "get_account_mappings", lambda: asyncio.sleep(0, result={}))
-    monkeypatch.setattr(db, "get_category_mappings", lambda: asyncio.sleep(0, result={"id_to_category": {}}))
+    monkeypatch.setattr(
+        db,
+        "get_category_mappings",
+        lambda *, user_id: asyncio.sleep(0, result={"id_to_category": {}}),
+    )
     monkeypatch.setattr(
         adapter,
         "backend_to_frontend",

@@ -110,6 +110,10 @@ class DatabaseRuntimeMixin(DatabaseFacadeBase):
         if key:
             self._cache.pop(key, None)
             self._cache_expiry.pop(key, None)
+            scoped_keys = [cache_key for cache_key in self._cache if cache_key.startswith(f"{key}:")]
+            for scoped_key in scoped_keys:
+                self._cache.pop(scoped_key, None)
+                self._cache_expiry.pop(scoped_key, None)
             self.logger.debug("已清除缓存: %s", key)
             return
 
@@ -186,14 +190,14 @@ class DatabaseRuntimeMixin(DatabaseFacadeBase):
         return mappings
 
     @log_method
-    async def get_category_mappings(self) -> dict[str, Any]:
+    async def get_category_mappings(self, user_id: int = 1) -> dict[str, Any]:
         """获取分类映射（带缓存）。"""
-        cache_key = "category_mappings"
+        cache_key = f"category_mappings:{user_id}"
         if self._is_cache_valid(cache_key):
             self.logger.debug("使用缓存的分类映射")
             return self._cache[cache_key]
 
-        categories = await self.get_all_categories()
+        categories = await self.get_all_categories(user_id=user_id)
         mappings = {
             "id_to_category": {category["id"]: category for category in categories},
             "name_to_id": {

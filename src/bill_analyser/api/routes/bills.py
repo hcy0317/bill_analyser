@@ -4055,7 +4055,7 @@ def get_reconciliation_statements():
             # 获取并转换分类映射格式以适配 v1_adapter
             # v1_adapter 需要 {(main, sub): cat_dict}
             # db.get_category_mappings 返回 {'id_to_category': ..., 'name_to_id': ...}
-            db_category_map = loop.run_until_complete(db.get_category_mappings())
+            db_category_map = loop.run_until_complete(db.get_category_mappings(user_id=request.user_id))
             category_map = {}
             if db_category_map and "id_to_category" in db_category_map:
                 for cat in db_category_map["id_to_category"].values():

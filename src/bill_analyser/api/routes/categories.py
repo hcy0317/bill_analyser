@@ -2,8 +2,11 @@
 分类 API 路由
 """
 
+# pylint: disable=too-many-nested-blocks,too-many-lines
+
 import json
-from typing import Any, cast
+import sqlite3
+from typing import cast
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
@@ -292,24 +295,62 @@ def create_category():  # pylint: disable=too-many-locals,too-many-branches,too-
 @bp.route("/<category_id>", methods=["PUT"])
 @log_method
 @require_auth
-def update_category(category_id):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def update_category(category_id):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-return-statements,too-many-nested-blocks
     """更新分类"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
         db, _, _ = get_app_context()
         user_id = _get_request_user_id()
+
+        def rollback_main_category_rename(current_name: str, previous_name: str) -> None:
+            try:
+                rollback_success = _run_async(
+                    db.update_main_category_name(current_name, previous_name, user_id=user_id)
+                )
+                if rollback_success is False:
+                    logger.error(
+                        "回滚主分类改名未命中记录或发生冲突: %s -> %s (user_id=%s)",
+                        current_name,
+                        previous_name,
+                        user_id,
+                    )
+            except Exception as rollback_exc:  # pylint: disable=broad-exception-caught
+                logger.error("回滚主分类改名失败: %s", rollback_exc, exc_info=True)
 
         if str(category_id).startswith("virtual_"):
             # 更新虚拟分类 -> 实际上是创建主分类记录 + 可能的重命名
             old_name = str(category_id).replace("virtual_", "", 1)
             new_name = data.get("name", old_name)
+            renamed_group = False
 
             # 1. 如果改名了，更新所有子分类
             if new_name != old_name:
-                _run_async(db.update_main_category_name(old_name, new_name))
-
-            # 2. 创建主分类记录 (如果不存在)
-            existing = _run_async(db.get_category_by_name(new_name, "", user_id=user_id))
+                try:
+                    real_categories = [
+                        category
+                        for category in _run_async(db.get_all_categories(user_id=user_id))
+                        if int(category.get("id", 0) or 0) > 0
+                    ]
+                    has_old_group = any(
+                        category["main_category"] == old_name for category in real_categories
+                    )
+                    has_target_group = any(
+                        category["main_category"] == new_name for category in real_categories
+                    )
+                    if has_old_group and has_target_group:
+                        return jsonify({"success": False, "error": "Category rename conflict"}), 409
+                    rename_success = _run_async(
+                        db.update_main_category_name(old_name, new_name, user_id=user_id)
+                    )
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.error("虚拟主分类批量改名失败: %s", exc, exc_info=True)
+                    return jsonify({"success": False, "error": "Failed to rename category"}), 500
+                if has_old_group and not rename_success:
+                    return jsonify({"success": False, "error": "Category rename conflict"}), 409
+                renamed_group = has_old_group and rename_success
 
             updates = {
                 "description": data.get("comment", ""),
@@ -321,19 +362,84 @@ def update_category(category_id):  # pylint: disable=too-many-locals,too-many-br
                 "color": data.get("color", ""),
             }
 
-            if existing:
-                # 更新现有记录
-                _run_async(db.update_category(existing["id"], updates, user_id=user_id))
-                cat_id = existing["id"]
-            else:
-                # 创建新记录
-                cat_data = updates.copy()
-                cat_data["main_category"] = new_name
-                cat_data["sub_category"] = ""
-                cat_id = _run_async(db.create_category(cat_data, user_id=user_id))
+            try:
+                # 2. 创建主分类记录 (如果不存在)
+                existing = _run_async(db.get_category_by_name(new_name, "", user_id=user_id))
 
-            # 获取最新数据返回
-            updated_cat = _run_async(db.get_category_by_id(cat_id, user_id=user_id))
+                if existing:
+                    # 更新现有记录
+                    cat_id = existing["id"]
+                    update_success = _run_async(
+                        db.update_category(cat_id, updates, user_id=user_id)
+                    )
+                    if not update_success:
+                        refreshed_existing = _run_async(
+                            db.get_category_by_name(new_name, "", user_id=user_id)
+                        )
+                        if not refreshed_existing:
+                            if renamed_group:
+                                rollback_main_category_rename(new_name, old_name)
+                            return (
+                                jsonify({"success": False, "error": "Failed to save category"}),
+                                500,
+                            )
+                        cat_id = refreshed_existing["id"]
+                        update_success = _run_async(
+                            db.update_category(cat_id, updates, user_id=user_id)
+                        )
+                        if not update_success:
+                            if renamed_group:
+                                rollback_main_category_rename(new_name, old_name)
+                            return (
+                                jsonify({"success": False, "error": "Failed to save category"}),
+                                500,
+                            )
+                else:
+                    # 创建新记录
+                    cat_data = updates.copy()
+                    cat_data["main_category"] = new_name
+                    cat_data["sub_category"] = ""
+                    cat_id = _run_async(db.create_category(cat_data, user_id=user_id))
+                    if cat_id is None:
+                        refreshed_existing = _run_async(
+                            db.get_category_by_name(new_name, "", user_id=user_id)
+                        )
+                        if not refreshed_existing:
+                            if renamed_group:
+                                rollback_main_category_rename(new_name, old_name)
+                            return (
+                                jsonify({"success": False, "error": "Failed to save category"}),
+                                500,
+                            )
+                        cat_id = refreshed_existing["id"]
+                        update_success = _run_async(
+                            db.update_category(cat_id, updates, user_id=user_id)
+                        )
+                        if not update_success:
+                            if renamed_group:
+                                rollback_main_category_rename(new_name, old_name)
+                            return (
+                                jsonify({"success": False, "error": "Failed to save category"}),
+                                500,
+                            )
+
+                # 获取最新数据返回
+                updated_cat = _run_async(db.get_category_by_id(cat_id, user_id=user_id))
+                if not updated_cat:
+                    if renamed_group:
+                        rollback_main_category_rename(new_name, old_name)
+                    return (
+                        jsonify({"success": False, "error": "Failed to load updated category"}),
+                        500,
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                if renamed_group:
+                    rollback_main_category_rename(new_name, old_name)
+                logger.error("虚拟主分类保存失败: %s", exc, exc_info=True)
+                return (
+                    jsonify({"success": False, "error": "Failed to save category"}),
+                    500,
+                )
 
             result = {
                 "id": str(updated_cat["id"]),
@@ -372,22 +478,73 @@ def update_category(category_id):  # pylint: disable=too-many-locals,too-many-br
             updates["color"] = data["color"]
 
         # 处理改名逻辑
+        renamed_main_category = False
+        original_main_category = None
+        renamed_to_main_category = None
         if "name" in data:
             cat = _run_async(db.get_category_by_id(cat_id_int, user_id=user_id))
             if cat:
                 if not cat["sub_category"]:
                     # 修改一级分类名称
                     if data["name"] != cat["main_category"]:
+                        real_categories = [
+                            category
+                            for category in _run_async(db.get_all_categories(user_id=user_id))
+                            if int(category.get("id", 0) or 0) > 0
+                        ]
+                        if any(
+                            category["main_category"] == data["name"]
+                            for category in real_categories
+                        ):
+                            return (
+                                jsonify({"success": False, "error": "Category rename conflict"}),
+                                409,
+                            )
                         updates["main_category"] = data["name"]
-                        _run_async(db.update_main_category_name(cat["main_category"], data["name"]))
+                        original_main_category = cat["main_category"]
+                        renamed_to_main_category = data["name"]
+                        try:
+                            rename_success = _run_async(
+                                db.update_main_category_name(
+                                    cat["main_category"],
+                                    data["name"],
+                                    user_id=user_id,
+                                )
+                            )
+                        except Exception as exc:  # pylint: disable=broad-exception-caught
+                            logger.error("主分类批量改名失败: %s", exc, exc_info=True)
+                            return (
+                                jsonify({"success": False, "error": "Failed to rename category"}),
+                                500,
+                            )
+                        if not rename_success:
+                            return (
+                                jsonify({"success": False, "error": "Category rename conflict"}),
+                                409,
+                            )
+                        renamed_main_category = True
                 else:
                     # 修改二级分类名称
                     updates["sub_category"] = data["name"]
 
-        success = _run_async(db.update_category(cat_id_int, updates, user_id=user_id))
+        try:
+            success = _run_async(db.update_category(cat_id_int, updates, user_id=user_id))
+        except sqlite3.IntegrityError:
+            if renamed_main_category and original_main_category and renamed_to_main_category:
+                rollback_main_category_rename(renamed_to_main_category, original_main_category)
+            return jsonify({"success": False, "error": "Category update conflict"}), 409
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            if renamed_main_category and original_main_category and renamed_to_main_category:
+                rollback_main_category_rename(renamed_to_main_category, original_main_category)
+            logger.error("更新分类保存阶段失败: %s", exc, exc_info=True)
+            return jsonify({"success": False, "error": "Failed to update category"}), 500
 
         if success:
             updated_cat = _run_async(db.get_category_by_id(cat_id_int, user_id=user_id))
+            if not updated_cat:
+                if renamed_main_category and original_main_category and renamed_to_main_category:
+                    rollback_main_category_rename(renamed_to_main_category, original_main_category)
+                return jsonify({"success": False, "error": "Failed to load updated category"}), 500
 
             result = {
                 "id": str(updated_cat["id"]),
@@ -407,11 +564,14 @@ def update_category(category_id):  # pylint: disable=too-many-locals,too-many-br
             }
             return jsonify({"success": True, "result": result})
 
+        if renamed_main_category and original_main_category and renamed_to_main_category:
+            rollback_main_category_rename(renamed_to_main_category, original_main_category)
+
         return jsonify({"success": False, "error": "Category not found"}), 404
 
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.error("更新分类失败: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        logger.error("更新分类失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Failed to update category"}), 500
 
 
 @bp.route("/move", methods=["POST"])
@@ -440,8 +600,8 @@ def move_categories():
         return jsonify({"success": True, "result": True})
 
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.error("移动分类失败: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        logger.error("移动分类失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Failed to move categories"}), 500
 
 
 @bp.route("/<category_id>", methods=["DELETE"])
@@ -456,7 +616,13 @@ def delete_category(category_id):
         if str(category_id).startswith("virtual_"):
             # 处理虚拟分类删除 (删除该主分类下的所有子分类)
             main_category = str(category_id).replace("virtual_", "", 1)
-            success = _run_async(db.delete_categories_by_main_category(main_category))
+            try:
+                success = _run_async(
+                    db.delete_categories_by_main_category(main_category, user_id=user_id)
+                )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.error("删除主分类失败: %s", exc, exc_info=True)
+                return jsonify({"success": False, "error": "Failed to delete category"}), 500
         else:
             # 处理普通ID删除
             try:
@@ -470,8 +636,8 @@ def delete_category(category_id):
         return jsonify({"success": False, "error": "Category not found or delete failed"}), 404
 
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.error("删除分类失败: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        logger.error("删除分类失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Failed to delete category"}), 500
 
 
 @bp.route("/flat", methods=["GET"])
@@ -897,7 +1063,7 @@ def import_categories():
 
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("导入分类失败: %s", exc, exc_info=True)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, "error": "Failed to import categories"}), 500
 
 
 @bp.route("/<category_id>", methods=["GET"])

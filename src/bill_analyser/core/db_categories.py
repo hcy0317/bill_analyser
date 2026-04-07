@@ -138,6 +138,7 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
 
             category_id = cursor.lastrowid
             self.logger.info("创建分类成功: ID=%s, %s/%s", category_id, main_category, sub_category)
+            self._clear_cache("category_mappings")
             return category_id
         except sqlite3.IntegrityError as exc:
             self.logger.warning(
@@ -178,17 +179,23 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
 
             set_clause = ", ".join(f"{key} = ?" for key in safe_updates)
             values = [*safe_updates.values(), category_id, user_id]
-            await conn.execute(
+            cursor = await conn.execute(
                 f"UPDATE categories SET {set_clause} WHERE id = ? AND user_id = ?",
                 values,
             )
             await conn.commit()
 
+            if cursor.rowcount == 0:
+                self.logger.warning("分类 ID %s 不存在或不属于用户 %s", category_id, user_id)
+                return False
+
             self.logger.info("已更新分类 ID: %s (user_id=%s)", category_id, user_id)
+            self._clear_cache("category_mappings")
             return True
         except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
-            self.logger.error("更新分类失败: %s", exc)
-            return False
+            await conn.rollback()
+            self.logger.error("更新分类失败: %s", exc, exc_info=True)
+            raise
 
     @log_method
     async def delete_category(self, category_id: int, user_id: int = 1) -> bool:
@@ -327,36 +334,77 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             return [dict(row) for row in rows]
 
     @log_method
-    async def delete_categories_by_main_category(self, main_category: str) -> bool:
+    async def delete_categories_by_main_category(
+        self,
+        main_category: str,
+        user_id: int = 1,
+    ) -> bool:
         """根据主分类名称删除所有相关分类。"""
         conn = await self._get_connection()
         try:
-            await conn.execute("DELETE FROM categories WHERE main_category = ?", (main_category,))
+            cursor = await conn.execute(
+                "DELETE FROM categories WHERE main_category = ? AND user_id = ?",
+                (main_category, user_id),
+            )
             await conn.commit()
-            self.logger.info("已删除主分类及其子分类: %s", main_category)
-            return True
+            deleted = cursor.rowcount > 0
+            self.logger.info(
+                "已删除主分类及其子分类: %s (user_id=%s, deleted=%s)",
+                main_category,
+                user_id,
+                deleted,
+            )
+            if deleted:
+                self._clear_cache("category_mappings")
+            return deleted
         except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
-            self.logger.error("删除主分类失败: %s", exc)
-            return False
+            await conn.rollback()
+            self.logger.error("删除主分类失败: %s", exc, exc_info=True)
+            raise
 
     @log_method
-    async def update_main_category_name(self, old_name: str, new_name: str) -> bool:
+    async def update_main_category_name(
+        self,
+        old_name: str,
+        new_name: str,
+        user_id: int = 1,
+    ) -> bool:
         """更新主分类名称（级联更新所有子分类）。"""
         conn = await self._get_connection()
         try:
-            await conn.execute(
-                "UPDATE categories SET main_category = ? WHERE main_category = ?",
-                (new_name, old_name),
+            cursor = await conn.execute(
+                "UPDATE categories SET main_category = ? WHERE main_category = ? AND user_id = ?",
+                (new_name, old_name, user_id),
             )
             await conn.commit()
+            if cursor.rowcount == 0:
+                self.logger.info(
+                    "主分类名称更新未命中任何分类: %s -> %s (user_id=%s)",
+                    old_name,
+                    new_name,
+                    user_id,
+                )
+                return False
             self.logger.info(
-                "已更新主分类名称: %s -> %s",
+                "已更新主分类名称: %s -> %s (user_id=%s)",
                 old_name,
                 new_name,
+                user_id,
             )
             self._clear_cache("account_mappings")
             self._clear_cache("category_mappings")
             return True
-        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
-            self.logger.error("更新主分类名称失败: %s", exc)
+        except sqlite3.IntegrityError as exc:
+            await conn.rollback()
+            self.logger.warning(
+                "更新主分类名称冲突: %s -> %s (user_id=%s): %s",
+                old_name,
+                new_name,
+                user_id,
+                exc,
+            )
             return False
+        except sqlite3.Error as exc:  # pragma: no cover - defensive logging branch
+            await conn.rollback()
+            self.logger.error("更新主分类名称失败: %s", exc, exc_info=True)
+            raise
