@@ -66,6 +66,53 @@ class DatabaseSchemaUsersSecurityMixin(DatabaseFacadeBase):
             """
         )
 
+        async with conn.execute("PRAGMA table_info(users)") as cursor:
+            user_columns = [row[1] for row in await cursor.fetchall()]
+
+        legacy_user_columns: list[tuple[str, str, object | None]] = [
+            ("nickname", "TEXT", None),
+            ("avatar", "TEXT", ""),
+            ("default_account_id", "INTEGER", None),
+            ("transaction_edit_scope", "INTEGER DEFAULT 0", 0),
+            ("language", "TEXT DEFAULT 'zh_Hans'", "zh_Hans"),
+            ("default_currency", "TEXT DEFAULT 'CNY'", "CNY"),
+            ("first_day_of_week", "INTEGER DEFAULT 1", 1),
+            ("fiscal_year_start", "INTEGER DEFAULT 1", 1),
+            ("calendar_display_type", "INTEGER DEFAULT 0", 0),
+            ("date_display_type", "INTEGER DEFAULT 0", 0),
+            ("long_date_format", "INTEGER DEFAULT 0", 0),
+            ("short_date_format", "INTEGER DEFAULT 0", 0),
+            ("long_time_format", "INTEGER DEFAULT 0", 0),
+            ("short_time_format", "INTEGER DEFAULT 0", 0),
+            ("fiscal_year_format", "INTEGER DEFAULT 0", 0),
+            ("currency_display_type", "INTEGER DEFAULT 0", 0),
+            ("numeral_system", "INTEGER DEFAULT 0", 0),
+            ("decimal_separator", "INTEGER DEFAULT 0", 0),
+            ("digit_grouping_symbol", "INTEGER DEFAULT 0", 0),
+            ("digit_grouping", "INTEGER DEFAULT 0", 0),
+            ("coordinate_display_type", "INTEGER DEFAULT 0", 0),
+            ("expense_amount_color", "INTEGER DEFAULT 0", 0),
+            ("income_amount_color", "INTEGER DEFAULT 0", 0),
+            ("is_active", "BOOLEAN DEFAULT 1", 1),
+            ("email_verified", "BOOLEAN DEFAULT 0", 0),
+            ("two_factor_enabled", "BOOLEAN DEFAULT 0", 0),
+            ("two_factor_secret", "TEXT", None),
+            ("failed_login_attempts", "INTEGER DEFAULT 0", 0),
+            ("locked_until", "TEXT", None),
+            ("last_login_at", "TEXT", None),
+            ("last_login_ip", "TEXT", None),
+        ]
+        for field_name, column_sql, default_value in legacy_user_columns:
+            if field_name in user_columns:
+                continue
+            self.logger.info("为 users 表添加 %s 字段", field_name)
+            await conn.execute(f"ALTER TABLE users ADD COLUMN {field_name} {column_sql}")
+            if default_value is not None:
+                await conn.execute(
+                    f"UPDATE users SET {field_name} = ? WHERE {field_name} IS NULL",
+                    (default_value,),
+                )
+
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
