@@ -45,8 +45,18 @@ def test_handoff_and_start_work_prompts_reference_shared_workflows() -> None:
     assert "nextVerification" in verify_prompt
 
 
-def test_ai_workflow_doc_mentions_parser_standard_flow_skill() -> None:
+def test_ai_workflow_doc_lists_parser_standard_flow_in_entry_table() -> None:
     doc_text = (REPO_ROOT / "docs" / "AI_WORKFLOW.md").read_text(encoding="utf-8")
+    matching_rows = [
+        line.strip()
+        for line in doc_text.splitlines()
+        if line.strip().startswith("|") and "`add-parser-standard-flow` skill" in line
+    ]
 
-    assert "add-parser-standard-flow" in doc_text
-    assert "新增 parser" in doc_text or "新增解析器" in doc_text
+    assert matching_rows, "AI_WORKFLOW must list add-parser-standard-flow in the entry table"
+    row = matching_rows[0]
+    assert "新增 parser workflow" in row
+    assert "ParserFactory" in row
+    assert "新增解析器" in row or "新增 parser" in row
+    assert "不要拿它代替" in row
+    assert "API/DB" in row or "通用导入调试" in row

@@ -84,6 +84,25 @@ def _contains_any(text: str, candidates: tuple[str, ...]) -> bool:
     return any(candidate in text for candidate in candidates)
 
 
+def _normalize_markdown_table_match_text(text: str) -> str:
+    return " ".join(str(text).replace("`", "").split()).lower()
+
+
+def _find_markdown_table_row(text: str, first_cell_fragment: str) -> str | None:
+    normalized_fragment = _normalize_markdown_table_match_text(first_cell_fragment)
+
+    for raw_line in text.splitlines():
+        stripped_line = raw_line.strip()
+        if not stripped_line.startswith("|") or stripped_line.count("|") < 4:
+            continue
+
+        normalized_line = _normalize_markdown_table_match_text(stripped_line)
+        if normalized_fragment in normalized_line:
+            return stripped_line
+
+    return None
+
+
 def _missing_requirement_labels(text: str, requirements: dict[str, tuple[str, ...]]) -> list[str]:
     return [label for label, candidates in requirements.items() if not _contains_any(text, candidates)]
 
@@ -508,10 +527,36 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
             parser_standard_flow_issues.append(
                 f"{PARSER_STANDARD_FLOW_DOC_PATH}: missing={missing_doc_markers}"
             )
-        if PARSER_STANDARD_FLOW_SKILL not in parser_standard_flow_ai_workflow_text:
+
+        parser_standard_flow_entry_row = _find_markdown_table_row(
+            parser_standard_flow_ai_workflow_text,
+            f"{PARSER_STANDARD_FLOW_SKILL} skill",
+        )
+        if parser_standard_flow_entry_row is None:
             parser_standard_flow_issues.append(
-                f"{AI_WORKFLOW_DOC_PATH}: missing {PARSER_STANDARD_FLOW_SKILL} workflow entry"
+                f"{AI_WORKFLOW_DOC_PATH}: missing parser-standard-flow entry table row"
             )
+        else:
+            normalized_entry_row = _normalize_markdown_table_match_text(parser_standard_flow_entry_row)
+            required_entry_fragments = (
+                (("新增 parser workflow",), "新增 parser workflow"),
+                (("ParserFactory",), "ParserFactory"),
+                (("新增解析器", "新增 parser"), "新增解析器/新增 parser"),
+                (("不要拿它代替",), "不要拿它代替"),
+                (("API/DB", "通用导入调试"), "API/DB/通用导入调试"),
+            )
+            missing_entry_fragments = [
+                label
+                for candidates, label in required_entry_fragments
+                if not any(
+                    _normalize_markdown_table_match_text(candidate) in normalized_entry_row
+                    for candidate in candidates
+                )
+            ]
+            if missing_entry_fragments:
+                parser_standard_flow_issues.append(
+                    f"{AI_WORKFLOW_DOC_PATH}: parser-standard-flow entry row malformed, missing={missing_entry_fragments}"
+                )
 
         if parser_standard_flow_issues:
             checks.append(

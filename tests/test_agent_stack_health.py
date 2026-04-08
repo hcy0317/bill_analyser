@@ -69,6 +69,58 @@ def _checks_by_id(payload: dict) -> dict[str, dict]:
     return {check["id"]: check for check in payload["checks"]}
 
 
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_minimal_parser_standard_flow_fake_repo(
+    repo_root: Path,
+    *,
+    ai_workflow_text: str,
+    include_parser_doc: bool = True,
+) -> None:
+    _write_text(repo_root / "AGENTS.md", "Legacy `.cursor/` compatibility mirrors were intentionally removed\n")
+    _write_text(repo_root / ".github" / "copilot-instructions.md", "")
+    _write_text(repo_root / ".codex" / "AGENTS.md", "")
+    _write_text(repo_root / ".codex" / "config.toml", 'model = "gpt-5.4"\n')
+    _write_text(repo_root / ".agents" / "skills" / "bill-analyser-conventions" / "SKILL.md", "")
+    _write_text(repo_root / ".claude" / "skills" / "bill-analyser" / "SKILL.md", "")
+    _write_text(
+        repo_root / ".agents" / "skills" / "add-parser-standard-flow" / "SKILL.md",
+        "\n".join(
+            (
+                "src/bill_analyser/parsers/factory.py",
+                "src/bill_analyser/parsers/base.py",
+                "tests/test_parser_base_factory.py",
+                "tests/new_ui/test_import_parser_alignment.py",
+                "ParserFactory",
+                "StandardBill",
+            )
+        ),
+    )
+    if include_parser_doc:
+        _write_text(
+            repo_root / "docs" / "parsers" / "add-parser-standard-flow.md",
+            "\n".join(
+                (
+                    ".agents/skills/add-parser-standard-flow/SKILL.md",
+                    "src/bill_analyser/parsers/factory.py",
+                    "src/bill_analyser/parsers/base.py",
+                    "tests/test_parser_base_factory.py",
+                    "tests/new_ui/test_import_parser_alignment.py",
+                )
+            ),
+        )
+    _write_text(repo_root / "docs" / "AI_WORKFLOW.md", ai_workflow_text)
+
+
+def _scan_repo_check(repo_root: Path, check_id: str):
+    agent_stack_health = importlib.import_module("scripts.agent_stack_health")
+    checks = {check.id: check for check in agent_stack_health.scan_repo(repo_root)}
+    return checks[check_id]
+
+
 def test_repo_scan_reports_expected_contracts() -> None:
     result = _run_agent_stack_health("--mode", "repo", "--format", "json")
 
@@ -311,3 +363,40 @@ def test_repo_parser_standard_flow_check_is_exposed_in_payload_text_and_doctor()
     assert "parser 标准流程" in text_result.stdout
     assert "repo.parser-standard-flow" in doctor_result.stdout
     assert "parser 标准流程" in doctor_result.stdout
+
+
+def test_repo_parser_standard_flow_check_fails_when_assets_are_missing(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_parser_standard_flow_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `add-parser-standard-flow` skill | 新增 parser workflow | 新增解析器、收紧 `ParserFactory` 检测、补 parser 对齐回归时 | 不要拿它代替通用导入调试或 API/DB 变更流程 |\n"
+        ),
+        include_parser_doc=False,
+    )
+
+    parser_check = _scan_repo_check(fake_repo, "repo.parser-standard-flow")
+
+    assert parser_check.status == "fail"
+    assert "资产不完整" in parser_check.summary
+    assert "docs/parsers/add-parser-standard-flow.md" in parser_check.evidence
+
+
+def test_repo_parser_standard_flow_check_fails_when_ai_workflow_entry_row_is_malformed(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_parser_standard_flow_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `add-parser-standard-flow` skill | parser workflow | 文档里随便提一嘴 skill 名称 | 这里只是普通说明 |\n"
+        ),
+    )
+
+    parser_check = _scan_repo_check(fake_repo, "repo.parser-standard-flow")
+
+    assert parser_check.status == "fail"
+    assert "契约闭环" in parser_check.summary
+    assert any(item.startswith("docs/AI_WORKFLOW.md:") for item in parser_check.evidence)
