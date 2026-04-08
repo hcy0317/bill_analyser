@@ -285,3 +285,29 @@ def test_parser_standard_flow_skill_and_doc_define_repo_specific_parser_contract
         "tests/new_ui/test_import_parser_alignment.py",
     ):
         assert expected in doc_text, f"doc must reference {expected}"
+
+
+def test_repo_parser_standard_flow_check_is_exposed_in_payload_text_and_doctor() -> None:
+    json_result = _run_agent_stack_health("--mode", "repo", "--format", "json")
+    text_result = _run_agent_stack_health("--mode", "repo", "--format", "text")
+    doctor_result = _run_agent_stack_health("--mode", "repo", "--format", "doctor")
+
+    assert json_result.returncode == 0, json_result.stderr or json_result.stdout
+    assert text_result.returncode == 0, text_result.stderr or text_result.stdout
+    assert doctor_result.returncode == 0, doctor_result.stderr or doctor_result.stdout
+
+    payload = json.loads(json_result.stdout)
+    checks = _checks_by_id(payload)
+    parser_check = checks["repo.parser-standard-flow"]
+
+    assert parser_check["status"] == "pass"
+    assert "parser 标准流程" in parser_check["summary"]
+    assert ".agents/skills/add-parser-standard-flow/SKILL.md" in parser_check["evidence"]
+    assert "docs/parsers/add-parser-standard-flow.md" in parser_check["evidence"]
+    assert "docs/AI_WORKFLOW.md" in parser_check["evidence"]
+    assert any("ParserFactory" in item and "StandardBill" in item for item in parser_check["evidence"])
+
+    assert "repo.parser-standard-flow" in text_result.stdout
+    assert "parser 标准流程" in text_result.stdout
+    assert "repo.parser-standard-flow" in doctor_result.stdout
+    assert "parser 标准流程" in doctor_result.stdout

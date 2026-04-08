@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 import tomllib
-
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STATUS_PRIORITY = {"fail": 0, "warn": 1, "pass": 2, "info": 3}
@@ -43,6 +42,9 @@ START_WORK_SKILL_PATH = f".agents/skills/{APPROVED_PLAN_EXECUTION_SKILL}/SKILL.m
 AI_WORKFLOW_DOC_PATH = "docs/AI_WORKFLOW.md"
 TASK_STATE_HELPER_PATH = "scripts/hooks/task_state.py"
 TASK_STATE_READER_PATH = "scripts/hooks/task_state_reader.py"
+PARSER_STANDARD_FLOW_SKILL = "add-parser-standard-flow"
+PARSER_STANDARD_FLOW_SKILL_PATH = f".agents/skills/{PARSER_STANDARD_FLOW_SKILL}/SKILL.md"
+PARSER_STANDARD_FLOW_DOC_PATH = "docs/parsers/add-parser-standard-flow.md"
 
 
 @dataclass(frozen=True)
@@ -452,6 +454,87 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                     "pass",
                     "handoff / start-work 入口已形成共享 skill + prompt + docs 闭环。",
                     list(workflow_asset_paths.keys()) + [TASK_STATE_PATH],
+                )
+            )
+
+    parser_standard_flow_paths = {
+        PARSER_STANDARD_FLOW_SKILL_PATH: repo_root / PARSER_STANDARD_FLOW_SKILL_PATH,
+        PARSER_STANDARD_FLOW_DOC_PATH: repo_root / PARSER_STANDARD_FLOW_DOC_PATH,
+        AI_WORKFLOW_DOC_PATH: repo_root / AI_WORKFLOW_DOC_PATH,
+    }
+    missing_parser_standard_flow_assets = [
+        relative_path for relative_path, path in parser_standard_flow_paths.items() if not path.exists()
+    ]
+    if missing_parser_standard_flow_assets:
+        checks.append(
+            _result(
+                "repo.parser-standard-flow",
+                "repo",
+                "fail",
+                "专用 parser 标准流程资产不完整，repo doctor 无法稳定发现这条共享 workflow。",
+                missing_parser_standard_flow_assets,
+                "补齐共享 skill、中文流程文档与 AI workflow 入口，再重新运行 repo doctor。",
+            )
+        )
+    else:
+        parser_standard_flow_skill_text = _read_text(parser_standard_flow_paths[PARSER_STANDARD_FLOW_SKILL_PATH])
+        parser_standard_flow_doc_text = _read_text(parser_standard_flow_paths[PARSER_STANDARD_FLOW_DOC_PATH])
+        parser_standard_flow_ai_workflow_text = _read_text(parser_standard_flow_paths[AI_WORKFLOW_DOC_PATH])
+        parser_standard_flow_issues: list[str] = []
+
+        required_skill_markers = (
+            "src/bill_analyser/parsers/factory.py",
+            "src/bill_analyser/parsers/base.py",
+            "tests/test_parser_base_factory.py",
+            "tests/new_ui/test_import_parser_alignment.py",
+            "ParserFactory",
+            "StandardBill",
+        )
+        required_doc_markers = (
+            PARSER_STANDARD_FLOW_SKILL_PATH,
+            "src/bill_analyser/parsers/factory.py",
+            "src/bill_analyser/parsers/base.py",
+            "tests/test_parser_base_factory.py",
+            "tests/new_ui/test_import_parser_alignment.py",
+        )
+
+        missing_skill_markers = [marker for marker in required_skill_markers if marker not in parser_standard_flow_skill_text]
+        missing_doc_markers = [marker for marker in required_doc_markers if marker not in parser_standard_flow_doc_text]
+        if missing_skill_markers:
+            parser_standard_flow_issues.append(
+                f"{PARSER_STANDARD_FLOW_SKILL_PATH}: missing={missing_skill_markers}"
+            )
+        if missing_doc_markers:
+            parser_standard_flow_issues.append(
+                f"{PARSER_STANDARD_FLOW_DOC_PATH}: missing={missing_doc_markers}"
+            )
+        if PARSER_STANDARD_FLOW_SKILL not in parser_standard_flow_ai_workflow_text:
+            parser_standard_flow_issues.append(
+                f"{AI_WORKFLOW_DOC_PATH}: missing {PARSER_STANDARD_FLOW_SKILL} workflow entry"
+            )
+
+        if parser_standard_flow_issues:
+            checks.append(
+                _result(
+                    "repo.parser-standard-flow",
+                    "repo",
+                    "fail",
+                    "专用 parser 标准流程资产已存在，但还没有形成稳定的 skill + doc + AI workflow 契约闭环。",
+                    parser_standard_flow_issues,
+                    "让 shared skill、流程文档和 AI workflow 入口同时绑定 ParserFactory / StandardBill / import alignment 触点。",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.parser-standard-flow",
+                    "repo",
+                    "pass",
+                    "专用 parser 标准流程已形成 skill + doc + AI workflow 入口闭环。",
+                    [
+                        *parser_standard_flow_paths.keys(),
+                        "contract=ParserFactory/StandardBill/tests/test_parser_base_factory.py/tests/new_ui/test_import_parser_alignment.py",
+                    ],
                 )
             )
 
@@ -971,6 +1054,19 @@ def render_doctor(payload: dict) -> str:
             lines.append(f"- [{check['status'].upper()}] {check['id']} — {check['summary']}")
             if check.get("recommendation"):
                 lines.append(f"  建议: {check['recommendation']}")
+        lines.append("")
+
+    parser_standard_flow_check = next(
+        (check for check in payload["checks"] if check["id"] == "repo.parser-standard-flow"),
+        None,
+    )
+    if parser_standard_flow_check is not None:
+        lines.extend(["Parser workflow 基线", "--------------------"])
+        lines.append(
+            f"- [{parser_standard_flow_check['status'].upper()}] {parser_standard_flow_check['id']} — {parser_standard_flow_check['summary']}"
+        )
+        for evidence in parser_standard_flow_check["evidence"][:4]:
+            lines.append(f"  - {evidence}")
         lines.append("")
 
     lines.extend(
