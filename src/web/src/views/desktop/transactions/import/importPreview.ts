@@ -33,6 +33,8 @@ export interface ImportPreviewRecord {
     preview_recurring_match_score?: number;
     preview_recurring_match_reasons?: string;
     preview_recurring_matched_date?: string;
+    dedup_type?: string;
+    dedup_source_ids?: Array<number | string> | string;
     preview_parser_id?: string;
     preview_parser_tags?: string[];
     matching?: ImportMatchingPayload;

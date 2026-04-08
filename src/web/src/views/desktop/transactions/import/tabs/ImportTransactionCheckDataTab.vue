@@ -184,6 +184,35 @@
                         {{ tt('Choose Scheduled Match') }}
                     </v-btn>
                 </div>
+                <div class="mt-1 d-flex flex-wrap ga-1" v-if="hasMatchingContextSummary(item)">
+                    <v-chip
+                        v-if="getMatchingContextSummary(item).parserId"
+                        size="x-small"
+                        variant="outlined"
+                        :color="getParserColor(getMatchingContextSummary(item).parserId)"
+                        :title="getMatchingParserTagsText(item)">
+                        {{ tt('Parser') }} · {{ getParserLabel(getMatchingContextSummary(item).parserId) }}
+                    </v-chip>
+                    <v-chip
+                        v-if="hasMatchingDedupContext(item)"
+                        :color="getMatchingContextSummary(item).dedupType === 'transfer' ? 'primary' : 'secondary'"
+                        variant="outlined"
+                        size="x-small"
+                        :title="getMatchingDedupTitle(item)">
+                        {{ tt(getMatchingDedupLabel(item)) }} · {{ getDisplayCount(getMatchingContextSummary(item).dedupSourceIds.length) }}
+                    </v-chip>
+                    <v-chip
+                        v-if="getMatchingContextSummary(item).isManuallyAnnotated"
+                        color="info"
+                        variant="outlined"
+                        size="x-small">
+                        {{ tt('Manually Annotated') }}
+                    </v-chip>
+                </div>
+                <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                     v-if="getMatchingParserTagsText(item)">
+                    {{ getMatchingParserTagsText(item) }}
+                </div>
             </div>
             <!-- 编辑状态：类型选择器（余额调整类型不可编辑） -->
             <div style="width: 120px" v-else :key="`type-edit-${item.index}`">
@@ -919,6 +948,15 @@ import {
     matchesImportCheckAnnotationFilter,
     type ImportCheckAnnotationFilterValue
 } from '../checkDataAnnotation.ts';
+import {
+    getImportCheckMatchingContextSummary,
+    getImportCheckMatchingDedupLabel,
+    getImportCheckMatchingDedupTitle,
+    getImportCheckMatchingParserTagsText,
+    hasImportCheckMatchingDedupContext,
+    hasImportCheckMatchingContext,
+    type ImportCheckMatchingContextSummary
+} from '../checkDataMatching.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -1436,6 +1474,30 @@ function getParserLabel(parserId: string): string {
 
 function getParserColor(parserId: string): string {
     return PARSER_COLORS[parserId] || 'grey';
+}
+
+function getMatchingContextSummary(item: ImportTransaction): ImportCheckMatchingContextSummary {
+    return getImportCheckMatchingContextSummary(item);
+}
+
+function hasMatchingContextSummary(item: ImportTransaction): boolean {
+    return hasImportCheckMatchingContext(getMatchingContextSummary(item));
+}
+
+function hasMatchingDedupContext(item: ImportTransaction): boolean {
+    return hasImportCheckMatchingDedupContext(getMatchingContextSummary(item));
+}
+
+function getMatchingDedupLabel(item: ImportTransaction): string {
+    return getImportCheckMatchingDedupLabel(getMatchingContextSummary(item));
+}
+
+function getMatchingDedupTitle(item: ImportTransaction): string {
+    return getImportCheckMatchingDedupTitle(getMatchingContextSummary(item));
+}
+
+function getMatchingParserTagsText(item: ImportTransaction): string {
+    return getImportCheckMatchingParserTagsText(getMatchingContextSummary(item));
 }
 
 function getAnnotationIssues(item: ImportTransaction): string[] {

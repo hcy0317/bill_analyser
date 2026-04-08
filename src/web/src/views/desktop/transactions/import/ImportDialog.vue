@@ -1401,6 +1401,8 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         recurringMatchScore: Number(item.preview_recurring_match_score || 0),
         recurringMatchReasons: item.preview_recurring_match_reasons || '',
         recurringMatchedDate: item.preview_recurring_matched_date || '',
+        dedupType: item.dedup_type || '',
+        dedupSourceIds: item.dedup_source_ids || [],
         parserSource: item.preview_parser_id || '',
         parserTags: item.preview_parser_tags || [],
         matching: item.matching,
@@ -1414,7 +1416,6 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
     transaction.parserTags = item.preview_parser_tags || transaction.parserTags || [];
     transaction.matching = item.matching || transaction.matching;
-    transaction.isManuallyAnnotated = !!item.preview_is_manually_annotated;
 
     return transaction;
 }

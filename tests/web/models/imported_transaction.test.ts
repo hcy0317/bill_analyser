@@ -158,6 +158,102 @@ describe('ImportTransaction model', () => {
         expect(recurringReset.recurringCandidateCount).toBe(0);
     });
 
+    test('matching payload becomes the primary display source when flat preview fields are absent', () => {
+        const transaction = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Investment,
+            suggestedType: undefined,
+            transferSuggestionScore: 0,
+            transferSuggestionLevel: '',
+            transferSuggestionReason: '',
+            investmentSignalScore: 0,
+            investmentSignalLevel: '',
+            investmentSignalReason: '',
+            learningRecommendationScore: 0,
+            learningRecommendationLevel: '',
+            learningRecommendationReason: '',
+            learningRecommendationType: '',
+            learningRecommendationSummary: '',
+            investmentPlatform: '',
+            investmentProduct: '',
+            recurringTemplateId: '',
+            recurringTemplateName: '',
+            recurringCandidateCount: 0,
+            recurringMatchScore: 0,
+            recurringMatchReasons: '',
+            recurringMatchedDate: '',
+            parserSource: '',
+            parserTags: [],
+            isManuallyAnnotated: false,
+            matching: {
+                transfer: {
+                    candidate_type: 'transfer',
+                    score: 0.93,
+                    level: 'high',
+                    reason: 'dedup_pair'
+                },
+                investment: {
+                    score: 0.81,
+                    level: 'high',
+                    reason: 'investment_keyword',
+                    platform: '蚂蚁财富',
+                    product: '黄金ETF'
+                },
+                learning: {
+                    rule_id: 8,
+                    score: 0.77,
+                    level: 'medium',
+                    reason: 'parser_id:exact',
+                    recommended_type: '投资',
+                    summary: '投资 | 投资理财/基金'
+                },
+                recurring: {
+                    id: 9,
+                    name: '每月定投',
+                    candidate_count: 2,
+                    match_score: 0.9,
+                    match_reasons: 'date|amount',
+                    matched_date: '2026-04-01'
+                },
+                dedup: {
+                    type: 'transfer',
+                    source_ids: [101, '102']
+                },
+                parser: {
+                    id: 'alipay',
+                    tags: ['parser:alipay', 'channel:wallet']
+                },
+                annotation: {
+                    is_manually_annotated: true
+                }
+            }
+        }, 6);
+
+        expect(transaction.suggestedType).toBe(TransactionType.Transfer);
+        expect(transaction.hasTransferSuggestion()).toBe(true);
+        expect(transaction.transferSuggestionScore).toBe(0.93);
+        expect(transaction.transferSuggestionReason).toBe('dedup_pair');
+
+        expect(transaction.hasInvestmentSignal()).toBe(true);
+        expect(transaction.investmentSignalScore).toBe(0.81);
+        expect(transaction.getInvestmentProfileText()).toBe('蚂蚁财富 · 黄金ETF');
+
+        expect(transaction.hasLearningRecommendation()).toBe(true);
+        expect(transaction.learningRecommendationSummary).toBe('投资 | 投资理财/基金');
+
+        expect(transaction.hasRecurringMatch()).toBe(true);
+        expect(transaction.recurringTemplateId).toBe('9');
+        expect(transaction.recurringCandidateCount).toBe(2);
+        expect(transaction.recurringMatchReasons).toBe('date|amount');
+
+        expect(transaction.parserSource).toBe('alipay');
+        expect(transaction.parserTags).toStrictEqual(['parser:alipay', 'channel:wallet']);
+        expect(transaction.dedupType).toBe('transfer');
+        expect(transaction.dedupSourceIds).toStrictEqual([101, 102]);
+        expect(transaction.hasMatchingDedupContext()).toBe(true);
+        expect(transaction.isManuallyAnnotated).toBe(true);
+    });
+
     test('toCreateRequest zeros destination fields for non-transfer transactions', () => {
         const expense = ImportTransaction.of(BASE_RESPONSE, 0);
         const transfer = ImportTransaction.of({

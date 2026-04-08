@@ -3,6 +3,66 @@ import { TransactionType } from '@/core/transaction.ts';
 import type { ImportMatchingPayload } from './import_matching.ts';
 import type { TransactionCreateRequest, TransactionGeoLocationResponse } from './transaction.ts';
 
+function getFirstNonEmptyString(...values: Array<string | null | undefined>): string {
+    for (const value of values) {
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+
+    return '';
+}
+
+function getFirstDefinedIdString(...values: Array<number | string | null | undefined>): string {
+    for (const value of values) {
+        if (typeof value === 'number') {
+            return String(value);
+        }
+
+        if (typeof value === 'string' && value) {
+            return value;
+        }
+    }
+
+    return '';
+}
+
+function getSuggestedTypeFromMatchingCandidate(candidateType: string | undefined): number | undefined {
+    const normalizedCandidateType = (candidateType || '').trim().toLowerCase();
+    if (normalizedCandidateType === '转账' || normalizedCandidateType === 'transfer' || normalizedCandidateType === '4') {
+        return TransactionType.Transfer;
+    }
+
+    return undefined;
+}
+
+function normalizeDedupSourceIds(rawValue: Array<number | string> | string | undefined): Array<number | string> {
+    if (Array.isArray(rawValue)) {
+        return rawValue.map(value => {
+            if (typeof value === 'string') {
+                const trimmedValue = value.trim();
+                const parsedValue = Number(trimmedValue);
+                return Number.isNaN(parsedValue) ? trimmedValue : parsedValue;
+            }
+
+            return value;
+        }).filter(value => value !== '');
+    }
+
+    if (typeof rawValue === 'string' && rawValue) {
+        return rawValue.split(',').map(value => value.trim()).filter(value => !!value).map(value => {
+            const parsedValue = Number(value);
+            return Number.isNaN(parsedValue) ? value : parsedValue;
+        });
+    }
+
+    return [];
+}
+
+function hasDedupSourceIds(rawValue: Array<number | string> | string | undefined): boolean {
+    return normalizeDedupSourceIds(rawValue).length > 0;
+}
+
 export class ImportTransaction implements ImportTransactionResponse {
     public type: number;
     public categoryId: string;
@@ -48,6 +108,8 @@ export class ImportTransaction implements ImportTransactionResponse {
     // v7: 解析器来源标识
     public parserSource: string;
     public parserTags: string[];
+    public dedupType: string;
+    public dedupSourceIds: Array<number | string>;
     public matching?: ImportMatchingPayload;
 
     // v7: 标记用户是否已人工标注
@@ -61,6 +123,8 @@ export class ImportTransaction implements ImportTransactionResponse {
     public valid: boolean;
 
     private constructor(response: ImportTransactionResponse, index: number) {
+        const matching = response.matching;
+
         this.type = response.type;
         this.categoryId = response.categoryId;
         this.originalCategoryName = response.originalCategoryName;
@@ -81,31 +145,47 @@ export class ImportTransaction implements ImportTransactionResponse {
         // v6.32新增
         this.counterparty = response.counterparty || '';
         this.paymentMethod = response.paymentMethod || '';
-        this.suggestedType = response.suggestedType;
-        this.transferSuggestionScore = response.transferSuggestionScore || 0;
-        this.transferSuggestionLevel = response.transferSuggestionLevel || '';
-        this.transferSuggestionReason = response.transferSuggestionReason || '';
-        this.investmentSignalScore = response.investmentSignalScore || 0;
-        this.investmentSignalLevel = response.investmentSignalLevel || '';
-        this.investmentSignalReason = response.investmentSignalReason || '';
-        this.learningRecommendationScore = response.learningRecommendationScore || 0;
-        this.learningRecommendationLevel = response.learningRecommendationLevel || '';
-        this.learningRecommendationReason = response.learningRecommendationReason || '';
-        this.learningRecommendationType = response.learningRecommendationType || '';
-        this.learningRecommendationSummary = response.learningRecommendationSummary || '';
-        this.investmentPlatform = response.investmentPlatform || '';
-        this.investmentProduct = response.investmentProduct || '';
-        this.recurringTemplateId = response.recurringTemplateId || '';
-        this.recurringTemplateName = response.recurringTemplateName || '';
-        this.recurringCandidateCount = response.recurringCandidateCount || 0;
-        this.recurringMatchScore = response.recurringMatchScore || 0;
-        this.recurringMatchReasons = response.recurringMatchReasons || '';
-        this.recurringMatchedDate = response.recurringMatchedDate || '';
+        this.suggestedType = getSuggestedTypeFromMatchingCandidate(matching?.transfer.candidate_type) ?? response.suggestedType;
+        this.transferSuggestionScore = (matching?.transfer.score ?? 0) > 0
+            ? (matching?.transfer.score ?? 0)
+            : (response.transferSuggestionScore || 0);
+        this.transferSuggestionLevel = getFirstNonEmptyString(matching?.transfer.level, response.transferSuggestionLevel);
+        this.transferSuggestionReason = getFirstNonEmptyString(matching?.transfer.reason, response.transferSuggestionReason);
+        this.investmentSignalScore = (matching?.investment.score ?? 0) > 0
+            ? (matching?.investment.score ?? 0)
+            : (response.investmentSignalScore || 0);
+        this.investmentSignalLevel = getFirstNonEmptyString(matching?.investment.level, response.investmentSignalLevel);
+        this.investmentSignalReason = getFirstNonEmptyString(matching?.investment.reason, response.investmentSignalReason);
+        this.learningRecommendationScore = (matching?.learning.score ?? 0) > 0
+            ? (matching?.learning.score ?? 0)
+            : (response.learningRecommendationScore || 0);
+        this.learningRecommendationLevel = getFirstNonEmptyString(matching?.learning.level, response.learningRecommendationLevel);
+        this.learningRecommendationReason = getFirstNonEmptyString(matching?.learning.reason, response.learningRecommendationReason);
+        this.learningRecommendationType = getFirstNonEmptyString(matching?.learning.recommended_type, response.learningRecommendationType);
+        this.learningRecommendationSummary = getFirstNonEmptyString(matching?.learning.summary, response.learningRecommendationSummary);
+        this.investmentPlatform = getFirstNonEmptyString(matching?.investment.platform, response.investmentPlatform);
+        this.investmentProduct = getFirstNonEmptyString(matching?.investment.product, response.investmentProduct);
+        this.recurringTemplateId = getFirstDefinedIdString(matching?.recurring.id, response.recurringTemplateId);
+        this.recurringTemplateName = getFirstNonEmptyString(matching?.recurring.name, response.recurringTemplateName);
+        this.recurringCandidateCount = (matching?.recurring.candidate_count ?? 0) > 0
+            ? (matching?.recurring.candidate_count ?? 0)
+            : (response.recurringCandidateCount || 0);
+        this.recurringMatchScore = (matching?.recurring.match_score ?? 0) > 0
+            ? (matching?.recurring.match_score ?? 0)
+            : (response.recurringMatchScore || 0);
+        this.recurringMatchReasons = getFirstNonEmptyString(matching?.recurring.match_reasons, response.recurringMatchReasons);
+        this.recurringMatchedDate = getFirstNonEmptyString(matching?.recurring.matched_date, response.recurringMatchedDate);
 
-        this.parserSource = response.parserSource || '';
-        this.parserTags = response.parserTags || [];
+        this.parserSource = getFirstNonEmptyString(matching?.parser.id, response.parserSource);
+        this.parserTags = Array.isArray(matching?.parser.tags) && matching.parser.tags.length > 0
+            ? matching.parser.tags
+            : (response.parserTags || []);
+        this.dedupType = getFirstNonEmptyString(matching?.dedup.type, response.dedupType);
+        this.dedupSourceIds = hasDedupSourceIds(matching?.dedup.source_ids)
+            ? normalizeDedupSourceIds(matching?.dedup.source_ids)
+            : normalizeDedupSourceIds(response.dedupSourceIds);
         this.matching = response.matching;
-        this.isManuallyAnnotated = !!response.isManuallyAnnotated;
+        this.isManuallyAnnotated = !!matching?.annotation.is_manually_annotated || !!response.isManuallyAnnotated;
 
         this.actualCategoryName = response.originalCategoryName;
         this.actualSourceAccountName = response.originalSourceAccountName;
@@ -143,6 +223,25 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     public hasRecurringMatch(): boolean {
         return !!this.recurringTemplateId;
+    }
+
+    public hasMatchingDedupContext(): boolean {
+        return this.dedupType !== '' && this.dedupType !== 'remaining' && this.dedupSourceIds.length > 0;
+    }
+
+    public hasMatchingContextSummary(): boolean {
+        return !!this.parserSource || this.hasMatchingDedupContext() || this.isManuallyAnnotated;
+    }
+
+    public getMatchingDedupSummary(): string {
+        return [
+            this.dedupType,
+            this.dedupSourceIds.length > 0 ? this.dedupSourceIds.join('|') : ''
+        ].filter(text => !!text).join(' | ');
+    }
+
+    public getMatchingParserTagText(): string {
+        return (this.parserTags || []).filter(tag => !!tag).join(' · ');
     }
 
     public clearRecurringMatch(resetCandidateCount: boolean = true): void {
@@ -269,6 +368,8 @@ export interface ImportTransactionResponse {
     readonly recurringMatchedDate?: string;
     readonly parserSource?: string;
     readonly parserTags?: string[];
+    readonly dedupType?: string;
+    readonly dedupSourceIds?: Array<number | string> | string;
     readonly matching?: ImportMatchingPayload;
     readonly isManuallyAnnotated?: boolean;
 }
