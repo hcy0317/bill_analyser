@@ -31,6 +31,7 @@
 | `AGENTS.md` | 仓库总规则 | 每次开始任务前 | 不要把它当变更日志 |
 | `docs/PROJECT_OVERVIEW.md` | 架构/领域事实 | 改 API、导入、预算、统计、账户、分类时 | 不写会话流水账 |
 | `bill-analyser-conventions` skill | 仓库专属 workflow | 全栈、导入、统计、金额、契约变更 | 不替代项目总规则 |
+| `add-parser-standard-flow` skill | 新增 parser workflow | 新增解析器、收紧 `ParserFactory` 检测、补 parser 对齐回归时 | 不要拿它代替通用导入调试或 API/DB 变更流程 |
 | `/plan` | 复杂任务规划 | 跨模块功能、重构、需求不清 | 小改动别过度启动 |
 | `/start-work` | 从已批准计划直接执行 | `/plan` 之后、已有 checklist 之后、恢复已确认方案时 | 没有批准计划时不要假装进入执行 |
 | `/handoff` | 显式交接未完成工作 | 会话要暂停、还有 diff、需要给下个会话可恢复摘要时 | 不要拿它代替 `/verify` |

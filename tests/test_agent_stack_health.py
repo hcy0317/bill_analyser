@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import importlib
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "agent_stack_health.py"
@@ -256,3 +255,33 @@ def test_agent_stack_workflow_uses_runner_compatible_python() -> None:
     assert match.group("version") == "3.14", (
         "agent-stack-health workflow should stay on Python 3.14 so repo-level AI customization checks match the current runtime baseline"
     )
+
+
+def test_parser_standard_flow_skill_and_doc_define_repo_specific_parser_contract() -> None:
+    skill_path = REPO_ROOT / ".agents" / "skills" / "add-parser-standard-flow" / "SKILL.md"
+    doc_path = REPO_ROOT / "docs" / "parsers" / "add-parser-standard-flow.md"
+
+    assert skill_path.exists(), "missing shared parser standard-flow skill"
+    assert doc_path.exists(), "missing parser standard-flow documentation"
+
+    skill_text = skill_path.read_text(encoding="utf-8")
+    doc_text = doc_path.read_text(encoding="utf-8")
+
+    for expected in (
+        "src/bill_analyser/parsers/factory.py",
+        "src/bill_analyser/parsers/base.py",
+        "tests/test_parser_base_factory.py",
+        "tests/new_ui/test_import_parser_alignment.py",
+        "ParserFactory",
+        "StandardBill",
+    ):
+        assert expected in skill_text, f"skill must reference {expected}"
+
+    for expected in (
+        ".agents/skills/add-parser-standard-flow/SKILL.md",
+        "src/bill_analyser/parsers/factory.py",
+        "src/bill_analyser/parsers/base.py",
+        "tests/test_parser_base_factory.py",
+        "tests/new_ui/test_import_parser_alignment.py",
+    ):
+        assert expected in doc_text, f"doc must reference {expected}"

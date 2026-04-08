@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -44,3 +43,10 @@ def test_handoff_and_start_work_prompts_reference_shared_workflows() -> None:
     assert "approved-plan-execution" in start_work_prompt
     assert ".git/ai/task-state.json" in start_work_prompt
     assert "nextVerification" in verify_prompt
+
+
+def test_ai_workflow_doc_mentions_parser_standard_flow_skill() -> None:
+    doc_text = (REPO_ROOT / "docs" / "AI_WORKFLOW.md").read_text(encoding="utf-8")
+
+    assert "add-parser-standard-flow" in doc_text
+    assert "新增 parser" in doc_text or "新增解析器" in doc_text
