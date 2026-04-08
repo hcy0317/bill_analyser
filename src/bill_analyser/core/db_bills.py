@@ -42,26 +42,34 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         filter_type = parts[0].lower()
         try:
             if filter_type == "eq":
+                amount = float(parts[1])
                 conditions.append("amount = ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "ne":
+                amount = float(parts[1])
                 conditions.append("amount != ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "gt":
+                amount = float(parts[1])
                 conditions.append("amount > ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "lt":
+                amount = float(parts[1])
                 conditions.append("amount < ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "gte":
+                amount = float(parts[1])
                 conditions.append("amount >= ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "lte":
+                amount = float(parts[1])
                 conditions.append("amount <= ?")
-                params.append(float(parts[1]))
+                params.append(amount)
             elif filter_type == "between" and len(parts) >= 3:
+                min_amount = float(parts[1])
+                max_amount = float(parts[2])
                 conditions.append("amount BETWEEN ? AND ?")
-                params.extend([float(parts[1]), float(parts[2])])
+                params.extend([min_amount, max_amount])
             else:
                 self.logger.warning("未知的金额过滤器类型: %s", filter_type)
         except (TypeError, ValueError, IndexError) as exc:
