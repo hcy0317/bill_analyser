@@ -58,7 +58,6 @@ from bill_analyser.api.config.bills import (
     LEGACY_IMPORT_FIELD_TO_COLUMN_TYPE,
     MAX_BILLS_FILE_SIZE,
 )
-from bill_analyser.constants import UPLOADS_DIR
 
 try:
     import openpyxl
@@ -72,6 +71,8 @@ except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
 
 from bill_analyser.api.adapters.transaction_adapter import TransactionAdapter
 from bill_analyser.api.middleware.auth import require_auth
+from bill_analyser.constants import UPLOADS_DIR
+from bill_analyser.parsers.parser_tags import resolve_parser_tags
 from bill_analyser.utils.constants import BACKEND_TO_FRONTEND_TYPE
 from bill_analyser.utils.currency import yuan_to_cents  # 金额单位转换工具
 from bill_analyser.utils.logger import get_logger, log_method
@@ -1089,6 +1090,16 @@ def _convert_bill_to_import_item(bill: dict[str, Any]) -> dict[str, Any]:
     original_tag_names = bill.get("original_tag_names") or []
     if not isinstance(original_tag_names, list):
         original_tag_names = []
+    parser_source = str(bill.get("parserSource") or bill.get("_parser_id") or bill.get("parser_id") or "").strip()
+    parser_tags = resolve_parser_tags(
+        bill.get("parser_tags")
+        or bill.get("parserTags")
+        or bill.get("preview_parser_tags")
+        or bill.get("preview_parser_tags_json"),
+        parser_id=parser_source,
+        payment_method=str(bill.get("payment_method", "") or bill.get("preview_payment_method", "")).strip(),
+        channel=str(bill.get("channel", "")).strip(),
+    )
 
     item = {
         "type": frontend_type,
@@ -1119,9 +1130,8 @@ def _convert_bill_to_import_item(bill: dict[str, Any]) -> dict[str, Any]:
         "accountName": str(bill.get("account", "") or "").strip(),
         "amount": abs(float(bill.get("amount", 0) or 0)),
         "description": str(bill.get("description", "") or "").strip(),
-        "parserSource": str(
-            bill.get("parserSource") or bill.get("_parser_id") or bill.get("parser_id") or ""
-        ).strip(),
+        "parserSource": parser_source,
+        "parserTags": parser_tags,
         "isManuallyAnnotated": bool(
             bill.get("isManuallyAnnotated")
             or bill.get("is_manually_annotated")
@@ -3836,6 +3846,12 @@ def parse_import_file():
 
             for bill in normalized_bills:
                 bill.setdefault("_parser_id", detected_parser_type or resolved_parser_type or "generic")
+                bill["parser_tags"] = resolve_parser_tags(
+                    bill.get("parser_tags"),
+                    parser_id=bill.get("_parser_id", ""),
+                    payment_method=str(bill.get("payment_method", "")).strip(),
+                    channel=str(bill.get("channel", "")).strip(),
+                )
             if detected_parser_type:
                 for bill in normalized_bills:
                     if not str(bill.get("payment_method") or "").strip():
@@ -4786,6 +4802,8 @@ def get_import_preview(session_id: str):
                         "counterparty": preview.get("preview_counterparty", ""),
                         "paymentMethod": preview.get("preview_payment_method", ""),
                         "description": preview.get("preview_description", ""),
+                        "parserSource": preview.get("preview_parser_id", ""),
+                        "parserTags": preview.get("preview_parser_tags", []),
                         "isSelected": preview.get("is_selected", 1) == 1,
                     }
                 )

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..parsers.parser_tags import resolve_parser_tags, serialize_parser_tags
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
@@ -108,10 +109,11 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
                         INSERT INTO bills_parser_template (
                             session_id, user_id, parser_date, parser_amount,
                             parser_type, parser_description, parser_id,
+                            parser_tags_json,
                             parser_counterparty, parser_payment_method,
                             parser_original_type, parser_original_category,
                             parser_account_id, parser_is_processed, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -121,6 +123,12 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
                             bill_type,
                             bill.get("description", ""),
                             parser_id,
+                            serialize_parser_tags(
+                                bill.get("parser_tags"),
+                                parser_id=parser_id,
+                                payment_method=bill.get("payment_method", ""),
+                                channel=str(bill.get("channel", "")),
+                            ),
                             bill.get("counterparty", ""),
                             bill.get("payment_method", ""),
                             bill.get("original_type", ""),
@@ -153,7 +161,16 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
 
         async with conn.execute(query, tuple(params)) as cursor:
             rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        templates: list[dict[str, Any]] = []
+        for row in rows:
+            template = dict(row)
+            template["parser_tags"] = resolve_parser_tags(
+                template.get("parser_tags_json"),
+                parser_id=template.get("parser_id", ""),
+                payment_method=template.get("parser_payment_method", ""),
+            )
+            templates.append(template)
+        return templates
 
     @log_method
     async def update_parser_template_status(

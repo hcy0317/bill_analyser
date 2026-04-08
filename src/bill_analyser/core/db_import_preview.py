@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from datetime import date
 
+from ..parsers.parser_tags import resolve_parser_tags, serialize_parser_tags
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now, utc_now_iso
@@ -38,11 +39,12 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                 preview_main_category, preview_sub_category,
                 preview_source_account_id, preview_destination_account_id,
                 preview_counterparty, preview_payment_method, preview_description,
+                preview_parser_id, preview_parser_tags_json,
                 preview_recurring_id, preview_recurring_name,
                 preview_recurring_candidate_count, preview_recurring_match_score,
                 preview_recurring_match_reasons, preview_recurring_matched_date,
                 preview_selected, dedup_type, dedup_source_ids, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -58,6 +60,12 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                 preview_data.get("preview_counterparty", ""),
                 preview_data.get("preview_payment_method", ""),
                 preview_data.get("preview_description", ""),
+                preview_data.get("preview_parser_id", ""),
+                serialize_parser_tags(
+                    preview_data.get("preview_parser_tags") or preview_data.get("preview_parser_tags_json"),
+                    parser_id=preview_data.get("preview_parser_id", ""),
+                    payment_method=preview_data.get("preview_payment_method", ""),
+                ),
                 preview_data.get("preview_recurring_id"),
                 preview_data.get("preview_recurring_name", ""),
                 preview_data.get("preview_recurring_candidate_count", 0),
@@ -102,12 +110,12 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                             preview_main_category, preview_sub_category,
                             preview_source_account_id, preview_destination_account_id,
                             preview_counterparty, preview_payment_method, preview_description,
-                            preview_parser_id,
+                            preview_parser_id, preview_parser_tags_json,
                             preview_recurring_id, preview_recurring_name,
                             preview_recurring_candidate_count, preview_recurring_match_score,
                             preview_recurring_match_reasons, preview_recurring_matched_date,
                             preview_selected, dedup_type, dedup_source_ids, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             session_id,
@@ -124,6 +132,11 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                             preview_data.get("preview_payment_method", ""),
                             preview_data.get("preview_description", ""),
                             preview_data.get("preview_parser_id", ""),
+                            serialize_parser_tags(
+                                preview_data.get("preview_parser_tags") or preview_data.get("preview_parser_tags_json"),
+                                parser_id=preview_data.get("preview_parser_id", ""),
+                                payment_method=preview_data.get("preview_payment_method", ""),
+                            ),
                             preview_data.get("preview_recurring_id"),
                             preview_data.get("preview_recurring_name", ""),
                             preview_data.get("preview_recurring_candidate_count", 0),
@@ -167,6 +180,11 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         for row in rows:
             preview = dict(row)
             preview["is_selected"] = preview.get("preview_selected", 1)
+            preview["preview_parser_tags"] = resolve_parser_tags(
+                preview.get("preview_parser_tags_json"),
+                parser_id=preview.get("preview_parser_id", ""),
+                payment_method=preview.get("preview_payment_method", ""),
+            )
             preview["category_id"] = category_id_map.get(
                 (preview.get("preview_main_category", ""), preview.get("preview_sub_category", ""))
             )
@@ -504,7 +522,16 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             (session_id,),
         ) as cursor:
             rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        templates: list[dict[str, Any]] = []
+        for row in rows:
+            template = dict(row)
+            template["parser_tags"] = resolve_parser_tags(
+                template.get("parser_tags_json"),
+                parser_id=template.get("parser_id", ""),
+                payment_method=template.get("parser_payment_method", ""),
+            )
+            templates.append(template)
+        return templates
 
     @log_method
     async def get_existing_bills_for_dedup(

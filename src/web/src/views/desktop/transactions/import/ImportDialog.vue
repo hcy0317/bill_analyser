@@ -1402,6 +1402,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         recurringMatchReasons: item.preview_recurring_match_reasons || '',
         recurringMatchedDate: item.preview_recurring_matched_date || '',
         parserSource: item.preview_parser_id || '',
+        parserTags: item.preview_parser_tags || [],
         isManuallyAnnotated: !!item.preview_is_manually_annotated
     };
 
@@ -1410,6 +1411,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const previewTransaction = transaction as ImportTransactionWithPreviewId;
     previewTransaction._previewId = item.id;  // 保存预览表记录ID
     transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
+    transaction.parserTags = item.preview_parser_tags || transaction.parserTags || [];
     transaction.isManuallyAnnotated = !!item.preview_is_manually_annotated;
 
     return transaction;

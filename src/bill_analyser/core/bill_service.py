@@ -19,6 +19,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from ..parsers.factory import ParserFactory
+from ..parsers.parser_tags import resolve_parser_tags
 from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.validator import BillValidator
@@ -1978,6 +1979,11 @@ class BillService:
                     payment_method_source,
                     parser_id,
                 )
+                parser_tags = resolve_parser_tags(
+                    template.get("parser_tags") or template.get("parser_tags_json"),
+                    parser_id=parser_id,
+                    payment_method=payment_method,
+                )
 
                 bill = {
                     "date": template.get("parser_date", ""),
@@ -1991,6 +1997,7 @@ class BillService:
                     "source_account_id": template.get("parser_account_id"),
                     "_template_id": template.get("id"),  # 保存模板ID用于回溯
                     "_parser_id": parser_id,
+                    "_parser_tags": parser_tags,
                     "_payment_method_source": payment_method_source,  # 记录来源便于调试
                 }
                 bills.append(bill)
@@ -2133,6 +2140,7 @@ class BillService:
                     "preview_payment_method": preview_payment_method,
                     "preview_description": bill.get("description", ""),
                     "preview_parser_id": bill.get("_parser_id", ""),
+                    "preview_parser_tags": list(bill.get("_parser_tags") or []),
                     "preview_recurring_id": top_recurring_candidate.get("id") if top_recurring_candidate else None,
                     "preview_recurring_name": top_recurring_candidate.get("name", "")
                     if top_recurring_candidate
@@ -2353,6 +2361,7 @@ class BillService:
                 "preview_payment_method": preview.get("preview_payment_method", ""),
                 "preview_description": preview.get("preview_description", ""),
                 "preview_parser_id": preview.get("preview_parser_id", ""),
+                "preview_parser_tags": list(preview.get("preview_parser_tags") or []),
                 "preview_recurring_id": preview.get("preview_recurring_id"),
                 "preview_recurring_name": preview.get("preview_recurring_name", ""),
                 "preview_recurring_candidate_count": preview.get("preview_recurring_candidate_count", 0),

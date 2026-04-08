@@ -11,17 +11,19 @@
     - source_account_id: 来源账户ID (str, 解析器标识如 'wechat'/'alipay'/'icbc' 等)
     - counterparty: 交易对方 (str, 可为空)
     - payment_method: 支付方式 (str, 可为空)
+    - parser_tags: 解析器元标签 (list[str], 受控词表)
     - original_type: 原始交易类型 (str, 保留原始值用于智能识别)
     - original_category: 原始分类 (str, 如支付宝的"投资理财"等)
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ..utils.logger import get_logger, log_method
+from .parser_tags import resolve_parser_tags
 
 
 @dataclass
@@ -42,6 +44,7 @@ class StandardBill:
     # 可选字段
     counterparty: str = ""  # 交易对方
     payment_method: str = ""  # 支付方式
+    parser_tags: list[str] = field(default_factory=list)  # 解析器元标签
     original_type: str = ""  # 原始交易类型
     original_category: str = ""  # 原始分类
     transaction_id: str = ""  # 原始交易单号
@@ -62,6 +65,7 @@ class StandardBill:
             "source_account_id": self.source_account_id,
             "counterparty": self.counterparty,
             "payment_method": self.payment_method,
+            "parser_tags": list(self.parser_tags),
             "original_type": self.original_type,
             "original_category": self.original_category,
             "transaction_id": self.transaction_id,
@@ -82,6 +86,11 @@ class StandardBill:
             source_account_id=data.get("source_account_id", ""),
             counterparty=data.get("counterparty", ""),
             payment_method=data.get("payment_method", ""),
+            parser_tags=resolve_parser_tags(
+                data.get("parser_tags"),
+                parser_id=data.get("source_account_id", ""),
+                payment_method=data.get("payment_method", ""),
+            ),
             original_type=data.get("original_type", ""),
             original_category=data.get("original_category", ""),
             transaction_id=data.get("transaction_id", ""),
@@ -343,8 +352,8 @@ class ParserBase(ABC):
         parts = []
         seen = set()  # 避免重复内容
 
-        for field in description_fields:
-            value = bill.get(field, "")
+        for field_name in description_fields:
+            value = bill.get(field_name, "")
             if value and str(value).strip():
                 cleaned = str(value).strip()
                 # 过滤无意义的值
@@ -437,6 +446,12 @@ class ParserBase(ABC):
                 processed_bill["counterparty"] = str(bill.get("counterparty", ""))
                 processed_bill["payment_method"] = str(
                     bill.get("payment_method", "") or bill.get("channel", "")
+                )
+                processed_bill["parser_tags"] = resolve_parser_tags(
+                    bill.get("parser_tags"),
+                    parser_id=self.PARSER_ID,
+                    payment_method=processed_bill["payment_method"],
+                    channel=str(bill.get("channel", "")),
                 )
                 processed_bill["original_type"] = original_type
                 processed_bill["original_category"] = original_category

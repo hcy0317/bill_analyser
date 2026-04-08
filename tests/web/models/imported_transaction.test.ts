@@ -26,6 +26,7 @@ const BASE_RESPONSE: ImportTransactionResponse = {
     counterparty: '兰州拉面',
     paymentMethod: '微信支付',
     parserSource: 'wechat',
+    parserTags: ['parser:wechat', 'channel:wallet'],
     isManuallyAnnotated: true
 };
 
@@ -41,6 +42,7 @@ describe('ImportTransaction model', () => {
         expect(transaction.counterparty).toBe('兰州拉面');
         expect(transaction.paymentMethod).toBe('微信支付');
         expect(transaction.parserSource).toBe('wechat');
+        expect(transaction.parserTags).toStrictEqual(['parser:wechat', 'channel:wallet']);
         expect(transaction.isManuallyAnnotated).toBe(true);
         expect(transaction.actualCategoryName).toBe('餐饮');
         expect(transaction.actualSourceAccountName).toBe('微信零钱');

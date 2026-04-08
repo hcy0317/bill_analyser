@@ -46,6 +46,7 @@ export class ImportTransaction implements ImportTransactionResponse {
 
     // v7: 解析器来源标识
     public parserSource: string;
+    public parserTags: string[];
 
     // v7: 标记用户是否已人工标注
     public isManuallyAnnotated: boolean;
@@ -100,6 +101,7 @@ export class ImportTransaction implements ImportTransactionResponse {
         this.recurringMatchedDate = response.recurringMatchedDate || '';
 
         this.parserSource = response.parserSource || '';
+        this.parserTags = response.parserTags || [];
         this.isManuallyAnnotated = !!response.isManuallyAnnotated;
 
         this.actualCategoryName = response.originalCategoryName;
@@ -263,6 +265,7 @@ export interface ImportTransactionResponse {
     readonly recurringMatchReasons?: string;
     readonly recurringMatchedDate?: string;
     readonly parserSource?: string;
+    readonly parserTags?: string[];
     readonly isManuallyAnnotated?: boolean;
 }
 

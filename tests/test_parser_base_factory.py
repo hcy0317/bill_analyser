@@ -29,11 +29,13 @@ def test_standard_bill_round_trip_and_type_hints() -> None:
             "type": "支出",
             "description": "早餐",
             "source_account_id": "wechat",
+            "parser_tags": ["parser:wechat", "channel:wallet"],
         }
     )
 
     assert bill.amount == 12.34
     assert bill.to_dict()["description"] == "早餐"
+    assert bill.to_dict()["parser_tags"] == ["parser:wechat", "channel:wallet"]
 
 
 def test_parser_base_helpers_and_post_process(tmp_path: Path) -> None:
@@ -87,6 +89,7 @@ def test_parser_base_helpers_and_post_process(tmp_path: Path) -> None:
     assert len(processed) == 2
     assert processed[0]["amount"] == -18.6
     assert processed[0]["source_account_id"] == "dummy"
+    assert "parser:dummy" in processed[0]["parser_tags"]
     assert processed[1]["type"] == "收入"
     assert processed[1]["amount"] == 88.0
 

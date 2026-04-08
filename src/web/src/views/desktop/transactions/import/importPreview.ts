@@ -32,5 +32,6 @@ export interface ImportPreviewRecord {
     preview_recurring_match_reasons?: string;
     preview_recurring_matched_date?: string;
     preview_parser_id?: string;
+    preview_parser_tags?: string[];
     preview_is_manually_annotated?: boolean;
 }

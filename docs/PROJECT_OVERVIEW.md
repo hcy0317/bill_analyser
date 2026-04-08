@@ -83,6 +83,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ### 3.3 解析器模块（`src/bill_analyser/parsers/`）
 - 已有解析器：`wechat.py`、`alipay.py`、`icbc.py`、`abc.py`、`ccb.py`、`cmbc.py`
 - 工厂入口：`factory.py`（自动识别并分发）
+- `ParserBase` 当前除标准账单字段外，还会生成扁平 `parser_tags` 标签数组；三阶段导入临时表分别通过 `bills_parser_template.parser_tags_json` 与 `bills_preview.preview_parser_tags_json` 持久化这些解析器元标签
 - 历史 `parsers_old/` 目录与 `*_parser.py` / `csv_parser.py` / `excel_parser.py` 兼容 shim 已移除；运行态仅保留当前工厂与现行解析器实现
 - 外部脚本如果仍引用旧 shim 导入路径，应迁移到 `factory.py` 或对应的现行 parser 模块
 - 标准解析样本统一放在 `tests/fixtures/import_samples/`，供 parser 单测与真实样本回归复用
@@ -159,6 +160,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ### 5.2.1 导入预览校验交互
 - 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，按日期、类型、分类、账户、标签、人工标注状态与备注等维度组织筛选项。
+- `/api/bills/parse_import` 返回的导入预览项当前会同时携带 `parserSource` 与 `parserTags`；`BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 预览数据会返回 `preview_parser_id` 与 `preview_parser_tags`，而 `/api/bills/import/v2/preview/<session_id>` 的简化结果也会附带 `parserSource` 与 `parserTags` 供前端保留与消费解析器元信息。
 - `Annotation` 筛选中的 `Needs Review or Manually Annotated` 表示：交易仍存在待补分类/账户问题，或该交易已经被用户手工编辑过并视为人工标注。
 - 当用户在导入预览表中行内编辑一条交易时，当前正在编辑的行会在标注筛选结果里保持可见，避免因分类/账户刚被补齐而立即从列表中消失。
 - 当用户结束行内编辑时，该交易会被标记为人工标注；此后它仍命中 `Needs Review or Manually Annotated`，但不会再命中 `No Annotation Issues`。
@@ -219,6 +221,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
+- 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
 - 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件
 
 ### 6.1.1 模板域当前漂移清单

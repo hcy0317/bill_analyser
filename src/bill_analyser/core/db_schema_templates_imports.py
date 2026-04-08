@@ -186,6 +186,7 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
                 parser_type TEXT NOT NULL,
                 parser_description TEXT,
                 parser_id TEXT NOT NULL,
+                parser_tags_json TEXT,
                 parser_counterparty TEXT,
                 parser_payment_method TEXT,
                 parser_original_type TEXT,
@@ -227,6 +228,7 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
                 preview_payment_method TEXT,
                 preview_description TEXT,
                 preview_parser_id TEXT,
+                preview_parser_tags_json TEXT,
                 preview_recurring_id INTEGER,
                 preview_recurring_name TEXT,
                 preview_recurring_candidate_count INTEGER DEFAULT 0,
@@ -247,7 +249,9 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_preview_date ON bills_preview(preview_date)")
 
         for alter_statement in [
+            "ALTER TABLE bills_parser_template ADD COLUMN parser_tags_json TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_parser_id TEXT",
+            "ALTER TABLE bills_preview ADD COLUMN preview_parser_tags_json TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_id INTEGER",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_name TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_candidate_count INTEGER DEFAULT 0",
