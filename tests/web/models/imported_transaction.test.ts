@@ -27,6 +27,48 @@ const BASE_RESPONSE: ImportTransactionResponse = {
     paymentMethod: '微信支付',
     parserSource: 'wechat',
     parserTags: ['parser:wechat', 'channel:wallet'],
+    matching: {
+        transfer: {
+            candidate_type: '转账',
+            score: 0.88,
+            level: 'high',
+            reason: 'dedup_pair'
+        },
+        investment: {
+            score: 0,
+            level: '',
+            reason: '',
+            platform: '',
+            product: ''
+        },
+        learning: {
+            rule_id: null,
+            score: 0,
+            level: '',
+            reason: '',
+            recommended_type: '',
+            summary: ''
+        },
+        recurring: {
+            id: null,
+            name: '',
+            candidate_count: 0,
+            match_score: 0,
+            match_reasons: '',
+            matched_date: ''
+        },
+        dedup: {
+            type: 'transfer',
+            source_ids: [1, 2]
+        },
+        parser: {
+            id: 'wechat',
+            tags: ['parser:wechat', 'channel:wallet']
+        },
+        annotation: {
+            is_manually_annotated: true
+        }
+    },
     isManuallyAnnotated: true
 };
 
@@ -43,6 +85,9 @@ describe('ImportTransaction model', () => {
         expect(transaction.paymentMethod).toBe('微信支付');
         expect(transaction.parserSource).toBe('wechat');
         expect(transaction.parserTags).toStrictEqual(['parser:wechat', 'channel:wallet']);
+        expect(transaction.matching?.transfer.candidate_type).toBe('转账');
+        expect(transaction.matching?.parser.tags).toStrictEqual(['parser:wechat', 'channel:wallet']);
+        expect(transaction.matching?.annotation.is_manually_annotated).toBe(true);
         expect(transaction.isManuallyAnnotated).toBe(true);
         expect(transaction.actualCategoryName).toBe('餐饮');
         expect(transaction.actualSourceAccountName).toBe('微信零钱');

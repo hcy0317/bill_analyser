@@ -31,6 +31,7 @@ from .investment_settings import (
     DEFAULT_INVESTMENT_PRODUCT_PATTERNS,
     build_user_investment_keyword_settings,
 )
+from .matching import build_preview_matching_payload
 from .smart_dedup import DeduplicationType, SmartDeduplicationEngine
 
 
@@ -2387,6 +2388,13 @@ class BillService:
                 "learning_recommendation_reason": learning_recommendation.get("reason", ""),
                 "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
                 "learning_recommendation_summary": learning_recommendation.get("summary", ""),
+                "matching": build_preview_matching_payload(
+                    preview,
+                    transfer_suggestion=transfer_suggestion,
+                    investment_signal=investment_signal,
+                    learning_recommendation=learning_recommendation,
+                    is_manually_annotated=int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
+                ),
             }
             result.append(item)
 

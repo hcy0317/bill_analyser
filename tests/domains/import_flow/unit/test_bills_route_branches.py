@@ -2022,6 +2022,93 @@ def test_bills_parse_import_file_and_stage1_routes_cover_remaining_parser_and_cl
         assert not invalid_only_temp.exists()
 
 
+def test_bills_import_stage2_route_preserves_matching_map_in_preview_payload(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """阶段2路由应透传 preview 项中的 matching 结构，不得在路由层剥离。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda: (db, service, None))
+
+    service.stage2_result = {
+        "success": True,
+        "template_count": 3,
+        "preview_count": 1,
+        "dedup_stats": {"transfer_pairs": 1},
+        "match_stats": {"matched": 1},
+    }
+    service.preview_result = [
+        {
+            "id": 1,
+            "preview_type": "支出",
+            "suggested_preview_type": "转账",
+            "transfer_suggestion_score": 0.88,
+            "preview_parser_id": "wechat",
+            "preview_parser_tags": ["parser:wechat", "channel:wallet"],
+            "matching": {
+                "transfer": {
+                    "candidate_type": "转账",
+                    "score": 0.88,
+                    "level": "high",
+                    "reason": "dedup_pair",
+                },
+                "investment": {
+                    "score": 0.0,
+                    "level": "",
+                    "reason": "",
+                    "platform": "",
+                    "product": "",
+                },
+                "learning": {
+                    "rule_id": None,
+                    "score": 0.0,
+                    "level": "",
+                    "reason": "",
+                    "recommended_type": "",
+                    "summary": "",
+                },
+                "recurring": {
+                    "id": None,
+                    "name": "",
+                    "candidate_count": 0,
+                    "match_score": 0.0,
+                    "match_reasons": "",
+                    "matched_date": "",
+                },
+                "dedup": {"type": "transfer", "source_ids": [1, 2]},
+                "parser": {"id": "wechat", "tags": ["parser:wechat", "channel:wallet"]},
+                "annotation": {"is_manually_annotated": False},
+            },
+        }
+    ]
+
+    stage2_route = _unwrap_all(bills_module.import_stage2_dedup)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/dedup",
+        method="POST",
+        json={"session_id": "sess-matching"},
+    ):
+        _set_request_user_id(5)
+        payload = stage2_route().get_json() or {}
+
+    assert payload["success"] is True
+    assert payload["data"]["total"] == 3
+    assert payload["data"]["after_dedup"] == 1
+    preview_item = payload["data"]["preview"][0]
+    assert preview_item["transfer_suggestion_score"] == 0.88
+    assert preview_item["matching"]["transfer"]["candidate_type"] == "转账"
+    assert preview_item["matching"]["parser"] == {
+        "id": "wechat",
+        "tags": ["parser:wechat", "channel:wallet"],
+    }
+    assert service.stage2_calls[-1] == ("sess-matching", 5)
+    assert service.preview_calls[-1] == "sess-matching"
+
+
 def test_bills_upload_and_reconciliation_routes_cover_remaining_tail_branches(
     bills_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,

@@ -647,6 +647,149 @@ async def test_import_preview_selection_updates_and_cancel_session_helpers() -> 
 
 
 @pytest.mark.asyncio
+async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_groups() -> None:
+    """导入预览应新增 matching 镜像结构，并保持现有平铺字段不变。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 1,
+            "session_id": "session-matching-transfer",
+            "user_id": 1,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": -12.3,
+            "preview_destination_amount": 12.3,
+            "preview_main_category": "转账",
+            "preview_sub_category": "账户互转",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": 3,
+            "preview_counterparty": "内部转账",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "转账到现金",
+            "preview_parser_id": "cmbc",
+            "preview_parser_tags": ["parser:cmbc", "channel:bank"],
+            "preview_selected": 1,
+            "dedup_type": "transfer",
+            "dedup_source_ids": [101, 102],
+        }
+    ]
+    fake_db.annotation_samples = [{"preview_id": 1}]
+    service = _make_service(fake_db)
+
+    preview_items = await service.get_import_preview("session-matching-transfer", selected_only=False)
+
+    assert len(preview_items) == 1
+    preview_item = preview_items[0]
+    matching = preview_item["matching"]
+
+    assert preview_item["suggested_preview_type"] == "转账"
+    assert preview_item["transfer_suggestion_score"] >= 0.55
+    assert matching["transfer"]["candidate_type"] == preview_item["suggested_preview_type"]
+    assert matching["transfer"]["score"] == preview_item["transfer_suggestion_score"]
+    assert matching["transfer"]["level"] == preview_item["transfer_suggestion_level"]
+    assert matching["transfer"]["reason"] == preview_item["transfer_suggestion_reason"]
+    assert matching["dedup"] == {"type": "transfer", "source_ids": [101, 102]}
+    assert matching["parser"] == {"id": "cmbc", "tags": ["parser:cmbc", "channel:bank"]}
+    assert matching["annotation"] == {"is_manually_annotated": True}
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_adds_matching_investment_learning_and_recurring_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """matching 应镜像投资、长期学习和周期候选字段，而不是替换原有平铺字段。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 2,
+            "session_id": "session-matching-investment",
+            "user_id": 1,
+            "preview_date": "2025-01-03 08:30:00",
+            "preview_type": "投资",
+            "preview_amount": 88.0,
+            "preview_destination_amount": 88.0,
+            "preview_main_category": "投资理财",
+            "preview_sub_category": "基金",
+            "preview_source_account_id": 4,
+            "preview_destination_account_id": 5,
+            "preview_counterparty": "蚂蚁财富",
+            "preview_payment_method": "支付宝",
+            "preview_description": "黄金ETF 自动定投",
+            "preview_parser_id": "alipay",
+            "preview_parser_tags": ["parser:alipay", "channel:wallet"],
+            "preview_recurring_id": 9,
+            "preview_recurring_name": "每月定投",
+            "preview_recurring_candidate_count": 2,
+            "preview_recurring_match_score": 0.91,
+            "preview_recurring_match_reasons": "date|amount",
+            "preview_recurring_matched_date": "2025-01-01",
+            "preview_selected": 1,
+            "dedup_type": "remaining",
+            "dedup_source_ids": [201],
+        }
+    ]
+    service = _make_service(fake_db)
+
+    monkeypatch.setattr(
+        service,
+        "_build_investment_signal_from_preview",
+        lambda *_args, **_kwargs: {
+            "score": 0.81,
+            "level": "high",
+            "reason": "investment_keyword",
+            "platform": "蚂蚁财富",
+            "product": "黄金ETF",
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_learning_similarity_signal_from_preview",
+        lambda *_args, **_kwargs: {
+            "rule_id": 42,
+            "score": 0.88,
+            "level": "high",
+            "reason": "parser_id:exact",
+            "recommended_type": "投资",
+            "summary": "投资 | 投资理财/基金 | 支付宝 → 理财账户",
+        },
+    )
+
+    preview_items = await service.get_import_preview("session-matching-investment", selected_only=False)
+
+    assert len(preview_items) == 1
+    preview_item = preview_items[0]
+    matching = preview_item["matching"]
+
+    assert preview_item["investment_signal_score"] == 0.81
+    assert matching["investment"] == {
+        "score": 0.81,
+        "level": "high",
+        "reason": "investment_keyword",
+        "platform": "蚂蚁财富",
+        "product": "黄金ETF",
+    }
+    assert preview_item["learning_recommendation_rule_id"] == 42
+    assert matching["learning"] == {
+        "rule_id": 42,
+        "score": 0.88,
+        "level": "high",
+        "reason": "parser_id:exact",
+        "recommended_type": "投资",
+        "summary": "投资 | 投资理财/基金 | 支付宝 → 理财账户",
+    }
+    assert matching["recurring"] == {
+        "id": 9,
+        "name": "每月定投",
+        "candidate_count": 2,
+        "match_score": 0.91,
+        "match_reasons": "date|amount",
+        "matched_date": "2025-01-01",
+    }
+    assert preview_item["preview_recurring_id"] == 9
+    assert preview_item["preview_recurring_match_score"] == 0.91
+
+
+@pytest.mark.asyncio
 async def test_preview_reclassify_and_session_cleanup_respect_non_default_user_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

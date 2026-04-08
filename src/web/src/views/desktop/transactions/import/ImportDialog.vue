@@ -1403,6 +1403,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
         recurringMatchedDate: item.preview_recurring_matched_date || '',
         parserSource: item.preview_parser_id || '',
         parserTags: item.preview_parser_tags || [],
+        matching: item.matching,
         isManuallyAnnotated: !!item.preview_is_manually_annotated
     };
 
@@ -1412,6 +1413,7 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     previewTransaction._previewId = item.id;  // 保存预览表记录ID
     transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
     transaction.parserTags = item.preview_parser_tags || transaction.parserTags || [];
+    transaction.matching = item.matching || transaction.matching;
     transaction.isManuallyAnnotated = !!item.preview_is_manually_annotated;
 
     return transaction;

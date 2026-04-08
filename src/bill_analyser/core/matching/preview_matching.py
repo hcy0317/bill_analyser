@@ -1,0 +1,112 @@
+"""Helpers for additive import-preview matching payloads."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from .models import (
+    AnnotationMatchingPayload,
+    DedupMatchingPayload,
+    InvestmentMatchingPayload,
+    LearningMatchingPayload,
+    ParserMatchingPayload,
+    PreviewMatchingPayload,
+    RecurringMatchingPayload,
+    TransferMatchingPayload,
+)
+
+
+def _normalize_list_value(raw_value: Any) -> list[Any]:
+    """Normalize list-like values while preserving additive compatibility."""
+    if raw_value in (None, ""):
+        return []
+    if isinstance(raw_value, list):
+        return list(raw_value)
+    if isinstance(raw_value, (tuple, set)):
+        return list(raw_value)
+    return [raw_value]
+
+
+def _normalize_source_ids_value(raw_value: Any) -> list[int | str]:
+    """Normalize persisted dedup source IDs from CSV/list shapes into arrays."""
+    if raw_value in (None, ""):
+        return []
+
+    if isinstance(raw_value, str):
+        parts = [part.strip() for part in raw_value.split(",") if part.strip()]
+    else:
+        parts = [str(part).strip() for part in _normalize_list_value(raw_value) if str(part).strip()]
+
+    normalized_parts: list[int | str] = []
+    for part in parts:
+        try:
+            normalized_parts.append(int(part))
+        except (TypeError, ValueError):
+            normalized_parts.append(part)
+    return normalized_parts
+
+
+def _normalize_int_or_none(raw_value: Any) -> int | None:
+    """Normalize numeric identifiers while keeping blank values empty."""
+    if raw_value in (None, ""):
+        return None
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_preview_matching_payload(
+    preview: dict[str, Any],
+    *,
+    transfer_suggestion: dict[str, Any] | None = None,
+    investment_signal: dict[str, Any] | None = None,
+    learning_recommendation: dict[str, Any] | None = None,
+    is_manually_annotated: bool = False,
+) -> dict[str, Any]:
+    """Group existing preview hints into a stable additive matching payload."""
+    transfer_suggestion = transfer_suggestion or {}
+    investment_signal = investment_signal or {}
+    learning_recommendation = learning_recommendation or {}
+
+    payload = PreviewMatchingPayload(
+        transfer=TransferMatchingPayload(
+            candidate_type=str(transfer_suggestion.get("suggested_preview_type") or ""),
+            score=float(transfer_suggestion.get("score", 0.0) or 0.0),
+            level=str(transfer_suggestion.get("level") or ""),
+            reason=str(transfer_suggestion.get("reason") or ""),
+        ),
+        investment=InvestmentMatchingPayload(
+            score=float(investment_signal.get("score", 0.0) or 0.0),
+            level=str(investment_signal.get("level") or ""),
+            reason=str(investment_signal.get("reason") or ""),
+            platform=str(investment_signal.get("platform") or ""),
+            product=str(investment_signal.get("product") or ""),
+        ),
+        learning=LearningMatchingPayload(
+            rule_id=_normalize_int_or_none(learning_recommendation.get("rule_id")),
+            score=float(learning_recommendation.get("score", 0.0) or 0.0),
+            level=str(learning_recommendation.get("level") or ""),
+            reason=str(learning_recommendation.get("reason") or ""),
+            recommended_type=str(learning_recommendation.get("recommended_type") or ""),
+            summary=str(learning_recommendation.get("summary") or ""),
+        ),
+        recurring=RecurringMatchingPayload(
+            id=_normalize_int_or_none(preview.get("preview_recurring_id")),
+            name=str(preview.get("preview_recurring_name") or ""),
+            candidate_count=int(preview.get("preview_recurring_candidate_count", 0) or 0),
+            match_score=float(preview.get("preview_recurring_match_score", 0.0) or 0.0),
+            match_reasons=str(preview.get("preview_recurring_match_reasons") or ""),
+            matched_date=str(preview.get("preview_recurring_matched_date") or ""),
+        ),
+        dedup=DedupMatchingPayload(
+            type=str(preview.get("dedup_type") or ""),
+            source_ids=_normalize_source_ids_value(preview.get("dedup_source_ids")),
+        ),
+        parser=ParserMatchingPayload(
+            id=str(preview.get("preview_parser_id") or ""),
+            tags=[str(tag) for tag in _normalize_list_value(preview.get("preview_parser_tags")) if str(tag)],
+        ),
+        annotation=AnnotationMatchingPayload(is_manually_annotated=bool(is_manually_annotated)),
+    )
+    return payload.to_dict()

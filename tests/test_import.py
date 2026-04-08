@@ -742,6 +742,46 @@ async def test_import_stage2_dedup_preserves_parser_tags_in_preview(service):
 
 
 @pytest.mark.asyncio
+async def test_get_import_preview_matching_normalizes_dedup_source_ids_after_db_round_trip(service):
+    """matching.dedup.source_ids 应在真实 preview 表回读后保持数组形状。"""
+    session_id = "session-preview-matching-dedup-source-ids"
+    await service.db.create_import_session(session_id, user_id=1, file_count=1)
+
+    inserted = await service.db.insert_preview_bills_batch(
+        session_id,
+        [
+            {
+                "preview_data": {
+                    "preview_date": "2026-03-10 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 66.0,
+                    "preview_destination_amount": 0.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_source_account_id": None,
+                    "preview_destination_account_id": None,
+                    "preview_counterparty": "测试商户",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "真实 round trip dedup ids",
+                    "preview_parser_id": "generic",
+                },
+                "dedup_type": "transfer",
+                "dedup_source_ids": [301, 302],
+            }
+        ],
+        user_id=1,
+    )
+    assert inserted == 1
+
+    preview_items = await service.get_import_preview(session_id, user_id=1)
+    assert len(preview_items) == 1
+    assert preview_items[0]["matching"]["dedup"] == {
+        "type": "transfer",
+        "source_ids": [301, 302],
+    }
+
+
+@pytest.mark.asyncio
 async def test_reclassify_preview_still_applies_legacy_single_field_learning_rules(service):
     """测试历史单字段长期学习规则在升级后仍可回放，避免老用户规则失效。"""
     user_id = await service.db.create_user({

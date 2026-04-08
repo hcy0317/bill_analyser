@@ -1,3 +1,5 @@
+import type { ImportMatchingPayload } from '@/models/import_matching.ts';
+
 export interface ImportPreviewRecord {
     id: number;
     preview_type?: string;
@@ -33,5 +35,6 @@ export interface ImportPreviewRecord {
     preview_recurring_matched_date?: string;
     preview_parser_id?: string;
     preview_parser_tags?: string[];
+    matching?: ImportMatchingPayload;
     preview_is_manually_annotated?: boolean;
 }
