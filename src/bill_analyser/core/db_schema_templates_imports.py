@@ -238,6 +238,7 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
                 preview_selected INTEGER DEFAULT 1,
                 dedup_type TEXT,
                 dedup_source_ids TEXT,
+                preview_matching_feedback_json TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
@@ -258,6 +259,7 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_match_score REAL DEFAULT 0",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_match_reasons TEXT",
             "ALTER TABLE bills_preview ADD COLUMN preview_recurring_matched_date TEXT",
+            "ALTER TABLE bills_preview ADD COLUMN preview_matching_feedback_json TEXT",
         ]:
             try:
                 await conn.execute(alter_statement)

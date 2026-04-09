@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,125 @@ from .db_time import utc_now, utc_now_iso
 
 class DatabaseImportPreviewMixin(DatabaseFacadeBase):
     """Preview editing, recurring matching, confirmation, and temp-data cleanup helpers."""
+
+    _TRANSFER_PREVIEW_SNAPSHOT_FIELDS: tuple[tuple[str, Any], ...] = (
+        ("preview_type", ""),
+        ("preview_main_category", ""),
+        ("preview_sub_category", ""),
+        ("preview_recurring_id", None),
+        ("preview_recurring_name", ""),
+        ("preview_recurring_candidate_count", 0),
+        ("preview_recurring_match_score", 0),
+        ("preview_recurring_match_reasons", ""),
+        ("preview_recurring_matched_date", ""),
+    )
+
+    @staticmethod
+    def _deserialize_preview_matching_feedback(raw_payload: Any) -> dict[str, Any]:
+        if isinstance(raw_payload, dict):
+            return dict(raw_payload)
+
+        if raw_payload in (None, ""):
+            return {}
+
+        try:
+            payload = json.loads(str(raw_payload))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _serialize_preview_matching_feedback(payload: dict[str, Any]) -> str:
+        if not payload:
+            return ""
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def _clear_transfer_matching_feedback(cls, raw_payload: Any) -> str:
+        feedback_payload = cls._deserialize_preview_matching_feedback(raw_payload)
+        feedback_payload.pop("transfer", None)
+        return cls._serialize_preview_matching_feedback(feedback_payload)
+
+    @staticmethod
+    def _preview_state_matches_snapshot(preview: dict[str, Any], expected_state: dict[str, Any] | None) -> bool:
+        if not expected_state:
+            return True
+
+        current_recurring_id = preview.get("preview_recurring_id")
+        normalized_current_recurring_id = None if current_recurring_id in (None, "") else int(current_recurring_id)
+        expected_recurring_id = expected_state.get("preview_recurring_id")
+        normalized_expected_recurring_id = None if expected_recurring_id in (None, "") else int(expected_recurring_id)
+
+        return (
+            str(preview.get("session_id") or "") == str(expected_state.get("session_id") or "")
+            and str(preview.get("preview_type") or "") == str(expected_state.get("preview_type") or "")
+            and str(preview.get("preview_main_category") or "") == str(expected_state.get("preview_main_category") or "")
+            and str(preview.get("preview_sub_category") or "") == str(expected_state.get("preview_sub_category") or "")
+            and normalized_current_recurring_id == normalized_expected_recurring_id
+            and str(preview.get("preview_matching_feedback_json") or "")
+            == str(expected_state.get("preview_matching_feedback_json") or "")
+        )
+
+    def _normalize_preview_row(self, preview: dict[str, Any]) -> dict[str, Any]:
+        normalized_preview = dict(preview)
+        normalized_preview["preview_parser_tags"] = resolve_parser_tags(
+            normalized_preview.get("preview_parser_tags_json"),
+            parser_id=normalized_preview.get("preview_parser_id", ""),
+            payment_method=normalized_preview.get("preview_payment_method", ""),
+        )
+        normalized_preview["preview_matching_feedback"] = self._deserialize_preview_matching_feedback(
+            normalized_preview.get("preview_matching_feedback_json")
+        )
+        return normalized_preview
+
+    @classmethod
+    def _build_transfer_previous_preview_snapshot(cls, preview: dict[str, Any]) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {}
+        for field, default_value in cls._TRANSFER_PREVIEW_SNAPSHOT_FIELDS:
+            value = preview.get(field, default_value)
+            if field == "preview_recurring_candidate_count":
+                snapshot[field] = int(value or 0)
+            elif field == "preview_recurring_match_score":
+                snapshot[field] = float(value or 0)
+            elif field == "preview_recurring_id":
+                snapshot[field] = None if value in (None, "") else value
+            else:
+                snapshot[field] = default_value if value is None else value
+        return snapshot
+
+    @classmethod
+    def _normalize_transfer_previous_preview_snapshot(cls, raw_payload: Any) -> dict[str, Any]:
+        if not isinstance(raw_payload, dict):
+            return {}
+
+        snapshot: dict[str, Any] = {}
+        for field, default_value in cls._TRANSFER_PREVIEW_SNAPSHOT_FIELDS:
+            value = raw_payload.get(field, default_value)
+            if field == "preview_recurring_candidate_count":
+                snapshot[field] = int(value or 0)
+            elif field == "preview_recurring_match_score":
+                snapshot[field] = float(value or 0)
+            elif field == "preview_recurring_id":
+                snapshot[field] = None if value in (None, "") else value
+            else:
+                snapshot[field] = default_value if value is None else value
+        return snapshot
+
+    @classmethod
+    def _append_transfer_snapshot_restore_updates(
+        cls,
+        snapshot: dict[str, Any],
+        update_parts: list[str],
+        params: list[Any],
+    ) -> None:
+        normalized_snapshot = cls._normalize_transfer_previous_preview_snapshot(snapshot)
+        if not normalized_snapshot:
+            return
+
+        for field, default_value in cls._TRANSFER_PREVIEW_SNAPSHOT_FIELDS:
+            update_parts.append(f"{field} = ?")
+            params.append(normalized_snapshot.get(field, default_value))
 
     @log_method
     async def insert_preview_bill(
@@ -178,13 +298,8 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         }
         previews: list[dict[str, Any]] = []
         for row in rows:
-            preview = dict(row)
+            preview = self._normalize_preview_row(dict(row))
             preview["is_selected"] = preview.get("preview_selected", 1)
-            preview["preview_parser_tags"] = resolve_parser_tags(
-                preview.get("preview_parser_tags_json"),
-                parser_id=preview.get("preview_parser_id", ""),
-                payment_method=preview.get("preview_payment_method", ""),
-            )
             preview["category_id"] = category_id_map.get(
                 (preview.get("preview_main_category", ""), preview.get("preview_sub_category", ""))
             )
@@ -199,7 +314,110 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             (preview_id, user_id),
         ) as cursor:
             row = await cursor.fetchone()
-        return dict(row) if row else None
+        return self._normalize_preview_row(dict(row)) if row else None
+
+    @log_method
+    async def update_preview_transfer_decision(
+        self,
+        preview_id: int,
+        decision: str,
+        user_id: int = 1,
+        reviewed_type: str = "转账",
+        expected_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"accept", "reject", "clear"}:
+            return None
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+
+            async with conn.execute(
+                "SELECT * FROM bills_preview WHERE id = ? AND user_id = ?",
+                (preview_id, user_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if not row:
+                await conn.rollback()
+                return None
+
+            raw_preview = dict(row)
+            if not self._preview_state_matches_snapshot(raw_preview, expected_state):
+                await conn.rollback()
+                return {"_state_conflict": True}
+
+            preview = self._normalize_preview_row(raw_preview)
+            feedback_payload = self._deserialize_preview_matching_feedback(preview.get("preview_matching_feedback"))
+            transfer_feedback = feedback_payload.get("transfer") if isinstance(feedback_payload, dict) else {}
+            if not isinstance(transfer_feedback, dict):
+                transfer_feedback = {}
+            previous_preview_snapshot = self._normalize_transfer_previous_preview_snapshot(
+                transfer_feedback.get("previous_preview")
+            )
+            current_review_status = str(transfer_feedback.get("review_status") or "").strip().lower()
+            should_restore_previous_preview = current_review_status == "accepted" and bool(previous_preview_snapshot)
+
+            update_parts: list[str] = []
+            params: list[Any] = []
+
+            if normalized_decision == "accept":
+                if not previous_preview_snapshot:
+                    previous_preview_snapshot = self._build_transfer_previous_preview_snapshot(preview)
+
+                feedback_payload["transfer"] = {
+                    "review_status": "accepted",
+                    "reviewed_type": reviewed_type,
+                    "suppressed": False,
+                    "previous_preview": previous_preview_snapshot,
+                }
+                update_parts.extend(
+                    [
+                        "preview_type = ?",
+                        "preview_main_category = ?",
+                        "preview_sub_category = ?",
+                        "preview_recurring_id = ?",
+                        "preview_recurring_name = ?",
+                        "preview_recurring_candidate_count = ?",
+                        "preview_recurring_match_score = ?",
+                        "preview_recurring_match_reasons = ?",
+                        "preview_recurring_matched_date = ?",
+                    ]
+                )
+                params.extend([reviewed_type, "", "", None, "", 0, 0, "", ""])
+            elif normalized_decision == "reject":
+                if should_restore_previous_preview:
+                    self._append_transfer_snapshot_restore_updates(previous_preview_snapshot, update_parts, params)
+
+                feedback_payload["transfer"] = {
+                    "review_status": "rejected",
+                    "reviewed_type": "",
+                    "suppressed": True,
+                }
+            else:
+                if should_restore_previous_preview:
+                    self._append_transfer_snapshot_restore_updates(previous_preview_snapshot, update_parts, params)
+                feedback_payload.pop("transfer", None)
+
+            update_parts.append("preview_matching_feedback_json = ?")
+            params.append(self._serialize_preview_matching_feedback(feedback_payload))
+            params.extend([preview_id, user_id])
+
+            cursor = await conn.execute(
+                f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ? AND user_id = ?",
+                tuple(params),
+            )
+            if int(cursor.rowcount or 0) < 1:
+                await conn.rollback()
+                return None
+
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+
+        return await self.get_preview_bill_by_id(preview_id, user_id=user_id)
 
     @log_method
     async def get_recurring_candidates_for_preview(
@@ -303,6 +521,15 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             if key in update_data:
                 update_parts.append(f"{column} = ?")
                 params.append(update_data[key])
+        if update_data.get("clear_transfer_decision"):
+            async with conn.execute(
+                "SELECT preview_matching_feedback_json FROM bills_preview WHERE id = ? AND user_id = ?",
+                (preview_id, user_id),
+            ) as cursor:
+                feedback_row = await cursor.fetchone()
+            if feedback_row:
+                update_parts.append("preview_matching_feedback_json = ?")
+                params.append(self._clear_transfer_matching_feedback(feedback_row[0]))
         if not update_parts:
             return False
         params.extend([preview_id, user_id])
@@ -381,6 +608,18 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                     if category:
                         update_parts.extend(["preview_main_category = ?", "preview_sub_category = ?"])
                         params.extend([category.get("main_category", ""), category.get("sub_category", "")])
+                if update_item.get("clear_transfer_decision"):
+                    async with conn.execute(
+                        (
+                            "SELECT preview_matching_feedback_json FROM bills_preview "
+                            "WHERE id = ? AND session_id = ? AND user_id = ?"
+                        ),
+                        (preview_id, session_id, user_id),
+                    ) as cursor:
+                        feedback_row = await cursor.fetchone()
+                    if feedback_row:
+                        update_parts.append("preview_matching_feedback_json = ?")
+                        params.append(self._clear_transfer_matching_feedback(feedback_row[0]))
                 if update_parts:
                     params.extend([preview_id, session_id, user_id])
                     cursor = await conn.execute(

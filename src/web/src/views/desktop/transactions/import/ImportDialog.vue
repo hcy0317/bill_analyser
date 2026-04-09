@@ -502,6 +502,7 @@ interface ImportFieldMappings {
 
 type ImportTransactionWithPreviewId = ImportTransaction & {
     _previewId?: number;
+    _shouldClearTransferDecision?: boolean;
 };
 
 interface ImportTransactionCheckDataFilterMenuGroup {
@@ -716,6 +717,33 @@ function getPreviewTransactionType(previewType?: string): number | undefined {
     }
 
     return PREVIEW_TRANSACTION_TYPE_MAP[previewType];
+}
+
+function resolvePreviewCategoryId(mainCategory: string, subCategory: string): string {
+    if (!mainCategory && !subCategory) {
+        return '';
+    }
+
+    const categoriesMap = transactionCategoriesStore.allTransactionCategoriesMap;
+    for (const [categoryId, category] of Object.entries(categoriesMap)) {
+        if (subCategory) {
+            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
+                continue;
+            }
+
+            const parentCategory = categoriesMap[category.parentId];
+            if (parentCategory?.name === mainCategory) {
+                return categoryId;
+            }
+            continue;
+        }
+
+        if (category.name === mainCategory && (!category.parentId || category.parentId === '0')) {
+            return categoryId;
+        }
+    }
+
+    return '';
 }
 
 function isActiveCheckDataFilterGroup(summary?: string): boolean {
@@ -1338,22 +1366,9 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
 
     // 根据分类名称查找分类 ID
-    let categoryId = '';
     const mainCat = item.preview_main_category || '';
     const subCat = item.preview_sub_category || '';
-    if (mainCat || subCat) {
-        const categoriesMap = transactionCategoriesStore.allTransactionCategoriesMap;
-        for (const [catId, cat] of Object.entries(categoriesMap)) {
-            if (subCat && cat.name === subCat) {
-                categoryId = catId;
-                break;
-            }
-            if (!subCat && mainCat && cat.name === mainCat && !cat.parentId) {
-                categoryId = catId;
-                break;
-            }
-        }
-    }
+    const categoryId = resolvePreviewCategoryId(mainCat, subCat);
 
     // 账户ID
     const sourceAccountId = item.preview_source_account_id ? String(item.preview_source_account_id) : '';
@@ -1567,6 +1582,7 @@ function submit(): void {
                     preview_recurring_match_reasons: t.recurringMatchReasons || '',
                     preview_recurring_matched_date: t.recurringMatchedDate || '',
                     category_id: t.categoryId ? parseInt(t.categoryId) : null,
+                    clear_transfer_decision: !!(t as ImportTransactionWithPreviewId)._shouldClearTransferDecision,
                     selected: t.selected
                 };
             });

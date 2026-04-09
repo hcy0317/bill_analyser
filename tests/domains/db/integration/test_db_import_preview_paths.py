@@ -333,6 +333,212 @@ async def test_preview_guard_paths_return_empty_or_false_without_side_effects(
 
 
 @pytest.mark.asyncio
+async def test_preview_transfer_decision_accept_reject_and_clear_restore_preview_fields(
+    tmp_path: Path,
+) -> None:
+    """转账建议决策应支持接受、拒绝和清除，并在需要时恢复原始预览字段。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_transfer_decision_user")
+        session_id = "preview-transfer-decision-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-06-01 10:30:00",
+                "preview_type": "支出",
+                "preview_amount": 50.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_counterparty": "测试早餐店",
+                "preview_payment_method": "招商银行",
+                "preview_description": "跨卡转账早餐卡",
+                "preview_recurring_id": 88,
+                "preview_recurring_name": "早餐模板",
+                "preview_recurring_candidate_count": 2,
+                "preview_recurring_match_score": 0.91,
+                "preview_recurring_match_reasons": "amount|date",
+                "preview_recurring_matched_date": "2026-06-01",
+            },
+            user_id=user_id,
+            dedup_type="transfer",
+            dedup_source_ids=[10, 11],
+        )
+        assert preview_id > 0
+
+        accepted_preview = await db.update_preview_transfer_decision(preview_id, "accept", user_id=user_id)
+        assert accepted_preview is not None
+        assert accepted_preview["preview_type"] == "转账"
+        assert accepted_preview["preview_main_category"] == ""
+        assert accepted_preview["preview_sub_category"] == ""
+        assert accepted_preview["preview_recurring_id"] is None
+        assert accepted_preview["preview_recurring_name"] == ""
+        transfer_feedback = accepted_preview["preview_matching_feedback"]["transfer"]
+        assert transfer_feedback["review_status"] == "accepted"
+        assert transfer_feedback["reviewed_type"] == "转账"
+        assert transfer_feedback["suppressed"] is False
+        assert transfer_feedback["previous_preview"]["preview_type"] == "支出"
+        assert transfer_feedback["previous_preview"]["preview_main_category"] == "餐饮"
+
+        rejected_preview = await db.update_preview_transfer_decision(preview_id, "reject", user_id=user_id)
+        assert rejected_preview is not None
+        assert rejected_preview["preview_type"] == "支出"
+        assert rejected_preview["preview_main_category"] == "餐饮"
+        assert rejected_preview["preview_sub_category"] == "早餐"
+        assert rejected_preview["preview_recurring_id"] == 88
+        rejected_feedback = rejected_preview["preview_matching_feedback"]["transfer"]
+        assert rejected_feedback == {
+            "review_status": "rejected",
+            "reviewed_type": "",
+            "suppressed": True,
+        }
+
+        cleared_preview = await db.update_preview_transfer_decision(preview_id, "clear", user_id=user_id)
+        assert cleared_preview is not None
+        assert cleared_preview["preview_matching_feedback"] == {}
+        assert cleared_preview["preview_type"] == "支出"
+        assert cleared_preview["preview_main_category"] == "餐饮"
+        assert cleared_preview["preview_sub_category"] == "早餐"
+        assert cleared_preview["preview_recurring_id"] == 88
+        assert await db.update_preview_transfer_decision(999999, "accept", user_id=user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_batch_sync_can_clear_transfer_decision_feedback_without_overwriting_manual_fields(
+    tmp_path: Path,
+) -> None:
+    """批量同步预览草稿时应能清理 transfer 决策反馈，并保留用户当前手工字段。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_transfer_manual_sync_user")
+        session_id = "preview-transfer-manual-sync-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-06-02 12:00:00",
+                "preview_type": "支出",
+                "preview_amount": 66.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "午餐",
+                "preview_counterparty": "测试午餐店",
+                "preview_payment_method": "银行卡",
+                "preview_description": "午餐卡转账",
+                "preview_recurring_id": 18,
+                "preview_recurring_name": "午餐模板",
+                "preview_recurring_candidate_count": 1,
+                "preview_recurring_match_score": 0.8,
+                "preview_recurring_match_reasons": "amount",
+                "preview_recurring_matched_date": "2026-06-02",
+            },
+            user_id=user_id,
+            dedup_type="transfer",
+            dedup_source_ids=[101, 102],
+        )
+        assert preview_id > 0
+
+        accepted_preview = await db.update_preview_transfer_decision(preview_id, "accept", user_id=user_id)
+        assert accepted_preview is not None
+        assert accepted_preview["preview_matching_feedback"]["transfer"]["review_status"] == "accepted"
+
+        updated_count = await db.update_preview_bills_batch(
+            session_id,
+            [
+                {
+                    "id": preview_id,
+                    "preview_type": "支出",
+                    "preview_main_category": "交通",
+                    "preview_sub_category": "地铁",
+                    "preview_recurring_id": 28,
+                    "preview_recurring_name": "通勤模板",
+                    "preview_recurring_candidate_count": 3,
+                    "preview_recurring_match_score": 0.67,
+                    "preview_recurring_match_reasons": "manual",
+                    "preview_recurring_matched_date": "2026-06-03",
+                    "clear_transfer_decision": True,
+                }
+            ],
+            user_id=user_id,
+        )
+        assert updated_count == 1
+
+        synced_preview = await db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        assert synced_preview is not None
+        assert synced_preview["preview_matching_feedback"] == {}
+        assert synced_preview["preview_type"] == "支出"
+        assert synced_preview["preview_main_category"] == "交通"
+        assert synced_preview["preview_sub_category"] == "地铁"
+        assert synced_preview["preview_recurring_id"] == 28
+        assert synced_preview["preview_recurring_name"] == "通勤模板"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_transfer_decision_rejects_stale_snapshot_inside_db_transaction(
+    tmp_path: Path,
+) -> None:
+    """转账决策更新应在 DB 事务内拒绝基于旧快照的重放写入。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_transfer_db_cas_user")
+        session_id = "preview-transfer-db-cas-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-06-04 08:00:00",
+                "preview_type": "支出",
+                "preview_amount": 30.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_counterparty": "测试早餐店",
+                "preview_payment_method": "银行卡",
+                "preview_description": "CAS transfer test",
+            },
+            user_id=user_id,
+            dedup_type="transfer",
+            dedup_source_ids=[301, 302],
+        )
+        assert preview_id > 0
+
+        preview_before_accept = await db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        assert preview_before_accept is not None
+        expected_snapshot = {
+            "session_id": str(preview_before_accept.get("session_id") or ""),
+            "preview_type": str(preview_before_accept.get("preview_type") or ""),
+            "preview_main_category": str(preview_before_accept.get("preview_main_category") or ""),
+            "preview_sub_category": str(preview_before_accept.get("preview_sub_category") or ""),
+            "preview_recurring_id": preview_before_accept.get("preview_recurring_id"),
+            "preview_matching_feedback_json": str(preview_before_accept.get("preview_matching_feedback_json") or ""),
+        }
+
+        accepted_preview = await db.update_preview_transfer_decision(
+            preview_id,
+            "accept",
+            user_id=user_id,
+            expected_state=expected_snapshot,
+        )
+        assert accepted_preview is not None
+        assert accepted_preview["preview_matching_feedback"]["transfer"]["review_status"] == "accepted"
+
+        stale_reject_result = await db.update_preview_transfer_decision(
+            preview_id,
+            "reject",
+            user_id=user_id,
+            expected_state=expected_snapshot,
+        )
+        assert stale_reject_result == {"_state_conflict": True}
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_preview_confirm_handles_income_duplicates_missing_recurring_and_dedup_query_window(
     tmp_path: Path,
 ) -> None:

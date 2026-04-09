@@ -203,10 +203,46 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public hasTransferSuggestion(): boolean {
-        return !!this.suggestedType &&
-            this.suggestedType === TransactionType.Transfer &&
-            this.type !== TransactionType.Transfer &&
-            this.transferSuggestionScore > 0;
+        return !!this.suggestedType
+            && this.suggestedType === TransactionType.Transfer
+            && this.type !== TransactionType.Transfer
+            && this.transferSuggestionScore > 0
+            && !this.isTransferSuggestionSuppressed()
+            && !this.isTransferSuggestionAccepted();
+    }
+
+    public getTransferSuggestionReviewStatus(): string {
+        return (this.matching?.transfer.review_status || '').trim().toLowerCase();
+    }
+
+    public isTransferSuggestionSuppressed(): boolean {
+        return !!this.matching?.transfer.suppressed || this.isTransferSuggestionRejected();
+    }
+
+    public isTransferSuggestionAccepted(): boolean {
+        return this.getTransferSuggestionReviewStatus() === 'accepted';
+    }
+
+    public isTransferSuggestionRejected(): boolean {
+        return this.getTransferSuggestionReviewStatus() === 'rejected';
+    }
+
+    public canClearTransferSuggestionDecision(): boolean {
+        return this.isTransferSuggestionAccepted() || this.isTransferSuggestionRejected();
+    }
+
+    public resetTransferSuggestionDecisionState(): void {
+        if (!this.matching?.transfer) {
+            return;
+        }
+
+        const hasTransferCandidate = !!this.suggestedType
+            && this.suggestedType === TransactionType.Transfer
+            && this.transferSuggestionScore > 0;
+
+        this.matching.transfer.review_status = hasTransferCandidate ? 'pending' : '';
+        this.matching.transfer.reviewed_type = '';
+        this.matching.transfer.suppressed = false;
     }
 
     public hasInvestmentSignal(): boolean {

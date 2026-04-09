@@ -2393,12 +2393,126 @@ class BillService:
                     transfer_suggestion=transfer_suggestion,
                     investment_signal=investment_signal,
                     learning_recommendation=learning_recommendation,
+                    matching_feedback=preview.get("preview_matching_feedback"),
                     is_manually_annotated=int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
                 ),
             }
             result.append(item)
 
         return result
+
+    @log_method
+    async def apply_preview_transfer_decision(
+        self,
+        preview_id: int,
+        decision: str,
+        expected_state: dict[str, Any] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a preview-scoped transfer suggestion decision and return refreshed preview data."""
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"accept", "reject", "clear"}:
+            return {"success": False, "error": "Invalid decision", "status_code": 400}
+
+        if not isinstance(expected_state, dict):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        preview = await self.db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        if not preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        current_transfer_review_status = await self._get_preview_transfer_review_status(preview)
+        current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
+        current_preview_recurring_id = preview.get("preview_recurring_id")
+        current_preview_recurring_id = (
+            None if current_preview_recurring_id in (None, "") else int(current_preview_recurring_id)
+        )
+
+        expected_session_id = str(expected_state.get("sessionId") or "")
+        expected_review_status = str(expected_state.get("reviewStatus") or "").strip().lower()
+        expected_preview_type = str(expected_state.get("previewType") or "")
+        try:
+            expected_category_id_raw = expected_state.get("categoryId")
+            expected_category_id = (
+                None if expected_category_id_raw in (None, "", 0, "0") else int(expected_category_id_raw)
+            )
+            expected_recurring_id_raw = expected_state.get("recurringId")
+            expected_recurring_id = (
+                None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
+            )
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        if (
+            str(preview.get("session_id") or "") != expected_session_id
+            or current_transfer_review_status != expected_review_status
+            or str(preview.get("preview_type") or "") != expected_preview_type
+            or current_preview_category_id != expected_category_id
+            or current_preview_recurring_id != expected_recurring_id
+        ):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+
+        transfer_feedback = preview.get("preview_matching_feedback", {}).get("transfer")
+        has_existing_transfer_review = isinstance(transfer_feedback, dict) and str(
+            transfer_feedback.get("review_status") or ""
+        ).strip().lower() in {"accepted", "rejected"}
+        if normalized_decision != "clear" and not has_existing_transfer_review:
+            transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
+            if not transfer_suggestion:
+                return {"success": False, "error": "Transfer suggestion not available", "status_code": 400}
+
+        preview = await self.db.update_preview_transfer_decision(
+            preview_id,
+            normalized_decision,
+            user_id=user_id,
+            expected_state={
+                "session_id": str(preview.get("session_id") or ""),
+                "preview_type": str(preview.get("preview_type") or ""),
+                "preview_main_category": str(preview.get("preview_main_category") or ""),
+                "preview_sub_category": str(preview.get("preview_sub_category") or ""),
+                "preview_recurring_id": current_preview_recurring_id,
+                "preview_matching_feedback_json": str(preview.get("preview_matching_feedback_json") or ""),
+            },
+        )
+        if preview and preview.get("_state_conflict"):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+        if not preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        session_id = str(preview.get("session_id") or "")
+        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": session_id,
+            "decision": normalized_decision,
+            "preview": refreshed_preview,
+        }
+
+    async def _get_preview_category_id(self, preview: dict[str, Any], user_id: int = 1) -> int | None:
+        main_category = str(preview.get("preview_main_category") or "")
+        sub_category = str(preview.get("preview_sub_category") or "")
+        if not main_category and not sub_category:
+            return None
+
+        category = await self.db.get_category_by_name(main_category, sub_category, user_id=user_id)
+        if not category or category.get("id") in (None, ""):
+            return None
+
+        return int(category["id"])
+
+    async def _get_preview_transfer_review_status(self, preview: dict[str, Any]) -> str:
+        transfer_feedback = preview.get("preview_matching_feedback", {}).get("transfer")
+        review_status = (
+            str(transfer_feedback.get("review_status") or "").strip().lower()
+            if isinstance(transfer_feedback, dict)
+            else ""
+        )
+        if review_status in {"accepted", "rejected"}:
+            return review_status
+
+        transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
+        return "pending" if transfer_suggestion else ""
 
     @staticmethod
     def _deserialize_learning_match_features(rule: dict[str, Any]) -> dict[str, str]:
@@ -2850,6 +2964,15 @@ class BillService:
 
         try:
             if preview_updates:
+                self.logger.info("[重新分类] 步骤0: 同步当前预览草稿 (%d 条)", len(preview_updates))
+                update_preview_batch = getattr(self.db, "update_preview_bills_batch", None)
+                if callable(update_preview_batch):
+                    update_preview_batch_params = inspect.signature(update_preview_batch).parameters
+                    if "user_id" in update_preview_batch_params:
+                        await update_preview_batch(session_id, preview_updates, user_id=user_id)
+                    else:
+                        await update_preview_batch(session_id, preview_updates)
+
                 self.logger.info("[重新分类] 步骤0: 保存当前会话人工标注样本 (%d 条)", len(preview_updates))
                 result["session_samples_saved"] = await self.db.save_import_annotation_samples(
                     session_id, preview_updates, user_id=user_id

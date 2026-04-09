@@ -4855,6 +4855,62 @@ def get_preview_recurring_candidates(preview_id: int):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route("/import/v2/preview-item/<int:preview_id>/transfer-decision", methods=["POST"])
+@log_method
+@require_auth
+def update_preview_transfer_decision(preview_id: int):
+    """更新导入预览中转账建议的接受/拒绝/清除状态。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        decision = str(data.get("decision") or "").strip().lower()
+        if decision not in {"accept", "reject", "clear"}:
+            return jsonify({"success": False, "error": "Invalid decision"}), 400
+
+        expected_state = data.get("expectedState")
+        if not isinstance(expected_state, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                bill_service.apply_preview_transfer_decision(
+                    preview_id,
+                    decision,
+                    expected_state=expected_state,
+                    user_id=request.user_id,
+                )
+            )
+        finally:
+            loop.close()
+
+        if not result.get("success"):
+            return jsonify({"success": False, "error": result.get("error", "Failed to update decision")}), int(
+                result.get("status_code", 400)
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "previewId": result.get("preview_id", preview_id),
+                    "sessionId": result.get("session_id", ""),
+                    "decision": result.get("decision", decision),
+                    "preview": result.get("preview", []),
+                },
+            }
+        )
+    except Exception as e:
+        logger.error("更新预览转账建议决策失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route("/import/v2/preview/<session_id>/update", methods=["PUT"])
 @log_method
 @require_auth

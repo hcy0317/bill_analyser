@@ -3,6 +3,9 @@ export interface ImportMatchingTransferPayload {
     score: number;
     level: string;
     reason: string;
+    review_status?: string;
+    reviewed_type?: string;
+    suppressed?: boolean;
 }
 
 export interface ImportMatchingInvestmentPayload {

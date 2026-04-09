@@ -1336,6 +1336,223 @@ class TestBillsAPI:
         assert inserted_bill is not None
         assert inserted_bill["created_from_recurring"] in [None, "", 0]
 
+    def test_import_preview_transfer_decision_accept_reject_clear_and_invalid_payload(self, client):
+        """测试导入预览转账建议支持 accept/reject/clear，并返回刷新后的 matching 决策状态。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_transfer_decision")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        session_id = f"pytest-import-transfer-decision-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _ensure_breakfast_category_id() -> int:
+            category = await db.get_category_by_name("餐饮", "早餐", user_id=current_user_id)
+            if category and category.get("id"):
+                return int(category["id"])
+
+            category_id = await db.create_category(
+                {
+                    "type": 3,
+                    "main_category": "餐饮",
+                    "sub_category": "早餐",
+                    "description": "",
+                    "priority": 0,
+                    "keywords": "",
+                    "hidden": False,
+                    "icon": "",
+                    "color": "",
+                },
+                user_id=current_user_id,
+            )
+            assert category_id is not None
+            return int(category_id)
+
+        async def _create_preview_item():
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            return await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-06-03 09:20:00",
+                    "preview_type": "支出",
+                    "preview_amount": 88.8,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "早餐",
+                    "preview_counterparty": "pytest transfer vendor",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "pytest transfer decision",
+                    "preview_recurring_id": 77,
+                    "preview_recurring_name": "pytest recurring snapshot",
+                    "preview_recurring_candidate_count": 1,
+                    "preview_recurring_match_score": 0.88,
+                    "preview_recurring_match_reasons": "amount|date",
+                    "preview_recurring_matched_date": "2026-06-03",
+                },
+                user_id=current_user_id,
+                dedup_type="transfer",
+                dedup_source_ids=[91, 92],
+            )
+
+        breakfast_category_id = asyncio.run(_ensure_breakfast_category_id())
+        preview_id = asyncio.run(_create_preview_item())
+
+        def _build_expected_state(
+            *,
+            review_status: str,
+            preview_type: str,
+            category_id: int | None,
+            recurring_id: int | None,
+        ) -> dict[str, object]:
+            return {
+                "sessionId": session_id,
+                "reviewStatus": review_status,
+                "previewType": preview_type,
+                "categoryId": category_id,
+                "recurringId": recurring_id,
+            }
+
+        accept_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(
+                {
+                    "decision": "accept",
+                    "expectedState": _build_expected_state(
+                        review_status="pending",
+                        preview_type="支出",
+                        category_id=breakfast_category_id,
+                        recurring_id=77,
+                    ),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        accept_preview = next(
+            item for item in accept_data["data"]["preview"] if int(item["id"]) == int(preview_id)
+        )
+        assert accept_preview["preview_type"] == "转账"
+        assert accept_preview["preview_main_category"] == ""
+        assert accept_preview["matching"]["transfer"]["review_status"] == "accepted"
+        assert accept_preview["matching"]["transfer"]["reviewed_type"] == "转账"
+        assert accept_preview["matching"]["transfer"]["suppressed"] is False
+
+        stale_state_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(
+                {
+                    "decision": "accept",
+                    "expectedState": _build_expected_state(
+                        review_status="pending",
+                        preview_type="支出",
+                        category_id=breakfast_category_id,
+                        recurring_id=77,
+                    ),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert stale_state_response.status_code == 409
+        stale_state_data = stale_state_response.get_json()
+        assert stale_state_data["success"] is False
+        assert stale_state_data["error"] == "Preview state changed, please refresh"
+
+        reject_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(
+                {
+                    "decision": "reject",
+                    "expectedState": _build_expected_state(
+                        review_status="accepted",
+                        preview_type="转账",
+                        category_id=None,
+                        recurring_id=None,
+                    ),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert reject_response.status_code == 200
+        reject_data = reject_response.get_json()
+        reject_preview = next(
+            item for item in reject_data["data"]["preview"] if int(item["id"]) == int(preview_id)
+        )
+        assert reject_preview["preview_type"] == "支出"
+        assert reject_preview["preview_main_category"] == "餐饮"
+        assert reject_preview["matching"]["transfer"]["review_status"] == "rejected"
+        assert reject_preview["matching"]["transfer"]["suppressed"] is True
+
+        clear_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(
+                {
+                    "decision": "clear",
+                    "expectedState": _build_expected_state(
+                        review_status="rejected",
+                        preview_type="支出",
+                        category_id=breakfast_category_id,
+                        recurring_id=77,
+                    ),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert clear_response.status_code == 200
+        clear_data = clear_response.get_json()
+        clear_preview = next(
+            item for item in clear_data["data"]["preview"] if int(item["id"]) == int(preview_id)
+        )
+        assert clear_preview["preview_type"] == "支出"
+        assert clear_preview["preview_main_category"] == "餐饮"
+        assert clear_preview["matching"]["transfer"]["review_status"] == "pending"
+        assert clear_preview["matching"]["transfer"]["suppressed"] is False
+
+        invalid_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(
+                {
+                    "decision": "noop",
+                    "expectedState": _build_expected_state(
+                        review_status="pending",
+                        preview_type="支出",
+                        category_id=breakfast_category_id,
+                        recurring_id=77,
+                    ),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert invalid_response.status_code == 400
+        invalid_data = invalid_response.get_json()
+        assert invalid_data["success"] is False
+        assert invalid_data["error"] == "Invalid decision"
+
+        invalid_shape_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps(["accept"]),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert invalid_shape_response.status_code == 400
+        invalid_shape_data = invalid_shape_response.get_json()
+        assert invalid_shape_data["success"] is False
+        assert invalid_shape_data["error"] == "Invalid request"
+
+        missing_expected_state_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps({"decision": "accept"}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert missing_expected_state_response.status_code == 400
+        missing_expected_state_data = missing_expected_state_response.get_json()
+        assert missing_expected_state_data["success"] is False
+        assert missing_expected_state_data["error"] == "Invalid request"
+
     def test_delete_bill(self, client, auth_headers):
         """测试删除账单"""
         # 先获取账单总数

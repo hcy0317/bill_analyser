@@ -115,10 +115,66 @@
                         variant="tonal"
                         size="x-small"
                         :prepend-icon="mdiLightbulbOutline"
-                        :title="item.transferSuggestionReason"
-                        @click.stop="applySuggestedType(item)">
+                        :title="item.transferSuggestionReason">
                         {{ tt('Likely Transfer') }}
                     </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            @click.stop="reviewTransferSuggestion(item, 'accept')">
+                            {{ tt('Apply Suggestion') }}
+                        </v-btn>
+                        <v-btn
+                            variant="text"
+                            color="error"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            @click.stop="reviewTransferSuggestion(item, 'reject')">
+                            {{ tt('Reject Transfer Suggestion') }}
+                        </v-btn>
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isTransferSuggestionAccepted()">
+                    <v-chip
+                        color="success"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiCheck">
+                        {{ tt('Transfer Suggestion Accepted') }}
+                    </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            @click.stop="reviewTransferSuggestion(item, 'clear')">
+                            {{ tt('Clear Transfer Decision') }}
+                        </v-btn>
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isTransferSuggestionRejected()">
+                    <v-chip
+                        color="error"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiAlertOutline"
+                        :title="item.transferSuggestionReason">
+                        {{ tt('Transfer Suggestion Rejected') }}
+                    </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            @click.stop="reviewTransferSuggestion(item, 'clear')">
+                            {{ tt('Clear Transfer Decision') }}
+                        </v-btn>
+                    </div>
                 </div>
                 <div class="mt-1" v-if="item.hasInvestmentSignal()">
                     <v-chip
@@ -227,16 +283,35 @@
                     v-model="item.type"
                     @update:model-value="onTransactionTypeChange(item)"
                 ></v-select>
-                <v-btn
-                    v-if="item.hasTransferSuggestion()"
+                <v-chip
+                    v-if="item.isTransferSuggestionAccepted()"
                     class="mt-1"
-                    variant="text"
+                    color="success"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiCheck">
+                    {{ tt('Transfer Suggestion Accepted') }}
+                </v-chip>
+                <v-chip
+                    v-else-if="item.isTransferSuggestionRejected()"
+                    class="mt-1"
+                    color="error"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiAlertOutline"
+                    :title="item.transferSuggestionReason">
+                    {{ tt('Transfer Suggestion Rejected') }}
+                </v-chip>
+                <v-chip
+                    v-else-if="item.hasTransferSuggestion()"
+                    class="mt-1"
                     color="warning"
+                    variant="tonal"
                     size="x-small"
                     :prepend-icon="mdiLightbulbOutline"
-                    @click.stop="applySuggestedType(item)">
-                    {{ tt('Apply Suggestion') }}
-                </v-btn>
+                    :title="item.transferSuggestionReason">
+                    {{ tt('Likely Transfer') }}
+                </v-chip>
                 <v-chip
                     v-if="item.hasInvestmentSignal()"
                     class="mt-1"
@@ -323,6 +398,7 @@
                                    :placeholder="tt('Category')"
                                    :items="getCategoriesForType(item.type)"
                                    v-model="item.categoryId"
+                                   @update:model-value="syncTransferDecisionDraftState(item)"
                                    @primary-action="quickCreatePrimaryCategory(item)"
                                    @secondary-action="quickCreateSecondaryCategory(item, $event)">
                 </two-column-select>
@@ -941,7 +1017,7 @@ import type { ImportPreviewRecord } from '../importPreview.ts';
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import {
@@ -1071,6 +1147,26 @@ interface RecurringCandidateItem {
     matchedOccurrenceDate?: string;
 }
 
+interface TransferDecisionPreviewBaseline {
+    type: number;
+    categoryId: string;
+    recurringTemplateId: string;
+    recurringTemplateName: string;
+    recurringCandidateCount: number;
+    recurringMatchScore: number;
+    recurringMatchReasons: string;
+    recurringMatchedDate: string;
+    reviewStatus: string;
+    reviewedType: string;
+    suppressed: boolean;
+}
+
+type ImportTransactionWithPreviewState = ImportTransaction & {
+    _previewId?: number;
+    _previewDecisionBaseline?: TransferDecisionPreviewBaseline;
+    _shouldClearTransferDecision?: boolean;
+};
+
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
@@ -1137,6 +1233,7 @@ const recurringCandidateLoading = ref<boolean>(false);
 const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
+const transferDecisionLoadingId = ref<number | null>(null);
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -1295,10 +1392,12 @@ function onTransactionTypeChange(item: ImportTransaction): void {
     if (item.hasRecurringMatch()) {
         item.clearRecurringMatch();
     }
+    syncTransferDecisionDraftState(item);
 }
 
 function clearRecurringMatch(item: ImportTransaction): void {
     item.clearRecurringMatch(false);
+    syncTransferDecisionDraftState(item);
     logger.info(`[定时匹配] 已清除自动匹配 index=${item.index}`);
 }
 
@@ -1413,6 +1512,7 @@ function applySelectedRecurringCandidate(): void {
         ? matchedCandidate.matchReasons.join('|')
         : '';
     recurringCandidateTarget.value.recurringMatchedDate = matchedCandidate.matchedOccurrenceDate || '';
+    syncTransferDecisionDraftState(recurringCandidateTarget.value);
 
     logger.info(`[定时候选] 已切换定时匹配 index=${recurringCandidateTarget.value.index}, recurringId=${matchedCandidate.id}`);
     closeRecurringCandidateDialog();
@@ -1436,16 +1536,280 @@ function getRecurringMatchSummary(item: ImportTransaction): string {
     ].filter(text => !!text).join(' | ');
 }
 
-function applySuggestedType(item: ImportTransaction): void {
-    if (!item.hasTransferSuggestion() || !item.suggestedType) {
+function getPreviewState(item: ImportTransaction): ImportTransactionWithPreviewState {
+    return item as ImportTransactionWithPreviewState;
+}
+
+function buildTransferDecisionBaseline(item: ImportTransaction): TransferDecisionPreviewBaseline {
+    return {
+        type: item.type,
+        categoryId: item.categoryId || '',
+        recurringTemplateId: item.recurringTemplateId || '',
+        recurringTemplateName: item.recurringTemplateName || '',
+        recurringCandidateCount: Number(item.recurringCandidateCount || 0),
+        recurringMatchScore: Number(item.recurringMatchScore || 0),
+        recurringMatchReasons: item.recurringMatchReasons || '',
+        recurringMatchedDate: item.recurringMatchedDate || '',
+        reviewStatus: item.getTransferSuggestionReviewStatus(),
+        reviewedType: item.matching?.transfer.reviewed_type || '',
+        suppressed: !!item.matching?.transfer.suppressed
+    };
+}
+
+function syncTransferDecisionBaseline(item: ImportTransaction): void {
+    const previewState = getPreviewState(item);
+    previewState._previewDecisionBaseline = buildTransferDecisionBaseline(item);
+    previewState._shouldClearTransferDecision = false;
+}
+
+function hasTransferDecisionRelevantDraftChanges(item: ImportTransaction): boolean {
+    const baseline = getPreviewState(item)._previewDecisionBaseline;
+    if (!baseline) {
+        return false;
+    }
+
+    return baseline.type !== item.type
+        || baseline.categoryId !== (item.categoryId || '')
+        || baseline.recurringTemplateId !== (item.recurringTemplateId || '')
+        || baseline.recurringTemplateName !== (item.recurringTemplateName || '')
+        || baseline.recurringCandidateCount !== Number(item.recurringCandidateCount || 0)
+        || baseline.recurringMatchScore !== Number(item.recurringMatchScore || 0)
+        || baseline.recurringMatchReasons !== (item.recurringMatchReasons || '')
+        || baseline.recurringMatchedDate !== (item.recurringMatchedDate || '');
+}
+
+function restoreTransferSuggestionDecisionState(item: ImportTransaction, baseline: TransferDecisionPreviewBaseline): void {
+    if (!item.matching?.transfer) {
         return;
     }
 
-    item.type = item.suggestedType;
-    onTransactionTypeChange(item);
-    logger.info(
-        `[导入推荐] 应用类型推荐 index=${item.index}, suggestedType=${item.suggestedType}, score=${item.transferSuggestionScore}`
-    );
+    item.matching.transfer.review_status = baseline.reviewStatus;
+    item.matching.transfer.reviewed_type = baseline.reviewedType;
+    item.matching.transfer.suppressed = baseline.suppressed;
+}
+
+function syncTransferDecisionDraftState(item: ImportTransaction): void {
+    const previewState = getPreviewState(item);
+    const baseline = previewState._previewDecisionBaseline;
+    if (!baseline) {
+        syncTransferDecisionBaseline(item);
+        return;
+    }
+
+    if (!hasTransferDecisionRelevantDraftChanges(item)) {
+        previewState._shouldClearTransferDecision = false;
+        restoreTransferSuggestionDecisionState(item, baseline);
+        return;
+    }
+
+    const shouldClearTransferDecision = baseline.reviewStatus === 'accepted'
+        || baseline.reviewStatus === 'rejected'
+        || baseline.suppressed;
+    previewState._shouldClearTransferDecision = shouldClearTransferDecision;
+
+    if (shouldClearTransferDecision) {
+        item.resetTransferSuggestionDecisionState();
+    }
+}
+
+function shouldClearTransferDecisionOnSync(item: ImportTransaction): boolean {
+    return !!getPreviewState(item)._shouldClearTransferDecision;
+}
+
+function getPreviewId(item: ImportTransaction): number | null {
+    const previewId = getPreviewState(item)._previewId;
+    return typeof previewId === 'number' ? previewId : null;
+}
+
+function getPreviewTransactionTypeNumber(previewType?: string): number | undefined {
+    const normalizedPreviewType = (previewType || '').trim();
+
+    if (normalizedPreviewType === '收入') {
+        return TransactionType.Income;
+    }
+    if (normalizedPreviewType === '支出') {
+        return TransactionType.Expense;
+    }
+    if (normalizedPreviewType === '转账') {
+        return TransactionType.Transfer;
+    }
+    if (normalizedPreviewType === '投资') {
+        return TransactionType.Investment;
+    }
+
+    return undefined;
+}
+
+function getPreviewTransactionTypeText(type: number): string {
+    if (type === TransactionType.Income) {
+        return '收入';
+    }
+    if (type === TransactionType.Expense) {
+        return '支出';
+    }
+    if (type === TransactionType.Transfer) {
+        return '转账';
+    }
+    if (type === TransactionType.Investment) {
+        return '投资';
+    }
+
+    return '支出';
+}
+
+function getTransferDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+    return {
+        sessionId: props.sessionId || '',
+        reviewStatus: item.getTransferSuggestionReviewStatus(),
+        previewType: getPreviewTransactionTypeText(item.type),
+        categoryId: item.categoryId ? parseInt(item.categoryId, 10) : null,
+        recurringId: item.recurringTemplateId ? parseInt(item.recurringTemplateId, 10) : null
+    };
+}
+
+function resolvePreviewCategoryId(previewData: ImportPreviewRecord): string {
+    const mainCategory = previewData.preview_main_category || '';
+    const subCategory = previewData.preview_sub_category || '';
+
+    if (!mainCategory && !subCategory) {
+        return '';
+    }
+
+    for (const [categoryId, category] of Object.entries(allCategoriesMap.value)) {
+        if (subCategory) {
+            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
+                continue;
+            }
+
+            const parentCategory = allCategoriesMap.value[category.parentId];
+            if (parentCategory?.name === mainCategory) {
+                return categoryId;
+            }
+            continue;
+        }
+
+        if (!subCategory && mainCategory && category.name === mainCategory && !category.parentId) {
+            return categoryId;
+        }
+    }
+
+    return '';
+}
+
+function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {
+    const nextType = getPreviewTransactionTypeNumber(previewData.preview_type);
+    if (nextType !== undefined) {
+        item.type = nextType;
+    }
+
+    item.categoryId = resolvePreviewCategoryId(previewData);
+    item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
+    item.actualCategoryName = item.originalCategoryName;
+
+    item.suggestedType = getPreviewTransactionTypeNumber(previewData.suggested_preview_type);
+    item.transferSuggestionScore = Number(previewData.transfer_suggestion_score || 0);
+    item.transferSuggestionLevel = previewData.transfer_suggestion_level || '';
+    item.transferSuggestionReason = previewData.transfer_suggestion_reason || '';
+    item.matching = previewData.matching || item.matching;
+
+    item.recurringTemplateId = previewData.preview_recurring_id ? String(previewData.preview_recurring_id) : '';
+    item.recurringTemplateName = previewData.preview_recurring_name || '';
+    item.recurringCandidateCount = Number(previewData.preview_recurring_candidate_count || 0);
+    item.recurringMatchScore = Number(previewData.preview_recurring_match_score || 0);
+    item.recurringMatchReasons = previewData.preview_recurring_match_reasons || '';
+    item.recurringMatchedDate = previewData.preview_recurring_matched_date || '';
+
+    updateTransactionData(item);
+    syncTransferDecisionBaseline(item);
+}
+
+function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
+    if (decision === 'accept') {
+        return 'Transfer Suggestion Accepted';
+    }
+
+    if (decision === 'reject') {
+        return 'Transfer Suggestion Rejected';
+    }
+
+    return 'Clear Transfer Decision';
+}
+
+async function reviewTransferSuggestion(
+    item: ImportTransaction,
+    decision: 'accept' | 'reject' | 'clear'
+): Promise<void> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || !previewId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (transferDecisionLoadingId.value !== null) {
+        return;
+    }
+
+    if (shouldClearTransferDecisionOnSync(item)) {
+        snackbar.value?.showMessage('Please sync manual preview edits before reviewing transfer suggestions');
+        return;
+    }
+
+    transferDecisionLoadingId.value = previewId;
+
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`/api/bills/import/v2/preview-item/${previewId}/transfer-decision`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                decision,
+                expectedState: getTransferDecisionExpectedState(item)
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Transfer decision failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        if ((result.data?.sessionId || '') !== props.sessionId) {
+            throw new Error('Transfer decision response is out of date');
+        }
+
+        if (editingTransaction.value) {
+            editingTags.value = [];
+            editingTransaction.value = null;
+        }
+
+        const previewData = Array.isArray(result.data?.preview)
+            ? result.data.preview as ImportPreviewRecord[]
+            : [];
+        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        if (!refreshedPreview) {
+            throw new Error('Transfer decision response missing preview item');
+        }
+
+        syncTransactionFromPreviewDecision(item, refreshedPreview);
+
+        snackbar.value?.showMessage(tt(getTransferDecisionMessageKey(decision)));
+    } catch (error) {
+        logger.error(`[转账建议决策] 失败: ${error}`);
+        snackbar.value?.showMessage(`Transfer decision failed: ${error}`);
+    } finally {
+        transferDecisionLoadingId.value = null;
+    }
 }
 
 const PARSER_LABELS: Record<string, string> = {
@@ -1562,6 +1926,7 @@ async function reclassifySelected(): Promise<void> {
     if (editingTransaction.value) {
         editingTransaction.value.tagIds = editingTags.value;
         updateTransactionData(editingTransaction.value);
+        syncTransferDecisionDraftState(editingTransaction.value);
     }
 
     // 检查 session_id 是否存在
@@ -1651,6 +2016,7 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
             preview_recurring_match_reasons: transaction.recurringMatchReasons || '',
             preview_recurring_matched_date: transaction.recurringMatchedDate || '',
             category_id: transaction.categoryId ? parseInt(transaction.categoryId, 10) : null,
+            clear_transfer_decision: shouldClearTransferDecisionOnSync(transaction),
             selected: transaction.selected
         };
     }).filter(item => !!item.id);
@@ -1727,6 +2093,7 @@ function applyCreatedCategoryToTransaction(importTransaction: ImportTransaction,
     importTransaction.originalCategoryName = category.name;
     importTransaction.isManuallyAnnotated = true;
     updateTransactionData(importTransaction);
+    syncTransferDecisionDraftState(importTransaction);
 }
 
 function applyCreatedAccountToTransaction(
@@ -1912,6 +2279,7 @@ function applyBatchCategory(): void {
 
         importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
+        syncTransferDecisionDraftState(importTransaction);
         updatedCount++;
     }
 
@@ -1961,6 +2329,14 @@ function applyBatchAccount(): void {
 
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
+
+watch(
+    () => props.importTransactions,
+    transactions => {
+        (transactions || []).forEach(transaction => syncTransferDecisionBaseline(transaction));
+    },
+    { immediate: true }
+);
 
 function getDateFilterSummary(): string {
     return filters.value.minDatetime !== null && filters.value.maxDatetime !== null
@@ -3078,6 +3454,7 @@ function editTransaction(transaction: ImportTransaction): void {
         editingTransaction.value.tagIds = editingTags.value;
         editingTransaction.value.isManuallyAnnotated = true;
         updateTransactionData(editingTransaction.value);
+        syncTransferDecisionDraftState(editingTransaction.value);
     }
 
     if (editingTransaction.value === transaction) {
@@ -3215,6 +3592,9 @@ function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagIt
                     updatedCount++;
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
+                    if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
+                        syncTransferDecisionDraftState(importTransaction);
+                    }
                 }
             }
         }
@@ -3380,6 +3760,9 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
                     updatedCount++;
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
+                    if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
+                        syncTransferDecisionDraftState(importTransaction);
+                    }
                 }
             }
         }
@@ -3458,6 +3841,7 @@ function showReplaceAllTypesDialog(): void {
                     updatedCount++;
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
+                    syncTransferDecisionDraftState(importTransaction);
                 }
             }
         }
@@ -3529,6 +3913,9 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
                     updatedCount++;
                     importTransaction.isManuallyAnnotated = true;
                     updateTransactionData(importTransaction);
+                    if (type === 'expenseCategory' || type === 'incomeCategory' || type === 'transferCategory') {
+                        syncTransferDecisionDraftState(importTransaction);
+                    }
                 }
             }
         }
@@ -3577,6 +3964,7 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
 
         importTransaction.isManuallyAnnotated = true;
         updateTransactionData(importTransaction);
+        syncTransferDecisionDraftState(importTransaction);
     }
 }
 
@@ -3593,6 +3981,7 @@ function clearSelectedRecurringMatches(): void {
 
         importTransaction.clearRecurringMatch(false);
         updateTransactionData(importTransaction);
+        syncTransferDecisionDraftState(importTransaction);
         updatedCount++;
     }
 

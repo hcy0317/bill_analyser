@@ -62,12 +62,24 @@ def build_preview_matching_payload(
     transfer_suggestion: dict[str, Any] | None = None,
     investment_signal: dict[str, Any] | None = None,
     learning_recommendation: dict[str, Any] | None = None,
+    matching_feedback: dict[str, Any] | None = None,
     is_manually_annotated: bool = False,
 ) -> dict[str, Any]:
     """Group existing preview hints into a stable additive matching payload."""
     transfer_suggestion = transfer_suggestion or {}
     investment_signal = investment_signal or {}
     learning_recommendation = learning_recommendation or {}
+    matching_feedback = matching_feedback or {}
+
+    transfer_feedback = matching_feedback.get("transfer") if isinstance(matching_feedback, dict) else {}
+    if not isinstance(transfer_feedback, dict):
+        transfer_feedback = {}
+
+    review_status = str(transfer_feedback.get("review_status") or "").strip().lower()
+    if review_status not in {"accepted", "rejected"}:
+        review_status = "pending" if transfer_suggestion.get("suggested_preview_type") else ""
+    reviewed_type = str(transfer_feedback.get("reviewed_type") or "")
+    suppressed = bool(transfer_feedback.get("suppressed")) or review_status == "rejected"
 
     payload = PreviewMatchingPayload(
         transfer=TransferMatchingPayload(
@@ -75,6 +87,9 @@ def build_preview_matching_payload(
             score=float(transfer_suggestion.get("score", 0.0) or 0.0),
             level=str(transfer_suggestion.get("level") or ""),
             reason=str(transfer_suggestion.get("reason") or ""),
+            review_status=review_status,
+            reviewed_type=reviewed_type,
+            suppressed=suppressed,
         ),
         investment=InvestmentMatchingPayload(
             score=float(investment_signal.get("score", 0.0) or 0.0),

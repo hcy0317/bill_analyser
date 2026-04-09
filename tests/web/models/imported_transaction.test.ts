@@ -32,7 +32,10 @@ const BASE_RESPONSE: ImportTransactionResponse = {
             candidate_type: '转账',
             score: 0.88,
             level: 'high',
-            reason: 'dedup_pair'
+            reason: 'dedup_pair',
+            review_status: 'pending',
+            reviewed_type: '',
+            suppressed: false
         },
         investment: {
             score: 0,
@@ -190,7 +193,10 @@ describe('ImportTransaction model', () => {
                     candidate_type: 'transfer',
                     score: 0.93,
                     level: 'high',
-                    reason: 'dedup_pair'
+                    reason: 'dedup_pair',
+                    review_status: 'pending',
+                    reviewed_type: '',
+                    suppressed: false
                 },
                 investment: {
                     score: 0.81,
@@ -252,6 +258,60 @@ describe('ImportTransaction model', () => {
         expect(transaction.dedupSourceIds).toStrictEqual([101, 102]);
         expect(transaction.hasMatchingDedupContext()).toBe(true);
         expect(transaction.isManuallyAnnotated).toBe(true);
+    });
+
+    test('transfer review decisions suppress rejected suggestions and keep accepted decisions clearable', () => {
+        const rejected = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                transfer: {
+                    ...BASE_RESPONSE.matching!.transfer,
+                    review_status: 'rejected',
+                    reviewed_type: '',
+                    suppressed: true
+                }
+            }
+        }, 7);
+        const accepted = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Transfer,
+            destinationAccountId: '202',
+            destinationAmount: 1200,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                transfer: {
+                    ...BASE_RESPONSE.matching!.transfer,
+                    review_status: 'accepted',
+                    reviewed_type: '转账',
+                    suppressed: false
+                }
+            }
+        }, 8);
+
+        expect(rejected.getTransferSuggestionReviewStatus()).toBe('rejected');
+        expect(rejected.isTransferSuggestionRejected()).toBe(true);
+        expect(rejected.isTransferSuggestionSuppressed()).toBe(true);
+        expect(rejected.hasTransferSuggestion()).toBe(false);
+        expect(rejected.canClearTransferSuggestionDecision()).toBe(true);
+
+        expect(accepted.getTransferSuggestionReviewStatus()).toBe('accepted');
+        expect(accepted.isTransferSuggestionAccepted()).toBe(true);
+        expect(accepted.hasTransferSuggestion()).toBe(false);
+        expect(accepted.canClearTransferSuggestionDecision()).toBe(true);
+
+        rejected.resetTransferSuggestionDecisionState();
+        accepted.resetTransferSuggestionDecisionState();
+
+        expect(rejected.getTransferSuggestionReviewStatus()).toBe('pending');
+        expect(rejected.isTransferSuggestionRejected()).toBe(false);
+        expect(rejected.isTransferSuggestionSuppressed()).toBe(false);
+        expect(rejected.hasTransferSuggestion()).toBe(true);
+        expect(rejected.canClearTransferSuggestionDecision()).toBe(false);
+
+        expect(accepted.getTransferSuggestionReviewStatus()).toBe('pending');
+        expect(accepted.isTransferSuggestionAccepted()).toBe(false);
+        expect(accepted.canClearTransferSuggestionDecision()).toBe(false);
     });
 
     test('toCreateRequest zeros destination fields for non-transfer transactions', () => {

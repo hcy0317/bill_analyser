@@ -14,6 +14,9 @@ class TransferMatchingPayload:
     score: float = 0.0
     level: str = ""
     reason: str = ""
+    review_status: str = ""
+    reviewed_type: str = ""
+    suppressed: bool = False
 
 
 @dataclass(frozen=True)
