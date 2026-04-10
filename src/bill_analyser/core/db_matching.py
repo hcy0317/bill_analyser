@@ -53,6 +53,27 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def _get_bill_pair_link_by_id(
+        self,
+        pair_id: int,
+        *,
+        user_id: int = 1,
+        pair_type: str = _TRANSFER_PAIR_TYPE,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT *
+            FROM bill_pair_links
+            WHERE id = ? AND user_id = ? AND pair_type = ?
+            LIMIT 1
+            """,
+            (int(pair_id), user_id, pair_type),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def _delete_bill_pair_links_for_bill_ids(
         self,
         conn: Any,
@@ -251,6 +272,52 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             raise ValueError(
                 "Bills already belong to an existing transfer pair"
             ) from exc
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
+    async def delete_manual_transfer_pair(
+        self,
+        pair_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Delete a persisted manual transfer pair for historical bills."""
+        normalized_pair_id = int(pair_id)
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            pair = await self._get_bill_pair_link_by_id(
+                normalized_pair_id,
+                user_id=user_id,
+                pair_type=self._TRANSFER_PAIR_TYPE,
+                conn=conn,
+            )
+            if not pair:
+                await conn.rollback()
+                raise LookupError("Pair not found")
+
+            if str(pair.get("source") or "manual") != "manual":
+                await conn.rollback()
+                raise ValueError("Only manual transfer pairs can be deleted")
+
+            cursor = await conn.execute(
+                "DELETE FROM bill_pair_links WHERE id = ? AND user_id = ?",
+                (normalized_pair_id, user_id),
+            )
+            if int(cursor.rowcount or 0) != 1:
+                await conn.rollback()
+                raise LookupError("Pair not found")
+
+            await conn.commit()
+            return {
+                "id": int(pair["id"]),
+                "pair_type": str(pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
+                "source": str(pair.get("source") or "manual"),
+                "left_bill_id": int(pair["left_bill_id"]),
+                "right_bill_id": int(pair["right_bill_id"]),
+            }
         except Exception:
             await conn.rollback()
             raise

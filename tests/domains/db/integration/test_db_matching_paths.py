@@ -221,6 +221,90 @@ async def test_db_manual_pair_persists_single_logical_pair_and_followup_read_hid
 
 
 @pytest.mark.asyncio
+async def test_db_delete_manual_pair_removes_link_and_restores_candidates(tmp_path: Path) -> None:
+    """删除历史手工配对后，应恢复 linked_pair 为空且候选重新可见。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_delete_restore_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="解链源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="解链目标账户")
+
+        expense_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-86.0,
+            bill_type="支出",
+            date="2026-07-03 11:00:00",
+            description="manual pair delete expense bill",
+        )
+        income_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=86.0,
+            bill_type="收入",
+            date="2026-07-03 11:03:00",
+            description="manual pair delete income bill",
+        )
+
+        pair = await db.create_manual_transfer_pair(expense_bill_id, income_bill_id, user_id=user_id)
+        assert await _count_bill_pair_links(db, user_id=user_id) == 1
+
+        deleted_pair = await db.delete_manual_transfer_pair(int(pair["id"]), user_id=user_id)
+        assert deleted_pair["id"] == int(pair["id"])
+        assert await _count_bill_pair_links(db, user_id=user_id) == 0
+
+        expense_result = await db.get_bill_transfer_candidates(expense_bill_id, user_id=user_id)
+        assert expense_result["linked_pair"] is None
+        assert [candidate["bill_id"] for candidate in expense_result["candidates"]] == [income_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_delete_manual_pair_is_user_scoped_and_rejects_missing_pair(tmp_path: Path) -> None:
+    """删除历史手工配对应保持 user scope，并拒绝不存在的 pair。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_delete_scope_user")
+        other_user_id = await _create_user(db, "matching_pair_delete_scope_other")
+        source_account_id = await _create_account(db, user_id=user_id, name="删除隔离源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="删除隔离目标账户")
+
+        expense_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-96.0,
+            bill_type="支出",
+            date="2026-07-03 12:00:00",
+            description="manual pair delete scope expense bill",
+        )
+        income_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=96.0,
+            bill_type="收入",
+            date="2026-07-03 12:02:00",
+            description="manual pair delete scope income bill",
+        )
+
+        pair = await db.create_manual_transfer_pair(expense_bill_id, income_bill_id, user_id=user_id)
+
+        with pytest.raises(LookupError, match="Pair not found"):
+            await db.delete_manual_transfer_pair(int(pair["id"]), user_id=other_user_id)
+
+        with pytest.raises(LookupError, match="Pair not found"):
+            await db.delete_manual_transfer_pair(999999, user_id=user_id)
+
+        assert await _count_bill_pair_links(db, user_id=user_id) == 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_db_manual_pair_rejects_reverse_duplicate_and_second_pair_for_either_bill(
     tmp_path: Path,
 ) -> None:

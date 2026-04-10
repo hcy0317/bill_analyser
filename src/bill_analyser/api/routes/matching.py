@@ -1,4 +1,4 @@
-"""Matching API Routes - 导入配对候选只读接口。"""
+"""Matching API Routes - 导入候选与历史账单后配对接口。"""
 
 import asyncio
 from typing import Any, cast
@@ -190,4 +190,27 @@ def create_manual_pair():
         return jsonify({"success": True, "data": {"pair": serialized_pair}})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("创建历史账单手工配对失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/pairs/<int:pair_id>", methods=["DELETE"])
+@log_method
+@require_auth
+def delete_manual_pair(pair_id: int):
+    """删除一条正式账单 transfer-only 手工配对。"""
+    try:
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        result = _run_async(
+            bill_service.delete_manual_transfer_pair(pair_id, user_id=user_id)
+        )
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 404))
+            error_message = result.get("error", "Pair not found")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        serialized_pair = _serialize_bill_pair(result.get("pair"))
+        return jsonify({"success": True, "data": {"pair": serialized_pair}})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除历史账单手工配对失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500

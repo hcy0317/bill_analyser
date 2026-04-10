@@ -2450,6 +2450,22 @@ class BillService:
         return {"success": True, "pair": pair}
 
     @log_method
+    async def delete_manual_transfer_pair(
+        self,
+        pair_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Delete a persisted manual transfer pair for historical bills."""
+        try:
+            pair = await self.db.delete_manual_transfer_pair(pair_id, user_id=user_id)
+        except LookupError:
+            return {"success": False, "error": "Pair not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+
+        return {"success": True, "pair": pair}
+
+    @log_method
     async def apply_preview_transfer_decision(
         self,
         preview_id: int,

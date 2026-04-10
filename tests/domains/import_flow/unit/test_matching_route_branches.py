@@ -47,6 +47,7 @@ class FakeMatchingService:
         self.calls: list[tuple[str, int]] = []
         self.bill_candidate_calls: list[tuple[int, int]] = []
         self.manual_pair_calls: list[tuple[int, int, int]] = []
+        self.deleted_pair_calls: list[tuple[int, int]] = []
         self.result = {
             "session_id": "session-1",
             "summary": {
@@ -84,6 +85,16 @@ class FakeMatchingService:
                 "right_bill_id": 12,
             },
         }
+        self.delete_pair_result = {
+            "success": True,
+            "pair": {
+                "id": 3,
+                "pair_type": "transfer",
+                "source": "manual",
+                "left_bill_id": 11,
+                "right_bill_id": 12,
+            },
+        }
 
     async def get_matching_session_candidates(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         self.calls.append((session_id, user_id))
@@ -101,6 +112,10 @@ class FakeMatchingService:
     ) -> dict[str, Any]:
         self.manual_pair_calls.append((bill_id, candidate_bill_id, user_id))
         return dict(self.manual_pair_result)
+
+    async def delete_manual_transfer_pair(self, pair_id: int, user_id: int = 1) -> dict[str, Any]:
+        self.deleted_pair_calls.append((pair_id, user_id))
+        return dict(self.delete_pair_result)
 
 
 def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
@@ -266,5 +281,48 @@ def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
     ):
         _set_request_user_id(9)
         response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_pair_delete_route_covers_success_404_and_500(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史正式账单手工配对删除路由应覆盖成功、404 与异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    delete_pair_route = _unwrap_all(matching_module.delete_manual_pair)
+
+    with matching_route_app.test_request_context("/api/matching/pairs/3", method="DELETE"):
+        _set_request_user_id(9)
+        payload = delete_pair_route(3).get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["pair"]["id"] == 3
+        assert service.deleted_pair_calls == [(3, 9)]
+
+    service.delete_pair_result = {
+        "success": False,
+        "error": "Pair not found",
+        "status_code": 404,
+    }
+    with matching_route_app.test_request_context("/api/matching/pairs/999", method="DELETE"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(delete_pair_route(999))
+        assert status == 404
+        assert response.get_json()["error"] == "Pair not found"
+
+    async def raise_delete_pair_error(_pair_id: int, user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("delete pair boom")
+
+    monkeypatch.setattr(service, "delete_manual_transfer_pair", raise_delete_pair_error)
+    with matching_route_app.test_request_context("/api/matching/pairs/3", method="DELETE"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(delete_pair_route(3))
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"

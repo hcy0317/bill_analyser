@@ -320,8 +320,8 @@ class TestMatchingAPI:
         assert post_response.status_code == 404
         assert post_response.get_json()["error"] == "Bill not found"
 
-    def test_matching_manual_pair_persists_link_and_followup_candidates_exclude_paired_bill(self, client):
-        """手工后配对成功后应返回 pair，并让后续候选读取收敛到 linkedPair。"""
+    def test_matching_manual_pair_delete_restores_candidates_for_formal_bill(self, client):
+        """手工后配对删除后，应恢复 linkedPair 为空且候选重新出现。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair")
         current_user_id = _get_current_user_id(client, auth_headers)
 
@@ -362,6 +362,22 @@ class TestMatchingAPI:
         follow_up_data = follow_up_response.get_json()
         assert follow_up_data["data"]["linkedPair"]["otherBillId"] == candidate_bill_id
         assert follow_up_data["data"]["candidates"] == []
+
+        delete_response = client.delete(
+            f"/api/matching/pairs/{data['data']['pair']['id']}",
+            headers=auth_headers,
+        )
+
+        assert delete_response.status_code == 200
+        delete_data = delete_response.get_json()
+        assert delete_data["success"] is True
+        assert delete_data["data"]["pair"]["id"] == data["data"]["pair"]["id"]
+
+        restored_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert restored_response.status_code == 200
+        restored_data = restored_response.get_json()
+        assert restored_data["data"]["linkedPair"] is None
+        assert [candidate["billId"] for candidate in restored_data["data"]["candidates"]] == [candidate_bill_id]
 
     def test_matching_manual_pair_rejects_self_pair_and_existing_link_conflicts(self, client):
         """手工后配对应拒绝 self-pair 与已存在 pair 的冲突写入。"""
@@ -418,6 +434,47 @@ class TestMatchingAPI:
         )
         assert conflicting_response.status_code == 409
         assert conflicting_response.get_json()["error"] == "Bills already belong to an existing transfer pair"
+
+    def test_matching_pair_delete_is_user_scoped(self, client):
+        """历史正式账单手工配对删除不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_pair_delete_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_pair_delete_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest 删除隔离转出账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest 删除隔离转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-81.0,
+            bill_type="支出",
+            date="2026-07-15 10:00:00",
+            description="matching api delete scope anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=81.0,
+            bill_type="收入",
+            date="2026-07-15 10:02:00",
+            description="matching api delete scope candidate",
+        )
+
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id},
+            headers=primary_headers,
+        )
+        assert pair_response.status_code == 200
+        pair_id = pair_response.get_json()["data"]["pair"]["id"]
+
+        delete_response = client.delete(f"/api/matching/pairs/{pair_id}", headers=secondary_headers)
+        assert delete_response.status_code == 404
+        assert delete_response.get_json()["error"] == "Pair not found"
+
+        follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=primary_headers)
+        assert follow_up_response.status_code == 200
+        assert follow_up_response.get_json()["data"]["linkedPair"]["id"] == pair_id
 
     def test_matching_bill_candidates_support_slash_and_cn_date_formats(self, client):
         """历史 matching API 应兼容验证器已接受的 `/` 与中文日期格式。"""
