@@ -2408,6 +2408,48 @@ class BillService:
         return build_matching_session_candidates(session_id, preview_items)
 
     @log_method
+    async def get_matching_bill_candidates(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
+        """Return transfer-only matching candidates for a persisted historical bill."""
+        result = await self.db.get_bill_transfer_candidates(bill_id, user_id=user_id)
+        if not result.get("bill"):
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+
+        return {
+            "success": True,
+            "bill_id": bill_id,
+            "linked_pair": result.get("linked_pair"),
+            "candidates": result.get("candidates", []),
+        }
+
+    @log_method
+    async def create_manual_transfer_pair(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a manual transfer pair for two historical bills."""
+        if int(bill_id) == int(candidate_bill_id):
+            return {
+                "success": False,
+                "error": "billId and candidateBillId must be different",
+                "status_code": 400,
+            }
+
+        try:
+            pair = await self.db.create_manual_transfer_pair(
+                bill_id,
+                candidate_bill_id,
+                user_id=user_id,
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+
+        return {"success": True, "pair": pair}
+
+    @log_method
     async def apply_preview_transfer_decision(
         self,
         preview_id: int,

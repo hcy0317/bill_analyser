@@ -45,6 +45,8 @@ class FakeMatchingService:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
+        self.bill_candidate_calls: list[tuple[int, int]] = []
+        self.manual_pair_calls: list[tuple[int, int, int]] = []
         self.result = {
             "session_id": "session-1",
             "summary": {
@@ -59,10 +61,46 @@ class FakeMatchingService:
             },
             "candidates": [{"candidate_id": "preview:1:transfer", "kind": "transfer"}],
         }
+        self.bill_candidate_result = {
+            "success": True,
+            "bill_id": 11,
+            "linked_pair": None,
+            "candidates": [
+                {
+                    "bill_id": 12,
+                    "score": 0.95,
+                    "level": "high",
+                    "reason": "same_amount|opposite_sign",
+                }
+            ],
+        }
+        self.manual_pair_result = {
+            "success": True,
+            "pair": {
+                "id": 3,
+                "pair_type": "transfer",
+                "source": "manual",
+                "left_bill_id": 11,
+                "right_bill_id": 12,
+            },
+        }
 
     async def get_matching_session_candidates(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         self.calls.append((session_id, user_id))
         return dict(self.result)
+
+    async def get_matching_bill_candidates(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
+        self.bill_candidate_calls.append((bill_id, user_id))
+        return dict(self.bill_candidate_result)
+
+    async def create_manual_transfer_pair(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        self.manual_pair_calls.append((bill_id, candidate_bill_id, user_id))
+        return dict(self.manual_pair_result)
 
 
 def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
@@ -127,5 +165,106 @@ def test_matching_route_returns_candidates_404_and_500(
     with matching_route_app.test_request_context("/api/matching/sessions/session-1/candidates", method="GET"):
         _set_request_user_id(9)
         response, status = _unwrap_response(route("session-1"))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史正式账单 matching 路由应覆盖 GET 候选与 POST 手工配对分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    get_candidates_route = _unwrap_all(matching_module.get_matching_bill_candidates)
+    create_manual_pair_route = _unwrap_all(matching_module.create_manual_pair)
+
+    with matching_route_app.test_request_context("/api/matching/bills/11/candidates", method="GET"):
+        _set_request_user_id(9)
+        payload = get_candidates_route(11).get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["billId"] == 11
+        assert payload["data"]["linkedPair"] is None
+        assert payload["data"]["candidates"][0]["billId"] == 12
+        assert service.bill_candidate_calls == [(11, 9)]
+
+    service.bill_candidate_result = {"success": False, "error": "Bill not found", "status_code": 404}
+    with matching_route_app.test_request_context("/api/matching/bills/999/candidates", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(get_candidates_route(999))
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    async def raise_bill_candidates_error(_bill_id: int, user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("bill candidates boom")
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", raise_bill_candidates_error)
+    with matching_route_app.test_request_context("/api/matching/bills/11/candidates", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(get_candidates_route(11))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", FakeMatchingService().get_matching_bill_candidates)
+    with matching_route_app.test_request_context("/api/matching/manual-pair", method="POST", json={}):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "billId and candidateBillId are required"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 11},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "billId and candidateBillId must be different"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 12},
+    ):
+        _set_request_user_id(7)
+        payload = create_manual_pair_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["pair"]["leftBillId"] == 11
+        assert payload["data"]["pair"]["rightBillId"] == 12
+        assert service.manual_pair_calls == [(11, 12, 7)]
+
+    service.manual_pair_result = {
+        "success": False,
+        "error": "Bills already belong to an existing transfer pair",
+        "status_code": 409,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 12},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 409
+        assert response.get_json()["error"] == "Bills already belong to an existing transfer pair"
+
+    async def raise_manual_pair_error(_bill_id: int, _candidate_bill_id: int, user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("manual pair boom")
+
+    monkeypatch.setattr(service, "create_manual_transfer_pair", raise_manual_pair_error)
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 12},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"

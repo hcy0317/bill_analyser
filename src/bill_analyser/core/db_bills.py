@@ -324,6 +324,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         """删除账单。"""
         conn = await self._get_connection()
         try:
+            await self._delete_bill_pair_links_for_bill_ids(conn, [bill_id], user_id=user_id)
             cursor = await conn.execute("DELETE FROM bills WHERE id = ? AND user_id = ?", (bill_id, user_id))
             await conn.commit()
             return cursor.rowcount > 0
@@ -390,6 +391,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
             return 0
 
         conn = await self._get_connection()
+        await self._delete_bill_pair_links_for_bill_ids(conn, bill_ids, user_id=user_id)
         placeholders = ",".join(["?" for _ in bill_ids])
         cursor = await conn.execute(
             f"DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?",
@@ -472,15 +474,56 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
     async def deduplicate(self) -> int:
         """去除重复账单。"""
         conn = await self._get_connection()
-        cursor = await conn.execute(
+        async with conn.execute(
             """
-            DELETE FROM bills
-            WHERE id NOT IN (
-                SELECT MIN(id)
-                FROM bills
-                GROUP BY hash
+            SELECT id, user_id, date, type, amount, counterparty, description, hash
+            FROM bills
+            ORDER BY id ASC
+            """
+        ) as cursor:
+            bill_rows = await cursor.fetchall()
+
+        duplicate_ids_by_user: dict[int, list[int]] = {}
+        seen_group_keys: set[tuple[Any, ...]] = set()
+        for row in bill_rows:
+            row_id = int(row["id"] or 0)
+            row_user_id = int(row["user_id"] or 0)
+            row_hash = str(row["hash"] or "").strip()
+
+            if row_hash:
+                dedup_group_key: tuple[Any, ...] = ("hash", row_user_id, row_hash)
+            else:
+                dedup_group_key = (
+                    "legacy-null-hash",
+                    row_user_id,
+                    str(row["date"] or ""),
+                    str(row["type"] or ""),
+                    f"{float(row['amount'] or 0.0):.10f}",
+                    str(row["counterparty"] or ""),
+                    str(row["description"] or ""),
+                )
+
+            if dedup_group_key in seen_group_keys:
+                duplicate_ids_by_user.setdefault(row_user_id, []).append(row_id)
+                continue
+
+            seen_group_keys.add(dedup_group_key)
+
+        duplicate_ids = [bill_id for bill_ids in duplicate_ids_by_user.values() for bill_id in bill_ids]
+        if not duplicate_ids:
+            return 0
+
+        for row_user_id, bill_ids in duplicate_ids_by_user.items():
+            await self._delete_bill_pair_links_for_bill_ids(
+                conn,
+                bill_ids,
+                user_id=row_user_id,
             )
-            """
+
+        placeholders = ",".join(["?" for _ in duplicate_ids])
+        cursor = await conn.execute(
+            f"DELETE FROM bills WHERE id IN ({placeholders})",
+            duplicate_ids,
         )
         deleted_count = int(cursor.rowcount or 0)
         await conn.commit()

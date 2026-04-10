@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from ..parsers.parser_tags import resolve_parser_tags, serialize_parser_tags
 from ..utils.logger import log_method
+from .bill_date_utils import normalize_bill_date_text
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now, utc_now_iso
 
@@ -151,6 +152,9 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         conn = await self._get_connection()
         now = utc_now_iso()
         source_ids_str = ",".join(map(str, dedup_source_ids)) if dedup_source_ids else ""
+        normalized_preview_date = normalize_bill_date_text(
+            preview_data.get("preview_date", "")
+        )
         cursor = await conn.execute(
             """
             INSERT INTO bills_preview (
@@ -169,7 +173,7 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             (
                 session_id,
                 user_id,
-                preview_data.get("preview_date", ""),
+                normalized_preview_date,
                 preview_data.get("preview_type", ""),
                 preview_data.get("preview_amount", 0),
                 preview_data.get("preview_destination_amount", 0),
@@ -219,6 +223,9 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             for item in batch:
                 try:
                     preview_data = item.get("preview_data", item)
+                    normalized_preview_date = normalize_bill_date_text(
+                        preview_data.get("preview_date", "")
+                    )
                     dedup_type = item.get("dedup_type", "remaining")
                     dedup_source_ids = item.get("dedup_source_ids", [])
                     source_ids_str = ",".join(map(str, dedup_source_ids)) if dedup_source_ids else ""
@@ -240,7 +247,7 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                         (
                             session_id,
                             user_id,
-                            preview_data.get("preview_date", ""),
+                            normalized_preview_date,
                             preview_data.get("preview_type", ""),
                             preview_data.get("preview_amount", 0),
                             preview_data.get("preview_destination_amount", 0),
@@ -749,6 +756,9 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         for preview in previews:
             try:
                 bill_type = preview.get("preview_type", "")
+                preview_date_text = normalize_bill_date_text(
+                    preview.get("preview_date", "")
+                )
                 amount = abs(float(preview.get("preview_amount", 0)))
                 if bill_type in ["支出", "expense"]:
                     amount = -abs(amount)
@@ -756,7 +766,7 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                     amount = abs(amount)
 
                 bill_data = {
-                    "date": preview.get("preview_date", ""),
+                    "date": preview_date_text,
                     "type": bill_type,
                     "amount": amount,
                     "counterparty": preview.get("preview_counterparty", ""),
@@ -774,7 +784,7 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                     """,
                     (
                         user_id,
-                        preview.get("preview_date", ""),
+                        preview_date_text,
                         bill_type,
                         amount,
                         preview.get("preview_counterparty", ""),

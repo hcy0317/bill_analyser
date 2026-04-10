@@ -481,6 +481,11 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
             bill_ids = [int(row["id"]) for row in bill_rows]
             deleted_bill_count = 0
             if bill_ids:
+                await self._delete_bill_pair_links_for_bill_ids(
+                    conn,
+                    bill_ids,
+                    user_id=user_id,
+                )
                 placeholders = ",".join(["?" for _ in bill_ids])
                 await conn.execute(f"DELETE FROM bill_tags WHERE bill_id IN ({placeholders})", bill_ids)
                 bill_cursor = await conn.execute(

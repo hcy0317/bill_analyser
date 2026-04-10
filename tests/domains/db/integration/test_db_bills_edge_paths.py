@@ -211,6 +211,156 @@ async def test_deduplicate_removes_duplicate_null_hash_rows(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_deduplicate_does_not_cross_user_boundaries_for_same_hash_group(tmp_path: Path) -> None:
+    """deduplicate() 不应把不同用户落在同一 hash 组里的账单互相删掉。"""
+    db = await _create_database(tmp_path)
+    try:
+        first_user_id = await _create_user(db, "db_bills_edge_cross_user_dedup_one")
+        second_user_id = await _create_user(db, "db_bills_edge_cross_user_dedup_two")
+        conn = await db._get_connection()
+        await conn.executemany(
+            """
+            INSERT INTO bills (
+                user_id, date, type, amount, counterparty, description,
+                payment_method, main_category, sub_category, batch_id, hash,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    first_user_id,
+                    "2026-04-08 09:00:00",
+                    "支出",
+                    -28.0,
+                    "cross user duplicate",
+                    "cross user duplicate",
+                    "支付宝",
+                    "餐饮",
+                    "早餐",
+                    "cross-user-batch-a",
+                    None,
+                    "2026-04-08T09:00:00",
+                    "2026-04-08T09:00:00",
+                ),
+                (
+                    second_user_id,
+                    "2026-04-08 09:00:00",
+                    "支出",
+                    -28.0,
+                    "cross user duplicate",
+                    "cross user duplicate",
+                    "支付宝",
+                    "餐饮",
+                    "早餐",
+                    "cross-user-batch-b",
+                    None,
+                    "2026-04-08T09:01:00",
+                    "2026-04-08T09:01:00",
+                ),
+            ],
+        )
+        await conn.commit()
+
+        deleted_count = await db.deduplicate()
+        assert deleted_count == 0
+
+        first_user_rows = await db.get_bills(filters={"counterparty": "cross user duplicate"}, user_id=first_user_id)
+        second_user_rows = await db.get_bills(filters={"counterparty": "cross user duplicate"}, user_id=second_user_id)
+        assert len(first_user_rows) == 1
+        assert len(second_user_rows) == 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_deduplicate_keeps_distinct_null_hash_rows_for_same_user(tmp_path: Path) -> None:
+    """deduplicate() 不应把同用户下内容不同的 NULL-hash 正式账单错误合并。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_bills_edge_null_hash_distinct")
+        conn = await db._get_connection()
+        await conn.executemany(
+            """
+            INSERT INTO bills (
+                user_id, date, type, amount, counterparty, description,
+                payment_method, main_category, sub_category, batch_id, hash,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    user_id,
+                    "2026-04-09 09:00:00",
+                    "支出",
+                    -35.0,
+                    "null hash merchant A",
+                    "null hash description A",
+                    "支付宝",
+                    "餐饮",
+                    "早餐",
+                    "null-hash-batch-a",
+                    None,
+                    "2026-04-09T09:00:00",
+                    "2026-04-09T09:00:00",
+                ),
+                (
+                    user_id,
+                    "2026-04-09 10:00:00",
+                    "支出",
+                    -45.0,
+                    "null hash merchant B",
+                    "null hash description B",
+                    "支付宝",
+                    "餐饮",
+                    "午餐",
+                    "null-hash-batch-b",
+                    None,
+                    "2026-04-09T10:00:00",
+                    "2026-04-09T10:00:00",
+                ),
+            ],
+        )
+        await conn.commit()
+
+        deleted_count = await db.deduplicate()
+        assert deleted_count == 0
+
+        remaining_rows = await db.get_bills(filters={"type": "支出"}, user_id=user_id)
+        assert len(remaining_rows) == 2
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_insert_bills_allows_same_hash_for_different_users(tmp_path: Path) -> None:
+    """同一 hash 的账单应允许在不同用户下各自写入。"""
+    db = await _create_database(tmp_path)
+    try:
+        first_user_id = await _create_user(db, "db_bills_edge_same_hash_user_one")
+        second_user_id = await _create_user(db, "db_bills_edge_same_hash_user_two")
+        bill_payload = {
+            "date": "2026-04-10 09:00:00",
+            "type": "支出",
+            "amount": -55.0,
+            "counterparty": "same hash merchant",
+            "description": "same hash description",
+            "payment_method": "支付宝",
+            "main_category": "餐饮",
+            "sub_category": "早餐",
+        }
+
+        assert await db.insert_bills([bill_payload], batch_id="same-hash-batch-a", user_id=first_user_id) == 1
+        assert await db.insert_bills([bill_payload], batch_id="same-hash-batch-b", user_id=second_user_id) == 1
+
+        first_user_rows = await db.get_bills(filters={"counterparty": "same hash merchant"}, user_id=first_user_id)
+        second_user_rows = await db.get_bills(filters={"counterparty": "same hash merchant"}, user_id=second_user_id)
+        assert len(first_user_rows) == 1
+        assert len(second_user_rows) == 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_get_ml_training_data_returns_only_classified_bills_for_requested_user(tmp_path: Path) -> None:
     """ML 训练数据应只返回当前用户已分类且主分类非空的账单。"""
     db = await _create_database(tmp_path)

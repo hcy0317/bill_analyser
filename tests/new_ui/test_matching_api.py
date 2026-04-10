@@ -6,8 +6,70 @@ import time
 from tests.new_ui.test_bills_api import _build_isolated_auth_headers, _get_current_user_id
 
 
+def _create_account_via_db(user_id: int, name: str) -> int:
+    from src.api.app import db
+
+    async def _create() -> int:
+        account_id = await db.create_account(
+            {
+                "name": name,
+                "type": 1,
+                "category": "asset",
+                "currency": "CNY",
+                "icon": "",
+                "color": "",
+                "balance": 0.0,
+                "initial_balance": 0.0,
+                "hidden": False,
+                "display_order": 0,
+                "comment": "",
+                "aliases": [],
+            },
+            user_id=user_id,
+        )
+        assert account_id is not None
+        return int(account_id)
+
+    return asyncio.run(_create())
+
+
+def _create_bill_via_db(
+    user_id: int,
+    *,
+    source_account_id: int,
+    amount: float,
+    bill_type: str,
+    date: str,
+    description: str,
+    destination_account_id: int = 0,
+) -> int:
+    from src.api.app import db
+
+    async def _create() -> int:
+        bill_id = await db.create_bill(
+            {
+                "date": date,
+                "type": bill_type,
+                "amount": amount,
+                "counterparty": "pytest matching api",
+                "description": description,
+                "payment_method": "银行卡",
+                "main_category": "转账",
+                "sub_category": "历史后配对",
+                "source_account_id": source_account_id,
+                "destination_account_id": destination_account_id,
+                "destination_amount": 0.0,
+            },
+            user_id=user_id,
+        )
+        assert bill_id is not None
+        return int(bill_id)
+
+    return asyncio.run(_create())
+
+
 class TestMatchingAPI:
-    """matching 只读 session 候选 API 回归。"""
+    """matching API 回归。"""
 
     def test_matching_session_candidates_returns_projected_candidates(self, client):
         """应返回由 preview[].matching 投影得到的显式 candidate 列表。"""
@@ -138,3 +200,252 @@ class TestMatchingAPI:
         data = response.get_json()
         assert data["success"] is False
         assert data["error"] == "Import session not found"
+
+    def test_matching_bill_candidates_returns_sorted_candidates_for_formal_bill(self, client):
+        """历史正式账单应返回按分数/时间差排序的 transfer-only 候选。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_candidates")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 历史转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest 历史转入账户")
+        third_account_id = _create_account_via_db(current_user_id, "pytest 历史第三账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-99.0,
+            bill_type="支出",
+            date="2026-07-10 10:00:00",
+            description="matching api anchor bill",
+        )
+        near_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=99.0,
+            bill_type="收入",
+            date="2026-07-10 10:03:00",
+            description="matching api near candidate",
+        )
+        far_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=third_account_id,
+            amount=99.0,
+            bill_type="收入",
+            date="2026-07-11 10:03:00",
+            description="matching api far candidate",
+        )
+        _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=-99.0,
+            bill_type="支出",
+            date="2026-07-10 10:01:00",
+            description="matching api invalid same sign",
+        )
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["billId"] == anchor_bill_id
+        assert data["data"]["linkedPair"] is None
+        candidates = data["data"]["candidates"]
+        assert [candidate["billId"] for candidate in candidates] == [
+            near_candidate_bill_id,
+            far_candidate_bill_id,
+        ]
+        assert candidates[0]["score"] >= candidates[1]["score"]
+
+    def test_matching_bill_candidates_returns_empty_list_for_existing_bill_without_candidates(self, client):
+        """历史账单存在但没有 transfer 候选时应返回 200 + 空数组。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_candidates_empty")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 空候选账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-35.0,
+            bill_type="支出",
+            date="2026-07-12 09:00:00",
+            description="matching api empty anchor",
+        )
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"] == {
+            "billId": anchor_bill_id,
+            "linkedPair": None,
+            "candidates": [],
+        }
+
+    def test_matching_bill_candidates_and_manual_pair_are_user_scoped(self, client):
+        """历史正式账单 matching 的读写都不应跨用户泄露。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_bill_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_bill_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        secondary_user_id = _get_current_user_id(client, secondary_headers)
+
+        primary_account_id = _create_account_via_db(primary_user_id, "pytest 主用户账户")
+        primary_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=primary_account_id,
+            amount=-45.0,
+            bill_type="支出",
+            date="2026-07-13 10:00:00",
+            description="matching api user scope anchor",
+        )
+        secondary_account_id = _create_account_via_db(secondary_user_id, "pytest 次用户账户")
+        secondary_bill_id = _create_bill_via_db(
+            secondary_user_id,
+            source_account_id=secondary_account_id,
+            amount=45.0,
+            bill_type="收入",
+            date="2026-07-13 10:01:00",
+            description="matching api user scope candidate",
+        )
+
+        get_response = client.get(f"/api/matching/bills/{primary_bill_id}/candidates", headers=secondary_headers)
+        assert get_response.status_code == 404
+        assert get_response.get_json()["error"] == "Bill not found"
+
+        post_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": primary_bill_id, "candidateBillId": secondary_bill_id},
+            headers=secondary_headers,
+        )
+        assert post_response.status_code == 404
+        assert post_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_manual_pair_persists_link_and_followup_candidates_exclude_paired_bill(self, client):
+        """手工后配对成功后应返回 pair，并让后续候选读取收敛到 linkedPair。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 手工配对转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest 手工配对转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-66.0,
+            bill_type="支出",
+            date="2026-07-14 11:00:00",
+            description="matching api manual pair anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=66.0,
+            bill_type="收入",
+            date="2026-07-14 11:02:00",
+            description="matching api manual pair candidate",
+        )
+
+        response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["pair"]["pairType"] == "transfer"
+        assert data["data"]["pair"]["leftBillId"] == min(anchor_bill_id, candidate_bill_id)
+        assert data["data"]["pair"]["rightBillId"] == max(anchor_bill_id, candidate_bill_id)
+
+        follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert follow_up_response.status_code == 200
+        follow_up_data = follow_up_response.get_json()
+        assert follow_up_data["data"]["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert follow_up_data["data"]["candidates"] == []
+
+    def test_matching_manual_pair_rejects_self_pair_and_existing_link_conflicts(self, client):
+        """手工后配对应拒绝 self-pair 与已存在 pair 的冲突写入。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair_conflict")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 冲突账户 A")
+        target_account_id = _create_account_via_db(current_user_id, "pytest 冲突账户 B")
+        third_account_id = _create_account_via_db(current_user_id, "pytest 冲突账户 C")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-77.0,
+            bill_type="支出",
+            date="2026-07-15 08:00:00",
+            description="matching api conflict anchor",
+        )
+        first_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=77.0,
+            bill_type="收入",
+            date="2026-07-15 08:02:00",
+            description="matching api first candidate",
+        )
+        second_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=third_account_id,
+            amount=77.0,
+            bill_type="收入",
+            date="2026-07-15 08:04:00",
+            description="matching api second candidate",
+        )
+
+        self_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": anchor_bill_id},
+            headers=auth_headers,
+        )
+        assert self_pair_response.status_code == 400
+        assert self_pair_response.get_json()["error"] == "billId and candidateBillId must be different"
+
+        first_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": first_candidate_bill_id},
+            headers=auth_headers,
+        )
+        assert first_pair_response.status_code == 200
+
+        conflicting_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": second_candidate_bill_id},
+            headers=auth_headers,
+        )
+        assert conflicting_response.status_code == 409
+        assert conflicting_response.get_json()["error"] == "Bills already belong to an existing transfer pair"
+
+    def test_matching_bill_candidates_support_slash_and_cn_date_formats(self, client):
+        """历史 matching API 应兼容验证器已接受的 `/` 与中文日期格式。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_date_formats")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 日期格式转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest 日期格式转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-108.0,
+            bill_type="支出",
+            date="2026/07/16 11:00:00",
+            description="matching api slash format anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=108.0,
+            bill_type="收入",
+            date="2026年07月16日 11:03:00",
+            description="matching api cn format candidate",
+        )
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert [candidate["billId"] for candidate in data["data"]["candidates"]] == [candidate_bill_id]

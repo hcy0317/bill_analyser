@@ -11,6 +11,7 @@ from .db_import_configs import DatabaseImportConfigsMixin
 from .db_import_learning import DatabaseImportLearningMixin
 from .db_import_preview import DatabaseImportPreviewMixin
 from .db_import_sessions import DatabaseImportSessionsMixin
+from .db_matching import DatabaseMatchingMixin
 from .db_runtime import DatabaseRuntimeMixin
 from .db_schema import DatabaseSchemaMixin
 from .db_shared import BudgetExecutionRequest, BudgetForecastRequest, BudgetGroupKey
@@ -42,6 +43,7 @@ class DatabaseTransactionalDataMixin(  # pylint: disable=too-many-ancestors
     DatabaseTagsMixin,
     DatabaseAccountsMixin,
     DatabaseCategoriesMixin,
+    DatabaseMatchingMixin,
     DatabaseBillsMixin,
     DatabaseAuditBackupMixin,
 ):

@@ -31,7 +31,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
                 main_category TEXT,
                 sub_category TEXT,
                 batch_id TEXT,
-                hash TEXT UNIQUE,
+                hash TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 source_account_id INTEGER DEFAULT 0,
@@ -193,6 +193,26 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS bill_pair_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                pair_type TEXT NOT NULL,
+                left_bill_id INTEGER NOT NULL,
+                right_bill_id INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK(left_bill_id < right_bill_id),
+                UNIQUE(user_id, pair_type, left_bill_id, right_bill_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (left_bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+                FOREIGN KEY (right_bill_id) REFERENCES bills(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS budgets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,
@@ -299,6 +319,9 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash)")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)"
+        )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type)")
@@ -313,6 +336,15 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_bill ON bill_tags(bill_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bill_tags_tag ON bill_tags(tag_id)")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_pair_links_user_left ON bill_pair_links(user_id, left_bill_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_pair_links_user_right ON bill_pair_links(user_id, right_bill_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_pair_links_user_type ON bill_pair_links(user_id, pair_type)"
+        )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_type)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category, sub_category)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date)")
@@ -423,6 +455,72 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("ALTER TABLE categories_new RENAME TO categories")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
         self.logger.info("categories 表 UNIQUE 约束迁移完成")
+
+    async def _migrate_bills_hash_unique_constraint(self, conn: aiosqlite.Connection) -> None:
+        """修复 bills.hash 的 UNIQUE 约束以包含 user_id。"""
+        async with conn.execute("PRAGMA index_list(bills)") as cursor:
+            indexes = await cursor.fetchall()
+        unique_index_names = [row[1] for row in indexes if row[2]]
+
+        constraint_needs_migration = False
+        for index_name in unique_index_names:
+            async with conn.execute(f"PRAGMA index_info({index_name})") as cursor:
+                indexed_columns = [row[2] for row in await cursor.fetchall()]
+            if indexed_columns == ["hash"]:
+                constraint_needs_migration = True
+                break
+
+        if not constraint_needs_migration:
+            return
+
+        self.logger.info("开始迁移 bills.hash UNIQUE 约束: 添加 user_id")
+        async with conn.execute("PRAGMA table_info(bills)") as cursor:
+            columns_info = await cursor.fetchall()
+        column_names = [column[1] for column in columns_info]
+        column_sql = ", ".join(column_names)
+
+        await conn.execute(
+            """
+            CREATE TABLE bills_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                counterparty TEXT NOT NULL,
+                description TEXT NOT NULL,
+                payment_method TEXT DEFAULT '',
+                main_category TEXT,
+                sub_category TEXT,
+                batch_id TEXT,
+                hash TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                source_account_id INTEGER DEFAULT 0,
+                destination_account_id INTEGER DEFAULT 0,
+                destination_amount REAL DEFAULT 0,
+                created_from_template INTEGER,
+                created_from_recurring INTEGER,
+                import_history_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            f"INSERT INTO bills_new ({column_sql}) SELECT {column_sql} FROM bills"
+        )
+        await conn.execute("DROP TABLE bills")
+        await conn.execute("ALTER TABLE bills_new RENAME TO bills")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_type ON bills(type)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash)")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)"
+        )
+        self.logger.info("bills.hash UNIQUE 约束迁移完成")
 
     async def _migrate_user_exchange_rates_unique_constraint(self, conn: aiosqlite.Connection) -> None:
         """修复 user_exchange_rates 的 UNIQUE 约束以包含 user_id。"""

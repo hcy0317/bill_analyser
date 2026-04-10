@@ -49,6 +49,7 @@ class DatabaseSchemaMixin(
         ]:
             await self._migrate_user_id_field(conn, table_name)
 
+        await self._migrate_bills_hash_unique_constraint(conn)
         await self._migrate_categories_unique_constraint(conn)
         await self._migrate_user_exchange_rates_unique_constraint(conn)
         await self._migrate_users_cash_fields(conn)

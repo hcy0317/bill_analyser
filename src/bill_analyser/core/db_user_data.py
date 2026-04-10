@@ -24,6 +24,13 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
             if deleted_count == 0:
                 return {"success": True, "deleted_count": 0}
 
+            async with conn.execute("SELECT id FROM bills WHERE user_id = ?", (user_id,)) as cursor:
+                bill_rows = await cursor.fetchall()
+            await self._delete_bill_pair_links_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
             await conn.execute(
                 "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)",
                 (user_id,),
@@ -56,6 +63,14 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
                 cursor = await conn.execute(query, (user_id,))
                 row = await cursor.fetchone()
                 counts[key] = int(row[0] if row else 0)
+
+            async with conn.execute("SELECT id FROM bills WHERE user_id = ?", (user_id,)) as cursor:
+                bill_rows = await cursor.fetchall()
+            await self._delete_bill_pair_links_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
 
             await conn.execute("DELETE FROM bills_preview WHERE user_id = ?", (user_id,))
             await conn.execute("DELETE FROM bills_parser_template WHERE user_id = ?", (user_id,))

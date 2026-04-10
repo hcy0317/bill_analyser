@@ -8,6 +8,7 @@ from typing import Any
 
 from ..parsers.parser_tags import resolve_parser_tags, serialize_parser_tags
 from ..utils.logger import log_method
+from .bill_date_utils import normalize_bill_date_text
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
 
@@ -93,6 +94,7 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
         for index in range(0, len(bills), self.batch_size):
             batch = bills[index : index + self.batch_size]
             for bill in batch:
+                parser_date = normalize_bill_date_text(bill.get("date", ""))
                 try:
                     amount = float(bill.get("amount", 0))
                     if bill.get("type"):
@@ -118,7 +120,7 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
                         (
                             session_id,
                             user_id,
-                            bill.get("date", ""),
+                            parser_date,
                             amount,
                             bill_type,
                             bill.get("description", ""),
@@ -140,7 +142,7 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
                     )
                     inserted_count += 1
                 except Exception as exc:  # pragma: no cover - defensive logging branch
-                    self.logger.error("[插入解析模板失败] %s - %s", bill.get("date"), exc)
+                    self.logger.error("[插入解析模板失败] %s - %s", parser_date, exc)
             await conn.commit()
         return inserted_count
 

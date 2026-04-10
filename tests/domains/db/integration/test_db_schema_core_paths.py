@@ -218,6 +218,7 @@ async def test_init_db_backfills_legacy_core_tables_and_user_scoped_unique_const
         tag_columns = await _get_table_columns(db, "tags")
         budget_history_columns = await _get_table_columns(db, "budget_history")
         bill_columns = await _get_table_columns(db, "bills")
+        bill_pair_link_columns = await _get_table_columns(db, "bill_pair_links")
         exchange_rate_columns = await _get_table_columns(db, "user_exchange_rates")
 
         assert {
@@ -242,6 +243,15 @@ async def test_init_db_backfills_legacy_core_tables_and_user_scoped_unique_const
             "created_from_recurring",
             "import_history_id",
         }.issubset(bill_columns)
+        assert {
+            "user_id",
+            "pair_type",
+            "left_bill_id",
+            "right_bill_id",
+            "source",
+            "created_at",
+            "updated_at",
+        }.issubset(bill_pair_link_columns)
         assert {"user_id"}.issubset(exchange_rate_columns)
 
         conn = await db._get_connection()
@@ -354,6 +364,38 @@ async def test_init_db_backfills_legacy_core_tables_and_user_scoped_unique_const
         assert category_count_row[0] == 2
         assert exchange_rate_count_row is not None
         assert exchange_rate_count_row[0] == 2
+
+        await conn.execute(
+            """
+            INSERT INTO bills (
+                user_id, date, type, amount, counterparty, description, hash,
+                created_at, updated_at, payment_method, source_account_id,
+                destination_account_id, destination_amount
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                second_user_id,
+                "2026-04-07 09:30:00",
+                "支出",
+                -25.0,
+                "schema hash duplicate",
+                "schema hash duplicate",
+                "legacy-hash",
+                "2026-04-07T09:30:00",
+                "2026-04-07T09:30:00",
+                "",
+                0,
+                0,
+                0.0,
+            ),
+        )
+        await conn.commit()
+
+        async with conn.execute("SELECT COUNT(*) FROM bills WHERE hash = ?", ("legacy-hash",)) as cursor:
+            bill_count_row = await cursor.fetchone()
+
+        assert bill_count_row is not None
+        assert bill_count_row[0] == 2
     finally:
         await db.close()
 

@@ -146,3 +146,80 @@ async def test_import_session_noop_guards_return_zero_for_empty_payloads(tmp_pat
         assert await db.update_parser_template_status([], processed=False) == 0
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_insert_parser_templates_normalizes_supported_date_formats(tmp_path: Path) -> None:
+    """解析模板写入时，应把验证器已接受的日期格式规范化为统一时间字符串。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "import_session_normalize_dates")
+        session_id = "import-session-normalize-dates"
+
+        await db.create_import_session(session_id, user_id=user_id, file_count=2)
+        inserted = await db.insert_parser_templates(
+            session_id,
+            [
+                {
+                    "date": "2026/07/10 09:00:00",
+                    "amount": 11.0,
+                    "description": "slash date parser template",
+                    "counterparty": "商户Slash",
+                },
+                {
+                    "date": "2026年07月10日 09:05:00",
+                    "amount": -12.0,
+                    "description": "cn date parser template",
+                    "counterparty": "商户中文",
+                },
+            ],
+            parser_id="pytest-parser",
+            user_id=user_id,
+        )
+        assert inserted == 2
+
+        templates = await db.get_parser_templates_by_session(session_id)
+        assert [template["parser_date"] for template in templates] == [
+            "2026-07-10 09:00:00",
+            "2026-07-10 09:05:00",
+        ]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_insert_parser_templates_skips_invalid_rows_without_crashing_batch(tmp_path: Path) -> None:
+    """单条坏 parser row 不应让整批模板写入崩掉。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "import_session_skip_invalid_rows")
+        session_id = "import-session-skip-invalid-rows"
+
+        await db.create_import_session(session_id, user_id=user_id, file_count=2)
+        inserted = await db.insert_parser_templates(
+            session_id,
+            [
+                {
+                    "date": "2026/07/11 09:00:00",
+                    "amount": "not-a-number",
+                    "description": "invalid parser amount",
+                    "counterparty": "坏数据商户",
+                },
+                {
+                    "date": "2026年07月11日 09:05:00",
+                    "amount": 13.0,
+                    "description": "valid parser amount",
+                    "counterparty": "好数据商户",
+                },
+            ],
+            parser_id="pytest-parser",
+            user_id=user_id,
+        )
+
+        assert inserted == 1
+        templates = await db.get_parser_templates_by_session(session_id)
+        assert len(templates) == 1
+        assert templates[0]["parser_date"] == "2026-07-11 09:05:00"
+        assert templates[0]["parser_description"] == "valid parser amount"
+    finally:
+        await db.close()
