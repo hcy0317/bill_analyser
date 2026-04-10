@@ -40,6 +40,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 ### 3.1 API 路由模块（`src/bill_analyser/api/routes/`）
 - `auth.py`：登录、鉴权、用户资料
 - `bills.py`：账单 CRUD、导入、预览、确认、批量操作
+- `matching.py`：导入会话级 matching 候选只读投影
 - `accounts.py`：账户管理、余额同步
 - `categories.py`：分类管理、规则维护
 - `tags.py`：标签管理与关联
@@ -113,6 +114,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
   - `/api/bills`
   - `/api/accounts`
   - `/api/categories`
+  - `/api/matching`
   - `/api/statistics`
   - `/api/tags`
   - `/api/templates`
@@ -162,6 +164,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，按日期、类型、分类、账户、标签、人工标注状态与备注等维度组织筛选项。
 - `/api/bills/parse_import` 返回的导入预览项当前会同时携带 `parserSource` 与 `parserTags`；`BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 预览数据会返回 `preview_parser_id` 与 `preview_parser_tags`，而 `/api/bills/import/v2/preview/<session_id>` 的简化结果也会附带 `parserSource` 与 `parserTags` 供前端保留与消费解析器元信息。
 - `BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 当前还会为每条预览账单附带嵌套 `matching` 结构，按 `transfer / investment / learning / recurring / dedup / parser / annotation` 分组镜像现有平铺推荐字段；前端导入模型会保留该结构，现有平铺字段语义保持不变。
+- matching 域当前已额外提供 `GET /api/matching/sessions/<session_id>/candidates` 作为导入会话级只读候选视图：接口按当前用户下的 `session_id` 读取整批 `preview[]`，再将每条 `preview.matching.transfer|investment|learning|recurring` 投影为显式 `candidates[]` 列表；响应结构固定包含 `session_id`、`summary(preview_count/candidate_count/counts_by_kind)` 与 `candidates[]`。其中每个 candidate 会携带稳定 `candidate_id=preview:<preview_id>:<kind>`、`kind`、`score/level/reason/status`、对应 `details`，以及从原预览复制的 `preview` 快照和 `context(dedup/parser/annotation)`，用于让前端或后续路由按 session 维度消费 matching 结果，而不必重新扫描整批 `preview[]`。
 - 导入预览现已提供 `POST /api/bills/import/v2/preview-item/<preview_id>/transfer-decision` 作为转账建议决策接口：请求体除 `decision=accept|reject|clear` 外，还需要携带 `expectedState(sessionId, reviewStatus, previewType, categoryId, recurringId)` 作为防陈旧写保护；若预览状态在客户端读取后已变化，接口会返回 `409 Preview state changed, please refresh`，否则响应返回刷新后的整批 `preview[]`。`matching.transfer` 当前除候选分数外，还会携带 `review_status / reviewed_type / suppressed` 供前端展示用户决策状态，且 `clear` 会恢复 `accept` 前被覆盖的 `preview_type / category / recurring` 展示字段。当前 `reclassify` / `confirm` 提交的 `preview_updates[]` 若已存在与该决策相关的本地类型/分类/周期编辑，会额外携带 `clear_transfer_decision=true`，用于清除已持久化的 transfer 决策反馈，避免 accepted / rejected 状态与手工编辑结果分叉。
 - 导入预览 `Check Data` 的类型列当前会优先消费 `preview[].matching.*` 作为候选摘要来源：`transfer / investment / learning / recurring` 继续映射为既有只读 chips，`parser / dedup / annotation` 则作为补充上下文摘要显示；预览确认与重新分类请求结构不因这层展示消费而改变。
 - `Annotation` 筛选中的 `Needs Review or Manually Annotated` 表示：交易仍存在待补分类/账户问题，或该交易已经被用户手工编辑过并视为人工标注。

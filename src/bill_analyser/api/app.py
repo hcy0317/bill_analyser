@@ -21,6 +21,7 @@ from bill_analyser.api.routes import (
     bills,
     budgets,
     categories,
+    matching,
     statistics,
     tags,
     templates,
@@ -140,6 +141,7 @@ def create_app():
     flask_app.register_blueprint(templates.bp, url_prefix="/api/templates")
     flask_app.register_blueprint(budgets.bp, url_prefix="/api/budgets")
     flask_app.register_blueprint(backup.bp, url_prefix="/api/backup")
+    flask_app.register_blueprint(matching.bp, url_prefix="/api/matching")
 
     # 健康检查端点
     @flask_app.route("/api/health", methods=["GET"])

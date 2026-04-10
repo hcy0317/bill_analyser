@@ -31,7 +31,7 @@ from .investment_settings import (
     DEFAULT_INVESTMENT_PRODUCT_PATTERNS,
     build_user_investment_keyword_settings,
 )
-from .matching import build_preview_matching_payload
+from .matching import build_matching_session_candidates, build_preview_matching_payload
 from .smart_dedup import DeduplicationType, SmartDeduplicationEngine
 
 
@@ -2400,6 +2400,12 @@ class BillService:
             result.append(item)
 
         return result
+
+    @log_method
+    async def get_matching_session_candidates(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
+        """Project import-preview matching payloads into a session-scoped candidate list."""
+        preview_items = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
+        return build_matching_session_candidates(session_id, preview_items)
 
     @log_method
     async def apply_preview_transfer_decision(
