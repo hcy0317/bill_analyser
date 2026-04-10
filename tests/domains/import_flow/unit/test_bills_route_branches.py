@@ -445,6 +445,7 @@ class FakeBillsService:
         self.reclassify_calls: list[tuple[str, list[dict[str, Any]], int]] = []
         self.preview_calls: list[str] = []
         self.promote_calls: list[tuple[str, list[dict[str, Any]], int]] = []
+        self.preview_recurring_match_calls: list[tuple[int, int | None, dict[str, Any], int]] = []
         self.confirm_result: dict[str, Any] = {"success": True, "inserted": 2}
         self.quick_add_result = True
         self.refresh_result: dict[str, Any] = {"success": True, "categorized": 3}
@@ -474,6 +475,13 @@ class FakeBillsService:
         }
         self.stage3_result: dict[str, Any] = {"success": True, "imported_count": 2, "skipped_count": 0, "errors": []}
         self.preview_result: list[dict[str, Any]] = [{"id": 1, "description": "早餐"}]
+        self.preview_recurring_match_result: dict[str, Any] = {
+            "success": True,
+            "preview_id": 1,
+            "session_id": "sess-preview",
+            "recurring_id": 9,
+            "preview": [{"id": 1, "preview_recurring_id": 9}],
+        }
         self.stage1_calls: list[tuple[list[str], str, int]] = []
         self.stage2_calls: list[tuple[str, int]] = []
         self.stage3_calls: list[tuple[str, int, Any]] = []
@@ -544,6 +552,17 @@ class FakeBillsService:
     ) -> dict[str, Any]:
         self.promote_calls.append((session_id, [dict(item) for item in preview_updates], user_id))
         return dict(self.promote_result)
+
+    async def update_preview_recurring_match(
+        self,
+        preview_id: int,
+        recurring_id: int | None,
+        *,
+        expected_state: dict[str, Any],
+        user_id: int,
+    ) -> dict[str, Any]:
+        self.preview_recurring_match_calls.append((preview_id, recurring_id, dict(expected_state), user_id))
+        return dict(self.preview_recurring_match_result)
 
     async def import_stage1_parse(self, file_paths: list[str], session_id: str, user_id: int) -> dict[str, Any]:
         self.stage1_calls.append((list(file_paths), session_id, user_id))
@@ -2740,6 +2759,146 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         response, status = _unwrap_response(update_preview_route("sess-12"))
         assert status == 500
         assert response.get_json()["error"] == "update preview boom"
+
+
+def test_bills_preview_recurring_match_routes_cover_put_delete_and_conflicts(
+    bills_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """preview-item recurring 绑定/清除路由应覆盖校验、成功、冲突与异常分支。"""
+    db = FakeBillsDB()
+    service = FakeBillsService()
+    category_engine = FakeBillsCategoryEngine()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(bills_module, "get_app_context", lambda: (db, service, category_engine))
+
+    bind_route = _unwrap_all(bills_module.bind_preview_recurring_match)
+    clear_route = _unwrap_all(bills_module.clear_preview_recurring_match)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="PUT",
+        json={},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(bind_route(1))
+        assert status == 400
+        assert response.get_json()["error"] == "Missing recurringId"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="PUT",
+        json={"recurringId": 9, "expectedState": None},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(bind_route(1))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="PUT",
+        json={"recurringId": "abc", "expectedState": {"sessionId": "sess-preview"}},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(bind_route(1))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    service.preview_recurring_match_result = {
+        "success": True,
+        "preview_id": 1,
+        "session_id": "sess-preview",
+        "recurring_id": 9,
+        "preview": [{"id": 1, "preview_recurring_id": 9}],
+    }
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="PUT",
+        json={
+            "recurringId": 9,
+            "expectedState": {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": None},
+        },
+    ):
+        _set_request_user_id(7)
+        payload = bind_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "sess-preview"
+        assert payload["data"]["recurringId"] == 9
+        assert service.preview_recurring_match_calls[-1] == (
+            1,
+            9,
+            {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": None},
+            7,
+        )
+
+    service.preview_recurring_match_result = {
+        "success": False,
+        "error": "Preview state changed, please refresh",
+        "status_code": 409,
+    }
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="PUT",
+        json={
+            "recurringId": 9,
+            "expectedState": {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": None},
+        },
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(bind_route(1))
+        assert status == 409
+        assert response.get_json()["error"] == "Preview state changed, please refresh"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="DELETE",
+        json={},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(clear_route(1))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    service.preview_recurring_match_result = {
+        "success": True,
+        "preview_id": 1,
+        "session_id": "sess-preview",
+        "recurring_id": None,
+        "preview": [{"id": 1, "preview_recurring_id": None}],
+    }
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="DELETE",
+        json={"expectedState": {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+    ):
+        _set_request_user_id(8)
+        payload = clear_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["recurringId"] is None
+        assert service.preview_recurring_match_calls[-1] == (
+            1,
+            None,
+            {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": 9},
+            8,
+        )
+
+    async def _raise_preview_recurring_match(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("preview recurring match boom")
+
+    monkeypatch.setattr(service, "update_preview_recurring_match", _raise_preview_recurring_match)
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview-item/1/recurring-match",
+        method="DELETE",
+        json={"expectedState": {"sessionId": "sess-preview", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(clear_route(1))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
 
 
 def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remaining_paths(

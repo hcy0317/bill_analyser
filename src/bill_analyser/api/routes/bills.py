@@ -4855,6 +4855,118 @@ def get_preview_recurring_candidates(preview_id: int):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route("/import/v2/preview-item/<int:preview_id>/recurring-match", methods=["PUT"])
+@log_method
+@require_auth
+def bind_preview_recurring_match(preview_id: int):
+    """在导入预览阶段绑定定时交易候选。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        recurring_id = data.get("recurringId")
+        if recurring_id in (None, ""):
+            return jsonify({"success": False, "error": "Missing recurringId"}), 400
+        try:
+            normalized_recurring_id = int(recurring_id)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        expected_state = data.get("expectedState")
+        if not isinstance(expected_state, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                bill_service.update_preview_recurring_match(
+                    preview_id,
+                    normalized_recurring_id,
+                    expected_state=expected_state,
+                    user_id=request.user_id,
+                )
+            )
+        finally:
+            loop.close()
+
+        if not result.get("success"):
+            return jsonify({"success": False, "error": result.get("error", "Failed to update recurring match")}), int(
+                result.get("status_code", 400)
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "previewId": result.get("preview_id", preview_id),
+                    "sessionId": result.get("session_id", ""),
+                    "recurringId": result.get("recurring_id"),
+                    "preview": result.get("preview", []),
+                },
+            }
+        )
+    except Exception as e:
+        logger.error("绑定预览定时交易失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/import/v2/preview-item/<int:preview_id>/recurring-match", methods=["DELETE"])
+@log_method
+@require_auth
+def clear_preview_recurring_match(preview_id: int):
+    """在导入预览阶段清除定时交易候选绑定。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        expected_state = data.get("expectedState")
+        if not isinstance(expected_state, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                bill_service.update_preview_recurring_match(
+                    preview_id,
+                    None,
+                    expected_state=expected_state,
+                    user_id=request.user_id,
+                )
+            )
+        finally:
+            loop.close()
+
+        if not result.get("success"):
+            return jsonify({"success": False, "error": result.get("error", "Failed to clear recurring match")}), int(
+                result.get("status_code", 400)
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "previewId": result.get("preview_id", preview_id),
+                    "sessionId": result.get("session_id", ""),
+                    "recurringId": result.get("recurring_id"),
+                    "preview": result.get("preview", []),
+                },
+            }
+        )
+    except Exception as e:
+        logger.error("清除预览定时交易绑定失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
 @bp.route("/import/v2/preview-item/<int:preview_id>/transfer-decision", methods=["POST"])
 @log_method
 @require_auth

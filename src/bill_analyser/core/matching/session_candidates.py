@@ -166,7 +166,7 @@ def _build_candidate(
         score = _coerce_float(normalized_details.get("match_score"))
         level = _derive_level_from_score(score)
         reason = str(normalized_details.get("match_reasons") or "")
-        status = "pending"
+        status = "confirmed" if normalized_details.get("id") not in (None, "") else "pending"
     else:
         score = _coerce_float(normalized_details.get("score"))
         level = str(normalized_details.get("level") or "")

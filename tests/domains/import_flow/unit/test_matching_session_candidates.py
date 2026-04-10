@@ -83,6 +83,52 @@ def test_build_matching_session_candidates_projects_transfer_recurring_and_conte
     assert result["candidates"][1]["score"] == 0.91
     assert result["candidates"][1]["level"] == "high"
     assert result["candidates"][1]["reason"] == "schedule|amount"
+    assert result["candidates"][1]["status"] == "confirmed"
+
+
+def test_build_matching_session_candidates_keeps_pending_recurring_after_manual_clear() -> None:
+    """清除 preview recurring 绑定后，若仍有候选数量，应保留 pending recurring candidate。"""
+    result = build_matching_session_candidates(
+        "session-cleared-recurring",
+        [
+            {
+                "id": 21,
+                "preview_date": "2026-04-11 08:00:00",
+                "preview_type": "支出",
+                "preview_amount": 20.0,
+                "preview_destination_amount": 0.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_source_account_id": 1,
+                "preview_destination_account_id": None,
+                "preview_counterparty": "早餐店",
+                "preview_payment_method": "银行卡",
+                "preview_description": "pending recurring",
+                "preview_selected": True,
+                "matching": {
+                    "transfer": {},
+                    "investment": {},
+                    "learning": {},
+                    "recurring": {
+                        "id": None,
+                        "name": "",
+                        "candidate_count": 2,
+                        "match_score": 0,
+                        "match_reasons": "",
+                        "matched_date": "",
+                    },
+                    "dedup": {},
+                    "parser": {},
+                    "annotation": {},
+                },
+            }
+        ],
+    )
+
+    assert result["summary"]["candidate_count"] == 1
+    assert result["candidates"][0]["kind"] == "recurring"
+    assert result["candidates"][0]["status"] == "pending"
+    assert result["candidates"][0]["details"]["candidate_count"] == 2
 
 
 def test_build_matching_session_candidates_keeps_reviewed_transfer_without_live_suggestion() -> None:
@@ -182,3 +228,71 @@ async def test_bill_service_get_matching_session_candidates_wraps_preview_projec
     assert result["session_id"] == "session-service-wrapper"
     assert result["summary"]["candidate_count"] == 1
     assert result["candidates"][0]["kind"] == "transfer"
+
+
+@pytest.mark.asyncio
+async def test_bill_service_update_preview_recurring_match_rejects_stale_transfer_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService recurring 写路径应把 transfer review 状态纳入 CAS 检查。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.update_calls: list[tuple[int, int | None, dict[str, object], int]] = []
+
+        async def get_preview_bill_by_id(self, preview_id: int, user_id: int = 1) -> dict[str, object] | None:
+            _ = (preview_id, user_id)
+            return {
+                "id": 1,
+                "session_id": "session-recurring-cas",
+                "preview_type": "支出",
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_recurring_id": None,
+                "preview_matching_feedback_json": "",
+                "preview_matching_feedback": {},
+            }
+
+        async def update_preview_recurring_match(
+            self,
+            preview_id: int,
+            recurring_id: int | None,
+            *,
+            user_id: int = 1,
+            expected_state: dict[str, object] | None = None,
+        ) -> dict[str, object]:
+            self.update_calls.append((preview_id, recurring_id, dict(expected_state or {}), user_id))
+            return {"id": preview_id, "session_id": "session-recurring-cas"}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    async def fake_get_preview_category_id(_preview: dict[str, object], user_id: int = 1) -> int | None:
+        _ = user_id
+        return 10
+
+    async def fake_get_preview_transfer_review_status(_preview: dict[str, object]) -> str:
+        return "rejected"
+
+    monkeypatch.setattr(service, "_get_preview_category_id", fake_get_preview_category_id)
+    monkeypatch.setattr(service, "_get_preview_transfer_review_status", fake_get_preview_transfer_review_status)
+
+    result = await service.update_preview_recurring_match(
+        1,
+        9,
+        expected_state={
+            "sessionId": "session-recurring-cas",
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": 10,
+            "recurringId": None,
+        },
+        user_id=7,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Preview state changed, please refresh",
+        "status_code": 409,
+    }
+    assert fake_db.update_calls == []

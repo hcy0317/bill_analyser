@@ -235,7 +235,7 @@
                         variant="text"
                         color="success"
                         size="x-small"
-                        :disabled="!!disabled || !props.sessionId"
+                        :disabled="!!disabled || isEditing || !props.sessionId || recurringDecisionLoadingId !== null"
                         @click.stop="openRecurringCandidateDialog(item)">
                         {{ tt('Choose Scheduled Match') }}
                     </v-btn>
@@ -344,7 +344,7 @@
                         variant="text"
                         color="success"
                         size="x-small"
-                        :disabled="!!disabled || !props.sessionId"
+                        :disabled="!!disabled || isEditing || !props.sessionId || recurringDecisionLoadingId !== null"
                         @click.stop="openRecurringCandidateDialog(item)">
                         {{ tt('Choose Scheduled Match') }}
                     </v-btn>
@@ -353,7 +353,7 @@
                         variant="text"
                         color="warning"
                         size="x-small"
-                        :disabled="!item.hasRecurringMatch()"
+                        :disabled="!!disabled || isEditing || !props.sessionId || !item.hasRecurringMatch() || recurringDecisionLoadingId !== null"
                         @click.stop="clearRecurringMatch(item)">
                         {{ tt('Clear Scheduled Match') }}
                     </v-btn>
@@ -941,17 +941,17 @@
             </v-card-text>
             <v-card-actions class="justify-center gap-4 flex-wrap">
                 <v-btn color="primary"
-                       :disabled="!selectedRecurringCandidateId"
+                       :disabled="!selectedRecurringCandidateId || isEditing || recurringDecisionLoadingId !== null"
                        @click="applySelectedRecurringCandidate">
                     {{ tt('Apply') }}
                 </v-btn>
                 <v-btn color="warning"
                        variant="tonal"
-                       :disabled="!recurringCandidateTarget || !recurringCandidateTarget.hasRecurringMatch()"
+                       :disabled="!recurringCandidateTarget || isEditing || !recurringCandidateTarget.hasRecurringMatch() || recurringDecisionLoadingId !== null"
                        @click="clearRecurringMatchFromDialog">
                     {{ tt('Clear Scheduled Match') }}
                 </v-btn>
-                <v-btn color="secondary" variant="tonal" @click="closeRecurringCandidateDialog">
+                <v-btn color="secondary" variant="tonal" :disabled="recurringDecisionLoadingId !== null" @click="closeRecurringCandidateDialog">
                     {{ tt('Cancel') }}
                 </v-btn>
             </v-card-actions>
@@ -1234,6 +1234,7 @@ const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
 const transferDecisionLoadingId = ref<number | null>(null);
+const recurringDecisionLoadingId = ref<number | null>(null);
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -1395,9 +1396,108 @@ function onTransactionTypeChange(item: ImportTransaction): void {
     syncTransferDecisionDraftState(item);
 }
 
-function clearRecurringMatch(item: ImportTransaction): void {
-    item.clearRecurringMatch(false);
-    syncTransferDecisionDraftState(item);
+function getRecurringDecisionMessageKey(cleared: boolean): string {
+    return cleared ? 'Clear Scheduled Match' : 'Scheduled Match';
+}
+
+async function updatePreviewRecurringMatch(
+    item: ImportTransaction,
+    recurringId: string | number | null
+): Promise<boolean> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || !previewId) {
+        snackbar.value?.showMessage('No session ID available');
+        return false;
+    }
+
+    if (isEditing.value) {
+        snackbar.value?.showMessage('Please sync manual preview edits before updating scheduled matches');
+        return false;
+    }
+
+    if (recurringDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null) {
+        return false;
+    }
+
+    recurringDecisionLoadingId.value = previewId;
+
+    try {
+        const token = getCurrentToken();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const normalizedRecurringId = recurringId === null || recurringId === ''
+            ? null
+            : parseInt(String(recurringId), 10);
+        const response = await fetch(`/api/bills/import/v2/preview-item/${previewId}/recurring-match`, {
+            method: normalizedRecurringId === null ? 'DELETE' : 'PUT',
+            headers: headers,
+            body: JSON.stringify(
+                normalizedRecurringId === null
+                    ? { expectedState: getTransferDecisionExpectedState(item) }
+                    : {
+                        recurringId: normalizedRecurringId,
+                        expectedState: getTransferDecisionExpectedState(item)
+                    }
+            )
+        });
+
+        if (!response.ok) {
+            let errorMessage = response.status >= 500
+                ? 'Internal Server Error'
+                : `Recurring match request failed (${response.status})`;
+
+            try {
+                const errorPayload = await response.json() as { error?: string };
+                if (typeof errorPayload?.error === 'string' && errorPayload.error.trim()) {
+                    errorMessage = errorPayload.error.trim();
+                }
+            } catch {
+                // ignore non-JSON error bodies and keep the safe fallback message
+            }
+
+            throw new Error(errorMessage);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        if ((result.data?.sessionId || '') !== props.sessionId) {
+            throw new Error('Recurring match response is out of date');
+        }
+
+        const previewData = Array.isArray(result.data?.preview)
+            ? result.data.preview as ImportPreviewRecord[]
+            : [];
+        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        if (!refreshedPreview) {
+            throw new Error('Recurring match response missing preview item');
+        }
+
+        syncTransactionFromPreviewDecision(item, refreshedPreview);
+        snackbar.value?.showMessage(tt(getRecurringDecisionMessageKey(normalizedRecurringId === null)));
+        return true;
+    } catch (error) {
+        logger.error(`[定时匹配决策] 失败: ${error}`);
+        snackbar.value?.showMessage(error instanceof Error ? error.message : 'Recurring match failed');
+        return false;
+    } finally {
+        recurringDecisionLoadingId.value = null;
+    }
+}
+
+async function clearRecurringMatch(item: ImportTransaction): Promise<void> {
+    const success = await updatePreviewRecurringMatch(item, null);
+    if (!success) {
+        return;
+    }
+
     logger.info(`[定时匹配] 已清除自动匹配 index=${item.index}`);
 }
 
@@ -1492,7 +1592,7 @@ function getPrimaryRecurringReason(item: ImportTransaction): string {
     return item.recurringMatchReasons.split('|').map(text => text.trim()).filter(text => !!text)[0] || '';
 }
 
-function applySelectedRecurringCandidate(): void {
+async function applySelectedRecurringCandidate(): Promise<void> {
     if (!recurringCandidateTarget.value || !selectedRecurringCandidateId.value) {
         return;
     }
@@ -1504,26 +1604,25 @@ function applySelectedRecurringCandidate(): void {
         return;
     }
 
-    recurringCandidateTarget.value.recurringTemplateId = String(matchedCandidate.id);
-    recurringCandidateTarget.value.recurringTemplateName = matchedCandidate.name || '';
-    recurringCandidateTarget.value.recurringCandidateCount = recurringCandidates.value.length;
-    recurringCandidateTarget.value.recurringMatchScore = Number(matchedCandidate.matchScore || 0);
-    recurringCandidateTarget.value.recurringMatchReasons = Array.isArray(matchedCandidate.matchReasons)
-        ? matchedCandidate.matchReasons.join('|')
-        : '';
-    recurringCandidateTarget.value.recurringMatchedDate = matchedCandidate.matchedOccurrenceDate || '';
-    syncTransferDecisionDraftState(recurringCandidateTarget.value);
+    const success = await updatePreviewRecurringMatch(recurringCandidateTarget.value, matchedCandidate.id);
+    if (!success) {
+        return;
+    }
 
     logger.info(`[定时候选] 已切换定时匹配 index=${recurringCandidateTarget.value.index}, recurringId=${matchedCandidate.id}`);
     closeRecurringCandidateDialog();
 }
 
-function clearRecurringMatchFromDialog(): void {
+async function clearRecurringMatchFromDialog(): Promise<void> {
     if (!recurringCandidateTarget.value) {
         return;
     }
 
-    clearRecurringMatch(recurringCandidateTarget.value);
+    const success = await updatePreviewRecurringMatch(recurringCandidateTarget.value, null);
+    if (!success) {
+        return;
+    }
+
     closeRecurringCandidateDialog();
 }
 
@@ -1610,6 +1709,18 @@ function syncTransferDecisionDraftState(item: ImportTransaction): void {
     if (shouldClearTransferDecision) {
         item.resetTransferSuggestionDecisionState();
     }
+}
+
+function commitEditingTransactionDraft(): void {
+    if (!editingTransaction.value) {
+        return;
+    }
+
+    editingTransaction.value.tagIds = editingTags.value;
+    updateTransactionData(editingTransaction.value);
+    syncTransferDecisionDraftState(editingTransaction.value);
+    editingTags.value = [];
+    editingTransaction.value = null;
 }
 
 function shouldClearTransferDecisionOnSync(item: ImportTransaction): boolean {
@@ -1788,10 +1899,7 @@ async function reviewTransferSuggestion(
             throw new Error('Transfer decision response is out of date');
         }
 
-        if (editingTransaction.value) {
-            editingTags.value = [];
-            editingTransaction.value = null;
-        }
+        commitEditingTransactionDraft();
 
         const previewData = Array.isArray(result.data?.preview)
             ? result.data.preview as ImportPreviewRecord[]

@@ -16,7 +16,7 @@ import re
 import warnings
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, cast
 
 from ..parsers.factory import ParserFactory
 from ..parsers.parser_tags import resolve_parser_tags
@@ -2495,6 +2495,86 @@ class BillService:
             "preview": refreshed_preview,
         }
 
+    @log_method
+    async def update_preview_recurring_match(
+        self,
+        preview_id: int,
+        recurring_id: int | None,
+        *,
+        expected_state: dict[str, Any] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a preview-scoped recurring choice and return refreshed preview data."""
+        if not isinstance(expected_state, dict):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        preview = await self.db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        if not preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
+        current_transfer_review_status = await self._get_preview_transfer_review_status(preview)
+        current_preview_recurring_id = preview.get("preview_recurring_id")
+        current_preview_recurring_id = (
+            None if current_preview_recurring_id in (None, "") else int(current_preview_recurring_id)
+        )
+
+        expected_session_id = str(expected_state.get("sessionId") or "")
+        expected_preview_type = str(expected_state.get("previewType") or "")
+        expected_review_status = str(expected_state.get("reviewStatus") or "").strip().lower()
+        should_compare_review_status = "reviewStatus" in expected_state
+        try:
+            expected_category_id_raw = expected_state.get("categoryId")
+            expected_category_id = (
+                None if expected_category_id_raw in (None, "", 0, "0") else int(expected_category_id_raw)
+            )
+            expected_recurring_id_raw = expected_state.get("recurringId")
+            expected_recurring_id = (
+                None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
+            )
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        if (
+            str(preview.get("session_id") or "") != expected_session_id
+            or str(preview.get("preview_type") or "") != expected_preview_type
+            or (should_compare_review_status and current_transfer_review_status != expected_review_status)
+            or current_preview_category_id != expected_category_id
+            or current_preview_recurring_id != expected_recurring_id
+        ):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+
+        updated_preview = await self.db.update_preview_recurring_match(
+            preview_id,
+            recurring_id,
+            user_id=user_id,
+            expected_state={
+                "session_id": str(preview.get("session_id") or ""),
+                "preview_type": str(preview.get("preview_type") or ""),
+                "preview_main_category": str(preview.get("preview_main_category") or ""),
+                "preview_sub_category": str(preview.get("preview_sub_category") or ""),
+                "preview_recurring_id": current_preview_recurring_id,
+                "preview_matching_feedback_json": str(preview.get("preview_matching_feedback_json") or ""),
+            },
+        )
+        if updated_preview and updated_preview.get("_state_conflict"):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+        if updated_preview and updated_preview.get("_invalid_recurring_id"):
+            return {"success": False, "error": "Recurring candidate not available", "status_code": 404}
+        if not updated_preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        session_id = str(updated_preview.get("session_id") or "")
+        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
+        normalized_recurring_id = None if recurring_id in (None, "") else int(recurring_id)
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": session_id,
+            "recurring_id": normalized_recurring_id,
+            "preview": refreshed_preview,
+        }
+
     async def _get_preview_category_id(self, preview: dict[str, Any], user_id: int = 1) -> int | None:
         main_category = str(preview.get("preview_main_category") or "")
         sub_category = str(preview.get("preview_sub_category") or "")
@@ -2639,7 +2719,9 @@ class BillService:
         learned_source_account_id = rule.get("learned_source_account_id")
         learned_destination_account_id = rule.get("learned_destination_account_id")
         source_account = accounts_by_id.get(int(learned_source_account_id)) if learned_source_account_id else None
-        destination_account = accounts_by_id.get(int(learned_destination_account_id)) if learned_destination_account_id else None
+        destination_account = (
+            accounts_by_id.get(int(learned_destination_account_id)) if learned_destination_account_id else None
+        )
         if source_account or destination_account:
             parts.append(
                 f"{source_account.get('name', '-') if source_account else '-'} → "
@@ -2973,11 +3055,12 @@ class BillService:
                 self.logger.info("[重新分类] 步骤0: 同步当前预览草稿 (%d 条)", len(preview_updates))
                 update_preview_batch = getattr(self.db, "update_preview_bills_batch", None)
                 if callable(update_preview_batch):
+                    update_preview_batch_fn = cast("Any", update_preview_batch)
                     update_preview_batch_params = inspect.signature(update_preview_batch).parameters
                     if "user_id" in update_preview_batch_params:
-                        await update_preview_batch(session_id, preview_updates, user_id=user_id)
+                        await update_preview_batch_fn(session_id, preview_updates, user_id=user_id)
                     else:
-                        await update_preview_batch(session_id, preview_updates)
+                        await update_preview_batch_fn(session_id, preview_updates)
 
                 self.logger.info("[重新分类] 步骤0: 保存当前会话人工标注样本 (%d 条)", len(preview_updates))
                 result["session_samples_saved"] = await self.db.save_import_annotation_samples(

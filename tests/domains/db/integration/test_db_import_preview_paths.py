@@ -36,6 +36,28 @@ async def _create_user(db: Database, username: str) -> int:
     )
 
 
+async def _create_account(db: Database, *, user_id: int, name: str) -> int:
+    account_id = await db.create_account(
+        {
+            "name": name,
+            "type": 1,
+            "category": "asset",
+            "currency": "CNY",
+            "icon": "",
+            "color": "",
+            "balance": 0.0,
+            "initial_balance": 0.0,
+            "hidden": False,
+            "display_order": 0,
+            "comment": "",
+            "aliases": [],
+        },
+        user_id=user_id,
+    )
+    assert account_id is not None
+    return int(account_id)
+
+
 async def _create_category(
     db: Database,
     *,
@@ -59,6 +81,45 @@ async def _create_category(
     )
     assert category_id is not None
     return int(category_id)
+
+
+def _build_recurring_template_payload(
+    *,
+    name: str,
+    category_id: int,
+    source_account_id: int,
+    destination_account_id: int,
+    start_date: str,
+) -> dict[str, object]:
+    return {
+        "templateType": 2,
+        "name": name,
+        "type": 3,
+        "categoryId": str(category_id),
+        "sourceAccountId": str(source_account_id),
+        "destinationAccountId": str(destination_account_id),
+        "sourceAmount": 1200,
+        "destinationAmount": 0,
+        "hideAmount": False,
+        "tagIds": [],
+        "comment": f"{name} 备注",
+        "hidden": False,
+        "utcOffset": 0,
+        "scheduledFrequencyType": 1,
+        "scheduledFrequency": "1",
+        "scheduledStartDate": start_date,
+        "scheduledEndDate": "",
+    }
+
+
+async def _get_raw_next_date(db: Database, *, recurring_id: int, user_id: int) -> str | None:
+    conn = await db._get_connection()
+    async with conn.execute(
+        "SELECT next_date FROM recurring_bills WHERE id = ? AND user_id = ?",
+        (recurring_id, user_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return str(row["next_date"]) if row and row["next_date"] else None
 
 
 @pytest.mark.asyncio
@@ -534,6 +595,150 @@ async def test_preview_transfer_decision_rejects_stale_snapshot_inside_db_transa
             expected_state=expected_snapshot,
         )
         assert stale_reject_result == {"_state_conflict": True}
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_recurring_match_persists_clear_and_keeps_template_schedule_unchanged(
+    tmp_path: Path,
+) -> None:
+    """预览 recurring 匹配应支持持久化/清除，并且 preview 阶段不能推进模板 next_date。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_recurring_match_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="预览扣款账户")
+        destination_account_id = await _create_account(db, user_id=user_id, name="预览收款账户")
+        category_id = await _create_category(
+            db,
+            user_id=user_id,
+            main_category="模板主类",
+            sub_category="模板子类",
+        )
+        recurring_a_id = await db.create_template(
+            _build_recurring_template_payload(
+                name="早餐模板 A",
+                category_id=category_id,
+                source_account_id=source_account_id,
+                destination_account_id=destination_account_id,
+                start_date="2026-03-08",
+            ),
+            user_id=user_id,
+        )
+        recurring_b_id = await db.create_template(
+            _build_recurring_template_payload(
+                name="早餐模板 B",
+                category_id=category_id,
+                source_account_id=source_account_id,
+                destination_account_id=destination_account_id,
+                start_date="2026-03-09",
+            ),
+            user_id=user_id,
+        )
+        session_id = "preview-recurring-match-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-03-09 10:30:00",
+                "preview_type": "支出",
+                "preview_amount": 12.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_counterparty": "测试早餐店",
+                "preview_payment_method": "测试银行卡",
+                "preview_description": "preview recurring match",
+                "preview_source_account_id": source_account_id,
+                "preview_destination_account_id": destination_account_id,
+            },
+            user_id=user_id,
+        )
+        assert preview_id > 0
+
+        preview_before = await db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        assert preview_before is not None
+        candidates_result = await db.get_recurring_candidates_for_preview(preview_id, user_id=user_id, tolerance_days=3)
+        candidates = candidates_result["candidates"]
+        assert len(candidates) >= 2
+        target_candidate = next(
+            candidate for candidate in candidates if int(candidate["id"]) == int(recurring_b_id)
+        )
+
+        next_date_before = await _get_raw_next_date(db, recurring_id=recurring_b_id, user_id=user_id)
+        expected_snapshot = {
+            "session_id": str(preview_before.get("session_id") or ""),
+            "preview_type": str(preview_before.get("preview_type") or ""),
+            "preview_main_category": str(preview_before.get("preview_main_category") or ""),
+            "preview_sub_category": str(preview_before.get("preview_sub_category") or ""),
+            "preview_recurring_id": preview_before.get("preview_recurring_id"),
+            "preview_matching_feedback_json": str(preview_before.get("preview_matching_feedback_json") or ""),
+        }
+
+        matched_preview = await db.update_preview_recurring_match(
+            preview_id,
+            recurring_b_id,
+            user_id=user_id,
+            expected_state=expected_snapshot,
+        )
+        assert matched_preview is not None
+        assert matched_preview["preview_recurring_id"] == recurring_b_id
+        assert matched_preview["preview_recurring_name"] == target_candidate["name"]
+        assert matched_preview["preview_recurring_candidate_count"] == len(candidates)
+        assert matched_preview["preview_recurring_match_score"] == pytest.approx(
+            float(target_candidate["matchScore"])
+        )
+        assert matched_preview["preview_recurring_matched_date"] == target_candidate["matchedOccurrenceDate"]
+        assert await _get_raw_next_date(db, recurring_id=recurring_b_id, user_id=user_id) == next_date_before
+
+        stale_clear_result = await db.update_preview_recurring_match(
+            preview_id,
+            None,
+            user_id=user_id,
+            expected_state=expected_snapshot,
+        )
+        assert stale_clear_result == {"_state_conflict": True}
+
+        clear_snapshot = {
+            "session_id": str(matched_preview.get("session_id") or ""),
+            "preview_type": str(matched_preview.get("preview_type") or ""),
+            "preview_main_category": str(matched_preview.get("preview_main_category") or ""),
+            "preview_sub_category": str(matched_preview.get("preview_sub_category") or ""),
+            "preview_recurring_id": matched_preview.get("preview_recurring_id"),
+            "preview_matching_feedback_json": str(matched_preview.get("preview_matching_feedback_json") or ""),
+        }
+        cleared_preview = await db.update_preview_recurring_match(
+            preview_id,
+            None,
+            user_id=user_id,
+            expected_state=clear_snapshot,
+        )
+        assert cleared_preview is not None
+        assert cleared_preview["preview_recurring_id"] is None
+        assert cleared_preview["preview_recurring_name"] == ""
+        assert cleared_preview["preview_recurring_candidate_count"] == len(candidates)
+        assert cleared_preview["preview_recurring_match_score"] == 0
+        assert cleared_preview["preview_recurring_match_reasons"] == ""
+        assert cleared_preview["preview_recurring_matched_date"] == ""
+        assert await _get_raw_next_date(db, recurring_id=recurring_b_id, user_id=user_id) == next_date_before
+
+        cleared_snapshot = {
+            "session_id": str(cleared_preview.get("session_id") or ""),
+            "preview_type": str(cleared_preview.get("preview_type") or ""),
+            "preview_main_category": str(cleared_preview.get("preview_main_category") or ""),
+            "preview_sub_category": str(cleared_preview.get("preview_sub_category") or ""),
+            "preview_recurring_id": cleared_preview.get("preview_recurring_id"),
+            "preview_matching_feedback_json": str(cleared_preview.get("preview_matching_feedback_json") or ""),
+        }
+
+        invalid_match_result = await db.update_preview_recurring_match(
+            preview_id,
+            999999,
+            user_id=user_id,
+            expected_state=cleared_snapshot,
+        )
+        assert invalid_match_result == {"_invalid_recurring_id": True}
+        assert await _get_raw_next_date(db, recurring_id=recurring_a_id, user_id=user_id) == "2026-03-08"
     finally:
         await db.close()
 

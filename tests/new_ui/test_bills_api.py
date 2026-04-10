@@ -219,6 +219,17 @@ def _find_recurring_by_id(recurring_id, user_id=1):
     return asyncio.run(_find())
 
 
+def _find_category_id_by_name(main_category, sub_category, user_id=1):
+    """按主/子分类名称查找分类 ID。"""
+    from src.api.app import db
+
+    async def _find():
+        category = await db.get_category_by_name(main_category or "", sub_category or "", user_id=user_id)
+        return int(category["id"]) if category and category.get("id") is not None else None
+
+    return asyncio.run(_find())
+
+
 def _get_current_user_id(client, auth_headers):
     """获取当前测试用户ID。"""
     profile_response = client.get("/api/profile", headers=auth_headers)
@@ -1335,6 +1346,146 @@ class TestBillsAPI:
         inserted_bill = _find_bill_by_comment(bill_comment, user_id=current_user_id)
         assert inserted_bill is not None
         assert inserted_bill["created_from_recurring"] in [None, "", 0]
+
+    def test_import_preview_recurring_match_put_delete_and_stale_snapshot(self, client):
+        """导入预览 recurring 候选应支持后端绑定/清除，并且 preview 阶段不推进模板 next_date。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_recurring_match")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        source_account = _ensure_test_account(client, isolated_auth_headers)
+        category = _ensure_test_expense_category(client, isolated_auth_headers)
+        bill_comment = f"pytest preview recurring match bill {int(time.time() * 1000)}"
+
+        recurring_one = _create_test_recurring_template(
+            client,
+            isolated_auth_headers,
+            name="pytest预览定时绑定候选一",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=7600,
+            start_date="2026-03-08",
+            frequency_type=1,
+            frequency="1"
+        )
+        recurring_two = _create_test_recurring_template(
+            client,
+            isolated_auth_headers,
+            name="pytest预览定时绑定候选二",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=7600,
+            start_date="2026-03-09",
+            frequency_type=1,
+            frequency="1"
+        )
+
+        session_id = f"pytest-import-recurring-match-{int(time.time() * 1000)}"
+        parser_bills = [{
+            "date": "2026-03-09 10:30:00",
+            "amount": -76.0,
+            "type": "支出",
+            "description": bill_comment,
+            "counterparty": "pytest recurring match vendor",
+            "payment_method": "pytest recurring account",
+            "source_account_id": source_account["id"]
+        }]
+        _create_test_import_session(session_id, parser_bills, parser_id="wechat", user_id=current_user_id)
+
+        dedup_response = client.post(
+            "/api/bills/import/v2/dedup",
+            data=json.dumps({"session_id": session_id}),
+            content_type="application/json",
+            headers=isolated_auth_headers
+        )
+        assert dedup_response.status_code == 200
+        preview_item = dedup_response.get_json()["data"]["preview"][0]
+
+        candidates_response = client.get(
+            f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-candidates?toleranceDays=3",
+            headers=isolated_auth_headers
+        )
+        assert candidates_response.status_code == 200
+        candidates_data = candidates_response.get_json()
+        assert candidates_data["success"] is True
+        candidates = candidates_data["result"]["candidates"]
+        assert len(candidates) >= 2
+
+        initial_recurring_id = preview_item.get("preview_recurring_id")
+        target_candidate = next(
+            candidate for candidate in candidates if str(candidate["id"]) != str(initial_recurring_id)
+        )
+        recurring_two_before = _find_recurring_by_id(recurring_two["id"], user_id=current_user_id)
+        assert recurring_two_before is not None
+        recurring_two_next_date_before = str(recurring_two_before["next_date"])
+
+        def _build_expected_state(item: dict[str, object]) -> dict[str, object]:
+            category_id = _find_category_id_by_name(
+                str(item.get("preview_main_category") or ""),
+                str(item.get("preview_sub_category") or ""),
+                user_id=current_user_id,
+            )
+            return {
+                "sessionId": session_id,
+                "previewType": item.get("preview_type"),
+                "categoryId": category_id,
+                "recurringId": item.get("preview_recurring_id"),
+            }
+
+        bind_response = client.put(
+            f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-match",
+            data=json.dumps(
+                {
+                    "recurringId": target_candidate["id"],
+                    "expectedState": _build_expected_state(preview_item),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert bind_response.status_code == 200
+        bind_data = bind_response.get_json()
+        assert bind_data["success"] is True
+        bound_preview = next(
+            item for item in bind_data["data"]["preview"] if int(item["id"]) == int(preview_item["id"])
+        )
+        assert str(bound_preview["preview_recurring_id"]) == str(target_candidate["id"])
+        assert bound_preview["preview_recurring_name"] == target_candidate["name"]
+        assert bound_preview["preview_recurring_candidate_count"] >= 2
+        assert bound_preview["matching"]["recurring"]["id"] == int(target_candidate["id"])
+
+        recurring_two_after_bind = _find_recurring_by_id(recurring_two["id"], user_id=current_user_id)
+        assert recurring_two_after_bind is not None
+        assert str(recurring_two_after_bind["next_date"]) == recurring_two_next_date_before
+
+        stale_delete_response = client.delete(
+            f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-match",
+            data=json.dumps({"expectedState": _build_expected_state(preview_item)}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert stale_delete_response.status_code == 409
+        assert stale_delete_response.get_json()["error"] == "Preview state changed, please refresh"
+
+        clear_response = client.delete(
+            f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-match",
+            data=json.dumps({"expectedState": _build_expected_state(bound_preview)}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert clear_response.status_code == 200
+        clear_data = clear_response.get_json()
+        assert clear_data["success"] is True
+        cleared_preview = next(
+            item for item in clear_data["data"]["preview"] if int(item["id"]) == int(preview_item["id"])
+        )
+        assert cleared_preview["preview_recurring_id"] in (None, "", 0)
+        assert cleared_preview["preview_recurring_name"] == ""
+        assert cleared_preview["preview_recurring_candidate_count"] >= 2
+        assert cleared_preview["preview_recurring_match_score"] == 0
+        assert cleared_preview["matching"]["recurring"]["id"] is None
+
+        recurring_two_after_clear = _find_recurring_by_id(recurring_two["id"], user_id=current_user_id)
+        assert recurring_two_after_clear is not None
+        assert str(recurring_two_after_clear["next_date"]) == recurring_two_next_date_before
 
     def test_import_preview_transfer_decision_accept_reject_clear_and_invalid_payload(self, client):
         """测试导入预览转账建议支持 accept/reject/clear，并返回刷新后的 matching 决策状态。"""

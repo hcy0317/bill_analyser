@@ -82,6 +82,7 @@ class TestMatchingAPI:
         assert candidates[1]["kind"] == "recurring"
         assert candidates[1]["score"] == 0.88
         assert candidates[1]["level"] == "high"
+        assert candidates[1]["status"] == "confirmed"
         assert candidates[1]["details"]["name"] == "pytest recurring candidate"
 
     def test_matching_session_candidates_returns_empty_list_for_empty_session(self, client):
