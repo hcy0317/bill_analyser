@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from ..bill_date_utils import parse_bill_datetime
+from .candidate_ids import build_formal_transfer_candidate_id
 
 _MAX_TRANSFER_PAIR_WINDOW = timedelta(days=3)
 _AMOUNT_TOLERANCE = 0.01
@@ -93,17 +94,6 @@ def _resolve_time_diff_seconds(
     if time_diff_seconds > _MAX_TRANSFER_PAIR_WINDOW.total_seconds():
         return None
     return time_diff_seconds
-
-
-def _build_transfer_candidate_id(
-    anchor_bill: dict[str, Any],
-    candidate_bill: dict[str, Any],
-) -> str:
-    anchor_id = _coerce_int(anchor_bill.get("id")) or 0
-    candidate_id = _coerce_int(candidate_bill.get("id")) or 0
-    return f"bill:{anchor_id}:transfer:{candidate_id}"
-
-
 def build_transfer_pair_candidate(
     anchor_bill: dict[str, Any],
     candidate_bill: dict[str, Any],
@@ -137,7 +127,10 @@ def build_transfer_pair_candidate(
         reason_parts.append("date_window")
 
     return {
-        "candidate_id": _build_transfer_candidate_id(anchor_bill, candidate_bill),
+        "candidate_id": build_formal_transfer_candidate_id(
+            _coerce_int(anchor_bill.get("id")) or 0,
+            candidate_id,
+        ),
         "bill_id": candidate_id,
         "score": score,
         "level": _derive_level(score),

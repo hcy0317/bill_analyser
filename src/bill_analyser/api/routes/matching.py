@@ -153,6 +153,25 @@ def _parse_manual_pair_request(data: Any) -> tuple[int, int]:
     return normalized_bill_id, normalized_candidate_bill_id
 
 
+def _build_matching_accept_payload(
+    candidate_id: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    response_data: dict[str, Any] = {
+        "candidateId": str(result.get("candidate_id") or candidate_id),
+        "action": str(result.get("action") or "accept"),
+    }
+    if result.get("preview_id") not in (None, ""):
+        response_data["previewId"] = int(result.get("preview_id") or 0)
+    if result.get("session_id") not in (None, ""):
+        response_data["sessionId"] = str(result.get("session_id") or "")
+    if isinstance(result.get("preview"), list):
+        response_data["preview"] = list(result.get("preview") or [])
+    if isinstance(result.get("pair"), dict):
+        response_data["pair"] = _serialize_bill_pair(result.get("pair"))
+    return response_data
+
+
 @bp.route("/sessions/<session_id>/candidates", methods=["GET"])
 @log_method
 @require_auth
@@ -244,6 +263,46 @@ def get_matching_candidates():
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取统一 matching 候选失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/candidates/<path:candidate_id>/accept", methods=["POST"])
+@log_method
+@require_auth
+def accept_matching_candidate(candidate_id: str):
+    """接受一个当前已支持 family 的 matching candidate。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        accept_handler = getattr(bill_service, "_accept_matching_candidate", None)
+        if not callable(accept_handler):
+            raise AttributeError("Matching accept handler not available")
+        result = _run_async(
+            accept_handler(
+                candidate_id,
+                data,
+                user_id=user_id,
+            )
+        )
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 400))
+            error_message = result.get("error", "Failed to accept candidate")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        return jsonify(
+            {
+                "success": True,
+                "data": _build_matching_accept_payload(candidate_id, result),
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("接受 matching candidate 失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 

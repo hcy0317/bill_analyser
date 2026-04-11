@@ -797,3 +797,206 @@ class TestMatchingAPI:
         )
         assert bill_response.status_code == 404
         assert bill_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_candidate_accept_accepts_preview_transfer_candidate_and_preserves_stale_guard(self, client):
+        """generic accept 第一刀应复用 preview transfer accept 与 stale-state 保护。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_preview")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-accept-preview-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-21 09:20:00",
+                    "preview_type": "支出",
+                    "preview_amount": 28.8,
+                    "preview_counterparty": "pytest generic accept vendor",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "pytest generic accept preview",
+                },
+                user_id=current_user_id,
+                dedup_type="transfer",
+                dedup_source_ids=[81, 82],
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+        candidate_id = f"preview:{preview_id}:transfer"
+        expected_state = {
+            "sessionId": session_id,
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+        }
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["action"] == "accept"
+        assert accept_data["data"]["previewId"] == preview_id
+        accept_preview = next(
+            item for item in accept_data["data"]["preview"] if int(item["id"]) == preview_id
+        )
+        assert accept_preview["preview_type"] == "转账"
+        assert accept_preview["matching"]["transfer"]["review_status"] == "accepted"
+
+        stale_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+
+        assert stale_response.status_code == 409
+        stale_data = stale_response.get_json()
+        assert stale_data["success"] is False
+        assert stale_data["error"] == "Preview state changed, please refresh"
+
+    def test_matching_candidate_accept_accepts_historical_transfer_candidate(self, client):
+        """generic accept 第一刀应复用历史 formal-bill transfer 的手工配对写路径。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest accept 历史转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest accept 历史转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-72.0,
+            bill_type="支出",
+            date="2026-07-21 10:00:00",
+            description="matching generic accept anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=72.0,
+            bill_type="收入",
+            date="2026-07-21 10:03:00",
+            description="matching generic accept candidate",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}"
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["pair"]["pairType"] == "transfer"
+        assert accept_data["data"]["pair"]["leftBillId"] == min(anchor_bill_id, candidate_bill_id)
+        assert accept_data["data"]["pair"]["rightBillId"] == max(anchor_bill_id, candidate_bill_id)
+
+        follow_up_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+        assert follow_up_response.status_code == 200
+        follow_up_data = follow_up_response.get_json()
+        assert follow_up_data["data"]["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert follow_up_data["data"]["candidates"] == []
+
+    def test_matching_candidate_accept_rejects_invalid_or_unsupported_candidate_ids(self, client):
+        """generic accept 第一刀应拒绝非法 candidateId 和未支持 family。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_invalid")
+
+        malformed_response = client.post(
+            "/api/matching/candidates/not-a-valid-candidate-id/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert malformed_response.status_code == 400
+        assert malformed_response.get_json()["error"] == "Invalid candidateId"
+
+        unsupported_response = client.post(
+            "/api/matching/candidates/preview:99:recurring/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert unsupported_response.status_code == 400
+        assert unsupported_response.get_json()["error"] == "Candidate family not supported"
+
+    def test_matching_candidate_accept_is_user_scoped_for_preview_and_bill_transfer(self, client):
+        """generic accept 第一刀的 preview/bill transfer 分支都不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        session_id = f"pytest-matching-accept-scope-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_primary_preview() -> int:
+            await db.create_import_session(session_id, user_id=primary_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-21 11:20:00",
+                    "preview_type": "支出",
+                    "preview_amount": 18.8,
+                    "preview_counterparty": "pytest accept scope vendor",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "pytest accept scope preview",
+                },
+                user_id=primary_user_id,
+                dedup_type="transfer",
+                dedup_source_ids=[71, 72],
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_primary_preview())
+        preview_response = client.post(
+            f"/api/matching/candidates/preview:{preview_id}:transfer/accept",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "支出",
+                    "categoryId": None,
+                    "recurringId": None,
+                }
+            },
+            headers=secondary_headers,
+        )
+        assert preview_response.status_code == 404
+        assert preview_response.get_json()["error"] == "Preview bill not found"
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest accept scope 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest accept scope 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-82.0,
+            bill_type="支出",
+            date="2026-07-21 11:40:00",
+            description="pytest accept scope anchor bill",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=82.0,
+            bill_type="收入",
+            date="2026-07-21 11:43:00",
+            description="pytest accept scope candidate bill",
+        )
+        bill_response = client.post(
+            f"/api/matching/candidates/bill:{anchor_bill_id}:transfer:{candidate_bill_id}/accept",
+            json={},
+            headers=secondary_headers,
+        )
+        assert bill_response.status_code == 404
+        assert bill_response.get_json()["error"] == "Bill not found"

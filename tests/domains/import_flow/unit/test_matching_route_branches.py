@@ -47,6 +47,7 @@ class FakeMatchingService:
         self.calls: list[tuple[str, int]] = []
         self.bill_candidate_calls: list[tuple[int, int]] = []
         self.matching_pairs_calls: list[int] = []
+        self.accept_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.manual_pair_calls: list[tuple[int, int, int]] = []
         self.deleted_pair_calls: list[tuple[int, int]] = []
         self.result = {
@@ -117,6 +118,14 @@ class FakeMatchingService:
                 }
             ],
         }
+        self.accept_candidate_result = {
+            "success": True,
+            "candidate_id": "preview:1:transfer",
+            "action": "accept",
+            "preview_id": 1,
+            "session_id": "session-1",
+            "preview": [{"id": 1, "matching": {"transfer": {"review_status": "accepted"}}}],
+        }
         self.manual_pair_result = {
             "success": True,
             "pair": {
@@ -152,6 +161,20 @@ class FakeMatchingService:
             "success": True,
             "pairs": [dict(pair) for pair in self.matching_pairs_result.get("pairs", [])],
         }
+
+    async def _accept_matching_candidate(
+        self,
+        candidate_id: str,
+        payload: dict[str, Any],
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        self.accept_candidate_calls.append((candidate_id, dict(payload), user_id))
+        result = dict(self.accept_candidate_result)
+        if isinstance(result.get("pair"), dict):
+            result["pair"] = dict(result["pair"])
+        if isinstance(result.get("preview"), list):
+            result["preview"] = list(result["preview"])
+        return result
 
     async def create_manual_transfer_pair(
         self,
@@ -524,5 +547,133 @@ def test_matching_candidates_route_preserves_validation_404_and_500(
     ):
         _set_request_user_id(9)
         response, status = _unwrap_response(route())
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_candidate_accept_route_dispatches_preview_and_bill_transfer_candidates(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应把 preview/bill transfer candidate 分发到 service，并序列化返回。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:transfer/accept",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1", "reviewStatus": "pending"}},
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:transfer").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:transfer"
+        assert payload["data"]["action"] == "accept"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert service.accept_candidate_calls == [
+            (
+                "preview:1:transfer",
+                {"expectedState": {"sessionId": "session-1", "reviewStatus": "pending"}},
+                9,
+            )
+        ]
+
+    service.accept_candidate_result = {
+        "success": True,
+        "candidate_id": "bill:11:transfer:12",
+        "action": "accept",
+        "pair": {
+            "id": 3,
+            "pair_type": "transfer",
+            "source": "manual",
+            "left_bill_id": 11,
+            "right_bill_id": 12,
+        },
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/bill:11:transfer:12/accept",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(7)
+        payload = route("bill:11:transfer:12").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "bill:11:transfer:12"
+        assert payload["data"]["pair"]["leftBillId"] == 11
+        assert payload["data"]["pair"]["rightBillId"] == 12
+        assert service.accept_candidate_calls[-1] == ("bill:11:transfer:12", {}, 7)
+
+
+def test_matching_candidate_accept_route_rejects_invalid_request_and_preserves_errors(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应覆盖非法请求、业务错误与异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:transfer/accept",
+        method="POST",
+        json=["accept"],
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:transfer"))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    service.accept_candidate_result = {
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:recurring/accept",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:recurring"))
+        assert status == 400
+        assert response.get_json()["error"] == "Candidate family not supported"
+
+    service.accept_candidate_result = {
+        "success": False,
+        "error": "Preview state changed, please refresh",
+        "status_code": 409,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:transfer/accept",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1"}},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:transfer"))
+        assert status == 409
+        assert response.get_json()["error"] == "Preview state changed, please refresh"
+
+    async def raise_accept_error(_candidate_id: str, _payload: dict[str, Any], user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("accept candidate boom")
+
+    monkeypatch.setattr(service, "_accept_matching_candidate", raise_accept_error)
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:transfer/accept",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1"}},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:transfer"))
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"
