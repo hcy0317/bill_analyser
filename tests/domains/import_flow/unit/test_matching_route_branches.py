@@ -69,6 +69,7 @@ class FakeMatchingService:
             "linked_pair": None,
             "candidates": [
                 {
+                    "candidate_id": "bill:11:transfer:12",
                     "bill_id": 12,
                     "score": 0.95,
                     "level": "high",
@@ -252,6 +253,7 @@ def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
         assert payload["success"] is True
         assert payload["data"]["billId"] == 11
         assert payload["data"]["linkedPair"] is None
+        assert payload["data"]["candidates"][0]["candidateId"] == "bill:11:transfer:12"
         assert payload["data"]["candidates"][0]["billId"] == 12
         assert service.bill_candidate_calls == [(11, 9)]
 
@@ -414,5 +416,113 @@ def test_matching_pairs_route_returns_serialized_pairs_empty_and_500(
     with matching_route_app.test_request_context("/api/matching/pairs", method="GET"):
         _set_request_user_id(9)
         response, status = _unwrap_response(list_pairs_route())
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_candidates_route_requires_exactly_one_selector_and_dispatches_branches(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """统一 candidates 入口应要求 selector 二选一，并分发到 session/bill 分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.get_matching_candidates)
+
+    with matching_route_app.test_request_context("/api/matching/candidates", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Exactly one of sessionId or billId is required"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?sessionId=session-1&billId=11",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Exactly one of sessionId or billId is required"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?sessionId=session-1",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["session_id"] == "session-1"
+        assert service.calls == [("session-1", 9)]
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?billId=11",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["billId"] == 11
+        assert payload["data"]["candidates"][0]["candidateId"] == "bill:11:transfer:12"
+        assert service.bill_candidate_calls == [(11, 9)]
+
+
+def test_matching_candidates_route_preserves_validation_404_and_500(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """统一 candidates 入口应保持 selector 校验、404 与 500 语义。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.get_matching_candidates)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?billId=abc",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid billId"
+
+    db.import_session_result = None
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?sessionId=missing",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 404
+        assert response.get_json()["error"] == "Import session not found"
+
+    service.bill_candidate_result = {"success": False, "error": "Bill not found", "status_code": 404}
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?billId=999",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    async def raise_session_error(_session_id: str, user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("matching candidates session boom")
+
+    db.import_session_result = {"session_id": "session-1", "user_id": 9}
+    monkeypatch.setattr(service, "get_matching_session_candidates", raise_session_error)
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates?sessionId=session-1",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"

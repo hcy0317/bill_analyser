@@ -95,6 +95,15 @@ def _resolve_time_diff_seconds(
     return time_diff_seconds
 
 
+def _build_transfer_candidate_id(
+    anchor_bill: dict[str, Any],
+    candidate_bill: dict[str, Any],
+) -> str:
+    anchor_id = _coerce_int(anchor_bill.get("id")) or 0
+    candidate_id = _coerce_int(candidate_bill.get("id")) or 0
+    return f"bill:{anchor_id}:transfer:{candidate_id}"
+
+
 def build_transfer_pair_candidate(
     anchor_bill: dict[str, Any],
     candidate_bill: dict[str, Any],
@@ -128,6 +137,7 @@ def build_transfer_pair_candidate(
         reason_parts.append("date_window")
 
     return {
+        "candidate_id": _build_transfer_candidate_id(anchor_bill, candidate_bill),
         "bill_id": candidate_id,
         "score": score,
         "level": _derive_level(score),

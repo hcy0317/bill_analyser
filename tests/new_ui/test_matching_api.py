@@ -250,6 +250,10 @@ class TestMatchingAPI:
         assert data["data"]["billId"] == anchor_bill_id
         assert data["data"]["linkedPair"] is None
         candidates = data["data"]["candidates"]
+        assert [candidate["candidateId"] for candidate in candidates] == [
+            f"bill:{anchor_bill_id}:transfer:{near_candidate_bill_id}",
+            f"bill:{anchor_bill_id}:transfer:{far_candidate_bill_id}",
+        ]
         assert [candidate["billId"] for candidate in candidates] == [
             near_candidate_bill_id,
             far_candidate_bill_id,
@@ -625,3 +629,171 @@ class TestMatchingAPI:
         data = response.get_json()
         assert data["success"] is True
         assert [candidate["billId"] for candidate in data["data"]["candidates"]] == [candidate_bill_id]
+
+    def test_matching_unified_candidates_rejects_invalid_selector_input(self, client):
+        """统一 candidates 入口应要求且仅允许一个合法 selector。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_unified_invalid_selector")
+
+        missing_selector_response = client.get("/api/matching/candidates", headers=auth_headers)
+        assert missing_selector_response.status_code == 400
+        assert missing_selector_response.get_json()["error"] == "Exactly one of sessionId or billId is required"
+
+        duplicate_selector_response = client.get(
+            "/api/matching/candidates?sessionId=session-1&billId=11",
+            headers=auth_headers,
+        )
+        assert duplicate_selector_response.status_code == 400
+        assert duplicate_selector_response.get_json()["error"] == "Exactly one of sessionId or billId is required"
+
+        invalid_bill_id_response = client.get(
+            "/api/matching/candidates?billId=abc",
+            headers=auth_headers,
+        )
+        assert invalid_bill_id_response.status_code == 400
+        assert invalid_bill_id_response.get_json()["error"] == "Invalid billId"
+
+    def test_matching_unified_candidates_session_selector_matches_existing_session_endpoint(self, client):
+        """统一 candidates 入口的 session 分支应复用现有 session 候选读模型。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_unified_session_selector")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-unified-session-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_preview_item() -> None:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-06-18 10:20:00",
+                    "preview_type": "支出",
+                    "preview_amount": 18.8,
+                    "preview_destination_amount": 18.8,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "早餐",
+                    "preview_source_account_id": 11,
+                    "preview_destination_account_id": 22,
+                    "preview_counterparty": "pytest unified session vendor",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "pytest unified matching api",
+                    "preview_parser_id": "wechat",
+                    "preview_parser_tags": ["parser:wechat", "channel:wallet"],
+                    "preview_recurring_id": 19,
+                    "preview_recurring_name": "pytest unified recurring candidate",
+                    "preview_recurring_candidate_count": 1,
+                    "preview_recurring_match_score": 0.78,
+                    "preview_recurring_match_reasons": "schedule|amount",
+                    "preview_recurring_matched_date": "2026-06-18",
+                },
+                user_id=current_user_id,
+                dedup_type="transfer",
+                dedup_source_ids=[191, 192],
+            )
+
+        asyncio.run(_create_preview_item())
+
+        old_response = client.get(
+            f"/api/matching/sessions/{session_id}/candidates",
+            headers=auth_headers,
+        )
+        unified_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+
+        assert old_response.status_code == 200
+        assert unified_response.status_code == 200
+        assert unified_response.get_json()["data"] == old_response.get_json()["data"]
+
+    def test_matching_unified_candidates_bill_selector_matches_existing_bill_endpoint(self, client):
+        """统一 candidates 入口的 bill 分支应复用现有历史账单候选读模型。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_unified_bill_selector")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest unified 历史转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest unified 历史转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-55.0,
+            bill_type="支出",
+            date="2026-07-20 09:00:00",
+            description="matching unified api anchor bill",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=55.0,
+            bill_type="收入",
+            date="2026-07-20 09:03:00",
+            description="matching unified api candidate bill",
+        )
+
+        old_response = client.get(
+            f"/api/matching/bills/{anchor_bill_id}/candidates",
+            headers=auth_headers,
+        )
+        unified_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+
+        assert old_response.status_code == 200
+        assert unified_response.status_code == 200
+        old_data = old_response.get_json()["data"]
+        unified_data = unified_response.get_json()["data"]
+        assert unified_data == old_data
+        assert unified_data["candidates"][0]["candidateId"] == f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}"
+
+    def test_matching_unified_candidates_is_user_scoped_for_session_and_bill_selectors(self, client):
+        """统一 candidates 入口的 session/bill 分支都不应跨用户泄露。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_unified_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_unified_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        session_id = f"pytest-matching-unified-scope-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_primary_session() -> None:
+            await db.create_import_session(session_id, user_id=primary_user_id, file_count=1)
+
+        asyncio.run(_create_primary_session())
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest unified scope 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest unified scope 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-65.0,
+            bill_type="支出",
+            date="2026-07-20 11:00:00",
+            description="matching unified scope anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=65.0,
+            bill_type="收入",
+            date="2026-07-20 11:03:00",
+            description="matching unified scope candidate",
+        )
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id},
+            headers=primary_headers,
+        )
+        assert pair_response.status_code == 200
+
+        session_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=secondary_headers,
+        )
+        assert session_response.status_code == 404
+        assert session_response.get_json()["error"] == "Import session not found"
+
+        bill_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=secondary_headers,
+        )
+        assert bill_response.status_code == 404
+        assert bill_response.get_json()["error"] == "Bill not found"
