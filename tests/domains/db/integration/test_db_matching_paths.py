@@ -93,6 +93,38 @@ async def _count_bill_pair_links(db: Database, *, user_id: int) -> int:
     return int(row[0] if row else 0)
 
 
+async def _insert_bill_pair_link(
+    db: Database,
+    *,
+    user_id: int,
+    left_bill_id: int,
+    right_bill_id: int,
+    pair_type: str = "transfer",
+    source: str = "manual",
+    created_at: str = "2026-07-01T00:00:00",
+    updated_at: str = "2026-07-01T00:00:00",
+) -> int:
+    conn = await db._get_connection()
+    cursor = await conn.execute(
+        """
+        INSERT INTO bill_pair_links (
+            user_id, pair_type, left_bill_id, right_bill_id, source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            pair_type,
+            left_bill_id,
+            right_bill_id,
+            source,
+            created_at,
+            updated_at,
+        ),
+    )
+    await conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
 @pytest.mark.asyncio
 async def test_db_get_bill_transfer_candidates_is_user_scoped_and_excludes_invalid_or_linked_bills(
     tmp_path: Path,
@@ -166,6 +198,178 @@ async def test_db_get_bill_transfer_candidates_is_user_scoped_and_excludes_inval
         assert invalid_same_sign_bill_id not in returned_candidate_ids
         assert invalid_other_user_bill_id not in returned_candidate_ids
         assert result["candidates"][0]["score"] >= result["candidates"][1]["score"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_list_manual_transfer_pairs_returns_only_current_user_pairs_with_bill_summaries(
+    tmp_path: Path,
+) -> None:
+    """pair 列表应只返回当前用户的 transfer/manual pairs，并附左右账单最小摘要。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_list_user")
+        other_user_id = await _create_user(db, "matching_pair_list_other")
+
+        source_account_id = await _create_account(db, user_id=user_id, name="列表源账户 A")
+        target_account_id = await _create_account(db, user_id=user_id, name="列表目标账户 B")
+        third_account_id = await _create_account(db, user_id=user_id, name="列表目标账户 C")
+        fourth_account_id = await _create_account(db, user_id=user_id, name="列表目标账户 D")
+        other_source_account_id = await _create_account(db, user_id=other_user_id, name="其他用户源账户")
+        other_target_account_id = await _create_account(db, user_id=other_user_id, name="其他用户目标账户")
+
+        first_left_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-31.0,
+            bill_type="支出",
+            date="2026-07-18 09:00:00",
+            description="pair list first expense",
+        )
+        first_right_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=31.0,
+            bill_type="收入",
+            date="2026-07-18 09:02:00",
+            description="pair list first income",
+        )
+        second_left_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-41.0,
+            bill_type="支出",
+            date="2026-07-18 10:00:00",
+            description="pair list second expense",
+        )
+        second_right_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=third_account_id,
+            amount=41.0,
+            bill_type="收入",
+            date="2026-07-18 10:03:00",
+            description="pair list second income",
+        )
+        auto_left_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-51.0,
+            bill_type="支出",
+            date="2026-07-18 11:00:00",
+            description="pair list auto expense",
+        )
+        auto_right_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=fourth_account_id,
+            amount=51.0,
+            bill_type="收入",
+            date="2026-07-18 11:03:00",
+            description="pair list auto income",
+        )
+        investment_left_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-61.0,
+            bill_type="支出",
+            date="2026-07-18 12:00:00",
+            description="pair list investment expense",
+        )
+        investment_right_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=61.0,
+            bill_type="收入",
+            date="2026-07-18 12:03:00",
+            description="pair list investment income",
+        )
+        other_left_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_source_account_id,
+            amount=-71.0,
+            bill_type="支出",
+            date="2026-07-18 13:00:00",
+            description="pair list other expense",
+        )
+        other_right_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_target_account_id,
+            amount=71.0,
+            bill_type="收入",
+            date="2026-07-18 13:03:00",
+            description="pair list other income",
+        )
+
+        first_pair = await db.create_manual_transfer_pair(first_left_bill_id, first_right_bill_id, user_id=user_id)
+        second_pair = await db.create_manual_transfer_pair(second_left_bill_id, second_right_bill_id, user_id=user_id)
+        await _insert_bill_pair_link(
+            db,
+            user_id=user_id,
+            left_bill_id=auto_left_bill_id,
+            right_bill_id=auto_right_bill_id,
+            source="auto",
+            created_at="2026-07-18T11:05:00",
+            updated_at="2026-07-18T11:05:00",
+        )
+        await _insert_bill_pair_link(
+            db,
+            user_id=user_id,
+            left_bill_id=investment_left_bill_id,
+            right_bill_id=investment_right_bill_id,
+            pair_type="investment",
+            source="manual",
+            created_at="2026-07-18T12:05:00",
+            updated_at="2026-07-18T12:05:00",
+        )
+        await db.create_manual_transfer_pair(other_left_bill_id, other_right_bill_id, user_id=other_user_id)
+
+        conn = await db._get_connection()
+        await conn.execute(
+            "UPDATE bill_pair_links SET updated_at = ? WHERE id = ?",
+            ("2026-07-18T09:05:00", int(first_pair["id"])),
+        )
+        await conn.execute(
+            "UPDATE bill_pair_links SET updated_at = ? WHERE id = ?",
+            ("2026-07-18T10:05:00", int(second_pair["id"])),
+        )
+        await conn.commit()
+
+        pairs = await db.list_manual_transfer_pairs(user_id=user_id)
+
+        assert [pair["id"] for pair in pairs] == [int(second_pair["id"]), int(first_pair["id"])]
+        assert all(pair["pair_type"] == "transfer" for pair in pairs)
+        assert all(pair["source"] == "manual" for pair in pairs)
+        assert pairs[0]["left_bill"]["id"] == pairs[0]["left_bill_id"]
+        assert pairs[0]["right_bill"]["id"] == pairs[0]["right_bill_id"]
+        assert pairs[0]["left_bill"]["payment_method"] == "银行卡"
+        assert pairs[0]["right_bill"]["description"] == "pair list second income"
+        assert pairs[1]["left_bill"]["description"] == "pair list first expense"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_list_manual_transfer_pairs_returns_empty_list_for_user_without_pairs(
+    tmp_path: Path,
+) -> None:
+    """没有 pair 的用户读取列表时应得到空数组。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_list_empty_user")
+
+        pairs = await db.list_manual_transfer_pairs(user_id=user_id)
+
+        assert pairs == []
     finally:
         await db.close()
 

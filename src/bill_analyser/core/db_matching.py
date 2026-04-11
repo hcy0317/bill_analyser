@@ -17,6 +17,28 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
     _TRANSFER_PAIR_TYPE = "transfer"
     _TRANSFER_PAIR_LOOKBACK_DAYS = 3
+    _MANUAL_PAIR_SOURCE = "manual"
+
+    @staticmethod
+    def _build_bill_snapshot_from_row(
+        row: dict[str, Any],
+        prefix: str,
+    ) -> dict[str, Any]:
+        return {
+            "id": int(row.get(f"{prefix}_id") or 0),
+            "date": str(row.get(f"{prefix}_date") or ""),
+            "type": str(row.get(f"{prefix}_type") or ""),
+            "amount": float(row.get(f"{prefix}_amount") or 0.0),
+            "counterparty": str(row.get(f"{prefix}_counterparty") or ""),
+            "description": str(row.get(f"{prefix}_description") or ""),
+            "payment_method": str(row.get(f"{prefix}_payment_method") or ""),
+            "main_category": str(row.get(f"{prefix}_main_category") or ""),
+            "sub_category": str(row.get(f"{prefix}_sub_category") or ""),
+            "source_account_id": int(row.get(f"{prefix}_source_account_id") or 0),
+            "destination_account_id": int(
+                row.get(f"{prefix}_destination_account_id") or 0
+            ),
+        }
 
     @staticmethod
     def _normalize_transfer_pair_bill_ids(
@@ -97,6 +119,88 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             ),
             params,
         )
+
+    @log_method
+    async def list_manual_transfer_pairs(
+        self,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """List persisted manual transfer pairs for the current user."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT
+                pairs.id,
+                pairs.pair_type,
+                pairs.source,
+                pairs.left_bill_id,
+                pairs.right_bill_id,
+                pairs.created_at,
+                pairs.updated_at,
+                left_bill.date AS left_bill_date,
+                left_bill.type AS left_bill_type,
+                left_bill.amount AS left_bill_amount,
+                left_bill.counterparty AS left_bill_counterparty,
+                left_bill.description AS left_bill_description,
+                left_bill.payment_method AS left_bill_payment_method,
+                left_bill.main_category AS left_bill_main_category,
+                left_bill.sub_category AS left_bill_sub_category,
+                left_bill.source_account_id AS left_bill_source_account_id,
+                left_bill.destination_account_id AS left_bill_destination_account_id,
+                right_bill.date AS right_bill_date,
+                right_bill.type AS right_bill_type,
+                right_bill.amount AS right_bill_amount,
+                right_bill.counterparty AS right_bill_counterparty,
+                right_bill.description AS right_bill_description,
+                right_bill.payment_method AS right_bill_payment_method,
+                right_bill.main_category AS right_bill_main_category,
+                right_bill.sub_category AS right_bill_sub_category,
+                right_bill.source_account_id AS right_bill_source_account_id,
+                right_bill.destination_account_id AS right_bill_destination_account_id
+            FROM bill_pair_links AS pairs
+            JOIN bills AS left_bill
+              ON left_bill.id = pairs.left_bill_id
+             AND left_bill.user_id = pairs.user_id
+            JOIN bills AS right_bill
+              ON right_bill.id = pairs.right_bill_id
+             AND right_bill.user_id = pairs.user_id
+            WHERE pairs.user_id = ?
+              AND pairs.pair_type = ?
+              AND pairs.source = ?
+            ORDER BY COALESCE(pairs.updated_at, pairs.created_at) DESC, pairs.id DESC
+            """,
+            (user_id, self._TRANSFER_PAIR_TYPE, self._MANUAL_PAIR_SOURCE),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        pairs: list[dict[str, Any]] = []
+        for row in rows:
+            row_dict = dict(row)
+            pairs.append(
+                {
+                    "id": int(row_dict.get("id") or 0),
+                    "pair_type": str(
+                        row_dict.get("pair_type") or self._TRANSFER_PAIR_TYPE
+                    ),
+                    "source": str(
+                        row_dict.get("source") or self._MANUAL_PAIR_SOURCE
+                    ),
+                    "left_bill_id": int(row_dict.get("left_bill_id") or 0),
+                    "right_bill_id": int(row_dict.get("right_bill_id") or 0),
+                    "created_at": str(row_dict.get("created_at") or ""),
+                    "updated_at": str(row_dict.get("updated_at") or ""),
+                    "left_bill": self._build_bill_snapshot_from_row(
+                        row_dict,
+                        "left_bill",
+                    ),
+                    "right_bill": self._build_bill_snapshot_from_row(
+                        row_dict,
+                        "right_bill",
+                    ),
+                }
+            )
+
+        return pairs
 
     @log_method
     async def get_bill_transfer_candidates(
@@ -254,7 +358,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                     self._TRANSFER_PAIR_TYPE,
                     left_bill_id,
                     right_bill_id,
-                    "manual",
+                    self._MANUAL_PAIR_SOURCE,
                     now,
                     now,
                 ),
@@ -263,7 +367,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             return {
                 "id": int(cursor.lastrowid or 0),
                 "pair_type": self._TRANSFER_PAIR_TYPE,
-                "source": "manual",
+                "source": self._MANUAL_PAIR_SOURCE,
                 "left_bill_id": left_bill_id,
                 "right_bill_id": right_bill_id,
             }
@@ -298,7 +402,10 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 await conn.rollback()
                 raise LookupError("Pair not found")
 
-            if str(pair.get("source") or "manual") != "manual":
+            if (
+                str(pair.get("source") or self._MANUAL_PAIR_SOURCE)
+                != self._MANUAL_PAIR_SOURCE
+            ):
                 await conn.rollback()
                 raise ValueError("Only manual transfer pairs can be deleted")
 
@@ -314,7 +421,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             return {
                 "id": int(pair["id"]),
                 "pair_type": str(pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
-                "source": str(pair.get("source") or "manual"),
+                "source": str(pair.get("source") or self._MANUAL_PAIR_SOURCE),
                 "left_bill_id": int(pair["left_bill_id"]),
                 "right_bill_id": int(pair["right_bill_id"]),
             }

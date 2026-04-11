@@ -476,6 +476,125 @@ class TestMatchingAPI:
         assert follow_up_response.status_code == 200
         assert follow_up_response.get_json()["data"]["linkedPair"]["id"] == pair_id
 
+    def test_matching_pairs_lists_current_user_persisted_pairs_with_bill_summaries(self, client):
+        """pair 列表应返回当前用户已持久化的 manual transfer pairs 与左右账单摘要。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest pair list 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest pair list 目标账户")
+        third_account_id = _create_account_via_db(current_user_id, "pytest pair list 第三账户")
+
+        first_left_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-91.0,
+            bill_type="支出",
+            date="2026-07-18 15:00:00",
+            description="matching api pair list first left",
+        )
+        first_right_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=91.0,
+            bill_type="收入",
+            date="2026-07-18 15:02:00",
+            description="matching api pair list first right",
+        )
+        second_left_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-92.0,
+            bill_type="支出",
+            date="2026-07-18 16:00:00",
+            description="matching api pair list second left",
+        )
+        second_right_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=third_account_id,
+            amount=92.0,
+            bill_type="收入",
+            date="2026-07-18 16:02:00",
+            description="matching api pair list second right",
+        )
+
+        first_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": first_left_bill_id, "candidateBillId": first_right_bill_id},
+            headers=auth_headers,
+        )
+        second_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": second_left_bill_id, "candidateBillId": second_right_bill_id},
+            headers=auth_headers,
+        )
+        assert first_pair_response.status_code == 200
+        assert second_pair_response.status_code == 200
+        first_pair_id = first_pair_response.get_json()["data"]["pair"]["id"]
+        second_pair_id = second_pair_response.get_json()["data"]["pair"]["id"]
+
+        response = client.get("/api/matching/pairs", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        pairs = data["data"]["pairs"]
+        assert [pair["id"] for pair in pairs] == [second_pair_id, first_pair_id]
+        assert pairs[0]["leftBill"]["id"] == min(second_left_bill_id, second_right_bill_id)
+        assert pairs[0]["rightBill"]["id"] == max(second_left_bill_id, second_right_bill_id)
+        assert pairs[0]["leftBill"]["paymentMethod"] == "银行卡"
+        assert pairs[1]["rightBill"]["description"] == "matching api pair list first right"
+
+    def test_matching_pairs_returns_empty_list_for_user_without_pairs(self, client):
+        """没有 pair 的用户读取列表时应返回 200 + 空数组。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list_empty")
+
+        response = client.get("/api/matching/pairs", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"] == {"pairs": []}
+
+    def test_matching_pairs_does_not_leak_other_users_pairs(self, client):
+        """pair 列表不应泄露其他用户已持久化的配对关系。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest pair leak 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest pair leak 目标账户")
+        left_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-101.0,
+            bill_type="支出",
+            date="2026-07-18 17:00:00",
+            description="matching api pair leak left",
+        )
+        right_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=101.0,
+            bill_type="收入",
+            date="2026-07-18 17:02:00",
+            description="matching api pair leak right",
+        )
+
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": left_bill_id, "candidateBillId": right_bill_id},
+            headers=primary_headers,
+        )
+        assert pair_response.status_code == 200
+
+        response = client.get("/api/matching/pairs", headers=secondary_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"] == {"pairs": []}
+
     def test_matching_bill_candidates_support_slash_and_cn_date_formats(self, client):
         """历史 matching API 应兼容验证器已接受的 `/` 与中文日期格式。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_date_formats")

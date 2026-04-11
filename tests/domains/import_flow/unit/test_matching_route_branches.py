@@ -46,6 +46,7 @@ class FakeMatchingService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
         self.bill_candidate_calls: list[tuple[int, int]] = []
+        self.matching_pairs_calls: list[int] = []
         self.manual_pair_calls: list[tuple[int, int, int]] = []
         self.deleted_pair_calls: list[tuple[int, int]] = []
         self.result = {
@@ -72,6 +73,46 @@ class FakeMatchingService:
                     "score": 0.95,
                     "level": "high",
                     "reason": "same_amount|opposite_sign",
+                }
+            ],
+        }
+        self.matching_pairs_result = {
+            "success": True,
+            "pairs": [
+                {
+                    "id": 3,
+                    "pair_type": "transfer",
+                    "source": "manual",
+                    "left_bill_id": 11,
+                    "right_bill_id": 12,
+                    "created_at": "2026-07-18T10:05:00",
+                    "updated_at": "2026-07-18T10:05:00",
+                    "left_bill": {
+                        "id": 11,
+                        "date": "2026-07-18 10:00:00",
+                        "type": "支出",
+                        "amount": -41.0,
+                        "counterparty": "pytest pair left",
+                        "description": "pair list left bill",
+                        "payment_method": "银行卡",
+                        "main_category": "转账",
+                        "sub_category": "历史后配对",
+                        "source_account_id": 21,
+                        "destination_account_id": 0,
+                    },
+                    "right_bill": {
+                        "id": 12,
+                        "date": "2026-07-18 10:03:00",
+                        "type": "收入",
+                        "amount": 41.0,
+                        "counterparty": "pytest pair right",
+                        "description": "pair list right bill",
+                        "payment_method": "银行卡",
+                        "main_category": "转账",
+                        "sub_category": "历史后配对",
+                        "source_account_id": 22,
+                        "destination_account_id": 0,
+                    },
                 }
             ],
         }
@@ -103,6 +144,13 @@ class FakeMatchingService:
     async def get_matching_bill_candidates(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
         self.bill_candidate_calls.append((bill_id, user_id))
         return dict(self.bill_candidate_result)
+
+    async def get_matching_pairs(self, user_id: int = 1) -> dict[str, Any]:
+        self.matching_pairs_calls.append(user_id)
+        return {
+            "success": True,
+            "pairs": [dict(pair) for pair in self.matching_pairs_result.get("pairs", [])],
+        }
 
     async def create_manual_transfer_pair(
         self,
@@ -324,5 +372,47 @@ def test_matching_pair_delete_route_covers_success_404_and_500(
     with matching_route_app.test_request_context("/api/matching/pairs/3", method="DELETE"):
         _set_request_user_id(9)
         response, status = _unwrap_response(delete_pair_route(3))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_pairs_route_returns_serialized_pairs_empty_and_500(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pair 列表路由应覆盖成功、空列表和异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    list_pairs_route = _unwrap_all(matching_module.get_matching_pairs)
+
+    with matching_route_app.test_request_context("/api/matching/pairs", method="GET"):
+        _set_request_user_id(9)
+        payload = list_pairs_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["pairs"][0]["id"] == 3
+        assert payload["data"]["pairs"][0]["pairType"] == "transfer"
+        assert payload["data"]["pairs"][0]["leftBill"]["paymentMethod"] == "银行卡"
+        assert payload["data"]["pairs"][0]["rightBill"]["description"] == "pair list right bill"
+        assert service.matching_pairs_calls == [9]
+
+    service.matching_pairs_result = {"success": True, "pairs": []}
+    with matching_route_app.test_request_context("/api/matching/pairs", method="GET"):
+        _set_request_user_id(9)
+        payload = list_pairs_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"] == {"pairs": []}
+
+    async def raise_matching_pairs_error(user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("matching pairs boom")
+
+    monkeypatch.setattr(service, "get_matching_pairs", raise_matching_pairs_error)
+    with matching_route_app.test_request_context("/api/matching/pairs", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(list_pairs_route())
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"

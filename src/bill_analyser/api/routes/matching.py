@@ -50,30 +50,47 @@ def _serialize_bill_pair(pair: dict[str, Any] | None) -> dict[str, Any] | None:
     return serialized_pair
 
 
+def _serialize_bill_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    bill_snapshot = dict(snapshot or {}) if isinstance(snapshot, dict) else {}
+    return {
+        "id": int(bill_snapshot.get("id") or 0),
+        "date": str(bill_snapshot.get("date") or ""),
+        "type": str(bill_snapshot.get("type") or ""),
+        "amount": float(bill_snapshot.get("amount") or 0.0),
+        "counterparty": str(bill_snapshot.get("counterparty") or ""),
+        "description": str(bill_snapshot.get("description") or ""),
+        "paymentMethod": str(bill_snapshot.get("payment_method") or ""),
+        "mainCategory": str(bill_snapshot.get("main_category") or ""),
+        "subCategory": str(bill_snapshot.get("sub_category") or ""),
+        "sourceAccountId": int(bill_snapshot.get("source_account_id") or 0),
+        "destinationAccountId": int(
+            bill_snapshot.get("destination_account_id") or 0
+        ),
+    }
+
+
+def _serialize_matching_pair_detail(pair: dict[str, Any]) -> dict[str, Any]:
+    serialized_pair = _serialize_bill_pair(pair) or {
+        "id": 0,
+        "pairType": "transfer",
+        "source": "manual",
+        "leftBillId": 0,
+        "rightBillId": 0,
+    }
+    serialized_pair["createdAt"] = str(pair.get("created_at") or "")
+    serialized_pair["updatedAt"] = str(pair.get("updated_at") or "")
+    serialized_pair["leftBill"] = _serialize_bill_snapshot(pair.get("left_bill"))
+    serialized_pair["rightBill"] = _serialize_bill_snapshot(pair.get("right_bill"))
+    return serialized_pair
+
+
 def _serialize_transfer_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    bill_snapshot = (
-        dict(candidate.get("bill") or {}) if isinstance(candidate.get("bill"), dict) else {}
-    )
     return {
         "billId": int(candidate.get("bill_id") or 0),
         "score": float(candidate.get("score") or 0.0),
         "level": str(candidate.get("level") or ""),
         "reason": str(candidate.get("reason") or ""),
-        "bill": {
-            "id": int(bill_snapshot.get("id") or 0),
-            "date": str(bill_snapshot.get("date") or ""),
-            "type": str(bill_snapshot.get("type") or ""),
-            "amount": float(bill_snapshot.get("amount") or 0.0),
-            "counterparty": str(bill_snapshot.get("counterparty") or ""),
-            "description": str(bill_snapshot.get("description") or ""),
-            "paymentMethod": str(bill_snapshot.get("payment_method") or ""),
-            "mainCategory": str(bill_snapshot.get("main_category") or ""),
-            "subCategory": str(bill_snapshot.get("sub_category") or ""),
-            "sourceAccountId": int(bill_snapshot.get("source_account_id") or 0),
-            "destinationAccountId": int(
-                bill_snapshot.get("destination_account_id") or 0
-            ),
-        },
+        "bill": _serialize_bill_snapshot(candidate.get("bill")),
     }
 
 
@@ -152,6 +169,31 @@ def get_matching_bill_candidates(bill_id: int):
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取历史账单 matching 候选失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/pairs", methods=["GET"])
+@log_method
+@require_auth
+def get_matching_pairs():
+    """返回当前用户已持久化的正式账单手工配对列表。"""
+    try:
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        result = _run_async(bill_service.get_matching_pairs(user_id=user_id))
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "pairs": [
+                        _serialize_matching_pair_detail(pair)
+                        for pair in list(result.get("pairs") or [])
+                    ]
+                },
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取历史账单配对列表失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 
