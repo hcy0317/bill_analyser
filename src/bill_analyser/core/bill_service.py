@@ -2477,6 +2477,32 @@ class BillService:
         }
 
     @log_method
+    async def _reject_preview_transfer_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.apply_preview_transfer_decision(
+            int(parsed_candidate_id["preview_id"]),
+            "reject",
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
     async def _accept_matching_candidate(
         self,
         candidate_id: str,
@@ -2506,6 +2532,38 @@ class BillService:
             return await self._accept_bill_transfer_candidate(
                 candidate_id,
                 parsed_candidate_id,
+                user_id=user_id,
+            )
+
+        return {
+            "success": False,
+            "error": "Candidate family not supported",
+            "status_code": 400,
+        }
+
+    @log_method
+    async def _reject_matching_candidate(
+        self,
+        candidate_id: str,
+        payload: dict[str, Any] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Reject a supported matching candidate by dispatching to existing write paths."""
+        if not isinstance(payload, dict):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        parsed_candidate_id = parse_matching_candidate_id(candidate_id)
+        if not isinstance(parsed_candidate_id, dict):
+            return {"success": False, "error": "Invalid candidateId", "status_code": 400}
+
+        candidate_scope = str(parsed_candidate_id.get("scope") or "")
+        candidate_kind = str(parsed_candidate_id.get("kind") or "")
+
+        if candidate_scope == "preview" and candidate_kind == "transfer":
+            return await self._reject_preview_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
                 user_id=user_id,
             )
 

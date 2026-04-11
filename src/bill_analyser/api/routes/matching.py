@@ -122,7 +122,8 @@ def _parse_matching_candidates_selector() -> tuple[str | None, int | None]:
         return session_id, None
 
     try:
-        bill_id = int(raw_bill_id)
+        normalized_raw_bill_id = "" if raw_bill_id is None else str(raw_bill_id)
+        bill_id = int(normalized_raw_bill_id)
     except (TypeError, ValueError) as exc:
         raise ValueError("Invalid billId") from exc
 
@@ -153,13 +154,13 @@ def _parse_manual_pair_request(data: Any) -> tuple[int, int]:
     return normalized_bill_id, normalized_candidate_bill_id
 
 
-def _build_matching_accept_payload(
+def _build_matching_candidate_action_payload(
     candidate_id: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
     response_data: dict[str, Any] = {
         "candidateId": str(result.get("candidate_id") or candidate_id),
-        "action": str(result.get("action") or "accept"),
+        "action": str(result.get("action") or ""),
     }
     if result.get("preview_id") not in (None, ""):
         response_data["previewId"] = int(result.get("preview_id") or 0)
@@ -298,11 +299,51 @@ def accept_matching_candidate(candidate_id: str):
         return jsonify(
             {
                 "success": True,
-                "data": _build_matching_accept_payload(candidate_id, result),
+                "data": _build_matching_candidate_action_payload(candidate_id, result),
             }
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("接受 matching candidate 失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/candidates/<path:candidate_id>/reject", methods=["POST"])
+@log_method
+@require_auth
+def reject_matching_candidate(candidate_id: str):
+    """拒绝一个当前已支持 family 的 matching candidate。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        reject_handler = getattr(bill_service, "_reject_matching_candidate", None)
+        if not callable(reject_handler):
+            raise AttributeError("Matching reject handler not available")
+        result = _run_async(
+            reject_handler(
+                candidate_id,
+                data,
+                user_id=user_id,
+            )
+        )
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 400))
+            error_message = result.get("error", "Failed to reject candidate")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        return jsonify(
+            {
+                "success": True,
+                "data": _build_matching_candidate_action_payload(candidate_id, result),
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("拒绝 matching candidate 失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 
