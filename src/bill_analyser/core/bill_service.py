@@ -2529,6 +2529,31 @@ class BillService:
         }
 
     @log_method
+    async def _reject_bill_transfer_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        try:
+            await self.db.reject_bill_transfer_candidate(
+                int(parsed_candidate_id["bill_id"]),
+                int(parsed_candidate_id["candidate_bill_id"]),
+                user_id=user_id,
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+        }
+
+    @log_method
     async def _accept_matching_candidate(
         self,
         candidate_id: str,
@@ -2598,6 +2623,13 @@ class BillService:
                 candidate_id,
                 parsed_candidate_id,
                 payload,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "bill" and candidate_kind == "transfer":
+            return await self._reject_bill_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
                 user_id=user_id,
             )
 

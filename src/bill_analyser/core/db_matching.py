@@ -120,6 +120,82 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             params,
         )
 
+    async def _get_bill_transfer_pair_suppression(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
+        left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
+            bill_id,
+            candidate_bill_id,
+        )
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT *
+            FROM bill_transfer_pair_suppressions
+            WHERE user_id = ? AND left_bill_id = ? AND right_bill_id = ?
+            LIMIT 1
+            """,
+            (user_id, left_bill_id, right_bill_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _get_suppressed_bill_transfer_candidate_ids(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> set[int]:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT
+                CASE
+                    WHEN left_bill_id = ? THEN right_bill_id
+                    ELSE left_bill_id
+                END AS other_bill_id
+            FROM bill_transfer_pair_suppressions
+            WHERE user_id = ? AND (left_bill_id = ? OR right_bill_id = ?)
+            """,
+            (int(bill_id), user_id, int(bill_id), int(bill_id)),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            int(row["other_bill_id"])
+            for row in rows
+            if row and row["other_bill_id"] is not None
+        }
+
+    async def _delete_bill_transfer_pair_suppressions_for_bill_ids(
+        self,
+        conn: Any,
+        bill_ids: list[int],
+        *,
+        user_id: int = 1,
+    ) -> None:
+        normalized_bill_ids = sorted(
+            {int(bill_id) for bill_id in bill_ids if int(bill_id) > 0}
+        )
+        if not normalized_bill_ids:
+            return
+
+        placeholders = ",".join(["?" for _ in normalized_bill_ids])
+        params = [user_id, *normalized_bill_ids, *normalized_bill_ids]
+        await conn.execute(
+            (
+                "DELETE FROM bill_transfer_pair_suppressions "
+                f"WHERE user_id = ? AND (left_bill_id IN ({placeholders}) "
+                f"OR right_bill_id IN ({placeholders}))"
+            ),
+            params,
+        )
+
     @log_method
     async def list_manual_transfer_pairs(
         self,
@@ -253,6 +329,11 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             }
 
         conn = await self._get_connection()
+        suppressed_candidate_bill_ids = await self._get_suppressed_bill_transfer_candidate_ids(
+            bill_id,
+            user_id=user_id,
+            conn=conn,
+        )
         async with conn.execute(
             """
             SELECT *
@@ -287,13 +368,104 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
         candidates = build_transfer_pair_candidates(
             anchor_bill,
-            [dict(row) for row in candidate_rows],
+            [
+                dict(row)
+                for row in candidate_rows
+                if int(row["id"] or 0) not in suppressed_candidate_bill_ids
+            ],
         )
         return {
             "bill": anchor_bill,
             "linked_pair": None,
             "candidates": candidates,
         }
+
+    @log_method
+    async def reject_bill_transfer_candidate(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a suppression for a historical transfer candidate pair."""
+        left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
+            bill_id,
+            candidate_bill_id,
+        )
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute(
+                "SELECT * FROM bills WHERE user_id = ? AND id IN (?, ?)",
+                (user_id, left_bill_id, right_bill_id),
+            ) as cursor:
+                bill_rows = await cursor.fetchall()
+
+            bills_by_id = {int(row["id"]): dict(row) for row in bill_rows}
+            if left_bill_id not in bills_by_id or right_bill_id not in bills_by_id:
+                await conn.rollback()
+                raise LookupError("Bill not found")
+
+            left_pair = await self._get_bill_pair_link_for_bill(
+                left_bill_id,
+                user_id=user_id,
+                pair_type=self._TRANSFER_PAIR_TYPE,
+                conn=conn,
+            )
+            right_pair = await self._get_bill_pair_link_for_bill(
+                right_bill_id,
+                user_id=user_id,
+                pair_type=self._TRANSFER_PAIR_TYPE,
+                conn=conn,
+            )
+            if left_pair or right_pair:
+                await conn.rollback()
+                raise ValueError("Bills already belong to an existing transfer pair")
+
+            candidate_payload = build_transfer_pair_candidate(
+                bills_by_id[left_bill_id],
+                bills_by_id[right_bill_id],
+            )
+            if candidate_payload is None:
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for transfer pairing")
+
+            existing_suppression = await self._get_bill_transfer_pair_suppression(
+                left_bill_id,
+                right_bill_id,
+                user_id=user_id,
+                conn=conn,
+            )
+            if existing_suppression:
+                await conn.rollback()
+                return {
+                    "left_bill_id": left_bill_id,
+                    "right_bill_id": right_bill_id,
+                }
+
+            await conn.execute(
+                """
+                INSERT INTO bill_transfer_pair_suppressions (
+                    user_id, left_bill_id, right_bill_id, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (user_id, left_bill_id, right_bill_id, utc_now_iso()),
+            )
+            await conn.commit()
+            return {
+                "left_bill_id": left_bill_id,
+                "right_bill_id": right_bill_id,
+            }
+        except sqlite3.IntegrityError:
+            await conn.rollback()
+            return {
+                "left_bill_id": left_bill_id,
+                "right_bill_id": right_bill_id,
+            }
+        except Exception:
+            await conn.rollback()
+            raise
 
     @log_method
     async def create_manual_transfer_pair(
@@ -337,6 +509,15 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             if left_pair or right_pair:
                 await conn.rollback()
                 raise ValueError("Bills already belong to an existing transfer pair")
+
+            if await self._get_bill_transfer_pair_suppression(
+                left_bill_id,
+                right_bill_id,
+                user_id=user_id,
+                conn=conn,
+            ):
+                await conn.rollback()
+                raise ValueError("Bills already rejected for transfer pairing")
 
             candidate_payload = build_transfer_pair_candidate(
                 bills_by_id[left_bill_id],

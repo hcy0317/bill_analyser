@@ -706,7 +706,7 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic reject route 应分发 preview transfer / recurring，并明确 formal-bill transfer 当前不支持。"""
+    """generic reject route 应分发 preview transfer / recurring / historical transfer，并保留其他 family 边界。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -762,9 +762,9 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
         )
 
     service.reject_candidate_result = {
-        "success": False,
-        "error": "Candidate family not supported",
-        "status_code": 400,
+        "success": True,
+        "candidate_id": "bill:11:transfer:12",
+        "action": "reject",
     }
     with matching_route_app.test_request_context(
         "/api/matching/candidates/bill:11:transfer:12/reject",
@@ -772,7 +772,26 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
         json={},
     ):
         _set_request_user_id(7)
-        response, status = _unwrap_response(route("bill:11:transfer:12"))
+        payload = route("bill:11:transfer:12").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"] == {
+            "candidateId": "bill:11:transfer:12",
+            "action": "reject",
+        }
+        assert service.reject_candidate_calls[-1] == ("bill:11:transfer:12", {}, 7)
+
+    service.reject_candidate_result = {
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/bill:11:investment:12/reject",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(7)
+        response, status = _unwrap_response(route("bill:11:investment:12"))
         assert status == 400
         assert response.get_json()["error"] == "Candidate family not supported"
 

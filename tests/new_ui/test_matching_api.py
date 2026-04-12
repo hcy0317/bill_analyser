@@ -1089,6 +1089,95 @@ class TestMatchingAPI:
         assert stale_data["success"] is False
         assert stale_data["error"] == "Preview state changed, please refresh"
 
+    def test_matching_candidate_reject_rejects_historical_transfer_candidate_and_filters_followup_reads(self, client):
+        """historical formal-bill transfer reject 应持久化 suppression，并过滤后续 bill/unified 候选读取。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest bill reject 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest bill reject 目标账户")
+        third_account_id = _create_account_via_db(current_user_id, "pytest bill reject 第三账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-57.0,
+            bill_type="支出",
+            date="2026-07-23 09:00:00",
+            description="matching generic bill reject anchor",
+        )
+        rejected_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=57.0,
+            bill_type="收入",
+            date="2026-07-23 09:02:00",
+            description="matching generic bill reject candidate",
+        )
+        retained_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=third_account_id,
+            amount=57.0,
+            bill_type="收入",
+            date="2026-07-23 09:05:00",
+            description="matching generic bill retained candidate",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:transfer:{rejected_candidate_bill_id}"
+
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        assert [candidate["billId"] for candidate in initial_response.get_json()["data"]["candidates"]] == [
+            rejected_candidate_bill_id,
+            retained_candidate_bill_id,
+        ]
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert reject_response.status_code == 200
+        reject_data = reject_response.get_json()
+        assert reject_data["success"] is True
+        assert reject_data["data"] == {
+            "candidateId": candidate_id,
+            "action": "reject",
+        }
+
+        bill_follow_up_response = client.get(
+            f"/api/matching/bills/{anchor_bill_id}/candidates",
+            headers=auth_headers,
+        )
+        assert bill_follow_up_response.status_code == 200
+        bill_follow_up_data = bill_follow_up_response.get_json()["data"]
+        assert bill_follow_up_data["linkedPair"] is None
+        assert [candidate["billId"] for candidate in bill_follow_up_data["candidates"]] == [retained_candidate_bill_id]
+
+        unified_follow_up_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+        assert unified_follow_up_response.status_code == 200
+        unified_follow_up_data = unified_follow_up_response.get_json()["data"]
+        assert unified_follow_up_data["linkedPair"] is None
+        assert [candidate["billId"] for candidate in unified_follow_up_data["candidates"]] == [retained_candidate_bill_id]
+
+        reverse_follow_up_response = client.get(
+            f"/api/matching/bills/{rejected_candidate_bill_id}/candidates",
+            headers=auth_headers,
+        )
+        assert reverse_follow_up_response.status_code == 200
+        reverse_candidates = reverse_follow_up_response.get_json()["data"]["candidates"]
+        assert anchor_bill_id not in {candidate["billId"] for candidate in reverse_candidates}
+
+        accept_after_reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert accept_after_reject_response.status_code == 409
+        assert accept_after_reject_response.get_json()["error"] == "Bills already rejected for transfer pairing"
+
     def test_matching_candidate_reject_clears_preview_recurring_match_and_returns_pending_candidate(self, client):
         """generic reject 的 preview recurring 分支应复用 clear recurring-match 语义。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring")
@@ -1205,7 +1294,7 @@ class TestMatchingAPI:
         assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
 
     def test_matching_candidate_reject_rejects_invalid_or_unsupported_candidate_ids(self, client):
-        """generic reject 第一刀应拒绝非法 candidateId、unsupported family 和 formal-bill transfer reject。"""
+        """generic reject 当前切片应拒绝非法 candidateId 与仍未支持的 family。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_invalid")
         current_user_id = _get_current_user_id(client, auth_headers)
 
@@ -1225,32 +1314,13 @@ class TestMatchingAPI:
         assert unsupported_response.status_code == 400
         assert unsupported_response.get_json()["error"] == "Candidate family not supported"
 
-        source_account_id = _create_account_via_db(current_user_id, "pytest reject 历史转出账户")
-        target_account_id = _create_account_via_db(current_user_id, "pytest reject 历史转入账户")
-        anchor_bill_id = _create_bill_via_db(
-            current_user_id,
-            source_account_id=source_account_id,
-            amount=-52.0,
-            bill_type="支出",
-            date="2026-07-22 10:00:00",
-            description="matching generic reject anchor",
-        )
-        candidate_bill_id = _create_bill_via_db(
-            current_user_id,
-            source_account_id=target_account_id,
-            amount=52.0,
-            bill_type="收入",
-            date="2026-07-22 10:03:00",
-            description="matching generic reject candidate",
-        )
-
-        bill_reject_response = client.post(
-            f"/api/matching/candidates/bill:{anchor_bill_id}:transfer:{candidate_bill_id}/reject",
+        historical_unsupported_response = client.post(
+            "/api/matching/candidates/bill:11:investment:12/reject",
             json={},
             headers=auth_headers,
         )
-        assert bill_reject_response.status_code == 400
-        assert bill_reject_response.get_json()["error"] == "Candidate family not supported"
+        assert historical_unsupported_response.status_code == 400
+        assert historical_unsupported_response.get_json()["error"] == "Candidate family not supported"
 
     def test_matching_candidate_reject_is_user_scoped_for_preview_transfer(self, client):
         """generic reject 第一刀的 preview transfer 分支不应跨用户生效。"""
@@ -1372,3 +1442,36 @@ class TestMatchingAPI:
         )
         assert preview_response.status_code == 404
         assert preview_response.get_json()["error"] == "Preview bill not found"
+
+    def test_matching_candidate_reject_is_user_scoped_for_historical_transfer(self, client):
+        """generic reject 的 historical transfer 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest bill reject scope 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest bill reject scope 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-68.0,
+            bill_type="支出",
+            date="2026-07-23 11:00:00",
+            description="matching bill reject scope anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=68.0,
+            bill_type="收入",
+            date="2026-07-23 11:03:00",
+            description="matching bill reject scope candidate",
+        )
+
+        reject_response = client.post(
+            f"/api/matching/candidates/bill:{anchor_bill_id}:transfer:{candidate_bill_id}/reject",
+            json={},
+            headers=secondary_headers,
+        )
+        assert reject_response.status_code == 404
+        assert reject_response.get_json()["error"] == "Bill not found"

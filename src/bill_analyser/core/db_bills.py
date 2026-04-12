@@ -325,6 +325,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         conn = await self._get_connection()
         try:
             await self._delete_bill_pair_links_for_bill_ids(conn, [bill_id], user_id=user_id)
+            await self._delete_bill_transfer_pair_suppressions_for_bill_ids(conn, [bill_id], user_id=user_id)
             cursor = await conn.execute("DELETE FROM bills WHERE id = ? AND user_id = ?", (bill_id, user_id))
             await conn.commit()
             return cursor.rowcount > 0
@@ -392,6 +393,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
 
         conn = await self._get_connection()
         await self._delete_bill_pair_links_for_bill_ids(conn, bill_ids, user_id=user_id)
+        await self._delete_bill_transfer_pair_suppressions_for_bill_ids(conn, bill_ids, user_id=user_id)
         placeholders = ",".join(["?" for _ in bill_ids])
         cursor = await conn.execute(
             f"DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?",
@@ -515,6 +517,11 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
 
         for row_user_id, bill_ids in duplicate_ids_by_user.items():
             await self._delete_bill_pair_links_for_bill_ids(
+                conn,
+                bill_ids,
+                user_id=row_user_id,
+            )
+            await self._delete_bill_transfer_pair_suppressions_for_bill_ids(
                 conn,
                 bill_ids,
                 user_id=row_user_id,

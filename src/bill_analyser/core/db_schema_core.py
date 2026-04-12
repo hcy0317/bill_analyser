@@ -213,6 +213,23 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS bill_transfer_pair_suppressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                left_bill_id INTEGER NOT NULL,
+                right_bill_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                CHECK(left_bill_id < right_bill_id),
+                UNIQUE(user_id, left_bill_id, right_bill_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (left_bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+                FOREIGN KEY (right_bill_id) REFERENCES bills(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS budgets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,
@@ -344,6 +361,14 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bill_pair_links_user_type ON bill_pair_links(user_id, pair_type)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_transfer_pair_suppressions_user_left "
+            "ON bill_transfer_pair_suppressions(user_id, left_bill_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_transfer_pair_suppressions_user_right "
+            "ON bill_transfer_pair_suppressions(user_id, right_bill_id)"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_type)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category, sub_category)")

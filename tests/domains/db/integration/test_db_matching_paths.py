@@ -93,6 +93,16 @@ async def _count_bill_pair_links(db: Database, *, user_id: int) -> int:
     return int(row[0] if row else 0)
 
 
+async def _count_bill_transfer_pair_suppressions(db: Database, *, user_id: int) -> int:
+    conn = await db._get_connection()
+    async with conn.execute(
+        "SELECT COUNT(*) FROM bill_transfer_pair_suppressions WHERE user_id = ?",
+        (user_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0] if row else 0)
+
+
 async def _insert_bill_pair_link(
     db: Database,
     *,
@@ -573,8 +583,154 @@ async def test_db_manual_pair_rejects_reverse_duplicate_and_second_pair_for_eith
 
 
 @pytest.mark.asyncio
+async def test_db_reject_bill_transfer_candidate_persists_suppression_and_filters_only_rejected_logical_pair(
+    tmp_path: Path,
+) -> None:
+    """historical transfer reject 应持久化 suppression，并只过滤被拒绝的 logical pair。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_reject_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="reject 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="reject 目标账户")
+        third_account_id = await _create_account(db, user_id=user_id, name="reject 第三账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-73.0,
+            bill_type="支出",
+            date="2026-07-19 09:00:00",
+            description="reject logical pair anchor bill",
+        )
+        rejected_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=73.0,
+            bill_type="收入",
+            date="2026-07-19 09:02:00",
+            description="reject logical pair candidate bill",
+        )
+        retained_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=third_account_id,
+            amount=73.0,
+            bill_type="收入",
+            date="2026-07-19 09:05:00",
+            description="reject logical pair retained bill",
+        )
+
+        initial_result = await db.get_bill_transfer_candidates(anchor_bill_id, user_id=user_id)
+        assert [candidate["bill_id"] for candidate in initial_result["candidates"]] == [
+            rejected_candidate_bill_id,
+            retained_candidate_bill_id,
+        ]
+
+        suppression = await db.reject_bill_transfer_candidate(
+            anchor_bill_id,
+            rejected_candidate_bill_id,
+            user_id=user_id,
+        )
+
+        assert suppression == {
+            "left_bill_id": min(anchor_bill_id, rejected_candidate_bill_id),
+            "right_bill_id": max(anchor_bill_id, rejected_candidate_bill_id),
+        }
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
+
+        anchor_result = await db.get_bill_transfer_candidates(anchor_bill_id, user_id=user_id)
+        assert anchor_result["linked_pair"] is None
+        assert [candidate["bill_id"] for candidate in anchor_result["candidates"]] == [retained_candidate_bill_id]
+
+        rejected_candidate_result = await db.get_bill_transfer_candidates(rejected_candidate_bill_id, user_id=user_id)
+        assert anchor_bill_id not in {candidate["bill_id"] for candidate in rejected_candidate_result["candidates"]}
+
+        retained_candidate_result = await db.get_bill_transfer_candidates(retained_candidate_bill_id, user_id=user_id)
+        assert [candidate["bill_id"] for candidate in retained_candidate_result["candidates"]] == [anchor_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_reject_bill_transfer_candidate_is_user_scoped_idempotent_and_blocks_manual_pair(
+    tmp_path: Path,
+) -> None:
+    """historical transfer reject 应保持 user scope、重复 reject 幂等，并阻止后续 accept/manual-pair 绕过。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_reject_scope_user")
+        other_user_id = await _create_user(db, "matching_pair_reject_scope_other")
+        source_account_id = await _create_account(db, user_id=user_id, name="reject scope 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="reject scope 目标账户")
+        other_source_account_id = await _create_account(db, user_id=other_user_id, name="other reject 源账户")
+        other_target_account_id = await _create_account(db, user_id=other_user_id, name="other reject 目标账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-83.0,
+            bill_type="支出",
+            date="2026-07-19 11:00:00",
+            description="reject scope anchor bill",
+        )
+        candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=83.0,
+            bill_type="收入",
+            date="2026-07-19 11:03:00",
+            description="reject scope candidate bill",
+        )
+        other_anchor_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_source_account_id,
+            amount=-93.0,
+            bill_type="支出",
+            date="2026-07-19 12:00:00",
+            description="other reject scope anchor bill",
+        )
+        other_candidate_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_target_account_id,
+            amount=93.0,
+            bill_type="收入",
+            date="2026-07-19 12:03:00",
+            description="other reject scope candidate bill",
+        )
+
+        first_suppression = await db.reject_bill_transfer_candidate(
+            anchor_bill_id,
+            candidate_bill_id,
+            user_id=user_id,
+        )
+        second_suppression = await db.reject_bill_transfer_candidate(
+            candidate_bill_id,
+            anchor_bill_id,
+            user_id=user_id,
+        )
+
+        assert first_suppression == second_suppression
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=other_user_id) == 0
+
+        with pytest.raises(ValueError, match="rejected for transfer pairing"):
+            await db.create_manual_transfer_pair(anchor_bill_id, candidate_bill_id, user_id=user_id)
+
+        other_result = await db.get_bill_transfer_candidates(other_anchor_bill_id, user_id=other_user_id)
+        assert [candidate["bill_id"] for candidate in other_result["candidates"]] == [other_candidate_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_db_delete_and_batch_delete_remove_related_bill_pair_links(tmp_path: Path) -> None:
-    """删除单条/批量账单时，应同步清理关联的 bill_pair_links。"""
+    """删除单条/批量账单时，应同步清理关联的 bill_pair_links 与 suppression。"""
     db = await _create_database(tmp_path)
     try:
         user_id = await _create_user(db, "matching_pair_delete_user")
@@ -618,24 +774,82 @@ async def test_db_delete_and_batch_delete_remove_related_bill_pair_links(tmp_pat
             date="2026-07-05 10:03:00",
             description="batch delete pair income bill",
         )
+        suppressed_delete_anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-19.0,
+            bill_type="支出",
+            date="2026-07-05 10:10:00",
+            description="delete suppression anchor bill",
+        )
+        suppressed_delete_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=19.0,
+            bill_type="收入",
+            date="2026-07-05 10:12:00",
+            description="delete suppression candidate bill",
+        )
+        suppressed_batch_anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-29.0,
+            bill_type="支出",
+            date="2026-07-05 10:20:00",
+            description="batch delete suppression anchor bill",
+        )
+        suppressed_batch_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=third_account_id,
+            amount=29.0,
+            bill_type="收入",
+            date="2026-07-05 10:23:00",
+            description="batch delete suppression candidate bill",
+        )
 
         await db.create_manual_transfer_pair(first_expense_bill_id, first_income_bill_id, user_id=user_id)
         await db.create_manual_transfer_pair(second_expense_bill_id, second_income_bill_id, user_id=user_id)
+        await db.reject_bill_transfer_candidate(
+            suppressed_delete_anchor_bill_id,
+            suppressed_delete_candidate_bill_id,
+            user_id=user_id,
+        )
+        await db.reject_bill_transfer_candidate(
+            suppressed_batch_anchor_bill_id,
+            suppressed_batch_candidate_bill_id,
+            user_id=user_id,
+        )
         assert await _count_bill_pair_links(db, user_id=user_id) == 2
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 2
 
         assert await db.delete_bill(first_expense_bill_id, user_id=user_id) is True
         assert await _count_bill_pair_links(db, user_id=user_id) == 1
+        assert await db.delete_bill(suppressed_delete_anchor_bill_id, user_id=user_id) is True
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
 
-        deleted_count = await db.batch_delete_bills([second_expense_bill_id, second_income_bill_id], user_id=user_id)
-        assert deleted_count == 2
+        deleted_count = await db.batch_delete_bills(
+            [
+                second_expense_bill_id,
+                second_income_bill_id,
+                suppressed_batch_anchor_bill_id,
+                suppressed_batch_candidate_bill_id,
+            ],
+            user_id=user_id,
+        )
+        assert deleted_count == 4
         assert await _count_bill_pair_links(db, user_id=user_id) == 0
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 0
     finally:
         await db.close()
 
 
 @pytest.mark.asyncio
 async def test_db_clear_user_transactions_and_data_remove_bill_pair_links(tmp_path: Path) -> None:
-    """清空用户交易或全量业务数据时，应同步移除关联的 bill_pair_links。"""
+    """清空用户交易或全量业务数据时，应同步移除关联的 bill_pair_links 与 suppression。"""
     db = await _create_database(tmp_path)
     try:
         user_id = await _create_user(db, "matching_pair_clear_user")
@@ -660,13 +874,38 @@ async def test_db_clear_user_transactions_and_data_remove_bill_pair_links(tmp_pa
             date="2026-07-06 08:03:00",
             description="clear transactions income bill",
         )
+        suppressed_expense_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-39.0,
+            bill_type="支出",
+            date="2026-07-06 08:10:00",
+            description="clear transactions suppression expense bill",
+        )
+        suppressed_income_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=39.0,
+            bill_type="收入",
+            date="2026-07-06 08:13:00",
+            description="clear transactions suppression income bill",
+        )
         await db.create_manual_transfer_pair(first_expense_bill_id, first_income_bill_id, user_id=user_id)
+        await db.reject_bill_transfer_candidate(
+            suppressed_expense_bill_id,
+            suppressed_income_bill_id,
+            user_id=user_id,
+        )
         assert await _count_bill_pair_links(db, user_id=user_id) == 1
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
 
         clear_transactions_result = await db.clear_user_transactions(user_id=user_id)
         assert clear_transactions_result["success"] is True
-        assert clear_transactions_result["deleted_count"] == 2
+        assert clear_transactions_result["deleted_count"] == 4
         assert await _count_bill_pair_links(db, user_id=user_id) == 0
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 0
 
         second_expense_bill_id = await _create_bill(
             db,
@@ -686,13 +925,38 @@ async def test_db_clear_user_transactions_and_data_remove_bill_pair_links(tmp_pa
             date="2026-07-06 09:02:00",
             description="clear data income bill",
         )
+        second_suppressed_expense_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-49.0,
+            bill_type="支出",
+            date="2026-07-06 09:10:00",
+            description="clear data suppression expense bill",
+        )
+        second_suppressed_income_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=49.0,
+            bill_type="收入",
+            date="2026-07-06 09:13:00",
+            description="clear data suppression income bill",
+        )
         await db.create_manual_transfer_pair(second_expense_bill_id, second_income_bill_id, user_id=user_id)
+        await db.reject_bill_transfer_candidate(
+            second_suppressed_expense_bill_id,
+            second_suppressed_income_bill_id,
+            user_id=user_id,
+        )
         assert await _count_bill_pair_links(db, user_id=user_id) == 1
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
 
         clear_data_result = await db.clear_user_data(user_id=user_id)
         assert clear_data_result["success"] is True
-        assert clear_data_result["counts"]["bills"] == 2
+        assert clear_data_result["counts"]["bills"] == 4
         assert await _count_bill_pair_links(db, user_id=user_id) == 0
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 0
     finally:
         await db.close()
 
@@ -701,7 +965,7 @@ async def test_db_clear_user_transactions_and_data_remove_bill_pair_links(tmp_pa
 async def test_db_account_transaction_clear_removes_pair_links(
     tmp_path: Path,
 ) -> None:
-    """账户级清交易后不应残留 bill_pair_links。"""
+    """账户级清交易后不应残留 bill_pair_links 与 suppression。"""
     db = await _create_database(tmp_path)
     try:
         user_id = await _create_user(db, "matching_pair_account_clear_user")
@@ -726,13 +990,38 @@ async def test_db_account_transaction_clear_removes_pair_links(
             date="2026-07-07 08:03:00",
             description="account clear income bill",
         )
+        suppressed_expense_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-59.0,
+            bill_type="支出",
+            date="2026-07-07 08:10:00",
+            description="account clear suppression expense bill",
+        )
+        suppressed_income_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=59.0,
+            bill_type="收入",
+            date="2026-07-07 08:13:00",
+            description="account clear suppression income bill",
+        )
         await db.create_manual_transfer_pair(expense_bill_id, income_bill_id, user_id=user_id)
+        await db.reject_bill_transfer_candidate(
+            suppressed_expense_bill_id,
+            suppressed_income_bill_id,
+            user_id=user_id,
+        )
         assert await _count_bill_pair_links(db, user_id=user_id) == 1
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
 
         result = await db.delete_all_transactions_by_account(source_account_id, user_id=user_id)
         assert result["success"] is True
-        assert result["deleted_count"] == 1
+        assert result["deleted_count"] == 2
         assert await _count_bill_pair_links(db, user_id=user_id) == 0
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 0
 
         income_result = await db.get_bill_transfer_candidates(income_bill_id, user_id=user_id)
         assert income_result["linked_pair"] is None
@@ -830,6 +1119,92 @@ async def test_db_deduplicate_removes_pair_links_for_deleted_duplicate_bill(tmp_
         assert [int(bill["id"]) for bill in remaining_duplicates] == [kept_bill_id]
         expense_result = await db.get_bill_transfer_candidates(expense_bill_id, user_id=user_id)
         assert expense_result["linked_pair"] is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_deduplicate_removes_transfer_pair_suppressions_for_deleted_duplicate_bill(
+    tmp_path: Path,
+) -> None:
+    """去重删除重复账单时，应同步移除引用被删账单的 suppression。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_pair_suppression_deduplicate_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="去重 suppression 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="去重 suppression 目标账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-69.0,
+            bill_type="支出",
+            date="2026-07-08 09:00:00",
+            description="deduplicate suppression anchor bill",
+        )
+
+        conn = await db._get_connection()
+        await conn.executemany(
+            """
+            INSERT INTO bills (
+                user_id, date, type, amount, counterparty, description,
+                payment_method, main_category, sub_category, source_account_id,
+                destination_account_id, destination_amount, hash, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    user_id,
+                    "2026-07-08 09:02:00",
+                    "收入",
+                    69.0,
+                    "deduplicate suppression income bill",
+                    "deduplicate suppression income bill",
+                    "银行卡",
+                    "转账",
+                    "历史后配对",
+                    target_account_id,
+                    0,
+                    0.0,
+                    None,
+                    "2026-07-08T09:02:00",
+                    "2026-07-08T09:02:00",
+                ),
+                (
+                    user_id,
+                    "2026-07-08 09:02:00",
+                    "收入",
+                    69.0,
+                    "deduplicate suppression income bill",
+                    "deduplicate suppression income bill",
+                    "银行卡",
+                    "转账",
+                    "历史后配对",
+                    target_account_id,
+                    0,
+                    0.0,
+                    None,
+                    "2026-07-08T09:03:00",
+                    "2026-07-08T09:03:00",
+                ),
+            ],
+        )
+        await conn.commit()
+
+        duplicate_bills = await db.get_bills(
+            filters={"counterparty": "deduplicate suppression income bill"},
+            user_id=user_id,
+        )
+        assert len(duplicate_bills) == 2
+        deleted_bill_id = max(int(bill["id"]) for bill in duplicate_bills)
+
+        await db.reject_bill_transfer_candidate(anchor_bill_id, deleted_bill_id, user_id=user_id)
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 1
+
+        deleted_count = await db.deduplicate()
+        assert deleted_count == 1
+        assert await _count_bill_transfer_pair_suppressions(db, user_id=user_id) == 0
     finally:
         await db.close()
 
