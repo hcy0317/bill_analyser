@@ -326,6 +326,112 @@ async def test_bill_service_get_matching_session_candidates_wraps_preview_projec
 
 
 @pytest.mark.asyncio
+async def test_bill_service_reconcile_matching_history_aggregates_unique_bill_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService 应聚合唯一 billIds，并按请求顺序返回 formal-bill transfer 结果。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, int]] = []
+
+    async def fake_get_matching_bill_candidates(bill_id: int, user_id: int = 1) -> dict[str, object]:
+        calls.append((bill_id, user_id))
+        return {
+            "success": True,
+            "bill_id": bill_id,
+            "linked_pair": None,
+            "candidates": [
+                {
+                    "candidate_id": f"bill:{bill_id}:transfer:{bill_id + 100}",
+                    "bill_id": bill_id + 100,
+                    "score": 0.91,
+                    "level": "high",
+                    "reason": "same_amount|opposite_sign",
+                    "bill": {"id": bill_id + 100},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", fake_get_matching_bill_candidates)
+
+    result = await service.reconcile_matching_history([12, 11, 12], user_id=7)
+
+    assert calls == [(12, 7), (11, 7)]
+    assert result["success"] is True
+    assert result["summary"] == {
+        "bill_count": 2,
+        "candidate_count": 2,
+        "linked_pair_count": 0,
+    }
+    assert [item["bill_id"] for item in result["results"]] == [12, 11]
+    assert result["results"][0]["candidates"][0]["candidate_id"] == "bill:12:transfer:112"
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reconcile_matching_history_preserves_first_bill_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService 历史调和聚合遇到 bill 级失败时应原样返回错误。"""
+    service = BillService(db=None)
+
+    async def fake_get_matching_bill_candidates(bill_id: int, user_id: int = 1) -> dict[str, object]:
+        _ = user_id
+        if bill_id == 99:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        return {
+            "success": True,
+            "bill_id": bill_id,
+            "linked_pair": None,
+            "candidates": [],
+        }
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", fake_get_matching_bill_candidates)
+
+    result = await service.reconcile_matching_history([11, 99], user_id=7)
+
+    assert result == {
+        "success": False,
+        "error": "Bill not found",
+        "status_code": 404,
+        "bill_id": 99,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reconcile_matching_history_counts_unique_linked_pairs_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """当请求同时包含同一 pair 两侧 bill 时，linked_pair_count 应按唯一 pair 计数。"""
+    service = BillService(db=None)
+
+    async def fake_get_matching_bill_candidates(bill_id: int, user_id: int = 1) -> dict[str, object]:
+        _ = user_id
+        return {
+            "success": True,
+            "bill_id": bill_id,
+            "linked_pair": {
+                "id": 3,
+                "pair_type": "transfer",
+                "source": "manual",
+                "left_bill_id": 11,
+                "right_bill_id": 12,
+                "other_bill_id": 12 if bill_id == 11 else 11,
+            },
+            "candidates": [],
+        }
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", fake_get_matching_bill_candidates)
+
+    result = await service.reconcile_matching_history([11, 12], user_id=7)
+
+    assert result["success"] is True
+    assert result["summary"] == {
+        "bill_count": 2,
+        "candidate_count": 0,
+        "linked_pair_count": 1,
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_update_preview_recurring_match_rejects_stale_transfer_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

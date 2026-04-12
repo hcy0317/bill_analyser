@@ -391,6 +391,234 @@ class TestMatchingAPI:
         assert post_response.status_code == 404
         assert post_response.get_json()["error"] == "Bill not found"
 
+    def test_matching_reconcile_history_returns_transfer_candidates_for_requested_bills(self, client):
+        """reconcile-history MVP 应按请求顺序聚合唯一 formal-bill transfer 候选。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest reconcile 源账户 A")
+        target_account_id = _create_account_via_db(current_user_id, "pytest reconcile 目标账户 A")
+        third_account_id = _create_account_via_db(current_user_id, "pytest reconcile 源账户 B")
+        fourth_account_id = _create_account_via_db(current_user_id, "pytest reconcile 目标账户 B")
+
+        first_anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-51.0,
+            bill_type="支出",
+            date="2026-07-25 09:00:00",
+            description="matching reconcile first anchor",
+        )
+        first_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=51.0,
+            bill_type="收入",
+            date="2026-07-25 09:03:00",
+            description="matching reconcile first candidate",
+        )
+        second_anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=third_account_id,
+            amount=-62.0,
+            bill_type="支出",
+            date="2026-07-25 10:00:00",
+            description="matching reconcile second anchor",
+        )
+        second_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=fourth_account_id,
+            amount=62.0,
+            bill_type="收入",
+            date="2026-07-25 10:04:00",
+            description="matching reconcile second candidate",
+        )
+
+        response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [second_anchor_bill_id, first_anchor_bill_id, second_anchor_bill_id]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["summary"] == {
+            "billCount": 2,
+            "candidateCount": 2,
+            "linkedPairCount": 0,
+        }
+        results = data["data"]["results"]
+        assert [item["billId"] for item in results] == [second_anchor_bill_id, first_anchor_bill_id]
+        assert results[0]["linkedPair"] is None
+        assert results[0]["candidates"][0]["candidateId"] == (
+            f"bill:{second_anchor_bill_id}:transfer:{second_candidate_bill_id}"
+        )
+        assert results[1]["candidates"][0]["candidateId"] == (
+            f"bill:{first_anchor_bill_id}:transfer:{first_candidate_bill_id}"
+        )
+
+    def test_matching_reconcile_history_rejects_invalid_requests_and_is_user_scoped(self, client):
+        """reconcile-history MVP 应校验 billIds，并保持 formal-bill user scope。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        invalid_request_response = client.post(
+            "/api/matching/reconcile-history",
+            json=[11],
+            headers=primary_headers,
+        )
+        assert invalid_request_response.status_code == 400
+        assert invalid_request_response.get_json()["error"] == "Invalid request"
+
+        missing_bill_ids_response = client.post(
+            "/api/matching/reconcile-history",
+            json={},
+            headers=primary_headers,
+        )
+        assert missing_bill_ids_response.status_code == 400
+        assert missing_bill_ids_response.get_json()["error"] == "billIds is required"
+
+        empty_bill_ids_response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": []},
+            headers=primary_headers,
+        )
+        assert empty_bill_ids_response.status_code == 400
+        assert empty_bill_ids_response.get_json()["error"] == "billIds must be a non-empty list"
+
+        invalid_bill_ids_response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": ["abc"]},
+            headers=primary_headers,
+        )
+        assert invalid_bill_ids_response.status_code == 400
+        assert invalid_bill_ids_response.get_json()["error"] == "Invalid billIds"
+
+        bool_bill_id_response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [True]},
+            headers=primary_headers,
+        )
+        assert bool_bill_id_response.status_code == 400
+        assert bool_bill_id_response.get_json()["error"] == "Invalid billIds"
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest reconcile scope 源账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-41.0,
+            bill_type="支出",
+            date="2026-07-25 11:00:00",
+            description="matching reconcile scope anchor",
+        )
+
+        scoped_response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [anchor_bill_id]},
+            headers=secondary_headers,
+        )
+        assert scoped_response.status_code == 404
+        assert scoped_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_reconcile_history_includes_existing_linked_pair_and_empty_candidates(self, client):
+        """reconcile-history MVP 应复用 formal transfer linkedPair 读语义。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history_linked_pair")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest reconcile pair 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest reconcile pair 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-73.0,
+            bill_type="支出",
+            date="2026-07-25 12:00:00",
+            description="matching reconcile pair anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=73.0,
+            bill_type="收入",
+            date="2026-07-25 12:03:00",
+            description="matching reconcile pair candidate",
+        )
+
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id},
+            headers=auth_headers,
+        )
+        assert pair_response.status_code == 200
+
+        response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [anchor_bill_id]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["summary"] == {
+            "billCount": 1,
+            "candidateCount": 0,
+            "linkedPairCount": 1,
+        }
+        result = data["data"]["results"][0]
+        assert result["billId"] == anchor_bill_id
+        assert result["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert result["candidates"] == []
+
+    def test_matching_reconcile_history_counts_same_linked_pair_once_when_both_sides_requested(self, client):
+        """当请求同一手工 pair 两侧 bill 时，linkedPairCount 应按唯一 pair 计数。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history_pair_count")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest reconcile count 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest reconcile count 目标账户")
+        left_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-84.0,
+            bill_type="支出",
+            date="2026-07-25 13:00:00",
+            description="matching reconcile count left",
+        )
+        right_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=84.0,
+            bill_type="收入",
+            date="2026-07-25 13:03:00",
+            description="matching reconcile count right",
+        )
+
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": left_bill_id, "candidateBillId": right_bill_id},
+            headers=auth_headers,
+        )
+        assert pair_response.status_code == 200
+
+        response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [left_bill_id, right_bill_id]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["summary"] == {
+            "billCount": 2,
+            "candidateCount": 0,
+            "linkedPairCount": 1,
+        }
+        assert [item["billId"] for item in data["data"]["results"]] == [left_bill_id, right_bill_id]
+
     def test_matching_manual_pair_delete_restores_candidates_for_formal_bill(self, client):
         """手工后配对删除后，应恢复 linkedPair 为空且候选重新出现。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair")

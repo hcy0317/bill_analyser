@@ -2422,6 +2422,118 @@ class BillService:
             "candidates": result.get("candidates", []),
         }
 
+    @staticmethod
+    def _coerce_matching_history_bill_id(raw_bill_id: Any) -> int:
+        if isinstance(raw_bill_id, bool):
+            raise ValueError("Invalid billIds")
+
+        if isinstance(raw_bill_id, int):
+            normalized_bill_id = raw_bill_id
+        elif isinstance(raw_bill_id, str):
+            normalized_raw_bill_id = raw_bill_id.strip()
+            if not normalized_raw_bill_id.isdigit():
+                raise ValueError("Invalid billIds")
+            normalized_bill_id = int(normalized_raw_bill_id)
+        else:
+            raise ValueError("Invalid billIds")
+
+        if normalized_bill_id <= 0:
+            raise ValueError("Invalid billIds")
+
+        return normalized_bill_id
+
+    @classmethod
+    def _normalize_matching_history_bill_ids(cls, raw_bill_ids: list[int] | None) -> list[int]:
+        if raw_bill_ids is None or not isinstance(raw_bill_ids, list):
+            raise ValueError("Invalid billIds")
+
+        normalized_bill_ids: list[int] = []
+        seen_bill_ids: set[int] = set()
+
+        for raw_bill_id in raw_bill_ids:
+            normalized_bill_id = cls._coerce_matching_history_bill_id(raw_bill_id)
+            if normalized_bill_id in seen_bill_ids:
+                continue
+            seen_bill_ids.add(normalized_bill_id)
+            normalized_bill_ids.append(normalized_bill_id)
+
+        return normalized_bill_ids
+
+    @staticmethod
+    def _build_matching_history_pair_key(linked_pair: dict[str, Any]) -> tuple[Any, ...] | None:
+        pair_id = linked_pair.get("id")
+        if pair_id not in (None, ""):
+            return ("id", int(pair_id))
+
+        left_bill_id = linked_pair.get("left_bill_id")
+        right_bill_id = linked_pair.get("right_bill_id")
+        if left_bill_id not in (None, "") and right_bill_id not in (None, ""):
+            return (
+                "bills",
+                min(int(left_bill_id), int(right_bill_id)),
+                max(int(left_bill_id), int(right_bill_id)),
+            )
+
+        return None
+
+    @log_method
+    async def reconcile_matching_history(
+        self,
+        bill_ids: list[int],
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Aggregate transfer-only matching candidates for explicit historical bill anchors."""
+        try:
+            normalized_bill_ids = self._normalize_matching_history_bill_ids(bill_ids)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid billIds", "status_code": 400}
+
+        if not normalized_bill_ids:
+            return {
+                "success": False,
+                "error": "billIds must be a non-empty list",
+                "status_code": 400,
+            }
+
+        results: list[dict[str, Any]] = []
+        candidate_count = 0
+        linked_pair_keys: set[tuple[Any, ...]] = set()
+
+        for bill_id in normalized_bill_ids:
+            result = await self.get_matching_bill_candidates(bill_id, user_id=user_id)
+            if not result.get("success"):
+                return {
+                    "success": False,
+                    "error": str(result.get("error") or "Bill not found"),
+                    "status_code": int(result.get("status_code", 404) or 404),
+                    "bill_id": bill_id,
+                }
+
+            linked_pair = result.get("linked_pair")
+            candidates = list(result.get("candidates") or [])
+            results.append(
+                {
+                    "bill_id": int(result.get("bill_id") or bill_id),
+                    "linked_pair": linked_pair,
+                    "candidates": candidates,
+                }
+            )
+            candidate_count += len(candidates)
+            if isinstance(linked_pair, dict):
+                pair_key = self._build_matching_history_pair_key(linked_pair)
+                if pair_key is not None:
+                    linked_pair_keys.add(pair_key)
+
+        return {
+            "success": True,
+            "results": results,
+            "summary": {
+                "bill_count": len(results),
+                "candidate_count": candidate_count,
+                "linked_pair_count": len(linked_pair_keys),
+            },
+        }
+
     @log_method
     async def get_matching_pairs(self, user_id: int = 1) -> dict[str, Any]:
         """Return persisted manual transfer pairs for the current user."""

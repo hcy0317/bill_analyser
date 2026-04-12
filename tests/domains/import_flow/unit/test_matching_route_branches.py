@@ -46,6 +46,7 @@ class FakeMatchingService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
         self.bill_candidate_calls: list[tuple[int, int]] = []
+        self.reconcile_history_calls: list[tuple[list[int], int]] = []
         self.matching_pairs_calls: list[int] = []
         self.accept_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.reject_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
@@ -77,6 +78,41 @@ class FakeMatchingService:
                     "level": "high",
                     "reason": "same_amount|opposite_sign",
                 }
+            ],
+        }
+        self.reconcile_history_result = {
+            "success": True,
+            "summary": {
+                "bill_count": 2,
+                "candidate_count": 1,
+                "linked_pair_count": 1,
+            },
+            "results": [
+                {
+                    "bill_id": 11,
+                    "linked_pair": None,
+                    "candidates": [
+                        {
+                            "candidate_id": "bill:11:transfer:12",
+                            "bill_id": 12,
+                            "score": 0.95,
+                            "level": "high",
+                            "reason": "same_amount|opposite_sign",
+                        }
+                    ],
+                },
+                {
+                    "bill_id": 21,
+                    "linked_pair": {
+                        "id": 3,
+                        "pair_type": "transfer",
+                        "source": "manual",
+                        "left_bill_id": 21,
+                        "right_bill_id": 22,
+                        "other_bill_id": 22,
+                    },
+                    "candidates": [],
+                },
             ],
         }
         self.matching_pairs_result = {
@@ -163,6 +199,16 @@ class FakeMatchingService:
     async def get_matching_bill_candidates(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
         self.bill_candidate_calls.append((bill_id, user_id))
         return dict(self.bill_candidate_result)
+
+    async def reconcile_matching_history(self, bill_ids: list[int], user_id: int = 1) -> dict[str, Any]:
+        self.reconcile_history_calls.append((list(bill_ids), user_id))
+        return {
+            "success": bool(self.reconcile_history_result.get("success", False)),
+            "summary": dict(self.reconcile_history_result.get("summary", {})),
+            "results": [dict(item) for item in self.reconcile_history_result.get("results", [])],
+            **({"error": self.reconcile_history_result.get("error")} if "error" in self.reconcile_history_result else {}),
+            **({"status_code": self.reconcile_history_result.get("status_code")} if "status_code" in self.reconcile_history_result else {}),
+        }
 
     async def get_matching_pairs(self, user_id: int = 1) -> dict[str, Any]:
         self.matching_pairs_calls.append(user_id)
@@ -567,6 +613,134 @@ def test_matching_candidates_route_preserves_validation_404_and_500(
     with matching_route_app.test_request_context(
         "/api/matching/candidates?sessionId=session-1",
         method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_reconcile_history_route_validates_and_dispatches(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reconcile-history route 应校验 billIds[]，并分发到 service 批量历史调和入口。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.reconcile_matching_history)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json=[11],
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "billIds is required"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": []},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "billIds must be a non-empty list"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11, "abc"]},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid billIds"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [True]},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid billIds"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11, 21, 11]},
+    ):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["summary"] == {
+            "billCount": 2,
+            "candidateCount": 1,
+            "linkedPairCount": 1,
+        }
+        assert [item["billId"] for item in payload["data"]["results"]] == [11, 21]
+        assert payload["data"]["results"][0]["candidates"][0]["candidateId"] == "bill:11:transfer:12"
+        assert payload["data"]["results"][1]["linkedPair"]["otherBillId"] == 22
+        assert service.reconcile_history_calls == [([11, 21], 9)]
+
+
+def test_matching_reconcile_history_route_preserves_service_errors_and_500(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reconcile-history route 应保留 service 错误状态码，并覆盖异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.reconcile_matching_history)
+
+    service.reconcile_history_result = {
+        "success": False,
+        "error": "Bill not found",
+        "status_code": 404,
+        "results": [],
+        "summary": {},
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11]},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 404
+        assert response.get_json()["error"] == "Bill not found"
+
+    async def raise_reconcile_error(_bill_ids: list[int], user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("reconcile history boom")
+
+    monkeypatch.setattr(service, "reconcile_matching_history", raise_reconcile_error)
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11]},
     ):
         _set_request_user_id(9)
         response, status = _unwrap_response(route())

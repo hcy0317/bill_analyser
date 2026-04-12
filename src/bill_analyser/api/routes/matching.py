@@ -154,6 +154,40 @@ def _parse_manual_pair_request(data: Any) -> tuple[int, int]:
     return normalized_bill_id, normalized_candidate_bill_id
 
 
+def _parse_reconcile_history_request(data: Any) -> list[int]:
+    if not isinstance(data, dict):
+        raise ValueError("Invalid request")
+
+    raw_bill_ids = data.get("billIds")
+    if raw_bill_ids is None:
+        raise KeyError("billIds is required")
+    if not isinstance(raw_bill_ids, list) or not raw_bill_ids:
+        raise ValueError("billIds must be a non-empty list")
+
+    normalized_bill_ids: list[int] = []
+    seen_bill_ids: set[int] = set()
+    for raw_bill_id in raw_bill_ids:
+        if isinstance(raw_bill_id, bool):
+            raise ValueError("Invalid billIds")
+        if isinstance(raw_bill_id, int):
+            normalized_bill_id = raw_bill_id
+        elif isinstance(raw_bill_id, str):
+            normalized_raw_bill_id = raw_bill_id.strip()
+            if not normalized_raw_bill_id.isdigit():
+                raise ValueError("Invalid billIds")
+            normalized_bill_id = int(normalized_raw_bill_id)
+        else:
+            raise ValueError("Invalid billIds")
+        if normalized_bill_id <= 0:
+            raise ValueError("Invalid billIds")
+        if normalized_bill_id in seen_bill_ids:
+            continue
+        seen_bill_ids.add(normalized_bill_id)
+        normalized_bill_ids.append(normalized_bill_id)
+
+    return normalized_bill_ids
+
+
 def _build_matching_candidate_action_payload(
     candidate_id: str,
     result: dict[str, Any],
@@ -171,6 +205,22 @@ def _build_matching_candidate_action_payload(
     if isinstance(result.get("pair"), dict):
         response_data["pair"] = _serialize_bill_pair(result.get("pair"))
     return response_data
+
+
+def _build_matching_reconcile_history_payload(result: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(result.get("summary") or {})
+    results = list(result.get("results") or [])
+    return {
+        "summary": {
+            "billCount": int(summary.get("bill_count") or 0),
+            "candidateCount": int(summary.get("candidate_count") or 0),
+            "linkedPairCount": int(summary.get("linked_pair_count") or 0),
+        },
+        "results": [
+            _build_matching_bill_candidates_payload(int(item.get("bill_id") or 0), item)
+            for item in results
+        ],
+    }
 
 
 @bp.route("/sessions/<session_id>/candidates", methods=["GET"])
@@ -264,6 +314,42 @@ def get_matching_candidates():
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取统一 matching 候选失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/reconcile-history", methods=["POST"])
+@log_method
+@require_auth
+def reconcile_matching_history():
+    """按显式 billIds 聚合读取历史正式账单 transfer-only matching 候选。"""
+    try:
+        try:
+            normalized_bill_ids = _parse_reconcile_history_request(request.get_json(silent=True))
+        except KeyError as exc:
+            return jsonify({"success": False, "error": str(exc.args[0])}), 400
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        reconcile_handler = getattr(bill_service, "reconcile_matching_history", None)
+        if not callable(reconcile_handler):
+            raise AttributeError("Matching reconcile-history handler not available")
+
+        result = _run_async(reconcile_handler(normalized_bill_ids, user_id=user_id))
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 400))
+            error_message = result.get("error", "Failed to reconcile matching history")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        return jsonify(
+            {
+                "success": True,
+                "data": _build_matching_reconcile_history_payload(result),
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("历史 matching 调和失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 
