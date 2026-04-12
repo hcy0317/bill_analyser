@@ -2503,6 +2503,32 @@ class BillService:
         }
 
     @log_method
+    async def _reject_preview_recurring_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.update_preview_recurring_match(
+            int(parsed_candidate_id["preview_id"]),
+            None,
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
     async def _accept_matching_candidate(
         self,
         candidate_id: str,
@@ -2561,6 +2587,14 @@ class BillService:
 
         if candidate_scope == "preview" and candidate_kind == "transfer":
             return await self._reject_preview_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "preview" and candidate_kind == "recurring":
+            return await self._reject_preview_recurring_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 payload,

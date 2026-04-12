@@ -296,3 +296,85 @@ async def test_bill_service_update_preview_recurring_match_rejects_stale_transfe
         "status_code": 409,
     }
     assert fake_db.update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_dispatches_preview_recurring_to_clear_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic reject 的 preview recurring 分支应复用 clear recurring-match 写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, int | None, dict[str, object], int]] = []
+
+    async def fake_update_preview_recurring_match(
+        preview_id: int,
+        recurring_id: int | None,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, recurring_id, dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-recurring-reject",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "matching": {
+                        "recurring": {
+                            "id": None,
+                            "candidate_count": 2,
+                        }
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "update_preview_recurring_match", fake_update_preview_recurring_match)
+
+    payload = {
+        "expectedState": {
+            "sessionId": "session-recurring-reject",
+            "previewType": "支出",
+            "categoryId": 10,
+            "recurringId": 9,
+        }
+    }
+    result = await service._reject_matching_candidate(
+        "preview:1:recurring",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            None,
+            {
+                "sessionId": "session-recurring-reject",
+                "previewType": "支出",
+                "categoryId": 10,
+                "recurringId": 9,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:recurring",
+        "action": "reject",
+        "preview_id": 1,
+        "session_id": "session-recurring-reject",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {
+                    "recurring": {
+                        "id": None,
+                        "candidate_count": 2,
+                    }
+                },
+            }
+        ],
+    }

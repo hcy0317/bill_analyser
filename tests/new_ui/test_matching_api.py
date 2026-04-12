@@ -3,7 +3,15 @@ from __future__ import annotations
 import asyncio
 import time
 
-from tests.new_ui.test_bills_api import _build_isolated_auth_headers, _get_current_user_id
+from tests.new_ui.test_bills_api import (
+    _build_isolated_auth_headers,
+    _create_test_import_session,
+    _create_test_recurring_template,
+    _ensure_test_account,
+    _ensure_test_expense_category,
+    _find_category_id_by_name,
+    _get_current_user_id,
+)
 
 
 def _create_account_via_db(user_id: int, name: str) -> int:
@@ -1081,6 +1089,121 @@ class TestMatchingAPI:
         assert stale_data["success"] is False
         assert stale_data["error"] == "Preview state changed, please refresh"
 
+    def test_matching_candidate_reject_clears_preview_recurring_match_and_returns_pending_candidate(self, client):
+        """generic reject 的 preview recurring 分支应复用 clear recurring-match 语义。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        source_account = _ensure_test_account(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        bill_comment = f"pytest recurring reject {int(time.time() * 1000)}"
+
+        _create_test_recurring_template(
+            client,
+            auth_headers,
+            name="pytest matching recurring reject 一",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=7600,
+            start_date="2026-03-08",
+            frequency_type=1,
+            frequency="1",
+        )
+        _create_test_recurring_template(
+            client,
+            auth_headers,
+            name="pytest matching recurring reject 二",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=7600,
+            start_date="2026-03-09",
+            frequency_type=1,
+            frequency="1",
+        )
+
+        session_id = f"pytest-matching-reject-recurring-{int(time.time() * 1000)}"
+        _create_test_import_session(
+            session_id,
+            [
+                {
+                    "date": "2026-03-09 10:30:00",
+                    "amount": -76.0,
+                    "type": "支出",
+                    "description": bill_comment,
+                    "counterparty": "pytest recurring reject vendor",
+                    "payment_method": "pytest recurring account",
+                    "source_account_id": source_account["id"],
+                }
+            ],
+            parser_id="wechat",
+            user_id=current_user_id,
+        )
+
+        dedup_response = client.post(
+            "/api/bills/import/v2/dedup",
+            json={"session_id": session_id},
+            headers=auth_headers,
+        )
+        assert dedup_response.status_code == 200
+        preview_item = dedup_response.get_json()["data"]["preview"][0]
+        preview_id = int(preview_item["id"])
+        candidate_id = f"preview:{preview_id}:recurring"
+        assert preview_item.get("preview_recurring_id") not in (None, "", 0)
+        assert int(preview_item.get("preview_recurring_candidate_count") or 0) >= 2
+
+        def _build_expected_state(item: dict[str, object]) -> dict[str, object]:
+            category_id = _find_category_id_by_name(
+                str(item.get("preview_main_category") or ""),
+                str(item.get("preview_sub_category") or ""),
+                user_id=current_user_id,
+            )
+            return {
+                "sessionId": session_id,
+                "previewType": item.get("preview_type"),
+                "categoryId": category_id,
+                "recurringId": item.get("preview_recurring_id"),
+            }
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={"expectedState": _build_expected_state(preview_item)},
+            headers=auth_headers,
+        )
+
+        assert reject_response.status_code == 200
+        reject_data = reject_response.get_json()
+        assert reject_data["success"] is True
+        assert reject_data["data"]["candidateId"] == candidate_id
+        assert reject_data["data"]["action"] == "reject"
+        assert reject_data["data"]["previewId"] == preview_id
+        cleared_preview = next(
+            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
+        )
+        assert cleared_preview["preview_recurring_id"] in (None, "", 0)
+        assert cleared_preview["preview_recurring_name"] == ""
+        assert int(cleared_preview["preview_recurring_candidate_count"] or 0) >= 2
+        assert cleared_preview["preview_recurring_match_score"] == 0
+        assert cleared_preview["matching"]["recurring"]["id"] is None
+
+        session_follow_up_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_follow_up_response.status_code == 200
+        session_follow_up_candidates = session_follow_up_response.get_json()["data"]["candidates"]
+        recurring_candidate = next(
+            candidate for candidate in session_follow_up_candidates if candidate["candidate_id"] == candidate_id
+        )
+        assert recurring_candidate["status"] == "pending"
+        assert recurring_candidate["details"]["candidate_count"] >= 2
+
+        stale_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={"expectedState": _build_expected_state(preview_item)},
+            headers=auth_headers,
+        )
+        assert stale_response.status_code == 409
+        assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
+
     def test_matching_candidate_reject_rejects_invalid_or_unsupported_candidate_ids(self, client):
         """generic reject 第一刀应拒绝非法 candidateId、unsupported family 和 formal-bill transfer reject。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_invalid")
@@ -1095,7 +1218,7 @@ class TestMatchingAPI:
         assert malformed_response.get_json()["error"] == "Invalid candidateId"
 
         unsupported_response = client.post(
-            "/api/matching/candidates/preview:99:recurring/reject",
+            "/api/matching/candidates/preview:99:investment/reject",
             json={},
             headers=auth_headers,
         )
@@ -1166,6 +1289,83 @@ class TestMatchingAPI:
                     "previewType": "支出",
                     "categoryId": None,
                     "recurringId": None,
+                }
+            },
+            headers=secondary_headers,
+        )
+        assert preview_response.status_code == 404
+        assert preview_response.get_json()["error"] == "Preview bill not found"
+
+    def test_matching_candidate_reject_is_user_scoped_for_preview_recurring(self, client):
+        """generic reject 的 preview recurring 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        source_account = _ensure_test_account(client, primary_headers)
+        category = _ensure_test_expense_category(client, primary_headers)
+
+        _create_test_recurring_template(
+            client,
+            primary_headers,
+            name="pytest matching recurring scope 一",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=8800,
+            start_date="2026-03-08",
+            frequency_type=1,
+            frequency="1",
+        )
+        _create_test_recurring_template(
+            client,
+            primary_headers,
+            name="pytest matching recurring scope 二",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=8800,
+            start_date="2026-03-09",
+            frequency_type=1,
+            frequency="1",
+        )
+
+        session_id = f"pytest-matching-reject-recurring-scope-{int(time.time() * 1000)}"
+        _create_test_import_session(
+            session_id,
+            [
+                {
+                    "date": "2026-03-09 10:30:00",
+                    "amount": -88.0,
+                    "type": "支出",
+                    "description": "pytest recurring reject scope preview",
+                    "counterparty": "pytest recurring reject scope vendor",
+                    "payment_method": "pytest recurring scope account",
+                    "source_account_id": source_account["id"],
+                }
+            ],
+            parser_id="wechat",
+            user_id=primary_user_id,
+        )
+
+        dedup_response = client.post(
+            "/api/bills/import/v2/dedup",
+            json={"session_id": session_id},
+            headers=primary_headers,
+        )
+        assert dedup_response.status_code == 200
+        preview_item = dedup_response.get_json()["data"]["preview"][0]
+        preview_id = int(preview_item["id"])
+
+        preview_response = client.post(
+            f"/api/matching/candidates/preview:{preview_id}:recurring/reject",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "previewType": preview_item.get("preview_type"),
+                    "categoryId": _find_category_id_by_name(
+                        str(preview_item.get("preview_main_category") or ""),
+                        str(preview_item.get("preview_sub_category") or ""),
+                        user_id=primary_user_id,
+                    ),
+                    "recurringId": preview_item.get("preview_recurring_id"),
                 }
             },
             headers=secondary_headers,

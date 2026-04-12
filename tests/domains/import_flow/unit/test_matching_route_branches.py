@@ -706,7 +706,7 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic reject route 应分发 preview transfer，并明确 formal-bill transfer 当前不支持。"""
+    """generic reject route 应分发 preview transfer / recurring，并明确 formal-bill transfer 当前不支持。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -734,6 +734,32 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
                 9,
             )
         ]
+
+    service.reject_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:recurring",
+        "action": "reject",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [{"id": 1, "matching": {"recurring": {"id": None, "candidate_count": 2}}}],
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:recurring/reject",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:recurring").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:recurring"
+        assert payload["data"]["action"] == "reject"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert service.reject_candidate_calls[-1] == (
+            "preview:1:recurring",
+            {"expectedState": {"sessionId": "session-1", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+            9,
+        )
 
     service.reject_candidate_result = {
         "success": False,
@@ -780,12 +806,12 @@ def test_matching_candidate_reject_route_rejects_invalid_request_and_preserves_e
         "status_code": 400,
     }
     with matching_route_app.test_request_context(
-        "/api/matching/candidates/preview:1:recurring/reject",
+        "/api/matching/candidates/preview:1:investment/reject",
         method="POST",
         json={},
     ):
         _set_request_user_id(9)
-        response, status = _unwrap_response(route("preview:1:recurring"))
+        response, status = _unwrap_response(route("preview:1:investment"))
         assert status == 400
         assert response.get_json()["error"] == "Candidate family not supported"
 
