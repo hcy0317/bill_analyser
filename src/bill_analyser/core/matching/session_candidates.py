@@ -56,6 +56,7 @@ def _has_investment_candidate(details: dict[str, Any]) -> bool:
 
 
 def _has_learning_candidate(details: dict[str, Any]) -> bool:
+    review_status = str(details.get("review_status") or "").strip().lower()
     return (
         details.get("rule_id") not in (None, "")
         or _coerce_float(details.get("score")) > 0
@@ -63,6 +64,7 @@ def _has_learning_candidate(details: dict[str, Any]) -> bool:
             str(details.get(field) or "").strip()
             for field in ("level", "reason", "recommended_type", "summary")
         )
+        or review_status in {"accepted", "rejected"}
     )
 
 
@@ -167,6 +169,8 @@ def _build_candidate_details(kind: str, details: dict[str, Any]) -> dict[str, An
         "reason": str(details.get("reason") or ""),
         "recommended_type": str(details.get("recommended_type") or ""),
         "summary": str(details.get("summary") or ""),
+        "review_status": str(details.get("review_status") or ""),
+        "suppressed": bool(details.get("suppressed")),
     }
 
 
@@ -186,6 +190,11 @@ def _build_candidate(
         reason = str(normalized_details.get("match_reasons") or "")
         status = "confirmed" if normalized_details.get("id") not in (None, "") else "pending"
     elif kind == "investment":
+        score = _coerce_float(normalized_details.get("score"))
+        level = str(normalized_details.get("level") or "")
+        reason = str(normalized_details.get("reason") or "")
+        status = str(normalized_details.get("review_status") or "") or "pending"
+    elif kind == "learning":
         score = _coerce_float(normalized_details.get("score"))
         level = str(normalized_details.get("level") or "")
         reason = str(normalized_details.get("reason") or "")

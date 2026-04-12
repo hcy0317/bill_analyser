@@ -72,7 +72,7 @@ def build_preview_matching_payload(
     matching_feedback: dict[str, Any] | None = None,
     is_manually_annotated: bool = False,
 ) -> dict[str, Any]:
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments,too-many-locals
     """Group existing preview hints into a stable additive matching payload."""
     transfer_suggestion = transfer_suggestion or {}
     investment_signal = investment_signal or {}
@@ -91,6 +91,12 @@ def build_preview_matching_payload(
     if not isinstance(investment_feedback, dict):
         investment_feedback = {}
 
+    learning_feedback = (
+        matching_feedback.get("learning") if isinstance(matching_feedback, dict) else {}
+    )
+    if not isinstance(learning_feedback, dict):
+        learning_feedback = {}
+
     review_status = str(transfer_feedback.get("review_status") or "").strip().lower()
     if review_status not in {"accepted", "rejected"}:
         review_status = "pending" if transfer_suggestion.get("suggested_preview_type") else ""
@@ -108,6 +114,21 @@ def build_preview_matching_payload(
         investment_review_status = "pending" if has_investment_signal else ""
     investment_suppressed = has_investment_signal and (
         bool(investment_feedback.get("suppressed")) or investment_review_status == "rejected"
+    )
+
+    has_learning_signal = (
+        _normalize_int_or_none(learning_recommendation.get("rule_id")) is not None
+        or bool(float(learning_recommendation.get("score", 0.0) or 0.0) > 0.0)
+        or any(
+            str(learning_recommendation.get(field) or "").strip()
+            for field in ("level", "reason", "recommended_type", "summary")
+        )
+    )
+    learning_review_status = str(learning_feedback.get("review_status") or "").strip().lower()
+    if learning_review_status not in {"accepted", "rejected"} or not has_learning_signal:
+        learning_review_status = "pending" if has_learning_signal else ""
+    learning_suppressed = has_learning_signal and (
+        bool(learning_feedback.get("suppressed")) or learning_review_status == "rejected"
     )
 
     payload = PreviewMatchingPayload(
@@ -136,6 +157,8 @@ def build_preview_matching_payload(
             reason=str(learning_recommendation.get("reason") or ""),
             recommended_type=str(learning_recommendation.get("recommended_type") or ""),
             summary=str(learning_recommendation.get("summary") or ""),
+            review_status=learning_review_status,
+            suppressed=learning_suppressed,
         ),
         recurring=RecurringMatchingPayload(
             id=_normalize_int_or_none(preview.get("preview_recurring_id")),

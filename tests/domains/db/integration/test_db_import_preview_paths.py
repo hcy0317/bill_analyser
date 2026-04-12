@@ -524,6 +524,63 @@ async def test_preview_investment_decision_reject_and_clear_preserve_preview_fie
 
 
 @pytest.mark.asyncio
+async def test_preview_learning_decision_reject_and_clear_preserve_preview_fields(
+    tmp_path: Path,
+) -> None:
+    """长期学习建议决策应支持 reject/clear，并保持当前 preview 字段不被覆盖。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_learning_decision_user")
+        session_id = "preview-learning-decision-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-06-06 10:30:00",
+                "preview_type": "支出",
+                "preview_amount": 38.0,
+                "preview_main_category": "",
+                "preview_sub_category": "",
+                "preview_counterparty": "星巴克",
+                "preview_payment_method": "支付宝",
+                "preview_description": "咖啡消费",
+                "preview_parser_id": "alipay",
+            },
+            user_id=user_id,
+        )
+        assert preview_id > 0
+
+        rejected_preview = await db.update_preview_learning_decision(
+            preview_id,
+            "reject",
+            user_id=user_id,
+        )
+        assert rejected_preview is not None
+        assert rejected_preview["preview_type"] == "支出"
+        assert rejected_preview["preview_main_category"] == ""
+        assert rejected_preview["preview_sub_category"] == ""
+        assert rejected_preview["preview_matching_feedback"]["learning"] == {
+            "review_status": "rejected",
+            "suppressed": True,
+        }
+
+        cleared_preview = await db.update_preview_learning_decision(
+            preview_id,
+            "clear",
+            user_id=user_id,
+        )
+        assert cleared_preview is not None
+        assert cleared_preview["preview_matching_feedback"] == {}
+        assert cleared_preview["preview_type"] == "支出"
+        assert cleared_preview["preview_main_category"] == ""
+        assert cleared_preview["preview_sub_category"] == ""
+        assert await db.update_preview_learning_decision(999999, "reject", user_id=user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_preview_batch_sync_can_clear_transfer_decision_feedback_without_overwriting_manual_fields(
     tmp_path: Path,
 ) -> None:

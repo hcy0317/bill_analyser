@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from datetime import datetime
 
 from tests.new_ui.test_bills_api import (
     _build_isolated_auth_headers,
@@ -72,6 +74,63 @@ def _create_bill_via_db(
         )
         assert bill_id is not None
         return int(bill_id)
+
+    return asyncio.run(_create())
+
+
+def _create_composite_learning_rule_via_db(
+    user_id: int,
+    *,
+    parser_id: str,
+    counterparty: str,
+    description: str,
+    payment_method: str,
+    learned_type: str,
+) -> int:
+    from src.api.app import db
+
+    async def _create() -> int:
+        conn = await db._get_connection()  # pylint: disable=protected-access
+        now = datetime.now().isoformat()
+        rule_hash = db.build_composite_match_hash(  # pylint: disable=protected-access
+            parser_id=parser_id,
+            counterparty=counterparty,
+            description=description,
+            payment_method=payment_method,
+        )
+        assert rule_hash is not None
+        cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_rules (
+                user_id, match_type, match_value, normalized_match_value,
+                learned_type, enabled, parser_id, composite_match_hash,
+                match_features_json, applied_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                "composite",
+                rule_hash,
+                rule_hash,
+                learned_type,
+                parser_id,
+                rule_hash,
+                json.dumps(
+                    {
+                        "counterparty": counterparty,
+                        "description": description,
+                        "parser_id": parser_id,
+                        "payment_method": payment_method,
+                    },
+                    ensure_ascii=False,
+                ),
+                6,
+                now,
+                now,
+            ),
+        )
+        await conn.commit()
+        return int(cursor.lastrowid)
 
     return asyncio.run(_create())
 
@@ -1176,6 +1235,103 @@ class TestMatchingAPI:
         assert stale_response.status_code == 409
         assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
 
+    def test_matching_candidate_reject_rejects_preview_learning_candidate_and_projects_rejected_status(self, client):
+        """preview learning reject 应走 preview-scoped feedback，并把 session candidate 状态投影为 rejected。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_preview_learning")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-reject-learning-{int(time.time() * 1000)}"
+
+        _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="alipay",
+            counterparty="星巴克咖啡",
+            description="门店消费",
+            payment_method="支付宝",
+            learned_type="支出",
+        )
+
+        from src.api.app import db
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-24 09:40:00",
+                    "preview_type": "支出",
+                    "preview_amount": 38.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_counterparty": "星巴克",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "咖啡消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+        candidate_id = f"preview:{preview_id}:learning"
+        expected_state = {
+            "sessionId": session_id,
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+        }
+
+        session_before_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_before_response.status_code == 200
+        session_before_candidates = session_before_response.get_json()["data"]["candidates"]
+        learning_candidate = next(
+            candidate for candidate in session_before_candidates if candidate["candidate_id"] == candidate_id
+        )
+        assert learning_candidate["status"] == "pending"
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+
+        assert reject_response.status_code == 200
+        reject_data = reject_response.get_json()
+        assert reject_data["success"] is True
+        assert reject_data["data"]["candidateId"] == candidate_id
+        assert reject_data["data"]["action"] == "reject"
+        assert reject_data["data"]["previewId"] == preview_id
+        assert reject_data["data"]["sessionId"] == session_id
+        reject_preview = next(
+            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
+        )
+        assert reject_preview["preview_type"] == "支出"
+        assert reject_preview["matching"]["learning"]["review_status"] == "rejected"
+        assert reject_preview["matching"]["learning"]["suppressed"] is True
+
+        session_follow_up_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_follow_up_response.status_code == 200
+        session_follow_up_candidates = session_follow_up_response.get_json()["data"]["candidates"]
+        rejected_candidate = next(
+            candidate for candidate in session_follow_up_candidates if candidate["candidate_id"] == candidate_id
+        )
+        assert rejected_candidate["status"] == "rejected"
+        assert rejected_candidate["details"]["suppressed"] is True
+
+        stale_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+        assert stale_response.status_code == 409
+        assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
+
     def test_matching_candidate_reject_rejects_historical_transfer_candidate_and_filters_followup_reads(self, client):
         """historical formal-bill transfer reject 应持久化 suppression，并过滤后续 bill/unified 候选读取。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill")
@@ -1393,7 +1549,7 @@ class TestMatchingAPI:
         assert malformed_response.get_json()["error"] == "Invalid candidateId"
 
         unsupported_response = client.post(
-            "/api/matching/candidates/preview:99:learning/reject",
+            "/api/matching/candidates/preview:99:mystery/reject",
             json={},
             headers=auth_headers,
         )
@@ -1562,6 +1718,49 @@ class TestMatchingAPI:
                     "sessionId": session_id,
                     "reviewStatus": "pending",
                     "previewType": "投资",
+                    "categoryId": None,
+                    "recurringId": None,
+                }
+            },
+            headers=secondary_headers,
+        )
+        assert preview_response.status_code == 404
+        assert preview_response.get_json()["error"] == "Preview bill not found"
+
+    def test_matching_candidate_reject_is_user_scoped_for_preview_learning(self, client):
+        """generic reject 的 preview learning 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_learning_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_learning_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        session_id = f"pytest-matching-reject-learning-scope-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_primary_preview() -> int:
+            await db.create_import_session(session_id, user_id=primary_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-24 11:40:00",
+                    "preview_type": "支出",
+                    "preview_amount": 28.0,
+                    "preview_counterparty": "星巴克",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "咖啡消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=primary_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_primary_preview())
+        preview_response = client.post(
+            f"/api/matching/candidates/preview:{preview_id}:learning/reject",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "支出",
                     "categoryId": None,
                     "recurringId": None,
                 }

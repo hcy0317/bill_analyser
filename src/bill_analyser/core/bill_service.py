@@ -2529,6 +2529,32 @@ class BillService:
         }
 
     @log_method
+    async def _reject_preview_learning_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.apply_preview_learning_decision(
+            int(parsed_candidate_id["preview_id"]),
+            "reject",
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
     async def _reject_preview_recurring_candidate(
         self,
         candidate_id: str,
@@ -2646,6 +2672,14 @@ class BillService:
 
         if candidate_scope == "preview" and candidate_kind == "investment":
             return await self._reject_preview_investment_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "preview" and candidate_kind == "learning":
+            return await self._reject_preview_learning_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 payload,
@@ -2898,6 +2932,144 @@ class BillService:
             "preview": refreshed_preview,
         }
 
+    async def _build_learning_recommendation_from_preview(
+        self,
+        preview: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        preview_user_id = int(preview.get("user_id") or user_id or 1)
+        if preview_user_id <= 0:
+            return {}
+
+        learning_rules = await self.db.get_import_learning_rules(
+            user_id=preview_user_id,
+            enabled_only=True,
+            limit=1000,
+        )
+        composite_learning_rules = [
+            rule
+            for rule in learning_rules
+            if rule.get("match_type") == "composite" and rule.get("match_features_json")
+        ]
+        if not composite_learning_rules:
+            return {}
+
+        learning_categories = await self.db.get_all_categories(user_id=preview_user_id)
+        learning_accounts = await self.db.get_all_accounts(user_id=preview_user_id)
+        learning_categories_by_id = {
+            int(category["id"]): category
+            for category in learning_categories
+            if category.get("id") is not None
+        }
+        learning_accounts_by_id = {
+            int(account["id"]): account
+            for account in learning_accounts
+            if account.get("id") is not None
+        }
+
+        return self._build_learning_similarity_signal_from_preview(
+            preview,
+            composite_learning_rules,
+            categories_by_id=learning_categories_by_id,
+            accounts_by_id=learning_accounts_by_id,
+        )
+
+    @log_method
+    async def apply_preview_learning_decision(  # pylint: disable=too-many-locals,too-many-return-statements,too-many-boolean-expressions
+        self,
+        preview_id: int,
+        decision: str,
+        expected_state: dict[str, Any] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a preview-scoped learning decision and return refreshed preview data."""
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"reject", "clear"}:
+            return {"success": False, "error": "Invalid decision", "status_code": 400}
+
+        if not isinstance(expected_state, dict):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        preview = await self.db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        if not preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        current_learning_review_status = await self._get_preview_learning_review_status(
+            preview,
+            user_id=user_id,
+        )
+        current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
+        current_preview_recurring_id = preview.get("preview_recurring_id")
+        current_preview_recurring_id = (
+            None if current_preview_recurring_id in (None, "") else int(current_preview_recurring_id)
+        )
+
+        expected_session_id = str(expected_state.get("sessionId") or "")
+        expected_review_status = str(expected_state.get("reviewStatus") or "").strip().lower()
+        expected_preview_type = str(expected_state.get("previewType") or "")
+        try:
+            expected_category_id_raw = expected_state.get("categoryId")
+            expected_category_id = (
+                None if expected_category_id_raw in (None, "", 0, "0") else int(expected_category_id_raw)
+            )
+            expected_recurring_id_raw = expected_state.get("recurringId")
+            expected_recurring_id = (
+                None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
+            )
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        if (
+            str(preview.get("session_id") or "") != expected_session_id
+            or current_learning_review_status != expected_review_status
+            or str(preview.get("preview_type") or "") != expected_preview_type
+            or current_preview_category_id != expected_category_id
+            or current_preview_recurring_id != expected_recurring_id
+        ):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+
+        has_existing_learning_review = current_learning_review_status in {"accepted", "rejected"}
+        if normalized_decision != "clear" and not has_existing_learning_review:
+            learning_recommendation = await self._build_learning_recommendation_from_preview(
+                preview,
+                user_id=user_id,
+            )
+            if not learning_recommendation:
+                return {
+                    "success": False,
+                    "error": "Learning candidate not available",
+                    "status_code": 400,
+                }
+
+        updated_preview = await self.db.update_preview_learning_decision(
+            preview_id,
+            normalized_decision,
+            user_id=user_id,
+            expected_state={
+                "session_id": str(preview.get("session_id") or ""),
+                "preview_type": str(preview.get("preview_type") or ""),
+                "preview_main_category": str(preview.get("preview_main_category") or ""),
+                "preview_sub_category": str(preview.get("preview_sub_category") or ""),
+                "preview_recurring_id": current_preview_recurring_id,
+                "preview_matching_feedback_json": str(preview.get("preview_matching_feedback_json") or ""),
+            },
+        )
+        if updated_preview and updated_preview.get("_state_conflict"):
+            return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+        if not updated_preview:
+            return {"success": False, "error": "Preview bill not found", "status_code": 404}
+
+        session_id = str(updated_preview.get("session_id") or "")
+        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": session_id,
+            "decision": normalized_decision,
+            "preview": refreshed_preview,
+        }
+
     @log_method
     async def update_preview_recurring_match(
         self,
@@ -3017,6 +3189,28 @@ class BillService:
         keyword_config = await self._get_investment_keyword_config(user_id)
         investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
         if not investment_signal:
+            return ""
+
+        if review_status in {"accepted", "rejected"}:
+            return review_status
+        return "pending"
+
+    async def _get_preview_learning_review_status(
+        self,
+        preview: dict[str, Any],
+        user_id: int = 1,
+    ) -> str:
+        learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
+        review_status = (
+            str(learning_feedback.get("review_status") or "").strip().lower()
+            if isinstance(learning_feedback, dict)
+            else ""
+        )
+        learning_recommendation = await self._build_learning_recommendation_from_preview(
+            preview,
+            user_id=user_id,
+        )
+        if not learning_recommendation:
             return ""
 
         if review_status in {"accepted", "rejected"}:

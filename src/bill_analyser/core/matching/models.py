@@ -33,6 +33,7 @@ class InvestmentMatchingPayload:
 
 
 @dataclass(frozen=True)
+# pylint: disable=too-many-instance-attributes
 class LearningMatchingPayload:
     """Learning recommendation mirror payload."""
 
@@ -42,6 +43,8 @@ class LearningMatchingPayload:
     reason: str = ""
     recommended_type: str = ""
     summary: str = ""
+    review_status: str = ""
+    suppressed: bool = False
 
 
 @dataclass(frozen=True)

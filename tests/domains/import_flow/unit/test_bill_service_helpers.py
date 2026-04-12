@@ -778,6 +778,8 @@ async def test_get_import_preview_adds_matching_investment_learning_and_recurrin
         "reason": "parser_id:exact",
         "recommended_type": "投资",
         "summary": "投资 | 投资理财/基金 | 支付宝 → 理财账户",
+        "review_status": "pending",
+        "suppressed": False,
     }
     assert matching["recurring"] == {
         "id": 9,

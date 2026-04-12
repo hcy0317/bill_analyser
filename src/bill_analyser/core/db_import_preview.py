@@ -1,6 +1,6 @@
 """Import-preview editing, confirmation, and temporary staging helpers."""
 
-# pylint: disable=missing-function-docstring,line-too-long,wrong-import-position,too-many-arguments,too-many-positional-arguments,too-many-locals,broad-exception-caught,assignment-from-no-return,too-many-nested-blocks
+# pylint: disable=missing-function-docstring,line-too-long,wrong-import-position,too-many-arguments,too-many-positional-arguments,too-many-locals,broad-exception-caught,assignment-from-no-return,too-many-nested-blocks,too-many-lines
 
 from __future__ import annotations
 
@@ -473,6 +473,69 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                 }
             else:
                 feedback_payload.pop("investment", None)
+
+            cursor = await conn.execute(
+                "UPDATE bills_preview SET preview_matching_feedback_json = ? WHERE id = ? AND user_id = ?",
+                (
+                    self._serialize_preview_matching_feedback(feedback_payload),
+                    preview_id,
+                    user_id,
+                ),
+            )
+            if int(cursor.rowcount or 0) < 1:
+                await conn.rollback()
+                return None
+
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+
+        return await self.get_preview_bill_by_id(preview_id, user_id=user_id)
+
+    @log_method
+    async def update_preview_learning_decision(
+        self,
+        preview_id: int,
+        decision: str,
+        user_id: int = 1,
+        expected_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_decision = str(decision or "").strip().lower()
+        if normalized_decision not in {"reject", "clear"}:
+            return None
+
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+
+            async with conn.execute(
+                "SELECT * FROM bills_preview WHERE id = ? AND user_id = ?",
+                (preview_id, user_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if not row:
+                await conn.rollback()
+                return None
+
+            raw_preview = dict(row)
+            if not self._preview_state_matches_snapshot(raw_preview, expected_state):
+                await conn.rollback()
+                return {"_state_conflict": True}
+
+            preview = self._normalize_preview_row(raw_preview)
+            feedback_payload = self._deserialize_preview_matching_feedback(
+                preview.get("preview_matching_feedback")
+            )
+            if normalized_decision == "reject":
+                feedback_payload["learning"] = {
+                    "review_status": "rejected",
+                    "suppressed": True,
+                }
+            else:
+                feedback_payload.pop("learning", None)
 
             cursor = await conn.execute(
                 "UPDATE bills_preview SET preview_matching_feedback_json = ? WHERE id = ? AND user_id = ?",
