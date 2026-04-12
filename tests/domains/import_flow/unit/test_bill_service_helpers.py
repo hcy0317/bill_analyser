@@ -767,6 +767,8 @@ async def test_get_import_preview_adds_matching_investment_learning_and_recurrin
         "reason": "investment_keyword",
         "platform": "蚂蚁财富",
         "product": "黄金ETF",
+        "review_status": "pending",
+        "suppressed": False,
     }
     assert preview_item["learning_recommendation_rule_id"] == 42
     assert matching["learning"] == {

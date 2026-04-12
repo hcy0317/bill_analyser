@@ -702,11 +702,11 @@ def test_matching_candidate_accept_route_rejects_invalid_request_and_preserves_e
         assert response.get_json()["error"] == "Internal Server Error"
 
 
-def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserves_boundary(
+def test_matching_candidate_reject_route_dispatches_supported_candidates_and_preserves_boundary(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic reject route 应分发 preview transfer / recurring / historical transfer，并保留其他 family 边界。"""
+    """generic reject route 应分发 preview transfer / investment / recurring / historical transfer，并保留其他 family 边界。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -737,12 +737,70 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
 
     service.reject_candidate_result = {
         "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "reject",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {
+                    "investment": {
+                        "review_status": "rejected",
+                        "suppressed": True,
+                    }
+                },
+            }
+        ],
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:investment/reject",
+        method="POST",
+        json={
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "pending",
+                "previewType": "投资",
+                "categoryId": 10,
+                "recurringId": None,
+            }
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:investment").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:investment"
+        assert payload["data"]["action"] == "reject"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert service.reject_candidate_calls[-1] == (
+            "preview:1:investment",
+            {
+                "expectedState": {
+                    "sessionId": "session-1",
+                    "reviewStatus": "pending",
+                    "previewType": "投资",
+                    "categoryId": 10,
+                    "recurringId": None,
+                }
+            },
+            9,
+        )
+
+    service.reject_candidate_result = {
+        "success": True,
         "candidate_id": "preview:1:recurring",
         "action": "reject",
         "preview_id": 1,
         "session_id": "session-1",
-        "preview": [{"id": 1, "matching": {"recurring": {"id": None, "candidate_count": 2}}}],
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"recurring": {"id": None, "candidate_count": 2}},
+            }
+        ],
     }
+
     with matching_route_app.test_request_context(
         "/api/matching/candidates/preview:1:recurring/reject",
         method="POST",
@@ -786,12 +844,12 @@ def test_matching_candidate_reject_route_dispatches_preview_transfer_and_preserv
         "status_code": 400,
     }
     with matching_route_app.test_request_context(
-        "/api/matching/candidates/bill:11:investment:12/reject",
+        "/api/matching/candidates/preview:1:learning/reject",
         method="POST",
         json={},
     ):
         _set_request_user_id(7)
-        response, status = _unwrap_response(route("bill:11:investment:12"))
+        response, status = _unwrap_response(route("preview:1:learning"))
         assert status == 400
         assert response.get_json()["error"] == "Candidate family not supported"
 
@@ -825,12 +883,12 @@ def test_matching_candidate_reject_route_rejects_invalid_request_and_preserves_e
         "status_code": 400,
     }
     with matching_route_app.test_request_context(
-        "/api/matching/candidates/preview:1:investment/reject",
+        "/api/matching/candidates/preview:1:learning/reject",
         method="POST",
         json={},
     ):
         _set_request_user_id(9)
-        response, status = _unwrap_response(route("preview:1:investment"))
+        response, status = _unwrap_response(route("preview:1:learning"))
         assert status == 400
         assert response.get_json()["error"] == "Candidate family not supported"
 

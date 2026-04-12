@@ -28,6 +28,8 @@ class InvestmentMatchingPayload:
     reason: str = ""
     platform: str = ""
     product: str = ""
+    review_status: str = ""
+    suppressed: bool = False
 
 
 @dataclass(frozen=True)

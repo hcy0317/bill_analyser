@@ -28,14 +28,21 @@ def _normalize_list_value(raw_value: Any) -> list[Any]:
 
 
 def _normalize_source_ids_value(raw_value: Any) -> list[int | str]:
-    """Normalize persisted dedup source IDs from CSV/list shapes into arrays."""
+    """Normalize persisted dedup source IDs from CSV/list shapes into arrays.
+
+    Preserve additive compatibility for both CSV and list-like inputs.
+    """
     if raw_value in (None, ""):
         return []
 
     if isinstance(raw_value, str):
         parts = [part.strip() for part in raw_value.split(",") if part.strip()]
     else:
-        parts = [str(part).strip() for part in _normalize_list_value(raw_value) if str(part).strip()]
+        parts = [
+            str(part).strip()
+            for part in _normalize_list_value(raw_value)
+            if str(part).strip()
+        ]
 
     normalized_parts: list[int | str] = []
     for part in parts:
@@ -65,21 +72,43 @@ def build_preview_matching_payload(
     matching_feedback: dict[str, Any] | None = None,
     is_manually_annotated: bool = False,
 ) -> dict[str, Any]:
+    # pylint: disable=too-many-arguments
     """Group existing preview hints into a stable additive matching payload."""
     transfer_suggestion = transfer_suggestion or {}
     investment_signal = investment_signal or {}
     learning_recommendation = learning_recommendation or {}
     matching_feedback = matching_feedback or {}
 
-    transfer_feedback = matching_feedback.get("transfer") if isinstance(matching_feedback, dict) else {}
+    transfer_feedback = (
+        matching_feedback.get("transfer") if isinstance(matching_feedback, dict) else {}
+    )
     if not isinstance(transfer_feedback, dict):
         transfer_feedback = {}
+
+    investment_feedback = (
+        matching_feedback.get("investment") if isinstance(matching_feedback, dict) else {}
+    )
+    if not isinstance(investment_feedback, dict):
+        investment_feedback = {}
 
     review_status = str(transfer_feedback.get("review_status") or "").strip().lower()
     if review_status not in {"accepted", "rejected"}:
         review_status = "pending" if transfer_suggestion.get("suggested_preview_type") else ""
     reviewed_type = str(transfer_feedback.get("reviewed_type") or "")
     suppressed = bool(transfer_feedback.get("suppressed")) or review_status == "rejected"
+
+    has_investment_signal = bool(float(investment_signal.get("score", 0.0) or 0.0) > 0.0) or any(
+        str(investment_signal.get(field) or "").strip()
+        for field in ("level", "reason", "platform", "product")
+    )
+    investment_review_status = str(
+        investment_feedback.get("review_status") or ""
+    ).strip().lower()
+    if investment_review_status not in {"accepted", "rejected"} or not has_investment_signal:
+        investment_review_status = "pending" if has_investment_signal else ""
+    investment_suppressed = has_investment_signal and (
+        bool(investment_feedback.get("suppressed")) or investment_review_status == "rejected"
+    )
 
     payload = PreviewMatchingPayload(
         transfer=TransferMatchingPayload(
@@ -97,6 +126,8 @@ def build_preview_matching_payload(
             reason=str(investment_signal.get("reason") or ""),
             platform=str(investment_signal.get("platform") or ""),
             product=str(investment_signal.get("product") or ""),
+            review_status=investment_review_status,
+            suppressed=investment_suppressed,
         ),
         learning=LearningMatchingPayload(
             rule_id=_normalize_int_or_none(learning_recommendation.get("rule_id")),
@@ -109,7 +140,9 @@ def build_preview_matching_payload(
         recurring=RecurringMatchingPayload(
             id=_normalize_int_or_none(preview.get("preview_recurring_id")),
             name=str(preview.get("preview_recurring_name") or ""),
-            candidate_count=int(preview.get("preview_recurring_candidate_count", 0) or 0),
+            candidate_count=int(
+                preview.get("preview_recurring_candidate_count", 0) or 0
+            ),
             match_score=float(preview.get("preview_recurring_match_score", 0.0) or 0.0),
             match_reasons=str(preview.get("preview_recurring_match_reasons") or ""),
             matched_date=str(preview.get("preview_recurring_matched_date") or ""),
@@ -120,7 +153,11 @@ def build_preview_matching_payload(
         ),
         parser=ParserMatchingPayload(
             id=str(preview.get("preview_parser_id") or ""),
-            tags=[str(tag) for tag in _normalize_list_value(preview.get("preview_parser_tags")) if str(tag)],
+            tags=[
+                str(tag)
+                for tag in _normalize_list_value(preview.get("preview_parser_tags"))
+                if str(tag)
+            ],
         ),
         annotation=AnnotationMatchingPayload(is_manually_annotated=bool(is_manually_annotated)),
     )

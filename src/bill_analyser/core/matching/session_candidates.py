@@ -40,26 +40,42 @@ def _derive_level_from_score(score: float) -> str:
 
 def _has_transfer_candidate(details: dict[str, Any]) -> bool:
     review_status = str(details.get("review_status") or "").strip().lower()
-    return bool(str(details.get("candidate_type") or "").strip()) or review_status in {"accepted", "rejected"}
+    return bool(str(details.get("candidate_type") or "").strip()) or review_status in {
+        "accepted",
+        "rejected",
+    }
 
 
 def _has_investment_candidate(details: dict[str, Any]) -> bool:
-    return _coerce_float(details.get("score")) > 0 or any(
-        str(details.get(field) or "").strip() for field in ("level", "reason", "platform", "product")
+    review_status = str(details.get("review_status") or "").strip().lower()
+    has_signal = _coerce_float(details.get("score")) > 0 or any(
+        str(details.get(field) or "").strip()
+        for field in ("level", "reason", "platform", "product")
     )
+    return has_signal or review_status in {"accepted", "rejected"}
 
 
 def _has_learning_candidate(details: dict[str, Any]) -> bool:
-    return details.get("rule_id") not in (None, "") or _coerce_float(details.get("score")) > 0 or any(
-        str(details.get(field) or "").strip()
-        for field in ("level", "reason", "recommended_type", "summary")
+    return (
+        details.get("rule_id") not in (None, "")
+        or _coerce_float(details.get("score")) > 0
+        or any(
+            str(details.get(field) or "").strip()
+            for field in ("level", "reason", "recommended_type", "summary")
+        )
     )
 
 
 def _has_recurring_candidate(details: dict[str, Any]) -> bool:
-    return details.get("id") not in (None, "") or int(details.get("candidate_count", 0) or 0) > 0 or any(
-        str(details.get(field) or "").strip() for field in ("name", "match_reasons", "matched_date")
-    ) or _coerce_float(details.get("match_score")) > 0
+    return (
+        details.get("id") not in (None, "")
+        or int(details.get("candidate_count", 0) or 0) > 0
+        or any(
+            str(details.get(field) or "").strip()
+            for field in ("name", "match_reasons", "matched_date")
+        )
+        or _coerce_float(details.get("match_score")) > 0
+    )
 
 
 def _should_include_candidate(kind: str, details: dict[str, Any]) -> bool:
@@ -140,6 +156,8 @@ def _build_candidate_details(kind: str, details: dict[str, Any]) -> dict[str, An
             "reason": str(details.get("reason") or ""),
             "platform": str(details.get("platform") or ""),
             "product": str(details.get("product") or ""),
+            "review_status": str(details.get("review_status") or ""),
+            "suppressed": bool(details.get("suppressed")),
         }
 
     return {
@@ -167,6 +185,11 @@ def _build_candidate(
         level = _derive_level_from_score(score)
         reason = str(normalized_details.get("match_reasons") or "")
         status = "confirmed" if normalized_details.get("id") not in (None, "") else "pending"
+    elif kind == "investment":
+        score = _coerce_float(normalized_details.get("score"))
+        level = str(normalized_details.get("level") or "")
+        reason = str(normalized_details.get("reason") or "")
+        status = str(normalized_details.get("review_status") or "") or "pending"
     else:
         score = _coerce_float(normalized_details.get("score"))
         level = str(normalized_details.get("level") or "")
@@ -191,7 +214,10 @@ def _build_candidate(
     }
 
 
-def build_matching_session_candidates(session_id: str, previews: list[dict[str, Any]] | None) -> dict[str, Any]:
+def build_matching_session_candidates(
+    session_id: str,
+    previews: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
     """Project additive preview matching payloads into session-scoped candidate lists."""
     candidates: list[dict[str, Any]] = []
     counts_by_kind = dict.fromkeys(_CANDIDATE_KIND_ORDER, 0)
@@ -205,7 +231,9 @@ def build_matching_session_candidates(session_id: str, previews: list[dict[str, 
             if not _should_include_candidate(kind, details):
                 continue
 
-            candidates.append(_build_candidate(session_id, preview, kind, details, context))
+            candidates.append(
+                _build_candidate(session_id, preview, kind, details, context)
+            )
             counts_by_kind[kind] += 1
 
     return {

@@ -177,6 +177,53 @@ def test_build_matching_session_candidates_keeps_reviewed_transfer_without_live_
     assert result["candidates"][0]["details"]["reviewed_type"] == "转账"
 
 
+def test_build_matching_session_candidates_projects_rejected_investment_candidate_status() -> None:
+    """investment candidate 在 preview feedback reject 后仍应保留并投影为 rejected。"""
+    result = build_matching_session_candidates(
+        "session-reviewed-investment",
+        [
+            {
+                "id": 31,
+                "preview_date": "2026-04-12 10:00:00",
+                "preview_type": "投资",
+                "preview_amount": 88.0,
+                "preview_destination_amount": 88.0,
+                "preview_main_category": "投资理财",
+                "preview_sub_category": "基金",
+                "preview_source_account_id": 1,
+                "preview_destination_account_id": 2,
+                "preview_counterparty": "蚂蚁财富",
+                "preview_payment_method": "支付宝",
+                "preview_description": "黄金ETF 自动定投",
+                "preview_selected": True,
+                "matching": {
+                    "transfer": {},
+                    "investment": {
+                        "score": 0.81,
+                        "level": "high",
+                        "reason": "investment_keyword",
+                        "platform": "蚂蚁财富",
+                        "product": "黄金ETF",
+                        "review_status": "rejected",
+                        "suppressed": True,
+                    },
+                    "learning": {},
+                    "recurring": {},
+                    "dedup": {},
+                    "parser": {},
+                    "annotation": {},
+                },
+            }
+        ],
+    )
+
+    assert result["summary"]["candidate_count"] == 1
+    assert result["summary"]["counts_by_kind"]["investment"] == 1
+    assert result["candidates"][0]["kind"] == "investment"
+    assert result["candidates"][0]["status"] == "rejected"
+    assert result["candidates"][0]["details"]["suppressed"] is True
+
+
 @pytest.mark.asyncio
 async def test_bill_service_get_matching_session_candidates_wraps_preview_projection(monkeypatch: pytest.MonkeyPatch) -> None:
     """BillService 应提供 matching session 候选的薄包装方法。"""
@@ -375,6 +422,80 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_recurri
                         "candidate_count": 2,
                     }
                 },
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_dispatches_preview_investment_to_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic reject 的 preview investment 分支应复用 preview-scoped feedback 写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, str, dict[str, object], int]] = []
+
+    async def fake_apply_preview_investment_decision(
+        preview_id: int,
+        decision: str,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-investment-reject",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "matching": {"investment": {"review_status": "rejected", "suppressed": True}}
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
+
+    payload = {
+        "expectedState": {
+            "sessionId": "session-investment-reject",
+            "reviewStatus": "pending",
+            "previewType": "投资",
+            "categoryId": 10,
+            "recurringId": None,
+        }
+    }
+    result = await service._reject_matching_candidate(
+        "preview:1:investment",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            "reject",
+            {
+                "sessionId": "session-investment-reject",
+                "reviewStatus": "pending",
+                "previewType": "投资",
+                "categoryId": 10,
+                "recurringId": None,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "reject",
+        "preview_id": 1,
+        "session_id": "session-investment-reject",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"investment": {"review_status": "rejected", "suppressed": True}}
             }
         ],
     }
