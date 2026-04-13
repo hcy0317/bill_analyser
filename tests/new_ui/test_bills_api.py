@@ -1423,12 +1423,31 @@ class TestBillsAPI:
                 str(item.get("preview_sub_category") or ""),
                 user_id=current_user_id,
             )
+            transfer_details = ((item.get("matching") or {}).get("transfer") or {})
+            transfer_review_status = str(transfer_details.get("review_status") or "").strip().lower()
+            if transfer_review_status not in {"accepted", "rejected"}:
+                transfer_review_status = "pending" if str(transfer_details.get("candidate_type") or "").strip() else ""
             return {
                 "sessionId": session_id,
+                "reviewStatus": transfer_review_status,
                 "previewType": item.get("preview_type"),
                 "categoryId": category_id,
                 "recurringId": item.get("preview_recurring_id"),
             }
+
+        invalid_recurring_id_response = client.put(
+            f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-match",
+            data=json.dumps(
+                {
+                    "recurringId": True,
+                    "expectedState": _build_expected_state(preview_item),
+                }
+            ),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert invalid_recurring_id_response.status_code == 400
+        assert invalid_recurring_id_response.get_json()["error"] == "Invalid request"
 
         bind_response = client.put(
             f"/api/bills/import/v2/preview-item/{preview_item['id']}/recurring-match",
@@ -1486,6 +1505,81 @@ class TestBillsAPI:
         recurring_two_after_clear = _find_recurring_by_id(recurring_two["id"], user_id=current_user_id)
         assert recurring_two_after_clear is not None
         assert str(recurring_two_after_clear["next_date"]) == recurring_two_next_date_before
+
+    def test_import_preview_recurring_match_rejects_stale_transfer_review_state(self, client):
+        """transfer review 变化后，preview recurring bind 应拒绝旧 reviewStatus 快照。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_recurring_transfer_stale")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        source_account = _ensure_test_account(client, isolated_auth_headers)
+        category = _ensure_test_expense_category(client, isolated_auth_headers)
+
+        from src.api.app import db
+
+        recurring_template = _create_test_recurring_template(
+            client,
+            isolated_auth_headers,
+            name="pytest preview recurring direct stale transfer",
+            account_id=source_account["id"],
+            category_id=category["id"],
+            amount_cents=9800,
+            start_date="2026-03-08",
+            frequency_type=1,
+            frequency="1",
+        )
+        session_id = f"pytest-import-recurring-transfer-stale-{int(time.time() * 1000)}"
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-27 10:20:00",
+                    "preview_type": "支出",
+                    "preview_amount": 98.0,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "早餐",
+                    "preview_counterparty": "pytest preview recurring direct stale vendor",
+                    "preview_payment_method": "银行卡",
+                    "preview_description": "pytest preview recurring direct stale preview",
+                    "preview_recurring_id": recurring_template["id"],
+                    "preview_recurring_name": recurring_template["name"],
+                    "preview_recurring_candidate_count": 1,
+                    "preview_recurring_match_score": 0.91,
+                    "preview_recurring_match_reasons": "schedule|amount",
+                    "preview_recurring_matched_date": "2026-07-27",
+                },
+                user_id=current_user_id,
+                dedup_type="transfer",
+                dedup_source_ids=[181, 182],
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+        category_id = _find_category_id_by_name("餐饮", "早餐", user_id=current_user_id)
+        expected_state = {
+            "sessionId": session_id,
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": category_id,
+            "recurringId": recurring_template["id"],
+        }
+
+        transfer_reject_response = client.post(
+            f"/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
+            data=json.dumps({"decision": "reject", "expectedState": expected_state}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert transfer_reject_response.status_code == 200
+
+        stale_bind_response = client.put(
+            f"/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
+            data=json.dumps({"recurringId": recurring_template["id"], "expectedState": expected_state}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert stale_bind_response.status_code == 409
+        assert stale_bind_response.get_json()["error"] == "Preview state changed, please refresh"
 
     def test_import_preview_transfer_decision_accept_reject_clear_and_invalid_payload(self, client):
         """测试导入预览转账建议支持 accept/reject/clear，并返回刷新后的 matching 决策状态。"""

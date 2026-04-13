@@ -2679,6 +2679,62 @@ class BillService:
             "preview": result.get("preview", []),
         }
 
+    @staticmethod
+    def _normalize_preview_recurring_id(raw_recurring_id: Any) -> int:
+        if isinstance(raw_recurring_id, bool):
+            raise ValueError("Invalid recurringId")
+
+        if isinstance(raw_recurring_id, int):
+            normalized_recurring_id = raw_recurring_id
+        elif isinstance(raw_recurring_id, str):
+            stripped_recurring_id = raw_recurring_id.strip()
+            if not stripped_recurring_id or not stripped_recurring_id.isdigit():
+                raise ValueError("Invalid recurringId")
+            normalized_recurring_id = int(stripped_recurring_id)
+        else:
+            raise ValueError("Invalid recurringId")
+
+        if normalized_recurring_id <= 0:
+            raise ValueError("Invalid recurringId")
+
+        return normalized_recurring_id
+
+    @log_method
+    async def _accept_preview_recurring_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        raw_recurring_id = payload.get("recurringId")
+        if raw_recurring_id in (None, ""):
+            return {"success": False, "error": "Missing recurringId", "status_code": 400}
+
+        try:
+            recurring_id = self._normalize_preview_recurring_id(raw_recurring_id)
+        except ValueError:
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
+        result = await self.update_preview_recurring_match(
+            int(parsed_candidate_id["preview_id"]),
+            recurring_id,
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "recurring_id": result.get("recurring_id"),
+            "preview": result.get("preview", []),
+        }
+
     @log_method
     async def _accept_bill_transfer_candidate(
         self,
@@ -2937,6 +2993,14 @@ class BillService:
 
         if candidate_scope == "preview" and candidate_kind == "transfer":
             return await self._accept_preview_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "preview" and candidate_kind == "recurring":
+            return await self._accept_preview_recurring_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 payload,
@@ -3414,10 +3478,12 @@ class BillService:
             None if current_preview_recurring_id in (None, "") else int(current_preview_recurring_id)
         )
 
+        if "reviewStatus" not in expected_state:
+            return {"success": False, "error": "Invalid request", "status_code": 400}
+
         expected_session_id = str(expected_state.get("sessionId") or "")
         expected_preview_type = str(expected_state.get("previewType") or "")
         expected_review_status = str(expected_state.get("reviewStatus") or "").strip().lower()
-        should_compare_review_status = "reviewStatus" in expected_state
         try:
             expected_category_id_raw = expected_state.get("categoryId")
             expected_category_id = (
@@ -3433,7 +3499,7 @@ class BillService:
         if (
             str(preview.get("session_id") or "") != expected_session_id
             or str(preview.get("preview_type") or "") != expected_preview_type
-            or (should_compare_review_status and current_transfer_review_status != expected_review_status)
+            or current_transfer_review_status != expected_review_status
             or current_preview_category_id != expected_category_id
             or current_preview_recurring_id != expected_recurring_id
         ):

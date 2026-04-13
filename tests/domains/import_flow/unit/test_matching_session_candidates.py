@@ -500,6 +500,69 @@ async def test_bill_service_update_preview_recurring_match_rejects_stale_transfe
 
 
 @pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_dispatches_preview_recurring_to_update_preview_recurring_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService generic accept 应把 preview recurring 分发到 update_preview_recurring_match。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, int, dict[str, object] | None, int]] = []
+
+    async def fake_update_preview_recurring_match(
+        preview_id: int,
+        recurring_id: int | None,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, int(recurring_id or 0), expected_state, user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-preview-recurring",
+            "recurring_id": recurring_id,
+            "preview": [
+                {
+                    "id": preview_id,
+                    "preview_recurring_id": recurring_id,
+                    "matching": {"recurring": {"id": recurring_id, "candidate_count": 2}},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "update_preview_recurring_match", fake_update_preview_recurring_match)
+
+    expected_state = {
+        "sessionId": "session-preview-recurring",
+        "reviewStatus": "pending",
+        "previewType": "支出",
+        "categoryId": 8,
+        "recurringId": None,
+    }
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:recurring",
+        {"recurringId": 9, "expectedState": expected_state},
+        user_id=7,
+    )
+
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:recurring",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-preview-recurring",
+        "recurring_id": 9,
+        "preview": [
+            {
+                "id": 1,
+                "preview_recurring_id": 9,
+                "matching": {"recurring": {"id": 9, "candidate_count": 2}},
+            }
+        ],
+    }
+    assert calls == [(1, 9, expected_state, 7)]
+
+
+@pytest.mark.asyncio
 async def test_bill_service_reject_matching_candidate_dispatches_preview_recurring_to_clear_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -537,6 +600,7 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_recurri
     payload = {
         "expectedState": {
             "sessionId": "session-recurring-reject",
+            "reviewStatus": "pending",
             "previewType": "支出",
             "categoryId": 10,
             "recurringId": 9,
@@ -554,6 +618,7 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_recurri
             None,
             {
                 "sessionId": "session-recurring-reject",
+                "reviewStatus": "pending",
                 "previewType": "支出",
                 "categoryId": 10,
                 "recurringId": 9,

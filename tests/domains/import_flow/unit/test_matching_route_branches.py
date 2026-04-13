@@ -807,6 +807,74 @@ def test_matching_candidate_accept_route_dispatches_preview_and_bill_transfer_ca
         assert service.accept_candidate_calls[-1] == ("bill:11:transfer:12", {}, 7)
 
 
+def test_matching_candidate_accept_route_dispatches_preview_recurring_candidate(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应分发 preview recurring candidate，并保留 recurring payload。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+    service.accept_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:recurring",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "recurring_id": 9,
+        "preview": [
+            {
+                "id": 1,
+                "preview_recurring_id": 9,
+                "matching": {"recurring": {"id": 9, "candidate_count": 2}},
+            }
+        ],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:recurring/accept",
+        method="POST",
+        json={
+            "recurringId": 9,
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "pending",
+                "previewType": "支出",
+                "categoryId": 10,
+                "recurringId": None,
+            },
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:recurring").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:recurring"
+        assert payload["data"]["action"] == "accept"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["recurringId"] == 9
+        assert service.accept_candidate_calls == [
+            (
+                "preview:1:recurring",
+                {
+                    "recurringId": 9,
+                    "expectedState": {
+                        "sessionId": "session-1",
+                        "reviewStatus": "pending",
+                        "previewType": "支出",
+                        "categoryId": 10,
+                        "recurringId": None,
+                    },
+                },
+                9,
+            )
+        ]
+
+
 def test_matching_candidate_accept_route_dispatches_historical_learning_candidate(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -880,16 +948,31 @@ def test_matching_candidate_accept_route_rejects_invalid_request_and_preserves_e
 
     service.accept_candidate_result = {
         "success": False,
-        "error": "Candidate family not supported",
+        "error": "Missing recurringId",
         "status_code": 400,
     }
     with matching_route_app.test_request_context(
         "/api/matching/candidates/preview:1:recurring/accept",
         method="POST",
-        json={},
+        json={"expectedState": {"sessionId": "session-1", "reviewStatus": "pending"}},
     ):
         _set_request_user_id(9)
         response, status = _unwrap_response(route("preview:1:recurring"))
+        assert status == 400
+        assert response.get_json()["error"] == "Missing recurringId"
+
+    service.accept_candidate_result = {
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:mystery/accept",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:mystery"))
         assert status == 400
         assert response.get_json()["error"] == "Candidate family not supported"
 
@@ -1078,7 +1161,15 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
     with matching_route_app.test_request_context(
         "/api/matching/candidates/preview:1:recurring/reject",
         method="POST",
-        json={"expectedState": {"sessionId": "session-1", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+        json={
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "pending",
+                "previewType": "支出",
+                "categoryId": 10,
+                "recurringId": 9,
+            }
+        },
     ):
         _set_request_user_id(9)
         payload = route("preview:1:recurring").get_json() or {}
@@ -1089,7 +1180,15 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
         assert payload["data"]["sessionId"] == "session-1"
         assert service.reject_candidate_calls[-1] == (
             "preview:1:recurring",
-            {"expectedState": {"sessionId": "session-1", "previewType": "支出", "categoryId": 10, "recurringId": 9}},
+            {
+                "expectedState": {
+                    "sessionId": "session-1",
+                    "reviewStatus": "pending",
+                    "previewType": "支出",
+                    "categoryId": 10,
+                    "recurringId": 9,
+                }
+            },
             9,
         )
 

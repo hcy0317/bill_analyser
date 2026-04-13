@@ -4870,9 +4870,19 @@ def bind_preview_recurring_match(preview_id: int):
         recurring_id = data.get("recurringId")
         if recurring_id in (None, ""):
             return jsonify({"success": False, "error": "Missing recurringId"}), 400
-        try:
-            normalized_recurring_id = int(recurring_id)
-        except (TypeError, ValueError):
+        if isinstance(recurring_id, bool):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+        if isinstance(recurring_id, int):
+            normalized_recurring_id = recurring_id
+        elif isinstance(recurring_id, str):
+            normalized_recurring_id_raw = recurring_id.strip()
+            if not normalized_recurring_id_raw.isdigit():
+                return jsonify({"success": False, "error": "Invalid request"}), 400
+            normalized_recurring_id = int(normalized_recurring_id_raw)
+        else:
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        if normalized_recurring_id <= 0:
             return jsonify({"success": False, "error": "Invalid request"}), 400
 
         expected_state = data.get("expectedState")
