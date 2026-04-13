@@ -10,6 +10,7 @@ from .bill_date_utils import parse_bill_datetime
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
 from .matching import build_transfer_pair_candidate, build_transfer_pair_candidates
+from .matching.candidate_ids import build_learning_rule_revision, normalize_learning_rule_revision
 
 
 class DatabaseMatchingMixin(DatabaseFacadeBase):
@@ -35,9 +36,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             "main_category": str(row.get(f"{prefix}_main_category") or ""),
             "sub_category": str(row.get(f"{prefix}_sub_category") or ""),
             "source_account_id": int(row.get(f"{prefix}_source_account_id") or 0),
-            "destination_account_id": int(
-                row.get(f"{prefix}_destination_account_id") or 0
-            ),
+            "destination_account_id": int(row.get(f"{prefix}_destination_account_id") or 0),
         }
 
     @staticmethod
@@ -103,9 +102,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         *,
         user_id: int = 1,
     ) -> None:
-        normalized_bill_ids = sorted(
-            {int(bill_id) for bill_id in bill_ids if int(bill_id) > 0}
-        )
+        normalized_bill_ids = sorted({int(bill_id) for bill_id in bill_ids if int(bill_id) > 0})
         if not normalized_bill_ids:
             return
 
@@ -166,11 +163,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             (int(bill_id), user_id, int(bill_id), int(bill_id)),
         ) as cursor:
             rows = await cursor.fetchall()
-        return {
-            int(row["other_bill_id"])
-            for row in rows
-            if row and row["other_bill_id"] is not None
-        }
+        return {int(row["other_bill_id"]) for row in rows if row and row["other_bill_id"] is not None}
 
     async def _delete_bill_transfer_pair_suppressions_for_bill_ids(
         self,
@@ -179,9 +172,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         *,
         user_id: int = 1,
     ) -> None:
-        normalized_bill_ids = sorted(
-            {int(bill_id) for bill_id in bill_ids if int(bill_id) > 0}
-        )
+        normalized_bill_ids = sorted({int(bill_id) for bill_id in bill_ids if int(bill_id) > 0})
         if not normalized_bill_ids:
             return
 
@@ -194,6 +185,86 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 f"OR right_bill_id IN ({placeholders}))"
             ),
             params,
+        )
+
+    async def _get_bill_learning_rule_suppression(
+        self,
+        bill_id: int,
+        rule_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT *
+            FROM bill_learning_rule_suppressions
+            WHERE user_id = ? AND bill_id = ? AND rule_id = ?
+            LIMIT 1
+            """,
+            (user_id, int(bill_id), int(rule_id)),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _get_suppressed_bill_learning_rule_ids(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> set[int]:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT rule_id
+            FROM bill_learning_rule_suppressions
+            WHERE user_id = ? AND bill_id = ?
+            """,
+            (user_id, int(bill_id)),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {int(row["rule_id"]) for row in rows if row and row["rule_id"] is not None}
+
+    async def _get_bill_learning_rule_suppression_created_at_map(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> dict[int, str]:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT rule_id, created_at
+            FROM bill_learning_rule_suppressions
+            WHERE user_id = ? AND bill_id = ?
+            """,
+            (user_id, int(bill_id)),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            int(row["rule_id"]): str(row["created_at"] or "")
+            for row in rows
+            if row and row["rule_id"] is not None
+        }
+
+    async def _delete_bill_learning_rule_suppressions_for_bill_ids(
+        self,
+        conn: Any,
+        bill_ids: list[int],
+        *,
+        user_id: int = 1,
+    ) -> None:
+        normalized_bill_ids = sorted({int(bill_id) for bill_id in bill_ids if int(bill_id) > 0})
+        if not normalized_bill_ids:
+            return
+
+        placeholders = ",".join(["?" for _ in normalized_bill_ids])
+        await conn.execute(
+            (f"DELETE FROM bill_learning_rule_suppressions WHERE user_id = ? AND bill_id IN ({placeholders})"),
+            [user_id, *normalized_bill_ids],
         )
 
     @log_method
@@ -255,12 +326,8 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             pairs.append(
                 {
                     "id": int(row_dict.get("id") or 0),
-                    "pair_type": str(
-                        row_dict.get("pair_type") or self._TRANSFER_PAIR_TYPE
-                    ),
-                    "source": str(
-                        row_dict.get("source") or self._MANUAL_PAIR_SOURCE
-                    ),
+                    "pair_type": str(row_dict.get("pair_type") or self._TRANSFER_PAIR_TYPE),
+                    "source": str(row_dict.get("source") or self._MANUAL_PAIR_SOURCE),
                     "left_bill_id": int(row_dict.get("left_bill_id") or 0),
                     "right_bill_id": int(row_dict.get("right_bill_id") or 0),
                     "created_at": str(row_dict.get("created_at") or ""),
@@ -303,9 +370,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 "bill": anchor_bill,
                 "linked_pair": {
                     "id": int(existing_pair["id"]),
-                    "pair_type": str(
-                        existing_pair.get("pair_type") or self._TRANSFER_PAIR_TYPE
-                    ),
+                    "pair_type": str(existing_pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
                     "source": str(existing_pair.get("source") or "manual"),
                     "left_bill_id": int(existing_pair["left_bill_id"]),
                     "right_bill_id": int(existing_pair["right_bill_id"]),
@@ -317,11 +382,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         anchor_amount = float(anchor_bill.get("amount") or 0.0)
         anchor_source_account_id = int(anchor_bill.get("source_account_id") or 0)
         anchor_datetime = parse_bill_datetime(anchor_bill.get("date"))
-        if (
-            abs(anchor_amount) <= 0
-            or anchor_source_account_id <= 0
-            or anchor_datetime is None
-        ):
+        if abs(anchor_amount) <= 0 or anchor_source_account_id <= 0 or anchor_datetime is None:
             return {
                 "bill": anchor_bill,
                 "linked_pair": None,
@@ -368,11 +429,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
         candidates = build_transfer_pair_candidates(
             anchor_bill,
-            [
-                dict(row)
-                for row in candidate_rows
-                if int(row["id"] or 0) not in suppressed_candidate_bill_ids
-            ],
+            [dict(row) for row in candidate_rows if int(row["id"] or 0) not in suppressed_candidate_bill_ids],
         )
         return {
             "bill": anchor_bill,
@@ -468,6 +525,243 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             raise
 
     @log_method
+    async def reject_bill_learning_candidate(
+        self,
+        bill_id: int,
+        rule_id: int,
+        user_id: int = 1,
+        expected_rule_revision: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a suppression for a historical learning candidate."""
+        normalized_bill_id = int(bill_id)
+        normalized_rule_id = int(rule_id)
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute(
+                "SELECT id FROM bills WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, normalized_bill_id),
+            ) as cursor:
+                bill_row = await cursor.fetchone()
+            if not bill_row:
+                await conn.rollback()
+                raise LookupError("Bill not found")
+
+            async with conn.execute(
+                "SELECT * FROM import_learning_rules WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, normalized_rule_id),
+            ) as cursor:
+                rule_row = await cursor.fetchone()
+            if not rule_row:
+                await conn.rollback()
+                raise LookupError("Learning rule not found")
+
+            current_rule_revision = build_learning_rule_revision(dict(rule_row))
+            normalized_expected_rule_revision = (
+                normalize_learning_rule_revision(expected_rule_revision)
+                if expected_rule_revision not in (None, "")
+                else None
+            )
+            if normalized_expected_rule_revision and normalized_expected_rule_revision != current_rule_revision:
+                await conn.rollback()
+                raise ValueError("Learning candidate not available")
+
+            existing_suppression = await self._get_bill_learning_rule_suppression(
+                normalized_bill_id,
+                normalized_rule_id,
+                user_id=user_id,
+                conn=conn,
+            )
+            if existing_suppression and str(existing_suppression.get("created_at") or "") == current_rule_revision:
+                await conn.rollback()
+                return {"bill_id": normalized_bill_id, "rule_id": normalized_rule_id}
+
+            if existing_suppression:
+                await conn.execute(
+                    "UPDATE bill_learning_rule_suppressions SET created_at = ? WHERE id = ?",
+                    (current_rule_revision, int(existing_suppression["id"])),
+                )
+                await conn.commit()
+                return {"bill_id": normalized_bill_id, "rule_id": normalized_rule_id}
+
+            await conn.execute(
+                """
+                INSERT INTO bill_learning_rule_suppressions (
+                    user_id, bill_id, rule_id, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (user_id, normalized_bill_id, normalized_rule_id, current_rule_revision),
+            )
+            await conn.commit()
+            return {"bill_id": normalized_bill_id, "rule_id": normalized_rule_id}
+        except sqlite3.IntegrityError:
+            await conn.rollback()
+            return {"bill_id": normalized_bill_id, "rule_id": normalized_rule_id}
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
+    async def accept_bill_learning_candidate(  # pylint: disable=too-many-locals,too-many-statements
+        self,
+        bill_id: int,
+        rule_id: int,
+        user_id: int = 1,
+        expected_rule_revision: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply a historical learning rule onto a persisted bill."""
+        normalized_bill_id = int(bill_id)
+        normalized_rule_id = int(rule_id)
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute(
+                "SELECT * FROM bills WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, normalized_bill_id),
+            ) as cursor:
+                bill_row = await cursor.fetchone()
+            if not bill_row:
+                await conn.rollback()
+                raise LookupError("Bill not found")
+
+            async with conn.execute(
+                "SELECT * FROM import_learning_rules WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, normalized_rule_id),
+            ) as cursor:
+                rule_row = await cursor.fetchone()
+            if not rule_row:
+                await conn.rollback()
+                raise LookupError("Learning rule not found")
+
+            bill = dict(bill_row)
+            rule = dict(rule_row)
+            current_rule_revision = build_learning_rule_revision(rule)
+            normalized_expected_rule_revision = (
+                normalize_learning_rule_revision(expected_rule_revision)
+                if expected_rule_revision not in (None, "")
+                else None
+            )
+            if normalized_expected_rule_revision and normalized_expected_rule_revision != current_rule_revision:
+                await conn.rollback()
+                raise ValueError("Learning candidate not available")
+            existing_suppression = await self._get_bill_learning_rule_suppression(
+                normalized_bill_id,
+                normalized_rule_id,
+                user_id=user_id,
+                conn=conn,
+            )
+            if existing_suppression and str(existing_suppression.get("created_at") or "") == current_rule_revision:
+                await conn.rollback()
+                raise ValueError("Learning candidate not applicable")
+
+            updates: dict[str, Any] = {}
+
+            learned_type = str(rule.get("learned_type") or "").strip()
+            if learned_type and learned_type != str(bill.get("type") or "").strip():
+                updates["type"] = learned_type
+
+            learned_category_id = rule.get("learned_category_id")
+            if learned_category_id not in (None, "", 0, "0"):
+                category = await self.get_category_by_id(int(learned_category_id), user_id=user_id)
+                if category and (
+                    str(category.get("main_category") or "") != str(bill.get("main_category") or "")
+                    or str(category.get("sub_category") or "") != str(bill.get("sub_category") or "")
+                ):
+                    updates["main_category"] = str(category.get("main_category") or "")
+                    updates["sub_category"] = str(category.get("sub_category") or "")
+
+            learned_source_account_id = rule.get("learned_source_account_id")
+            if learned_source_account_id not in (None, "", 0, "0"):
+                normalized_source_account_id = int(learned_source_account_id or 0)
+                if normalized_source_account_id != int(bill.get("source_account_id") or 0):
+                    updates["source_account_id"] = normalized_source_account_id
+
+            learned_destination_account_id = rule.get("learned_destination_account_id")
+            if learned_destination_account_id not in (None, "", 0, "0"):
+                normalized_destination_account_id = int(learned_destination_account_id or 0)
+                if normalized_destination_account_id != int(bill.get("destination_account_id") or 0):
+                    updates["destination_account_id"] = normalized_destination_account_id
+
+            updated_at = utc_now_iso()
+            if updates:
+                update_payload = {**updates, "updated_at": updated_at}
+                set_clause = ", ".join(f"{key} = ?" for key in update_payload)
+                cursor = await conn.execute(
+                    f"UPDATE bills SET {set_clause} WHERE id = ? AND user_id = ?",
+                    [*update_payload.values(), normalized_bill_id, user_id],
+                )
+                if int(cursor.rowcount or 0) != 1:
+                    await conn.rollback()
+                    raise LookupError("Bill not found")
+
+            await conn.execute(
+                ("DELETE FROM bill_learning_rule_suppressions WHERE user_id = ? AND bill_id = ? AND rule_id = ?"),
+                (user_id, normalized_bill_id, normalized_rule_id),
+            )
+
+            await self._record_import_learning_rule_log(
+                conn,
+                rule_id=normalized_rule_id,
+                user_id=user_id,
+                action="accepted",
+                match_type=str(rule.get("match_type") or ""),
+                match_value=str(rule.get("match_value") or ""),
+                normalized_match_value=str(rule.get("normalized_match_value") or ""),
+                session_id=rule.get("source_session_id"),
+                preview_id=rule.get("source_preview_id"),
+                payload={
+                    "bill_id": normalized_bill_id,
+                    "applied_updates": updates,
+                    "previous_bill": {
+                        "type": str(bill.get("type") or ""),
+                        "main_category": str(bill.get("main_category") or ""),
+                        "sub_category": str(bill.get("sub_category") or ""),
+                        "source_account_id": int(bill.get("source_account_id") or 0),
+                        "destination_account_id": int(bill.get("destination_account_id") or 0),
+                    },
+                },
+            )
+            await conn.execute(
+                """
+                UPDATE import_learning_rules
+                SET applied_count = applied_count + 1,
+                    last_applied_at = ?,
+                    updated_at = ?
+                WHERE user_id = ? AND id = ?
+                """,
+                (updated_at, updated_at, user_id, normalized_rule_id),
+            )
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO bill_learning_rule_suppressions (
+                    user_id, bill_id, rule_id, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (user_id, normalized_bill_id, normalized_rule_id, current_rule_revision),
+            )
+
+            async with conn.execute(
+                "SELECT * FROM bills WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, normalized_bill_id),
+            ) as cursor:
+                updated_bill_row = await cursor.fetchone()
+
+            await conn.commit()
+            return {
+                "bill_id": normalized_bill_id,
+                "rule_id": normalized_rule_id,
+                "bill": dict(updated_bill_row) if updated_bill_row else None,
+            }
+        except sqlite3.IntegrityError as exc:
+            await conn.rollback()
+            raise ValueError("Learning candidate not applicable") from exc
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
     async def create_manual_transfer_pair(
         self,
         bill_id: int,
@@ -554,9 +848,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             }
         except sqlite3.IntegrityError as exc:
             await conn.rollback()
-            raise ValueError(
-                "Bills already belong to an existing transfer pair"
-            ) from exc
+            raise ValueError("Bills already belong to an existing transfer pair") from exc
         except Exception:
             await conn.rollback()
             raise
@@ -583,10 +875,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 await conn.rollback()
                 raise LookupError("Pair not found")
 
-            if (
-                str(pair.get("source") or self._MANUAL_PAIR_SOURCE)
-                != self._MANUAL_PAIR_SOURCE
-            ):
+            if str(pair.get("source") or self._MANUAL_PAIR_SOURCE) != self._MANUAL_PAIR_SOURCE:
                 await conn.rollback()
                 raise ValueError("Only manual transfer pairs can be deleted")
 

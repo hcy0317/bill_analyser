@@ -32,7 +32,11 @@ from .investment_settings import (
     build_user_investment_keyword_settings,
 )
 from .matching import build_matching_session_candidates, build_preview_matching_payload
-from .matching.candidate_ids import parse_matching_candidate_id
+from .matching.candidate_ids import (
+    build_formal_learning_candidate_id,
+    build_learning_rule_revision,
+    parse_matching_candidate_id,
+)
 from .smart_dedup import DeduplicationType, SmartDeduplicationEngine
 
 
@@ -1215,7 +1219,10 @@ class BillService:
 
         if applied_count > 0:
             self.logger.info(
-                "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s, composite_rules=%d, legacy_single_rules=%d",
+                (
+                    "[长期学习] 应用完成: user_id=%d, bills=%d, applied=%d, type_only=%s, "
+                    "composite_rules=%d, legacy_single_rules=%d"
+                ),
                 user_id,
                 len(bills),
                 applied_count,
@@ -1559,9 +1566,7 @@ class BillService:
         return False
 
     @log_method
-    async def refresh_category_for_bills(
-        self, bill_ids: list[int] | None = None, user_id: int = 1
-    ) -> dict[str, Any]:
+    async def refresh_category_for_bills(self, bill_ids: list[int] | None = None, user_id: int = 1) -> dict[str, Any]:
         """
         刷新账单分类（使用最新的分类规则重新匹配）
 
@@ -2321,9 +2326,7 @@ class BillService:
             else []
         )
         composite_learning_rules = [
-            rule
-            for rule in learning_rules
-            if rule.get("match_type") == "composite" and rule.get("match_features_json")
+            rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")
         ]
         learning_categories_by_id: dict[int, dict[str, Any]] = {}
         learning_accounts_by_id: dict[int, dict[str, Any]] = {}
@@ -2410,17 +2413,123 @@ class BillService:
 
     @log_method
     async def get_matching_bill_candidates(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
-        """Return transfer-only matching candidates for a persisted historical bill."""
+        """Return matching candidates for a persisted historical bill."""
         result = await self.db.get_bill_transfer_candidates(bill_id, user_id=user_id)
         if not result.get("bill"):
             return {"success": False, "error": "Bill not found", "status_code": 404}
+
+        transfer_candidates = list(result.get("candidates") or [])
+        learning_candidates = await self._build_learning_candidates_for_bill(
+            dict(result.get("bill") or {}),
+            user_id=user_id,
+        )
 
         return {
             "success": True,
             "bill_id": bill_id,
             "linked_pair": result.get("linked_pair"),
-            "candidates": result.get("candidates", []),
+            "candidates": [*transfer_candidates, *learning_candidates],
         }
+
+    @log_method
+    async def _build_learning_candidates_for_bill(
+        self,
+        bill: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        bill_id = int(bill.get("id") or 0)
+        if bill_id <= 0:
+            return []
+
+        learning_rules = await self.db.get_import_learning_rules(
+            user_id=user_id,
+            enabled_only=True,
+            limit=1000,
+        )
+        composite_learning_rules = [
+            rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")
+        ]
+        if not composite_learning_rules:
+            return []
+
+        suppressed_rule_created_at_map = await self.db._get_bill_learning_rule_suppression_created_at_map(  # pylint: disable=protected-access
+            bill_id,
+            user_id=user_id,
+        )
+        learning_categories = await self.db.get_all_categories(user_id=user_id)
+        learning_accounts = await self.db.get_all_accounts(user_id=user_id)
+        learning_categories_by_id = {
+            int(category["id"]): category for category in learning_categories if category.get("id") is not None
+        }
+        learning_accounts_by_id = {
+            int(account["id"]): account for account in learning_accounts if account.get("id") is not None
+        }
+
+        bill_features = self.db.build_composite_match_features(
+            parser_id="",
+            counterparty=str(bill.get("counterparty") or ""),
+            description=str(bill.get("description") or ""),
+            payment_method=str(bill.get("payment_method") or ""),
+        )
+        if not bill_features:
+            return []
+
+        candidates: list[dict[str, Any]] = []
+        for rule in composite_learning_rules:
+            rule_id = int(rule.get("id") or 0)
+            if rule_id <= 0:
+                continue
+
+            suppression_created_at = str(suppressed_rule_created_at_map.get(rule_id) or "")
+            rule_revision = build_learning_rule_revision(rule)
+            if suppression_created_at and suppression_created_at == rule_revision:
+                continue
+
+            rule_features = self._deserialize_learning_match_features(rule)
+            if not rule_features:
+                continue
+
+            score_payload = self._score_learning_rule_similarity(bill_features, rule_features)
+            if not score_payload:
+                continue
+
+            score = float(score_payload["score"])
+            if score < 0.72:
+                continue
+
+            if score >= 0.9:
+                level = "high"
+            elif score >= 0.82:
+                level = "medium"
+            else:
+                level = "low"
+
+            candidates.append(
+                {
+                    "candidate_id": build_formal_learning_candidate_id(bill_id, rule_id, rule_revision),
+                    "kind": "learning",
+                    "rule_id": rule_id,
+                    "score": score,
+                    "level": level,
+                    "reason": ", ".join(score_payload["reason_parts"]),
+                    "recommended_type": str(rule.get("learned_type") or "").strip(),
+                    "summary": self._build_learning_rule_result_summary(
+                        rule,
+                        learning_categories_by_id,
+                        learning_accounts_by_id,
+                    ),
+                    "suppressed": False,
+                }
+            )
+
+        candidates.sort(
+            key=lambda candidate: (
+                -float(candidate.get("score") or 0.0),
+                -int(candidate.get("rule_id") or 0),
+            )
+        )
+        return candidates
 
     @staticmethod
     def _coerce_matching_history_bill_id(raw_bill_id: Any) -> int:
@@ -2485,7 +2594,7 @@ class BillService:
         """Aggregate transfer-only matching candidates for explicit historical bill anchors."""
         try:
             normalized_bill_ids = self._normalize_matching_history_bill_ids(bill_ids)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {"success": False, "error": "Invalid billIds", "status_code": 400}
 
         if not normalized_bill_ids:
@@ -2510,7 +2619,11 @@ class BillService:
                 }
 
             linked_pair = result.get("linked_pair")
-            candidates = list(result.get("candidates") or [])
+            candidates = [
+                candidate
+                for candidate in list(result.get("candidates") or [])
+                if str(candidate.get("kind") or "transfer") == "transfer"
+            ]
             results.append(
                 {
                     "bill_id": int(result.get("bill_id") or bill_id),
@@ -2586,6 +2699,49 @@ class BillService:
             "candidate_id": str(candidate_id),
             "action": "accept",
             "pair": result.get("pair"),
+        }
+
+    @log_method
+    async def _accept_bill_learning_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        bill_id = int(parsed_candidate_id["bill_id"])
+        rule_id = int(parsed_candidate_id["rule_id"])
+        bill_candidates = await self.get_matching_bill_candidates(bill_id, user_id=user_id)
+        if not bill_candidates.get("success"):
+            return bill_candidates
+
+        candidate_ids = {
+            str(candidate.get("candidate_id") or "") for candidate in list(bill_candidates.get("candidates") or [])
+        }
+        if str(candidate_id) not in candidate_ids:
+            return {
+                "success": False,
+                "error": "Learning candidate not available",
+                "status_code": 400,
+            }
+
+        try:
+            result = await self.db.accept_bill_learning_candidate(
+                bill_id,
+                rule_id,
+                user_id=user_id,
+                expected_rule_revision=parsed_candidate_id.get("rule_revision"),
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "bill": result.get("bill"),
         }
 
     @log_method
@@ -2718,6 +2874,50 @@ class BillService:
         }
 
     @log_method
+    async def _reject_bill_learning_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        bill_id = int(parsed_candidate_id["bill_id"])
+        rule_id = int(parsed_candidate_id["rule_id"])
+        bill_candidates = await self.get_matching_bill_candidates(bill_id, user_id=user_id)
+        if not bill_candidates.get("success"):
+            return bill_candidates
+
+        candidate_ids = {
+            str(candidate.get("candidate_id") or "") for candidate in list(bill_candidates.get("candidates") or [])
+        }
+        if str(candidate_id) not in candidate_ids:
+            return {
+                "success": False,
+                "error": "Learning candidate not available",
+                "status_code": 400,
+            }
+
+        try:
+            await self.db.reject_bill_learning_candidate(
+                bill_id,
+                rule_id,
+                user_id=user_id,
+                expected_rule_revision=parsed_candidate_id.get("rule_revision"),
+            )
+        except LookupError:
+            return {
+                "success": False,
+                "error": "Learning candidate not available",
+                "status_code": 400,
+            }
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+        }
+
+    @log_method
     async def _accept_matching_candidate(
         self,
         candidate_id: str,
@@ -2745,6 +2945,13 @@ class BillService:
 
         if candidate_scope == "bill" and candidate_kind == "transfer":
             return await self._accept_bill_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "bill" and candidate_kind == "learning":
+            return await self._accept_bill_learning_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 user_id=user_id,
@@ -2808,6 +3015,13 @@ class BillService:
 
         if candidate_scope == "bill" and candidate_kind == "transfer":
             return await self._reject_bill_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "bill" and candidate_kind == "learning":
+            return await self._reject_bill_learning_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 user_id=user_id,
@@ -2902,7 +3116,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -2993,7 +3207,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -3060,9 +3274,7 @@ class BillService:
             limit=1000,
         )
         composite_learning_rules = [
-            rule
-            for rule in learning_rules
-            if rule.get("match_type") == "composite" and rule.get("match_features_json")
+            rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")
         ]
         if not composite_learning_rules:
             return {}
@@ -3070,14 +3282,10 @@ class BillService:
         learning_categories = await self.db.get_all_categories(user_id=preview_user_id)
         learning_accounts = await self.db.get_all_accounts(user_id=preview_user_id)
         learning_categories_by_id = {
-            int(category["id"]): category
-            for category in learning_categories
-            if category.get("id") is not None
+            int(category["id"]): category for category in learning_categories if category.get("id") is not None
         }
         learning_accounts_by_id = {
-            int(account["id"]): account
-            for account in learning_accounts
-            if account.get("id") is not None
+            int(account["id"]): account for account in learning_accounts if account.get("id") is not None
         }
 
         return self._build_learning_similarity_signal_from_preview(
@@ -3129,7 +3337,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -3219,7 +3427,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -3338,7 +3546,7 @@ class BillService:
 
         try:
             payload = json.loads(raw_payload)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except TypeError, ValueError, json.JSONDecodeError:
             return {}
 
         if not isinstance(payload, dict):

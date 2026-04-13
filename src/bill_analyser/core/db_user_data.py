@@ -36,6 +36,11 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
                 [int(row[0]) for row in bill_rows if row and row[0] is not None],
                 user_id=user_id,
             )
+            await self._delete_bill_learning_rule_suppressions_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
             await conn.execute(
                 "DELETE FROM bill_tags WHERE bill_id IN (SELECT id FROM bills WHERE user_id = ?)",
                 (user_id,),
@@ -77,6 +82,11 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
                 user_id=user_id,
             )
             await self._delete_bill_transfer_pair_suppressions_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
+            await self._delete_bill_learning_rule_suppressions_for_bill_ids(
                 conn,
                 [int(row[0]) for row in bill_rows if row and row[0] is not None],
                 user_id=user_id,

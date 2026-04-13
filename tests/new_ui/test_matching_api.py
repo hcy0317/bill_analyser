@@ -619,6 +619,60 @@ class TestMatchingAPI:
         }
         assert [item["billId"] for item in data["data"]["results"]] == [left_bill_id, right_bill_id]
 
+    def test_matching_reconcile_history_remains_transfer_only_when_bill_has_learning_candidates(self, client):
+        """reconcile-history 当前契约仍应保持 transfer-only，不应透出 historical learning candidates。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_reconcile_history_transfer_only")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest reconcile learning vendor",
+            description="pytest reconcile learning note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest reconcile learning 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest reconcile learning 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-58.0,
+            bill_type="支出",
+            date="2026-07-25 14:00:00",
+            description="pytest reconcile learning note",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=58.0,
+            bill_type="收入",
+            date="2026-07-25 14:03:00",
+            description="pytest reconcile transfer candidate",
+        )
+
+        response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [anchor_bill_id]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["summary"] == {
+            "billCount": 1,
+            "candidateCount": 1,
+            "linkedPairCount": 0,
+        }
+        result = data["data"]["results"][0]
+        assert result["billId"] == anchor_bill_id
+        assert [candidate["candidateId"] for candidate in result["candidates"]] == [
+            f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}"
+        ]
+        assert all(candidate["kind"] == "transfer" for candidate in result["candidates"])
+
     def test_matching_manual_pair_delete_restores_candidates_for_formal_bill(self, client):
         """手工后配对删除后，应恢复 linkedPair 为空且候选重新出现。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair")
@@ -1141,9 +1195,7 @@ class TestMatchingAPI:
         assert accept_data["data"]["candidateId"] == candidate_id
         assert accept_data["data"]["action"] == "accept"
         assert accept_data["data"]["previewId"] == preview_id
-        accept_preview = next(
-            item for item in accept_data["data"]["preview"] if int(item["id"]) == preview_id
-        )
+        accept_preview = next(item for item in accept_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert accept_preview["preview_type"] == "转账"
         assert accept_preview["matching"]["transfer"]["review_status"] == "accepted"
 
@@ -1346,9 +1398,7 @@ class TestMatchingAPI:
         assert reject_data["data"]["candidateId"] == candidate_id
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
-        reject_preview = next(
-            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
-        )
+        reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert reject_preview["preview_type"] == "支出"
         assert reject_preview["preview_main_category"] == "餐饮"
         assert reject_preview["matching"]["transfer"]["review_status"] == "rejected"
@@ -1436,9 +1486,7 @@ class TestMatchingAPI:
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
         assert reject_data["data"]["sessionId"] == session_id
-        reject_preview = next(
-            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
-        )
+        reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert reject_preview["preview_type"] == "投资"
         assert reject_preview["matching"]["investment"]["review_status"] == "rejected"
         assert reject_preview["matching"]["investment"]["suppressed"] is True
@@ -1533,9 +1581,7 @@ class TestMatchingAPI:
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
         assert reject_data["data"]["sessionId"] == session_id
-        reject_preview = next(
-            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
-        )
+        reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert reject_preview["preview_type"] == "支出"
         assert reject_preview["matching"]["learning"]["review_status"] == "rejected"
         assert reject_preview["matching"]["learning"]["suppressed"] is True
@@ -1631,7 +1677,9 @@ class TestMatchingAPI:
         assert unified_follow_up_response.status_code == 200
         unified_follow_up_data = unified_follow_up_response.get_json()["data"]
         assert unified_follow_up_data["linkedPair"] is None
-        assert [candidate["billId"] for candidate in unified_follow_up_data["candidates"]] == [retained_candidate_bill_id]
+        assert [candidate["billId"] for candidate in unified_follow_up_data["candidates"]] == [
+            retained_candidate_bill_id
+        ]
 
         reverse_follow_up_response = client.get(
             f"/api/matching/bills/{rejected_candidate_bill_id}/candidates",
@@ -1648,6 +1696,343 @@ class TestMatchingAPI:
         )
         assert accept_after_reject_response.status_code == 409
         assert accept_after_reject_response.get_json()["error"] == "Bills already rejected for transfer pairing"
+
+    def test_matching_bill_candidates_include_historical_learning_candidates(self, client):
+        """historical bill candidates 应返回 formal-bill learning 候选与稳定 candidateId。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_learning_candidates")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest learning vendor",
+            description="pytest learning note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(current_user_id, "pytest learning 历史账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-45.6,
+            bill_type="支出",
+            date="2026-07-24 13:00:00",
+            description="pytest learning note",
+        )
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        candidates = data["data"]["candidates"]
+        learning_candidate = next(candidate for candidate in candidates if candidate["kind"] == "learning")
+        assert learning_candidate["candidateId"].startswith(f"bill:{anchor_bill_id}:learning:{rule_id}:")
+        assert learning_candidate["ruleId"] == rule_id
+        assert learning_candidate["recommendedType"] == "支出"
+        assert learning_candidate["summary"]
+
+        unified_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+        assert unified_response.status_code == 200
+        unified_candidates = unified_response.get_json()["data"]["candidates"]
+        assert any(candidate["candidateId"] == learning_candidate["candidateId"] for candidate in unified_candidates)
+
+    def test_matching_candidate_reject_rejects_historical_learning_candidate_and_filters_followup_reads(self, client):
+        """historical formal-bill learning reject 应持久化 suppression，并过滤后续 bill/unified 候选读取。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_learning")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        rejected_rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest bill learning vendor",
+            description="pytest bill learning anchor",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        retained_rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest bill learning vendor",
+            description="pytest bill learning anchor extra",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(current_user_id, "pytest bill learning reject 账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-63.0,
+            bill_type="支出",
+            date="2026-07-24 14:00:00",
+            description="pytest bill learning anchor",
+        )
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        initial_candidates = [
+            candidate
+            for candidate in initial_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert [candidate["ruleId"] for candidate in initial_candidates] == [rejected_rule_id, retained_rule_id]
+        candidate_id = next(
+            candidate["candidateId"] for candidate in initial_candidates if candidate["ruleId"] == rejected_rule_id
+        )
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert reject_response.status_code == 200
+        assert reject_response.get_json()["data"] == {
+            "candidateId": candidate_id,
+            "action": "reject",
+        }
+
+        bill_follow_up_response = client.get(
+            f"/api/matching/bills/{anchor_bill_id}/candidates",
+            headers=auth_headers,
+        )
+        assert bill_follow_up_response.status_code == 200
+        bill_learning_candidates = [
+            candidate
+            for candidate in bill_follow_up_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert [candidate["ruleId"] for candidate in bill_learning_candidates] == [retained_rule_id]
+
+        unified_follow_up_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+        assert unified_follow_up_response.status_code == 200
+        unified_learning_candidates = [
+            candidate
+            for candidate in unified_follow_up_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert [candidate["ruleId"] for candidate in unified_learning_candidates] == [retained_rule_id]
+
+        repeat_reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+        assert repeat_reject_response.status_code == 400
+        assert repeat_reject_response.get_json()["error"] == "Learning candidate not available"
+
+    def test_matching_candidate_accept_applies_historical_learning_candidate_to_bill(self, client):
+        """historical formal-bill learning accept 应把 rule 结果应用到正式账单。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_learning")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        from src.api.app import db
+
+        target_category_id = asyncio.run(
+            db.create_category(
+                {
+                    "type": 1,
+                    "main_category": "餐饮",
+                    "sub_category": "午餐",
+                    "description": "",
+                    "priority": 0,
+                    "keywords": "",
+                    "hidden": False,
+                    "icon": "",
+                    "color": "",
+                },
+                user_id=current_user_id,
+            )
+        )
+        assert target_category_id is not None
+        destination_account_id = _create_account_via_db(current_user_id, "pytest bill learning accept 目标账户")
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest accept learning vendor",
+            description="pytest accept learning note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+
+        async def _update_learning_rule() -> None:
+            conn = await db._get_connection()  # pylint: disable=protected-access
+            await conn.execute(
+                """
+                UPDATE import_learning_rules
+                SET learned_category_id = ?,
+                    learned_destination_account_id = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (int(target_category_id), destination_account_id, rule_id, current_user_id),
+            )
+            await conn.commit()
+
+        asyncio.run(_update_learning_rule())
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest bill learning accept 源账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-72.5,
+            bill_type="支出",
+            date="2026-07-24 16:00:00",
+            description="pytest accept learning note",
+        )
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        candidate_id = next(
+            candidate["candidateId"]
+            for candidate in initial_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["action"] == "accept"
+        accepted_bill = accept_data["data"]["bill"]
+        assert accepted_bill["id"] == anchor_bill_id
+        assert accepted_bill["type"] == "收入"
+        assert accepted_bill["mainCategory"] == "餐饮"
+        assert accepted_bill["subCategory"] == "午餐"
+        assert accepted_bill["destinationAccountId"] == destination_account_id
+
+        follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert follow_up_response.status_code == 200
+        learning_candidates = [
+            candidate
+            for candidate in follow_up_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert learning_candidates == []
+
+        repeat_accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert repeat_accept_response.status_code == 400
+        assert repeat_accept_response.get_json()["error"] == "Learning candidate not available"
+
+    def test_matching_candidate_accept_is_user_scoped_for_historical_learning(self, client):
+        """generic accept 的 historical learning 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_bill_learning_scope_primary"
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_bill_learning_scope_secondary"
+        )
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        rule_id = _create_composite_learning_rule_via_db(
+            primary_user_id,
+            parser_id="wechat",
+            counterparty="pytest bill learning accept scope vendor",
+            description="pytest bill learning accept scope note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(primary_user_id, "pytest bill learning accept scope 账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-41.0,
+            bill_type="支出",
+            date="2026-07-24 17:00:00",
+            description="pytest bill learning accept scope note",
+        )
+
+        candidate_id = next(
+            candidate["candidateId"]
+            for candidate in client.get(
+                f"/api/matching/bills/{anchor_bill_id}/candidates",
+                headers=primary_headers,
+            ).get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=secondary_headers,
+        )
+        assert accept_response.status_code == 404
+        assert accept_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_candidate_accept_can_resolve_historical_learning_candidate_without_bill_changes(self, client):
+        """当 historical learning candidate 不会改动 bill 字段时，首次 accept 仍应记为 resolved 并隐藏后续重复候选。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_learning_noop")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest learning noop vendor",
+            description="pytest learning noop note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(current_user_id, "pytest learning noop 账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-33.0,
+            bill_type="支出",
+            date="2026-07-26 10:00:00",
+            description="pytest learning noop note",
+        )
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        initial_learning_candidates = [
+            candidate
+            for candidate in initial_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert [candidate["ruleId"] for candidate in initial_learning_candidates] == [rule_id]
+        candidate_id = initial_learning_candidates[0]["candidateId"]
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["bill"]["id"] == anchor_bill_id
+        assert accept_data["data"]["bill"]["type"] == "支出"
+
+        follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert follow_up_response.status_code == 200
+        follow_up_learning_candidates = [
+            candidate
+            for candidate in follow_up_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert follow_up_learning_candidates == []
+
+        repeat_accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert repeat_accept_response.status_code == 400
+        assert repeat_accept_response.get_json()["error"] == "Learning candidate not available"
 
     def test_matching_candidate_reject_clears_preview_recurring_match_and_returns_pending_candidate(self, client):
         """generic reject 的 preview recurring 分支应复用 clear recurring-match 语义。"""
@@ -1735,9 +2120,7 @@ class TestMatchingAPI:
         assert reject_data["data"]["candidateId"] == candidate_id
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
-        cleared_preview = next(
-            item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id
-        )
+        cleared_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert cleared_preview["preview_recurring_id"] in (None, "", 0)
         assert cleared_preview["preview_recurring_name"] == ""
         assert int(cleared_preview["preview_recurring_candidate_count"] or 0) >= 2
@@ -1839,7 +2222,9 @@ class TestMatchingAPI:
     def test_matching_candidate_reject_is_user_scoped_for_preview_recurring(self, client):
         """generic reject 的 preview recurring 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring_scope_primary")
-        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_recurring_scope_secondary")
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_recurring_scope_secondary"
+        )
         primary_user_id = _get_current_user_id(client, primary_headers)
         source_account = _ensure_test_account(client, primary_headers)
         category = _ensure_test_expense_category(client, primary_headers)
@@ -1915,8 +2300,12 @@ class TestMatchingAPI:
 
     def test_matching_candidate_reject_is_user_scoped_for_preview_investment(self, client):
         """generic reject 的 preview investment 分支不应跨用户生效。"""
-        primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_investment_scope_primary")
-        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_investment_scope_secondary")
+        primary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_investment_scope_primary"
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_investment_scope_secondary"
+        )
         primary_user_id = _get_current_user_id(client, primary_headers)
         session_id = f"pytest-matching-reject-investment-scope-{int(time.time() * 1000)}"
 
@@ -1958,7 +2347,9 @@ class TestMatchingAPI:
     def test_matching_candidate_reject_is_user_scoped_for_preview_learning(self, client):
         """generic reject 的 preview learning 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_learning_scope_primary")
-        secondary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_learning_scope_secondary")
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_learning_scope_secondary"
+        )
         primary_user_id = _get_current_user_id(client, primary_headers)
         session_id = f"pytest-matching-reject-learning-scope-{int(time.time() * 1000)}"
 
@@ -2030,3 +2421,173 @@ class TestMatchingAPI:
         )
         assert reject_response.status_code == 404
         assert reject_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_candidate_reject_is_user_scoped_for_historical_learning(self, client):
+        """generic reject 的 historical learning 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_bill_learning_scope_primary"
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_reject_bill_learning_scope_secondary"
+        )
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        rule_id = _create_composite_learning_rule_via_db(
+            primary_user_id,
+            parser_id="wechat",
+            counterparty="pytest bill learning scope vendor",
+            description="pytest bill learning scope note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(primary_user_id, "pytest bill learning scope 账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-54.0,
+            bill_type="支出",
+            date="2026-07-24 15:00:00",
+            description="pytest bill learning scope note",
+        )
+
+        candidate_id = next(
+            candidate["candidateId"]
+            for candidate in client.get(
+                f"/api/matching/bills/{anchor_bill_id}/candidates",
+                headers=primary_headers,
+            ).get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+
+        reject_response = client.post(f"/api/matching/candidates/{candidate_id}/reject", json={}, headers=secondary_headers)
+        assert reject_response.status_code == 404
+        assert reject_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_candidate_accept_rejects_stale_historical_learning_candidate_revision(self, client):
+        """当同一 rule 原地更新后，旧 revision 的 historical learning candidate 不应再被 accept。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_learning_stale")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        from src.api.app import db
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest learning stale vendor",
+            description="pytest learning stale note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+        source_account_id = _create_account_via_db(current_user_id, "pytest learning stale 账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-38.0,
+            bill_type="支出",
+            date="2026-07-26 12:00:00",
+            description="pytest learning stale note",
+        )
+
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        initial_candidate_id = next(
+            candidate["candidateId"]
+            for candidate in initial_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+
+        async def _bump_rule_revision() -> None:
+            conn = await db._get_connection()  # pylint: disable=protected-access
+            await conn.execute(
+                "UPDATE import_learning_rules SET learned_type = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                ("支出", "2026-07-26T12:05:00", rule_id, current_user_id),
+            )
+            await conn.commit()
+
+        asyncio.run(_bump_rule_revision())
+
+        refreshed_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert refreshed_response.status_code == 200
+        refreshed_candidate_id = next(
+            candidate["candidateId"]
+            for candidate in refreshed_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+        assert refreshed_candidate_id != initial_candidate_id
+
+        stale_accept_response = client.post(
+            f"/api/matching/candidates/{initial_candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert stale_accept_response.status_code == 400
+        assert stale_accept_response.get_json()["error"] == "Learning candidate not available"
+
+    def test_matching_candidate_reject_does_not_hide_new_historical_learning_rule_revision(self, client):
+        """旧 revision 的 resolved suppression 不应继续隐藏同一 rule_id 的新 revision 候选。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_learning_revision")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        from src.api.app import db
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="wechat",
+            counterparty="pytest learning revision vendor",
+            description="pytest learning revision note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        source_account_id = _create_account_via_db(current_user_id, "pytest learning revision 账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-41.0,
+            bill_type="支出",
+            date="2026-07-26 13:00:00",
+            description="pytest learning revision note",
+        )
+
+        initial_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert initial_response.status_code == 200
+        initial_candidate_id = next(
+            candidate["candidateId"]
+            for candidate in initial_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning" and candidate["ruleId"] == rule_id
+        )
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{initial_candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+        assert reject_response.status_code == 200
+
+        hidden_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert hidden_response.status_code == 200
+        hidden_learning_candidates = [
+            candidate
+            for candidate in hidden_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert hidden_learning_candidates == []
+
+        async def _bump_rule_revision() -> None:
+            conn = await db._get_connection()  # pylint: disable=protected-access
+            await conn.execute(
+                "UPDATE import_learning_rules SET learned_type = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                ("收入", "2026-07-26T13:05:00", rule_id, current_user_id),
+            )
+            await conn.commit()
+
+        asyncio.run(_bump_rule_revision())
+
+        refreshed_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert refreshed_response.status_code == 200
+        refreshed_learning_candidates = [
+            candidate
+            for candidate in refreshed_response.get_json()["data"]["candidates"]
+            if candidate["kind"] == "learning"
+        ]
+        assert len(refreshed_learning_candidates) == 1
+        assert refreshed_learning_candidates[0]["candidateId"] != initial_candidate_id

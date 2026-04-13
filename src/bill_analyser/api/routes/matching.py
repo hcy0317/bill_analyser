@@ -63,9 +63,7 @@ def _serialize_bill_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         "mainCategory": str(bill_snapshot.get("main_category") or ""),
         "subCategory": str(bill_snapshot.get("sub_category") or ""),
         "sourceAccountId": int(bill_snapshot.get("source_account_id") or 0),
-        "destinationAccountId": int(
-            bill_snapshot.get("destination_account_id") or 0
-        ),
+        "destinationAccountId": int(bill_snapshot.get("destination_account_id") or 0),
     }
 
 
@@ -84,15 +82,27 @@ def _serialize_matching_pair_detail(pair: dict[str, Any]) -> dict[str, Any]:
     return serialized_pair
 
 
-def _serialize_transfer_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _serialize_matching_bill_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    serialized_candidate = {
         "candidateId": str(candidate.get("candidate_id") or ""),
-        "billId": int(candidate.get("bill_id") or 0),
+        "kind": str(candidate.get("kind") or "transfer"),
         "score": float(candidate.get("score") or 0.0),
         "level": str(candidate.get("level") or ""),
         "reason": str(candidate.get("reason") or ""),
-        "bill": _serialize_bill_snapshot(candidate.get("bill")),
     }
+    if candidate.get("bill_id") not in (None, ""):
+        serialized_candidate["billId"] = int(candidate.get("bill_id") or 0)
+    if isinstance(candidate.get("bill"), dict):
+        serialized_candidate["bill"] = _serialize_bill_snapshot(candidate.get("bill"))
+    if candidate.get("rule_id") not in (None, ""):
+        serialized_candidate["ruleId"] = int(candidate.get("rule_id") or 0)
+    if candidate.get("recommended_type") not in (None, ""):
+        serialized_candidate["recommendedType"] = str(candidate.get("recommended_type") or "")
+    if candidate.get("summary") not in (None, ""):
+        serialized_candidate["summary"] = str(candidate.get("summary") or "")
+    if candidate.get("suppressed") not in (None, ""):
+        serialized_candidate["suppressed"] = bool(candidate.get("suppressed"))
+    return serialized_candidate
 
 
 def _build_matching_bill_candidates_payload(
@@ -103,8 +113,7 @@ def _build_matching_bill_candidates_payload(
         "billId": bill_id,
         "linkedPair": _serialize_bill_pair(result.get("linked_pair")),
         "candidates": [
-            _serialize_transfer_candidate(candidate)
-            for candidate in list(result.get("candidates") or [])
+            _serialize_matching_bill_candidate(candidate) for candidate in list(result.get("candidates") or [])
         ],
     }
 
@@ -204,6 +213,8 @@ def _build_matching_candidate_action_payload(
         response_data["preview"] = list(result.get("preview") or [])
     if isinstance(result.get("pair"), dict):
         response_data["pair"] = _serialize_bill_pair(result.get("pair"))
+    if isinstance(result.get("bill"), dict):
+        response_data["bill"] = _serialize_bill_snapshot(result.get("bill"))
     return response_data
 
 
@@ -216,10 +227,7 @@ def _build_matching_reconcile_history_payload(result: dict[str, Any]) -> dict[st
             "candidateCount": int(summary.get("candidate_count") or 0),
             "linkedPairCount": int(summary.get("linked_pair_count") or 0),
         },
-        "results": [
-            _build_matching_bill_candidates_payload(int(item.get("bill_id") or 0), item)
-            for item in results
-        ],
+        "results": [_build_matching_bill_candidates_payload(int(item.get("bill_id") or 0), item) for item in results],
     }
 
 
@@ -236,9 +244,7 @@ def get_matching_session_candidates(session_id: str):
         if not session:
             return jsonify({"success": False, "error": "Import session not found"}), 404
 
-        result = _run_async(
-            bill_service.get_matching_session_candidates(session_id, user_id=user_id)
-        )
+        result = _run_async(bill_service.get_matching_session_candidates(session_id, user_id=user_id))
         return jsonify({"success": True, "data": result})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取 matching 会话候选失败: %s", exc, exc_info=True)
@@ -249,14 +255,12 @@ def get_matching_session_candidates(session_id: str):
 @log_method
 @require_auth
 def get_matching_bill_candidates(bill_id: int):
-    """返回某条正式账单的 transfer-only 历史后配对候选。"""
+    """返回某条正式账单的历史 matching 候选。"""
     try:
         _, bill_service = get_app_context()
         user_id = _get_request_user_id()
 
-        result = _run_async(
-            bill_service.get_matching_bill_candidates(bill_id, user_id=user_id)
-        )
+        result = _run_async(bill_service.get_matching_bill_candidates(bill_id, user_id=user_id))
         if not result.get("success"):
             status_code = int(result.get("status_code", 404))
             error_message = result.get("error", "Bill not found")
@@ -292,15 +296,11 @@ def get_matching_candidates():
             if not session:
                 return jsonify({"success": False, "error": "Import session not found"}), 404
 
-            result = _run_async(
-                bill_service.get_matching_session_candidates(session_id, user_id=user_id)
-            )
+            result = _run_async(bill_service.get_matching_session_candidates(session_id, user_id=user_id))
             return jsonify({"success": True, "data": result})
 
         normalized_bill_id = int(bill_id or 0)
-        result = _run_async(
-            bill_service.get_matching_bill_candidates(normalized_bill_id, user_id=user_id)
-        )
+        result = _run_async(bill_service.get_matching_bill_candidates(normalized_bill_id, user_id=user_id))
         if not result.get("success"):
             status_code = int(result.get("status_code", 404))
             error_message = result.get("error", "Bill not found")
@@ -445,12 +445,7 @@ def get_matching_pairs():
         return jsonify(
             {
                 "success": True,
-                "data": {
-                    "pairs": [
-                        _serialize_matching_pair_detail(pair)
-                        for pair in list(result.get("pairs") or [])
-                    ]
-                },
+                "data": {"pairs": [_serialize_matching_pair_detail(pair) for pair in list(result.get("pairs") or [])]},
             }
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -504,9 +499,7 @@ def delete_manual_pair(pair_id: int):
     try:
         _, bill_service = get_app_context()
         user_id = _get_request_user_id()
-        result = _run_async(
-            bill_service.delete_manual_transfer_pair(pair_id, user_id=user_id)
-        )
+        result = _run_async(bill_service.delete_manual_transfer_pair(pair_id, user_id=user_id))
         if not result.get("success"):
             status_code = int(result.get("status_code", 404))
             error_message = result.get("error", "Pair not found")

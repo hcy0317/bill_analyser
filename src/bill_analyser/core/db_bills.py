@@ -126,9 +126,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         account_ids = filters.get("account_ids")
         if isinstance(account_ids, list) and account_ids:
             placeholders = ",".join(["?"] * len(account_ids))
-            conditions.append(
-                f"(source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))"
-            )
+            conditions.append(f"(source_account_id IN ({placeholders}) OR destination_account_id IN ({placeholders}))")
             params.extend(account_ids)
             params.extend(account_ids)
 
@@ -326,6 +324,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         try:
             await self._delete_bill_pair_links_for_bill_ids(conn, [bill_id], user_id=user_id)
             await self._delete_bill_transfer_pair_suppressions_for_bill_ids(conn, [bill_id], user_id=user_id)
+            await self._delete_bill_learning_rule_suppressions_for_bill_ids(conn, [bill_id], user_id=user_id)
             cursor = await conn.execute("DELETE FROM bills WHERE id = ? AND user_id = ?", (bill_id, user_id))
             await conn.commit()
             return cursor.rowcount > 0
@@ -394,6 +393,7 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         conn = await self._get_connection()
         await self._delete_bill_pair_links_for_bill_ids(conn, bill_ids, user_id=user_id)
         await self._delete_bill_transfer_pair_suppressions_for_bill_ids(conn, bill_ids, user_id=user_id)
+        await self._delete_bill_learning_rule_suppressions_for_bill_ids(conn, bill_ids, user_id=user_id)
         placeholders = ",".join(["?" for _ in bill_ids])
         cursor = await conn.execute(
             f"DELETE FROM bills WHERE id IN ({placeholders}) AND user_id = ?",
@@ -526,6 +526,11 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
                 bill_ids,
                 user_id=row_user_id,
             )
+            await self._delete_bill_learning_rule_suppressions_for_bill_ids(
+                conn,
+                bill_ids,
+                user_id=row_user_id,
+            )
 
         placeholders = ",".join(["?" for _ in duplicate_ids])
         cursor = await conn.execute(
@@ -628,15 +633,11 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
 
         conn = await self._get_connection()
         if filter_id:
-            query = (
-                "SELECT id, name, filter_data, description, created_at, updated_at "
-                "FROM saved_filters WHERE id = ?"
-            )
+            query = "SELECT id, name, filter_data, description, created_at, updated_at FROM saved_filters WHERE id = ?"
             params = (filter_id,)
         else:
             query = (
-                "SELECT id, name, filter_data, description, created_at, updated_at "
-                "FROM saved_filters WHERE name = ?"
+                "SELECT id, name, filter_data, description, created_at, updated_at FROM saved_filters WHERE name = ?"
             )
             params = (name,)
 

@@ -230,6 +230,22 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS bill_learning_rule_suppressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                bill_id INTEGER NOT NULL,
+                rule_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, bill_id, rule_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+                FOREIGN KEY (rule_id) REFERENCES import_learning_rules(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS budgets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,
@@ -336,9 +352,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash)")
-        await conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)"
-        )
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type)")
@@ -369,6 +383,14 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bill_transfer_pair_suppressions_user_right "
             "ON bill_transfer_pair_suppressions(user_id, right_bill_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_learning_rule_suppressions_user_bill "
+            "ON bill_learning_rule_suppressions(user_id, bill_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_learning_rule_suppressions_user_rule "
+            "ON bill_learning_rule_suppressions(user_id, rule_id)"
         )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_type)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category, sub_category)")
@@ -473,9 +495,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             )
             """
         )
-        await conn.execute(
-            f"INSERT OR IGNORE INTO categories_new ({column_sql}) SELECT {column_sql} FROM categories"
-        )
+        await conn.execute(f"INSERT OR IGNORE INTO categories_new ({column_sql}) SELECT {column_sql} FROM categories")
         await conn.execute("DROP TABLE categories")
         await conn.execute("ALTER TABLE categories_new RENAME TO categories")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id)")
@@ -531,9 +551,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             )
             """
         )
-        await conn.execute(
-            f"INSERT INTO bills_new ({column_sql}) SELECT {column_sql} FROM bills"
-        )
+        await conn.execute(f"INSERT INTO bills_new ({column_sql}) SELECT {column_sql} FROM bills")
         await conn.execute("DROP TABLE bills")
         await conn.execute("ALTER TABLE bills_new RENAME TO bills")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id)")
@@ -542,9 +560,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash)")
-        await conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)"
-        )
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash)")
         self.logger.info("bills.hash UNIQUE 约束迁移完成")
 
     async def _migrate_user_exchange_rates_unique_constraint(self, conn: aiosqlite.Connection) -> None:
@@ -591,8 +607,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             """
         )
         await conn.execute(
-            "INSERT OR IGNORE INTO user_exchange_rates_new "
-            f"({column_sql}) SELECT {column_sql} FROM user_exchange_rates"
+            f"INSERT OR IGNORE INTO user_exchange_rates_new ({column_sql}) SELECT {column_sql} FROM user_exchange_rates"
         )
         await conn.execute("DROP TABLE user_exchange_rates")
         await conn.execute("ALTER TABLE user_exchange_rates_new RENAME TO user_exchange_rates")
@@ -603,7 +618,5 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_exchange_rates_date ON user_exchange_rates(effective_date DESC)"
         )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id)"
-        )
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id)")
         self.logger.info("user_exchange_rates 表 UNIQUE 约束迁移完成")

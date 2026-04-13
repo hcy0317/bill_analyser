@@ -103,6 +103,62 @@ async def _count_bill_transfer_pair_suppressions(db: Database, *, user_id: int) 
     return int(row[0] if row else 0)
 
 
+async def _count_bill_learning_rule_suppressions(db: Database, *, user_id: int) -> int:
+    conn = await db._get_connection()
+    async with conn.execute(
+        "SELECT COUNT(*) FROM bill_learning_rule_suppressions WHERE user_id = ?",
+        (user_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0] if row else 0)
+
+
+async def _create_composite_learning_rule(
+    db: Database,
+    *,
+    user_id: int,
+    parser_id: str,
+    counterparty: str,
+    description: str,
+    payment_method: str,
+    learned_type: str,
+) -> int:
+    conn = await db._get_connection()
+    now = "2026-07-24T00:00:00"
+    rule_hash = db.build_composite_match_hash(
+        parser_id=parser_id,
+        counterparty=counterparty,
+        description=description,
+        payment_method=payment_method,
+    )
+    assert rule_hash is not None
+    cursor = await conn.execute(
+        """
+        INSERT INTO import_learning_rules (
+            user_id, match_type, match_value, normalized_match_value,
+            learned_type, enabled, parser_id, composite_match_hash,
+            match_features_json, applied_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            "composite",
+            rule_hash,
+            rule_hash,
+            learned_type,
+            parser_id,
+            rule_hash,
+            '{"counterparty": "%s", "description": "%s", "parser_id": "%s", "payment_method": "%s"}'
+            % (counterparty, description, parser_id, payment_method),
+            0,
+            now,
+            now,
+        ),
+    )
+    await conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
 async def _insert_bill_pair_link(
     db: Database,
     *,
@@ -724,6 +780,355 @@ async def test_db_reject_bill_transfer_candidate_is_user_scoped_idempotent_and_b
 
         other_result = await db.get_bill_transfer_candidates(other_anchor_bill_id, user_id=other_user_id)
         assert [candidate["bill_id"] for candidate in other_result["candidates"]] == [other_candidate_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_reject_bill_learning_candidate_is_user_scoped_idempotent_and_accept_clears_suppression(
+    tmp_path: Path,
+) -> None:
+    """historical learning reject 应保持 user scope、重复 reject 幂等，accept 后应应用 rule 并保持 resolved suppression。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_reject_scope_user")
+        other_user_id = await _create_user(db, "matching_learning_reject_scope_other")
+        source_account_id = await _create_account(db, user_id=user_id, name="learning scope 源账户")
+        destination_account_id = await _create_account(db, user_id=user_id, name="learning scope 目标账户")
+
+        category_id = await db.create_category(
+            {
+                "type": 1,
+                "main_category": "餐饮",
+                "sub_category": "午餐",
+                "description": "",
+                "priority": 0,
+                "keywords": "",
+                "hidden": False,
+                "icon": "",
+                "color": "",
+            },
+            user_id=user_id,
+        )
+        assert category_id is not None
+
+        rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="pytest learning vendor",
+            description="pytest learning note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+
+        conn = await db._get_connection()
+        await conn.execute(
+            """
+            UPDATE import_learning_rules
+            SET learned_category_id = ?, learned_destination_account_id = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (int(category_id), destination_account_id, rule_id, user_id),
+        )
+        await conn.commit()
+
+        bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-72.5,
+            bill_type="支出",
+            date="2026-07-24 16:00:00",
+            description="pytest learning note",
+            counterparty="pytest learning vendor",
+        )
+
+        first_suppression = await db.reject_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+        second_suppression = await db.reject_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+
+        assert first_suppression == second_suppression == {"bill_id": bill_id, "rule_id": rule_id}
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 1
+
+        with pytest.raises(LookupError):
+            await db.reject_bill_learning_candidate(bill_id, rule_id, user_id=other_user_id)
+
+        with pytest.raises(ValueError, match="Learning candidate not applicable"):
+            await db.accept_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+
+        accepted_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-73.5,
+            bill_type="支出",
+            date="2026-07-24 16:10:00",
+            description="pytest learning note",
+            counterparty="pytest learning vendor",
+        )
+
+        accepted = await db.accept_bill_learning_candidate(accepted_bill_id, rule_id, user_id=user_id)
+        assert accepted["bill_id"] == accepted_bill_id
+        assert accepted["rule_id"] == rule_id
+        assert accepted["bill"]["type"] == "收入"
+        assert accepted["bill"]["main_category"] == "餐饮"
+        assert accepted["bill"]["sub_category"] == "午餐"
+        assert int(accepted["bill"]["destination_account_id"] or 0) == destination_account_id
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 2
+
+        with pytest.raises(ValueError, match="Learning candidate not applicable"):
+            await db.accept_bill_learning_candidate(accepted_bill_id, rule_id, user_id=user_id)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_accept_bill_learning_candidate_can_resolve_noop_candidate_once(tmp_path: Path) -> None:
+    """当 historical learning rule 不产生字段变化时，首次 accept 仍应记为 resolved，重复 accept 应失败。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_accept_noop_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="learning noop 源账户")
+        rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="pytest learning noop vendor",
+            description="pytest learning noop note",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-21.5,
+            bill_type="支出",
+            date="2026-07-26 09:00:00",
+            description="pytest learning noop note",
+            counterparty="pytest learning noop vendor",
+        )
+
+        accepted = await db.accept_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+
+        assert accepted["bill_id"] == bill_id
+        assert accepted["rule_id"] == rule_id
+        assert accepted["bill"]["type"] == "支出"
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 1
+
+        with pytest.raises(ValueError, match="Learning candidate not applicable"):
+            await db.accept_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_accept_bill_learning_candidate_does_not_clear_accounts_for_zero_rule_values(tmp_path: Path) -> None:
+    """当 learning rule 的账户字段为 0/空值语义时，historical accept 不应把正式账单账户清空。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_zero_account_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="learning zero 源账户")
+        destination_account_id = await _create_account(db, user_id=user_id, name="learning zero 目标账户")
+        rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="pytest learning zero vendor",
+            description="pytest learning zero note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+
+        conn = await db._get_connection()
+        await conn.execute(
+            """
+            UPDATE import_learning_rules
+            SET learned_destination_account_id = 0
+            WHERE id = ? AND user_id = ?
+            """,
+            (rule_id, user_id),
+        )
+        await conn.commit()
+
+        bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            destination_account_id=destination_account_id,
+            amount=-26.5,
+            bill_type="支出",
+            date="2026-07-26 11:00:00",
+            description="pytest learning zero note",
+            counterparty="pytest learning zero vendor",
+        )
+
+        accepted = await db.accept_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+
+        assert accepted["bill_id"] == bill_id
+        assert accepted["bill"]["type"] == "收入"
+        assert int(accepted["bill"]["destination_account_id"] or 0) == destination_account_id
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_accept_and_reject_bill_learning_candidate_reject_stale_expected_rule_revision(tmp_path: Path) -> None:
+    """historical learning accept/reject 应在事务内拒绝 stale expected_rule_revision。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_stale_revision_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="learning stale revision 源账户")
+        rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="pytest learning stale revision vendor",
+            description="pytest learning stale revision note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+        bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-28.5,
+            bill_type="支出",
+            date="2026-07-26 12:30:00",
+            description="pytest learning stale revision note",
+            counterparty="pytest learning stale revision vendor",
+        )
+
+        with pytest.raises(ValueError, match="Learning candidate not available"):
+            await db.accept_bill_learning_candidate(
+                bill_id,
+                rule_id,
+                user_id=user_id,
+                expected_rule_revision="stale-revision",
+            )
+
+        with pytest.raises(ValueError, match="Learning candidate not available"):
+            await db.reject_bill_learning_candidate(
+                bill_id,
+                rule_id,
+                user_id=user_id,
+                expected_rule_revision="stale-revision",
+            )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_delete_and_clear_paths_remove_learning_rule_suppressions(tmp_path: Path) -> None:
+    """删除账单、批量删除、账户清交易与清空用户交易时，应同步移除 learning suppression。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_cleanup_user")
+        account_id = await _create_account(db, user_id=user_id, name="learning cleanup 账户")
+        second_account_id = await _create_account(db, user_id=user_id, name="learning cleanup 第二账户")
+
+        first_rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="cleanup vendor one",
+            description="cleanup note one",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        second_rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="cleanup vendor two",
+            description="cleanup note two",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+
+        delete_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=account_id,
+            amount=-11.0,
+            bill_type="支出",
+            date="2026-07-25 09:00:00",
+            description="cleanup note one",
+            counterparty="cleanup vendor one",
+        )
+        batch_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=account_id,
+            amount=-12.0,
+            bill_type="支出",
+            date="2026-07-25 09:05:00",
+            description="cleanup note two",
+            counterparty="cleanup vendor two",
+        )
+
+        await db.reject_bill_learning_candidate(delete_bill_id, first_rule_id, user_id=user_id)
+        await db.reject_bill_learning_candidate(batch_bill_id, second_rule_id, user_id=user_id)
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 2
+
+        assert await db.delete_bill(delete_bill_id, user_id=user_id) is True
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 1
+
+        deleted_count = await db.batch_delete_bills([batch_bill_id], user_id=user_id)
+        assert deleted_count == 1
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 0
+
+        account_clear_rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="cleanup vendor three",
+            description="cleanup note three",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        account_clear_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=second_account_id,
+            amount=-13.0,
+            bill_type="支出",
+            date="2026-07-25 09:10:00",
+            description="cleanup note three",
+            counterparty="cleanup vendor three",
+        )
+        await db.reject_bill_learning_candidate(account_clear_bill_id, account_clear_rule_id, user_id=user_id)
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 1
+
+        account_clear_result = await db.delete_all_transactions_by_account(second_account_id, user_id=user_id)
+        assert account_clear_result["success"] is True
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 0
+
+        clear_rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="cleanup vendor four",
+            description="cleanup note four",
+            payment_method="银行卡",
+            learned_type="支出",
+        )
+        clear_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=account_id,
+            amount=-14.0,
+            bill_type="支出",
+            date="2026-07-25 09:15:00",
+            description="cleanup note four",
+            counterparty="cleanup vendor four",
+        )
+        await db.reject_bill_learning_candidate(clear_bill_id, clear_rule_id, user_id=user_id)
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 1
+
+        clear_transactions_result = await db.clear_user_transactions(user_id=user_id)
+        assert clear_transactions_result["success"] is True
+        assert await _count_bill_learning_rule_suppressions(db, user_id=user_id) == 0
     finally:
         await db.close()
 

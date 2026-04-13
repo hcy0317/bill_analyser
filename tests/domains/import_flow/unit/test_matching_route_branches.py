@@ -807,6 +807,54 @@ def test_matching_candidate_accept_route_dispatches_preview_and_bill_transfer_ca
         assert service.accept_candidate_calls[-1] == ("bill:11:transfer:12", {}, 7)
 
 
+def test_matching_candidate_accept_route_dispatches_historical_learning_candidate(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应分发 historical learning candidate，并序列化更新后的 bill。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+    service.accept_candidate_result = {
+        "success": True,
+        "candidate_id": "bill:11:learning:21:r1",
+        "action": "accept",
+        "bill": {
+            "id": 11,
+            "date": "2026-07-24 16:00:00",
+            "type": "收入",
+            "amount": -72.5,
+            "counterparty": "pytest learning bill",
+            "description": "accepted historical learning bill",
+            "payment_method": "银行卡",
+            "main_category": "餐饮",
+            "sub_category": "午餐",
+            "source_account_id": 31,
+            "destination_account_id": 32,
+        },
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/bill:11:learning:21:r1/accept",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(7)
+        payload = route("bill:11:learning:21:r1").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "bill:11:learning:21:r1"
+        assert payload["data"]["action"] == "accept"
+        assert payload["data"]["bill"]["id"] == 11
+        assert payload["data"]["bill"]["type"] == "收入"
+        assert payload["data"]["bill"]["mainCategory"] == "餐饮"
+        assert payload["data"]["bill"]["destinationAccountId"] == 32
+        assert service.accept_candidate_calls == [("bill:11:learning:21:r1", {}, 7)]
+
+
 def test_matching_candidate_accept_route_rejects_invalid_request_and_preserves_errors(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -1063,6 +1111,25 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
             "action": "reject",
         }
         assert service.reject_candidate_calls[-1] == ("bill:11:transfer:12", {}, 7)
+
+    service.reject_candidate_result = {
+        "success": True,
+        "candidate_id": "bill:11:learning:21:r1",
+        "action": "reject",
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/bill:11:learning:21:r1/reject",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(7)
+        payload = route("bill:11:learning:21:r1").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"] == {
+            "candidateId": "bill:11:learning:21:r1",
+            "action": "reject",
+        }
+        assert service.reject_candidate_calls[-1] == ("bill:11:learning:21:r1", {}, 7)
 
     service.reject_candidate_result = {
         "success": False,

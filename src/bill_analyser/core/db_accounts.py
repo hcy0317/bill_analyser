@@ -491,6 +491,11 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
                     bill_ids,
                     user_id=user_id,
                 )
+                await self._delete_bill_learning_rule_suppressions_for_bill_ids(
+                    conn,
+                    bill_ids,
+                    user_id=user_id,
+                )
                 placeholders = ",".join(["?" for _ in bill_ids])
                 await conn.execute(f"DELETE FROM bill_tags WHERE bill_id IN ({placeholders})", bill_ids)
                 bill_cursor = await conn.execute(
@@ -609,13 +614,7 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
                 investment_in = row["investment_in"] or 0.0
 
             calculated_balance = (
-                initial_balance
-                + income
-                - expense
-                - transfer_out
-                + transfer_in
-                - investment_out
-                + investment_in
+                initial_balance + income - expense - transfer_out + transfer_in - investment_out + investment_in
             )
 
             self.logger.info(
