@@ -1341,6 +1341,91 @@ class TestMatchingAPI:
         assert stale_response.status_code == 409
         assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
 
+    def test_matching_candidate_accept_accepts_preview_investment_candidate_and_projects_accepted_status(self, client):
+        """preview investment accept 应走 preview-scoped feedback，并把 session candidate 状态投影为 accepted。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_preview_investment")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-accept-investment-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-24 09:20:00",
+                    "preview_type": "投资",
+                    "preview_amount": 68.8,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_counterparty": "蚂蚁财富",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "黄金ETF 自动定投",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+        candidate_id = f"preview:{preview_id}:investment"
+        expected_state = {
+            "sessionId": session_id,
+            "reviewStatus": "pending",
+            "previewType": "投资",
+            "categoryId": None,
+            "recurringId": None,
+        }
+
+        session_before_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_before_response.status_code == 200
+        session_before_candidates = session_before_response.get_json()["data"]["candidates"]
+        investment_candidate = next(
+            candidate for candidate in session_before_candidates if candidate["candidate_id"] == candidate_id
+        )
+        assert investment_candidate["status"] == "pending"
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["action"] == "accept"
+        assert accept_data["data"]["previewId"] == preview_id
+        assert accept_data["data"]["sessionId"] == session_id
+        accept_preview = next(item for item in accept_data["data"]["preview"] if int(item["id"]) == preview_id)
+        assert accept_preview["preview_type"] == "投资"
+        assert accept_preview["matching"]["investment"]["review_status"] == "accepted"
+        assert accept_preview["matching"]["investment"]["suppressed"] is False
+
+        session_follow_up_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_follow_up_response.status_code == 200
+        session_follow_up_candidates = session_follow_up_response.get_json()["data"]["candidates"]
+        accepted_candidate = next(
+            candidate for candidate in session_follow_up_candidates if candidate["candidate_id"] == candidate_id
+        )
+        assert accepted_candidate["status"] == "accepted"
+        assert accepted_candidate["details"]["suppressed"] is False
+
+        stale_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={"expectedState": expected_state},
+            headers=auth_headers,
+        )
+        assert stale_response.status_code == 409
+        assert stale_response.get_json()["error"] == "Preview state changed, please refresh"
+
     def test_matching_candidate_accept_accepts_historical_transfer_candidate(self, client):
         """generic accept 第一刀应复用历史 formal-bill transfer 的手工配对写路径。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill")
@@ -2637,6 +2722,52 @@ class TestMatchingAPI:
         preview_id = asyncio.run(_create_primary_preview())
         preview_response = client.post(
             f"/api/matching/candidates/preview:{preview_id}:investment/reject",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "投资",
+                    "categoryId": None,
+                    "recurringId": None,
+                }
+            },
+            headers=secondary_headers,
+        )
+        assert preview_response.status_code == 404
+        assert preview_response.get_json()["error"] == "Preview bill not found"
+
+    def test_matching_candidate_accept_is_user_scoped_for_preview_investment(self, client):
+        """generic accept 的 preview investment 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_investment_scope_primary"
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_investment_scope_secondary"
+        )
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        session_id = f"pytest-matching-accept-investment-scope-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_primary_preview() -> int:
+            await db.create_import_session(session_id, user_id=primary_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-24 11:20:00",
+                    "preview_type": "投资",
+                    "preview_amount": 19.8,
+                    "preview_counterparty": "蚂蚁财富",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "黄金ETF 自动定投",
+                },
+                user_id=primary_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_primary_preview())
+        preview_response = client.post(
+            f"/api/matching/candidates/preview:{preview_id}:investment/accept",
             json={
                 "expectedState": {
                     "sessionId": session_id,

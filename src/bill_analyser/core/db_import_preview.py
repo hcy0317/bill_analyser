@@ -439,7 +439,7 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         expected_state: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         normalized_decision = str(decision or "").strip().lower()
-        if normalized_decision not in {"reject", "clear"}:
+        if normalized_decision not in {"accept", "reject", "clear"}:
             return None
 
         conn = await self._get_connection()
@@ -466,7 +466,12 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             feedback_payload = self._deserialize_preview_matching_feedback(
                 preview.get("preview_matching_feedback")
             )
-            if normalized_decision == "reject":
+            if normalized_decision == "accept":
+                feedback_payload["investment"] = {
+                    "review_status": "accepted",
+                    "suppressed": False,
+                }
+            elif normalized_decision == "reject":
                 feedback_payload["investment"] = {
                     "review_status": "rejected",
                     "suppressed": True,

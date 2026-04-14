@@ -875,6 +875,71 @@ def test_matching_candidate_accept_route_dispatches_preview_recurring_candidate(
         ]
 
 
+def test_matching_candidate_accept_route_dispatches_preview_investment_candidate(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应分发 preview investment candidate，并序列化 accepted preview 状态。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+    service.accept_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [
+            {
+                "id": 1,
+                "preview_type": "投资",
+                "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
+            }
+        ],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:investment/accept",
+        method="POST",
+        json={
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "pending",
+                "previewType": "投资",
+                "categoryId": 10,
+                "recurringId": None,
+            },
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:investment").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:investment"
+        assert payload["data"]["action"] == "accept"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["preview"][0]["matching"]["investment"]["review_status"] == "accepted"
+        assert service.accept_candidate_calls == [
+            (
+                "preview:1:investment",
+                {
+                    "expectedState": {
+                        "sessionId": "session-1",
+                        "reviewStatus": "pending",
+                        "previewType": "投资",
+                        "categoryId": 10,
+                        "recurringId": None,
+                    },
+                },
+                9,
+            )
+        ]
+
+
 def test_matching_candidate_accept_route_dispatches_historical_learning_candidate(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,

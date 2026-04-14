@@ -563,6 +563,80 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_recurri
 
 
 @pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_dispatches_preview_investment_to_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService generic accept 应把 preview investment 分发到 preview-scoped feedback 写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, str, dict[str, object], int]] = []
+
+    async def fake_apply_preview_investment_decision(
+        preview_id: int,
+        decision: str,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-investment-accept",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
+
+    payload = {
+        "expectedState": {
+            "sessionId": "session-investment-accept",
+            "reviewStatus": "pending",
+            "previewType": "投资",
+            "categoryId": 10,
+            "recurringId": None,
+        }
+    }
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:investment",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            "accept",
+            {
+                "sessionId": "session-investment-accept",
+                "reviewStatus": "pending",
+                "previewType": "投资",
+                "categoryId": 10,
+                "recurringId": None,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-investment-accept",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_reject_matching_candidate_dispatches_preview_recurring_to_clear_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

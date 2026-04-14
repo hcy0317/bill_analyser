@@ -2736,6 +2736,32 @@ class BillService:
         }
 
     @log_method
+    async def _accept_preview_investment_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.apply_preview_investment_decision(
+            int(parsed_candidate_id["preview_id"]),
+            "accept",
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
     async def _accept_bill_transfer_candidate(
         self,
         candidate_id: str,
@@ -3007,6 +3033,14 @@ class BillService:
                 user_id=user_id,
             )
 
+        if candidate_scope == "preview" and candidate_kind == "investment":
+            return await self._accept_preview_investment_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
+
         if candidate_scope == "bill" and candidate_kind == "transfer":
             return await self._accept_bill_transfer_candidate(
                 candidate_id,
@@ -3239,7 +3273,7 @@ class BillService:
     ) -> dict[str, Any]:
         """Persist a preview-scoped investment decision and return refreshed preview data."""
         normalized_decision = str(decision or "").strip().lower()
-        if normalized_decision not in {"reject", "clear"}:
+        if normalized_decision not in {"accept", "reject", "clear"}:
             return {"success": False, "error": "Invalid decision", "status_code": 400}
 
         if not isinstance(expected_state, dict):
