@@ -940,6 +940,73 @@ def test_matching_candidate_accept_route_dispatches_preview_investment_candidate
         ]
 
 
+def test_matching_candidate_accept_route_dispatches_preview_learning_with_rule_id(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic accept route 应分发 preview learning candidate，并携带 ruleId。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.accept_matching_candidate)
+    service.accept_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:learning",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [
+            {
+                "id": 1,
+                "preview_type": "收入",
+                "matching": {"learning": {"rule_id": 42, "review_status": "accepted", "suppressed": False}},
+            }
+        ],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/accept",
+        method="POST",
+        json={
+            "ruleId": 42,
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "pending",
+                "previewType": "支出",
+                "categoryId": None,
+                "recurringId": None,
+            },
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:learning").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:learning"
+        assert payload["data"]["action"] == "accept"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["preview"][0]["matching"]["learning"]["review_status"] == "accepted"
+        assert service.accept_candidate_calls == [
+            (
+                "preview:1:learning",
+                {
+                    "ruleId": 42,
+                    "expectedState": {
+                        "sessionId": "session-1",
+                        "reviewStatus": "pending",
+                        "previewType": "支出",
+                        "categoryId": None,
+                        "recurringId": None,
+                    },
+                },
+                9,
+            )
+        ]
+
+
 def test_matching_candidate_accept_route_dispatches_historical_learning_candidate(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -1025,6 +1092,21 @@ def test_matching_candidate_accept_route_rejects_invalid_request_and_preserves_e
         response, status = _unwrap_response(route("preview:1:recurring"))
         assert status == 400
         assert response.get_json()["error"] == "Missing recurringId"
+
+    service.accept_candidate_result = {
+        "success": False,
+        "error": "Missing ruleId",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/accept",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1", "reviewStatus": "pending"}},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:learning"))
+        assert status == 400
+        assert response.get_json()["error"] == "Missing ruleId"
 
     service.accept_candidate_result = {
         "success": False,

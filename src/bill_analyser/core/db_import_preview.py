@@ -32,6 +32,13 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         ("preview_recurring_match_reasons", ""),
         ("preview_recurring_matched_date", ""),
     )
+    _LEARNING_PREVIEW_SNAPSHOT_FIELDS: tuple[tuple[str, Any], ...] = (
+        ("preview_type", ""),
+        ("preview_main_category", ""),
+        ("preview_sub_category", ""),
+        ("preview_source_account_id", None),
+        ("preview_destination_account_id", None),
+    )
 
     @staticmethod
     def _deserialize_preview_matching_feedback(raw_payload: Any) -> dict[str, Any]:
@@ -73,6 +80,24 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         normalized_current_recurring_id = None if current_recurring_id in (None, "") else int(current_recurring_id)
         expected_recurring_id = expected_state.get("preview_recurring_id")
         normalized_expected_recurring_id = None if expected_recurring_id in (None, "") else int(expected_recurring_id)
+        current_source_account_id = preview.get("preview_source_account_id")
+        normalized_current_source_account_id = (
+            None if current_source_account_id in (None, "", 0, "0") else int(current_source_account_id)
+        )
+        expected_source_account_id = expected_state.get("preview_source_account_id")
+        normalized_expected_source_account_id = (
+            None if expected_source_account_id in (None, "", 0, "0") else int(expected_source_account_id)
+        )
+        current_destination_account_id = preview.get("preview_destination_account_id")
+        normalized_current_destination_account_id = (
+            None if current_destination_account_id in (None, "", 0, "0") else int(current_destination_account_id)
+        )
+        expected_destination_account_id = expected_state.get("preview_destination_account_id")
+        normalized_expected_destination_account_id = (
+            None if expected_destination_account_id in (None, "", 0, "0") else int(expected_destination_account_id)
+        )
+        compare_source_account = "preview_source_account_id" in expected_state
+        compare_destination_account = "preview_destination_account_id" in expected_state
 
         return (
             str(preview.get("session_id") or "") == str(expected_state.get("session_id") or "")
@@ -80,6 +105,14 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             and str(preview.get("preview_main_category") or "") == str(expected_state.get("preview_main_category") or "")
             and str(preview.get("preview_sub_category") or "") == str(expected_state.get("preview_sub_category") or "")
             and normalized_current_recurring_id == normalized_expected_recurring_id
+            and (
+                not compare_source_account
+                or normalized_current_source_account_id == normalized_expected_source_account_id
+            )
+            and (
+                not compare_destination_account
+                or normalized_current_destination_account_id == normalized_expected_destination_account_id
+            )
             and str(preview.get("preview_matching_feedback_json") or "")
             == str(expected_state.get("preview_matching_feedback_json") or "")
         )
@@ -143,6 +176,78 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         for field, default_value in cls._TRANSFER_PREVIEW_SNAPSHOT_FIELDS:
             update_parts.append(f"{field} = ?")
             params.append(normalized_snapshot.get(field, default_value))
+
+    @classmethod
+    def _build_learning_previous_preview_snapshot(cls, preview: dict[str, Any]) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {}
+        for field, default_value in cls._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+            value = preview.get(field, default_value)
+            if field in {"preview_source_account_id", "preview_destination_account_id"}:
+                snapshot[field] = None if value in (None, "") else int(value)
+            else:
+                snapshot[field] = default_value if value is None else value
+        return snapshot
+
+    @classmethod
+    def _normalize_learning_previous_preview_snapshot(cls, raw_payload: Any) -> dict[str, Any]:
+        if not isinstance(raw_payload, dict):
+            return {}
+
+        snapshot: dict[str, Any] = {}
+        for field, default_value in cls._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+            value = raw_payload.get(field, default_value)
+            if field in {"preview_source_account_id", "preview_destination_account_id"}:
+                snapshot[field] = None if value in (None, "") else int(value)
+            else:
+                snapshot[field] = default_value if value is None else value
+        return snapshot
+
+    @classmethod
+    def _append_learning_snapshot_restore_updates(
+        cls,
+        snapshot: dict[str, Any],
+        update_parts: list[str],
+        params: list[Any],
+    ) -> None:
+        normalized_snapshot = cls._normalize_learning_previous_preview_snapshot(snapshot)
+        if not normalized_snapshot:
+            return
+
+        for field, default_value in cls._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+            update_parts.append(f"{field} = ?")
+            params.append(normalized_snapshot.get(field, default_value))
+
+    @classmethod
+    def _learning_preview_matches_snapshot(cls, preview: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+        normalized_snapshot = cls._normalize_learning_previous_preview_snapshot(snapshot)
+        if not normalized_snapshot:
+            return False
+
+        for field, default_value in cls._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+            current_value = preview.get(field, default_value)
+            if field in {"preview_source_account_id", "preview_destination_account_id"}:
+                normalized_current_value = None if current_value in (None, "") else int(current_value)
+            else:
+                normalized_current_value = default_value if current_value is None else current_value
+            if normalized_current_value != normalized_snapshot.get(field, default_value):
+                return False
+
+        return True
+
+    @classmethod
+    def _build_learning_accept_preview_updates(
+        cls,
+        applied_result: dict[str, Any],
+        preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_updates: dict[str, Any] = {}
+        for field, default_value in cls._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+            raw_value = applied_result.get(field, preview.get(field, default_value))
+            if field in {"preview_source_account_id", "preview_destination_account_id"}:
+                normalized_updates[field] = None if raw_value in (None, "") else int(raw_value)
+            else:
+                normalized_updates[field] = default_value if raw_value is None else raw_value
+        return normalized_updates
 
     @log_method
     async def insert_preview_bill(
@@ -505,9 +610,10 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         decision: str,
         user_id: int = 1,
         expected_state: dict[str, Any] | None = None,
+        applied_result: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         normalized_decision = str(decision or "").strip().lower()
-        if normalized_decision not in {"reject", "clear"}:
+        if normalized_decision not in {"accept", "reject", "clear"}:
             return None
 
         conn = await self._get_connection()
@@ -534,21 +640,73 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
             feedback_payload = self._deserialize_preview_matching_feedback(
                 preview.get("preview_matching_feedback")
             )
-            if normalized_decision == "reject":
+            learning_feedback = feedback_payload.get("learning") if isinstance(feedback_payload, dict) else {}
+            if not isinstance(learning_feedback, dict):
+                learning_feedback = {}
+            previous_preview_snapshot = self._normalize_learning_previous_preview_snapshot(
+                learning_feedback.get("previous_preview")
+            )
+            applied_preview_snapshot = self._normalize_learning_previous_preview_snapshot(
+                learning_feedback.get("applied_preview")
+            )
+            current_review_status = str(learning_feedback.get("review_status") or "").strip().lower()
+            should_restore_previous_preview = (
+                current_review_status == "accepted"
+                and bool(previous_preview_snapshot)
+                and (
+                    not applied_preview_snapshot
+                    or self._learning_preview_matches_snapshot(preview, applied_preview_snapshot)
+                )
+            )
+
+            update_parts: list[str] = []
+            params: list[Any] = []
+
+            if normalized_decision == "accept":
+                if not previous_preview_snapshot:
+                    previous_preview_snapshot = self._build_learning_previous_preview_snapshot(preview)
+
+                applied_updates = self._build_learning_accept_preview_updates(applied_result or {}, preview)
+                for field, _default_value in self._LEARNING_PREVIEW_SNAPSHOT_FIELDS:
+                    update_parts.append(f"{field} = ?")
+                    params.append(applied_updates[field])
+
+                feedback_payload["learning"] = {
+                    "review_status": "accepted",
+                    "suppressed": False,
+                    "previous_preview": previous_preview_snapshot,
+                    "applied_preview": applied_updates,
+                }
+                normalized_rule_id = applied_result.get("rule_id") if isinstance(applied_result, dict) else None
+                if normalized_rule_id not in (None, "", 0, "0"):
+                    feedback_payload["learning"]["rule_id"] = int(normalized_rule_id)
+            elif normalized_decision == "reject":
+                if should_restore_previous_preview:
+                    self._append_learning_snapshot_restore_updates(previous_preview_snapshot, update_parts, params)
+
                 feedback_payload["learning"] = {
                     "review_status": "rejected",
                     "suppressed": True,
                 }
+                normalized_rule_id = None
+                if isinstance(applied_result, dict):
+                    normalized_rule_id = applied_result.get("rule_id")
+                if normalized_rule_id in (None, "", 0, "0"):
+                    normalized_rule_id = learning_feedback.get("rule_id")
+                if normalized_rule_id not in (None, "", 0, "0"):
+                    feedback_payload["learning"]["rule_id"] = int(normalized_rule_id)
             else:
+                if should_restore_previous_preview:
+                    self._append_learning_snapshot_restore_updates(previous_preview_snapshot, update_parts, params)
                 feedback_payload.pop("learning", None)
 
+            update_parts.append("preview_matching_feedback_json = ?")
+            params.append(self._serialize_preview_matching_feedback(feedback_payload))
+            params.extend([preview_id, user_id])
+
             cursor = await conn.execute(
-                "UPDATE bills_preview SET preview_matching_feedback_json = ? WHERE id = ? AND user_id = ?",
-                (
-                    self._serialize_preview_matching_feedback(feedback_payload),
-                    preview_id,
-                    user_id,
-                ),
+                f"UPDATE bills_preview SET {', '.join(update_parts)} WHERE id = ? AND user_id = ?",
+                tuple(params),
             )
             if int(cursor.rowcount or 0) < 1:
                 await conn.rollback()

@@ -89,6 +89,10 @@ class FakeBillServiceDB:
         _ = user_id
         return self.accounts
 
+    async def get_account_by_id(self, account_id: int, user_id: int = 1) -> dict[str, Any] | None:
+        _ = user_id
+        return next((account for account in self.accounts if int(account.get("id") or 0) == account_id), None)
+
     async def get_historical_source_account_suggestion(self, **kwargs: Any) -> dict[str, Any] | None:
         if kwargs.get("description") == "历史命中":
             return self.history_source
@@ -532,6 +536,50 @@ async def test_import_learning_helpers_and_promotion_cover_rule_replay_paths() -
     assert promote_result["success"] is True
     assert fake_db.saved_annotation_samples[0][0] == "session-1"
     assert fake_db.promoted_annotation_sessions[0] == ("session-1", [11], 1)
+
+
+@pytest.mark.asyncio
+async def test_apply_import_learning_rules_ignores_stale_account_ids() -> None:
+    """长期学习回放遇到已失效账户 ID 时，不应把悬空账户写回 bill。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.import_rules = [
+        {
+            "id": 10,
+            "match_type": "composite",
+            "composite_match_hash": fake_db.build_composite_match_hash(
+                parser_id="wechat",
+                counterparty="早餐铺",
+                description="共同描述",
+                payment_method="微信支付",
+            ),
+            "learned_type": "收入",
+            "learned_category_id": 77,
+            "learned_source_account_id": 999999,
+            "learned_destination_account_id": 999998,
+        }
+    ]
+    service = _make_service(fake_db)
+
+    bills = [
+        {
+            "_parser_id": "wechat",
+            "counterparty": "早餐铺",
+            "description": "共同描述",
+            "payment_method": "微信支付",
+            "type": "支出",
+            "source_account_id": 5,
+            "destination_account_id": 6,
+        }
+    ]
+
+    applied = await service._apply_import_learning_rules(bills, user_id=1, type_only=False, record_usage=False)
+
+    assert applied == 1
+    assert bills[0]["type"] == "收入"
+    assert bills[0]["main_category"] == "餐饮"
+    assert bills[0]["sub_category"] == "早餐"
+    assert bills[0]["source_account_id"] == 5
+    assert bills[0]["destination_account_id"] == 6
 
 
 @pytest.mark.asyncio

@@ -351,6 +351,20 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         return [dict(row) for row in rows]
 
     @log_method
+    async def get_import_learning_rule_by_id(
+        self,
+        rule_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any] | None:
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1",
+            (rule_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    @log_method
     async def count_import_learning_rules(self, user_id: int = 1, enabled_only: bool = False) -> int:
         conn = await self._get_connection()
         query = "SELECT COUNT(*) AS total_count FROM import_learning_rules WHERE user_id = ?"

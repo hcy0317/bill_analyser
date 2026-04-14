@@ -973,6 +973,58 @@ async def test_db_accept_bill_learning_candidate_does_not_clear_accounts_for_zer
 
 
 @pytest.mark.asyncio
+async def test_db_accept_bill_learning_candidate_ignores_stale_account_ids(tmp_path: Path) -> None:
+    """historical learning accept 遇到已失效账户 ID 时，不应把悬空账户写回正式账单。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_learning_stale_account_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="learning stale 源账户")
+        destination_account_id = await _create_account(db, user_id=user_id, name="learning stale 目标账户")
+        rule_id = await _create_composite_learning_rule(
+            db,
+            user_id=user_id,
+            parser_id="wechat",
+            counterparty="pytest learning stale vendor",
+            description="pytest learning stale note",
+            payment_method="银行卡",
+            learned_type="收入",
+        )
+
+        conn = await db._get_connection()
+        await conn.execute(
+            """
+            UPDATE import_learning_rules
+            SET learned_source_account_id = ?,
+                learned_destination_account_id = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (999999, 999998, rule_id, user_id),
+        )
+        await conn.commit()
+
+        bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            destination_account_id=destination_account_id,
+            amount=-18.5,
+            bill_type="支出",
+            date="2026-07-26 12:00:00",
+            description="pytest learning stale note",
+            counterparty="pytest learning stale vendor",
+        )
+
+        accepted = await db.accept_bill_learning_candidate(bill_id, rule_id, user_id=user_id)
+
+        assert accepted["bill_id"] == bill_id
+        assert accepted["bill"]["type"] == "收入"
+        assert int(accepted["bill"]["source_account_id"] or 0) == source_account_id
+        assert int(accepted["bill"]["destination_account_id"] or 0) == destination_account_id
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_db_accept_and_reject_bill_learning_candidate_reject_stale_expected_rule_revision(tmp_path: Path) -> None:
     """historical learning accept/reject 应在事务内拒绝 stale expected_rule_revision。"""
     db = await _create_database(tmp_path)

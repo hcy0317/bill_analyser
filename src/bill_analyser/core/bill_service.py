@@ -1149,6 +1149,7 @@ class BillService:
             return 0
 
         category_cache: dict[int, dict[str, Any] | None] = {}
+        account_cache: dict[int, dict[str, Any] | None] = {}
         matched_rule_ids: list[int] = []
         applied_count = 0
 
@@ -1204,10 +1205,29 @@ class BillService:
                         bill["main_category"] = category.get("main_category", "")
                         bill["sub_category"] = category.get("sub_category", "")
 
-                if matched_rule.get("learned_source_account_id"):
-                    bill["source_account_id"] = matched_rule.get("learned_source_account_id")
-                if matched_rule.get("learned_destination_account_id"):
-                    bill["destination_account_id"] = matched_rule.get("learned_destination_account_id")
+                learned_source_account_id = matched_rule.get("learned_source_account_id")
+                if learned_source_account_id not in (None, "", 0, "0"):
+                    source_account_id = int(learned_source_account_id)
+                    if source_account_id not in account_cache:
+                        account_cache[source_account_id] = await self.db.get_account_by_id(
+                            source_account_id,
+                            user_id=user_id,
+                        )
+                    source_account = account_cache.get(source_account_id)
+                    if source_account and source_account.get("id") not in (None, ""):
+                        bill["source_account_id"] = int(source_account.get("id") or 0)
+
+                learned_destination_account_id = matched_rule.get("learned_destination_account_id")
+                if learned_destination_account_id not in (None, "", 0, "0"):
+                    destination_account_id = int(learned_destination_account_id)
+                    if destination_account_id not in account_cache:
+                        account_cache[destination_account_id] = await self.db.get_account_by_id(
+                            destination_account_id,
+                            user_id=user_id,
+                        )
+                    destination_account = account_cache.get(destination_account_id)
+                    if destination_account and destination_account.get("id") not in (None, ""):
+                        bill["destination_account_id"] = int(destination_account.get("id") or 0)
 
             applied_count += 1
             rule_id = matched_rule.get("id")
@@ -2699,6 +2719,48 @@ class BillService:
 
         return normalized_recurring_id
 
+    @staticmethod
+    def _normalize_preview_learning_rule_id(raw_rule_id: Any) -> int:
+        if isinstance(raw_rule_id, bool):
+            raise ValueError("Invalid ruleId")
+
+        if isinstance(raw_rule_id, int):
+            normalized_rule_id = raw_rule_id
+        elif isinstance(raw_rule_id, str):
+            stripped_rule_id = raw_rule_id.strip()
+            if not stripped_rule_id or not stripped_rule_id.isdigit():
+                raise ValueError("Invalid ruleId")
+            normalized_rule_id = int(stripped_rule_id)
+        else:
+            raise ValueError("Invalid ruleId")
+
+        if normalized_rule_id <= 0:
+            raise ValueError("Invalid ruleId")
+
+        return normalized_rule_id
+
+    @staticmethod
+    def _normalize_preview_learning_account_id(raw_account_id: Any) -> int | None:
+        if raw_account_id in (None, "", 0, "0"):
+            return None
+        if isinstance(raw_account_id, bool):
+            raise ValueError("Invalid accountId")
+
+        if isinstance(raw_account_id, int):
+            normalized_account_id = raw_account_id
+        elif isinstance(raw_account_id, str):
+            stripped_account_id = raw_account_id.strip()
+            if not stripped_account_id or not stripped_account_id.isdigit():
+                raise ValueError("Invalid accountId")
+            normalized_account_id = int(stripped_account_id)
+        else:
+            raise ValueError("Invalid accountId")
+
+        if normalized_account_id <= 0:
+            raise ValueError("Invalid accountId")
+
+        return normalized_account_id
+
     @log_method
     async def _accept_preview_recurring_candidate(
         self,
@@ -2748,6 +2810,33 @@ class BillService:
             int(parsed_candidate_id["preview_id"]),
             "accept",
             expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
+    async def _accept_preview_learning_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.apply_preview_learning_decision(
+            int(parsed_candidate_id["preview_id"]),
+            "accept",
+            expected_state=payload.get("expectedState"),
+            rule_id=payload.get("ruleId"),
             user_id=user_id,
         )
         if not result.get("success"):
@@ -3035,6 +3124,14 @@ class BillService:
 
         if candidate_scope == "preview" and candidate_kind == "investment":
             return await self._accept_preview_investment_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "preview" and candidate_kind == "learning":
+            return await self._accept_preview_learning_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 payload,
@@ -3393,17 +3490,62 @@ class BillService:
             accounts_by_id=learning_accounts_by_id,
         )
 
+    async def _build_preview_learning_apply_payload(
+        self,
+        rule: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        applied_result: dict[str, Any] = {"rule_id": int(rule.get("id") or 0)}
+
+        learned_type = str(rule.get("learned_type") or "").strip()
+        if learned_type:
+            applied_result["preview_type"] = learned_type
+
+        learned_category_id = rule.get("learned_category_id")
+        if learned_category_id not in (None, "", 0, "0"):
+            category = await self.db.get_category_by_id(
+                int(learned_category_id),
+                user_id=user_id,
+            )
+            if category:
+                applied_result["preview_main_category"] = str(category.get("main_category") or "")
+                applied_result["preview_sub_category"] = str(category.get("sub_category") or "")
+
+        learned_source_account_id = rule.get("learned_source_account_id")
+        if learned_source_account_id not in (None, "", 0, "0"):
+            source_account = await self.db.get_account_by_id(
+                int(learned_source_account_id),
+                user_id=user_id,
+            )
+            if source_account and source_account.get("id") not in (None, ""):
+                applied_result["preview_source_account_id"] = int(source_account.get("id") or 0)
+
+        learned_destination_account_id = rule.get("learned_destination_account_id")
+        if learned_destination_account_id not in (None, "", 0, "0"):
+            destination_account = await self.db.get_account_by_id(
+                int(learned_destination_account_id),
+                user_id=user_id,
+            )
+            if destination_account and destination_account.get("id") not in (None, ""):
+                applied_result["preview_destination_account_id"] = int(
+                    destination_account.get("id") or 0
+                )
+
+        return applied_result
+
     @log_method
     async def apply_preview_learning_decision(  # pylint: disable=too-many-locals,too-many-return-statements,too-many-boolean-expressions
         self,
         preview_id: int,
         decision: str,
         expected_state: dict[str, Any] | None = None,
+        rule_id: Any | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """Persist a preview-scoped learning decision and return refreshed preview data."""
         normalized_decision = str(decision or "").strip().lower()
-        if normalized_decision not in {"reject", "clear"}:
+        if normalized_decision not in {"accept", "reject", "clear"}:
             return {"success": False, "error": "Invalid decision", "status_code": 400}
 
         if not isinstance(expected_state, dict):
@@ -3422,6 +3564,12 @@ class BillService:
         current_preview_recurring_id = (
             None if current_preview_recurring_id in (None, "") else int(current_preview_recurring_id)
         )
+        current_preview_source_account_id = self._normalize_preview_learning_account_id(
+            preview.get("preview_source_account_id")
+        )
+        current_preview_destination_account_id = self._normalize_preview_learning_account_id(
+            preview.get("preview_destination_account_id")
+        )
 
         expected_session_id = str(expected_state.get("sessionId") or "")
         expected_review_status = str(expected_state.get("reviewStatus") or "").strip().lower()
@@ -3435,6 +3583,26 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
+            source_account_state_required = (
+                normalized_decision == "accept"
+                or current_learning_review_status == "accepted"
+                or "sourceAccountId" in expected_state
+            )
+            destination_account_state_required = (
+                normalized_decision == "accept"
+                or current_learning_review_status == "accepted"
+                or "destinationAccountId" in expected_state
+            )
+            expected_source_account_id = (
+                self._normalize_preview_learning_account_id(expected_state.get("sourceAccountId"))
+                if source_account_state_required
+                else current_preview_source_account_id
+            )
+            expected_destination_account_id = (
+                self._normalize_preview_learning_account_id(expected_state.get("destinationAccountId"))
+                if destination_account_state_required
+                else current_preview_destination_account_id
+            )
         except TypeError, ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
@@ -3444,21 +3612,79 @@ class BillService:
             or str(preview.get("preview_type") or "") != expected_preview_type
             or current_preview_category_id != expected_category_id
             or current_preview_recurring_id != expected_recurring_id
+            or current_preview_source_account_id != expected_source_account_id
+            or current_preview_destination_account_id != expected_destination_account_id
         ):
             return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
 
+        learning_recommendation = await self._build_learning_recommendation_from_preview(
+            preview,
+            user_id=user_id,
+        )
+        learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         has_existing_learning_review = current_learning_review_status in {"accepted", "rejected"}
-        if normalized_decision != "clear" and not has_existing_learning_review:
-            learning_recommendation = await self._build_learning_recommendation_from_preview(
-                preview,
+        retained_learning_rule_id = None
+        if isinstance(learning_feedback, dict) and learning_feedback.get("rule_id") not in (None, ""):
+            try:
+                retained_learning_rule_id = self._normalize_preview_learning_rule_id(
+                    learning_feedback.get("rule_id")
+                )
+            except ValueError:
+                retained_learning_rule_id = None
+
+        applied_result: dict[str, Any] | None = None
+        if normalized_decision == "accept":
+            if rule_id in (None, ""):
+                return {"success": False, "error": "Missing ruleId", "status_code": 400}
+
+            try:
+                normalized_rule_id = self._normalize_preview_learning_rule_id(rule_id)
+            except ValueError:
+                return {"success": False, "error": "Invalid request", "status_code": 400}
+
+            live_learning_rule_id = int(learning_recommendation.get("rule_id") or 0)
+            if live_learning_rule_id > 0:
+                if live_learning_rule_id != normalized_rule_id:
+                    return {
+                        "success": False,
+                        "error": "Learning candidate not available",
+                        "status_code": 400,
+                    }
+            elif retained_learning_rule_id != normalized_rule_id:
+                return {
+                    "success": False,
+                    "error": "Learning candidate not available",
+                    "status_code": 400,
+                }
+
+            learning_rule = await self.db.get_import_learning_rule_by_id(
+                normalized_rule_id,
                 user_id=user_id,
             )
+            if not learning_rule:
+                return {
+                    "success": False,
+                    "error": "Learning candidate not available",
+                    "status_code": 400,
+                }
+
+            applied_result = await self._build_preview_learning_apply_payload(
+                learning_rule,
+                user_id=user_id,
+            )
+        elif normalized_decision != "clear" and not has_existing_learning_review:
             if not learning_recommendation:
                 return {
                     "success": False,
                     "error": "Learning candidate not available",
                     "status_code": 400,
                 }
+
+            live_learning_rule_id = int(learning_recommendation.get("rule_id") or 0)
+            if live_learning_rule_id > 0:
+                applied_result = {"rule_id": live_learning_rule_id}
+        elif retained_learning_rule_id is not None:
+            applied_result = {"rule_id": retained_learning_rule_id}
 
         updated_preview = await self.db.update_preview_learning_decision(
             preview_id,
@@ -3470,8 +3696,11 @@ class BillService:
                 "preview_main_category": str(preview.get("preview_main_category") or ""),
                 "preview_sub_category": str(preview.get("preview_sub_category") or ""),
                 "preview_recurring_id": current_preview_recurring_id,
+                "preview_source_account_id": current_preview_source_account_id,
+                "preview_destination_account_id": current_preview_destination_account_id,
                 "preview_matching_feedback_json": str(preview.get("preview_matching_feedback_json") or ""),
             },
+            applied_result=applied_result,
         )
         if updated_preview and updated_preview.get("_state_conflict"):
             return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
@@ -3630,11 +3859,23 @@ class BillService:
             preview,
             user_id=user_id,
         )
+        feedback_rule_id = None
+        if isinstance(learning_feedback, dict) and learning_feedback.get("rule_id") not in (None, ""):
+            try:
+                feedback_rule_id = self._normalize_preview_learning_rule_id(learning_feedback.get("rule_id"))
+            except ValueError:
+                feedback_rule_id = None
+
+        live_rule_id = int(learning_recommendation.get("rule_id") or 0)
+        if review_status in {"accepted", "rejected"}:
+            if live_rule_id == 0:
+                return review_status
+            if feedback_rule_id in (None, live_rule_id):
+                return review_status
+
         if not learning_recommendation:
             return ""
 
-        if review_status in {"accepted", "rejected"}:
-            return review_status
         return "pending"
 
     @staticmethod

@@ -272,6 +272,55 @@ def test_build_matching_session_candidates_projects_rejected_learning_candidate_
     assert result["candidates"][0]["details"]["suppressed"] is True
 
 
+def test_build_matching_session_candidates_projects_accepted_learning_candidate_status() -> None:
+    """learning candidate 在 preview feedback accept 后仍应保留并投影为 accepted。"""
+    result = build_matching_session_candidates(
+        "session-accepted-learning",
+        [
+            {
+                "id": 33,
+                "preview_date": "2026-04-12 11:00:00",
+                "preview_type": "收入",
+                "preview_amount": 38.0,
+                "preview_destination_amount": 0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "咖啡",
+                "preview_source_account_id": 1,
+                "preview_destination_account_id": 2,
+                "preview_counterparty": "星巴克",
+                "preview_payment_method": "支付宝",
+                "preview_description": "咖啡消费",
+                "preview_selected": True,
+                "matching": {
+                    "transfer": {},
+                    "investment": {},
+                    "learning": {
+                        "rule_id": 43,
+                        "score": 0.9,
+                        "level": "high",
+                        "reason": "parser_id:exact",
+                        "recommended_type": "收入",
+                        "summary": "收入 | 餐饮/咖啡 | 星巴克账户 → 会员账户",
+                        "review_status": "accepted",
+                        "suppressed": False,
+                    },
+                    "recurring": {},
+                    "dedup": {},
+                    "parser": {},
+                    "annotation": {},
+                },
+            }
+        ],
+    )
+
+    assert result["summary"]["candidate_count"] == 1
+    assert result["summary"]["counts_by_kind"]["learning"] == 1
+    assert result["candidates"][0]["kind"] == "learning"
+    assert result["candidates"][0]["status"] == "accepted"
+    assert result["candidates"][0]["details"]["rule_id"] == 43
+    assert result["candidates"][0]["details"]["suppressed"] is False
+
+
 @pytest.mark.asyncio
 async def test_bill_service_get_matching_session_candidates_wraps_preview_projection(monkeypatch: pytest.MonkeyPatch) -> None:
     """BillService 应提供 matching session 候选的薄包装方法。"""
@@ -631,6 +680,97 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_investm
             {
                 "id": 1,
                 "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_dispatches_preview_learning_with_rule_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BillService generic accept 应把 preview learning 分发到带 ruleId 绑定的写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, str, int, dict[str, object], int]] = []
+
+    async def fake_apply_preview_learning_decision(
+        preview_id: int,
+        decision: str,
+        *,
+        expected_state: dict[str, object] | None = None,
+        rule_id: int | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, decision, int(rule_id or 0), dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-learning-accept",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "preview_type": "收入",
+                    "matching": {
+                        "learning": {
+                            "rule_id": int(rule_id or 0),
+                            "review_status": "accepted",
+                            "suppressed": False,
+                        }
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "apply_preview_learning_decision", fake_apply_preview_learning_decision)
+
+    payload = {
+        "ruleId": 42,
+        "expectedState": {
+            "sessionId": "session-learning-accept",
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+        },
+    }
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:learning",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            "accept",
+            42,
+            {
+                "sessionId": "session-learning-accept",
+                "reviewStatus": "pending",
+                "previewType": "支出",
+                "categoryId": None,
+                "recurringId": None,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:learning",
+        "action": "accept",
+        "preview_id": 1,
+        "session_id": "session-learning-accept",
+        "preview": [
+            {
+                "id": 1,
+                "preview_type": "收入",
+                "matching": {
+                    "learning": {
+                        "rule_id": 42,
+                        "review_status": "accepted",
+                        "suppressed": False,
+                    }
+                },
             }
         ],
     }

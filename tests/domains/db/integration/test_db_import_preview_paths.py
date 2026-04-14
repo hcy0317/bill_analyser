@@ -539,10 +539,10 @@ async def test_preview_investment_decision_accept_reject_and_clear_preserve_prev
 
 
 @pytest.mark.asyncio
-async def test_preview_learning_decision_reject_and_clear_preserve_preview_fields(
+async def test_preview_learning_decision_accept_reject_and_clear_restore_preview_fields(
     tmp_path: Path,
 ) -> None:
-    """长期学习建议决策应支持 reject/clear，并保持当前 preview 字段不被覆盖。"""
+    """长期学习建议决策应支持 accept/reject/clear，并在需要时恢复 accept 前 snapshot。"""
     db = await _create_database(tmp_path)
     try:
         user_id = await _create_user(db, "preview_learning_decision_user")
@@ -557,6 +557,8 @@ async def test_preview_learning_decision_reject_and_clear_preserve_preview_field
                 "preview_amount": 38.0,
                 "preview_main_category": "",
                 "preview_sub_category": "",
+                "preview_source_account_id": 5,
+                "preview_destination_account_id": None,
                 "preview_counterparty": "星巴克",
                 "preview_payment_method": "支付宝",
                 "preview_description": "咖啡消费",
@@ -565,6 +567,47 @@ async def test_preview_learning_decision_reject_and_clear_preserve_preview_field
             user_id=user_id,
         )
         assert preview_id > 0
+
+        applied_result = {
+            "rule_id": 42,
+            "preview_type": "收入",
+            "preview_main_category": "餐饮",
+            "preview_sub_category": "咖啡",
+            "preview_source_account_id": 11,
+            "preview_destination_account_id": 22,
+        }
+
+        accepted_preview = await db.update_preview_learning_decision(
+            preview_id,
+            "accept",
+            user_id=user_id,
+            applied_result=applied_result,
+        )
+        assert accepted_preview is not None
+        assert accepted_preview["preview_type"] == "收入"
+        assert accepted_preview["preview_main_category"] == "餐饮"
+        assert accepted_preview["preview_sub_category"] == "咖啡"
+        assert accepted_preview["preview_source_account_id"] == 11
+        assert accepted_preview["preview_destination_account_id"] == 22
+        assert accepted_preview["preview_matching_feedback"]["learning"] == {
+            "review_status": "accepted",
+            "suppressed": False,
+            "rule_id": 42,
+            "applied_preview": {
+                "preview_type": "收入",
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "咖啡",
+                "preview_source_account_id": 11,
+                "preview_destination_account_id": 22,
+            },
+            "previous_preview": {
+                "preview_type": "支出",
+                "preview_main_category": "",
+                "preview_sub_category": "",
+                "preview_source_account_id": 5,
+                "preview_destination_account_id": None,
+            },
+        }
 
         rejected_preview = await db.update_preview_learning_decision(
             preview_id,
@@ -575,10 +618,26 @@ async def test_preview_learning_decision_reject_and_clear_preserve_preview_field
         assert rejected_preview["preview_type"] == "支出"
         assert rejected_preview["preview_main_category"] == ""
         assert rejected_preview["preview_sub_category"] == ""
+        assert rejected_preview["preview_source_account_id"] == 5
+        assert rejected_preview["preview_destination_account_id"] is None
         assert rejected_preview["preview_matching_feedback"]["learning"] == {
             "review_status": "rejected",
             "suppressed": True,
+            "rule_id": 42,
         }
+
+        reaccepted_preview = await db.update_preview_learning_decision(
+            preview_id,
+            "accept",
+            user_id=user_id,
+            applied_result=applied_result,
+        )
+        assert reaccepted_preview is not None
+        assert reaccepted_preview["preview_type"] == "收入"
+        assert reaccepted_preview["preview_main_category"] == "餐饮"
+        assert reaccepted_preview["preview_sub_category"] == "咖啡"
+        assert reaccepted_preview["preview_source_account_id"] == 11
+        assert reaccepted_preview["preview_destination_account_id"] == 22
 
         cleared_preview = await db.update_preview_learning_decision(
             preview_id,
@@ -590,6 +649,17 @@ async def test_preview_learning_decision_reject_and_clear_preserve_preview_field
         assert cleared_preview["preview_type"] == "支出"
         assert cleared_preview["preview_main_category"] == ""
         assert cleared_preview["preview_sub_category"] == ""
+        assert cleared_preview["preview_source_account_id"] == 5
+        assert cleared_preview["preview_destination_account_id"] is None
+        assert (
+            await db.update_preview_learning_decision(
+                999999,
+                "accept",
+                user_id=user_id,
+                applied_result=applied_result,
+            )
+            is None
+        )
         assert await db.update_preview_learning_decision(999999, "reject", user_id=user_id) is None
     finally:
         await db.close()

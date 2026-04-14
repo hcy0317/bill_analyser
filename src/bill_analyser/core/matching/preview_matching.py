@@ -124,11 +124,33 @@ def build_preview_matching_payload(
             for field in ("level", "reason", "recommended_type", "summary")
         )
     )
+    feedback_learning_rule_id = _normalize_int_or_none(learning_feedback.get("rule_id"))
+    live_learning_rule_id = _normalize_int_or_none(learning_recommendation.get("rule_id"))
     learning_review_status = str(learning_feedback.get("review_status") or "").strip().lower()
-    if learning_review_status not in {"accepted", "rejected"} or not has_learning_signal:
+    if learning_review_status in {"accepted", "rejected"}:
+        if has_learning_signal and live_learning_rule_id not in (None, feedback_learning_rule_id):
+            learning_review_status = "pending"
+    else:
         learning_review_status = "pending" if has_learning_signal else ""
-    learning_suppressed = has_learning_signal and (
-        bool(learning_feedback.get("suppressed")) or learning_review_status == "rejected"
+    learning_suppressed = bool(learning_feedback.get("suppressed")) or learning_review_status == "rejected"
+    learning_rule_id = live_learning_rule_id
+    if learning_rule_id is None:
+        learning_rule_id = feedback_learning_rule_id
+
+    if learning_review_status in {"accepted", "rejected"} and not has_learning_signal:
+        learning_suppressed = learning_review_status == "rejected"
+
+    if learning_review_status == "accepted" and not has_learning_signal:
+        learning_suppressed = False
+
+    if learning_review_status in {"accepted", "rejected"} and not str(learning_recommendation.get("summary") or ""):
+        learning_recommendation = {
+            **learning_recommendation,
+            "rule_id": learning_rule_id,
+        }
+
+    learning_suppressed = learning_suppressed and (
+        has_learning_signal or learning_review_status in {"accepted", "rejected"}
     )
 
     payload = PreviewMatchingPayload(
@@ -182,6 +204,8 @@ def build_preview_matching_payload(
                 if str(tag)
             ],
         ),
-        annotation=AnnotationMatchingPayload(is_manually_annotated=bool(is_manually_annotated)),
+        annotation=AnnotationMatchingPayload(
+            is_manually_annotated=bool(is_manually_annotated),
+        ),
     )
     return payload.to_dict()

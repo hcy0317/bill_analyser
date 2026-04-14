@@ -674,15 +674,27 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
             learned_source_account_id = rule.get("learned_source_account_id")
             if learned_source_account_id not in (None, "", 0, "0"):
-                normalized_source_account_id = int(learned_source_account_id or 0)
-                if normalized_source_account_id != int(bill.get("source_account_id") or 0):
-                    updates["source_account_id"] = normalized_source_account_id
+                async with conn.execute(
+                    "SELECT id FROM accounts WHERE user_id = ? AND id = ? LIMIT 1",
+                    (user_id, int(learned_source_account_id)),
+                ) as cursor:
+                    source_account_row = await cursor.fetchone()
+                if source_account_row:
+                    normalized_source_account_id = int(source_account_row["id"] or 0)
+                    if normalized_source_account_id != int(bill.get("source_account_id") or 0):
+                        updates["source_account_id"] = normalized_source_account_id
 
             learned_destination_account_id = rule.get("learned_destination_account_id")
             if learned_destination_account_id not in (None, "", 0, "0"):
-                normalized_destination_account_id = int(learned_destination_account_id or 0)
-                if normalized_destination_account_id != int(bill.get("destination_account_id") or 0):
-                    updates["destination_account_id"] = normalized_destination_account_id
+                async with conn.execute(
+                    "SELECT id FROM accounts WHERE user_id = ? AND id = ? LIMIT 1",
+                    (user_id, int(learned_destination_account_id)),
+                ) as cursor:
+                    destination_account_row = await cursor.fetchone()
+                if destination_account_row:
+                    normalized_destination_account_id = int(destination_account_row["id"] or 0)
+                    if normalized_destination_account_id != int(bill.get("destination_account_id") or 0):
+                        updates["destination_account_id"] = normalized_destination_account_id
 
             updated_at = utc_now_iso()
             if updates:
