@@ -135,6 +135,40 @@ def _create_composite_learning_rule_via_db(
     return asyncio.run(_create())
 
 
+def _list_bill_pair_feedback_via_db(*, user_id: int, candidate_id: str | None = None) -> list[dict[str, object]]:
+    from src.api.app import db
+
+    async def _list() -> list[dict[str, object]]:
+        conn = await db._get_connection()  # pylint: disable=protected-access
+        if candidate_id is None:
+            query = "SELECT * FROM bill_pair_feedback WHERE user_id = ? ORDER BY id ASC"
+            params: tuple[object, ...] = (user_id,)
+        else:
+            query = "SELECT * FROM bill_pair_feedback WHERE user_id = ? AND candidate_id = ? ORDER BY id ASC"
+            params = (user_id, candidate_id)
+
+        async with conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+
+        feedback_rows: list[dict[str, object]] = []
+        for row in rows:
+            row_dict = dict(row)
+            feedback_rows.append(
+                {
+                    **row_dict,
+                    "id": int(row_dict.get("id") or 0),
+                    "user_id": int(row_dict.get("user_id") or 0),
+                    "candidate_id": str(row_dict.get("candidate_id") or ""),
+                    "action": str(row_dict.get("action") or ""),
+                    "payload": json.loads(str(row_dict.get("payload_json") or "{}")),
+                    "created_at": str(row_dict.get("created_at") or ""),
+                }
+            )
+        return feedback_rows
+
+    return asyncio.run(_list())
+
+
 class TestMatchingAPI:
     """matching API 回归。"""
 
@@ -4371,6 +4405,142 @@ class TestMatchingAPI:
         )
         assert reject_response.status_code == 404
         assert reject_response.get_json()["error"] == "Bill not found"
+
+    def test_matching_candidate_accept_records_feedback_event_for_historical_transfer(self, client):
+        """historical transfer generic accept 成功后，应追加一条 bill_pair_feedback 事件。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_transfer_feedback")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest feedback transfer accept 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest feedback transfer accept 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-48.0,
+            bill_type="支出",
+            date="2026-07-28 09:00:00",
+            description="pytest feedback transfer accept anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=48.0,
+            bill_type="收入",
+            date="2026-07-28 09:03:00",
+            description="pytest feedback transfer accept candidate",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}"
+
+        assert _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id) == []
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        feedback_rows = _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id)
+        assert len(feedback_rows) == 1
+        assert feedback_rows[0]["action"] == "accept"
+        assert feedback_rows[0]["payload"] == {
+            "scope": "bill",
+            "kind": "transfer",
+            "bill_id": anchor_bill_id,
+            "candidate_bill_id": candidate_bill_id,
+            "pair": {
+                "id": accept_response.get_json()["data"]["pair"]["id"],
+                "pair_type": "transfer",
+                "source": "manual",
+                "left_bill_id": min(anchor_bill_id, candidate_bill_id),
+                "right_bill_id": max(anchor_bill_id, candidate_bill_id),
+            },
+        }
+
+    def test_matching_candidate_reject_records_feedback_event_for_historical_investment(self, client):
+        """historical investment generic reject 成功后，应追加一条 bill_pair_feedback 事件。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_investment_feedback")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest feedback investment reject 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest feedback investment reject 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-58.0,
+            bill_type="投资",
+            date="2026-07-28 10:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=58.0,
+            bill_type="投资",
+            date="2026-07-28 10:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
+
+        assert _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id) == []
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert reject_response.status_code == 200
+        feedback_rows = _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id)
+        assert len(feedback_rows) == 1
+        assert feedback_rows[0]["action"] == "reject"
+        assert feedback_rows[0]["payload"] == {
+            "scope": "bill",
+            "kind": "investment",
+            "bill_id": anchor_bill_id,
+            "candidate_bill_id": candidate_bill_id,
+        }
+
+    def test_matching_candidate_accept_conflict_does_not_record_feedback_event_for_historical_transfer(self, client):
+        """historical transfer generic accept 失败时，不应误写 bill_pair_feedback 事件。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_transfer_feedback_conflict")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest feedback transfer conflict 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest feedback transfer conflict 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-68.0,
+            bill_type="支出",
+            date="2026-07-28 11:00:00",
+            description="pytest feedback transfer conflict anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=68.0,
+            bill_type="收入",
+            date="2026-07-28 11:03:00",
+            description="pytest feedback transfer conflict candidate",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}"
+
+        pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id},
+            headers=auth_headers,
+        )
+        assert pair_response.status_code == 200
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 409
+        assert _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id) == []
 
     def test_matching_candidate_reject_is_user_scoped_for_historical_learning(self, client):
         """generic reject 的 historical learning 分支不应跨用户生效。"""

@@ -213,6 +213,20 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS bill_pair_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                candidate_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS bill_transfer_pair_suppressions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,
@@ -392,6 +406,14 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bill_pair_links_user_type ON bill_pair_links(user_id, pair_type)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_pair_feedback_user_candidate "
+            "ON bill_pair_feedback(user_id, candidate_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bill_pair_feedback_user_created_at "
+            "ON bill_pair_feedback(user_id, created_at DESC)"
         )
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_bill_transfer_pair_suppressions_user_left "

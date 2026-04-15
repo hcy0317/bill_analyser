@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import sqlite3
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -121,6 +123,161 @@ async def _count_bill_learning_rule_suppressions(db: Database, *, user_id: int) 
     ) as cursor:
         row = await cursor.fetchone()
     return int(row[0] if row else 0)
+
+
+async def _list_bill_pair_feedback(
+    db: Database,
+    *,
+    user_id: int,
+    candidate_id: str | None = None,
+) -> list[dict[str, Any]]:
+    conn = await db._get_connection()
+    if candidate_id is None:
+        query = "SELECT * FROM bill_pair_feedback WHERE user_id = ? ORDER BY id ASC"
+        params: tuple[object, ...] = (user_id,)
+    else:
+        query = "SELECT * FROM bill_pair_feedback WHERE user_id = ? AND candidate_id = ? ORDER BY id ASC"
+        params = (user_id, candidate_id)
+
+    async with conn.execute(query, params) as cursor:
+        rows = await cursor.fetchall()
+
+    feedback_rows: list[dict[str, Any]] = []
+    for row in rows:
+        row_dict = dict(row)
+        feedback_rows.append(
+            {
+                **row_dict,
+                "id": int(row_dict.get("id") or 0),
+                "user_id": int(row_dict.get("user_id") or 0),
+                "candidate_id": str(row_dict.get("candidate_id") or ""),
+                "action": str(row_dict.get("action") or ""),
+                "payload": json.loads(str(row_dict.get("payload_json") or "{}")),
+                "created_at": str(row_dict.get("created_at") or ""),
+            }
+        )
+    return feedback_rows
+
+
+@pytest.mark.asyncio
+async def test_db_record_bill_pair_feedback_persists_append_only_rows(tmp_path: Path) -> None:
+    """bill_pair_feedback 应作为 append-only 事件流持久化 historical transfer/investment accept/reject。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_feedback_event_user")
+
+        first_event = await db.record_bill_pair_feedback(
+            "bill:11:transfer:12",
+            "accept",
+            {
+                "scope": "bill",
+                "kind": "transfer",
+                "bill_id": 11,
+                "candidate_bill_id": 12,
+                "pair": {
+                    "id": 91,
+                    "pair_type": "transfer",
+                    "source": "manual",
+                    "left_bill_id": 11,
+                    "right_bill_id": 12,
+                },
+            },
+            user_id=user_id,
+        )
+        second_event = await db.record_bill_pair_feedback(
+            "bill:11:investment:12",
+            "reject",
+            {
+                "scope": "bill",
+                "kind": "investment",
+                "bill_id": 11,
+                "candidate_bill_id": 12,
+            },
+            user_id=user_id,
+        )
+
+        feedback_rows = await _list_bill_pair_feedback(db, user_id=user_id)
+
+        assert first_event["id"] > 0
+        assert first_event["candidate_id"] == "bill:11:transfer:12"
+        assert first_event["action"] == "accept"
+        assert first_event["payload"]["pair"]["pair_type"] == "transfer"
+        assert second_event["id"] > first_event["id"]
+        assert second_event["candidate_id"] == "bill:11:investment:12"
+        assert second_event["action"] == "reject"
+        assert second_event["payload"]["kind"] == "investment"
+        assert [row["candidate_id"] for row in feedback_rows] == [
+            "bill:11:transfer:12",
+            "bill:11:investment:12",
+        ]
+        assert [row["action"] for row in feedback_rows] == ["accept", "reject"]
+        assert feedback_rows[0]["payload"]["pair"]["pair_type"] == "transfer"
+        assert feedback_rows[1]["payload"] == {
+            "scope": "bill",
+            "kind": "investment",
+            "bill_id": 11,
+            "candidate_bill_id": 12,
+        }
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_create_manual_transfer_pair_rolls_back_when_feedback_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """当 feedback 事件写入失败时，manual transfer pair 应整体回滚，避免主写与事件流失配。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_feedback_txn_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="feedback txn 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="feedback txn 目标账户")
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-51.0,
+            bill_type="支出",
+            date="2026-07-29 09:00:00",
+            description="feedback txn anchor bill",
+        )
+        candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=51.0,
+            bill_type="收入",
+            date="2026-07-29 09:03:00",
+            description="feedback txn candidate bill",
+        )
+
+        async def _raise_feedback_write_failure(*args: object, **kwargs: object) -> dict[str, object]:
+            _ = (args, kwargs)
+            raise sqlite3.OperationalError("feedback write failed")
+
+        monkeypatch.setattr(db, "record_bill_pair_feedback", _raise_feedback_write_failure)
+
+        with pytest.raises(sqlite3.OperationalError, match="feedback write failed"):
+            await db.create_manual_transfer_pair(
+                anchor_bill_id,
+                candidate_bill_id,
+                user_id=user_id,
+                feedback_candidate_id=f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}",
+            )
+
+        assert await _count_bill_pair_links(db, user_id=user_id) == 0
+        assert await _list_bill_pair_feedback(
+            db,
+            user_id=user_id,
+            candidate_id=f"bill:{anchor_bill_id}:transfer:{candidate_bill_id}",
+        ) == []
+
+        candidate_result = await db.get_bill_transfer_candidates(anchor_bill_id, user_id=user_id)
+        assert candidate_result["linked_pair"] is None
+        assert [candidate["bill_id"] for candidate in candidate_result["candidates"]] == [candidate_bill_id]
+    finally:
+        await db.close()
 
 
 async def _create_composite_learning_rule(

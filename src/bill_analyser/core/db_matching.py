@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -195,6 +196,74 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             "left_bill_id": int(existing_pair["left_bill_id"]),
             "right_bill_id": int(existing_pair["right_bill_id"]),
             "other_bill_id": other_bill_id,
+        }
+
+    @staticmethod
+    def _build_bill_pair_feedback_payload(
+        *,
+        kind: str,
+        bill_id: int,
+        candidate_bill_id: int,
+        pair: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "scope": "bill",
+            "kind": str(kind or "").strip(),
+            "bill_id": int(bill_id),
+            "candidate_bill_id": int(candidate_bill_id),
+        }
+        if isinstance(pair, dict):
+            payload["pair"] = {
+                "id": int(pair.get("id") or 0),
+                "pair_type": str(pair.get("pair_type") or ""),
+                "source": str(pair.get("source") or ""),
+                "left_bill_id": int(pair.get("left_bill_id") or 0),
+                "right_bill_id": int(pair.get("right_bill_id") or 0),
+            }
+        return payload
+
+    @log_method
+    async def record_bill_pair_feedback(
+        self,
+        candidate_id: str,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        user_id: int,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Persist an append-only feedback event for historical bill matching actions."""
+        normalized_candidate_id = str(candidate_id or "").strip()
+        normalized_action = str(action or "").strip().lower()
+        normalized_user_id = int(user_id)
+        if not normalized_candidate_id:
+            raise ValueError("Invalid candidateId")
+        if normalized_action not in {"accept", "reject", "manual_override"}:
+            raise ValueError("Invalid action")
+        if normalized_user_id <= 0:
+            raise ValueError("Invalid userId")
+
+        normalized_payload = payload if isinstance(payload, dict) else {}
+        created_at = utc_now_iso()
+        payload_json = json.dumps(normalized_payload, ensure_ascii=False)
+        active_conn = conn or await self._get_connection()
+        cursor = await active_conn.execute(
+            """
+            INSERT INTO bill_pair_feedback (
+                user_id, candidate_id, action, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (normalized_user_id, normalized_candidate_id, normalized_action, payload_json, created_at),
+        )
+        if conn is None:
+            await active_conn.commit()
+
+        return {
+            "id": int(cursor.lastrowid or 0),
+            "candidate_id": normalized_candidate_id,
+            "action": normalized_action,
+            "payload": normalized_payload,
+            "created_at": created_at,
         }
 
     async def _delete_bill_pair_links_for_bill_ids(
@@ -714,11 +783,15 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         bill_id: int,
         candidate_bill_id: int,
         user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a suppression for a historical transfer candidate pair."""
+        normalized_bill_id = int(bill_id)
+        normalized_candidate_bill_id = int(candidate_bill_id)
         left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
-            bill_id,
-            candidate_bill_id,
+            normalized_bill_id,
+            normalized_candidate_bill_id,
         )
         conn = await self._get_connection()
 
@@ -780,6 +853,18 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 """,
                 (user_id, left_bill_id, right_bill_id, utc_now_iso()),
             )
+            if feedback_candidate_id not in (None, ""):
+                await self.record_bill_pair_feedback(
+                    str(feedback_candidate_id),
+                    "reject",
+                    self._build_bill_pair_feedback_payload(
+                        kind=self._TRANSFER_PAIR_TYPE,
+                        bill_id=normalized_bill_id,
+                        candidate_bill_id=normalized_candidate_bill_id,
+                    ),
+                    user_id=user_id,
+                    conn=conn,
+                )
             await conn.commit()
             return {
                 "left_bill_id": left_bill_id,
@@ -801,11 +886,15 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         bill_id: int,
         candidate_bill_id: int,
         user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a suppression for a historical investment candidate pair."""
+        normalized_bill_id = int(bill_id)
+        normalized_candidate_bill_id = int(candidate_bill_id)
         left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
-            bill_id,
-            candidate_bill_id,
+            normalized_bill_id,
+            normalized_candidate_bill_id,
         )
         conn = await self._get_connection()
 
@@ -893,6 +982,18 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 """,
                 (user_id, left_bill_id, right_bill_id, utc_now_iso()),
             )
+            if feedback_candidate_id not in (None, ""):
+                await self.record_bill_pair_feedback(
+                    str(feedback_candidate_id),
+                    "reject",
+                    self._build_bill_pair_feedback_payload(
+                        kind=self._INVESTMENT_PAIR_TYPE,
+                        bill_id=normalized_bill_id,
+                        candidate_bill_id=normalized_candidate_bill_id,
+                    ),
+                    user_id=user_id,
+                    conn=conn,
+                )
             await conn.commit()
             return {
                 "left_bill_id": left_bill_id,
@@ -1163,11 +1264,15 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         bill_id: int,
         candidate_bill_id: int,
         user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a single manual transfer pair for two historical bills."""
+        normalized_bill_id = int(bill_id)
+        normalized_candidate_bill_id = int(candidate_bill_id)
         left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
-            bill_id,
-            candidate_bill_id,
+            normalized_bill_id,
+            normalized_candidate_bill_id,
         )
         conn = await self._get_connection()
 
@@ -1234,14 +1339,28 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                     now,
                 ),
             )
-            await conn.commit()
-            return {
+            pair = {
                 "id": int(cursor.lastrowid or 0),
                 "pair_type": self._TRANSFER_PAIR_TYPE,
                 "source": self._MANUAL_PAIR_SOURCE,
                 "left_bill_id": left_bill_id,
                 "right_bill_id": right_bill_id,
             }
+            if feedback_candidate_id not in (None, ""):
+                await self.record_bill_pair_feedback(
+                    str(feedback_candidate_id),
+                    "accept",
+                    self._build_bill_pair_feedback_payload(
+                        kind=self._TRANSFER_PAIR_TYPE,
+                        bill_id=normalized_bill_id,
+                        candidate_bill_id=normalized_candidate_bill_id,
+                        pair=pair,
+                    ),
+                    user_id=user_id,
+                    conn=conn,
+                )
+            await conn.commit()
+            return pair
         except sqlite3.IntegrityError as exc:
             await conn.rollback()
             raise ValueError("Bills already belong to an existing transfer pair") from exc
@@ -1255,11 +1374,15 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         bill_id: int,
         candidate_bill_id: int,
         user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a single manual investment pair for two historical bills."""
+        normalized_bill_id = int(bill_id)
+        normalized_candidate_bill_id = int(candidate_bill_id)
         left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
-            bill_id,
-            candidate_bill_id,
+            normalized_bill_id,
+            normalized_candidate_bill_id,
         )
         conn = await self._get_connection()
 
@@ -1361,14 +1484,28 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                     now,
                 ),
             )
-            await conn.commit()
-            return {
+            pair = {
                 "id": int(cursor.lastrowid or 0),
                 "pair_type": self._INVESTMENT_PAIR_TYPE,
                 "source": self._MANUAL_PAIR_SOURCE,
                 "left_bill_id": left_bill_id,
                 "right_bill_id": right_bill_id,
             }
+            if feedback_candidate_id not in (None, ""):
+                await self.record_bill_pair_feedback(
+                    str(feedback_candidate_id),
+                    "accept",
+                    self._build_bill_pair_feedback_payload(
+                        kind=self._INVESTMENT_PAIR_TYPE,
+                        bill_id=normalized_bill_id,
+                        candidate_bill_id=normalized_candidate_bill_id,
+                        pair=pair,
+                    ),
+                    user_id=user_id,
+                    conn=conn,
+                )
+            await conn.commit()
+            return pair
         except sqlite3.IntegrityError as exc:
             await conn.rollback()
             raise ValueError(

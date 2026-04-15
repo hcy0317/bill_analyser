@@ -835,7 +835,9 @@ async def test_bill_service_accept_matching_candidate_dispatches_historical_inve
             candidate_bill_id: int,
             *,
             user_id: int = 1,
+            feedback_candidate_id: str | None = None,
         ) -> dict[str, int | str]:
+            assert feedback_candidate_id == "bill:11:investment:12"
             self.calls.append((bill_id, candidate_bill_id, user_id))
             return {
                 "id": 91,
@@ -867,6 +869,165 @@ async def test_bill_service_accept_matching_candidate_dispatches_historical_inve
             "right_bill_id": 12,
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_records_feedback_event_for_historical_transfer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """historical transfer accept 成功后，应追加一条 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 1, "candidate_id": candidate_id, "action": action, "payload": payload}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    async def fake_create_manual_transfer_pair(
+        bill_id: int,
+        candidate_bill_id: int,
+        *,
+        user_id: int = 1,
+        feedback_candidate_id: str | None = None,
+    ) -> dict[str, object]:
+        assert (bill_id, candidate_bill_id, user_id) == (11, 12, 7)
+        assert feedback_candidate_id == "bill:11:transfer:12"
+        return {
+            "success": True,
+            "pair": {
+                "id": 33,
+                "pair_type": "transfer",
+                "source": "manual",
+                "left_bill_id": 11,
+                "right_bill_id": 12,
+            },
+        }
+
+    monkeypatch.setattr(service, "create_manual_transfer_pair", fake_create_manual_transfer_pair)
+
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "bill:11:transfer:12",
+        {},
+        user_id=7,
+    )
+
+    assert result["success"] is True
+    assert fake_db.feedback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_records_feedback_event_for_historical_investment() -> None:
+    """historical investment accept 成功后，应追加一条 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.create_calls: list[tuple[int, int, int]] = []
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def create_manual_investment_pair(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+            feedback_candidate_id: str | None = None,
+        ) -> dict[str, int | str]:
+            self.create_calls.append((bill_id, candidate_bill_id, user_id))
+            assert feedback_candidate_id == "bill:11:investment:12"
+            return {
+                "id": 91,
+                "pair_type": "investment",
+                "source": "manual",
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 2, "candidate_id": candidate_id, "action": action, "payload": payload}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "bill:11:investment:12",
+        {},
+        user_id=7,
+    )
+
+    assert result["success"] is True
+    assert fake_db.create_calls == [(11, 12, 7)]
+    assert fake_db.feedback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_does_not_record_feedback_event_when_historical_transfer_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """historical transfer accept 失败时，不应误写 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 3}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    async def fake_create_manual_transfer_pair(
+        bill_id: int,
+        candidate_bill_id: int,
+        *,
+        user_id: int = 1,
+        feedback_candidate_id: str | None = None,
+    ) -> dict[str, object]:
+        _ = (bill_id, candidate_bill_id, user_id)
+        assert feedback_candidate_id == "bill:11:transfer:12"
+        return {"success": False, "error": "Bills already belong to an existing transfer pair", "status_code": 409}
+
+    monkeypatch.setattr(service, "create_manual_transfer_pair", fake_create_manual_transfer_pair)
+
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "bill:11:transfer:12",
+        {},
+        user_id=7,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Bills already belong to an existing transfer pair",
+        "status_code": 409,
+    }
+    assert fake_db.feedback_calls == []
 
 
 @pytest.mark.asyncio
@@ -1115,10 +1276,11 @@ async def test_bill_service_reject_matching_candidate_dispatches_historical_tran
             candidate_bill_id: int,
             *,
             user_id: int = 1,
+            feedback_candidate_id: str | None = None,
         ) -> dict[str, int]:
+            assert feedback_candidate_id == "bill:11:transfer:12"
             self.calls.append((bill_id, candidate_bill_id, user_id))
             return {
-                "left_bill_id": min(bill_id, candidate_bill_id),
                 "right_bill_id": max(bill_id, candidate_bill_id),
             }
 
@@ -1140,6 +1302,55 @@ async def test_bill_service_reject_matching_candidate_dispatches_historical_tran
 
 
 @pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_records_feedback_event_for_historical_transfer() -> None:
+    """historical transfer reject 成功后，应追加一条 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.reject_calls: list[tuple[int, int, int]] = []
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def reject_bill_transfer_candidate(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+            feedback_candidate_id: str | None = None,
+        ) -> dict[str, int]:
+            self.reject_calls.append((bill_id, candidate_bill_id, user_id))
+            assert feedback_candidate_id == "bill:11:transfer:12"
+            return {
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 4}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._reject_matching_candidate(
+        "bill:11:transfer:12",
+        {},
+        user_id=7,
+    )
+
+    assert result["success"] is True
+    assert fake_db.reject_calls == [(11, 12, 7)]
+    assert fake_db.feedback_calls == []
+
+
+@pytest.mark.asyncio
 async def test_bill_service_reject_matching_candidate_dispatches_historical_investment_to_persisted_suppression(
 ) -> None:
     """generic reject 的 bill investment 分支应复用 persisted suppression 写路径。"""
@@ -1154,10 +1365,11 @@ async def test_bill_service_reject_matching_candidate_dispatches_historical_inve
             candidate_bill_id: int,
             *,
             user_id: int = 1,
+            feedback_candidate_id: str | None = None,
         ) -> dict[str, int]:
+            assert feedback_candidate_id == "bill:11:investment:12"
             self.calls.append((bill_id, candidate_bill_id, user_id))
             return {
-                "left_bill_id": min(bill_id, candidate_bill_id),
                 "right_bill_id": max(bill_id, candidate_bill_id),
             }
 
@@ -1176,3 +1388,97 @@ async def test_bill_service_reject_matching_candidate_dispatches_historical_inve
         "candidate_id": "bill:11:investment:12",
         "action": "reject",
     }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_records_feedback_event_for_historical_investment() -> None:
+    """historical investment reject 成功后，应追加一条 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.reject_calls: list[tuple[int, int, int]] = []
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def reject_bill_investment_candidate(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+            feedback_candidate_id: str | None = None,
+        ) -> dict[str, int]:
+            self.reject_calls.append((bill_id, candidate_bill_id, user_id))
+            assert feedback_candidate_id == "bill:11:investment:12"
+            return {
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 5}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._reject_matching_candidate(
+        "bill:11:investment:12",
+        {},
+        user_id=7,
+    )
+
+    assert result["success"] is True
+    assert fake_db.reject_calls == [(11, 12, 7)]
+    assert fake_db.feedback_calls == []
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_does_not_record_feedback_event_when_historical_investment_fails(
+) -> None:
+    """historical investment reject 失败时，不应误写 feedback 事件。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.feedback_calls: list[tuple[str, str, dict[str, object], int]] = []
+
+        async def reject_bill_investment_candidate(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+            feedback_candidate_id: str | None = None,
+        ) -> dict[str, int]:
+            _ = (bill_id, candidate_bill_id, user_id)
+            assert feedback_candidate_id == "bill:11:investment:12"
+            raise LookupError("Bill not found")
+
+        async def record_bill_pair_feedback(
+            self,
+            candidate_id: str,
+            action: str,
+            payload: dict[str, object],
+            *,
+            user_id: int = 1,
+        ) -> dict[str, object]:
+            self.feedback_calls.append((candidate_id, action, payload, user_id))
+            return {"id": 6}
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._reject_matching_candidate(
+        "bill:11:investment:12",
+        {},
+        user_id=7,
+    )
+
+    assert result == {"success": False, "error": "Bill not found", "status_code": 404}
+    assert fake_db.feedback_calls == []

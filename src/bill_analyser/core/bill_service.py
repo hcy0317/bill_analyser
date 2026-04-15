@@ -772,7 +772,9 @@ class BillService:
         )
 
     def _extract_investment_profile(
-        self, text: str, keyword_config: dict[str, list[str]] | None = None
+        self,
+        text: str,
+        keyword_config: dict[str, list[str]] | None = None,
     ) -> dict[str, str]:
         """提取投资平台与产品归一信息。"""
         return extract_investment_profile(text, keyword_config=keyword_config)
@@ -2814,6 +2816,7 @@ class BillService:
             int(parsed_candidate_id["bill_id"]),
             int(parsed_candidate_id["candidate_bill_id"]),
             user_id=user_id,
+            feedback_candidate_id=str(candidate_id),
         )
         if not result.get("success"):
             return result
@@ -2837,6 +2840,7 @@ class BillService:
                 int(parsed_candidate_id["bill_id"]),
                 int(parsed_candidate_id["candidate_bill_id"]),
                 user_id=user_id,
+                feedback_candidate_id=str(candidate_id),
             )
         except LookupError:
             return {"success": False, "error": "Bill not found", "status_code": 404}
@@ -3010,6 +3014,7 @@ class BillService:
                 int(parsed_candidate_id["bill_id"]),
                 int(parsed_candidate_id["candidate_bill_id"]),
                 user_id=user_id,
+                feedback_candidate_id=str(candidate_id),
             )
         except LookupError:
             return {"success": False, "error": "Bill not found", "status_code": 404}
@@ -3035,6 +3040,7 @@ class BillService:
                 int(parsed_candidate_id["bill_id"]),
                 int(parsed_candidate_id["candidate_bill_id"]),
                 user_id=user_id,
+                feedback_candidate_id=str(candidate_id),
             )
         except LookupError:
             return {"success": False, "error": "Bill not found", "status_code": 404}
@@ -3251,6 +3257,8 @@ class BillService:
         bill_id: int,
         candidate_bill_id: int,
         user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a manual transfer pair for two historical bills."""
         if int(bill_id) == int(candidate_bill_id):
@@ -3265,12 +3273,12 @@ class BillService:
                 bill_id,
                 candidate_bill_id,
                 user_id=user_id,
+                feedback_candidate_id=feedback_candidate_id,
             )
         except LookupError:
             return {"success": False, "error": "Bill not found", "status_code": 404}
         except ValueError as exc:
             return {"success": False, "error": str(exc), "status_code": 409}
-
         return {"success": True, "pair": pair}
 
     @log_method
