@@ -103,6 +103,16 @@ async def _count_bill_transfer_pair_suppressions(db: Database, *, user_id: int) 
     return int(row[0] if row else 0)
 
 
+async def _count_bill_investment_pair_suppressions(db: Database, *, user_id: int) -> int:
+    conn = await db._get_connection()
+    async with conn.execute(
+        "SELECT COUNT(*) FROM bill_investment_pair_suppressions WHERE user_id = ?",
+        (user_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0] if row else 0)
+
+
 async def _count_bill_learning_rule_suppressions(db: Database, *, user_id: int) -> int:
     conn = await db._get_connection()
     async with conn.execute(
@@ -780,6 +790,167 @@ async def test_db_reject_bill_transfer_candidate_is_user_scoped_idempotent_and_b
 
         other_result = await db.get_bill_transfer_candidates(other_anchor_bill_id, user_id=other_user_id)
         assert [candidate["bill_id"] for candidate in other_result["candidates"]] == [other_candidate_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_reject_bill_investment_candidate_persists_suppression_and_filters_only_rejected_logical_pair(
+    tmp_path: Path,
+) -> None:
+    """historical investment reject 应持久化 suppression，并只过滤被拒绝的 logical pair。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_investment_reject_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="investment reject 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="investment reject 目标账户")
+        third_account_id = await _create_account(db, user_id=user_id, name="investment reject 第三账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-73.0,
+            bill_type="投资",
+            date="2026-07-19 09:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+            counterparty="蚂蚁财富",
+        )
+        rejected_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=73.0,
+            bill_type="投资",
+            date="2026-07-19 09:02:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+            counterparty="蚂蚁财富",
+        )
+        retained_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=third_account_id,
+            amount=73.0,
+            bill_type="投资",
+            date="2026-07-19 09:05:00",
+            description="蚂蚁财富 黄金ETF 自动定投 赎回",
+            counterparty="蚂蚁财富",
+        )
+
+        initial_result = await db.get_bill_investment_candidate_bills(anchor_bill_id, user_id=user_id)
+        assert [candidate["id"] for candidate in initial_result["candidates"]] == [
+            rejected_candidate_bill_id,
+            retained_candidate_bill_id,
+        ]
+
+        suppression = await db.reject_bill_investment_candidate(
+            anchor_bill_id,
+            rejected_candidate_bill_id,
+            user_id=user_id,
+        )
+
+        assert suppression == {
+            "left_bill_id": min(anchor_bill_id, rejected_candidate_bill_id),
+            "right_bill_id": max(anchor_bill_id, rejected_candidate_bill_id),
+        }
+        assert await _count_bill_investment_pair_suppressions(db, user_id=user_id) == 1
+
+        anchor_result = await db.get_bill_investment_candidate_bills(anchor_bill_id, user_id=user_id)
+        assert [candidate["id"] for candidate in anchor_result["candidates"]] == [retained_candidate_bill_id]
+
+        rejected_candidate_result = await db.get_bill_investment_candidate_bills(
+            rejected_candidate_bill_id,
+            user_id=user_id,
+        )
+        assert anchor_bill_id not in {int(candidate["id"] or 0) for candidate in rejected_candidate_result["candidates"]}
+
+        retained_candidate_result = await db.get_bill_investment_candidate_bills(
+            retained_candidate_bill_id,
+            user_id=user_id,
+        )
+        assert [candidate["id"] for candidate in retained_candidate_result["candidates"]] == [anchor_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_reject_bill_investment_candidate_is_user_scoped_idempotent_and_cleanup_removes_suppression(
+    tmp_path: Path,
+) -> None:
+    """historical investment reject 应保持 user scope、重复 reject 幂等，并在清理路径中被移除。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_investment_reject_scope_user")
+        other_user_id = await _create_user(db, "matching_investment_reject_scope_other")
+        source_account_id = await _create_account(db, user_id=user_id, name="investment scope 源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="investment scope 目标账户")
+        other_source_account_id = await _create_account(db, user_id=other_user_id, name="other investment 源账户")
+        other_target_account_id = await _create_account(db, user_id=other_user_id, name="other investment 目标账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-83.0,
+            bill_type="投资",
+            date="2026-07-19 11:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+            counterparty="蚂蚁财富",
+        )
+        candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=83.0,
+            bill_type="投资",
+            date="2026-07-19 11:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+            counterparty="蚂蚁财富",
+        )
+        other_anchor_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_source_account_id,
+            amount=-93.0,
+            bill_type="投资",
+            date="2026-07-19 12:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+            counterparty="蚂蚁财富",
+        )
+        other_candidate_bill_id = await _create_bill(
+            db,
+            user_id=other_user_id,
+            source_account_id=other_target_account_id,
+            amount=93.0,
+            bill_type="投资",
+            date="2026-07-19 12:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+            counterparty="蚂蚁财富",
+        )
+
+        first_suppression = await db.reject_bill_investment_candidate(
+            anchor_bill_id,
+            candidate_bill_id,
+            user_id=user_id,
+        )
+        second_suppression = await db.reject_bill_investment_candidate(
+            candidate_bill_id,
+            anchor_bill_id,
+            user_id=user_id,
+        )
+
+        assert first_suppression == second_suppression
+        assert await _count_bill_investment_pair_suppressions(db, user_id=user_id) == 1
+        assert await _count_bill_investment_pair_suppressions(db, user_id=other_user_id) == 0
+
+        with pytest.raises(LookupError, match="Bill not found"):
+            await db.reject_bill_investment_candidate(anchor_bill_id, candidate_bill_id, user_id=other_user_id)
+
+        other_result = await db.get_bill_investment_candidate_bills(other_anchor_bill_id, user_id=other_user_id)
+        assert [candidate["id"] for candidate in other_result["candidates"]] == [other_candidate_bill_id]
+
+        assert await db.delete_bill(anchor_bill_id, user_id=user_id) is True
+        assert await _count_bill_investment_pair_suppressions(db, user_id=user_id) == 0
     finally:
         await db.close()
 

@@ -1044,3 +1044,42 @@ async def test_bill_service_reject_matching_candidate_dispatches_historical_tran
         "candidate_id": "bill:11:transfer:12",
         "action": "reject",
     }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_reject_matching_candidate_dispatches_historical_investment_to_persisted_suppression(
+) -> None:
+    """generic reject 的 bill investment 分支应复用 persisted suppression 写路径。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int, int]] = []
+
+        async def reject_bill_investment_candidate(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+        ) -> dict[str, int]:
+            self.calls.append((bill_id, candidate_bill_id, user_id))
+            return {
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._reject_matching_candidate(
+        "bill:11:investment:12",
+        {},
+        user_id=7,
+    )
+
+    assert fake_db.calls == [(11, 12, 7)]
+    assert result == {
+        "success": True,
+        "candidate_id": "bill:11:investment:12",
+        "action": "reject",
+    }

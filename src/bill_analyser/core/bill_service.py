@@ -23,12 +23,15 @@ from ..parsers.parser_tags import resolve_parser_tags
 from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
 from ..utils.validator import BillValidator
+from .bill_date_utils import parse_bill_datetime
 from .category_engine import CategoryEngine
 from .db import Database
+from .investment_matching import (
+    clean_investment_product_name,
+    extract_investment_profile,
+    score_investment_candidate,
+)
 from .investment_settings import (
-    DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS,
-    DEFAULT_INVESTMENT_PLATFORM_ALIASES,
-    DEFAULT_INVESTMENT_PRODUCT_PATTERNS,
     build_user_investment_keyword_settings,
 )
 from .matching import build_matching_session_candidates, build_preview_matching_payload
@@ -762,194 +765,21 @@ class BillService:
         keyword_config: dict[str, list[str]] | None = None,
     ) -> dict[str, Any] | None:
         """为单条账单计算投资候选分数。"""
-        current_type = str(bill.get("type", "") or "").strip().lower()
-        if current_type in ["转账", "transfer", "4"]:
-            return None
-        if not allow_existing_investment and current_type in ["投资", "investment", "5"]:
-            return None
-
-        text_parts = [
-            str(bill.get("counterparty", "") or "").strip(),
-            str(bill.get("payment_method", "") or "").strip(),
-            str(bill.get("description", "") or "").strip(),
-            str(bill.get("main_category", "") or "").strip(),
-            str(bill.get("sub_category", "") or "").strip(),
-            str(bill.get("original_category", "") or "").strip(),
-        ]
-        text_blob = " ".join(part for part in text_parts if part)
-        if not text_blob:
-            return None
-
-        text_lower = text_blob.lower()
-        effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
-        investment_profile = self._extract_investment_profile(text_blob, keyword_config=effective_keyword_config)
-        normalized_platform = investment_profile.get("platform", "")
-        normalized_product = investment_profile.get("product", "")
-
-        platform_keywords = effective_keyword_config["platform_keywords"]
-        product_keywords = effective_keyword_config["product_keywords"]
-        exclude_keywords = effective_keyword_config["exclude_keywords"]
-
-        matched_platforms = []
-        if normalized_platform:
-            matched_platforms.append(normalized_platform)
-        matched_platforms.extend(
-            [kw for kw in platform_keywords if kw not in matched_platforms and kw.lower() in text_lower]
+        return score_investment_candidate(
+            bill,
+            allow_existing_investment=allow_existing_investment,
+            keyword_config=keyword_config,
         )
-        matched_products = [kw for kw in product_keywords if kw.lower() in text_lower]
-        if normalized_product and normalized_product not in matched_products:
-            matched_products.insert(0, normalized_product)
-        matched_excludes = [kw for kw in exclude_keywords if kw.lower() in text_lower]
-
-        score = 0.0
-        if matched_platforms:
-            score += min(0.65, 0.38 * len(matched_platforms[:2]))
-        if matched_products:
-            score += min(0.42, 0.18 * len(matched_products[:3]))
-        if matched_excludes:
-            score -= min(0.48, 0.28 * len(matched_excludes[:2]))
-
-        # 若没有平台词，则至少需要两个投资相关产品/动作词，降低误判。
-        if not matched_platforms and len(matched_products) < 2:
-            return None
-
-        if score < 0.55:
-            return None
-
-        reason_parts: list[str] = []
-        if matched_platforms:
-            reason_parts.append("platform:" + "/".join(matched_platforms[:2]))
-        if matched_products:
-            reason_parts.append("product:" + "/".join(matched_products[:3]))
-        if matched_excludes:
-            reason_parts.append("exclude:" + "/".join(matched_excludes[:2]))
-
-        hint_tokens = matched_platforms[:1] + matched_products[:2]
-        hint_text = " ".join(hint_tokens)
-
-        return {
-            "score": round(min(score, 1.0), 2),
-            "reason": ", ".join(reason_parts),
-            "hint_text": hint_text,
-            "platform": normalized_platform,
-            "product": normalized_product,
-        }
 
     def _extract_investment_profile(
         self, text: str, keyword_config: dict[str, list[str]] | None = None
     ) -> dict[str, str]:
         """提取投资平台与产品归一信息。"""
-        raw_text = str(text or "").strip()
-        if not raw_text:
-            return {"platform": "", "product": ""}
-
-        text_lower = raw_text.lower()
-        effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
-
-        generic_platforms = {"基金销售平台", "证券账户"}
-
-        platform = ""
-        best_platform_score = (-1, -1)
-        for canonical, aliases in DEFAULT_INVESTMENT_PLATFORM_ALIASES:
-            alias_candidates = [canonical] + aliases
-            matched_aliases = [alias for alias in alias_candidates if alias.lower() in text_lower]
-            if not matched_aliases:
-                continue
-
-            best_alias = max(matched_aliases, key=len)
-            platform_score = (0 if canonical in generic_platforms else 1, len(best_alias))
-            if platform_score > best_platform_score:
-                best_platform_score = platform_score
-                platform = canonical
-
-        if not platform:
-            for keyword in sorted(effective_keyword_config["platform_keywords"], key=len, reverse=True):
-                if keyword.lower() in text_lower:
-                    platform = keyword
-                    break
-
-        product = ""
-        named_product = ""
-
-        matched_config_products = [
-            keyword
-            for keyword in sorted(effective_keyword_config["product_keywords"], key=len, reverse=True)
-            if keyword.lower() in text_lower
-        ]
-        if matched_config_products:
-            product = matched_config_products[0]
-
-        for pattern in DEFAULT_INVESTMENT_NAMED_PRODUCT_PATTERNS:
-            match = re.search(pattern, raw_text, re.IGNORECASE)
-            if match:
-                candidate = self._clean_investment_product_name(match.group(1).strip(), platform=platform)
-                if candidate:
-                    named_product = candidate
-                    break
-
-        if named_product and (not product or len(named_product) > len(product)):
-            product = named_product
-
-        if not product:
-            best_product_score = -1
-            for canonical, aliases in DEFAULT_INVESTMENT_PRODUCT_PATTERNS:
-                alias_candidates = [canonical] + aliases
-                matched_aliases = [alias for alias in alias_candidates if alias.lower() in text_lower]
-                if not matched_aliases:
-                    continue
-
-                best_alias = max(matched_aliases, key=len)
-                if len(best_alias) > best_product_score:
-                    best_product_score = len(best_alias)
-                    product = best_alias
-
-        if product:
-            product = self._clean_investment_product_name(product, platform=platform)
-
-        return {"platform": platform, "product": product}
+        return extract_investment_profile(text, keyword_config=keyword_config)
 
     def _clean_investment_product_name(self, product: str, platform: str = "") -> str:
         """清理提取出的投资产品名，移除平台前缀与交易动作后缀。"""
-        cleaned = str(product or "").strip().strip("|｜,， ")
-        if not cleaned:
-            return ""
-
-        cleaned = re.sub(
-            r"^(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出)[-－:：\s]*", "", cleaned, flags=re.IGNORECASE
-        )
-        cleaned = re.sub(
-            r"[-－:：\s]*(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出|确认份额|分红再投资)$",
-            "",
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-
-        for canonical, aliases in DEFAULT_INVESTMENT_PLATFORM_ALIASES:
-            alias_candidates = [canonical] + aliases
-            for alias in alias_candidates:
-                cleaned = re.sub(rf"^{re.escape(alias)}[-－:：\s]*", "", cleaned, flags=re.IGNORECASE)
-
-        if platform:
-            cleaned = re.sub(rf"^{re.escape(platform)}[-－:：\s]*", "", cleaned, flags=re.IGNORECASE)
-
-        cleaned = re.sub(
-            r"^(买入|卖出|申购|赎回|定投|扣款|自动定投|转入|转出)[-－:：\s]*", "", cleaned, flags=re.IGNORECASE
-        )
-
-        if "|" in cleaned or "｜" in cleaned:
-            candidates = [segment.strip().strip("|｜,， ") for segment in re.split(r"[|｜]", cleaned)]
-            preferred = [
-                segment
-                for segment in candidates
-                if re.search(
-                    r"(基金|ETF|LOF|REITs|REIT|理财|计划|组合|债券|股票|黄金|A类|C类|联接)", segment, re.IGNORECASE
-                )
-            ]
-            if preferred:
-                cleaned = max(preferred, key=len)
-
-        cleaned = re.sub(r"\s+", " ", cleaned).strip().strip("-－:：|｜,， ")
-        return cleaned[:80]
+        return clean_investment_product_name(product, platform=platform)
 
     @log_method
     async def _detect_cash_transfers(self, bills: list[dict[str, Any]], user_id: int = 1) -> list[dict[str, Any]]:
@@ -2438,7 +2268,19 @@ class BillService:
         if not result.get("bill"):
             return {"success": False, "error": "Bill not found", "status_code": 404}
 
+        if result.get("linked_pair"):
+            return {
+                "success": True,
+                "bill_id": bill_id,
+                "linked_pair": result.get("linked_pair"),
+                "candidates": [],
+            }
+
         transfer_candidates = list(result.get("candidates") or [])
+        investment_candidates = await self._build_investment_candidates_for_bill(
+            dict(result.get("bill") or {}),
+            user_id=user_id,
+        )
         learning_candidates = await self._build_learning_candidates_for_bill(
             dict(result.get("bill") or {}),
             user_id=user_id,
@@ -2448,8 +2290,112 @@ class BillService:
             "success": True,
             "bill_id": bill_id,
             "linked_pair": result.get("linked_pair"),
-            "candidates": [*transfer_candidates, *learning_candidates],
+            "candidates": [*transfer_candidates, *investment_candidates, *learning_candidates],
         }
+
+    @staticmethod
+    def _derive_matching_candidate_level(score: float) -> str:
+        if score >= 0.8:
+            return "high"
+        if score >= 0.65:
+            return "medium"
+        if score > 0:
+            return "low"
+        return ""
+
+    @staticmethod
+    def _build_historical_candidate_bill_snapshot(candidate_bill: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(candidate_bill.get("id") or 0),
+            "date": str(candidate_bill.get("date") or ""),
+            "type": str(candidate_bill.get("type") or ""),
+            "amount": float(candidate_bill.get("amount") or 0.0),
+            "counterparty": str(candidate_bill.get("counterparty") or ""),
+            "description": str(candidate_bill.get("description") or ""),
+            "payment_method": str(candidate_bill.get("payment_method") or ""),
+            "main_category": str(candidate_bill.get("main_category") or ""),
+            "sub_category": str(candidate_bill.get("sub_category") or ""),
+            "source_account_id": int(candidate_bill.get("source_account_id") or 0),
+            "destination_account_id": int(candidate_bill.get("destination_account_id") or 0),
+        }
+
+    @log_method
+    async def _build_investment_candidates_for_bill(
+        self,
+        bill: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        bill_id = int(bill.get("id") or 0)
+        if bill_id <= 0:
+            return []
+
+        keyword_config = await self._get_investment_keyword_config(user_id)
+        if not self._score_investment_candidate(
+            bill,
+            allow_existing_investment=True,
+            keyword_config=keyword_config,
+        ):
+            return []
+
+        result = await self.db.get_bill_investment_candidate_bills(bill_id, user_id=user_id)
+        raw_candidates = list(result.get("candidates") or [])
+        if not raw_candidates:
+            return []
+
+        anchor_datetime = parse_bill_datetime(bill.get("date"))
+        if anchor_datetime is None:
+            return []
+
+        max_window_seconds = 3 * 24 * 60 * 60
+        candidates: list[dict[str, Any]] = []
+        for candidate_bill in raw_candidates:
+            candidate_id = int(candidate_bill.get("id") or 0)
+            if candidate_id <= 0 or candidate_id == bill_id:
+                continue
+            if not self._score_investment_candidate(
+                candidate_bill,
+                allow_existing_investment=True,
+                keyword_config=keyword_config,
+            ):
+                continue
+
+            candidate_datetime = parse_bill_datetime(candidate_bill.get("date"))
+            if candidate_datetime is None:
+                continue
+
+            time_diff_seconds = abs((anchor_datetime - candidate_datetime).total_seconds())
+            if time_diff_seconds > max_window_seconds:
+                continue
+
+            time_score = max(0.0, 1.0 - (time_diff_seconds / max_window_seconds))
+            score = round(min(0.86 + (0.12 * time_score), 0.98), 2)
+            reason_parts = ["investment_keyword", "opposite_amount", "different_source_account"]
+            reason_parts.append("time_close" if time_diff_seconds <= 3600 else "date_window")
+            candidates.append(
+                {
+                    "candidate_id": f"bill:{bill_id}:investment:{candidate_id}",
+                    "kind": "investment",
+                    "bill_id": candidate_id,
+                    "score": score,
+                    "level": self._derive_matching_candidate_level(score),
+                    "reason": "|".join(reason_parts),
+                    "bill": self._build_historical_candidate_bill_snapshot(candidate_bill),
+                    "time_diff_seconds": int(time_diff_seconds),
+                    "suppressed": False,
+                }
+            )
+
+        candidates.sort(
+            key=lambda candidate: (
+                -float(candidate.get("score") or 0.0),
+                int(candidate.get("time_diff_seconds") or 0),
+                int(candidate.get("bill_id") or 0),
+            )
+        )
+        for candidate in candidates:
+            candidate.pop("time_diff_seconds", None)
+        return candidates
 
     @log_method
     async def _build_learning_candidates_for_bill(
@@ -3045,6 +2991,31 @@ class BillService:
         }
 
     @log_method
+    async def _reject_bill_investment_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        try:
+            await self.db.reject_bill_investment_candidate(
+                int(parsed_candidate_id["bill_id"]),
+                int(parsed_candidate_id["candidate_bill_id"]),
+                user_id=user_id,
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+        }
+
+    @log_method
     async def _reject_bill_learning_candidate(
         self,
         candidate_id: str,
@@ -3210,6 +3181,13 @@ class BillService:
 
         if candidate_scope == "bill" and candidate_kind == "transfer":
             return await self._reject_bill_transfer_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
+
+        if candidate_scope == "bill" and candidate_kind == "investment":
+            return await self._reject_bill_investment_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 user_id=user_id,

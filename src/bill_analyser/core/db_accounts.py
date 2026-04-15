@@ -491,6 +491,11 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
                     bill_ids,
                     user_id=user_id,
                 )
+                await self._delete_bill_investment_pair_suppressions_for_bill_ids(
+                    conn,
+                    bill_ids,
+                    user_id=user_id,
+                )
                 await self._delete_bill_learning_rule_suppressions_for_bill_ids(
                     conn,
                     bill_ids,

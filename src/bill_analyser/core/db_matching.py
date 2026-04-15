@@ -9,6 +9,8 @@ from ..utils.logger import log_method
 from .bill_date_utils import parse_bill_datetime
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+from .investment_matching import score_investment_candidate
+from .investment_settings import build_user_investment_keyword_settings
 from .matching import build_transfer_pair_candidate, build_transfer_pair_candidates
 from .matching.candidate_ids import build_learning_rule_revision, normalize_learning_rule_revision
 
@@ -18,6 +20,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
     _TRANSFER_PAIR_TYPE = "transfer"
     _TRANSFER_PAIR_LOOKBACK_DAYS = 3
+    _INVESTMENT_PAIR_LOOKBACK_DAYS = 3
     _MANUAL_PAIR_SOURCE = "manual"
 
     @staticmethod
@@ -52,6 +55,78 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             min(normalized_bill_id, normalized_candidate_bill_id),
             max(normalized_bill_id, normalized_candidate_bill_id),
         )
+
+    @staticmethod
+    def _has_opposite_matching_amounts(
+        left_bill: dict[str, Any],
+        right_bill: dict[str, Any],
+    ) -> bool:
+        left_amount = float(left_bill.get("amount") or 0.0)
+        right_amount = float(right_bill.get("amount") or 0.0)
+        return abs(abs(left_amount) - abs(right_amount)) <= 0.01 and left_amount * right_amount < 0
+
+    @staticmethod
+    def _has_distinct_valid_source_account_ids(
+        left_bill: dict[str, Any],
+        right_bill: dict[str, Any],
+    ) -> bool:
+        left_source_account_id = int(left_bill.get("source_account_id") or 0)
+        right_source_account_id = int(right_bill.get("source_account_id") or 0)
+        return left_source_account_id > 0 and right_source_account_id > 0 and left_source_account_id != right_source_account_id
+
+    @staticmethod
+    def _is_explicit_transfer_type(raw_type: Any) -> bool:
+        return str(raw_type or "").strip().lower() in {"转账", "transfer"}
+
+    @classmethod
+    def _is_investment_like_bill(
+        cls,
+        bill: dict[str, Any],
+        keyword_config: dict[str, list[str]],
+    ) -> bool:
+        return score_investment_candidate(
+            bill,
+            allow_existing_investment=True,
+            keyword_config=keyword_config,
+        ) is not None
+
+    async def _get_user_investment_keyword_config(
+        self,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> dict[str, list[str]]:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT investment_platform_keywords, investment_product_keywords, investment_exclude_keywords
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (user_id,),
+        ) as cursor:
+            user_row = await cursor.fetchone()
+        return build_user_investment_keyword_settings(dict(user_row) if user_row else None)
+
+    @classmethod
+    def _resolve_pair_time_diff_seconds(
+        cls,
+        left_bill: dict[str, Any],
+        right_bill: dict[str, Any],
+        *,
+        lookback_days: int,
+    ) -> float | None:
+        left_datetime = parse_bill_datetime(left_bill.get("date"))
+        right_datetime = parse_bill_datetime(right_bill.get("date"))
+        if left_datetime is None or right_datetime is None:
+            return None
+
+        time_diff_seconds = abs((left_datetime - right_datetime).total_seconds())
+        max_window_seconds = float(max(lookback_days, 0) * 24 * 60 * 60)
+        if max_window_seconds <= 0 or time_diff_seconds > max_window_seconds:
+            return None
+        return time_diff_seconds
 
     async def _get_bill_pair_link_for_bill(
         self,
@@ -181,6 +256,76 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         await conn.execute(
             (
                 "DELETE FROM bill_transfer_pair_suppressions "
+                f"WHERE user_id = ? AND (left_bill_id IN ({placeholders}) "
+                f"OR right_bill_id IN ({placeholders}))"
+            ),
+            params,
+        )
+
+    async def _get_bill_investment_pair_suppression(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
+        left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
+            bill_id,
+            candidate_bill_id,
+        )
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT *
+            FROM bill_investment_pair_suppressions
+            WHERE user_id = ? AND left_bill_id = ? AND right_bill_id = ?
+            LIMIT 1
+            """,
+            (user_id, left_bill_id, right_bill_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _get_suppressed_bill_investment_candidate_ids(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+        conn: Any | None = None,
+    ) -> set[int]:
+        active_conn = conn or await self._get_connection()
+        async with active_conn.execute(
+            """
+            SELECT
+                CASE
+                    WHEN left_bill_id = ? THEN right_bill_id
+                    ELSE left_bill_id
+                END AS other_bill_id
+            FROM bill_investment_pair_suppressions
+            WHERE user_id = ? AND (left_bill_id = ? OR right_bill_id = ?)
+            """,
+            (int(bill_id), user_id, int(bill_id), int(bill_id)),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {int(row["other_bill_id"]) for row in rows if row and row["other_bill_id"] is not None}
+
+    async def _delete_bill_investment_pair_suppressions_for_bill_ids(
+        self,
+        conn: Any,
+        bill_ids: list[int],
+        *,
+        user_id: int = 1,
+    ) -> None:
+        normalized_bill_ids = sorted({int(bill_id) for bill_id in bill_ids if int(bill_id) > 0})
+        if not normalized_bill_ids:
+            return
+
+        placeholders = ",".join(["?" for _ in normalized_bill_ids])
+        params = [user_id, *normalized_bill_ids, *normalized_bill_ids]
+        await conn.execute(
+            (
+                "DELETE FROM bill_investment_pair_suppressions "
                 f"WHERE user_id = ? AND (left_bill_id IN ({placeholders}) "
                 f"OR right_bill_id IN ({placeholders}))"
             ),
@@ -438,6 +583,131 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         }
 
     @log_method
+    async def get_bill_investment_candidate_bills(
+        self,
+        bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Return raw historical investment candidate bills for a persisted bill."""
+        anchor_bill = await self.get_bill_by_id(bill_id, user_id=user_id)
+        if not anchor_bill:
+            return {"bill": None, "linked_pair": None, "candidates": []}
+
+        existing_pair = await self._get_bill_pair_link_for_bill(
+            bill_id,
+            user_id=user_id,
+        )
+        if existing_pair:
+            other_bill_id = (
+                int(existing_pair["right_bill_id"])
+                if int(existing_pair["left_bill_id"]) == int(bill_id)
+                else int(existing_pair["left_bill_id"])
+            )
+            return {
+                "bill": anchor_bill,
+                "linked_pair": {
+                    "id": int(existing_pair["id"]),
+                    "pair_type": str(existing_pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
+                    "source": str(existing_pair.get("source") or "manual"),
+                    "left_bill_id": int(existing_pair["left_bill_id"]),
+                    "right_bill_id": int(existing_pair["right_bill_id"]),
+                    "other_bill_id": other_bill_id,
+                },
+                "candidates": [],
+            }
+
+        anchor_amount = float(anchor_bill.get("amount") or 0.0)
+        anchor_source_account_id = int(anchor_bill.get("source_account_id") or 0)
+        if (
+            abs(anchor_amount) <= 0
+            or anchor_source_account_id <= 0
+            or self._is_explicit_transfer_type(anchor_bill.get("type"))
+        ):
+            return {
+                "bill": anchor_bill,
+                "linked_pair": None,
+                "candidates": [],
+            }
+
+        conn = await self._get_connection()
+        keyword_config = await self._get_user_investment_keyword_config(user_id=user_id, conn=conn)
+        transfer_suppressed_candidate_bill_ids = await self._get_suppressed_bill_transfer_candidate_ids(
+            bill_id,
+            user_id=user_id,
+            conn=conn,
+        )
+        suppressed_candidate_bill_ids = await self._get_suppressed_bill_investment_candidate_ids(
+            bill_id,
+            user_id=user_id,
+            conn=conn,
+        )
+        async with conn.execute(
+            """
+            SELECT *
+            FROM bills AS b
+            WHERE b.user_id = ?
+              AND b.id != ?
+              AND COALESCE(b.source_account_id, 0) > 0
+              AND COALESCE(b.source_account_id, 0) != ?
+              AND ABS(ABS(COALESCE(b.amount, 0)) - ?) <= 0.01
+              AND COALESCE(b.amount, 0) * ? < 0
+              AND COALESCE(b.type, '') NOT IN ('转账', 'transfer')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM bill_pair_links AS links
+                  WHERE links.user_id = ?
+                    AND links.pair_type = ?
+                    AND (links.left_bill_id = b.id OR links.right_bill_id = b.id)
+              )
+            ORDER BY b.id ASC
+            """,
+            (
+                user_id,
+                bill_id,
+                anchor_source_account_id,
+                abs(anchor_amount),
+                anchor_amount,
+                user_id,
+                self._TRANSFER_PAIR_TYPE,
+            ),
+        ) as cursor:
+            candidate_rows = await cursor.fetchall()
+
+        candidates: list[dict[str, Any]] = []
+        for row in candidate_rows:
+            candidate = dict(row)
+            candidate_id = int(candidate.get("id") or 0)
+            if (
+                candidate_id in transfer_suppressed_candidate_bill_ids
+                or candidate_id in suppressed_candidate_bill_ids
+            ):
+                continue
+            if not self._is_investment_like_bill(anchor_bill, keyword_config):
+                continue
+            if not self._is_investment_like_bill(candidate, keyword_config):
+                continue
+            if not self._has_opposite_matching_amounts(anchor_bill, candidate):
+                continue
+            if not self._has_distinct_valid_source_account_ids(anchor_bill, candidate):
+                continue
+            if (
+                self._resolve_pair_time_diff_seconds(
+                    anchor_bill,
+                    candidate,
+                    lookback_days=self._INVESTMENT_PAIR_LOOKBACK_DAYS,
+                )
+                is None
+            ):
+                continue
+            candidates.append(candidate)
+
+        return {
+            "bill": anchor_bill,
+            "linked_pair": None,
+            "candidates": candidates,
+        }
+
+    @log_method
     async def reject_bill_transfer_candidate(
         self,
         bill_id: int,
@@ -504,6 +774,116 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             await conn.execute(
                 """
                 INSERT INTO bill_transfer_pair_suppressions (
+                    user_id, left_bill_id, right_bill_id, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (user_id, left_bill_id, right_bill_id, utc_now_iso()),
+            )
+            await conn.commit()
+            return {
+                "left_bill_id": left_bill_id,
+                "right_bill_id": right_bill_id,
+            }
+        except sqlite3.IntegrityError:
+            await conn.rollback()
+            return {
+                "left_bill_id": left_bill_id,
+                "right_bill_id": right_bill_id,
+            }
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
+    async def reject_bill_investment_candidate(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a suppression for a historical investment candidate pair."""
+        left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
+            bill_id,
+            candidate_bill_id,
+        )
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute(
+                "SELECT * FROM bills WHERE user_id = ? AND id IN (?, ?)",
+                (user_id, left_bill_id, right_bill_id),
+            ) as cursor:
+                bill_rows = await cursor.fetchall()
+
+            bills_by_id = {int(row["id"]): dict(row) for row in bill_rows}
+            if left_bill_id not in bills_by_id or right_bill_id not in bills_by_id:
+                await conn.rollback()
+                raise LookupError("Bill not found")
+
+            left_pair = await self._get_bill_pair_link_for_bill(
+                left_bill_id,
+                user_id=user_id,
+                pair_type=self._TRANSFER_PAIR_TYPE,
+                conn=conn,
+            )
+            right_pair = await self._get_bill_pair_link_for_bill(
+                right_bill_id,
+                user_id=user_id,
+                pair_type=self._TRANSFER_PAIR_TYPE,
+                conn=conn,
+            )
+            if left_pair or right_pair:
+                await conn.rollback()
+                raise ValueError("Bills already belong to an existing transfer pair")
+
+            left_bill = bills_by_id[left_bill_id]
+            right_bill = bills_by_id[right_bill_id]
+            keyword_config = await self._get_user_investment_keyword_config(user_id=user_id, conn=conn)
+            if self._is_explicit_transfer_type(left_bill.get("type")) or self._is_explicit_transfer_type(
+                right_bill.get("type")
+            ):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._is_investment_like_bill(left_bill, keyword_config) or not self._is_investment_like_bill(
+                right_bill,
+                keyword_config,
+            ):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._has_opposite_matching_amounts(left_bill, right_bill):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._has_distinct_valid_source_account_ids(left_bill, right_bill):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if (
+                self._resolve_pair_time_diff_seconds(
+                    left_bill,
+                    right_bill,
+                    lookback_days=self._INVESTMENT_PAIR_LOOKBACK_DAYS,
+                )
+                is None
+            ):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+
+            existing_suppression = await self._get_bill_investment_pair_suppression(
+                left_bill_id,
+                right_bill_id,
+                user_id=user_id,
+                conn=conn,
+            )
+            if existing_suppression:
+                await conn.rollback()
+                return {
+                    "left_bill_id": left_bill_id,
+                    "right_bill_id": right_bill_id,
+                }
+
+            await conn.execute(
+                """
+                INSERT INTO bill_investment_pair_suppressions (
                     user_id, left_bill_id, right_bill_id, created_at
                 ) VALUES (?, ?, ?, ?)
                 """,

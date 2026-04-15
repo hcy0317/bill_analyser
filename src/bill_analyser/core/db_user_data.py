@@ -36,6 +36,11 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
                 [int(row[0]) for row in bill_rows if row and row[0] is not None],
                 user_id=user_id,
             )
+            await self._delete_bill_investment_pair_suppressions_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
             await self._delete_bill_learning_rule_suppressions_for_bill_ids(
                 conn,
                 [int(row[0]) for row in bill_rows if row and row[0] is not None],
@@ -82,6 +87,11 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
                 user_id=user_id,
             )
             await self._delete_bill_transfer_pair_suppressions_for_bill_ids(
+                conn,
+                [int(row[0]) for row in bill_rows if row and row[0] is not None],
+                user_id=user_id,
+            )
+            await self._delete_bill_investment_pair_suppressions_for_bill_ids(
                 conn,
                 [int(row[0]) for row in bill_rows if row and row[0] is not None],
                 user_id=user_id,
