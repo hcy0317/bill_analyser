@@ -718,6 +718,59 @@ class TestMatchingAPI:
         ]
         assert all(candidate["kind"] == "transfer" for candidate in result["candidates"])
 
+    def test_matching_reconcile_history_keeps_investment_linked_pair_out_of_transfer_only_batch(self, client):
+        """reconcile-history 当前契约仍应保持 transfer-only，不应把 investment linkedPair 暴露进 batch 结果。"""
+        auth_headers = _build_isolated_auth_headers(
+            client, "test_matching_reconcile_history_transfer_only_investment_linked"
+        )
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest reconcile investment linked 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest reconcile investment linked 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-58.0,
+            bill_type="投资",
+            date="2026-07-25 14:10:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=58.0,
+            bill_type="投资",
+            date="2026-07-25 14:13:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert accept_response.status_code == 200
+
+        response = client.post(
+            "/api/matching/reconcile-history",
+            json={"billIds": [anchor_bill_id]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["summary"] == {
+            "billCount": 1,
+            "candidateCount": 0,
+            "linkedPairCount": 0,
+        }
+        result = data["data"]["results"][0]
+        assert result["billId"] == anchor_bill_id
+        assert result["linkedPair"] is None
+        assert result["candidates"] == []
+
     def test_matching_manual_pair_delete_restores_candidates_for_formal_bill(self, client):
         """手工后配对删除后，应恢复 linkedPair 为空且候选重新出现。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair")
@@ -3739,18 +3792,162 @@ class TestMatchingAPI:
         assert unified_data["linkedPair"]["otherBillId"] == candidate_bill_id
         assert unified_data["candidates"] == []
 
-    def test_matching_candidate_accept_keeps_historical_investment_candidate_unsupported(self, client):
-        """historical formal-bill investment 当前仍只支持 reject，不支持 generic accept。"""
-        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_investment_unsupported")
+    def test_matching_candidate_accept_accepts_historical_investment_candidate_and_allows_manual_delete(self, client):
+        """historical formal-bill investment accept 应写入 manual pair，并允许通过现有 pair delete 撤销。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill_investment")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest accept investment 历史转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest accept investment 历史转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-72.0,
+            bill_type="投资",
+            date="2026-07-21 10:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=72.0,
+            bill_type="投资",
+            date="2026-07-21 10:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
 
         accept_response = client.post(
-            "/api/matching/candidates/bill:11:investment:12/accept",
+            f"/api/matching/candidates/{candidate_id}/accept",
             json={},
             headers=auth_headers,
         )
 
-        assert accept_response.status_code == 400
-        assert accept_response.get_json()["error"] == "Candidate family not supported"
+        assert accept_response.status_code == 200
+        accept_data = accept_response.get_json()
+        assert accept_data["success"] is True
+        assert accept_data["data"]["candidateId"] == candidate_id
+        assert accept_data["data"]["pair"]["pairType"] == "investment"
+        assert accept_data["data"]["pair"]["leftBillId"] == min(anchor_bill_id, candidate_bill_id)
+        assert accept_data["data"]["pair"]["rightBillId"] == max(anchor_bill_id, candidate_bill_id)
+
+        bill_follow_up_response = client.get(
+            f"/api/matching/bills/{anchor_bill_id}/candidates",
+            headers=auth_headers,
+        )
+        assert bill_follow_up_response.status_code == 200
+        bill_follow_up_data = bill_follow_up_response.get_json()["data"]
+        assert bill_follow_up_data["linkedPair"]["pairType"] == "investment"
+        assert bill_follow_up_data["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert bill_follow_up_data["candidates"] == []
+
+        unified_follow_up_response = client.get(
+            f"/api/matching/candidates?billId={anchor_bill_id}",
+            headers=auth_headers,
+        )
+        assert unified_follow_up_response.status_code == 200
+        unified_follow_up_data = unified_follow_up_response.get_json()["data"]
+        assert unified_follow_up_data["linkedPair"]["pairType"] == "investment"
+        assert unified_follow_up_data["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert unified_follow_up_data["candidates"] == []
+
+        list_pairs_response = client.get("/api/matching/pairs", headers=auth_headers)
+        assert list_pairs_response.status_code == 200
+        assert list_pairs_response.get_json()["data"] == {"pairs": []}
+
+        delete_response = client.delete(
+            f"/api/matching/pairs/{accept_data['data']['pair']['id']}",
+            headers=auth_headers,
+        )
+        assert delete_response.status_code == 200
+        assert delete_response.get_json()["data"]["pair"]["pairType"] == "investment"
+
+        restored_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert restored_response.status_code == 200
+        restored_candidates = restored_response.get_json()["data"]["candidates"]
+        restored_investment_candidates = [
+            candidate for candidate in restored_candidates if candidate["kind"] == "investment"
+        ]
+        assert [candidate["billId"] for candidate in restored_investment_candidates] == [candidate_bill_id]
+
+    def test_matching_candidate_accept_blocks_historical_investment_candidate_after_prior_reject(self, client):
+        """historical investment generic reject 后，不应再通过 generic accept 绕回同一 logical pair。"""
+        auth_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_bill_investment_after_reject"
+        )
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest accept reject investment 源账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest accept reject investment 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-61.0,
+            bill_type="投资",
+            date="2026-07-21 12:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=61.0,
+            bill_type="投资",
+            date="2026-07-21 12:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+        )
+        candidate_id = f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
+
+        reject_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+        assert reject_response.status_code == 200
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert accept_response.status_code == 409
+        assert accept_response.get_json()["error"] == "Bills already rejected for investment pairing"
+
+    def test_matching_candidate_accept_is_user_scoped_for_historical_investment(self, client):
+        """generic accept 的 historical investment 分支不应跨用户生效。"""
+        primary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_bill_investment_scope_primary"
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client, "test_matching_candidate_accept_bill_investment_scope_secondary"
+        )
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest accept investment scope 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest accept investment scope 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-68.0,
+            bill_type="投资",
+            date="2026-07-23 11:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=68.0,
+            bill_type="投资",
+            date="2026-07-23 11:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+        )
+
+        accept_response = client.post(
+            f"/api/matching/candidates/bill:{anchor_bill_id}:investment:{candidate_bill_id}/accept",
+            json={},
+            headers=secondary_headers,
+        )
+        assert accept_response.status_code == 404
+        assert accept_response.get_json()["error"] == "Bill not found"
 
     def test_matching_candidate_reject_is_user_scoped_for_preview_transfer(self, client):
         """generic reject 第一刀的 preview transfer 分支不应跨用户生效。"""

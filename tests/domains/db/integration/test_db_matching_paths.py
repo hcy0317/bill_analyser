@@ -543,6 +543,122 @@ async def test_db_delete_manual_pair_removes_link_and_restores_candidates(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_db_manual_investment_pair_persists_single_logical_pair_and_blocks_other_pairing(
+    tmp_path: Path,
+) -> None:
+    """historical investment accept 应写入 investment/manual pair，并让两侧账单退出后续配对池。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_investment_pair_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="投资转出账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="投资转入账户")
+        third_account_id = await _create_account(db, user_id=user_id, name="投资第三账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-66.0,
+            bill_type="投资",
+            date="2026-07-23 09:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+            counterparty="蚂蚁财富",
+        )
+        candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=66.0,
+            bill_type="投资",
+            date="2026-07-23 09:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+            counterparty="蚂蚁财富",
+        )
+        extra_transfer_candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=third_account_id,
+            amount=66.0,
+            bill_type="收入",
+            date="2026-07-23 09:05:00",
+            description="额外 transfer 候选",
+            counterparty="pytest transfer",
+        )
+
+        pair = await db.create_manual_investment_pair(anchor_bill_id, candidate_bill_id, user_id=user_id)
+
+        assert pair["pair_type"] == "investment"
+        assert pair["source"] == "manual"
+        assert pair["left_bill_id"] == min(anchor_bill_id, candidate_bill_id)
+        assert pair["right_bill_id"] == max(anchor_bill_id, candidate_bill_id)
+        assert await _count_bill_pair_links(db, user_id=user_id) == 1
+
+        transfer_result = await db.get_bill_transfer_candidates(anchor_bill_id, user_id=user_id)
+        assert transfer_result["linked_pair"] is not None
+        assert transfer_result["linked_pair"]["pair_type"] == "investment"
+        assert transfer_result["candidates"] == []
+
+        investment_result = await db.get_bill_investment_candidate_bills(anchor_bill_id, user_id=user_id)
+        assert investment_result["linked_pair"] is not None
+        assert investment_result["linked_pair"]["pair_type"] == "investment"
+        assert investment_result["candidates"] == []
+
+        extra_transfer_result = await db.get_bill_transfer_candidates(extra_transfer_candidate_bill_id, user_id=user_id)
+        assert anchor_bill_id not in {candidate["bill_id"] for candidate in extra_transfer_result["candidates"]}
+        assert candidate_bill_id not in {candidate["bill_id"] for candidate in extra_transfer_result["candidates"]}
+
+        with pytest.raises(ValueError, match="existing transfer pair"):
+            await db.create_manual_transfer_pair(anchor_bill_id, extra_transfer_candidate_bill_id, user_id=user_id)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_db_delete_manual_pair_removes_investment_link_and_restores_candidates(tmp_path: Path) -> None:
+    """删除 manual investment pair 后，应恢复 linked_pair 为空且 investment candidates 重新可见。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_investment_pair_delete_user")
+        source_account_id = await _create_account(db, user_id=user_id, name="投资解链源账户")
+        target_account_id = await _create_account(db, user_id=user_id, name="投资解链目标账户")
+
+        anchor_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=source_account_id,
+            amount=-86.0,
+            bill_type="投资",
+            date="2026-07-23 11:00:00",
+            description="蚂蚁财富 黄金ETF 自动定投 买入",
+            counterparty="蚂蚁财富",
+        )
+        candidate_bill_id = await _create_bill(
+            db,
+            user_id=user_id,
+            source_account_id=target_account_id,
+            amount=86.0,
+            bill_type="投资",
+            date="2026-07-23 11:03:00",
+            description="蚂蚁财富 黄金ETF 自动定投 卖出",
+            counterparty="蚂蚁财富",
+        )
+
+        pair = await db.create_manual_investment_pair(anchor_bill_id, candidate_bill_id, user_id=user_id)
+        assert await _count_bill_pair_links(db, user_id=user_id) == 1
+
+        deleted_pair = await db.delete_manual_pair(int(pair["id"]), user_id=user_id)
+        assert deleted_pair["id"] == int(pair["id"])
+        assert deleted_pair["pair_type"] == "investment"
+        assert await _count_bill_pair_links(db, user_id=user_id) == 0
+
+        investment_result = await db.get_bill_investment_candidate_bills(anchor_bill_id, user_id=user_id)
+        assert investment_result["linked_pair"] is None
+        assert [int(candidate["id"] or 0) for candidate in investment_result["candidates"]] == [candidate_bill_id]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_db_delete_manual_pair_is_user_scoped_and_rejects_missing_pair(tmp_path: Path) -> None:
     """删除历史手工配对应保持 user scope，并拒绝不存在的 pair。"""
     db = await _create_database(tmp_path)

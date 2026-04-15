@@ -497,7 +497,7 @@ def create_manual_pair():
 @log_method
 @require_auth
 def delete_manual_pair(pair_id: int):
-    """删除一条正式账单 transfer-only 手工配对。"""
+    """删除一条当前用户下的正式账单 manual pair（含 investment/manual）。"""
     try:
         _, bill_service = get_app_context()
         user_id = _get_request_user_id()

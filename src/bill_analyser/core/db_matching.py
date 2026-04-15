@@ -19,6 +19,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
     """Persistence helpers for historical bill transfer pairing."""
 
     _TRANSFER_PAIR_TYPE = "transfer"
+    _INVESTMENT_PAIR_TYPE = "investment"
     _TRANSFER_PAIR_LOOKBACK_DAYS = 3
     _INVESTMENT_PAIR_LOOKBACK_DAYS = 3
     _MANUAL_PAIR_SOURCE = "manual"
@@ -72,7 +73,11 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
     ) -> bool:
         left_source_account_id = int(left_bill.get("source_account_id") or 0)
         right_source_account_id = int(right_bill.get("source_account_id") or 0)
-        return left_source_account_id > 0 and right_source_account_id > 0 and left_source_account_id != right_source_account_id
+        return (
+            left_source_account_id > 0
+            and right_source_account_id > 0
+            and left_source_account_id != right_source_account_id
+        )
 
     @staticmethod
     def _is_explicit_transfer_type(raw_type: Any) -> bool:
@@ -107,7 +112,9 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             (user_id,),
         ) as cursor:
             user_row = await cursor.fetchone()
-        return build_user_investment_keyword_settings(dict(user_row) if user_row else None)
+        return build_user_investment_keyword_settings(
+            dict(user_row) if user_row else None,
+        )
 
     @classmethod
     def _resolve_pair_time_diff_seconds(
@@ -133,19 +140,20 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         bill_id: int,
         *,
         user_id: int = 1,
-        pair_type: str = _TRANSFER_PAIR_TYPE,
+        pair_type: str | None = _TRANSFER_PAIR_TYPE,
         conn: Any | None = None,
     ) -> dict[str, Any] | None:
         active_conn = conn or await self._get_connection()
-        async with active_conn.execute(
-            """
-            SELECT *
-            FROM bill_pair_links
-            WHERE user_id = ? AND pair_type = ? AND (left_bill_id = ? OR right_bill_id = ?)
-            LIMIT 1
-            """,
-            (user_id, pair_type, bill_id, bill_id),
-        ) as cursor:
+        query = (
+            "SELECT * FROM bill_pair_links "
+            "WHERE user_id = ? AND (left_bill_id = ? OR right_bill_id = ?) "
+        )
+        params: list[Any] = [user_id, bill_id, bill_id]
+        if pair_type is not None:
+            query += "AND pair_type = ? "
+            params.append(pair_type)
+        query += "LIMIT 1"
+        async with active_conn.execute(query, params) as cursor:
             row = await cursor.fetchone()
         return dict(row) if row else None
 
@@ -154,21 +162,40 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         pair_id: int,
         *,
         user_id: int = 1,
-        pair_type: str = _TRANSFER_PAIR_TYPE,
+        pair_type: str | None = _TRANSFER_PAIR_TYPE,
         conn: Any | None = None,
     ) -> dict[str, Any] | None:
         active_conn = conn or await self._get_connection()
-        async with active_conn.execute(
-            """
-            SELECT *
-            FROM bill_pair_links
-            WHERE id = ? AND user_id = ? AND pair_type = ?
-            LIMIT 1
-            """,
-            (int(pair_id), user_id, pair_type),
-        ) as cursor:
+        query = "SELECT * FROM bill_pair_links WHERE id = ? AND user_id = ? "
+        params: list[Any] = [int(pair_id), user_id]
+        if pair_type is not None:
+            query += "AND pair_type = ? "
+            params.append(pair_type)
+        query += "LIMIT 1"
+        async with active_conn.execute(query, params) as cursor:
             row = await cursor.fetchone()
         return dict(row) if row else None
+
+    @classmethod
+    def _build_linked_pair_payload(
+        cls,
+        existing_pair: dict[str, Any],
+        *,
+        bill_id: int,
+    ) -> dict[str, Any]:
+        other_bill_id = (
+            int(existing_pair["right_bill_id"])
+            if int(existing_pair["left_bill_id"]) == int(bill_id)
+            else int(existing_pair["left_bill_id"])
+        )
+        return {
+            "id": int(existing_pair["id"]),
+            "pair_type": str(existing_pair.get("pair_type") or cls._TRANSFER_PAIR_TYPE),
+            "source": str(existing_pair.get("source") or cls._MANUAL_PAIR_SOURCE),
+            "left_bill_id": int(existing_pair["left_bill_id"]),
+            "right_bill_id": int(existing_pair["right_bill_id"]),
+            "other_bill_id": other_bill_id,
+        }
 
     async def _delete_bill_pair_links_for_bill_ids(
         self,
@@ -504,23 +531,12 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         existing_pair = await self._get_bill_pair_link_for_bill(
             bill_id,
             user_id=user_id,
+            pair_type=None,
         )
         if existing_pair:
-            other_bill_id = (
-                int(existing_pair["right_bill_id"])
-                if int(existing_pair["left_bill_id"]) == int(bill_id)
-                else int(existing_pair["left_bill_id"])
-            )
             return {
                 "bill": anchor_bill,
-                "linked_pair": {
-                    "id": int(existing_pair["id"]),
-                    "pair_type": str(existing_pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
-                    "source": str(existing_pair.get("source") or "manual"),
-                    "left_bill_id": int(existing_pair["left_bill_id"]),
-                    "right_bill_id": int(existing_pair["right_bill_id"]),
-                    "other_bill_id": other_bill_id,
-                },
+                "linked_pair": self._build_linked_pair_payload(existing_pair, bill_id=bill_id),
                 "candidates": [],
             }
 
@@ -555,7 +571,6 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                   SELECT 1
                   FROM bill_pair_links AS links
                   WHERE links.user_id = ?
-                    AND links.pair_type = ?
                     AND (links.left_bill_id = b.id OR links.right_bill_id = b.id)
               )
                         ORDER BY b.id ASC
@@ -567,7 +582,6 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 abs(anchor_amount),
                 anchor_amount,
                 user_id,
-                self._TRANSFER_PAIR_TYPE,
             ),
         ) as cursor:
             candidate_rows = await cursor.fetchall()
@@ -596,23 +610,12 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         existing_pair = await self._get_bill_pair_link_for_bill(
             bill_id,
             user_id=user_id,
+            pair_type=None,
         )
         if existing_pair:
-            other_bill_id = (
-                int(existing_pair["right_bill_id"])
-                if int(existing_pair["left_bill_id"]) == int(bill_id)
-                else int(existing_pair["left_bill_id"])
-            )
             return {
                 "bill": anchor_bill,
-                "linked_pair": {
-                    "id": int(existing_pair["id"]),
-                    "pair_type": str(existing_pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
-                    "source": str(existing_pair.get("source") or "manual"),
-                    "left_bill_id": int(existing_pair["left_bill_id"]),
-                    "right_bill_id": int(existing_pair["right_bill_id"]),
-                    "other_bill_id": other_bill_id,
-                },
+                "linked_pair": self._build_linked_pair_payload(existing_pair, bill_id=bill_id),
                 "candidates": [],
             }
 
@@ -656,7 +659,6 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                   SELECT 1
                   FROM bill_pair_links AS links
                   WHERE links.user_id = ?
-                    AND links.pair_type = ?
                     AND (links.left_bill_id = b.id OR links.right_bill_id = b.id)
               )
             ORDER BY b.id ASC
@@ -668,7 +670,6 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
                 abs(anchor_amount),
                 anchor_amount,
                 user_id,
-                self._TRANSFER_PAIR_TYPE,
             ),
         ) as cursor:
             candidate_rows = await cursor.fetchall()
@@ -737,13 +738,13 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             left_pair = await self._get_bill_pair_link_for_bill(
                 left_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             right_pair = await self._get_bill_pair_link_for_bill(
                 right_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             if left_pair or right_pair:
@@ -824,13 +825,13 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             left_pair = await self._get_bill_pair_link_for_bill(
                 left_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             right_pair = await self._get_bill_pair_link_for_bill(
                 right_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             if left_pair or right_pair:
@@ -839,16 +840,19 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
 
             left_bill = bills_by_id[left_bill_id]
             right_bill = bills_by_id[right_bill_id]
-            keyword_config = await self._get_user_investment_keyword_config(user_id=user_id, conn=conn)
-            if self._is_explicit_transfer_type(left_bill.get("type")) or self._is_explicit_transfer_type(
-                right_bill.get("type")
-            ):
+            keyword_config = await self._get_user_investment_keyword_config(
+                user_id=user_id,
+                conn=conn,
+            )
+            if self._is_explicit_transfer_type(
+                left_bill.get("type"),
+            ) or self._is_explicit_transfer_type(right_bill.get("type")):
                 await conn.rollback()
                 raise ValueError("Bills are not eligible for investment pairing")
-            if not self._is_investment_like_bill(left_bill, keyword_config) or not self._is_investment_like_bill(
-                right_bill,
+            if not self._is_investment_like_bill(
+                left_bill,
                 keyword_config,
-            ):
+            ) or not self._is_investment_like_bill(right_bill, keyword_config):
                 await conn.rollback()
                 raise ValueError("Bills are not eligible for investment pairing")
             if not self._has_opposite_matching_amounts(left_bill, right_bill):
@@ -1183,13 +1187,13 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             left_pair = await self._get_bill_pair_link_for_bill(
                 left_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             right_pair = await self._get_bill_pair_link_for_bill(
                 right_bill_id,
                 user_id=user_id,
-                pair_type=self._TRANSFER_PAIR_TYPE,
+                pair_type=None,
                 conn=conn,
             )
             if left_pair or right_pair:
@@ -1246,6 +1250,135 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             raise
 
     @log_method
+    async def create_manual_investment_pair(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Persist a single manual investment pair for two historical bills."""
+        left_bill_id, right_bill_id = self._normalize_transfer_pair_bill_ids(
+            bill_id,
+            candidate_bill_id,
+        )
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute(
+                "SELECT * FROM bills WHERE user_id = ? AND id IN (?, ?)",
+                (user_id, left_bill_id, right_bill_id),
+            ) as cursor:
+                bill_rows = await cursor.fetchall()
+
+            bills_by_id = {int(row["id"]): dict(row) for row in bill_rows}
+            if left_bill_id not in bills_by_id or right_bill_id not in bills_by_id:
+                await conn.rollback()
+                raise LookupError("Bill not found")
+
+            left_pair = await self._get_bill_pair_link_for_bill(
+                left_bill_id,
+                user_id=user_id,
+                pair_type=None,
+                conn=conn,
+            )
+            right_pair = await self._get_bill_pair_link_for_bill(
+                right_bill_id,
+                user_id=user_id,
+                pair_type=None,
+                conn=conn,
+            )
+            if left_pair or right_pair:
+                await conn.rollback()
+                raise ValueError("Bills already belong to an existing transfer pair")
+
+            if await self._get_bill_transfer_pair_suppression(
+                left_bill_id,
+                right_bill_id,
+                user_id=user_id,
+                conn=conn,
+            ):
+                await conn.rollback()
+                raise ValueError("Bills already rejected for transfer pairing")
+
+            if await self._get_bill_investment_pair_suppression(
+                left_bill_id,
+                right_bill_id,
+                user_id=user_id,
+                conn=conn,
+            ):
+                await conn.rollback()
+                raise ValueError("Bills already rejected for investment pairing")
+
+            left_bill = bills_by_id[left_bill_id]
+            right_bill = bills_by_id[right_bill_id]
+            keyword_config = await self._get_user_investment_keyword_config(
+                user_id=user_id,
+                conn=conn,
+            )
+            if self._is_explicit_transfer_type(
+                left_bill.get("type"),
+            ) or self._is_explicit_transfer_type(right_bill.get("type")):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._is_investment_like_bill(
+                left_bill,
+                keyword_config,
+            ) or not self._is_investment_like_bill(right_bill, keyword_config):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._has_opposite_matching_amounts(left_bill, right_bill):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if not self._has_distinct_valid_source_account_ids(left_bill, right_bill):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+            if (
+                self._resolve_pair_time_diff_seconds(
+                    left_bill,
+                    right_bill,
+                    lookback_days=self._INVESTMENT_PAIR_LOOKBACK_DAYS,
+                )
+                is None
+            ):
+                await conn.rollback()
+                raise ValueError("Bills are not eligible for investment pairing")
+
+            now = utc_now_iso()
+            cursor = await conn.execute(
+                """
+                INSERT INTO bill_pair_links (
+                    user_id, pair_type, left_bill_id, right_bill_id, source, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    self._INVESTMENT_PAIR_TYPE,
+                    left_bill_id,
+                    right_bill_id,
+                    self._MANUAL_PAIR_SOURCE,
+                    now,
+                    now,
+                ),
+            )
+            await conn.commit()
+            return {
+                "id": int(cursor.lastrowid or 0),
+                "pair_type": self._INVESTMENT_PAIR_TYPE,
+                "source": self._MANUAL_PAIR_SOURCE,
+                "left_bill_id": left_bill_id,
+                "right_bill_id": right_bill_id,
+            }
+        except sqlite3.IntegrityError as exc:
+            await conn.rollback()
+            raise ValueError(
+                "Bills already belong to an existing transfer pair",
+            ) from exc
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
     async def delete_manual_transfer_pair(
         self,
         pair_id: int,
@@ -1283,6 +1416,54 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             return {
                 "id": int(pair["id"]),
                 "pair_type": str(pair.get("pair_type") or self._TRANSFER_PAIR_TYPE),
+                "source": str(pair.get("source") or self._MANUAL_PAIR_SOURCE),
+                "left_bill_id": int(pair["left_bill_id"]),
+                "right_bill_id": int(pair["right_bill_id"]),
+            }
+        except Exception:
+            await conn.rollback()
+            raise
+
+    @log_method
+    async def delete_manual_pair(
+        self,
+        pair_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """Delete a persisted manual pair for historical bills."""
+        normalized_pair_id = int(pair_id)
+        conn = await self._get_connection()
+
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            pair = await self._get_bill_pair_link_by_id(
+                normalized_pair_id,
+                user_id=user_id,
+                pair_type=None,
+                conn=conn,
+            )
+            if not pair:
+                await conn.rollback()
+                raise LookupError("Pair not found")
+
+            if str(pair.get("source") or self._MANUAL_PAIR_SOURCE) != self._MANUAL_PAIR_SOURCE:
+                await conn.rollback()
+                raise ValueError("Only manual pairs can be deleted")
+
+            cursor = await conn.execute(
+                "DELETE FROM bill_pair_links WHERE id = ? AND user_id = ?",
+                (normalized_pair_id, user_id),
+            )
+            if int(cursor.rowcount or 0) != 1:
+                await conn.rollback()
+                raise LookupError("Pair not found")
+
+            await conn.commit()
+            return {
+                "id": int(pair["id"]),
+                "pair_type": str(
+                    pair.get("pair_type") or self._TRANSFER_PAIR_TYPE,
+                ),
                 "source": str(pair.get("source") or self._MANUAL_PAIR_SOURCE),
                 "left_bill_id": int(pair["left_bill_id"]),
                 "right_bill_id": int(pair["right_bill_id"]),

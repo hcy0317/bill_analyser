@@ -481,6 +481,50 @@ async def test_bill_service_reconcile_matching_history_counts_unique_linked_pair
 
 
 @pytest.mark.asyncio
+async def test_bill_service_reconcile_matching_history_keeps_investment_linked_pair_out_of_transfer_only_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reconcile-history 当前仍应保持 transfer-only，不应把 investment linkedPair 外溢到批量结果。"""
+    service = BillService(db=None)
+
+    async def fake_get_matching_bill_candidates(bill_id: int, user_id: int = 1) -> dict[str, object]:
+        _ = user_id
+        return {
+            "success": True,
+            "bill_id": bill_id,
+            "linked_pair": {
+                "id": 17,
+                "pair_type": "investment",
+                "source": "manual",
+                "left_bill_id": 11,
+                "right_bill_id": 12,
+                "other_bill_id": 12 if bill_id == 11 else 11,
+            },
+            "candidates": [],
+        }
+
+    monkeypatch.setattr(service, "get_matching_bill_candidates", fake_get_matching_bill_candidates)
+
+    result = await service.reconcile_matching_history([11], user_id=7)
+
+    assert result == {
+        "success": True,
+        "results": [
+            {
+                "bill_id": 11,
+                "linked_pair": None,
+                "candidates": [],
+            }
+        ],
+        "summary": {
+            "bill_count": 1,
+            "candidate_count": 0,
+            "linked_pair_count": 0,
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_update_preview_recurring_match_rejects_stale_transfer_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -773,6 +817,55 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_learnin
                 },
             }
         ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_accept_matching_candidate_dispatches_historical_investment_to_persisted_pair(
+) -> None:
+    """generic accept 的 bill investment 分支应复用 persisted pair link 写路径。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int, int]] = []
+
+        async def create_manual_investment_pair(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            *,
+            user_id: int = 1,
+        ) -> dict[str, int | str]:
+            self.calls.append((bill_id, candidate_bill_id, user_id))
+            return {
+                "id": 91,
+                "pair_type": "investment",
+                "source": "manual",
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+        "bill:11:investment:12",
+        {},
+        user_id=7,
+    )
+
+    assert fake_db.calls == [(11, 12, 7)]
+    assert result == {
+        "success": True,
+        "candidate_id": "bill:11:investment:12",
+        "action": "accept",
+        "pair": {
+            "id": 91,
+            "pair_type": "investment",
+            "source": "manual",
+            "left_bill_id": 11,
+            "right_bill_id": 12,
+        },
     }
 
 

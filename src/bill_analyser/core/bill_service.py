@@ -2584,7 +2584,13 @@ class BillService:
                     "bill_id": bill_id,
                 }
 
-            linked_pair = result.get("linked_pair")
+            raw_linked_pair = result.get("linked_pair")
+            linked_pair = (
+                raw_linked_pair
+                if isinstance(raw_linked_pair, dict)
+                and str(raw_linked_pair.get("pair_type") or "transfer") == "transfer"
+                else None
+            )
             candidates = [
                 candidate
                 for candidate in list(result.get("candidates") or [])
@@ -2816,6 +2822,32 @@ class BillService:
             "candidate_id": str(candidate_id),
             "action": "accept",
             "pair": result.get("pair"),
+        }
+
+    @log_method
+    async def _accept_bill_investment_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        try:
+            pair = await self.db.create_manual_investment_pair(
+                int(parsed_candidate_id["bill_id"]),
+                int(parsed_candidate_id["candidate_bill_id"]),
+                user_id=user_id,
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "pair": pair,
         }
 
     @log_method
@@ -3116,6 +3148,13 @@ class BillService:
                 user_id=user_id,
             )
 
+        if candidate_scope == "bill" and candidate_kind == "investment":
+            return await self._accept_bill_investment_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
+
         if candidate_scope == "bill" and candidate_kind == "learning":
             return await self._accept_bill_learning_candidate(
                 candidate_id,
@@ -3240,9 +3279,9 @@ class BillService:
         pair_id: int,
         user_id: int = 1,
     ) -> dict[str, Any]:
-        """Delete a persisted manual transfer pair for historical bills."""
+        """Delete a persisted manual pair for historical bills."""
         try:
-            pair = await self.db.delete_manual_transfer_pair(pair_id, user_id=user_id)
+            pair = await self.db.delete_manual_pair(pair_id, user_id=user_id)
         except LookupError:
             return {"success": False, "error": "Pair not found", "status_code": 404}
         except ValueError as exc:
