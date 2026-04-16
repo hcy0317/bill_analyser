@@ -1246,6 +1246,121 @@ class BillService:
         }
 
     @log_method
+    async def get_import_learning_suggestions(
+        self,
+        session_id: str,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        """返回当前导入会话的 dry-run 长期学习建议列表。"""
+        suggestions = await self.db.list_import_learning_suggestions_for_session(
+            session_id,
+            user_id=user_id,
+        )
+        if not suggestions:
+            return {
+                "sessionId": session_id,
+                "totalCount": 0,
+                "suggestions": [],
+            }
+
+        categories = await self.db.get_all_categories(user_id=user_id)
+        accounts = await self.db.get_all_accounts(user_id=user_id)
+        categories_by_id = {
+            int(category["id"]): category
+            for category in categories
+            if category.get("id") is not None
+        }
+        accounts_by_id = {
+            int(account["id"]): account
+            for account in accounts
+            if account.get("id") is not None
+        }
+
+        result: list[dict[str, Any]] = []
+        for suggestion in suggestions:
+            learned_category_id = suggestion.get("learned_category_id")
+            learned_source_account_id = suggestion.get("learned_source_account_id")
+            learned_destination_account_id = suggestion.get("learned_destination_account_id")
+
+            learned_category = (
+                categories_by_id.get(int(learned_category_id))
+                if learned_category_id not in (None, "", 0, "0")
+                else None
+            )
+            learned_source_account = (
+                accounts_by_id.get(int(learned_source_account_id))
+                if learned_source_account_id not in (None, "", 0, "0")
+                else None
+            )
+            learned_destination_account = (
+                accounts_by_id.get(int(learned_destination_account_id))
+                if learned_destination_account_id not in (None, "", 0, "0")
+                else None
+            )
+
+            learned_category_name = ""
+            if learned_category:
+                main_category = str(learned_category.get("main_category") or "").strip()
+                sub_category = str(learned_category.get("sub_category") or "").strip()
+                learned_category_name = (
+                    f"{main_category}/{sub_category}"
+                    if main_category and sub_category
+                    else main_category
+                )
+
+            result.append(
+                {
+                    "matchType": str(suggestion.get("match_type") or ""),
+                    "matchValue": str(suggestion.get("match_value") or ""),
+                    "matchFeatures": dict(suggestion.get("match_features") or {}),
+                    "sampleCount": int(suggestion.get("sample_count") or 0),
+                    "sourcePreviewIds": [
+                        int(preview_id)
+                        for preview_id in list(suggestion.get("source_preview_ids") or [])
+                        if int(preview_id) > 0
+                    ],
+                    "learnedType": str(suggestion.get("learned_type") or ""),
+                    "learnedCategoryId": (
+                        int(learned_category_id)
+                        if learned_category_id not in (None, "", 0, "0")
+                        else None
+                    ),
+                    "learnedCategoryName": learned_category_name,
+                    "learnedSourceAccountId": (
+                        int(learned_source_account_id)
+                        if learned_source_account_id not in (None, "", 0, "0")
+                        else None
+                    ),
+                    "learnedSourceAccountName": (
+                        str(learned_source_account.get("name") or "")
+                        if learned_source_account
+                        else ""
+                    ),
+                    "learnedDestinationAccountId": (
+                        int(learned_destination_account_id)
+                        if learned_destination_account_id not in (None, "", 0, "0")
+                        else None
+                    ),
+                    "learnedDestinationAccountName": (
+                        str(learned_destination_account.get("name") or "")
+                        if learned_destination_account
+                        else ""
+                    ),
+                    "summary": self._build_learning_rule_result_summary(
+                        suggestion,
+                        categories_by_id,
+                        accounts_by_id,
+                    ),
+                }
+            )
+
+        return {
+            "sessionId": session_id,
+            "totalCount": len(result),
+            "suggestions": result,
+        }
+
+    @log_method
     async def import_multiple_files(self, file_paths: list[str], user_id: int = 1) -> dict[str, Any]:
         """
         批量导入多个文件

@@ -19,6 +19,60 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
     """Import annotation, long-term learning rule, and composite-match helpers."""
 
     @staticmethod
+    def _normalize_import_learning_suggestion_id(raw_value: Any) -> int | None:
+        if raw_value in (None, "", 0, "0"):
+            return None
+        try:
+            normalized_value = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return normalized_value if normalized_value > 0 else None
+
+    @classmethod
+    def _build_import_learning_suggestion_signature(
+        cls,
+        sample: dict[str, Any],
+        preview: dict[str, Any],
+    ) -> tuple[str, int | None, int | None, int | None]:
+        return (
+            str(sample.get("annotated_type") or preview.get("preview_type") or "").strip(),
+            cls._normalize_import_learning_suggestion_id(sample.get("annotated_category_id")),
+            cls._normalize_import_learning_suggestion_id(sample.get("annotated_source_account_id")),
+            cls._normalize_import_learning_suggestion_id(sample.get("annotated_destination_account_id")),
+        )
+
+    @classmethod
+    def _build_import_learning_suggestion_payload(
+        cls,
+        *,
+        session_id: str,
+        sample: dict[str, Any],
+        preview: dict[str, Any],
+        composite_hash: str,
+        match_features: dict[str, str],
+    ) -> dict[str, Any]:
+        preview_id = int(sample.get("preview_id", 0) or 0)
+        signature = cls._build_import_learning_suggestion_signature(sample, preview)
+        last_annotation_at = str(sample.get("updated_at") or sample.get("created_at") or "")
+        return {
+            "match_type": "composite",
+            "match_value": composite_hash,
+            "normalized_match_value": composite_hash,
+            "learned_type": signature[0],
+            "learned_category_id": signature[1],
+            "learned_source_account_id": signature[2],
+            "learned_destination_account_id": signature[3],
+            "source_session_id": session_id,
+            "source_preview_ids": [preview_id],
+            "sample_count": 1,
+            "parser_id": str(preview.get("preview_parser_id") or "").strip(),
+            "composite_match_hash": composite_hash,
+            "match_features": dict(match_features),
+            "signature": signature,
+            "last_annotation_at": last_annotation_at,
+        }
+
+    @staticmethod
     def _normalize_import_learning_text(raw_value: Any) -> str:
         if raw_value is None:
             return ""
@@ -173,6 +227,92 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         ) as cursor:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+    @log_method
+    async def list_import_learning_suggestions_for_session(
+        self,
+        session_id: str,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        previews = await self.get_preview_by_session(session_id, user_id=user_id)
+        preview_map = {int(preview["id"]): preview for preview in previews if preview.get("id")}
+        samples = await self.get_import_annotation_samples(session_id, user_id=user_id)
+        if not preview_map or not samples:
+            return []
+
+        existing_rules = await self.get_import_learning_rules(user_id=user_id, enabled_only=False, limit=None)
+        existing_composite_hashes = {
+            str(rule.get("normalized_match_value") or "")
+            for rule in existing_rules
+            if str(rule.get("match_type") or "") == "composite" and str(rule.get("normalized_match_value") or "")
+        }
+
+        pending_suggestions: dict[str, dict[str, Any]] = {}
+        conflicted_hashes: set[str] = set()
+        for sample in samples:
+            preview_id = int(sample.get("preview_id", 0) or 0)
+            preview = preview_map.get(preview_id)
+            if not preview:
+                continue
+
+            composite_hash = self.build_composite_match_hash(
+                parser_id=preview.get("preview_parser_id", ""),
+                counterparty=preview.get("preview_counterparty", ""),
+                description=preview.get("preview_description", ""),
+                payment_method=preview.get("preview_payment_method", ""),
+            )
+            match_features = self.build_composite_match_features(
+                parser_id=preview.get("preview_parser_id", ""),
+                counterparty=preview.get("preview_counterparty", ""),
+                description=preview.get("preview_description", ""),
+                payment_method=preview.get("preview_payment_method", ""),
+            )
+            if not composite_hash or not match_features:
+                continue
+            if composite_hash in existing_composite_hashes or composite_hash in conflicted_hashes:
+                continue
+
+            suggestion_signature = self._build_import_learning_suggestion_signature(sample, preview)
+            existing_suggestion = pending_suggestions.get(composite_hash)
+            if existing_suggestion is None:
+                pending_suggestions[composite_hash] = self._build_import_learning_suggestion_payload(
+                    session_id=session_id,
+                    sample=sample,
+                    preview=preview,
+                    composite_hash=composite_hash,
+                    match_features=match_features,
+                )
+                continue
+
+            if existing_suggestion["signature"] != suggestion_signature:
+                conflicted_hashes.add(composite_hash)
+                pending_suggestions.pop(composite_hash, None)
+                continue
+
+            if preview_id not in existing_suggestion["source_preview_ids"]:
+                existing_suggestion["source_preview_ids"].append(preview_id)
+                existing_suggestion["sample_count"] += 1
+            sample_annotation_time = str(sample.get("updated_at") or sample.get("created_at") or "")
+            if sample_annotation_time > str(existing_suggestion.get("last_annotation_at") or ""):
+                existing_suggestion["last_annotation_at"] = sample_annotation_time
+
+        suggestions = list(pending_suggestions.values())
+        for suggestion in suggestions:
+            suggestion["source_preview_ids"] = sorted(
+                int(preview_id) for preview_id in suggestion.get("source_preview_ids") or []
+            )
+            suggestion.pop("signature", None)
+
+        suggestions.sort(
+            key=lambda suggestion: (
+                int(suggestion.get("sample_count") or 0),
+                str(suggestion.get("last_annotation_at") or ""),
+                int((suggestion.get("source_preview_ids") or [0])[-1] or 0),
+                str(suggestion.get("match_value") or ""),
+            ),
+            reverse=True,
+        )
+        return suggestions
 
     @log_method
     async def promote_import_annotation_samples_to_learning(

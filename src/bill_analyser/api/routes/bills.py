@@ -2947,6 +2947,40 @@ def reclassify_preview_session(session_id: str):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route("/import/v2/learning/<session_id>/suggestions", methods=["GET"])
+@log_method
+@require_auth
+def list_import_learning_suggestions(session_id: str):
+    """返回当前导入会话的 dry-run 长期学习建议。"""
+    try:
+        logger.info(
+            "[长期学习建议] session_id=%s, user_id=%s",
+            session_id,
+            request.user_id,
+        )
+        db, bill_service, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            session = loop.run_until_complete(
+                db.get_import_session(session_id, user_id=request.user_id)
+            )
+            if not session:
+                return jsonify({"success": False, "error": "Import session not found"}), 404
+
+            suggestions_result = loop.run_until_complete(
+                bill_service.get_import_learning_suggestions(session_id, user_id=request.user_id)
+            )
+            return jsonify({"success": True, "data": suggestions_result})
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error("[长期学习建议] 失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route("/import/v2/learning/<session_id>/promote", methods=["POST"])
 @log_method
 @require_auth

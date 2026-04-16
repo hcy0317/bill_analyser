@@ -136,6 +136,13 @@ class DatabaseFacadeBase:  # pylint: disable=too-many-public-methods
     async def get_import_annotation_samples(self, session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         ...
 
+    async def list_import_learning_suggestions_for_session(
+        self,
+        session_id: str,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        ...
+
     @classmethod
     def build_composite_match_hash(
         cls,
