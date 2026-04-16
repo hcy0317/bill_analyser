@@ -2989,7 +2989,27 @@ def promote_import_learning(session_id: str):
     try:
         logger.info("[长期学习提升] session_id=%s, user_id=%s", session_id, request.user_id)
         data = request.get_json(silent=True) or {}
-        preview_updates = data.get("preview_updates") or []
+        preview_updates = data.get("preview_updates")
+        raw_preview_ids = data.get("previewIds")
+        preview_ids: list[int] | None = None
+
+        if raw_preview_ids is not None:
+            if not isinstance(raw_preview_ids, list):
+                return jsonify({"success": False, "error": "previewIds must be an array"}), 400
+
+            normalized_preview_ids: list[int] = []
+            for raw_preview_id in raw_preview_ids:
+                if (
+                    not isinstance(raw_preview_id, int)
+                    or isinstance(raw_preview_id, bool)
+                    or raw_preview_id <= 0
+                ):
+                    return jsonify(
+                        {"success": False, "error": "previewIds must contain positive integers"}
+                    ), 400
+                normalized_preview_ids.append(raw_preview_id)
+
+            preview_ids = normalized_preview_ids
 
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
@@ -2998,7 +3018,10 @@ def promote_import_learning(session_id: str):
         try:
             promote_result = loop.run_until_complete(
                 bill_service.promote_session_annotations_to_learning(
-                    session_id, preview_updates=preview_updates, user_id=request.user_id
+                    session_id,
+                    preview_updates=preview_updates,
+                    preview_ids=preview_ids,
+                    user_id=request.user_id,
                 )
             )
 

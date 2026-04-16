@@ -325,7 +325,10 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         preview_map = {int(preview["id"]): preview for preview in previews if preview.get("id")}
         samples = await self.get_import_annotation_samples(session_id, user_id=user_id)
 
+        selection_requested = preview_ids is not None
         selected_preview_ids = {int(pid) for pid in (preview_ids or []) if pid}
+        if selection_requested and not selected_preview_ids:
+            return {"selected_samples": 0, "rules_total": 0, "created": 0, "updated": 0}
         if selected_preview_ids:
             samples = [sample for sample in samples if int(sample.get("preview_id", 0) or 0) in selected_preview_ids]
         if not samples:

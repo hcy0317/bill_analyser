@@ -1228,16 +1228,29 @@ class BillService:
 
     @log_method
     async def promote_session_annotations_to_learning(
-        self, session_id: str, preview_updates: list[dict[str, Any]] | None = None, user_id: int = 1
+        self,
+        session_id: str,
+        preview_updates: list[dict[str, Any]] | None = None,
+        preview_ids: list[int] | None = None,
+        user_id: int = 1,
     ) -> dict[str, Any]:
         """将当前会话人工标注提升为长期学习规则。"""
-        preview_ids: list[int] = []
-        if preview_updates:
-            await self.db.save_import_annotation_samples(session_id, preview_updates, user_id=user_id)
-            preview_ids = [int(item["id"]) for item in preview_updates if item.get("id")]
+        selected_preview_ids: list[int] | None = None
+        if preview_updates is not None:
+            selected_preview_ids = []
+            await self.db.save_import_annotation_samples(
+                session_id,
+                preview_updates,
+                user_id=user_id,
+            )
+            selected_preview_ids = [int(item["id"]) for item in preview_updates if item.get("id")]
+        elif preview_ids is not None:
+            selected_preview_ids = [int(preview_id) for preview_id in preview_ids if int(preview_id) > 0]
 
         promote_result = await self.db.promote_import_annotation_samples_to_learning(
-            session_id, preview_ids=preview_ids or None, user_id=user_id
+            session_id,
+            preview_ids=selected_preview_ids,
+            user_id=user_id,
         )
         return {
             "success": True,

@@ -368,6 +368,54 @@ async def test_import_learning_rules_promote_with_parser_builds_parser_aware_com
 
 
 @pytest.mark.asyncio
+async def test_import_learning_rules_promote_with_explicit_empty_preview_ids_returns_zero(db):
+    """显式传入空 preview_ids 时，不应回退成全量提升。"""
+    session_id = "test-session-learning-empty-preview-ids"
+    await db.create_import_session(session_id, user_id=1, file_count=1)
+
+    inserted = await db.insert_preview_bills_batch(session_id, [
+        {
+            "preview_data": {
+                "preview_date": "2026-03-10 08:00:00",
+                "preview_type": "支出",
+                "preview_amount": 18.0,
+                "preview_destination_amount": 0.0,
+                "preview_main_category": "",
+                "preview_sub_category": "",
+                "preview_source_account_id": None,
+                "preview_destination_account_id": None,
+                "preview_counterparty": "空选择商户",
+                "preview_payment_method": "支付宝",
+                "preview_description": "空选择描述"
+            },
+            "dedup_type": "remaining",
+            "dedup_source_ids": []
+        }
+    ], user_id=1)
+    assert inserted == 1
+
+    preview_id = (await db.get_preview_by_session(session_id))[0]["id"]
+    saved = await db.save_import_annotation_samples(session_id, [
+        {
+            "id": preview_id,
+            "preview_type": "支出",
+            "category_id": None,
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+        }
+    ], user_id=1)
+    assert saved == 1
+
+    promoted = await db.promote_import_annotation_samples_to_learning(
+        session_id,
+        preview_ids=[],
+        user_id=1,
+    )
+    assert promoted == {"selected_samples": 0, "rules_total": 0, "created": 0, "updated": 0}
+    assert await db.get_import_learning_rules(user_id=1) == []
+
+
+@pytest.mark.asyncio
 async def test_import_learning_rules_promote_uses_user_scoped_preview_lookup(db):
     """非默认用户提升长期学习规则时必须读取同一用户的 preview 数据。"""
     user_id = await db.create_user({

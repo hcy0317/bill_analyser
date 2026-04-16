@@ -547,10 +547,13 @@ class FakeBillsService:
         self,
         session_id: str,
         *,
-        preview_updates: list[dict[str, Any]],
+        preview_updates: list[dict[str, Any]] | None = None,
+        preview_ids: list[int] | None = None,
         user_id: int,
     ) -> dict[str, Any]:
-        self.promote_calls.append((session_id, [dict(item) for item in preview_updates], user_id))
+        normalized_updates = [dict(item) for item in (preview_updates or [])]
+        normalized_preview_ids = [int(item) for item in (preview_ids or [])]
+        self.promote_calls.append((session_id, normalized_updates, normalized_preview_ids, user_id))
         return dict(self.promote_result)
 
     async def update_preview_recurring_match(
@@ -1324,7 +1327,37 @@ def test_bills_reclassify_and_learning_routes_cover_remaining_midweight_branches
         _set_request_user_id(7)
         payload = promote_route("sess-5").get_json() or {}
         assert payload == {"success": True, "data": {"promotedCount": 4}}
-        assert service.promote_calls[-1] == ("sess-5", [{"id": 9}], 7)
+        assert service.promote_calls[-1] == ("sess-5", [{"id": 9}], [], 7)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/learning/sess-5-preview-ids/promote",
+        method="POST",
+        json={"previewIds": [9, 10]},
+    ):
+        _set_request_user_id(8)
+        payload = promote_route("sess-5-preview-ids").get_json() or {}
+        assert payload == {"success": True, "data": {"promotedCount": 4}}
+        assert service.promote_calls[-1] == ("sess-5-preview-ids", [], [9, 10], 8)
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/learning/sess-preview-ids-invalid-shape/promote",
+        method="POST",
+        json={"previewIds": "9"},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(promote_route("sess-preview-ids-invalid-shape"))
+        assert status == 400
+        assert response.get_json()["error"] == "previewIds must be an array"
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/learning/sess-preview-ids-invalid-item/promote",
+        method="POST",
+        json={"previewIds": [9, 0, True]},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(promote_route("sess-preview-ids-invalid-item"))
+        assert status == 400
+        assert response.get_json()["error"] == "previewIds must contain positive integers"
 
     async def _raise_promote_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("promote boom")

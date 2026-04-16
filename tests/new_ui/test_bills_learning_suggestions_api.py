@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 from tests.new_ui.test_bills_api import (
     _build_isolated_auth_headers,

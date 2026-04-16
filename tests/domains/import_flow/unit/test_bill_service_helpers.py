@@ -539,6 +539,69 @@ async def test_import_learning_helpers_and_promotion_cover_rule_replay_paths() -
 
 
 @pytest.mark.asyncio
+async def test_promote_session_annotations_supports_explicit_preview_ids_without_resaving_samples() -> None:
+    """长期学习提升应支持直接透传 preview_ids，而不重复保存会话标注样本。"""
+    fake_db = FakeBillServiceDB()
+    service = _make_service(fake_db)
+
+    promote_result = await service.promote_session_annotations_to_learning(
+        "session-explicit-preview-ids",
+        preview_ids=[21, 22],
+        user_id=3,
+    )
+
+    assert promote_result["success"] is True
+    assert fake_db.saved_annotation_samples == []
+    assert fake_db.promoted_annotation_sessions == [
+        ("session-explicit-preview-ids", [21, 22], 3)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_promote_session_annotations_prefers_preview_updates_over_explicit_preview_ids() -> None:
+    """当 preview_updates 与 preview_ids 同时提供时，应优先使用 preview_updates 派生的选择结果。"""
+    fake_db = FakeBillServiceDB()
+    service = _make_service(fake_db)
+
+    promote_result = await service.promote_session_annotations_to_learning(
+        "session-preview-updates-priority",
+        preview_updates=[{"id": 11, "preview_type": "支出"}, {"id": 12, "preview_type": "收入"}],
+        preview_ids=[99],
+        user_id=5,
+    )
+
+    assert promote_result["success"] is True
+    assert fake_db.saved_annotation_samples == [
+        (
+            "session-preview-updates-priority",
+            [{"id": 11, "preview_type": "支出"}, {"id": 12, "preview_type": "收入"}],
+            5,
+        )
+    ]
+    assert fake_db.promoted_annotation_sessions == [
+        ("session-preview-updates-priority", [11, 12], 5)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_promote_session_annotations_treats_explicit_empty_preview_ids_as_zero_selection() -> None:
+    """显式传入空 preview_ids 时，应保持零提升，而不是回退成全量提升。"""
+    fake_db = FakeBillServiceDB()
+    service = _make_service(fake_db)
+
+    promote_result = await service.promote_session_annotations_to_learning(
+        "session-empty-preview-ids",
+        preview_ids=[],
+        user_id=6,
+    )
+
+    assert promote_result["success"] is True
+    assert fake_db.promoted_annotation_sessions == [
+        ("session-empty-preview-ids", [], 6)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_apply_import_learning_rules_ignores_stale_account_ids() -> None:
     """长期学习回放遇到已失效账户 ID 时，不应把悬空账户写回 bill。"""
     fake_db = FakeBillServiceDB()
