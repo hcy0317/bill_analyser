@@ -513,7 +513,7 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
         self,
         user_id: int = 1,
     ) -> list[dict[str, Any]]:
-        """List persisted manual transfer pairs for the current user."""
+        """List persisted manual bill pairs for the current user."""
         conn = await self._get_connection()
         async with conn.execute(
             """
@@ -553,11 +553,10 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
               ON right_bill.id = pairs.right_bill_id
              AND right_bill.user_id = pairs.user_id
             WHERE pairs.user_id = ?
-              AND pairs.pair_type = ?
               AND pairs.source = ?
             ORDER BY COALESCE(pairs.updated_at, pairs.created_at) DESC, pairs.id DESC
             """,
-            (user_id, self._TRANSFER_PAIR_TYPE, self._MANUAL_PAIR_SOURCE),
+                        (user_id, self._MANUAL_PAIR_SOURCE),
         ) as cursor:
             rows = await cursor.fetchall()
 

@@ -436,10 +436,10 @@ async def test_db_get_bill_transfer_candidates_is_user_scoped_and_excludes_inval
 
 
 @pytest.mark.asyncio
-async def test_db_list_manual_transfer_pairs_returns_only_current_user_pairs_with_bill_summaries(
+async def test_db_list_manual_transfer_pairs_returns_only_current_user_manual_pairs_with_bill_summaries(
     tmp_path: Path,
 ) -> None:
-    """pair 列表应只返回当前用户的 transfer/manual pairs，并附左右账单最小摘要。"""
+    """pair 列表应返回当前用户的 manual pairs（含 investment），并附左右账单最小摘要。"""
     db = await _create_database(tmp_path)
     try:
         user_id = await _create_user(db, "matching_pair_list_user")
@@ -579,14 +579,19 @@ async def test_db_list_manual_transfer_pairs_returns_only_current_user_pairs_wit
 
         pairs = await db.list_manual_transfer_pairs(user_id=user_id)
 
-        assert [pair["id"] for pair in pairs] == [int(second_pair["id"]), int(first_pair["id"])]
-        assert all(pair["pair_type"] == "transfer" for pair in pairs)
+        assert [pair["pair_type"] for pair in pairs] == ["investment", "transfer", "transfer"]
+        assert [pair["source"] for pair in pairs] == ["manual", "manual", "manual"]
+        assert [pair["right_bill"]["description"] for pair in pairs] == [
+            "pair list investment income",
+            "pair list second income",
+            "pair list first income",
+        ]
         assert all(pair["source"] == "manual" for pair in pairs)
         assert pairs[0]["left_bill"]["id"] == pairs[0]["left_bill_id"]
         assert pairs[0]["right_bill"]["id"] == pairs[0]["right_bill_id"]
         assert pairs[0]["left_bill"]["payment_method"] == "银行卡"
-        assert pairs[0]["right_bill"]["description"] == "pair list second income"
-        assert pairs[1]["left_bill"]["description"] == "pair list first expense"
+        assert pairs[1]["left_bill"]["description"] == "pair list second expense"
+        assert pairs[2]["left_bill"]["description"] == "pair list first expense"
     finally:
         await db.close()
 

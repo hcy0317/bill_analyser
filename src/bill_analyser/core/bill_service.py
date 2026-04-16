@@ -2623,7 +2623,7 @@ class BillService:
 
     @log_method
     async def get_matching_pairs(self, user_id: int = 1) -> dict[str, Any]:
-        """Return persisted manual transfer pairs for the current user."""
+        """Return persisted manual bill pairs for the current user."""
         pairs = await self.db.list_manual_transfer_pairs(user_id=user_id)
         return {"success": True, "pairs": pairs}
 

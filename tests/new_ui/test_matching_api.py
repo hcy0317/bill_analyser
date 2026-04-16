@@ -1041,6 +1041,82 @@ class TestMatchingAPI:
         assert data["success"] is True
         assert data["data"] == {"pairs": []}
 
+    def test_matching_pairs_includes_investment_manual_pairs(self, client):
+        """pair 列表应返回当前用户下的 mixed manual pairs，至少包含 investment/manual。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list_investment_manual")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        transfer_source_account_id = _create_account_via_db(current_user_id, "pytest pair list transfer 源账户")
+        transfer_target_account_id = _create_account_via_db(current_user_id, "pytest pair list transfer 目标账户")
+        investment_source_account_id = _create_account_via_db(current_user_id, "pytest pair list investment 源账户")
+        investment_target_account_id = _create_account_via_db(current_user_id, "pytest pair list investment 目标账户")
+
+        transfer_left_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=transfer_source_account_id,
+            amount=-118.0,
+            bill_type="支出",
+            date="2026-07-19 10:00:00",
+            description="matching api mixed pair transfer left",
+        )
+        transfer_right_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=transfer_target_account_id,
+            amount=118.0,
+            bill_type="收入",
+            date="2026-07-19 10:03:00",
+            description="matching api mixed pair transfer right",
+        )
+        investment_left_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=investment_source_account_id,
+            amount=-128.0,
+            bill_type="投资",
+            date="2026-07-19 11:00:00",
+            description="蚂蚁财富 mixed pair investment 买入",
+        )
+        investment_right_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=investment_target_account_id,
+            amount=128.0,
+            bill_type="投资",
+            date="2026-07-19 11:03:00",
+            description="蚂蚁财富 mixed pair investment 卖出",
+        )
+
+        transfer_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": transfer_left_bill_id, "candidateBillId": transfer_right_bill_id},
+            headers=auth_headers,
+        )
+        assert transfer_pair_response.status_code == 200
+
+        from src.api.app import db
+
+        async def _create_investment_pair() -> dict[str, object]:
+            return await db.create_manual_investment_pair(
+                investment_left_bill_id,
+                investment_right_bill_id,
+                user_id=current_user_id,
+            )
+
+        investment_pair = asyncio.run(_create_investment_pair())
+
+        response = client.get("/api/matching/pairs", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        pairs = data["data"]["pairs"]
+        assert [pair["pairType"] for pair in pairs] == ["investment", "transfer"]
+        assert [pair["id"] for pair in pairs] == [
+            int(investment_pair["id"]),
+            transfer_pair_response.get_json()["data"]["pair"]["id"],
+        ]
+        assert pairs[0]["leftBill"]["description"] == "蚂蚁财富 mixed pair investment 买入"
+        assert pairs[0]["rightBill"]["description"] == "蚂蚁财富 mixed pair investment 卖出"
+        assert pairs[1]["leftBill"]["description"] == "matching api mixed pair transfer left"
+
     def test_matching_pairs_does_not_leak_other_users_pairs(self, client):
         """pair 列表不应泄露其他用户已持久化的配对关系。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_pairs_list_primary")
@@ -3887,7 +3963,15 @@ class TestMatchingAPI:
 
         list_pairs_response = client.get("/api/matching/pairs", headers=auth_headers)
         assert list_pairs_response.status_code == 200
-        assert list_pairs_response.get_json()["data"] == {"pairs": []}
+        list_pairs = list_pairs_response.get_json()["data"]["pairs"]
+        assert len(list_pairs) == 1
+        assert list_pairs[0]["id"] == accept_data["data"]["pair"]["id"]
+        assert list_pairs[0]["pairType"] == "investment"
+        assert list_pairs[0]["source"] == "manual"
+        assert list_pairs[0]["leftBillId"] == min(anchor_bill_id, candidate_bill_id)
+        assert list_pairs[0]["rightBillId"] == max(anchor_bill_id, candidate_bill_id)
+        assert list_pairs[0]["leftBill"]["id"] == list_pairs[0]["leftBillId"]
+        assert list_pairs[0]["rightBill"]["id"] == list_pairs[0]["rightBillId"]
 
         delete_response = client.delete(
             f"/api/matching/pairs/{accept_data['data']['pair']['id']}",
