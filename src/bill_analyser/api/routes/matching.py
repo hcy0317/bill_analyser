@@ -118,6 +118,17 @@ def _build_matching_bill_candidates_payload(
     }
 
 
+def _serialize_matching_feedback_event(event: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(event.get("payload") or {}) if isinstance(event.get("payload"), dict) else {}
+    return {
+        "id": int(event.get("id") or 0),
+        "candidateId": str(event.get("candidate_id") or ""),
+        "action": str(event.get("action") or ""),
+        "createdAt": str(event.get("created_at") or ""),
+        "payload": payload,
+    }
+
+
 def _parse_matching_candidates_selector() -> tuple[str | None, int | None]:
     session_id = str(request.args.get("sessionId") or "").strip()
     raw_bill_id = request.args.get("billId")
@@ -223,13 +234,17 @@ def _build_matching_candidate_action_payload(
 def _build_matching_reconcile_history_payload(result: dict[str, Any]) -> dict[str, Any]:
     summary = dict(result.get("summary") or {})
     results = list(result.get("results") or [])
+    serialized_results = [
+        _build_matching_bill_candidates_payload(int(item.get("bill_id") or 0), item)
+        for item in results
+    ]
     return {
         "summary": {
             "billCount": int(summary.get("bill_count") or 0),
             "candidateCount": int(summary.get("candidate_count") or 0),
             "linkedPairCount": int(summary.get("linked_pair_count") or 0),
         },
-        "results": [_build_matching_bill_candidates_payload(int(item.get("bill_id") or 0), item) for item in results],
+        "results": serialized_results,
     }
 
 
@@ -276,6 +291,37 @@ def get_matching_bill_candidates(bill_id: int):
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取历史账单 matching 候选失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/bills/<int:bill_id>/feedback", methods=["GET"])
+@log_method
+@require_auth
+def get_matching_bill_feedback(bill_id: int):
+    """返回某条正式账单的 matching feedback 审查事件流。"""
+    try:
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+
+        result = _run_async(bill_service.get_matching_bill_feedback(bill_id, user_id=user_id))
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 404))
+            error_message = result.get("error", "Bill not found")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "billId": bill_id,
+                    "events": [
+                        _serialize_matching_feedback_event(event) for event in list(result.get("events") or [])
+                    ],
+                },
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取历史账单 matching feedback 失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 
@@ -444,10 +490,11 @@ def get_matching_pairs():
         _, bill_service = get_app_context()
         user_id = _get_request_user_id()
         result = _run_async(bill_service.get_matching_pairs(user_id=user_id))
+        serialized_pairs = [_serialize_matching_pair_detail(pair) for pair in list(result.get("pairs") or [])]
         return jsonify(
             {
                 "success": True,
-                "data": {"pairs": [_serialize_matching_pair_detail(pair) for pair in list(result.get("pairs") or [])]},
+                "data": {"pairs": serialized_pairs},
             }
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught

@@ -4626,6 +4626,171 @@ class TestMatchingAPI:
         assert accept_response.status_code == 409
         assert _list_bill_pair_feedback_via_db(user_id=current_user_id, candidate_id=candidate_id) == []
 
+    def test_matching_bill_feedback_returns_related_events_for_current_user(self, client):
+        """bill-scoped feedback 读侧应返回当前用户与该 bill 相关的 formal-bill matching 事件。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_feedback_current_user")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest feedback read 源账户")
+        transfer_target_account_id = _create_account_via_db(current_user_id, "pytest feedback read 转账目标账户")
+        investment_target_account_id = _create_account_via_db(current_user_id, "pytest feedback read 投资目标账户")
+        unrelated_source_account_id = _create_account_via_db(current_user_id, "pytest feedback read 无关源账户")
+        unrelated_target_account_id = _create_account_via_db(current_user_id, "pytest feedback read 无关目标账户")
+
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-58.0,
+            bill_type="投资",
+            date="2026-07-30 09:00:00",
+            description="蚂蚁财富 feedback read anchor 买入",
+        )
+        transfer_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=transfer_target_account_id,
+            amount=58.0,
+            bill_type="收入",
+            date="2026-07-30 09:03:00",
+            description="pytest feedback read transfer candidate",
+        )
+        investment_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=investment_target_account_id,
+            amount=58.0,
+            bill_type="投资",
+            date="2026-07-30 09:05:00",
+            description="蚂蚁财富 feedback read investment 卖出",
+        )
+        unrelated_anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=unrelated_source_account_id,
+            amount=-41.0,
+            bill_type="支出",
+            date="2026-07-30 10:00:00",
+            description="pytest feedback read unrelated anchor",
+        )
+        unrelated_candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=unrelated_target_account_id,
+            amount=41.0,
+            bill_type="收入",
+            date="2026-07-30 10:02:00",
+            description="pytest feedback read unrelated candidate",
+        )
+
+        transfer_candidate_id = f"bill:{anchor_bill_id}:transfer:{transfer_candidate_bill_id}"
+        investment_candidate_id = f"bill:{anchor_bill_id}:investment:{investment_candidate_bill_id}"
+        unrelated_candidate_id = f"bill:{unrelated_anchor_bill_id}:transfer:{unrelated_candidate_bill_id}"
+
+        transfer_reject_response = client.post(
+            f"/api/matching/candidates/{transfer_candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+        assert transfer_reject_response.status_code == 200
+
+        investment_reject_response = client.post(
+            f"/api/matching/candidates/{investment_candidate_id}/reject",
+            json={},
+            headers=auth_headers,
+        )
+        assert investment_reject_response.status_code == 200
+
+        unrelated_accept_response = client.post(
+            f"/api/matching/candidates/{unrelated_candidate_id}/accept",
+            json={},
+            headers=auth_headers,
+        )
+        assert unrelated_accept_response.status_code == 200
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/feedback", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["billId"] == anchor_bill_id
+        assert [event["candidateId"] for event in data["data"]["events"]] == [
+            investment_candidate_id,
+            transfer_candidate_id,
+        ]
+        assert [event["action"] for event in data["data"]["events"]] == ["reject", "reject"]
+        assert data["data"]["events"][0]["payload"] == {
+            "scope": "bill",
+            "kind": "investment",
+            "bill_id": anchor_bill_id,
+            "candidate_bill_id": investment_candidate_bill_id,
+        }
+        assert data["data"]["events"][1]["payload"] == {
+            "scope": "bill",
+            "kind": "transfer",
+            "bill_id": anchor_bill_id,
+            "candidate_bill_id": transfer_candidate_bill_id,
+        }
+
+    def test_matching_bill_feedback_returns_empty_list_for_existing_bill_without_events(self, client):
+        """bill 存在但没有 feedback 事件时，应返回 200 + 空数组。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_bill_feedback_empty")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest feedback empty 源账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-35.0,
+            bill_type="支出",
+            date="2026-07-30 11:00:00",
+            description="pytest feedback empty anchor",
+        )
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/feedback", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "success": True,
+            "data": {
+                "billId": anchor_bill_id,
+                "events": [],
+            },
+        }
+
+    def test_matching_bill_feedback_is_user_scoped(self, client):
+        """bill-scoped feedback 读侧不应跨用户泄露 bill 或事件。"""
+        primary_headers = _build_isolated_auth_headers(client, "test_matching_bill_feedback_scope_primary")
+        secondary_headers = _build_isolated_auth_headers(client, "test_matching_bill_feedback_scope_secondary")
+        primary_user_id = _get_current_user_id(client, primary_headers)
+
+        source_account_id = _create_account_via_db(primary_user_id, "pytest feedback scope 源账户")
+        target_account_id = _create_account_via_db(primary_user_id, "pytest feedback scope 目标账户")
+        anchor_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=source_account_id,
+            amount=-47.0,
+            bill_type="支出",
+            date="2026-07-30 12:00:00",
+            description="pytest feedback scope anchor",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            primary_user_id,
+            source_account_id=target_account_id,
+            amount=47.0,
+            bill_type="收入",
+            date="2026-07-30 12:02:00",
+            description="pytest feedback scope candidate",
+        )
+
+        reject_response = client.post(
+            f"/api/matching/candidates/bill:{anchor_bill_id}:transfer:{candidate_bill_id}/reject",
+            json={},
+            headers=primary_headers,
+        )
+        assert reject_response.status_code == 200
+
+        response = client.get(f"/api/matching/bills/{anchor_bill_id}/feedback", headers=secondary_headers)
+
+        assert response.status_code == 404
+        assert response.get_json()["success"] is False
+        assert response.get_json()["error"] == "Bill not found"
+
     def test_matching_candidate_reject_is_user_scoped_for_historical_learning(self, client):
         """generic reject 的 historical learning 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(

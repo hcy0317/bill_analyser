@@ -2628,6 +2628,20 @@ class BillService:
         return {"success": True, "pairs": pairs}
 
     @log_method
+    async def get_matching_bill_feedback(self, bill_id: int, user_id: int = 1) -> dict[str, Any]:
+        """Return append-only formal-bill matching feedback events for a persisted bill."""
+        bill = await self.db.get_bill_by_id(int(bill_id), user_id=user_id)
+        if not bill:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+
+        events = await self.db.list_bill_matching_feedback_for_bill(int(bill_id), user_id=user_id)
+        return {
+            "success": True,
+            "bill_id": int(bill_id),
+            "events": events,
+        }
+
+    @log_method
     async def _accept_preview_transfer_candidate(
         self,
         candidate_id: str,

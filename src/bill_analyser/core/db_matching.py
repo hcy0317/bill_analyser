@@ -222,6 +222,43 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             }
         return payload
 
+    @staticmethod
+    def _deserialize_bill_pair_feedback_payload(raw_payload_json: Any) -> dict[str, Any]:
+        if isinstance(raw_payload_json, dict):
+            return dict(raw_payload_json)
+        if raw_payload_json in (None, ""):
+            return {}
+        try:
+            payload = json.loads(str(raw_payload_json))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _is_bill_related_feedback_payload(payload: dict[str, Any], bill_id: int) -> bool:
+        normalized_bill_id = int(bill_id)
+        related_bill_ids: set[int] = set()
+
+        for raw_bill_id in (payload.get("bill_id"), payload.get("candidate_bill_id")):
+            if raw_bill_id in (None, ""):
+                continue
+            try:
+                related_bill_ids.add(int(raw_bill_id))
+            except (TypeError, ValueError):
+                continue
+
+        pair_payload = payload.get("pair")
+        if isinstance(pair_payload, dict):
+            for raw_bill_id in (pair_payload.get("left_bill_id"), pair_payload.get("right_bill_id")):
+                if raw_bill_id in (None, ""):
+                    continue
+                try:
+                    related_bill_ids.add(int(raw_bill_id))
+                except (TypeError, ValueError):
+                    continue
+
+        return normalized_bill_id in related_bill_ids
+
     @log_method
     async def record_bill_pair_feedback(
         self,
@@ -265,6 +302,49 @@ class DatabaseMatchingMixin(DatabaseFacadeBase):
             "payload": normalized_payload,
             "created_at": created_at,
         }
+
+    @log_method
+    async def list_bill_matching_feedback_for_bill(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return append-only formal-bill matching feedback events related to a bill."""
+        normalized_bill_id = int(bill_id)
+        if normalized_bill_id <= 0:
+            return []
+
+        conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT *
+            FROM bill_pair_feedback
+            WHERE user_id = ?
+            ORDER BY COALESCE(created_at, '') DESC, id DESC
+            """,
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            row_dict = dict(row)
+            payload = self._deserialize_bill_pair_feedback_payload(row_dict.get("payload_json"))
+            if not self._is_bill_related_feedback_payload(payload, normalized_bill_id):
+                continue
+            events.append(
+                {
+                    "id": int(row_dict.get("id") or 0),
+                    "user_id": int(row_dict.get("user_id") or 0),
+                    "candidate_id": str(row_dict.get("candidate_id") or ""),
+                    "action": str(row_dict.get("action") or ""),
+                    "payload": payload,
+                    "created_at": str(row_dict.get("created_at") or ""),
+                }
+            )
+
+        return events
 
     async def _delete_bill_pair_links_for_bill_ids(
         self,

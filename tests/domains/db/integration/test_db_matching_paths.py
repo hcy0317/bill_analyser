@@ -160,6 +160,110 @@ async def _list_bill_pair_feedback(
 
 
 @pytest.mark.asyncio
+async def test_db_list_bill_matching_feedback_for_bill_returns_related_events_in_desc_order_and_user_scoped(
+    tmp_path: Path,
+) -> None:
+    """bill-scoped feedback 读侧应只返回当前用户相关事件，并按最新事件优先排序。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "matching_feedback_read_user")
+        other_user_id = await _create_user(db, "matching_feedback_read_other")
+
+        first_event = await db.record_bill_pair_feedback(
+            "bill:11:transfer:12",
+            "accept",
+            {
+                "scope": "bill",
+                "kind": "transfer",
+                "bill_id": 11,
+                "candidate_bill_id": 12,
+                "pair": {
+                    "id": 91,
+                    "pair_type": "transfer",
+                    "source": "manual",
+                    "left_bill_id": 11,
+                    "right_bill_id": 12,
+                },
+            },
+            user_id=user_id,
+        )
+        second_event = await db.record_bill_pair_feedback(
+            "bill:13:investment:11",
+            "reject",
+            {
+                "scope": "bill",
+                "kind": "investment",
+                "bill_id": 13,
+                "candidate_bill_id": 11,
+            },
+            user_id=user_id,
+        )
+        await db.record_bill_pair_feedback(
+            "bill:21:transfer:22",
+            "reject",
+            {
+                "scope": "bill",
+                "kind": "transfer",
+                "bill_id": 21,
+                "candidate_bill_id": 22,
+            },
+            user_id=user_id,
+        )
+        await db.record_bill_pair_feedback(
+            "bill:11:transfer:12",
+            "accept",
+            {
+                "scope": "bill",
+                "kind": "transfer",
+                "bill_id": 11,
+                "candidate_bill_id": 12,
+            },
+            user_id=other_user_id,
+        )
+
+        events = await db.list_bill_matching_feedback_for_bill(11, user_id=user_id)
+        other_user_events = await db.list_bill_matching_feedback_for_bill(11, user_id=other_user_id)
+
+        assert [event["candidate_id"] for event in events] == [
+            "bill:13:investment:11",
+            "bill:11:transfer:12",
+        ]
+        assert [event["action"] for event in events] == ["reject", "accept"]
+        assert events[0]["payload"] == {
+            "scope": "bill",
+            "kind": "investment",
+            "bill_id": 13,
+            "candidate_bill_id": 11,
+        }
+        assert events[1]["payload"]["pair"] == {
+            "id": 91,
+            "pair_type": "transfer",
+            "source": "manual",
+            "left_bill_id": 11,
+            "right_bill_id": 12,
+        }
+        assert int(events[0]["id"]) == int(second_event["id"])
+        assert int(events[1]["id"]) == int(first_event["id"])
+        assert other_user_events == [
+            {
+                "id": int(other_user_events[0]["id"]),
+                "user_id": other_user_id,
+                "candidate_id": "bill:11:transfer:12",
+                "action": "accept",
+                "payload": {
+                    "scope": "bill",
+                    "kind": "transfer",
+                    "bill_id": 11,
+                    "candidate_bill_id": 12,
+                },
+                "created_at": other_user_events[0]["created_at"],
+            }
+        ]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_db_record_bill_pair_feedback_persists_append_only_rows(tmp_path: Path) -> None:
     """bill_pair_feedback 应作为 append-only 事件流持久化 historical transfer/investment accept/reject。"""
     db = await _create_database(tmp_path)
