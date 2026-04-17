@@ -74,9 +74,8 @@ def _request_json(
         return error.code, data
 
 
-def _repair_user_password_hash(username: str, password: str) -> bool:
-    """Repair user password hash to bcrypt when DB contains invalid format for current auth verifier."""
-    db_path = Path(__file__).resolve().parents[1] / "data" / "bills.db"
+def _repair_user_password_hash(db_path: Path, username: str, password: str) -> bool:
+    """Repair user password hash to bcrypt in one explicit target DB."""
     if not db_path.exists():
         return False
 
@@ -125,6 +124,7 @@ def run_checklist(
     username: str,
     password: str,
     repair_invalid_salt: bool = False,
+    repair_db_path: Path | None = None,
 ) -> list[CheckResult]:
     """Run full acceptance checklist and return result list."""
     results: list[CheckResult] = []
@@ -149,7 +149,11 @@ def run_checklist(
 
     if login_status != 200 and repair_invalid_salt:
         message = str(login_body.get("message", "")) if isinstance(login_body, dict) else ""
-        if "Invalid salt" in message and _repair_user_password_hash(username, password):
+        if (
+            "Invalid salt" in message
+            and repair_db_path is not None
+            and _repair_user_password_hash(repair_db_path, username, password)
+        ):
             login_status, login_body = _request_json(
                 "POST",
                 f"{base_url}/api/authorize.json",
@@ -267,6 +271,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Auto-repair test user password hash when login fails with 'Invalid salt'",
     )
+    parser.add_argument(
+        "--repair-db-path",
+        type=Path,
+        help="在启用 --repair-invalid-salt 时用于修复密码哈希的显式数据库路径",
+    )
     return parser
 
 
@@ -283,6 +292,7 @@ def main() -> int:
             username=args.username,
             password=args.password,
             repair_invalid_salt=args.repair_invalid_salt,
+            repair_db_path=args.repair_db_path.resolve() if args.repair_db_path else None,
         )
     except RuntimeError as error:
         print(f"[ERROR] {error}")

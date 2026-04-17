@@ -1,10 +1,13 @@
 """分析去重问题：检查bills_parser_template中ID 1和48为何未被去重."""
 import sqlite3
-import os
+
+try:
+    from tests.runtime_paths import get_runtime_db_uri
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
+    from runtime_paths import get_runtime_db_uri
 
 # 连接数据库
-db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'bills.db')
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect(get_runtime_db_uri(readonly=True), uri=True)
 conn.row_factory = sqlite3.Row
 
 print("=" * 100)
@@ -59,7 +62,7 @@ for p in previews:
 print("\n[3] bills_parser_template 表统计:")
 print("-" * 100)
 cursor = conn.execute("SELECT COUNT(*) as total FROM bills_parser_template")
-total = cursor.fetchone()['total']
+total = cursor.fetchone()["total"]
 print(f"总记录数: {total}")
 
 cursor = conn.execute("SELECT parser_id, COUNT(*) as cnt FROM bills_parser_template GROUP BY parser_id")
@@ -77,37 +80,37 @@ cursor = conn.execute("""
 bill_1 = None
 bill_48 = None
 for r in cursor.fetchall():
-    if r['id'] == 1:
+    if r["id"] == 1:
         bill_1 = dict(r)
-    elif r['id'] == 48:
+    elif r["id"] == 48:
         bill_48 = dict(r)
 
 if bill_1 and bill_48:
     print(f"账单1: 日期={bill_1['parser_date']}, 金额={bill_1['parser_amount']}, 来源={bill_1['parser_id']}")
     print(f"账单48: 日期={bill_48['parser_date']}, 金额={bill_48['parser_amount']}, 来源={bill_48['parser_id']}")
-    
+
     # 比较
     from datetime import datetime
     try:
-        dt1 = datetime.fromisoformat(bill_1['parser_date'].replace('Z', '+00:00'))
-        dt2 = datetime.fromisoformat(bill_48['parser_date'].replace('Z', '+00:00'))
+        dt1 = datetime.fromisoformat(bill_1["parser_date"].replace("Z", "+00:00"))
+        dt2 = datetime.fromisoformat(bill_48["parser_date"].replace("Z", "+00:00"))
         time_diff = abs((dt1 - dt2).total_seconds())
         print(f"\n时间差: {time_diff} 秒")
     except Exception as e:
         print(f"时间解析错误: {e}")
-    
-    amt1 = float(bill_1['parser_amount']) if bill_1['parser_amount'] else 0
-    amt2 = float(bill_48['parser_amount']) if bill_48['parser_amount'] else 0
+
+    amt1 = float(bill_1["parser_amount"]) if bill_1["parser_amount"] else 0
+    amt2 = float(bill_48["parser_amount"]) if bill_48["parser_amount"] else 0
     print(f"金额差: {abs(amt1 - amt2)}")
     print(f"金额符号相同: {amt1 * amt2 > 0}")
     print(f"来源不同: {bill_1['parser_id'] != bill_48['parser_id']}")
-    
+
     # 检查去重条件
-    is_platform_1 = bill_1['parser_id'] in ['wechat', 'alipay']
-    is_platform_48 = bill_48['parser_id'] in ['wechat', 'alipay']
+    is_platform_1 = bill_1["parser_id"] in ["wechat", "alipay"]
+    is_platform_48 = bill_48["parser_id"] in ["wechat", "alipay"]
     is_bank_1 = not is_platform_1
     is_bank_48 = not is_platform_48
-    
+
     print(f"\n账单1是平台: {is_platform_1}, 是银行: {is_bank_1}")
     print(f"账单48是平台: {is_platform_48}, 是银行: {is_bank_48}")
     print(f"是平台-银行对: {(is_platform_1 and is_bank_48) or (is_bank_1 and is_platform_48)}")

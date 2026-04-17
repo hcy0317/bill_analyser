@@ -3,9 +3,9 @@
 import os
 from pathlib import Path
 
-
 TEST_DB_DIR_ENV = "BILL_ANALYSER_TEST_DB_DIR"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_DB_PATH = REPO_ROOT / "data" / "bills.db"
 TESTS_RUNTIME_DIR = REPO_ROOT / "tests" / ".runtime"
 TESTS_DB_DIR = TESTS_RUNTIME_DIR / "db"
 TEST_DB_SIDE_CAR_SUFFIXES = ("", "-wal", "-shm", "-journal")
@@ -40,3 +40,20 @@ def get_test_db_path(filename: str) -> Path:
     """Return a concrete test DB path inside tests runtime storage."""
     db_dir = configure_test_runtime_environment()
     return db_dir / filename
+
+
+def build_sqlite_uri(db_path: Path, readonly: bool = True) -> str:
+    """Build a sqlite file URI for the provided database path."""
+    resolved_path = db_path.resolve()
+    mode = "ro" if readonly else "rw"
+    return f"file:{resolved_path.as_posix()}?mode={mode}"
+
+
+def get_runtime_db_path() -> Path:
+    """Return the repository runtime bills.db path."""
+    return RUNTIME_DB_PATH
+
+
+def get_runtime_db_uri(readonly: bool = True) -> str:
+    """Return a sqlite file URI for the repository runtime bills.db path."""
+    return build_sqlite_uri(RUNTIME_DB_PATH, readonly=readonly)

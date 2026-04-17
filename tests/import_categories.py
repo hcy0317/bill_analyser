@@ -1,22 +1,24 @@
+import argparse
 import asyncio
 import json
 import sys
 from pathlib import Path
 
-# 将项目根目录加入路径
-sys.path.append(str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-from src.core.db import Database
-from src.utils.constants import CategoryType
-from src.utils.logger import get_logger
+from bill_analyser.core.db import Database
+from bill_analyser.utils.constants import CategoryType
+from bill_analyser.utils.logger import get_logger
 
 logger = get_logger("ImportCategories")
 
-async def import_categories():
+async def import_categories(db_path: Path):
     """Import categories from JSON to DB"""
     try:
         # 初始化数据库
-        db_path = Path("src/data/bills.db")
         logger.info(f"Connecting to database: {db_path}")
         db = Database(str(db_path))
         await db.init_db()
@@ -114,7 +116,11 @@ if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.INFO)
 
+    parser = argparse.ArgumentParser(description="Import categories into a target database")
+    parser.add_argument("--db-path", type=Path, required=True, help="目标数据库路径")
+    args = parser.parse_args()
+
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    asyncio.run(import_categories())
+    asyncio.run(import_categories(args.db_path.resolve()))

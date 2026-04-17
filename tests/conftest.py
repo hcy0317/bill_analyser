@@ -231,3 +231,19 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         pass
 
     cleanup_test_runtime_databases()
+
+    try:
+        from tests.test_runtime_db_guard import (  # pylint: disable=import-outside-toplevel
+            get_runtime_bills_db_cleanliness_issues,
+        )
+
+        cleanliness_issues = get_runtime_bills_db_cleanliness_issues()
+        if cleanliness_issues:
+            print("\n[pytest_sessionfinish] 运行时 bills.db 洁净审计失败:")
+            for issue in cleanliness_issues:
+                print(f"- {issue}")
+            session.exitstatus = 1
+    except Exception as exc:  # pragma: no cover - session-end hard failure path
+        print("\n[pytest_sessionfinish] 运行时 bills.db 洁净审计执行异常:")
+        print(f"- {exc}")
+        session.exitstatus = 1
