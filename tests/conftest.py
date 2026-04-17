@@ -1,13 +1,24 @@
 """Pytest shared teardown hooks."""
 
+# pylint: disable=invalid-name,too-many-return-statements
+# pylint: disable=isinstance-second-argument-not-valid-type,not-callable
+# pylint: disable=broad-exception-caught,line-too-long
+
 import asyncio
 import inspect
 import pkgutil
+import sqlite3
 import sys
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
+from urllib.parse import parse_qs, unquote, urlparse
+
+try:
+    import aiosqlite
+except ModuleNotFoundError:  # pragma: no cover - bootstrap path for -S health checks
+    aiosqlite = None  # type: ignore[assignment]
 
 from tests.runtime_paths import (
     cleanup_test_runtime_databases,
@@ -90,6 +101,82 @@ def _install_src_compat_aliases() -> None:
 
 _install_src_compat_aliases()
 
+_ORIGINAL_SQLITE_CONNECT = sqlite3.connect
+_ORIGINAL_AIOSQLITE_CONNECT = aiosqlite.connect if aiosqlite is not None else None
+_FORBIDDEN_RUNTIME_DB_PATHS = {
+    (REPO_ROOT / "data" / "bills.db").resolve(),
+    (REPO_ROOT / "src" / "data" / "bills.db").resolve(),
+}
+
+
+def _is_runtime_bills_db_target(database: object) -> bool:
+    """Return True when a connection target points at the real runtime bills.db."""
+    if database in {":memory:", "file::memory:?cache=shared"}:
+        return False
+
+    text = str(database or "").strip()
+    if not text:
+        return False
+    if text.startswith("file:") and "mode=memory" in text:
+        return False
+
+    if text.startswith("file:"):
+        parsed = urlparse(text)
+        query_params = parse_qs(parsed.query)
+        mode = str((query_params.get("mode") or [""])[0]).strip().lower()
+        raw_path = unquote(parsed.path or text[len("file:"):].split("?", maxsplit=1)[0])
+        if raw_path.startswith("/") and len(raw_path) >= 3 and raw_path[2] == ":":
+            raw_path = raw_path[1:]
+
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return False
+
+        if resolved in _FORBIDDEN_RUNTIME_DB_PATHS:
+            return mode != "ro"
+        return False
+
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+
+    return resolved in _FORBIDDEN_RUNTIME_DB_PATHS
+
+
+def _guarded_sqlite_connect(database, *args, **kwargs):
+    """Block pytest from opening the real runtime bills.db directly."""
+    if _is_runtime_bills_db_target(database):
+        raise RuntimeError(
+            "Pytest must not open the real runtime data/bills.db; use get_test_db_path(...) instead."
+        )
+    return _ORIGINAL_SQLITE_CONNECT(database, *args, **kwargs)
+
+
+def _guarded_aiosqlite_connect(database, *args, **kwargs):
+    """Block pytest from opening the real runtime bills.db directly."""
+    if _ORIGINAL_AIOSQLITE_CONNECT is None:
+        raise ModuleNotFoundError("aiosqlite")
+    if _is_runtime_bills_db_target(database):
+        raise RuntimeError(
+            "Pytest must not open the real runtime data/bills.db; use get_test_db_path(...) instead."
+        )
+    return _ORIGINAL_AIOSQLITE_CONNECT(database, *args, **kwargs)
+
+
+sqlite3.connect = _guarded_sqlite_connect
+if aiosqlite is not None:
+    aiosqlite.connect = _guarded_aiosqlite_connect
+
 
 def _close_db_instance(db_instance) -> None:
     """Close async database instance safely in sync pytest hook."""
@@ -126,7 +213,7 @@ def _close_db_instance(db_instance) -> None:
 def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argument
     """Ensure global DB connections are closed so worker threads can exit."""
     try:
-        from src.api import app as api_app  # pylint: disable=import-outside-toplevel
+        from bill_analyser.api import app as api_app  # pylint: disable=import-outside-toplevel
 
         db_from_config = api_app.app.config.get("DB_INSTANCE") if hasattr(api_app, "app") else None
         db_global = getattr(api_app, "db", None)

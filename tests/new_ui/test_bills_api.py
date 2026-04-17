@@ -10,6 +10,8 @@ from io import BytesIO
 import pytest
 from openpyxl import Workbook
 
+from tests.user_cleanup_support import register_test_user_for_cleanup
+
 
 def _pick_first_account(account_items):
     """递归获取第一个可用账户。"""
@@ -91,6 +93,9 @@ def _build_isolated_auth_headers(client, prefix: str) -> dict[str, str]:
     """为易受共享状态影响的用例创建独立用户。"""
     username = f"{prefix}_{int(time.time() * 1000)}"
     password = "Test123456!"
+    from bill_analyser.api.app import app as flask_app
+
+    db = flask_app.config["DB_INSTANCE"]
 
     register_response = client.post("/api/auth/register", json={
         "username": username,
@@ -98,7 +103,8 @@ def _build_isolated_auth_headers(client, prefix: str) -> dict[str, str]:
         "password": password,
         "nickname": username,
     })
-    assert register_response.status_code in (200, 201, 409), register_response.get_data(as_text=True)
+    assert register_response.status_code in (200, 201), register_response.get_data(as_text=True)
+    register_test_user_for_cleanup(db, username)
 
     login_response = client.post("/api/auth/login", json={
         "loginName": username,
@@ -169,7 +175,7 @@ def _create_test_bill_for_recurring(client, auth_headers, *, account_id, categor
 
 def _create_test_import_session(session_id, parser_bills, parser_id="alipay", user_id=1):
     """创建用于三阶段导入测试的会话与解析模板。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         await db.create_import_session(session_id, user_id=user_id, file_count=1)
@@ -181,7 +187,7 @@ def _create_test_import_session(session_id, parser_bills, parser_id="alipay", us
 
 def _find_bill_by_comment(comment, user_id=1):
     """按备注查找最近写入的账单。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _find():
         conn = await db._get_connection()  # pylint: disable=protected-access
@@ -201,7 +207,7 @@ def _find_bill_by_comment(comment, user_id=1):
 
 def _find_recurring_by_id(recurring_id, user_id=1):
     """按ID查找定时模板。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _find():
         conn = await db._get_connection()  # pylint: disable=protected-access
@@ -221,7 +227,7 @@ def _find_recurring_by_id(recurring_id, user_id=1):
 
 def _find_category_id_by_name(main_category, sub_category, user_id=1):
     """按主/子分类名称查找分类 ID。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _find():
         category = await db.get_category_by_name(main_category or "", sub_category or "", user_id=user_id)
@@ -236,7 +242,7 @@ def _get_current_user_id(client, auth_headers):
     assert profile_response.status_code == 200
     username = profile_response.get_json()["result"]["username"]
 
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _find_user_id():
         user = await db.get_user_by_username(username)
@@ -250,7 +256,7 @@ def _create_import_learning_rule(user_id, match_type, match_value, *, learned_ty
                                  learned_category_id=None, learned_source_account_id=None,
                                  learned_destination_account_id=None):
     """创建导入长期学习规则。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         conn = await db._get_connection()  # pylint: disable=protected-access
@@ -294,31 +300,28 @@ def _create_import_learning_rule(user_id, match_type, match_value, *, learned_ty
     return asyncio.run(_create())
 
 
-@pytest.fixture(scope="module", name="auth_headers")
+@pytest.fixture(name="auth_headers")
 def _auth_headers_fixture(client):
     """获取认证请求头"""
-    login_response = client.post("/api/auth/login", json={
-        "loginName": "admin",
-        "password": "admin123"
+    username = f"test_bills_api_{int(time.time() * 1000)}"
+    from bill_analyser.api.app import app as flask_app
+
+    db = flask_app.config["DB_INSTANCE"]
+    register_response = client.post("/api/auth/register", json={
+        "username": username,
+        "email": f"{username}@example.com",
+        "password": "Test123456!",
+        "nickname": username
     })
+    assert register_response.status_code in [200, 201], (
+        f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
+    )
+    register_test_user_for_cleanup(db, username)
 
-    if login_response.status_code != 200:
-        suffix = int(time.time())
-        username = f"test_bills_api_{suffix}"
-        register_response = client.post("/api/auth/register", json={
-            "username": username,
-            "email": f"{username}@example.com",
-            "password": "Test123456!",
-            "nickname": username
-        })
-        assert register_response.status_code in [200, 409], (
-            f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
-        )
-
-        login_response = client.post("/api/auth/login", json={
-            "loginName": username,
-            "password": "Test123456!"
-        })
+    login_response = client.post("/api/auth/login", json={
+        "loginName": username,
+        "password": "Test123456!"
+    })
 
     assert login_response.status_code == 200, (
         f"登录失败: {login_response.status_code}, {login_response.get_data(as_text=True)}"
@@ -1513,7 +1516,7 @@ class TestBillsAPI:
         source_account = _ensure_test_account(client, isolated_auth_headers)
         category = _ensure_test_expense_category(client, isolated_auth_headers)
 
-        from src.api.app import db
+        from bill_analyser.api.app import db
 
         recurring_template = _create_test_recurring_template(
             client,
@@ -1587,7 +1590,7 @@ class TestBillsAPI:
         current_user_id = _get_current_user_id(client, isolated_auth_headers)
         session_id = f"pytest-import-transfer-decision-{int(time.time() * 1000)}"
 
-        from src.api.app import db
+        from bill_analyser.api.app import db
 
         async def _ensure_breakfast_category_id() -> int:
             category = await db.get_category_by_name("餐饮", "早餐", user_id=current_user_id)

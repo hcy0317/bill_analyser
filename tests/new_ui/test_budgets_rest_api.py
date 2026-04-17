@@ -8,35 +8,34 @@ from datetime import date, timedelta
 
 import pytest
 
+from tests.user_cleanup_support import register_test_user_for_cleanup
+
 # pylint: disable=line-too-long,too-many-locals,too-many-arguments
 # pylint: disable=import-outside-toplevel,import-error,no-name-in-module
 
 
-@pytest.fixture(scope="module", name="auth_headers")
+@pytest.fixture(name="auth_headers")
 def _auth_headers_fixture(client):
     """获取认证请求头。"""
-    login_response = client.post("/api/auth/login", json={
-        "loginName": "admin",
-        "password": "admin123"
+    username = f"test_budgets_{int(time.time() * 1000)}"
+    from bill_analyser.api.app import app as flask_app
+
+    db = flask_app.config["DB_INSTANCE"]
+    register_response = client.post("/api/auth/register", json={
+        "username": username,
+        "email": f"{username}@example.com",
+        "password": "Test123456!",
+        "nickname": username
     })
+    assert register_response.status_code in [200, 201], (
+        f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
+    )
+    register_test_user_for_cleanup(db, username)
 
-    if login_response.status_code != 200:
-        suffix = int(time.time())
-        username = f"test_budgets_{suffix}"
-        register_response = client.post("/api/auth/register", json={
-            "username": username,
-            "email": f"{username}@example.com",
-            "password": "Test123456!",
-            "nickname": username
-        })
-        assert register_response.status_code in [200, 409], (
-            f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
-        )
-
-        login_response = client.post("/api/auth/login", json={
-            "loginName": username,
-            "password": "Test123456!"
-        })
+    login_response = client.post("/api/auth/login", json={
+        "loginName": username,
+        "password": "Test123456!"
+    })
 
     assert login_response.status_code == 200, (
         f"登录失败: {login_response.status_code}, {login_response.get_data(as_text=True)}"
@@ -53,7 +52,7 @@ def _get_current_user_id(client, auth_headers):
     assert profile_response.status_code == 200
     username = profile_response.get_json()["result"]["username"]
 
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _find_user_id():
         user = await db.get_user_by_username(username)
@@ -65,7 +64,7 @@ def _get_current_user_id(client, auth_headers):
 
 def _create_budget_support_category(user_id, main_category, sub_category):
     """为预算测试创建主/子分类。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         parent_category_id = await db.create_category({
@@ -102,7 +101,7 @@ def _create_budget_support_category(user_id, main_category, sub_category):
 
 def _create_budget_support_sub_category(user_id, main_category, sub_category):
     """为预算测试创建额外子分类，避免重复创建父分类。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         sub_category_id = await db.create_category({
@@ -124,7 +123,7 @@ def _create_budget_support_sub_category(user_id, main_category, sub_category):
 
 def _create_budget_support_tag(user_id, name):
     """为预算测试创建标签。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         return int(await db.create_tag({
@@ -139,7 +138,7 @@ def _create_budget_support_tag(user_id, name):
 
 def _insert_budget_support_bill(user_id, *, main_category, sub_category, amount, description, date_text, tag_ids):
     """直接写入预算测试账单并绑定标签。"""
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _create():
         bill_id = await db.create_bill(

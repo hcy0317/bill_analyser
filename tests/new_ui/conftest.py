@@ -1,6 +1,10 @@
 """
 测试配置和Fixtures
 """
+
+# pylint: disable=deprecated-class,duplicate-code,import-outside-toplevel
+# pylint: disable=redefined-outer-name,unused-argument
+
 import asyncio
 import os
 import sys
@@ -14,6 +18,11 @@ import pytest_asyncio
 
 from tests.real_sample_support import extract_real_sample_family
 from tests.runtime_paths import get_test_db_path, remove_test_database_family
+from tests.user_cleanup_support import (
+    begin_test_user_cleanup_tracking,
+    cleanup_registered_test_users,
+    register_test_user_for_cleanup,
+)
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -27,7 +36,7 @@ if sys.platform == "win32":
 @pytest_asyncio.fixture(scope="session")
 async def initialize_app():
     """异步初始化Flask应用"""
-    from src.api.app import initialize
+    from bill_analyser.api.app import initialize
 
     # 使用测试数据库
     test_db_path = get_test_db_path("test_bills.db")
@@ -39,8 +48,8 @@ async def initialize_app():
 @pytest_asyncio.fixture(scope="session")
 async def app(initialize_app):
     """创建Flask应用实例（依赖异步初始化）"""
-    from src.api.app import app, db
-    from src.utils.logger import _logger_instance
+    from bill_analyser.api.app import app, db
+    from bill_analyser.utils.logger import _logger_instance
 
     # 配置测试模式
     app.config["TESTING"] = True
@@ -64,8 +73,16 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _tracked_test_user_cleanup(db):
+    """按测试回收共享测试库里新建的测试用户。"""
+    begin_test_user_cleanup_tracking()
+    yield
+    cleanup_registered_test_users(db)
+
+
 @pytest.fixture
-def auth_identity(client):
+def auth_identity(client, db):
     """为每个测试返回独立的测试认证身份信息。"""
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     username = f"test_new_ui_{suffix}"
@@ -77,9 +94,10 @@ def auth_identity(client):
         "password": password,
         "nickname": username
     })
-    assert register_response.status_code in [200, 201, 409], (
+    assert register_response.status_code in [200, 201], (
         f"注册失败: {register_response.status_code}, {register_response.get_data(as_text=True)}"
     )
+    register_test_user_for_cleanup(db, username)
 
     return {
         "username": username,
@@ -120,27 +138,27 @@ def auth_headers(auth_context):
 
 
 @pytest.fixture(scope="session")
-def operation_password(db):
+def operation_password(app):
     """返回与运行时密码校验逻辑一致的操作密码。"""
     env_password = os.getenv("BILL_ANALYSER_OPERATION_PASSWORD")
     if env_password:
         return env_password
 
-    stored_password = asyncio.run(db.get_app_setting("operation_password"))
+    db_instance = app.config["DB_INSTANCE"]
+    stored_password = asyncio.run(db_instance.get_app_setting("operation_password"))
     return stored_password or "admin123"
 
 
-@pytest.fixture(scope="session")
-def db():
+@pytest.fixture
+def db(app):
     """获取数据库实例"""
-    from src.api.app import db
-    return db
+    return app.config["DB_INSTANCE"]
 
 
 @pytest.fixture(scope="session")
 def category_engine(initialize_app):
     """获取分类引擎实例"""
-    from src.api.app import category_engine
+    from bill_analyser.api.app import category_engine
     return category_engine
 
 

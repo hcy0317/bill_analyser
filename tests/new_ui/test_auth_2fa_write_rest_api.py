@@ -5,14 +5,18 @@ from datetime import datetime
 import pytest
 
 from bill_analyser.api.routes import auth as auth_module
+from tests.user_cleanup_support import register_test_user_for_cleanup
 
 
-@pytest.fixture(scope="module", name="user_credentials")
+@pytest.fixture(name="user_credentials")
 def _user_credentials_fixture(client):
     """注册测试用户并返回凭据。"""
-    suffix = int(datetime.now().timestamp())
+    suffix = int(datetime.now().timestamp() * 1000)
     username = f"test_2fa_write_{suffix}"
     password = "Test123456!"
+    from bill_analyser.api.app import app as flask_app
+
+    db = flask_app.config["DB_INSTANCE"]
 
     register_response = client.post("/api/auth/register", json={
         "username": username,
@@ -20,7 +24,8 @@ def _user_credentials_fixture(client):
         "password": password,
         "nickname": username
     })
-    assert register_response.status_code in [200, 409]
+    assert register_response.status_code in [200, 201]
+    register_test_user_for_cleanup(db, username)
 
     return {
         "username": username,

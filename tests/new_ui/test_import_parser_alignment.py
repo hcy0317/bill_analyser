@@ -19,6 +19,7 @@ from bill_analyser.api.routes.bills import (
 )
 from bill_analyser.parsers.factory import ParserFactory
 from tests.real_sample_support import discover_parser_comparison_cases
+from tests.user_cleanup_support import register_test_user_for_cleanup
 
 PARSER_ALIGNMENT_CASES = discover_parser_comparison_cases()
 FRONTEND_TYPE_BY_NAME = {
@@ -37,11 +38,14 @@ STRICT_ALIGNMENT_FAMILIES = {
 }
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def auth_headers(client):
     """为本模块创建隔离的认证上下文，避免受其他 new_ui 用例污染。"""
     username = f"test_alignment_{int(time.time() * 1000)}"
     password = "Test123456!"
+    from bill_analyser.api.app import app as flask_app
+
+    db = flask_app.config["DB_INSTANCE"]
 
     register_response = client.post(
         "/api/auth/register",
@@ -52,7 +56,8 @@ def auth_headers(client):
             "nickname": username,
         },
     )
-    assert register_response.status_code in (200, 201, 409), register_response.get_data(as_text=True)
+    assert register_response.status_code in (200, 201), register_response.get_data(as_text=True)
+    register_test_user_for_cleanup(db, username)
 
     login_response = client.post("/api/auth/login", json={"loginName": username, "password": password})
     assert login_response.status_code == 200, login_response.get_data(as_text=True)
@@ -222,8 +227,10 @@ def _preview_with_auto_parser(client, auth_headers, sample_path: Path):
         )
 
 
-def _ensure_alignment_category(client, auth_headers, *, family: str, keyword: str, transaction_type: int) -> None:
+def _ensure_alignment_category(client, auth_headers, *, family: str, keywords: list[str], transaction_type: int) -> None:
     category_type = 3 if transaction_type not in (2, 5) else transaction_type
+    normalized_keywords = [str(keyword or "").strip() for keyword in keywords if str(keyword or "").strip()]
+    keyword_payload = ",".join(dict.fromkeys(normalized_keywords))
     response = client.post(
         "/api/categories/",
         json={
@@ -233,14 +240,15 @@ def _ensure_alignment_category(client, auth_headers, *, family: str, keyword: st
             "comment": "parser alignment regression category",
             "displayOrder": 0,
             "visible": True,
-            "keywords": keyword,
+            "keywords": keyword_payload,
         },
         headers=auth_headers,
     )
     assert response.status_code in (200, 201), response.get_data(as_text=True)
 
 
-def _ensure_alignment_account(client, auth_headers, *, family: str, alias: str) -> None:
+def _ensure_alignment_account(client, auth_headers, *, family: str, aliases: list[str]) -> None:
+    normalized_aliases = [str(alias or "").strip() for alias in aliases if str(alias or "").strip()]
     response = client.post(
         "/api/accounts/",
         json={
@@ -253,7 +261,7 @@ def _ensure_alignment_account(client, auth_headers, *, family: str, alias: str) 
             "balance": 0,
             "comment": "parser alignment regression account",
             "hidden": False,
-            "aliases": [alias],
+            "aliases": list(dict.fromkeys(normalized_aliases)),
         },
         headers=auth_headers,
     )
@@ -327,29 +335,51 @@ def test_forced_generic_parser_matches_dedicated_preview_after_enrichment(client
         _normalize_import_item(_convert_bill_to_import_item(bill))
         for bill in ParserFactory().parse(str(sample_path), parser_type=case["dedicated_parser"])
     ]
+    generic_raw_items = [
+        _normalize_import_item(_convert_bill_to_import_item(bill))
+        for bill in _build_generic_bills(sample_path)
+    ]
     assert dedicated_raw_items, sample_path.name
 
     seed_item = next(
         (item for item in dedicated_raw_items if item["comment"] or item["counterparty"] or item["paymentMethod"]),
         dedicated_raw_items[0],
     )
-    category_keyword = seed_item["comment"] or seed_item["counterparty"]
-    account_alias = seed_item["paymentMethod"] or seed_item["counterparty"] or seed_item["comment"]
+    seed_key = (seed_item["timeText"], seed_item["sourceAmount"])
+    generic_seed_reference = next(
+        (item for item in generic_raw_items if (item["timeText"], item["sourceAmount"]) == seed_key),
+        generic_raw_items[0] if generic_raw_items else seed_item,
+    )
 
-    if category_keyword:
+    category_keywords = [
+        seed_item["comment"],
+        seed_item["counterparty"],
+        generic_seed_reference["comment"],
+        generic_seed_reference["counterparty"],
+    ]
+    account_aliases = [
+        seed_item["paymentMethod"],
+        generic_seed_reference["paymentMethod"],
+        seed_item["counterparty"],
+        generic_seed_reference["counterparty"],
+        seed_item["comment"],
+        generic_seed_reference["comment"],
+    ]
+
+    if any(category_keywords):
         _ensure_alignment_category(
             client,
             auth_headers,
             family=case["id"].split("::", maxsplit=1)[0],
-            keyword=category_keyword,
+            keywords=category_keywords,
             transaction_type=seed_item["type"],
         )
-    if account_alias:
+    if any(account_aliases):
         _ensure_alignment_account(
             client,
             auth_headers,
             family=case["id"].split("::", maxsplit=1)[0],
-            alias=account_alias,
+            aliases=account_aliases,
         )
 
     dedicated_response = _preview_with_dedicated_parser(client, auth_headers, sample_path)
@@ -388,7 +418,6 @@ def test_forced_generic_parser_matches_dedicated_preview_after_enrichment(client
             ], f"{sample_path.name}: 进入预览后处理后，通用解析与专用解析的时间/金额结构仍有差异"
         pytest.skip(f"{sample_path.name}: 进入预览后处理后，通用解析与专用解析的时间/金额结构仍有差异")
 
-    seed_key = (seed_item["timeText"], seed_item["sourceAmount"])
     dedicated_seed_item = next(item for item in normalized_dedicated if (item["timeText"], item["sourceAmount"]) == seed_key)
     generic_seed_item = next(item for item in normalized_generic if (item["timeText"], item["sourceAmount"]) == seed_key)
 
@@ -401,7 +430,7 @@ def test_forced_generic_parser_matches_dedicated_preview_after_enrichment(client
         pytest.skip(
             f"{sample_path.name}: 种子账单分类结果不一致 (generic={generic_seed_item['categoryName']}, dedicated={dedicated_seed_item['categoryName']})"
         )
-    if account_alias:
+    if any(account_aliases):
         if generic_seed_item["sourceAccountId"] != dedicated_seed_item["sourceAccountId"]:
             if family in STRICT_ALIGNMENT_FAMILIES:
                 assert generic_seed_item["sourceAccountId"] == dedicated_seed_item["sourceAccountId"], (

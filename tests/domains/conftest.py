@@ -1,5 +1,7 @@
 """Domain-level shared fixtures for integration tests."""
 
+# pylint: disable=import-outside-toplevel,redefined-outer-name
+
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +12,11 @@ from pathlib import Path
 import pytest
 
 from tests.runtime_paths import get_test_db_path, remove_test_database_family
+from tests.user_cleanup_support import (
+    begin_test_user_cleanup_tracking,
+    cleanup_registered_test_users,
+    register_test_user_for_cleanup,
+)
 
 _DOMAIN_TEST_DB_PATH: Path | None = None
 
@@ -18,8 +25,7 @@ _DOMAIN_TEST_DB_PATH: Path | None = None
 def app():
     """Provide a configured Flask app instance for domain integration tests."""
     from bill_analyser.api.app import app as flask_app
-    from bill_analyser.api.app import initialize
-    from bill_analyser.api.app import db
+    from bill_analyser.api.app import db, initialize
 
     global _DOMAIN_TEST_DB_PATH  # pylint: disable=global-statement
 
@@ -45,8 +51,16 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _tracked_test_user_cleanup(db_instance):
+    """Clean test-created users after each domain integration test."""
+    begin_test_user_cleanup_tracking()
+    yield
+    cleanup_registered_test_users(db_instance)
+
+
 @pytest.fixture
-def auth_identity(client):
+def auth_identity(client, db_instance):
     """Register an isolated test user for each integration test."""
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     username = f"test_domains_{suffix}"
@@ -61,7 +75,10 @@ def auth_identity(client):
             "nickname": username,
         },
     )
-    assert register_response.status_code in (200, 201, 409), register_response.get_data(as_text=True)
+    assert register_response.status_code in (200, 201), (
+        register_response.get_data(as_text=True)
+    )
+    register_test_user_for_cleanup(db_instance, username)
 
     return {"username": username, "password": password}
 
@@ -96,9 +113,7 @@ def auth_headers(auth_context):
     return auth_context["headers"]
 
 
-@pytest.fixture(scope="session")
-def db_instance():
+@pytest.fixture
+def db_instance(app):
     """Expose the initialized database instance."""
-    from bill_analyser.api.app import db
-
-    return db
+    return app.config["DB_INSTANCE"]

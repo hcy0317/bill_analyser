@@ -13,7 +13,7 @@ from tests.new_ui.test_bills_api import (
 
 
 def _list_learning_rules_for_user(*, user_id: int) -> list[dict[str, Any]]:
-    from src.api.app import db
+    from bill_analyser.api.app import db
 
     async def _list() -> list[dict[str, Any]]:
         return await db.get_import_learning_rules(
@@ -35,7 +35,7 @@ class TestBillsImportLearningPromoteAPI:
         category = _ensure_test_expense_category(client, auth_headers)
         session_id = f"pytest-learning-promote-preview-ids-{int(time.time() * 1000)}"
 
-        from src.api.app import db
+        from bill_analyser.api.app import db
 
         async def _prepare() -> tuple[int, int]:
             await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
@@ -119,7 +119,7 @@ class TestBillsImportLearningPromoteAPI:
         category = _ensure_test_expense_category(client, auth_headers)
         session_id = f"pytest-learning-promote-empty-preview-ids-{int(time.time() * 1000)}"
 
-        from src.api.app import db
+        from bill_analyser.api.app import db
 
         async def _prepare() -> None:
             await db.create_import_session(session_id, user_id=current_user_id, file_count=1)

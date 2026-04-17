@@ -1,10 +1,14 @@
 """User data-management and user-specific exchange-rate helpers."""
 
+# pyright: reportAttributeAccessIssue=false
+
 # pylint: disable=missing-function-docstring,line-too-long,broad-exception-caught
 
 from __future__ import annotations
 
 from typing import Any
+
+from bill_analyser.utils.config import load_default_user_settings
 
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
@@ -13,6 +17,48 @@ from .db_time import utc_now, utc_now_iso
 
 class DatabaseUserDataMixin(DatabaseFacadeBase):
     """User data management and user-specific exchange rate helpers."""
+
+    def _get_protected_usernames(self) -> set[str]:
+        """Return usernames that must never be purged automatically."""
+        protected = {"admin"}
+        try:
+            default_user = load_default_user_settings()
+        except Exception:  # pragma: no cover - defensive config fallback
+            default_user = None
+
+        if isinstance(default_user, dict):
+            username = str(default_user.get("username") or "").strip().lower()
+            if username:
+                protected.add(username)
+
+        return protected
+
+    async def _list_user_scoped_tables(self, conn: Any) -> list[str]:
+        """Return all tables that expose a user_id column."""
+        async with conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY name ASC"
+        ) as cursor:
+            table_rows = await cursor.fetchall()
+
+        user_scoped_tables: list[str] = []
+        for row in table_rows:
+            table_name = str(row[0] if not isinstance(row, dict) else row.get("name") or "").strip()
+            if not table_name:
+                continue
+
+            async with conn.execute(f'PRAGMA table_info("{table_name}")') as table_info_cursor:
+                columns = await table_info_cursor.fetchall()
+
+            column_names = {
+                str(column[1] if not isinstance(column, dict) else column.get("name") or "")
+                for column in columns
+            }
+            if "user_id" in column_names:
+                user_scoped_tables.append(table_name)
+
+        return user_scoped_tables
 
     @log_method
     async def clear_user_transactions(self, user_id: int = 1) -> dict[str, Any]:
@@ -132,6 +178,65 @@ class DatabaseUserDataMixin(DatabaseFacadeBase):
             self.logger.error("清空用户业务数据失败: user_id=%s, error=%s", user_id, exc)
             await conn.rollback()
             return {"success": False, "message": str(exc)}
+
+    @log_method
+    async def purge_user_account(self, user_id: int, allow_protected: bool = False) -> dict[str, Any]:
+        """Purge one user row plus all user-scoped residue except protected users."""
+        conn = await self._get_connection()
+        try:
+            user = await self.get_user_by_id(int(user_id))
+            if not user:
+                return {"success": True, "deleted": False, "reason": "user_not_found", "user_id": int(user_id)}
+
+            username = str(user.get("username") or "").strip()
+            normalized_username = username.lower()
+            if not allow_protected and normalized_username in self._get_protected_usernames():
+                raise ValueError(f"Refusing to purge protected user: {username}")
+
+            business_cleanup = await self.clear_user_data(user_id=int(user_id))
+            if not business_cleanup.get("success"):
+                return {
+                    "success": False,
+                    "deleted": False,
+                    "reason": "clear_user_data_failed",
+                    "user_id": int(user_id),
+                    "message": business_cleanup.get("message"),
+                }
+
+            deleted_counts: dict[str, int] = {}
+            for table_name in await self._list_user_scoped_tables(conn):
+                if table_name == "users":
+                    continue
+                cursor = await conn.execute(
+                    f'DELETE FROM "{table_name}" WHERE user_id = ?',
+                    (int(user_id),),
+                )
+                deleted_counts[table_name] = int(cursor.rowcount or 0)
+
+            cursor = await conn.execute("DELETE FROM users WHERE id = ?", (int(user_id),))
+            deleted_counts["users"] = int(cursor.rowcount or 0)
+            await conn.commit()
+
+            self._clear_cache("account_mappings")
+            self._clear_cache("category_mappings")
+
+            return {
+                "success": True,
+                "deleted": bool(deleted_counts["users"] > 0),
+                "user_id": int(user_id),
+                "username": username,
+                "business_counts": business_cleanup.get("counts") or {},
+                "deleted_counts": deleted_counts,
+            }
+        except Exception as exc:  # pragma: no cover - defensive logging branch
+            self.logger.error("彻底清理用户失败: user_id=%s, error=%s", user_id, exc)
+            await conn.rollback()
+            return {
+                "success": False,
+                "deleted": False,
+                "user_id": int(user_id),
+                "message": str(exc),
+            }
 
     @log_method
     async def get_user_data_statistics(self, user_id: int = 1) -> dict[str, int]:
