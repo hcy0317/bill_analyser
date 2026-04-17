@@ -1,3 +1,5 @@
+"""Regression tests for the import-learning promote REST API."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +31,10 @@ class TestBillsImportLearningPromoteAPI:
     """长期学习提升接口回归。"""
 
     def test_import_learning_promote_supports_explicit_preview_ids_selection(self, client):
-        auth_headers = _build_isolated_auth_headers(client, "test_bills_learning_promote_preview_ids")
+        auth_headers = _build_isolated_auth_headers(
+            client,
+            "test_bills_learning_promote_preview_ids",
+        )
         current_user_id = _get_current_user_id(client, auth_headers)
         source_account = _ensure_test_account(client, auth_headers)
         category = _ensure_test_expense_category(client, auth_headers)
@@ -113,7 +118,10 @@ class TestBillsImportLearningPromoteAPI:
         assert int(session_rules[0]["source_preview_id"] or 0) != skipped_preview_id
 
     def test_import_learning_promote_treats_empty_preview_ids_as_zero_selection(self, client):
-        auth_headers = _build_isolated_auth_headers(client, "test_bills_learning_promote_empty_preview_ids")
+        auth_headers = _build_isolated_auth_headers(
+            client,
+            "test_bills_learning_promote_empty_preview_ids",
+        )
         current_user_id = _get_current_user_id(client, auth_headers)
         source_account = _ensure_test_account(client, auth_headers)
         category = _ensure_test_expense_category(client, auth_headers)
@@ -170,3 +178,38 @@ class TestBillsImportLearningPromoteAPI:
         rules = _list_learning_rules_for_user(user_id=current_user_id)
         session_rules = [rule for rule in rules if rule.get("source_session_id") == session_id]
         assert session_rules == []
+
+    def test_import_learning_promote_is_user_scoped_and_404_for_missing_session(self, client):
+        primary_headers = _build_isolated_auth_headers(
+            client,
+            "test_bills_learning_promote_primary",
+        )
+        secondary_headers = _build_isolated_auth_headers(
+            client,
+            "test_bills_learning_promote_secondary",
+        )
+        primary_user_id = _get_current_user_id(client, primary_headers)
+        session_id = f"pytest-learning-promote-scope-{int(time.time() * 1000)}"
+
+        from bill_analyser.api.app import db
+
+        async def _create_session() -> None:
+            await db.create_import_session(session_id, user_id=primary_user_id, file_count=1)
+
+        asyncio.run(_create_session())
+
+        missing_response = client.post(
+            "/api/bills/import/v2/learning/does-not-exist/promote",
+            headers=primary_headers,
+            json={},
+        )
+        assert missing_response.status_code == 404
+        assert missing_response.get_json()["error"] == "Import session not found"
+
+        scoped_response = client.post(
+            f"/api/bills/import/v2/learning/{session_id}/promote",
+            headers=secondary_headers,
+            json={},
+        )
+        assert scoped_response.status_code == 404
+        assert scoped_response.get_json()["error"] == "Import session not found"

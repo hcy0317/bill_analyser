@@ -3031,11 +3031,17 @@ def promote_import_learning(session_id: str):
         except ValueError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
 
-        _, bill_service, _ = get_app_context()
+        db, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         try:
+            session = loop.run_until_complete(
+                db.get_import_session(session_id, user_id=request.user_id)
+            )
+            if not session:
+                return jsonify({"success": False, "error": "Import session not found"}), 404
+
             promote_result = loop.run_until_complete(
                 bill_service.promote_session_annotations_to_learning(
                     session_id,
