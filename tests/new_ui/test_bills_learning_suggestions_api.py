@@ -161,6 +161,204 @@ class TestBillsLearningSuggestionsAPI:
         assert suggestion["learnedDestinationAccountId"] in (None, "", 0)
         assert suggestion["summary"]
 
+    def test_import_learning_suggestions_post_stages_preview_updates_and_filters_selection(self, client):
+        auth_headers = _build_isolated_auth_headers(client, "test_bills_learning_suggestions_post")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        source_account = _ensure_test_account(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        session_id = f"pytest-learning-suggestions-post-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _prepare() -> tuple[int, int, int]:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            first_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-05 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 32.5,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            second_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-05 18:30:00",
+                    "preview_type": "支出",
+                    "preview_amount": 29.0,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            skipped_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-05 20:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 16.5,
+                    "preview_counterparty": "盒马鲜生",
+                    "preview_payment_method": "微信支付",
+                    "preview_description": "水果消费",
+                    "preview_parser_id": "wechat",
+                },
+                user_id=current_user_id,
+            )
+            await db.save_import_annotation_samples(
+                session_id,
+                [
+                    {
+                        "id": skipped_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    }
+                ],
+                user_id=current_user_id,
+            )
+            return int(first_preview_id), int(second_preview_id), int(skipped_preview_id)
+
+        first_preview_id, second_preview_id, skipped_preview_id = asyncio.run(_prepare())
+
+        response = client.post(
+            f"/api/bills/import/v2/learning/{session_id}/suggestions",
+            headers=auth_headers,
+            json={
+                "preview_updates": [
+                    {
+                        "id": first_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    },
+                    {
+                        "id": second_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    },
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["sessionId"] == session_id
+        assert data["data"]["totalCount"] == 1
+        suggestion = data["data"]["suggestions"][0]
+        assert suggestion["sourcePreviewIds"] == [first_preview_id, second_preview_id]
+        assert skipped_preview_id not in suggestion["sourcePreviewIds"]
+
+    def test_import_learning_suggestions_post_crops_same_group_sources_to_selected_subset(self, client):
+        auth_headers = _build_isolated_auth_headers(client, "test_bills_learning_suggestions_crop_sources")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        source_account = _ensure_test_account(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        session_id = f"pytest-learning-suggestions-crop-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _prepare() -> tuple[int, int, int]:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            first_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-06 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 21.0,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            second_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-06 12:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 25.0,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            third_preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-06 18:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 28.0,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            await db.save_import_annotation_samples(
+                session_id,
+                [
+                    {
+                        "id": third_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    }
+                ],
+                user_id=current_user_id,
+            )
+            return int(first_preview_id), int(second_preview_id), int(third_preview_id)
+
+        first_preview_id, second_preview_id, third_preview_id = asyncio.run(_prepare())
+
+        response = client.post(
+            f"/api/bills/import/v2/learning/{session_id}/suggestions",
+            headers=auth_headers,
+            json={
+                "preview_updates": [
+                    {
+                        "id": first_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    },
+                    {
+                        "id": second_preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                        "preview_source_account_id": int(source_account["id"]),
+                        "preview_destination_account_id": None,
+                    },
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["totalCount"] == 1
+        suggestion = data["data"]["suggestions"][0]
+        assert suggestion["sampleCount"] == 2
+        assert suggestion["sourcePreviewIds"] == [first_preview_id, second_preview_id]
+        assert third_preview_id not in suggestion["sourcePreviewIds"]
+
     def test_import_learning_suggestions_is_user_scoped_and_404_for_missing_session(self, client):
         primary_headers = _build_isolated_auth_headers(client, "test_bills_learning_suggestions_primary")
         secondary_headers = _build_isolated_auth_headers(client, "test_bills_learning_suggestions_secondary")

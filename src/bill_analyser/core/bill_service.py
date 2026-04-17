@@ -1262,13 +1262,37 @@ class BillService:
     async def get_import_learning_suggestions(
         self,
         session_id: str,
+        preview_updates: list[dict[str, Any]] | None = None,
+        preview_ids: list[int] | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """返回当前导入会话的 dry-run 长期学习建议列表。"""
+        selected_preview_ids: set[int] | None = None
+        if preview_updates is not None:
+            await self.db.save_import_annotation_samples(
+                session_id,
+                preview_updates,
+                user_id=user_id,
+            )
+            selected_preview_ids = {
+                int(item["id"])
+                for item in preview_updates
+                if item.get("id")
+            }
+        elif preview_ids is not None:
+            selected_preview_ids = {
+                int(preview_id)
+                for preview_id in preview_ids
+                if int(preview_id) > 0
+            }
+
         suggestions = await self.db.list_import_learning_suggestions_for_session(
             session_id,
             user_id=user_id,
         )
+        if selected_preview_ids is not None and not selected_preview_ids:
+            suggestions = []
+
         if not suggestions:
             return {
                 "sessionId": session_id,
@@ -1291,6 +1315,20 @@ class BillService:
 
         result: list[dict[str, Any]] = []
         for suggestion in suggestions:
+            source_preview_ids = [
+                int(preview_id)
+                for preview_id in list(suggestion.get("source_preview_ids") or [])
+                if int(preview_id) > 0
+            ]
+            if selected_preview_ids is not None:
+                source_preview_ids = [
+                    preview_id
+                    for preview_id in source_preview_ids
+                    if preview_id in selected_preview_ids
+                ]
+                if not source_preview_ids:
+                    continue
+
             learned_category_id = suggestion.get("learned_category_id")
             learned_source_account_id = suggestion.get("learned_source_account_id")
             learned_destination_account_id = suggestion.get("learned_destination_account_id")
@@ -1326,12 +1364,8 @@ class BillService:
                     "matchType": str(suggestion.get("match_type") or ""),
                     "matchValue": str(suggestion.get("match_value") or ""),
                     "matchFeatures": dict(suggestion.get("match_features") or {}),
-                    "sampleCount": int(suggestion.get("sample_count") or 0),
-                    "sourcePreviewIds": [
-                        int(preview_id)
-                        for preview_id in list(suggestion.get("source_preview_ids") or [])
-                        if int(preview_id) > 0
-                    ],
+                    "sampleCount": len(source_preview_ids),
+                    "sourcePreviewIds": source_preview_ids,
                     "learnedType": str(suggestion.get("learned_type") or ""),
                     "learnedCategoryId": (
                         int(learned_category_id)

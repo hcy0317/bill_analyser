@@ -2947,7 +2947,27 @@ def reclassify_preview_session(session_id: str):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@bp.route("/import/v2/learning/<session_id>/suggestions", methods=["GET"])
+def _parse_import_learning_preview_ids(raw_preview_ids):
+    if raw_preview_ids is None:
+        return None
+
+    if not isinstance(raw_preview_ids, list):
+        raise ValueError("previewIds must be an array")
+
+    normalized_preview_ids: list[int] = []
+    for raw_preview_id in raw_preview_ids:
+        if (
+            not isinstance(raw_preview_id, int)
+            or isinstance(raw_preview_id, bool)
+            or raw_preview_id <= 0
+        ):
+            raise ValueError("previewIds must contain positive integers")
+        normalized_preview_ids.append(raw_preview_id)
+
+    return normalized_preview_ids
+
+
+@bp.route("/import/v2/learning/<session_id>/suggestions", methods=["GET", "POST"])
 @log_method
 @require_auth
 def list_import_learning_suggestions(session_id: str):
@@ -2958,6 +2978,17 @@ def list_import_learning_suggestions(session_id: str):
             session_id,
             request.user_id,
         )
+        preview_updates = None
+        preview_ids = None
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            preview_updates = data.get("preview_updates")
+
+            try:
+                preview_ids = _parse_import_learning_preview_ids(data.get("previewIds"))
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+
         db, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -2970,7 +3001,12 @@ def list_import_learning_suggestions(session_id: str):
                 return jsonify({"success": False, "error": "Import session not found"}), 404
 
             suggestions_result = loop.run_until_complete(
-                bill_service.get_import_learning_suggestions(session_id, user_id=request.user_id)
+                bill_service.get_import_learning_suggestions(
+                    session_id,
+                    preview_updates=preview_updates,
+                    preview_ids=preview_ids,
+                    user_id=request.user_id,
+                )
             )
             return jsonify({"success": True, "data": suggestions_result})
         finally:
@@ -2990,26 +3026,10 @@ def promote_import_learning(session_id: str):
         logger.info("[长期学习提升] session_id=%s, user_id=%s", session_id, request.user_id)
         data = request.get_json(silent=True) or {}
         preview_updates = data.get("preview_updates")
-        raw_preview_ids = data.get("previewIds")
-        preview_ids: list[int] | None = None
-
-        if raw_preview_ids is not None:
-            if not isinstance(raw_preview_ids, list):
-                return jsonify({"success": False, "error": "previewIds must be an array"}), 400
-
-            normalized_preview_ids: list[int] = []
-            for raw_preview_id in raw_preview_ids:
-                if (
-                    not isinstance(raw_preview_id, int)
-                    or isinstance(raw_preview_id, bool)
-                    or raw_preview_id <= 0
-                ):
-                    return jsonify(
-                        {"success": False, "error": "previewIds must contain positive integers"}
-                    ), 400
-                normalized_preview_ids.append(raw_preview_id)
-
-            preview_ids = normalized_preview_ids
+        try:
+            preview_ids = _parse_import_learning_preview_ids(data.get("previewIds"))
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()

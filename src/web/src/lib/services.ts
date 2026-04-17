@@ -64,6 +64,10 @@ import type {
     ImportTransactionResponsePageWrapper
 } from '@/models/imported_transaction.ts';
 import type {
+    ImportLearningPromoteResponse,
+    ImportLearningSuggestionsResponse
+} from '@/models/import_learning.ts';
+import type {
     TransactionCreateRequest,
     TransactionImportRequest,
     TransactionModifyRequest,
@@ -203,6 +207,11 @@ interface ApiRequestConfig extends AxiosRequestConfig {
 }
 
 export type ApiResponsePromise<T> = Promise<AxiosResponse<ApiResponse<T>>>;
+
+interface ApiDataResponse<T> {
+    success: boolean;
+    data: T;
+}
 
 function buildApiResponse<T>(response: AxiosResponse<any>, result: T): AxiosResponse<ApiResponse<T>> {
     return {
@@ -1221,6 +1230,54 @@ export default {
         }, {
             timeout: DEFAULT_UPLOAD_API_TIMEOUT
         } as ApiRequestConfig);
+    },
+    getImportLearningSuggestions: ({
+        sessionId,
+        previewUpdates,
+        previewIds
+    }: {
+        sessionId: string,
+        previewUpdates?: Array<Record<string, unknown>>,
+        previewIds?: number[]
+    }): ApiResponsePromise<ImportLearningSuggestionsResponse> => {
+        const payload: Record<string, unknown> = {};
+
+        if (previewUpdates !== undefined) {
+            payload['preview_updates'] = previewUpdates;
+        }
+        if (previewIds !== undefined) {
+            payload['previewIds'] = previewIds;
+        }
+
+        const request = Object.keys(payload).length > 0
+            ? axios.post<ApiDataResponse<ImportLearningSuggestionsResponse>>(`bills/import/v2/learning/${sessionId}/suggestions`, payload)
+            : axios.get<ApiDataResponse<ImportLearningSuggestionsResponse>>(`bills/import/v2/learning/${sessionId}/suggestions`);
+
+        return request.then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    promoteImportLearning: ({
+        sessionId,
+        previewUpdates,
+        previewIds
+    }: {
+        sessionId: string,
+        previewUpdates?: Array<Record<string, unknown>>,
+        previewIds?: number[]
+    }): ApiResponsePromise<ImportLearningPromoteResponse> => {
+        const payload: Record<string, unknown> = {};
+
+        if (previewUpdates !== undefined) {
+            payload['preview_updates'] = previewUpdates;
+        }
+        if (previewIds !== undefined) {
+            payload['previewIds'] = previewIds;
+        }
+
+        return axios.post<ApiDataResponse<ImportLearningPromoteResponse>>(`bills/import/v2/learning/${sessionId}/promote`, payload).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
     },
     getImportConfigs: ({ fileFormat }: { fileFormat?: string } = {}): ApiResponsePromise<any[]> => {
         return axios.get<ApiResponse<any[]>>('bills/import/configs', {

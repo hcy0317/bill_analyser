@@ -784,6 +784,7 @@
     <batch-replace-dialog ref="batchReplaceDialog" />
     <batch-replace-all-types-dialog ref="batchReplaceAllTypesDialog" />
     <batch-create-dialog ref="batchCreateDialog" />
+    <import-learning-suggestion-dialog ref="importLearningSuggestionDialog" />
     <snack-bar ref="snackbar" />
 
     <!-- v6.34: 分类管理选择对话框 -->
@@ -1012,6 +1013,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/BatchReplaceDialog.vue';
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
+import ImportLearningSuggestionDialog from '../dialogs/ImportLearningSuggestionDialog.vue';
 import type { ImportPreviewRecord } from '../importPreview.ts';
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
@@ -1072,6 +1074,7 @@ import {
 import {
     getCurrentToken
 } from '@/lib/userstate.ts';
+import services from '@/lib/services.ts';
 import { isTransactionFromAIImageRecognitionEnabled } from '@/lib/server_settings.ts';
 import logger from '@/lib/logger.ts';
 
@@ -1102,6 +1105,7 @@ type SnackBarType = InstanceType<typeof SnackBar>;
 type BatchReplaceDialogType = InstanceType<typeof BatchReplaceDialog>;
 type BatchReplaceAllTypesDialogType = InstanceType<typeof BatchReplaceAllTypesDialog>;
 type BatchCreateDialogType = InstanceType<typeof BatchCreateDialog>;
+type ImportLearningSuggestionDialogType = InstanceType<typeof ImportLearningSuggestionDialog>;
 // v6.34: 分类和账户编辑对话框类型
 type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
 type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
@@ -1196,6 +1200,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const batchReplaceDialog = useTemplateRef<BatchReplaceDialogType>('batchReplaceDialog');
 const batchReplaceAllTypesDialog = useTemplateRef<BatchReplaceAllTypesDialogType>('batchReplaceAllTypesDialog');
 const batchCreateDialog = useTemplateRef<BatchCreateDialogType>('batchCreateDialog');
+const importLearningSuggestionDialog = useTemplateRef<ImportLearningSuggestionDialogType>('importLearningSuggestionDialog');
 // v6.34: 分类和账户编辑对话框引用
 const categoryEditDialog = useTemplateRef<CategoryEditDialogType>('categoryEditDialog');
 const accountEditDialog = useTemplateRef<AccountEditDialogType>('accountEditDialog');
@@ -2131,10 +2136,7 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
 }
 
 async function promoteSelectedToLongTermLearning(): Promise<void> {
-    if (editingTransaction.value) {
-        editingTransaction.value.tagIds = editingTags.value;
-        updateTransactionData(editingTransaction.value);
-    }
+    commitEditingTransactionDraft();
 
     if (!props.sessionId) {
         snackbar.value?.showMessage('No session ID available');
@@ -2142,34 +2144,42 @@ async function promoteSelectedToLongTermLearning(): Promise<void> {
     }
 
     try {
-        const token = getCurrentToken();
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json'
-        };
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
         const previewUpdates = buildSelectedPreviewUpdates();
-        const response = await fetch(`/api/bills/import/v2/learning/${props.sessionId}/promote`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({ preview_updates: previewUpdates })
+        if (!previewUpdates.length) {
+            return;
+        }
+
+        const suggestionsResponse = await services.getImportLearningSuggestions({
+            sessionId: props.sessionId,
+            previewUpdates
         });
+        const suggestions = suggestionsResponse.data?.result?.suggestions || [];
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Promote failed: ${response.status} ${errorText}`);
+        if (!suggestions.length) {
+            snackbar.value?.showMessage(tt('No learning suggestions available for the selected preview rows'));
+            return;
         }
 
-        const result = await response.json();
-        if (!result.success) {
-            throw new Error(result.error || 'Unknown error');
+        let dialogResult;
+        try {
+            dialogResult = await importLearningSuggestionDialog.value?.open({ suggestions });
+        } catch {
+            return;
         }
+
+        const previewIds = dialogResult?.previewIds || [];
+        if (!previewIds.length) {
+            return;
+        }
+
+        const promoteResponse = await services.promoteImportLearning({
+            sessionId: props.sessionId,
+            previewIds
+        });
 
         snackbar.value?.showMessage(
             tt('Long-term learning saved: {count} rules', {
-                count: result.data?.rules_total || 0
+                count: promoteResponse.data?.result?.rules_total || 0
             })
         );
     } catch (error) {
