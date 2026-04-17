@@ -190,7 +190,7 @@
                         {{ item.getInvestmentProfileText() }}
                     </div>
                 </div>
-                <div class="mt-1" v-if="item.hasLearningRecommendation()">
+                <div class="mt-1" v-if="item.hasPendingLearningRecommendation()">
                     <v-chip
                         color="secondary"
                         variant="tonal"
@@ -199,6 +199,72 @@
                         :title="item.learningRecommendationReason">
                         {{ tt('Learning Suggestion') }}
                     </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="secondary"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            @click.stop="reviewLearningSuggestion(item, 'accept')">
+                            {{ tt('Apply Suggestion') }}
+                        </v-btn>
+                        <v-btn
+                            variant="text"
+                            color="error"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            @click.stop="reviewLearningSuggestion(item, 'reject')">
+                            {{ tt('Reject Learning Suggestion') }}
+                        </v-btn>
+                    </div>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.learningRecommendationSummary">
+                        {{ item.learningRecommendationSummary }}
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isLearningRecommendationAccepted()">
+                    <v-chip
+                        color="success"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiCheck"
+                        :title="item.learningRecommendationReason">
+                        {{ tt('Learning Suggestion Accepted') }}
+                    </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            @click.stop="reviewLearningSuggestion(item, 'clear')">
+                            {{ tt('Clear Learning Decision') }}
+                        </v-btn>
+                    </div>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.learningRecommendationSummary">
+                        {{ item.learningRecommendationSummary }}
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isLearningRecommendationRejected()">
+                    <v-chip
+                        color="error"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiAlertOutline"
+                        :title="item.learningRecommendationReason">
+                        {{ tt('Learning Suggestion Rejected') }}
+                    </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            @click.stop="reviewLearningSuggestion(item, 'clear')">
+                            {{ tt('Clear Learning Decision') }}
+                        </v-btn>
+                    </div>
                     <div class="text-caption text-medium-emphasis ms-1 mt-1"
                          v-if="item.learningRecommendationSummary">
                         {{ item.learningRecommendationSummary }}
@@ -326,6 +392,35 @@
                      v-if="item.hasInvestmentSignal() && item.getInvestmentProfileText()">
                     {{ item.getInvestmentProfileText() }}
                 </div>
+                <v-chip
+                    v-if="item.isLearningRecommendationAccepted()"
+                    class="mt-1"
+                    color="success"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiCheck">
+                    {{ tt('Learning Suggestion Accepted') }}
+                </v-chip>
+                <v-chip
+                    v-else-if="item.isLearningRecommendationRejected()"
+                    class="mt-1"
+                    color="error"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiAlertOutline"
+                    :title="item.learningRecommendationReason">
+                    {{ tt('Learning Suggestion Rejected') }}
+                </v-chip>
+                <v-chip
+                    v-else-if="item.hasPendingLearningRecommendation()"
+                    class="mt-1"
+                    color="secondary"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiSchoolOutline"
+                    :title="item.learningRecommendationReason">
+                    {{ tt('Learning Suggestion') }}
+                </v-chip>
                 <div class="text-caption text-medium-emphasis mt-1"
                      v-if="item.hasLearningRecommendation() && item.learningRecommendationSummary">
                     {{ item.learningRecommendationSummary }}
@@ -1035,6 +1130,13 @@ import {
     hasImportCheckMatchingContext,
     type ImportCheckMatchingContextSummary
 } from '../checkDataMatching.ts';
+import {
+    buildImportCheckLearningPreviewTextSyncPayload,
+    convertImportPreviewAmountToCents,
+    hasImportCheckLearningExpectedStateDrift,
+    hasImportCheckLearningTextDrift,
+    type ImportCheckLearningDecisionBaseline
+} from '../checkDataLearning.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -1151,6 +1253,20 @@ interface RecurringCandidateItem {
     matchedOccurrenceDate?: string;
 }
 
+interface MatchingSessionCandidateItem {
+    candidate_id?: string;
+    details?: {
+        rule_id?: number | null;
+        score?: number;
+        level?: string;
+        reason?: string;
+        recommended_type?: string;
+        summary?: string;
+        review_status?: string;
+        suppressed?: boolean;
+    };
+}
+
 interface TransferDecisionPreviewBaseline {
     type: number;
     categoryId: string;
@@ -1169,6 +1285,7 @@ type ImportTransactionWithPreviewState = ImportTransaction & {
     _previewId?: number;
     _previewDecisionBaseline?: TransferDecisionPreviewBaseline;
     _shouldClearTransferDecision?: boolean;
+    _learningDecisionBaseline?: ImportCheckLearningDecisionBaseline;
 };
 
 const props = defineProps<{
@@ -1239,6 +1356,7 @@ const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
 const transferDecisionLoadingId = ref<number | null>(null);
+const learningDecisionLoadingId = ref<number | null>(null);
 const recurringDecisionLoadingId = ref<number | null>(null);
 
 // 批量编辑对话框状态和数据
@@ -1420,7 +1538,7 @@ async function updatePreviewRecurringMatch(
         return false;
     }
 
-    if (recurringDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null) {
+    if (recurringDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null || learningDecisionLoadingId.value !== null) {
         return false;
     }
 
@@ -1666,6 +1784,87 @@ function syncTransferDecisionBaseline(item: ImportTransaction): void {
     previewState._shouldClearTransferDecision = false;
 }
 
+function buildLearningDecisionBaseline(item: ImportTransaction): ImportCheckLearningDecisionBaseline {
+    return {
+        inputFingerprint: item.getLearningRecommendationInputFingerprint(),
+        type: item.type,
+        categoryId: item.categoryId || '',
+        recurringTemplateId: item.recurringTemplateId || '',
+        sourceAccountId: item.sourceAccountId || '',
+        destinationAccountId: item.destinationAccountId || ''
+    };
+}
+
+function getLearningDecisionBaseline(item: ImportTransaction): ImportCheckLearningDecisionBaseline {
+    const previewState = getPreviewState(item);
+    if (!previewState._learningDecisionBaseline) {
+        previewState._learningDecisionBaseline = buildLearningDecisionBaseline(item);
+    }
+
+    return previewState._learningDecisionBaseline;
+}
+
+function syncLearningDecisionBaseline(item: ImportTransaction): void {
+    const previewState = getPreviewState(item);
+    previewState._learningDecisionBaseline = buildLearningDecisionBaseline(item);
+}
+
+function hasLearningDecisionTextDraftChanges(item: ImportTransaction): boolean {
+    const baseline = getLearningDecisionBaseline(item);
+    return hasImportCheckLearningTextDrift(baseline, buildLearningDecisionBaseline(item));
+}
+
+function shouldBlockLearningDecisionOnSync(item: ImportTransaction): boolean {
+    const baseline = getLearningDecisionBaseline(item);
+    return hasImportCheckLearningExpectedStateDrift(baseline, buildLearningDecisionBaseline(item));
+}
+
+function clearLearningRecommendationState(item: ImportTransaction): void {
+    item.learningRecommendationScore = 0;
+    item.learningRecommendationLevel = '';
+    item.learningRecommendationReason = '';
+    item.learningRecommendationType = '';
+    item.learningRecommendationSummary = '';
+
+    if (item.matching?.learning) {
+        item.matching.learning.rule_id = null;
+        item.matching.learning.score = 0;
+        item.matching.learning.level = '';
+        item.matching.learning.reason = '';
+        item.matching.learning.recommended_type = '';
+        item.matching.learning.summary = '';
+        item.matching.learning.review_status = '';
+        item.matching.learning.suppressed = false;
+    }
+
+    updateTransactionData(item);
+    syncLearningDecisionBaseline(item);
+}
+
+function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, candidate: MatchingSessionCandidateItem): void {
+    const details = candidate.details || {};
+
+    item.learningRecommendationScore = Number(details.score || 0);
+    item.learningRecommendationLevel = details.level || '';
+    item.learningRecommendationReason = details.reason || '';
+    item.learningRecommendationType = details.recommended_type || '';
+    item.learningRecommendationSummary = details.summary || '';
+
+    if (item.matching?.learning) {
+        item.matching.learning.rule_id = typeof details.rule_id === 'number' ? details.rule_id : null;
+        item.matching.learning.score = Number(details.score || 0);
+        item.matching.learning.level = details.level || '';
+        item.matching.learning.reason = details.reason || '';
+        item.matching.learning.recommended_type = details.recommended_type || '';
+        item.matching.learning.summary = details.summary || '';
+        item.matching.learning.review_status = details.review_status || '';
+        item.matching.learning.suppressed = !!details.suppressed;
+    }
+
+    updateTransactionData(item);
+    syncLearningDecisionBaseline(item);
+}
+
 function hasTransferDecisionRelevantDraftChanges(item: ImportTransaction): boolean {
     const baseline = getPreviewState(item)._previewDecisionBaseline;
     if (!baseline) {
@@ -1783,6 +1982,31 @@ function getTransferDecisionExpectedState(item: ImportTransaction): Record<strin
     };
 }
 
+function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+    return {
+        sessionId: props.sessionId || '',
+        reviewStatus: item.getLearningRecommendationReviewStatus(),
+        previewType: getPreviewTransactionTypeText(item.type),
+        categoryId: item.categoryId ? parseInt(item.categoryId, 10) : null,
+        recurringId: item.recurringTemplateId ? parseInt(item.recurringTemplateId, 10) : null,
+        sourceAccountId: item.sourceAccountId ? parseInt(item.sourceAccountId, 10) : null,
+        destinationAccountId: item.destinationAccountId ? parseInt(item.destinationAccountId, 10) : null
+    };
+}
+
+function getActionErrorMessage(error: unknown, fallbackMessage: string): string {
+    const responseError = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+    if (typeof responseError === 'string' && responseError.trim()) {
+        return responseError.trim();
+    }
+
+    if (error instanceof Error && error.message.trim()) {
+        return error.message.trim();
+    }
+
+    return fallbackMessage;
+}
+
 function resolvePreviewCategoryId(previewData: ImportPreviewRecord): string {
     const mainCategory = previewData.preview_main_category || '';
     const subCategory = previewData.preview_sub_category || '';
@@ -1821,12 +2045,33 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.categoryId = resolvePreviewCategoryId(previewData);
     item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
     item.actualCategoryName = item.originalCategoryName;
+    item.sourceAccountId = previewData.preview_source_account_id ? String(previewData.preview_source_account_id) : '';
+    item.destinationAccountId = previewData.preview_destination_account_id ? String(previewData.preview_destination_account_id) : '';
+    item.sourceAmount = convertImportPreviewAmountToCents(previewData.preview_amount, item.sourceAmount || 0);
+    item.destinationAmount = convertImportPreviewAmountToCents(previewData.preview_destination_amount, item.destinationAmount || 0);
 
     item.suggestedType = getPreviewTransactionTypeNumber(previewData.suggested_preview_type);
     item.transferSuggestionScore = Number(previewData.transfer_suggestion_score || 0);
     item.transferSuggestionLevel = previewData.transfer_suggestion_level || '';
     item.transferSuggestionReason = previewData.transfer_suggestion_reason || '';
+    item.investmentSignalScore = Number(previewData.investment_signal_score || 0);
+    item.investmentSignalLevel = previewData.investment_signal_level || '';
+    item.investmentSignalReason = previewData.investment_signal_reason || '';
+    item.learningRecommendationScore = Number(previewData.learning_recommendation_score || 0);
+    item.learningRecommendationLevel = previewData.learning_recommendation_level || '';
+    item.learningRecommendationReason = previewData.learning_recommendation_reason || '';
+    item.learningRecommendationType = previewData.learning_recommendation_type || '';
+    item.learningRecommendationSummary = previewData.learning_recommendation_summary || '';
+    item.investmentPlatform = previewData.investment_platform || '';
+    item.investmentProduct = previewData.investment_product || '';
+    item.parserSource = previewData.preview_parser_id || '';
+    item.parserTags = Array.isArray(previewData.preview_parser_tags) ? previewData.preview_parser_tags : [];
+    item.dedupType = previewData.dedup_type || '';
+    item.dedupSourceIds = Array.isArray(previewData.dedup_source_ids)
+        ? previewData.dedup_source_ids
+        : item.dedupSourceIds;
     item.matching = previewData.matching || item.matching;
+    item.isManuallyAnnotated = !!previewData.preview_is_manually_annotated || !!previewData.matching?.annotation.is_manually_annotated;
 
     item.recurringTemplateId = previewData.preview_recurring_id ? String(previewData.preview_recurring_id) : '';
     item.recurringTemplateName = previewData.preview_recurring_name || '';
@@ -1837,6 +2082,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
 
     updateTransactionData(item);
     syncTransferDecisionBaseline(item);
+    syncLearningDecisionBaseline(item);
 }
 
 function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
@@ -1849,6 +2095,18 @@ function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'):
     }
 
     return 'Clear Transfer Decision';
+}
+
+function getLearningDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
+    if (decision === 'accept') {
+        return 'Learning Suggestion Accepted';
+    }
+
+    if (decision === 'reject') {
+        return 'Learning Suggestion Rejected';
+    }
+
+    return 'Clear Learning Decision';
 }
 
 async function reviewTransferSuggestion(
@@ -1922,6 +2180,148 @@ async function reviewTransferSuggestion(
         snackbar.value?.showMessage(`Transfer decision failed: ${error}`);
     } finally {
         transferDecisionLoadingId.value = null;
+    }
+}
+
+async function reviewLearningSuggestion(
+    item: ImportTransaction,
+    decision: 'accept' | 'reject' | 'clear'
+): Promise<void> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || !previewId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (learningDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null || recurringDecisionLoadingId.value !== null) {
+        return;
+    }
+
+    const candidateId = `preview:${previewId}:learning`;
+
+    learningDecisionLoadingId.value = previewId;
+
+    if (shouldBlockLearningDecisionOnSync(item)) {
+        snackbar.value?.showMessage(tt('Please sync manual preview edits before reviewing learning suggestions'));
+        learningDecisionLoadingId.value = null;
+        return;
+    }
+
+    if (hasLearningDecisionTextDraftChanges(item)) {
+        const synced = await syncLearningDecisionDraftToPreview(item, candidateId);
+        if (!synced) {
+            learningDecisionLoadingId.value = null;
+            return;
+        }
+    }
+
+    const payload: Record<string, unknown> = {
+        expectedState: getLearningDecisionExpectedState(item)
+    };
+
+    if (decision === 'accept') {
+        const ruleId = item.matching?.learning.rule_id;
+        if (typeof ruleId !== 'number' || ruleId <= 0) {
+            snackbar.value?.showMessage('Learning candidate not available');
+            learningDecisionLoadingId.value = null;
+            return;
+        }
+
+        payload['ruleId'] = ruleId;
+    }
+    try {
+        let response;
+        if (decision === 'accept') {
+            response = await services.acceptMatchingCandidate({ candidateId, payload });
+        } else if (decision === 'reject') {
+            response = await services.rejectMatchingCandidate({ candidateId, payload });
+        } else {
+            response = await services.clearMatchingCandidate({ candidateId, payload });
+        }
+
+        const result = response.data?.result;
+        if (!result || (result.sessionId || '') !== props.sessionId) {
+            throw new Error('Learning decision response is out of date');
+        }
+
+        commitEditingTransactionDraft();
+
+        const previewData = Array.isArray(result.preview)
+            ? result.preview as unknown as ImportPreviewRecord[]
+            : [];
+        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        if (!refreshedPreview) {
+            throw new Error('Learning decision response missing preview item');
+        }
+
+        syncTransactionFromPreviewDecision(item, refreshedPreview);
+        snackbar.value?.showMessage(tt(getLearningDecisionMessageKey(decision)));
+    } catch (error) {
+        const errorMessage = getActionErrorMessage(error, 'Learning decision failed');
+        logger.error(`[学习建议决策] 失败: ${errorMessage}`, error);
+        snackbar.value?.showMessage(errorMessage);
+    } finally {
+        learningDecisionLoadingId.value = null;
+    }
+}
+
+async function fetchMatchingSessionCandidate(candidateId: string): Promise<MatchingSessionCandidateItem | null> {
+    if (!props.sessionId) {
+        return null;
+    }
+
+    const response = await services.getMatchingSessionCandidates({
+        sessionId: props.sessionId
+    });
+    const candidates = Array.isArray(response.data?.result?.candidates)
+        ? response.data.result.candidates as MatchingSessionCandidateItem[]
+        : [];
+    return candidates.find(candidate => candidate.candidate_id === candidateId) || null;
+}
+
+async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candidateId: string): Promise<boolean> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || !previewId) {
+        snackbar.value?.showMessage('No session ID available');
+        return false;
+    }
+
+    const payload = buildImportCheckLearningPreviewTextSyncPayload({
+        previewId,
+        counterparty: item.counterparty,
+        paymentMethod: item.paymentMethod,
+        comment: item.comment,
+        selected: item.selected
+    });
+    if (!payload) {
+        snackbar.value?.showMessage('Preview text sync failed');
+        return false;
+    }
+
+    try {
+        const response = await services.updateImportPreviewItem({
+            sessionId: props.sessionId,
+            payload
+        });
+
+        if (!response.data?.result) {
+            throw new Error('Preview text sync failed');
+        }
+
+        const refreshedCandidate = await fetchMatchingSessionCandidate(candidateId);
+        if (!refreshedCandidate) {
+            clearLearningRecommendationState(item);
+            snackbar.value?.showMessage('Learning candidate not available');
+            return false;
+        }
+
+        syncLearningCandidateFromSessionCandidate(item, refreshedCandidate);
+        return true;
+    } catch (error) {
+        const errorMessage = getActionErrorMessage(error, 'Failed to sync preview text edits before reviewing learning suggestions');
+        logger.error(`[学习建议预览同步] 失败: ${errorMessage}`, error);
+        snackbar.value?.showMessage(errorMessage);
+        return false;
     }
 }
 

@@ -314,6 +314,96 @@ describe('ImportTransaction model', () => {
         expect(accepted.canClearTransferSuggestionDecision()).toBe(false);
     });
 
+    test('learning review helpers expose pending, accepted, and rejected states', () => {
+        const pending = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    rule_id: 12,
+                    score: 0.73,
+                    level: 'medium',
+                    reason: 'composite_match',
+                    recommended_type: '支出',
+                    summary: '餐饮 | 午餐',
+                    review_status: 'pending',
+                    suppressed: false
+                }
+            }
+        }, 9);
+        const accepted = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    rule_id: 13,
+                    score: 0.85,
+                    level: 'high',
+                    reason: 'composite_match',
+                    recommended_type: '支出',
+                    summary: '餐饮 | 晚餐',
+                    review_status: 'accepted',
+                    suppressed: false
+                }
+            }
+        }, 10);
+        const rejected = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                learning: {
+                    ...BASE_RESPONSE.matching!.learning,
+                    rule_id: 14,
+                    score: 0.61,
+                    level: 'medium',
+                    reason: 'composite_match',
+                    recommended_type: '支出',
+                    summary: '餐饮 | 咖啡',
+                    review_status: 'rejected',
+                    suppressed: true
+                }
+            }
+        }, 11);
+
+        expect(pending.hasLearningRecommendation()).toBe(true);
+        expect(pending.hasPendingLearningRecommendation()).toBe(true);
+        expect(pending.getLearningRecommendationReviewStatus()).toBe('pending');
+        expect(pending.isLearningRecommendationAccepted()).toBe(false);
+        expect(pending.isLearningRecommendationRejected()).toBe(false);
+        expect(pending.canClearLearningRecommendationDecision()).toBe(false);
+
+        expect(accepted.hasLearningRecommendation()).toBe(true);
+        expect(accepted.hasPendingLearningRecommendation()).toBe(false);
+        expect(accepted.isLearningRecommendationAccepted()).toBe(true);
+        expect(accepted.canClearLearningRecommendationDecision()).toBe(true);
+
+        expect(rejected.hasLearningRecommendation()).toBe(true);
+        expect(rejected.hasPendingLearningRecommendation()).toBe(false);
+        expect(rejected.isLearningRecommendationRejected()).toBe(true);
+        expect(rejected.isLearningRecommendationSuppressed()).toBe(true);
+        expect(rejected.canClearLearningRecommendationDecision()).toBe(true);
+    });
+
+    test('learning input fingerprint tracks parser-aware text fields', () => {
+        const base = ImportTransaction.of(BASE_RESPONSE, 12);
+        const same = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            comment: '工作日午餐',
+            counterparty: '兰州拉面',
+            paymentMethod: '微信支付',
+            parserSource: 'wechat'
+        }, 13);
+        const changed = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            comment: '周末午餐'
+        }, 14);
+
+        expect(base.getLearningRecommendationInputFingerprint()).toBe(same.getLearningRecommendationInputFingerprint());
+        expect(base.getLearningRecommendationInputFingerprint()).not.toBe(changed.getLearningRecommendationInputFingerprint());
+    });
+
     test('toCreateRequest zeros destination fields for non-transfer transactions', () => {
         const expense = ImportTransaction.of(BASE_RESPONSE, 0);
         const transfer = ImportTransaction.of({

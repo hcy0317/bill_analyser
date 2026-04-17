@@ -23,6 +23,8 @@ export interface ImportMatchingLearningPayload {
     reason: string;
     recommended_type: string;
     summary: string;
+    review_status?: string;
+    suppressed?: boolean;
 }
 
 export interface ImportMatchingRecurringPayload {

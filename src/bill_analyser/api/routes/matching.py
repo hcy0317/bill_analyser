@@ -504,6 +504,46 @@ def reject_matching_candidate(candidate_id: str):
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 
+@bp.route("/candidates/<path:candidate_id>/clear", methods=["POST"])
+@log_method
+@require_auth
+def clear_matching_candidate(candidate_id: str):
+    """清除一个当前已支持 family 的 matching candidate 决策状态。"""
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        _, bill_service = get_app_context()
+        user_id = _get_request_user_id()
+        clear_handler = getattr(bill_service, "_clear_matching_candidate", None)
+        if not callable(clear_handler):
+            raise AttributeError("Matching clear handler not available")
+        result = _run_async(
+            clear_handler(
+                candidate_id,
+                data,
+                user_id=user_id,
+            )
+        )
+        if not result.get("success"):
+            status_code = int(result.get("status_code", 400))
+            error_message = result.get("error", "Failed to clear candidate")
+            return jsonify({"success": False, "error": error_message}), status_code
+
+        return jsonify(
+            {
+                "success": True,
+                "data": _build_matching_candidate_action_payload(candidate_id, result),
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("清除 matching candidate 决策失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
 @bp.route("/pairs", methods=["GET"])
 @log_method
 @require_auth

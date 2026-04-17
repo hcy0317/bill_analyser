@@ -50,6 +50,7 @@ class FakeMatchingService:
         self.matching_pairs_calls: list[int] = []
         self.accept_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.reject_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
+        self.clear_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.manual_pair_calls: list[tuple[int, int, int]] = []
         self.manual_investment_pair_calls: list[tuple[int, int, int]] = []
         self.deleted_pair_calls: list[tuple[int, int]] = []
@@ -172,6 +173,14 @@ class FakeMatchingService:
             "session_id": "session-1",
             "preview": [{"id": 1, "matching": {"transfer": {"review_status": "rejected"}}}],
         }
+        self.clear_candidate_result = {
+            "success": True,
+            "candidate_id": "preview:1:learning",
+            "action": "clear",
+            "preview_id": 1,
+            "session_id": "session-1",
+            "preview": [{"id": 1, "matching": {"learning": {"review_status": "pending"}}}],
+        }
         self.manual_pair_result = {
             "success": True,
             "pair": {
@@ -250,6 +259,20 @@ class FakeMatchingService:
     ) -> dict[str, Any]:
         self.reject_candidate_calls.append((candidate_id, dict(payload), user_id))
         result = dict(self.reject_candidate_result)
+        if isinstance(result.get("pair"), dict):
+            result["pair"] = dict(result["pair"])
+        if isinstance(result.get("preview"), list):
+            result["preview"] = list(result["preview"])
+        return result
+
+    async def _clear_matching_candidate(
+        self,
+        candidate_id: str,
+        payload: dict[str, Any],
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        self.clear_candidate_calls.append((candidate_id, dict(payload), user_id))
+        result = dict(self.clear_candidate_result)
         if isinstance(result.get("pair"), dict):
             result["pair"] = dict(result["pair"])
         if isinstance(result.get("preview"), list):
@@ -1531,5 +1554,157 @@ def test_matching_candidate_reject_route_rejects_invalid_request_and_preserves_e
     ):
         _set_request_user_id(9)
         response, status = _unwrap_response(route("preview:1:transfer"))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_candidate_clear_route_dispatches_preview_learning(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic clear route 应分发 preview learning candidate，并返回刷新后的 preview。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.clear_matching_candidate)
+    service.clear_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:learning",
+        "action": "clear",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"learning": {"review_status": "pending", "suppressed": False}},
+            }
+        ],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/clear",
+        method="POST",
+        json={
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "accepted",
+                "previewType": "支出",
+                "categoryId": None,
+                "recurringId": None,
+                "sourceAccountId": 12,
+                "destinationAccountId": 18,
+            }
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:learning").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:learning"
+        assert payload["data"]["action"] == "clear"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["preview"][0]["matching"]["learning"]["review_status"] == "pending"
+        assert service.clear_candidate_calls == [
+            (
+                "preview:1:learning",
+                {
+                    "expectedState": {
+                        "sessionId": "session-1",
+                        "reviewStatus": "accepted",
+                        "previewType": "支出",
+                        "categoryId": None,
+                        "recurringId": None,
+                        "sourceAccountId": 12,
+                        "destinationAccountId": 18,
+                    }
+                },
+                9,
+            )
+        ]
+
+
+def test_matching_candidate_clear_route_rejects_invalid_request_and_unsupported_family(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic clear route 应覆盖非法请求、业务错误与异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.clear_matching_candidate)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/clear",
+        method="POST",
+        json=["clear"],
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:learning"))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    service.clear_candidate_result = {
+        "success": False,
+        "error": "Invalid request",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/clear",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:learning"))
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    service.clear_candidate_result = {
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:mystery/clear",
+        method="POST",
+        json={},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:mystery"))
+        assert status == 400
+        assert response.get_json()["error"] == "Candidate family not supported"
+
+    service.clear_candidate_result = {
+        "success": False,
+        "error": "Preview state changed, please refresh",
+        "status_code": 409,
+    }
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/clear",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1"}},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:learning"))
+        assert status == 409
+        assert response.get_json()["error"] == "Preview state changed, please refresh"
+
+    async def raise_clear_error(_candidate_id: str, _payload: dict[str, Any], user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("clear candidate boom")
+
+    monkeypatch.setattr(service, "_clear_matching_candidate", raise_clear_error)
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:learning/clear",
+        method="POST",
+        json={"expectedState": {"sessionId": "session-1"}},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route("preview:1:learning"))
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"

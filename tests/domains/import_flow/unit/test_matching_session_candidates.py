@@ -1335,6 +1335,102 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_learnin
 
 
 @pytest.mark.asyncio
+async def test_bill_service_clear_matching_candidate_dispatches_preview_learning_to_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic clear 的 preview learning 分支应复用 preview-scoped feedback clear 写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, str, dict[str, object], int]] = []
+
+    async def fake_apply_preview_learning_decision(
+        preview_id: int,
+        decision: str,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-learning-clear",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "matching": {"learning": {"review_status": "pending", "suppressed": False}}
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "apply_preview_learning_decision", fake_apply_preview_learning_decision, raising=False)
+
+    payload = {
+        "expectedState": {
+            "sessionId": "session-learning-clear",
+            "reviewStatus": "accepted",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+            "sourceAccountId": 12,
+            "destinationAccountId": 18,
+        }
+    }
+    result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:learning",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            "clear",
+            {
+                "sessionId": "session-learning-clear",
+                "reviewStatus": "accepted",
+                "previewType": "支出",
+                "categoryId": None,
+                "recurringId": None,
+                "sourceAccountId": 12,
+                "destinationAccountId": 18,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:learning",
+        "action": "clear",
+        "preview_id": 1,
+        "session_id": "session-learning-clear",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"learning": {"review_status": "pending", "suppressed": False}}
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_clear_matching_candidate_requires_preview_learning_expected_state() -> None:
+    """preview learning clear 缺少 expectedState 时应直接返回 Invalid request。"""
+    service = BillService(db=None)
+
+    result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:learning",
+        {},
+        user_id=7,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Invalid request",
+        "status_code": 400,
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_reject_matching_candidate_dispatches_historical_transfer_to_persisted_suppression() -> None:
     """generic reject 的 bill transfer 分支应复用 persisted suppression 写路径。"""
 

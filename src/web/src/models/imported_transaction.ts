@@ -250,7 +250,49 @@ export class ImportTransaction implements ImportTransactionResponse {
     }
 
     public hasLearningRecommendation(): boolean {
-        return this.learningRecommendationScore > 0;
+        const learningRuleId = this.matching?.learning.rule_id;
+        return this.learningRecommendationScore > 0
+            || !!this.learningRecommendationSummary
+            || !!this.learningRecommendationReason
+            || !!this.learningRecommendationType
+            || (typeof learningRuleId === 'number' && learningRuleId > 0)
+            || this.getLearningRecommendationReviewStatus() !== '';
+    }
+
+    public hasPendingLearningRecommendation(): boolean {
+        return this.hasLearningRecommendation()
+            && !this.isLearningRecommendationAccepted()
+            && !this.isLearningRecommendationRejected()
+            && !this.isLearningRecommendationSuppressed();
+    }
+
+    public getLearningRecommendationReviewStatus(): string {
+        return (this.matching?.learning.review_status || '').trim().toLowerCase();
+    }
+
+    public isLearningRecommendationSuppressed(): boolean {
+        return !!this.matching?.learning.suppressed || this.isLearningRecommendationRejected();
+    }
+
+    public isLearningRecommendationAccepted(): boolean {
+        return this.getLearningRecommendationReviewStatus() === 'accepted';
+    }
+
+    public isLearningRecommendationRejected(): boolean {
+        return this.getLearningRecommendationReviewStatus() === 'rejected';
+    }
+
+    public canClearLearningRecommendationDecision(): boolean {
+        return this.isLearningRecommendationAccepted() || this.isLearningRecommendationRejected();
+    }
+
+    public getLearningRecommendationInputFingerprint(): string {
+        return JSON.stringify({
+            parserSource: (this.parserSource || '').trim(),
+            counterparty: (this.counterparty || '').trim(),
+            paymentMethod: (this.paymentMethod || '').trim(),
+            comment: (this.comment || '').trim()
+        });
     }
 
     public getInvestmentProfileText(): string {

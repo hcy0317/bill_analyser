@@ -213,6 +213,40 @@ interface ApiDataResponse<T> {
     data: T;
 }
 
+type MatchingCandidateActionName = 'accept' | 'reject' | 'clear';
+
+interface MatchingCandidateActionResponse {
+    candidateId: string;
+    action: string;
+    previewId?: number;
+    sessionId?: string;
+    recurringId?: number;
+    preview?: Array<Record<string, unknown>>;
+    pair?: Record<string, unknown>;
+    bill?: Record<string, unknown>;
+}
+
+interface MatchingSessionCandidatesResponse {
+    session_id?: string;
+    summary?: Record<string, unknown>;
+    candidates?: Array<Record<string, unknown>>;
+}
+
+interface UpdateImportPreviewItemPayload {
+    id: number;
+    type?: string;
+    amount?: number;
+    destinationAmount?: number;
+    mainCategory?: string;
+    subCategory?: string;
+    sourceAccountId?: number | null;
+    destinationAccountId?: number | null;
+    counterparty?: string;
+    paymentMethod?: string;
+    description?: string;
+    isSelected?: boolean;
+}
+
 function buildApiResponse<T>(response: AxiosResponse<any>, result: T): AxiosResponse<ApiResponse<T>> {
     return {
         ...response,
@@ -491,6 +525,19 @@ function mapImportedBudgetToRest(budget: any): any {
         alert_threshold: budget?.alertThreshold ?? budget?.alert_threshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
         enabled: budget?.enabled ?? DEFAULT_BUDGET_ENABLED
     };
+}
+
+function postMatchingCandidateAction(
+    action: MatchingCandidateActionName,
+    candidateId: string,
+    payload?: Record<string, unknown>
+): ApiResponsePromise<MatchingCandidateActionResponse> {
+    return axios.post<ApiDataResponse<MatchingCandidateActionResponse>>(
+        `matching/candidates/${encodeURIComponent(candidateId)}/${action}`,
+        payload ?? {}
+    ).then(response => {
+        return buildApiResponse(response, response.data?.data);
+    });
 }
 
 let needBlockRequest = false;
@@ -1278,6 +1325,53 @@ export default {
         return axios.post<ApiDataResponse<ImportLearningPromoteResponse>>(`bills/import/v2/learning/${sessionId}/promote`, payload).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
+    },
+    updateImportPreviewItem: ({
+        sessionId,
+        payload
+    }: {
+        sessionId: string,
+        payload: UpdateImportPreviewItemPayload
+    }): ApiResponsePromise<boolean> => {
+        return axios.put<{ success?: boolean }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
+            return buildApiResponse(response, !!response.data?.success);
+        });
+    },
+    getMatchingSessionCandidates: ({
+        sessionId
+    }: {
+        sessionId: string
+    }): ApiResponsePromise<MatchingSessionCandidatesResponse> => {
+        return axios.get<ApiDataResponse<MatchingSessionCandidatesResponse>>(`matching/candidates?sessionId=${encodeURIComponent(sessionId)}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    acceptMatchingCandidate: ({
+        candidateId,
+        payload
+    }: {
+        candidateId: string,
+        payload?: Record<string, unknown>
+    }): ApiResponsePromise<MatchingCandidateActionResponse> => {
+        return postMatchingCandidateAction('accept', candidateId, payload);
+    },
+    rejectMatchingCandidate: ({
+        candidateId,
+        payload
+    }: {
+        candidateId: string,
+        payload?: Record<string, unknown>
+    }): ApiResponsePromise<MatchingCandidateActionResponse> => {
+        return postMatchingCandidateAction('reject', candidateId, payload);
+    },
+    clearMatchingCandidate: ({
+        candidateId,
+        payload
+    }: {
+        candidateId: string,
+        payload?: Record<string, unknown>
+    }): ApiResponsePromise<MatchingCandidateActionResponse> => {
+        return postMatchingCandidateAction('clear', candidateId, payload);
     },
     getImportConfigs: ({ fileFormat }: { fileFormat?: string } = {}): ApiResponsePromise<any[]> => {
         return axios.get<ApiResponse<any[]>>('bills/import/configs', {
