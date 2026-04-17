@@ -864,6 +864,78 @@ class TestMatchingAPI:
         assert restored_data["data"]["linkedPair"] is None
         assert [candidate["billId"] for candidate in restored_data["data"]["candidates"]] == [candidate_bill_id]
 
+    def test_matching_manual_investment_pair_delete_restores_candidates_for_formal_bill(self, client):
+        """investment/manual 删除后，应恢复 linkedPair 为空且 investment candidate 重新出现。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_investment_pair")
+        current_user_id = _get_current_user_id(client, auth_headers)
+
+        source_account_id = _create_account_via_db(current_user_id, "pytest 投资手工配对转出账户")
+        target_account_id = _create_account_via_db(current_user_id, "pytest 投资手工配对转入账户")
+        anchor_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=source_account_id,
+            amount=-166.0,
+            bill_type="投资",
+            date="2026-07-14 12:00:00",
+            description="蚂蚁财富 手工投资配对 买入",
+        )
+        candidate_bill_id = _create_bill_via_db(
+            current_user_id,
+            source_account_id=target_account_id,
+            amount=166.0,
+            bill_type="投资",
+            date="2026-07-14 12:02:00",
+            description="蚂蚁财富 手工投资配对 卖出",
+        )
+
+        before_pair_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert before_pair_response.status_code == 200
+        before_candidates = before_pair_response.get_json()["data"]["candidates"]
+        assert any(
+            candidate["candidateId"] == f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
+            for candidate in before_candidates
+        )
+
+        response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": anchor_bill_id, "candidateBillId": candidate_bill_id, "pairType": "investment"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
+        assert data["data"]["pair"]["pairType"] == "investment"
+        assert data["data"]["pair"]["leftBillId"] == min(anchor_bill_id, candidate_bill_id)
+        assert data["data"]["pair"]["rightBillId"] == max(anchor_bill_id, candidate_bill_id)
+
+        follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert follow_up_response.status_code == 200
+        follow_up_data = follow_up_response.get_json()
+        assert follow_up_data["data"]["linkedPair"]["pairType"] == "investment"
+        assert follow_up_data["data"]["linkedPair"]["otherBillId"] == candidate_bill_id
+        assert follow_up_data["data"]["candidates"] == []
+
+        delete_response = client.delete(
+            f"/api/matching/pairs/{data['data']['pair']['id']}",
+            headers=auth_headers,
+        )
+
+        assert delete_response.status_code == 200
+        delete_data = delete_response.get_json()
+        assert delete_data["success"] is True
+        assert delete_data["data"]["pair"]["id"] == data["data"]["pair"]["id"]
+        assert delete_data["data"]["pair"]["pairType"] == "investment"
+
+        restored_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)
+        assert restored_response.status_code == 200
+        restored_data = restored_response.get_json()
+        assert restored_data["data"]["linkedPair"] is None
+        assert any(
+            candidate["candidateId"] == f"bill:{anchor_bill_id}:investment:{candidate_bill_id}"
+            for candidate in restored_data["data"]["candidates"]
+        )
+
     def test_matching_manual_pair_rejects_self_pair_and_existing_link_conflicts(self, client):
         """手工后配对应拒绝 self-pair 与已存在 pair 的冲突写入。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair_conflict")
@@ -919,6 +991,42 @@ class TestMatchingAPI:
         )
         assert conflicting_response.status_code == 409
         assert conflicting_response.get_json()["error"] == "Bills already belong to an existing transfer pair"
+
+    def test_matching_manual_pair_rejects_invalid_request_values(self, client):
+        """manual-pair 应拒绝非法 pairType、布尔 ID 与浮点 ID。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_manual_pair_invalid_request")
+
+        invalid_pair_type_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": 11, "candidateBillId": 12, "pairType": "crypto"},
+            headers=auth_headers,
+        )
+        assert invalid_pair_type_response.status_code == 400
+        assert invalid_pair_type_response.get_json()["error"] == "Invalid pairType"
+
+        falsey_pair_type_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": 11, "candidateBillId": 12, "pairType": []},
+            headers=auth_headers,
+        )
+        assert falsey_pair_type_response.status_code == 400
+        assert falsey_pair_type_response.get_json()["error"] == "Invalid pairType"
+
+        bool_bill_id_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": True, "candidateBillId": 12},
+            headers=auth_headers,
+        )
+        assert bool_bill_id_response.status_code == 400
+        assert bool_bill_id_response.get_json()["error"] == "Invalid request"
+
+        float_candidate_bill_id_response = client.post(
+            "/api/matching/manual-pair",
+            json={"billId": 11, "candidateBillId": 12.5},
+            headers=auth_headers,
+        )
+        assert float_candidate_bill_id_response.status_code == 400
+        assert float_candidate_bill_id_response.get_json()["error"] == "Invalid request"
 
     def test_matching_pair_delete_is_user_scoped(self, client):
         """历史正式账单手工配对删除不应跨用户生效。"""
@@ -1090,17 +1198,18 @@ class TestMatchingAPI:
             headers=auth_headers,
         )
         assert transfer_pair_response.status_code == 200
-
-        from src.api.app import db
-
-        async def _create_investment_pair() -> dict[str, object]:
-            return await db.create_manual_investment_pair(
-                investment_left_bill_id,
-                investment_right_bill_id,
-                user_id=current_user_id,
-            )
-
-        investment_pair = asyncio.run(_create_investment_pair())
+        investment_pair_response = client.post(
+            "/api/matching/manual-pair",
+            json={
+                "billId": investment_left_bill_id,
+                "candidateBillId": investment_right_bill_id,
+                "pairType": "investment",
+            },
+            headers=auth_headers,
+        )
+        assert investment_pair_response.status_code == 200
+        investment_pair = investment_pair_response.get_json()["data"]["pair"]
+        assert investment_pair["pairType"] == "investment"
 
         response = client.get("/api/matching/pairs", headers=auth_headers)
 

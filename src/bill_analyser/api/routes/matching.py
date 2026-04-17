@@ -153,25 +153,48 @@ def _parse_matching_candidates_selector() -> tuple[str | None, int | None]:
     return None, bill_id
 
 
-def _parse_manual_pair_request(data: Any) -> tuple[int, int]:
+def _parse_positive_request_int(data: dict[str, Any], field_name: str) -> int:
+    raw_value = data.get(field_name)
+    if raw_value in (None, ""):
+        raise KeyError("billId and candidateBillId are required")
+
+    if isinstance(raw_value, bool):
+        raise ValueError("Invalid request")
+    if isinstance(raw_value, int):
+        normalized_value = raw_value
+    elif isinstance(raw_value, str):
+        normalized_raw_value = raw_value.strip()
+        if not normalized_raw_value.isdigit():
+            raise ValueError("Invalid request")
+        normalized_value = int(normalized_raw_value)
+    else:
+        raise ValueError("Invalid request")
+
+    if normalized_value <= 0:
+        raise ValueError("Invalid request")
+
+    return normalized_value
+
+
+def _parse_manual_pair_request(data: Any) -> tuple[int, int, str]:
     if not isinstance(data, dict):
         raise ValueError("Invalid request")
 
-    bill_id = data.get("billId")
-    candidate_bill_id = data.get("candidateBillId")
-    if bill_id in (None, "") or candidate_bill_id in (None, ""):
-        raise KeyError("billId and candidateBillId are required")
+    normalized_bill_id = _parse_positive_request_int(data, "billId")
+    normalized_candidate_bill_id = _parse_positive_request_int(data, "candidateBillId")
 
-    try:
-        normalized_bill_id = int(bill_id)
-        normalized_candidate_bill_id = int(candidate_bill_id)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Invalid request") from exc
+    raw_pair_type = data.get("pairType", None)
+    if raw_pair_type is None:
+        pair_type = "transfer"
+    else:
+        pair_type = str(raw_pair_type).strip().lower()
+    if pair_type not in {"transfer", "investment"}:
+        raise ValueError("Invalid pairType")
 
     if normalized_bill_id == normalized_candidate_bill_id:
         raise LookupError("billId and candidateBillId must be different")
 
-    return normalized_bill_id, normalized_candidate_bill_id
+    return normalized_bill_id, normalized_candidate_bill_id, pair_type
 
 
 def _parse_reconcile_history_request(data: Any) -> list[int]:
@@ -506,10 +529,10 @@ def get_matching_pairs():
 @log_method
 @require_auth
 def create_manual_pair():
-    """为两条正式账单创建 1:1 transfer-only 手工配对。"""
+    """为两条正式账单创建 1:1 manual pair。默认 transfer，可选 investment。"""
     try:
         try:
-            normalized_bill_id, normalized_candidate_bill_id = _parse_manual_pair_request(
+            normalized_bill_id, normalized_candidate_bill_id, pair_type = _parse_manual_pair_request(
                 request.get_json(silent=True) or {}
             )
         except KeyError as exc:
@@ -521,8 +544,13 @@ def create_manual_pair():
 
         _, bill_service = get_app_context()
         user_id = _get_request_user_id()
+        pair_creator = (
+            bill_service.create_manual_investment_pair
+            if pair_type == "investment"
+            else bill_service.create_manual_transfer_pair
+        )
         result = _run_async(
-            bill_service.create_manual_transfer_pair(
+            pair_creator(
                 normalized_bill_id,
                 normalized_candidate_bill_id,
                 user_id=user_id,

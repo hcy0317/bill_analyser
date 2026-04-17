@@ -872,6 +872,78 @@ async def test_bill_service_accept_matching_candidate_dispatches_historical_inve
 
 
 @pytest.mark.asyncio
+async def test_bill_service_create_manual_investment_pair_handles_self_pair_404_and_409() -> None:
+    """BillService 应为 manual investment pair 提供与 transfer 对齐的薄桥语义。"""
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.mode = "success"
+            self.calls: list[tuple[int, int, int, str | None]] = []
+
+        async def create_manual_investment_pair(
+            self,
+            bill_id: int,
+            candidate_bill_id: int,
+            user_id: int = 1,
+            *,
+            feedback_candidate_id: str | None = None,
+        ) -> dict[str, object]:
+            self.calls.append((bill_id, candidate_bill_id, user_id, feedback_candidate_id))
+            if self.mode == "missing":
+                raise LookupError("Bill not found")
+            if self.mode == "conflict":
+                raise ValueError("Bills already rejected for investment pairing")
+            return {
+                "id": 91,
+                "pair_type": "investment",
+                "source": "manual",
+                "left_bill_id": min(bill_id, candidate_bill_id),
+                "right_bill_id": max(bill_id, candidate_bill_id),
+            }
+
+    fake_db = FakeDb()
+    service = BillService(db=fake_db)  # type: ignore[arg-type]
+
+    self_pair_result = await service.create_manual_investment_pair(11, 11, user_id=7)
+    assert self_pair_result == {
+        "success": False,
+        "error": "billId and candidateBillId must be different",
+        "status_code": 400,
+    }
+    assert fake_db.calls == []
+
+    success_result = await service.create_manual_investment_pair(
+        11,
+        12,
+        user_id=7,
+        feedback_candidate_id="bill:11:investment:12",
+    )
+    assert success_result == {
+        "success": True,
+        "pair": {
+            "id": 91,
+            "pair_type": "investment",
+            "source": "manual",
+            "left_bill_id": 11,
+            "right_bill_id": 12,
+        },
+    }
+    assert fake_db.calls == [(11, 12, 7, "bill:11:investment:12")]
+
+    fake_db.mode = "missing"
+    missing_result = await service.create_manual_investment_pair(21, 22, user_id=9)
+    assert missing_result == {"success": False, "error": "Bill not found", "status_code": 404}
+
+    fake_db.mode = "conflict"
+    conflict_result = await service.create_manual_investment_pair(31, 32, user_id=5)
+    assert conflict_result == {
+        "success": False,
+        "error": "Bills already rejected for investment pairing",
+        "status_code": 409,
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_accept_matching_candidate_records_feedback_event_for_historical_transfer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -3011,23 +3011,20 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
-        try:
-            pair = await self.db.create_manual_investment_pair(
-                int(parsed_candidate_id["bill_id"]),
-                int(parsed_candidate_id["candidate_bill_id"]),
-                user_id=user_id,
-                feedback_candidate_id=str(candidate_id),
-            )
-        except LookupError:
-            return {"success": False, "error": "Bill not found", "status_code": 404}
-        except ValueError as exc:
-            return {"success": False, "error": str(exc), "status_code": 409}
+        result = await self.create_manual_investment_pair(
+            int(parsed_candidate_id["bill_id"]),
+            int(parsed_candidate_id["candidate_bill_id"]),
+            user_id=user_id,
+            feedback_candidate_id=str(candidate_id),
+        )
+        if not result.get("success"):
+            return result
 
         return {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "accept",
-            "pair": pair,
+            "pair": result.get("pair"),
         }
 
     @log_method
@@ -3446,6 +3443,36 @@ class BillService:
 
         try:
             pair = await self.db.create_manual_transfer_pair(
+                bill_id,
+                candidate_bill_id,
+                user_id=user_id,
+                feedback_candidate_id=feedback_candidate_id,
+            )
+        except LookupError:
+            return {"success": False, "error": "Bill not found", "status_code": 404}
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
+        return {"success": True, "pair": pair}
+
+    @log_method
+    async def create_manual_investment_pair(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+        *,
+        feedback_candidate_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist a manual investment pair for two historical bills."""
+        if int(bill_id) == int(candidate_bill_id):
+            return {
+                "success": False,
+                "error": "billId and candidateBillId must be different",
+                "status_code": 400,
+            }
+
+        try:
+            pair = await self.db.create_manual_investment_pair(
                 bill_id,
                 candidate_bill_id,
                 user_id=user_id,

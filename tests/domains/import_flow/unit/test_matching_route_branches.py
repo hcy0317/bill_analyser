@@ -51,6 +51,7 @@ class FakeMatchingService:
         self.accept_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.reject_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.manual_pair_calls: list[tuple[int, int, int]] = []
+        self.manual_investment_pair_calls: list[tuple[int, int, int]] = []
         self.deleted_pair_calls: list[tuple[int, int]] = []
         self.result = {
             "session_id": "session-1",
@@ -181,6 +182,16 @@ class FakeMatchingService:
                 "right_bill_id": 12,
             },
         }
+        self.manual_investment_pair_result = {
+            "success": True,
+            "pair": {
+                "id": 91,
+                "pair_type": "investment",
+                "source": "manual",
+                "left_bill_id": 21,
+                "right_bill_id": 22,
+            },
+        }
         self.delete_pair_result = {
             "success": True,
             "pair": {
@@ -253,6 +264,15 @@ class FakeMatchingService:
     ) -> dict[str, Any]:
         self.manual_pair_calls.append((bill_id, candidate_bill_id, user_id))
         return dict(self.manual_pair_result)
+
+    async def create_manual_investment_pair(
+        self,
+        bill_id: int,
+        candidate_bill_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        self.manual_investment_pair_calls.append((bill_id, candidate_bill_id, user_id))
+        return dict(self.manual_investment_pair_result)
 
     async def delete_manual_transfer_pair(self, pair_id: int, user_id: int = 1) -> dict[str, Any]:
         self.deleted_pair_calls.append((pair_id, user_id))
@@ -387,6 +407,46 @@ def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
     with matching_route_app.test_request_context(
         "/api/matching/manual-pair",
         method="POST",
+        json={"billId": 11, "candidateBillId": 12, "pairType": "crypto"},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid pairType"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 12, "pairType": False},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid pairType"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": True, "candidateBillId": 12},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 11, "candidateBillId": 12.5},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(create_manual_pair_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
         json={"billId": 11, "candidateBillId": 12},
     ):
         _set_request_user_id(7)
@@ -395,6 +455,19 @@ def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
         assert payload["data"]["pair"]["leftBillId"] == 11
         assert payload["data"]["pair"]["rightBillId"] == 12
         assert service.manual_pair_calls == [(11, 12, 7)]
+
+    with matching_route_app.test_request_context(
+        "/api/matching/manual-pair",
+        method="POST",
+        json={"billId": 21, "candidateBillId": 22, "pairType": "investment"},
+    ):
+        _set_request_user_id(8)
+        payload = create_manual_pair_route().get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["pair"]["pairType"] == "investment"
+        assert payload["data"]["pair"]["leftBillId"] == 21
+        assert payload["data"]["pair"]["rightBillId"] == 22
+        assert service.manual_investment_pair_calls == [(21, 22, 8)]
 
     service.manual_pair_result = {
         "success": False,
