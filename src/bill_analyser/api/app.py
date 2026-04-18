@@ -23,6 +23,7 @@ from bill_analyser.api.routes import (
     categories,
     learning,
     matching,
+    recurring,
     statistics,
     tags,
     templates,
@@ -144,6 +145,7 @@ def create_app():
     flask_app.register_blueprint(backup.bp, url_prefix="/api/backup")
     flask_app.register_blueprint(matching.bp, url_prefix="/api/matching")
     flask_app.register_blueprint(learning.bp, url_prefix="/api/learning")
+    flask_app.register_blueprint(recurring.bp, url_prefix="/api/recurring")
 
     # 健康检查端点
     @flask_app.route("/api/health", methods=["GET"])
