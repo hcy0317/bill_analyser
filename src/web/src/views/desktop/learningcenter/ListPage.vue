@@ -14,12 +14,16 @@
                             </v-btn>
                         </div>
                         <v-divider class="mt-4" />
-                        <v-list density="compact" nav>
+                        <v-list density="compact" nav class="mt-2">
                             <v-list-item :active="activeTab === 'suggestions'"
+                                         :prepend-icon="mdiLightbulbOutline"
+                                         class="mb-1"
                                          @click="switchTab('suggestions')">
                                 <v-list-item-title>{{ tt('Learning Suggestions') }}</v-list-item-title>
                             </v-list-item>
                             <v-list-item :active="activeTab === 'rules'"
+                                         :prepend-icon="mdiBookOpenPageVariant"
+                                         class="mb-1"
                                          @click="switchTab('rules')">
                                 <v-list-item-title>{{ tt('Learning Rules') }}</v-list-item-title>
                             </v-list-item>
@@ -106,7 +110,12 @@
                                                 <div class="text-caption text-grey">{{ item.matchValue }}</div>
                                             </td>
                                             <td>
-                                                <div class="text-caption">{{ getFeatureSummary(item) }}</div>
+                                                <div class="d-flex flex-wrap ga-1">
+                                                    <v-chip v-for="(feat, idx) in getFeatureSummary(item).split(' · ').filter(Boolean)"
+                                                            :key="idx" size="x-small" variant="tonal" color="secondary">
+                                                        {{ feat }}
+                                                    </v-chip>
+                                                </div>
                                             </td>
                                             <td>
                                                 <div class="text-body-2">{{ item.summary || item.suggestedType }}</div>
@@ -139,6 +148,7 @@
                                 </v-table>
 
                                 <v-empty-state v-if="!loading && filteredSuggestions.length === 0"
+                                               :icon="mdiLightbulbOutline"
                                                :headline="tt('No Suggestions')"
                                                :text="tt('Click Generate Suggestions to mine patterns from your transaction history.')" />
                             </template>
@@ -163,7 +173,12 @@
                                                 <div class="text-caption text-grey">{{ rule.matchValue }}</div>
                                             </td>
                                             <td>
-                                                <div class="text-caption">{{ getRuleFeatSummary(rule) }}</div>
+                                                <div class="d-flex flex-wrap ga-1">
+                                                    <v-chip v-for="(feat, idx) in getRuleFeatSummary(rule).split(' · ').filter(Boolean)"
+                                                            :key="idx" size="x-small" variant="tonal" color="secondary">
+                                                        {{ feat }}
+                                                    </v-chip>
+                                                </div>
                                             </td>
                                             <td>
                                                 <div class="text-body-2">{{ rule.learnedType }}</div>
@@ -188,6 +203,7 @@
                                 </v-table>
 
                                 <v-empty-state v-if="!loading && rules.length === 0"
+                                               :icon="mdiBookOpenPageVariant"
                                                :headline="tt('No Rules')"
                                                :text="tt('Accept suggestions to create learning rules that auto-classify future imports.')" />
                             </template>
@@ -215,7 +231,9 @@ import {
     mdiBrain,
     mdiCheck,
     mdiClose,
-    mdiDelete
+    mdiDelete,
+    mdiLightbulbOutline,
+    mdiBookOpenPageVariant
 } from '@mdi/js';
 
 const props = defineProps<{
@@ -344,3 +362,14 @@ watch(activeTab, (tab) => {
     }
 }, { immediate: true });
 </script>
+
+<style scoped>
+.v-table :deep(td) {
+    padding-block: 12px;
+    vertical-align: middle;
+}
+
+.v-table :deep(th) {
+    white-space: nowrap;
+}
+</style>

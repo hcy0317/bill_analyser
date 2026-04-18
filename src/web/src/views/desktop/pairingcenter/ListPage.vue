@@ -14,9 +14,11 @@
                             </v-btn>
                         </div>
                         <v-divider class="mt-4" />
-                        <v-list density="compact" nav>
+                        <v-list density="compact" nav class="mt-2">
                             <v-list-item
                                 :active="activePairType === undefined"
+                                :prepend-icon="mdiFormatListBulleted"
+                                class="mb-1"
                                 @click="filterByType(undefined)">
                                 <v-list-item-title>{{ tt('All Types') }}</v-list-item-title>
                             </v-list-item>
@@ -24,6 +26,8 @@
                                 v-for="pairType in pairTypeOptions"
                                 :key="pairType.value"
                                 :active="activePairType === pairType.value"
+                                :prepend-icon="pairTypeIcon(pairType.value)"
+                                class="mb-1"
                                 @click="filterByType(pairType.value)">
                                 <v-list-item-title>{{ pairType.label }}</v-list-item-title>
                             </v-list-item>
@@ -92,6 +96,7 @@
                                                    :disabled="deleting === pair.id"
                                                    @click="confirmDeletePair(pair)">
                                                 <v-icon :icon="mdiDeleteOutline" />
+                                                <v-tooltip activator="parent" location="top">{{ tt('Delete') }}</v-tooltip>
                                             </v-btn>
                                         </td>
                                     </tr>
@@ -99,9 +104,9 @@
                             </v-table>
 
                             <v-empty-state v-if="!loading && pairs.length === 0"
-                                           :icon="mdiLinkVariant"
+                                           :icon="mdiLinkOff"
                                            :headline="tt('No Pairs')"
-                                           :text="tt('No matching pairs found')" />
+                                           :text="tt('No matching pairs found. Pairs are created when transactions are linked across accounts.')" />
                         </v-card-text>
                     </v-main>
                 </v-layout>
@@ -133,7 +138,12 @@ import { useDisplay } from 'vuetify';
 import {
     mdiLinkVariant,
     mdiRefresh,
-    mdiDeleteOutline
+    mdiDeleteOutline,
+    mdiFormatListBulleted,
+    mdiSwapHorizontal,
+    mdiFinance,
+    mdiBrain,
+    mdiLinkOff
 } from '@mdi/js';
 
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
@@ -190,6 +200,15 @@ function pairTypeLabel(pairType: string): string {
     }
 }
 
+function pairTypeIcon(pairType: string): string {
+    switch (pairType) {
+        case 'transfer': return mdiSwapHorizontal;
+        case 'investment': return mdiFinance;
+        case 'learning': return mdiBrain;
+        default: return mdiLinkVariant;
+    }
+}
+
 function formatAmount(amount: number): string {
     return amount.toFixed(2);
 }
@@ -221,3 +240,14 @@ onMounted(() => {
     loadAllPairs();
 });
 </script>
+
+<style scoped>
+.v-table :deep(td) {
+    padding-block: 12px;
+    vertical-align: middle;
+}
+
+.v-table :deep(th) {
+    white-space: nowrap;
+}
+</style>
