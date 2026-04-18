@@ -34,6 +34,7 @@ import AboutPage from '@/views/desktop/AboutPage.vue';
 import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
 import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
 import LearningCenterPage from '@/views/desktop/learningcenter/ListPage.vue';
+import RecurringDiscoverPage from '@/views/desktop/recurring/DiscoverPage.vue';
 
 function checkLogin(): NavigationGuardReturn {
     if (!isUserLogined()) {
@@ -202,6 +203,11 @@ const router = createRouter({
                     props: route => ({
                         initTab: route.query['tab']
                     })
+                },
+                {
+                    path: '/recurring/discover',
+                    component: RecurringDiscoverPage,
+                    beforeEnter: checkLogin
                 },
                 {
                     path: '/user/settings',

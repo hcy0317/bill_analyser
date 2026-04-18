@@ -73,6 +73,15 @@ import type {
     BatchAcceptResponse,
     GenerateSuggestionsResponse
 } from '@/models/learning_center.ts';
+import type {
+    RecurringSuggestionsResponse,
+    RecurringDetectResponse,
+    RecurringAcceptResponse,
+} from '@/models/recurring_suggestion.ts';
+import {
+    normalizeSuggestionsResponse as normalizeRecurringSuggestionsResponse,
+    normalizeDetectResponse,
+} from '@/models/recurring_suggestion.ts';
 import {
     normalizeSuggestionsResponse,
     normalizeRulesResponse,
@@ -2040,6 +2049,44 @@ export default {
 
     deleteLearningRule: ({ ruleId }: { ruleId: number }): ApiResponsePromise<any> => {
         return axios.delete(`learning/rules/${ruleId}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── Recurring Detection (周期自动发现) ──────────
+
+    getRecurringSuggestions: ({
+        status,
+        limit,
+        offset
+    }: {
+        status?: string,
+        limit?: number,
+        offset?: number
+    } = {}): ApiResponsePromise<RecurringSuggestionsResponse> => {
+        return axios.get<ApiDataResponse<RecurringSuggestionsResponse>>('recurring/suggestions', {
+            params: { status, limit, offset }
+        }).then(response => {
+            const normalized = normalizeRecurringSuggestionsResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    detectRecurringPatterns: (): ApiResponsePromise<RecurringDetectResponse> => {
+        return axios.post<ApiDataResponse<RecurringDetectResponse>>('recurring/suggestions/detect').then(response => {
+            const normalized = normalizeDetectResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    acceptRecurringSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<RecurringAcceptResponse> => {
+        return axios.post<ApiDataResponse<RecurringAcceptResponse>>(`recurring/suggestions/${suggestionId}/accept`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    rejectRecurringSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<any> => {
+        return axios.post(`recurring/suggestions/${suggestionId}/reject`).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     }
