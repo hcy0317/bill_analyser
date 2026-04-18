@@ -1626,6 +1626,70 @@ def test_matching_candidate_clear_route_dispatches_preview_learning(
         ]
 
 
+def test_matching_candidate_clear_route_dispatches_preview_investment(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic clear route 应分发 preview investment candidate，并返回刷新后的 preview。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.clear_matching_candidate)
+    service.clear_candidate_result = {
+        "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "clear",
+        "preview_id": 1,
+        "session_id": "session-1",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"investment": {"review_status": "pending", "suppressed": False}},
+            }
+        ],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/candidates/preview:1:investment/clear",
+        method="POST",
+        json={
+            "expectedState": {
+                "sessionId": "session-1",
+                "reviewStatus": "accepted",
+                "previewType": "投资",
+                "categoryId": None,
+                "recurringId": None,
+            }
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route("preview:1:investment").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == "preview:1:investment"
+        assert payload["data"]["action"] == "clear"
+        assert payload["data"]["previewId"] == 1
+        assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["preview"][0]["matching"]["investment"]["review_status"] == "pending"
+        assert service.clear_candidate_calls == [
+            (
+                "preview:1:investment",
+                {
+                    "expectedState": {
+                        "sessionId": "session-1",
+                        "reviewStatus": "accepted",
+                        "previewType": "投资",
+                        "categoryId": None,
+                        "recurringId": None,
+                    }
+                },
+                9,
+            )
+        ]
+
+
 def test_matching_candidate_clear_route_rejects_invalid_request_and_unsupported_family(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,

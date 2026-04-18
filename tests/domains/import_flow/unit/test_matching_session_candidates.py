@@ -1413,12 +1413,109 @@ async def test_bill_service_clear_matching_candidate_dispatches_preview_learning
 
 
 @pytest.mark.asyncio
+async def test_bill_service_clear_matching_candidate_dispatches_preview_investment_to_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generic clear 的 preview investment 分支应复用 preview-scoped feedback clear 写路径。"""
+    service = BillService(db=None)
+    calls: list[tuple[int, str, dict[str, object], int]] = []
+
+    async def fake_apply_preview_investment_decision(
+        preview_id: int,
+        decision: str,
+        *,
+        expected_state: dict[str, object] | None = None,
+        user_id: int = 1,
+    ) -> dict[str, object]:
+        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
+        return {
+            "success": True,
+            "preview_id": preview_id,
+            "session_id": "session-investment-clear",
+            "preview": [
+                {
+                    "id": preview_id,
+                    "matching": {"investment": {"review_status": "pending", "suppressed": False}}
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        service,
+        "apply_preview_investment_decision",
+        fake_apply_preview_investment_decision,
+        raising=False,
+    )
+
+    payload = {
+        "expectedState": {
+            "sessionId": "session-investment-clear",
+            "reviewStatus": "accepted",
+            "previewType": "投资",
+            "categoryId": None,
+            "recurringId": None,
+        }
+    }
+    result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:investment",
+        payload,
+        user_id=7,
+    )
+
+    assert calls == [
+        (
+            1,
+            "clear",
+            {
+                "sessionId": "session-investment-clear",
+                "reviewStatus": "accepted",
+                "previewType": "投资",
+                "categoryId": None,
+                "recurringId": None,
+            },
+            7,
+        )
+    ]
+    assert result == {
+        "success": True,
+        "candidate_id": "preview:1:investment",
+        "action": "clear",
+        "preview_id": 1,
+        "session_id": "session-investment-clear",
+        "preview": [
+            {
+                "id": 1,
+                "matching": {"investment": {"review_status": "pending", "suppressed": False}}
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_bill_service_clear_matching_candidate_requires_preview_learning_expected_state() -> None:
     """preview learning clear 缺少 expectedState 时应直接返回 Invalid request。"""
     service = BillService(db=None)
 
     result = await service._clear_matching_candidate(  # pylint: disable=protected-access
         "preview:1:learning",
+        {},
+        user_id=7,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Invalid request",
+        "status_code": 400,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bill_service_clear_matching_candidate_requires_preview_investment_expected_state() -> None:
+    """preview investment clear 缺少 expectedState 时应直接返回 Invalid request。"""
+    service = BillService(db=None)
+
+    result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+        "preview:1:investment",
         {},
         user_id=7,
     )

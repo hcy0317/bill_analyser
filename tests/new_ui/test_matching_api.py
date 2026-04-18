@@ -4771,6 +4771,158 @@ class TestMatchingAPI:
         assert clear_response.status_code == 409
         assert clear_response.get_json()["error"] == "Preview state changed, please refresh"
 
+    def test_matching_candidate_clear_restores_preview_investment_to_pending(self, client):
+        """preview investment generic clear 应把已审查信号恢复为 pending，并同步 session 候选状态。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_clear_preview_investment")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-clear-investment-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_preview() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-02 09:15:00",
+                    "preview_type": "投资",
+                    "preview_amount": 199.5,
+                    "preview_counterparty": "蚂蚁财富",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "黄金 ETF 定投",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview())
+        candidate_id = f"preview:{preview_id}:investment"
+
+        session_before_accept_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_before_accept_response.status_code == 200
+        investment_candidate_before_accept = next(
+            candidate
+            for candidate in session_before_accept_response.get_json()["data"]["candidates"]
+            if candidate["candidate_id"] == candidate_id
+        )
+        accept_expected_state = {
+            "sessionId": session_id,
+            "reviewStatus": investment_candidate_before_accept["status"],
+            "previewType": investment_candidate_before_accept["preview"]["preview_type"],
+            "categoryId": None,
+            "recurringId": investment_candidate_before_accept["preview"].get("preview_recurring_id"),
+        }
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={
+                "expectedState": accept_expected_state,
+            },
+            headers=auth_headers,
+        )
+        assert accept_response.status_code == 200
+        accepted_preview = next(
+            item for item in accept_response.get_json()["data"]["preview"] if int(item["id"]) == preview_id
+        )
+        assert accepted_preview["matching"]["investment"]["review_status"] == "accepted"
+
+        clear_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/clear",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "accepted",
+                    "previewType": accepted_preview["preview_type"],
+                    "categoryId": None,
+                    "recurringId": accepted_preview.get("preview_recurring_id"),
+                }
+            },
+            headers=auth_headers,
+        )
+
+        assert clear_response.status_code == 200
+        payload = clear_response.get_json()
+        assert payload["success"] is True
+        assert payload["data"]["candidateId"] == candidate_id
+        assert payload["data"]["action"] == "clear"
+        refreshed_preview = next(item for item in payload["data"]["preview"] if int(item["id"]) == preview_id)
+        assert refreshed_preview["matching"]["investment"]["review_status"] == "pending"
+        assert refreshed_preview["matching"]["investment"]["suppressed"] is False
+
+        session_after_clear_response = client.get(
+            f"/api/matching/candidates?sessionId={session_id}",
+            headers=auth_headers,
+        )
+        assert session_after_clear_response.status_code == 200
+        investment_candidate_after_clear = next(
+            candidate
+            for candidate in session_after_clear_response.get_json()["data"]["candidates"]
+            if candidate["candidate_id"] == candidate_id
+        )
+        assert investment_candidate_after_clear["status"] == "pending"
+
+    def test_matching_candidate_clear_rejects_stale_preview_investment_state(self, client):
+        """preview investment generic clear 应对过期 expectedState 返回 409。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_clear_preview_investment_stale")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-clear-investment-stale-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        async def _create_preview() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-02 09:40:00",
+                    "preview_type": "投资",
+                    "preview_amount": 88.0,
+                    "preview_counterparty": "蚂蚁财富",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "基金定投",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview())
+        candidate_id = f"preview:{preview_id}:investment"
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "投资",
+                    "categoryId": None,
+                    "recurringId": None,
+                }
+            },
+            headers=auth_headers,
+        )
+        assert accept_response.status_code == 200
+
+        clear_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/clear",
+            json={
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "投资",
+                    "categoryId": None,
+                    "recurringId": None,
+                }
+            },
+            headers=auth_headers,
+        )
+
+        assert clear_response.status_code == 409
+        assert clear_response.get_json()["error"] == "Preview state changed, please refresh"
+
     def test_matching_candidate_reject_is_user_scoped_for_historical_transfer(self, client):
         """generic reject 的 historical transfer 分支不应跨用户生效。"""
         primary_headers = _build_isolated_auth_headers(client, "test_matching_candidate_reject_bill_scope_primary")

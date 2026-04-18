@@ -3175,6 +3175,32 @@ class BillService:
         }
 
     @log_method
+    async def _clear_preview_investment_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        result = await self.apply_preview_investment_decision(
+            int(parsed_candidate_id["preview_id"]),
+            "clear",
+            expected_state=payload.get("expectedState"),
+            user_id=user_id,
+        )
+        if not result.get("success"):
+            return result
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "clear",
+            "preview_id": result.get("preview_id"),
+            "session_id": result.get("session_id"),
+            "preview": result.get("preview", []),
+        }
+
+    @log_method
     async def _reject_preview_recurring_candidate(
         self,
         candidate_id: str,
@@ -3467,6 +3493,16 @@ class BillService:
 
         candidate_scope = str(parsed_candidate_id.get("scope") or "")
         candidate_kind = str(parsed_candidate_id.get("kind") or "")
+
+        if candidate_scope == "preview" and candidate_kind == "investment":
+            if not isinstance(payload.get("expectedState"), dict):
+                return {"success": False, "error": "Invalid request", "status_code": 400}
+            return await self._clear_preview_investment_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                payload,
+                user_id=user_id,
+            )
 
         if candidate_scope == "preview" and candidate_kind == "learning":
             if not isinstance(payload.get("expectedState"), dict):

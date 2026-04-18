@@ -217,6 +217,16 @@
                         :title="item.investmentSignalReason">
                         {{ tt('Investment Signal Accepted') }}
                     </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                            @click.stop="reviewInvestmentSignal(item, 'clear')">
+                            {{ tt('Clear Investment Decision') }}
+                        </v-btn>
+                    </div>
                     <div class="text-caption text-medium-emphasis ms-1 mt-1"
                          v-if="item.getInvestmentProfileText()">
                         {{ item.getInvestmentProfileText() }}
@@ -231,6 +241,16 @@
                         :title="item.investmentSignalReason">
                         {{ tt('Investment Signal Rejected') }}
                     </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="warning"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                            @click.stop="reviewInvestmentSignal(item, 'clear')">
+                            {{ tt('Clear Investment Decision') }}
+                        </v-btn>
+                    </div>
                     <div class="text-caption text-medium-emphasis ms-1 mt-1"
                          v-if="item.getInvestmentProfileText()">
                         {{ item.getInvestmentProfileText() }}
@@ -2177,12 +2197,16 @@ function getLearningDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'):
     return 'Clear Learning Decision';
 }
 
-function getInvestmentDecisionMessageKey(decision: 'accept' | 'reject'): string {
+function getInvestmentDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
     if (decision === 'accept') {
         return 'Investment Signal Accepted';
     }
 
-    return 'Investment Signal Rejected';
+    if (decision === 'reject') {
+        return 'Investment Signal Rejected';
+    }
+
+    return 'Clear Investment Decision';
 }
 
 async function reviewTransferSuggestion(
@@ -2343,7 +2367,7 @@ async function reviewLearningSuggestion(
 
 async function reviewInvestmentSignal(
     item: ImportTransaction,
-    decision: 'accept' | 'reject'
+    decision: 'accept' | 'reject' | 'clear'
 ): Promise<void> {
     const previewId = getPreviewId(item);
     if (!props.sessionId || !previewId) {
@@ -2370,7 +2394,9 @@ async function reviewInvestmentSignal(
     try {
         const response = decision === 'accept'
             ? await services.acceptMatchingCandidate({ candidateId, payload })
-            : await services.rejectMatchingCandidate({ candidateId, payload });
+            : decision === 'reject'
+                ? await services.rejectMatchingCandidate({ candidateId, payload })
+                : await services.clearMatchingCandidate({ candidateId, payload });
 
         const result = response.data?.result;
         if (!result || (result.sessionId || '') !== props.sessionId) {
