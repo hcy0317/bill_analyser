@@ -2771,5 +2771,17 @@
     "Select a category to edit its keywords and settings": "Select a category to edit its keywords and settings",
     "Select Account to Edit": "Select Account to Edit",
     "Select an account to edit its aliases and settings": "Select an account to edit its aliases and settings",
-    "Select Account": "Select Account"
+    "Select Account": "Select Account",
+
+    "Pairing Center": "Pairing Center",
+    "No Pairs": "No Matching Pairs",
+    "No matching pairs found": "No matching pairs found",
+    "pairs": "pairs",
+    "Left Bill": "Left Bill",
+    "Right Bill": "Right Bill",
+    "Created At": "Created At",
+    "Delete Pair": "Delete Pair",
+    "Are you sure you want to delete this matching pair?": "Are you sure you want to delete this matching pair?",
+    "Investment": "Investment",
+    "Learning": "Learning"
 }

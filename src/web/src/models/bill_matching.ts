@@ -211,3 +211,91 @@ export function buildBillMatchingViewState(
         showDeletePairAction: false
     };
 }
+
+// --- Pair list & reconcile-history types ---
+
+export interface BillMatchingPairBillSummary {
+    id: number;
+    type: string;
+    amount: number;
+    date: string;
+    description: string;
+    counterparty: string;
+    mainCategory: string;
+    subCategory: string;
+    sourceAccountName: string;
+}
+
+export interface BillMatchingPairDetail {
+    id: number;
+    pairType: string;
+    source: string;
+    leftBillId: number;
+    rightBillId: number;
+    createdAt: string;
+    updatedAt: string;
+    leftBill: BillMatchingPairBillSummary | null;
+    rightBill: BillMatchingPairBillSummary | null;
+}
+
+export interface MatchingPairsResponse {
+    pairs: BillMatchingPairDetail[];
+}
+
+export interface ReconcileHistorySummary {
+    billCount: number;
+    candidateCount: number;
+    linkedPairCount: number;
+}
+
+export interface ReconcileHistoryBillResult {
+    billId: number;
+    linkedPair: BillMatchingPairSummary | null;
+    candidates: BillMatchingCandidate[];
+}
+
+export interface ReconcileHistoryResponse {
+    summary: ReconcileHistorySummary;
+    results: ReconcileHistoryBillResult[];
+}
+
+export function normalizeMatchingPairsResponse(
+    payload: unknown
+): MatchingPairsResponse {
+    const response = toRecord(payload);
+    const rawPairs = Array.isArray(response['pairs']) ? response['pairs'] : [];
+
+    return {
+        pairs: rawPairs.map(item => {
+            const pairRecord = toRecord(item);
+            const leftBillRecord = pairRecord['leftBill'] ? toRecord(pairRecord['leftBill']) : null;
+            const rightBillRecord = pairRecord['rightBill'] ? toRecord(pairRecord['rightBill']) : null;
+
+            function toBillSummary(record: Record<string, unknown>): BillMatchingPairBillSummary {
+                return {
+                    id: toNumber(record['id']),
+                    type: toStringValue(record['type']),
+                    amount: toNumber(record['amount']),
+                    date: toStringValue(record['date']),
+                    description: toStringValue(record['description']),
+                    counterparty: toStringValue(record['counterparty']),
+                    mainCategory: toStringValue(record['mainCategory']),
+                    subCategory: toStringValue(record['subCategory']),
+                    sourceAccountName: toStringValue(record['sourceAccountName'])
+                };
+            }
+
+            return {
+                id: toNumber(pairRecord['id']),
+                pairType: toStringValue(pairRecord['pairType']),
+                source: toStringValue(pairRecord['source']),
+                leftBillId: toNumber(pairRecord['leftBillId']),
+                rightBillId: toNumber(pairRecord['rightBillId']),
+                createdAt: toStringValue(pairRecord['createdAt']),
+                updatedAt: toStringValue(pairRecord['updatedAt']),
+                leftBill: leftBillRecord ? toBillSummary(leftBillRecord) : null,
+                rightBill: rightBillRecord ? toBillSummary(rightBillRecord) : null
+            } satisfies BillMatchingPairDetail;
+        })
+    };
+}

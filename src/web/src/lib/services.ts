@@ -70,7 +70,9 @@ import type {
 import type {
     BillMatchingCandidatesResponse,
     BillMatchingFeedbackResponse,
-    BillMatchingPairSummary
+    BillMatchingPairSummary,
+    MatchingPairsResponse,
+    ReconcileHistoryResponse
 } from '@/models/bill_matching.ts';
 import type {
     TransactionCreateRequest,
@@ -1406,6 +1408,55 @@ export default {
         pairId: string | number
     }): ApiResponsePromise<MatchingPairOperationResponse> => {
         return axios.delete<ApiDataResponse<MatchingPairOperationResponse>>(`matching/pairs/${encodeURIComponent(String(pairId))}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    getMatchingPairs: ({
+        pairType,
+        page,
+        pageSize
+    }: {
+        pairType?: string,
+        page?: number,
+        pageSize?: number
+    } = {}): ApiResponsePromise<MatchingPairsResponse> => {
+        const params: Record<string, string> = {};
+        if (pairType) params['pair_type'] = pairType;
+        if (page !== undefined) params['page'] = String(page);
+        if (pageSize !== undefined) params['page_size'] = String(pageSize);
+        return axios.get<ApiDataResponse<MatchingPairsResponse>>('matching/pairs', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    reconcileMatchingHistory: ({
+        billIds,
+        families
+    }: {
+        billIds: number[],
+        families?: string[]
+    }): ApiResponsePromise<ReconcileHistoryResponse> => {
+        const body: Record<string, unknown> = { billIds };
+        if (families && families.length > 0) {
+            body['families'] = families;
+        }
+        return axios.post<ApiDataResponse<ReconcileHistoryResponse>>('matching/reconcile-history', body).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    createManualPair: ({
+        billId,
+        candidateBillId,
+        pairType
+    }: {
+        billId: number,
+        candidateBillId: number,
+        pairType?: string
+    }): ApiResponsePromise<MatchingPairOperationResponse> => {
+        return axios.post<ApiDataResponse<MatchingPairOperationResponse>>('matching/manual-pair', {
+            billId,
+            candidateBillId,
+            pairType: pairType || 'transfer'
+        }).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },

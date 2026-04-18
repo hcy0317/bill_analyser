@@ -32,6 +32,7 @@ import AppSettingsPage from '@/views/desktop/app/AppSettingsPage.vue';
 import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
+import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
 
 function checkLogin(): NavigationGuardReturn {
     if (!isUserLogined()) {
@@ -183,6 +184,14 @@ const router = createRouter({
                         initType: route.query['type'],
                         initPeriodType: route.query['periodType'],
                         initViewMode: route.query['viewMode']
+                    })
+                },
+                {
+                    path: '/pairing/list',
+                    component: PairingCenterPage,
+                    beforeEnter: checkLogin,
+                    props: route => ({
+                        initPairType: route.query['pairType']
                     })
                 },
                 {

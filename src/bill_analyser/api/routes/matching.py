@@ -197,7 +197,8 @@ def _parse_manual_pair_request(data: Any) -> tuple[int, int, str]:
     return normalized_bill_id, normalized_candidate_bill_id, pair_type
 
 
-def _parse_reconcile_history_request(data: Any) -> list[int]:
+def _parse_reconcile_history_request(data: Any) -> tuple[list[int], list[str] | None]:
+    """Return ``(bill_ids, families | None)`` from the request body."""
     if not isinstance(data, dict):
         raise ValueError("Invalid request")
 
@@ -228,7 +229,12 @@ def _parse_reconcile_history_request(data: Any) -> list[int]:
         seen_bill_ids.add(normalized_bill_id)
         normalized_bill_ids.append(normalized_bill_id)
 
-    return normalized_bill_ids
+    raw_families = data.get("families")
+    families: list[str] | None = None
+    if isinstance(raw_families, list) and raw_families:
+        families = [str(f) for f in raw_families if isinstance(f, str)] or None
+
+    return normalized_bill_ids, families
 
 
 def _build_matching_candidate_action_payload(
@@ -392,10 +398,10 @@ def get_matching_candidates():
 @log_method
 @require_auth
 def reconcile_matching_history():
-    """按显式 billIds 聚合读取历史正式账单 transfer-only matching 候选。"""
+    """按显式 billIds 聚合读取历史正式账单 matching 候选（支持可选 families 过滤）。"""
     try:
         try:
-            normalized_bill_ids = _parse_reconcile_history_request(request.get_json(silent=True))
+            normalized_bill_ids, families = _parse_reconcile_history_request(request.get_json(silent=True))
         except KeyError as exc:
             return jsonify({"success": False, "error": str(exc.args[0])}), 400
         except ValueError as exc:
@@ -407,7 +413,7 @@ def reconcile_matching_history():
         if not callable(reconcile_handler):
             raise AttributeError("Matching reconcile-history handler not available")
 
-        result = _run_async(reconcile_handler(normalized_bill_ids, user_id=user_id))
+        result = _run_async(reconcile_handler(normalized_bill_ids, user_id=user_id, families=families))
         if not result.get("success"):
             status_code = int(result.get("status_code", 400))
             error_message = result.get("error", "Failed to reconcile matching history")

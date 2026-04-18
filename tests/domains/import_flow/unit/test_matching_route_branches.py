@@ -46,7 +46,7 @@ class FakeMatchingService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
         self.bill_candidate_calls: list[tuple[int, int]] = []
-        self.reconcile_history_calls: list[tuple[list[int], int]] = []
+        self.reconcile_history_calls: list[tuple[list[int], int, list[str] | None]] = []
         self.matching_pairs_calls: list[int] = []
         self.accept_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
         self.reject_candidate_calls: list[tuple[str, dict[str, Any], int]] = []
@@ -220,8 +220,8 @@ class FakeMatchingService:
         self.bill_candidate_calls.append((bill_id, user_id))
         return dict(self.bill_candidate_result)
 
-    async def reconcile_matching_history(self, bill_ids: list[int], user_id: int = 1) -> dict[str, Any]:
-        self.reconcile_history_calls.append((list(bill_ids), user_id))
+    async def reconcile_matching_history(self, bill_ids: list[int], user_id: int = 1, families: list[str] | None = None) -> dict[str, Any]:
+        self.reconcile_history_calls.append((list(bill_ids), user_id, families))
         return {
             "success": bool(self.reconcile_history_result.get("success", False)),
             "summary": dict(self.reconcile_history_result.get("summary", {})),
@@ -795,7 +795,7 @@ def test_matching_reconcile_history_route_validates_and_dispatches(
         assert [item["billId"] for item in payload["data"]["results"]] == [11, 21]
         assert payload["data"]["results"][0]["candidates"][0]["candidateId"] == "bill:11:transfer:12"
         assert payload["data"]["results"][1]["linkedPair"]["otherBillId"] == 22
-        assert service.reconcile_history_calls == [([11, 21], 9)]
+        assert service.reconcile_history_calls == [([11, 21], 9, None)]
 
 
 def test_matching_reconcile_history_route_preserves_service_errors_and_500(
@@ -828,8 +828,9 @@ def test_matching_reconcile_history_route_preserves_service_errors_and_500(
         assert status == 404
         assert response.get_json()["error"] == "Bill not found"
 
-    async def raise_reconcile_error(_bill_ids: list[int], user_id: int = 1) -> dict[str, Any]:
+    async def raise_reconcile_error(_bill_ids: list[int], user_id: int = 1, families: list[str] | None = None) -> dict[str, Any]:
         _ = user_id
+        _ = families
         raise RuntimeError("reconcile history boom")
 
     monkeypatch.setattr(service, "reconcile_matching_history", raise_reconcile_error)
@@ -842,6 +843,46 @@ def test_matching_reconcile_history_route_preserves_service_errors_and_500(
         response, status = _unwrap_response(route())
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_reconcile_history_route_passes_families_parameter(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reconcile-history route 应将 families 参数正确传递给 service。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.reconcile_matching_history)
+
+    service.reconcile_history_result = {
+        "success": True,
+        "summary": {"billCount": 1, "candidateCount": 0, "linkedPairCount": 0},
+        "results": [{"billId": 11, "linkedPair": None, "candidates": []}],
+    }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11], "families": ["transfer", "investment"]},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 200
+        assert service.reconcile_history_calls == [([11], 9, ["transfer", "investment"])]
+
+    service.reconcile_history_calls.clear()
+    with matching_route_app.test_request_context(
+        "/api/matching/reconcile-history",
+        method="POST",
+        json={"billIds": [11]},
+    ):
+        _set_request_user_id(9)
+        _unwrap_response(route())
+        assert service.reconcile_history_calls == [([11], 9, None)]
 
 
 def test_matching_candidate_accept_route_dispatches_preview_and_bill_transfer_candidates(

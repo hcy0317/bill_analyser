@@ -85,6 +85,12 @@
                         <span class="nav-item-title">{{ tt('Budget Management') }}</span>
                     </router-link>
                 </li>
+                <li class="nav-link">
+                    <router-link to="/pairing/list">
+                        <v-icon class="nav-item-icon" :icon="mdiLinkVariant"/>
+                        <span class="nav-item-title">{{ tt('Pairing Center') }}</span>
+                    </router-link>
+                </li>
                 <li class="nav-section-title">
                     <div class="title-wrapper">
                         <span class="title-text">{{ tt('Miscellaneous') }}</span>
@@ -245,7 +251,8 @@ import {
     mdiAccountCogOutline,
     mdiLockOutline,
     mdiLogout,
-    mdiCalculatorVariantOutline
+    mdiCalculatorVariantOutline,
+    mdiLinkVariant
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;

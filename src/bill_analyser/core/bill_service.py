@@ -2715,16 +2715,24 @@ class BillService:
 
         return None
 
+    _RECONCILE_ALLOWED_FAMILIES: set[str] = {"transfer", "investment", "learning"}
+
     @log_method
     async def reconcile_matching_history(
         self,
         bill_ids: list[int],
         user_id: int = 1,
+        families: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Aggregate transfer-only matching candidates for explicit historical bill anchors."""
+        """Aggregate matching candidates for explicit historical bill anchors.
+
+        *families* controls which candidate kinds are included:
+        ``['transfer']`` (default for backward-compat),
+        ``['transfer', 'investment', 'learning']`` for multi-family.
+        """
         try:
             normalized_bill_ids = self._normalize_matching_history_bill_ids(bill_ids)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {"success": False, "error": "Invalid billIds", "status_code": 400}
 
         if not normalized_bill_ids:
@@ -2733,6 +2741,8 @@ class BillService:
                 "error": "billIds must be a non-empty list",
                 "status_code": 400,
             }
+
+        allowed_families = self._normalize_reconcile_families(families)
 
         results: list[dict[str, Any]] = []
         candidate_count = 0
@@ -2752,13 +2762,13 @@ class BillService:
             linked_pair = (
                 raw_linked_pair
                 if isinstance(raw_linked_pair, dict)
-                and str(raw_linked_pair.get("pair_type") or "transfer") == "transfer"
+                and str(raw_linked_pair.get("pair_type") or "transfer") in allowed_families
                 else None
             )
             candidates = [
                 candidate
                 for candidate in list(result.get("candidates") or [])
-                if str(candidate.get("kind") or "transfer") == "transfer"
+                if str(candidate.get("kind") or "transfer") in allowed_families
             ]
             results.append(
                 {
@@ -2782,6 +2792,19 @@ class BillService:
                 "linked_pair_count": len(linked_pair_keys),
             },
         }
+
+    def _normalize_reconcile_families(self, families: list[str] | None) -> set[str]:
+        """Return the validated set of candidate families for reconcile-history."""
+        if families is None:
+            return {"transfer"}
+        if not isinstance(families, list):
+            return {"transfer"}
+        normalized = {
+            str(f).strip().lower()
+            for f in families
+            if isinstance(f, str) and str(f).strip().lower() in self._RECONCILE_ALLOWED_FAMILIES
+        }
+        return normalized if normalized else {"transfer"}
 
     @log_method
     async def get_matching_pairs(self, user_id: int = 1) -> dict[str, Any]:

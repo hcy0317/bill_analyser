@@ -2776,5 +2776,17 @@
     "Select a category to edit its keywords and settings": "选择一个分类以编辑其关键词和设置",
     "Select Account to Edit": "选择要编辑的账户",
     "Select an account to edit its aliases and settings": "选择一个账户以编辑其别名和设置",
-    "Select Account": "选择账户"
+    "Select Account": "选择账户",
+
+    "Pairing Center": "配对中心",
+    "No Pairs": "暂无配对",
+    "No matching pairs found": "未找到匹配配对记录",
+    "pairs": "对",
+    "Left Bill": "左侧账单",
+    "Right Bill": "右侧账单",
+    "Created At": "创建时间",
+    "Delete Pair": "删除配对",
+    "Are you sure you want to delete this matching pair?": "确定要删除此匹配配对吗？",
+    "Investment": "投资",
+    "Learning": "学习规则"
 }
