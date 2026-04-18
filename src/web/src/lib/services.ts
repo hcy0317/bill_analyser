@@ -68,6 +68,11 @@ import type {
     ImportLearningSuggestionsResponse
 } from '@/models/import_learning.ts';
 import type {
+    BillMatchingCandidatesResponse,
+    BillMatchingFeedbackResponse,
+    BillMatchingPairSummary
+} from '@/models/bill_matching.ts';
+import type {
     TransactionCreateRequest,
     TransactionImportRequest,
     TransactionModifyRequest,
@@ -230,6 +235,10 @@ interface MatchingSessionCandidatesResponse {
     session_id?: string;
     summary?: Record<string, unknown>;
     candidates?: Array<Record<string, unknown>>;
+}
+
+interface MatchingPairOperationResponse {
+    pair?: BillMatchingPairSummary;
 }
 
 interface UpdateImportPreviewItemPayload {
@@ -1346,6 +1355,24 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
+    getMatchingBillCandidates: ({
+        billId
+    }: {
+        billId: string | number
+    }): ApiResponsePromise<BillMatchingCandidatesResponse> => {
+        return axios.get<ApiDataResponse<BillMatchingCandidatesResponse>>(`matching/candidates?billId=${encodeURIComponent(String(billId))}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    getMatchingBillFeedback: ({
+        billId
+    }: {
+        billId: string | number
+    }): ApiResponsePromise<BillMatchingFeedbackResponse> => {
+        return axios.get<ApiDataResponse<BillMatchingFeedbackResponse>>(`matching/bills/${encodeURIComponent(String(billId))}/feedback`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
     acceptMatchingCandidate: ({
         candidateId,
         payload
@@ -1372,6 +1399,15 @@ export default {
         payload?: Record<string, unknown>
     }): ApiResponsePromise<MatchingCandidateActionResponse> => {
         return postMatchingCandidateAction('clear', candidateId, payload);
+    },
+    deleteMatchingPair: ({
+        pairId
+    }: {
+        pairId: string | number
+    }): ApiResponsePromise<MatchingPairOperationResponse> => {
+        return axios.delete<ApiDataResponse<MatchingPairOperationResponse>>(`matching/pairs/${encodeURIComponent(String(pairId))}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
     },
     getImportConfigs: ({ fileFormat }: { fileFormat?: string } = {}): ApiResponsePromise<any[]> => {
         return axios.get<ApiResponse<any[]>>('bills/import/configs', {

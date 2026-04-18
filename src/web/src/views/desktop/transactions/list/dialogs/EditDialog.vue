@@ -422,6 +422,14 @@
                                         </div>
                                     </v-card>
                                 </v-col>
+                                <v-col cols="12" md="12"
+                                       v-if="type === TransactionEditPageType.Transaction && mode === TransactionEditPageMode.View && editId">
+                                    <bill-matching-panel :bill-id="editId"
+                                                         :disabled="loading || submitting"
+                                                         @notify="onBillMatchingNotify"
+                                                                            @error="onBillMatchingError"
+                                                                            @updated="onBillMatchingUpdated" />
+                                </v-col>
                                 <v-col cols="12" md="12">
                                     <v-autocomplete
                                         item-title="name"
@@ -676,6 +684,7 @@
 import MapView from '@/components/common/MapView.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import BillMatchingPanel from './BillMatchingPanel.vue';
 
 import { ref, computed, useTemplateRef, watch, nextTick, onMounted, onUnmounted } from 'vue';
 
@@ -1746,6 +1755,41 @@ function viewOrRemovePicture(pictureInfo: TransactionPictureInfoBasicResponse): 
 
 function onShowDateTimeError(error: string): void {
     snackbar.value?.showError(error);
+}
+
+function onBillMatchingNotify(message: string): void {
+    snackbar.value?.showMessage(message);
+}
+
+function onBillMatchingError(message: string): void {
+    snackbar.value?.showError(message);
+}
+
+async function onBillMatchingUpdated(): Promise<void> {
+    if (props.type !== TransactionEditPageType.Transaction || !editId.value || mode.value !== TransactionEditPageMode.View) {
+        return;
+    }
+
+    loading.value = true;
+
+    try {
+        const latestTransaction = await transactionsStore.getTransaction({ transactionId: editId.value });
+
+        if (latestTransaction instanceof Transaction) {
+            setTransaction(latestTransaction, {}, true, true);
+            originalTransactionEditable.value = latestTransaction.editable;
+        }
+    } catch (error) {
+        logger.error('failed to refresh transaction after matching update', error);
+
+        if (error instanceof Error) {
+            snackbar.value?.showError(error.message);
+        } else {
+            snackbar.value?.showError('Failed to refresh transaction after matching update');
+        }
+    } finally {
+        loading.value = false;
+    }
 }
 
 watch(activeTab, (newValue) => {
