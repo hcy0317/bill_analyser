@@ -21,13 +21,17 @@ from bill_analyser.api.routes import (
     bills,
     budgets,
     categories,
+    insights,
     learning,
     matching,
+    networth,
     recurring,
+    rules,
     statistics,
     tags,
     templates,
 )
+from bill_analyser.api.routes import calendar as calendar_routes
 from bill_analyser.constants import PROJECT_ROOT, STATIC_DIR
 from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.category_engine import CategoryEngine
@@ -146,6 +150,10 @@ def create_app():
     flask_app.register_blueprint(matching.bp, url_prefix="/api/matching")
     flask_app.register_blueprint(learning.bp, url_prefix="/api/learning")
     flask_app.register_blueprint(recurring.bp, url_prefix="/api/recurring")
+    flask_app.register_blueprint(calendar_routes.bp, url_prefix="/api/calendar")
+    flask_app.register_blueprint(networth.bp, url_prefix="/api/networth")
+    flask_app.register_blueprint(rules.bp, url_prefix="/api/rules")
+    flask_app.register_blueprint(insights.bp, url_prefix="/api/insights")
 
     # 健康检查端点
     @flask_app.route("/api/health", methods=["GET"])

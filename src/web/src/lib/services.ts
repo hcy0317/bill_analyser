@@ -2089,5 +2089,51 @@ export default {
         return axios.post(`recurring/suggestions/${suggestionId}/reject`).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
+    },
+
+    // ── Calendar Events (日历/现金流) ──────────
+
+    getCalendarEvents: ({
+        startDate,
+        endDate
+    }: {
+        startDate: string,
+        endDate: string
+    }): ApiResponsePromise<any> => {
+        return axios.get('calendar/events', {
+            params: { start_date: startDate, end_date: endDate }
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── Net Worth (净资产) ──────────
+
+    getNetWorthSnapshot: (): ApiResponsePromise<any> => {
+        return axios.get('networth/snapshot').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── Rule Center (规则中心) ──────────
+
+    getRulesOverview: (): ApiResponsePromise<any> => {
+        return axios.get('rules/overview').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── Anomaly Insights (异常洞察) ──────────
+
+    getAnomalies: ({
+        months
+    }: {
+        months?: number
+    } = {}): ApiResponsePromise<any> => {
+        return axios.get('insights/anomalies', {
+            params: { months }
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
     }
 };
