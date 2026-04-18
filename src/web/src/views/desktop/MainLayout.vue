@@ -97,6 +97,12 @@
                         <span class="nav-item-title">{{ tt('Learning Center') }}</span>
                     </router-link>
                 </li>
+                <li class="nav-link">
+                    <router-link to="/rules/center">
+                        <v-icon class="nav-item-icon" :icon="mdiBookCogOutline"/>
+                        <span class="nav-item-title">{{ tt('Rule Center') }}</span>
+                    </router-link>
+                </li>
                 <li class="nav-section-title">
                     <div class="title-wrapper">
                         <span class="title-text">{{ tt('Miscellaneous') }}</span>
@@ -259,7 +265,8 @@ import {
     mdiLogout,
     mdiCalculatorVariantOutline,
     mdiLinkVariant,
-    mdiBrain
+    mdiBrain,
+    mdiBookCogOutline
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;

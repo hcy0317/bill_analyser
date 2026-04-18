@@ -35,8 +35,6 @@ import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
 import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
 import LearningCenterPage from '@/views/desktop/learningcenter/ListPage.vue';
 import RecurringDiscoverPage from '@/views/desktop/recurring/DiscoverPage.vue';
-import CalendarPage from '@/views/desktop/calendar/CalendarPage.vue';
-import NetWorthPage from '@/views/desktop/networth/NetWorthPage.vue';
 import RuleCenterPage from '@/views/desktop/rules/RuleCenterPage.vue';
 import InsightsPage from '@/views/desktop/insights/InsightsPage.vue';
 
@@ -213,16 +211,7 @@ const router = createRouter({
                     component: RecurringDiscoverPage,
                     beforeEnter: checkLogin
                 },
-                {
-                    path: '/calendar',
-                    component: CalendarPage,
-                    beforeEnter: checkLogin
-                },
-                {
-                    path: '/networth',
-                    component: NetWorthPage,
-                    beforeEnter: checkLogin
-                },
+
                 {
                     path: '/rules/center',
                     component: RuleCenterPage,
