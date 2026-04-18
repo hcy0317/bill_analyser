@@ -114,6 +114,69 @@ def test_learning_suggestions_not_found_returns_404(client) -> None:
     assert resp.status_code == 404
 
 
+def test_learning_suggestions_batch_accept(client) -> None:
+    """POST /api/learning/suggestions/batch-accept 应批量接受建议。"""
+    headers = _build_isolated_auth_headers(client, "learn_center_batch")
+    user_id = _get_current_user_id(client, headers)
+    _create_session_and_preview(user_id, suffix="batch1")
+    _create_session_and_preview(user_id, suffix="batch2")
+
+    client.post("/api/learning/suggestions/generate", headers=headers)
+
+    resp = client.get("/api/learning/suggestions?status=pending", headers=headers)
+    items = resp.get_json()["data"]["items"]
+    if len(items) < 1:
+        return
+
+    ids = [item["id"] for item in items]
+    resp = client.post(
+        "/api/learning/suggestions/batch-accept",
+        json={"suggestionIds": ids},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["data"]["acceptedCount"] + body["data"]["failedCount"] == len(ids)
+
+
+def test_learning_suggestions_batch_accept_empty(client) -> None:
+    """空 suggestionIds 应返回 400。"""
+    headers = _build_isolated_auth_headers(client, "learn_center_batch_empty")
+    resp = client.post(
+        "/api/learning/suggestions/batch-accept",
+        json={"suggestionIds": []},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+
+def test_learning_suggestions_batch_accept_over_limit(client) -> None:
+    """超过 100 的 suggestionIds 应返回 400。"""
+    headers = _build_isolated_auth_headers(client, "learn_center_batch_limit")
+    resp = client.post(
+        "/api/learning/suggestions/batch-accept",
+        json={"suggestionIds": list(range(1, 102))},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+
+def test_learning_suggestions_batch_accept_invalid_ids(client) -> None:
+    """不存在的建议 ID 应出现在 failed 列表中。"""
+    headers = _build_isolated_auth_headers(client, "learn_center_batch_invalid")
+    resp = client.post(
+        "/api/learning/suggestions/batch-accept",
+        json={"suggestionIds": [999998, 999999]},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["success"] is True
+    assert body["data"]["failedCount"] == 2
+    assert body["data"]["acceptedCount"] == 0
+
+
 def test_learning_rules_list(client) -> None:
     """GET /api/learning/rules 应返回规则列表。"""
     headers = _build_isolated_auth_headers(client, "learn_center_rules")

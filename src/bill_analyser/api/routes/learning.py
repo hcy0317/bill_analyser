@@ -95,6 +95,51 @@ def accept_suggestion(suggestion_id: int):
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@bp.route("/suggestions/batch-accept", methods=["POST"])
+@log_method
+@require_auth
+def batch_accept_suggestions():
+    """批量接受学习建议并提升为长期学习规则。"""
+    try:
+        db = _get_db()
+        user_id = _get_user_id()
+        data = request.get_json(silent=True) or {}
+        suggestion_ids = data.get("suggestionIds")
+        if not isinstance(suggestion_ids, list) or len(suggestion_ids) == 0:
+            return jsonify({"success": False, "error": "suggestionIds must be a non-empty array"}), 400
+        if len(suggestion_ids) > 100:
+            return jsonify({"success": False, "error": "batch size must not exceed 100"}), 400
+
+        try:
+            validated_ids = list(dict.fromkeys(int(sid) for sid in suggestion_ids))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"success": False, "error": f"Invalid suggestionIds: {exc}"}), 400
+
+        accepted = []
+        failed = []
+        for sid_int in validated_ids:
+            result = _run_async(db.accept_learning_suggestion(sid_int, user_id=user_id))
+            if result is None:
+                failed.append({"id": sid_int, "error": "suggestion_not_found"})
+            elif "error" in result:
+                failed.append({"id": sid_int, "error": result["error"]})
+            else:
+                accepted.append({"id": sid_int, "ruleId": result.get("rule_id")})
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "accepted": accepted,
+                "failed": failed,
+                "acceptedCount": len(accepted),
+                "failedCount": len(failed),
+            },
+        })
+    except Exception as exc:
+        logger.error("[学习建议批量接受] error=%s", exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @bp.route("/suggestions/<int:suggestion_id>/reject", methods=["POST"])
 @log_method
 @require_auth

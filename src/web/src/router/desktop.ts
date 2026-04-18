@@ -33,6 +33,7 @@ import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
 import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
+import LearningCenterPage from '@/views/desktop/learningcenter/ListPage.vue';
 
 function checkLogin(): NavigationGuardReturn {
     if (!isUserLogined()) {
@@ -192,6 +193,14 @@ const router = createRouter({
                     beforeEnter: checkLogin,
                     props: route => ({
                         initPairType: route.query['pairType']
+                    })
+                },
+                {
+                    path: '/learning/center',
+                    component: LearningCenterPage,
+                    beforeEnter: checkLogin,
+                    props: route => ({
+                        initTab: route.query['tab']
                     })
                 },
                 {

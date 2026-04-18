@@ -68,6 +68,18 @@ import type {
     ImportLearningSuggestionsResponse
 } from '@/models/import_learning.ts';
 import type {
+    LearningSuggestionsResponse,
+    LearningRulesResponse,
+    BatchAcceptResponse,
+    GenerateSuggestionsResponse
+} from '@/models/learning_center.ts';
+import {
+    normalizeSuggestionsResponse,
+    normalizeRulesResponse,
+    normalizeBatchAcceptResponse,
+    normalizeGenerateResponse
+} from '@/models/learning_center.ts';
+import type {
     BillMatchingCandidatesResponse,
     BillMatchingFeedbackResponse,
     BillMatchingPairSummary,
@@ -1953,6 +1965,82 @@ export default {
                 failedCount: result.errors ?? 0,
                 errors: result.error_details || []
             });
+        });
+    },
+
+    // ── Learning Center ──────────────────────────
+
+    getLearningSuggestions: ({
+        status,
+        limit,
+        offset
+    }: {
+        status?: string,
+        limit?: number,
+        offset?: number
+    } = {}): ApiResponsePromise<LearningSuggestionsResponse> => {
+        return axios.get<ApiDataResponse<LearningSuggestionsResponse>>('learning/suggestions', {
+            params: { status, limit, offset }
+        }).then(response => {
+            const normalized = normalizeSuggestionsResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    generateLearningSuggestions: (): ApiResponsePromise<GenerateSuggestionsResponse> => {
+        return axios.post<ApiDataResponse<GenerateSuggestionsResponse>>('learning/suggestions/generate').then(response => {
+            const normalized = normalizeGenerateResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    acceptLearningSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<any> => {
+        return axios.post(`learning/suggestions/${suggestionId}/accept`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    rejectLearningSuggestion: ({ suggestionId }: { suggestionId: number }): ApiResponsePromise<any> => {
+        return axios.post(`learning/suggestions/${suggestionId}/reject`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    batchAcceptLearningSuggestions: ({ suggestionIds }: { suggestionIds: number[] }): ApiResponsePromise<BatchAcceptResponse> => {
+        return axios.post<ApiDataResponse<BatchAcceptResponse>>('learning/suggestions/batch-accept', {
+            suggestionIds
+        }).then(response => {
+            const normalized = normalizeBatchAcceptResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    getLearningRules: ({
+        enabledOnly,
+        limit,
+        offset
+    }: {
+        enabledOnly?: boolean,
+        limit?: number,
+        offset?: number
+    } = {}): ApiResponsePromise<LearningRulesResponse> => {
+        return axios.get<ApiDataResponse<LearningRulesResponse>>('learning/rules', {
+            params: { enabled_only: enabledOnly, limit, offset }
+        }).then(response => {
+            const normalized = normalizeRulesResponse(response.data?.data);
+            return buildApiResponse(response, normalized);
+        });
+    },
+
+    toggleLearningRule: ({ ruleId, enabled }: { ruleId: number, enabled: boolean }): ApiResponsePromise<any> => {
+        return axios.put(`learning/rules/${ruleId}/toggle`, { enabled }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    deleteLearningRule: ({ ruleId }: { ruleId: number }): ApiResponsePromise<any> => {
+        return axios.delete(`learning/rules/${ruleId}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
         });
     }
 };
