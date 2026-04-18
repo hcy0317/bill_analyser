@@ -348,6 +348,38 @@ class DatabaseSchemaTemplatesImportsMixin(DatabaseFacadeBase):
             "CREATE INDEX IF NOT EXISTS idx_import_learning_rule_logs_rule ON import_learning_rule_logs(rule_id)"
         )
 
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS import_learning_suggestions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                match_type TEXT NOT NULL,
+                match_value TEXT NOT NULL,
+                normalized_match_value TEXT NOT NULL,
+                composite_match_hash TEXT,
+                match_features_json TEXT,
+                suggested_type TEXT,
+                suggested_category_id INTEGER,
+                suggested_source_account_id INTEGER,
+                suggested_destination_account_id INTEGER,
+                sample_count INTEGER NOT NULL DEFAULT 1,
+                source_session_ids_json TEXT,
+                source_preview_ids_json TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                existing_rule_id INTEGER,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, match_type, normalized_match_value),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_learning_suggestions_user_status "
+            "ON import_learning_suggestions(user_id, status)"
+        )
+
     async def _migrate_learning_rules_composite_fields(self, conn: aiosqlite.Connection) -> None:
         """为 import_learning_rules 表补齐解析器复合匹配字段。"""
         async with conn.execute("PRAGMA table_info(import_learning_rules)") as cursor:

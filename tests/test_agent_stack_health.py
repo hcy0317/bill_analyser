@@ -307,6 +307,9 @@ def test_agent_stack_workflow_uses_runner_compatible_python() -> None:
     assert match.group("version") == "3.14", (
         "agent-stack-health workflow should stay on Python 3.14 so repo-level AI customization checks match the current runtime baseline"
     )
+    assert "allow-prereleases: true" in workflow_text, (
+        "setup-python step must set allow-prereleases: true so 3.14 installs on runners that still list it as pre-release"
+    )
 
 
 def test_parser_standard_flow_skill_and_doc_define_repo_specific_parser_contract() -> None:
