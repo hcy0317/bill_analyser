@@ -597,7 +597,7 @@
                                                         :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
                                                         :bg-opacity="1"
                                                         :height="6"
-                                                        :rounded="false"
+                                                        rounded
                                                     />
                                                 </div>
                                             </div>
@@ -677,93 +677,8 @@
                                                             :color="getBudgetProgressColor(budget)"
                                                             :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
                                                             :bg-opacity="1"
-                                                            :height="4"
-                                                            :rounded="false"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-
-                                    <tr v-for="(budget, bIdx) in group.subBudgets" :key="budget.id"
-                                        class="budget-list-row budget-sub-row"
-                                        :class="{ 'budget-group-last-row': gIdx < groupedBudgets.length - 1 && bIdx === group.subBudgets.length - 1 }"
-                                        @dblclick="edit(budget)" tabindex="0"
-                                        @keydown.delete="remove(budget)" @keydown.enter="edit(budget)">
-                                        <td colspan="4" class="pa-0">
-                                            <div class="budget-item budget-secondary d-flex px-4 py-2"
-                                                 style="padding-left: 56px !important;">
-                                                <!-- 子分类图标（放大，与文字+进度条等高） -->
-                                                <item-icon
-                                                    v-if="budget.categoryIcon"
-                                                    class="me-3 flex-shrink-0"
-                                                    icon-type="category"
-                                                    :icon-id="budget.categoryIcon"
-                                                    :color="budget.categoryColor"
-                                                    :size="28"
-                                                />
-                                                <!-- 右侧内容区域 -->
-                                                <div class="d-flex flex-column flex-grow-1">
-                                                    <!-- 第一行：子分类名称 + 执行度 + 操作按钮 + 金额 -->
-                                                    <div class="d-flex align-center justify-space-between mb-1">
-                                                        <div class="d-flex align-center flex-grow-1">
-                                                            <span class="budget-category-name text-body-2">
-                                                                {{ budget.subCategory }}
-                                                            </span>
-                                                            <span class="budget-percent text-body-2 ms-2"
-                                                                  :class="getExecutionRateTextClass(budget.executionRate)">
-                                                                {{ budget.executionRateText }}
-                                                            </span>
-                                                            <v-icon v-if="budget.alertTriggered && !budget.isOverBudget"
-                                                                    :icon="mdiAlertCircle" color="warning" class="ms-1" size="14" />
-                                                            <v-icon v-if="budget.isOverBudget"
-                                                                    :icon="mdiAlertOctagon" color="error" class="ms-1" size="14" />
-                                                        </div>
-                                                        <!-- 操作按钮 -->
-                                                        <div class="budget-row-actions d-flex align-center">
-                                                            <v-btn density="compact" color="default" variant="text" size="x-small"
-                                                                   :icon="mdiPencilOutline"
-                                                                   :disabled="loading || updating"
-                                                                   @click.stop="edit(budget)">
-                                                                <v-icon :icon="mdiPencilOutline" size="16" />
-                                                                <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
-                                                            </v-btn>
-                                                            <v-btn density="compact" color="default" variant="text" size="x-small"
-                                                                   :icon="mdiDeleteOutline"
-                                                                   :loading="budgetRemoving[budget.id]"
-                                                                   :disabled="loading || updating"
-                                                                   @click.stop="remove(budget)">
-                                                                <template #loader>
-                                                                    <v-progress-circular indeterminate size="14" width="2"/>
-                                                                </template>
-                                                                <v-icon :icon="mdiDeleteOutline" size="16" />
-                                                                <v-tooltip activator="parent">{{ tt('Delete') }}</v-tooltip>
-                                                            </v-btn>
-                                                        </div>
-                                                        <!-- 金额显示（左对齐在最右边） -->
-                                                        <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
-                                                            <span class="budget-spent text-body-2"
-                                                                  :class="{ 'text-error font-weight-bold': budget.isOverBudget }">
-                                                                {{ formatAmount(budget.spentAmountInYuan) }}
-                                                            </span>
-                                                            <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
-                                                            <span class="budget-total text-body-2 text-medium-emphasis">
-                                                                {{ formatAmount(budget.amountInYuan) }}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <!-- 子分类进度条（与子分类名称左对齐，点击跳转到账单列表） -->
-                                                    <div class="budget-progress-container cursor-pointer"
-                                                         @click.stop="navigateToTransactions(budget.category, budget.subCategory, budget)"
-                                                         :title="tt('Click to view transactions')">
-                                                        <v-progress-linear
-                                                            :model-value="Math.min(budget.executionRate, 100)"
-                                                            :color="getBudgetProgressColor(budget)"
-                                                            :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
-                                                            :bg-opacity="1"
-                                                            :height="4"
-                                                            :rounded="false"
+                                                            :height="6"
+                                                            rounded
                                                         />
                                                     </div>
                                                 </div>
@@ -788,11 +703,13 @@
                             </div>
 
                             <div v-if="loading" class="py-10">
-                                <v-skeleton-loader type="image, article" :loading="true"></v-skeleton-loader>
+                                <v-skeleton-loader type="heading" class="mb-4" :loading="true"></v-skeleton-loader>
+                                <v-skeleton-loader type="image" class="mb-4" :loading="true" height="400"></v-skeleton-loader>
+                                <v-skeleton-loader type="chip@6" :loading="true"></v-skeleton-loader>
                             </div>
 
                             <div v-else-if="historicalLegendGroups.length > 0" class="budget-history-panel">
-                                <div class="budget-history-chart-shell">
+                                <v-card variant="outlined" rounded="lg" class="budget-history-chart-shell pa-4">
                                     <v-chart
                                         v-if="historicalChartModel.primaryBands.length > 0"
                                         autoresize
@@ -804,7 +721,7 @@
                                         <span class="text-medium-emphasis">{{ tt('All categories hidden') }}</span>
                                     </div>
 
-                                </div>
+                                </v-card>
 
                                 <div v-if="historicalLegendGroups.length > 0" class="budget-history-legend">
                                     <div v-for="group in historicalLegendGroups" :key="group.primaryKey" class="budget-history-legend-group">
@@ -843,8 +760,10 @@
                                 </div>
                             </div>
 
-                            <div v-else class="d-flex align-center justify-center py-12">
-                                <span class="text-medium-emphasis">{{ tt('No historical budget data') }}</span>
+                            <div v-else class="d-flex flex-column align-center justify-center py-16">
+                                <v-icon :icon="mdiChartBoxOutline" size="48" color="grey-lighten-1" class="mb-3"/>
+                                <span class="text-body-1 text-medium-emphasis">{{ tt('No historical budget data') }}</span>
+                                <span class="text-caption text-disabled mt-1">{{ tt('Create budgets and wait for execution data') }}</span>
                             </div>
                         </v-card-text>
                     </v-window-item>
@@ -876,8 +795,9 @@
                             <tbody v-if="!forecastLoading && (!currentForecast || currentForecast.forecasts.length === 0)">
                             <tr>
                                 <td colspan="7">
-                                    <div class="d-flex align-center justify-center py-8">
-                                        <span class="text-grey">{{ tt('No forecast data') }}</span>
+                                    <div class="d-flex flex-column align-center justify-center py-12">
+                                        <v-icon :icon="mdiChartTimelineVariant" size="48" color="grey-lighten-1" class="mb-3"/>
+                                        <span class="text-body-1 text-medium-emphasis">{{ tt('No forecast data') }}</span>
                                     </div>
                                 </td>
                             </tr>
@@ -1147,7 +1067,9 @@ import {
     mdiInformationOutline,
     mdiArrowLeft,
     mdiArrowRight,
-    mdiCalendarRangeOutline
+    mdiCalendarRangeOutline,
+    mdiChartBoxOutline,
+    mdiChartTimelineVariant
 } from '@mdi/js';
 
 // ============================================================================
@@ -3516,6 +3438,10 @@ watch(filterKeyword, (newVal) => {
 
 .budget-progress-container {
     width: 100%;
+}
+
+.budget-progress-container :deep(.v-progress-linear) {
+    transition: all 0.3s ease;
 }
 
 /* 操作按钮悬浮显示 */
