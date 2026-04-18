@@ -123,7 +123,7 @@
                             variant="text"
                             color="warning"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewTransferSuggestion(item, 'accept')">
                             {{ tt('Apply Suggestion') }}
                         </v-btn>
@@ -131,7 +131,7 @@
                             variant="text"
                             color="error"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewTransferSuggestion(item, 'reject')">
                             {{ tt('Reject Transfer Suggestion') }}
                         </v-btn>
@@ -150,7 +150,7 @@
                             variant="text"
                             color="warning"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewTransferSuggestion(item, 'clear')">
                             {{ tt('Clear Transfer Decision') }}
                         </v-btn>
@@ -170,13 +170,13 @@
                             variant="text"
                             color="warning"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || transferDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewTransferSuggestion(item, 'clear')">
                             {{ tt('Clear Transfer Decision') }}
                         </v-btn>
                     </div>
                 </div>
-                <div class="mt-1" v-if="item.hasInvestmentSignal()">
+                <div class="mt-1" v-if="item.hasPendingInvestmentSignal()">
                     <v-chip
                         color="info"
                         variant="tonal"
@@ -184,6 +184,52 @@
                         :prepend-icon="mdiChartLine"
                         :title="item.investmentSignalReason">
                         {{ tt('Investment Signal') }}
+                    </v-chip>
+                    <div class="d-flex flex-wrap ga-1 mt-1">
+                        <v-btn
+                            variant="text"
+                            color="info"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                            @click.stop="reviewInvestmentSignal(item, 'accept')">
+                            {{ tt('Accept Investment Signal') }}
+                        </v-btn>
+                        <v-btn
+                            variant="text"
+                            color="error"
+                            size="x-small"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                            @click.stop="reviewInvestmentSignal(item, 'reject')">
+                            {{ tt('Reject Investment Signal') }}
+                        </v-btn>
+                    </div>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.getInvestmentProfileText()">
+                        {{ item.getInvestmentProfileText() }}
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isInvestmentSignalAccepted()">
+                    <v-chip
+                        color="success"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiCheck"
+                        :title="item.investmentSignalReason">
+                        {{ tt('Investment Signal Accepted') }}
+                    </v-chip>
+                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
+                         v-if="item.getInvestmentProfileText()">
+                        {{ item.getInvestmentProfileText() }}
+                    </div>
+                </div>
+                <div class="mt-1" v-else-if="item.isInvestmentSignalRejected()">
+                    <v-chip
+                        color="error"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="mdiAlertOutline"
+                        :title="item.investmentSignalReason">
+                        {{ tt('Investment Signal Rejected') }}
                     </v-chip>
                     <div class="text-caption text-medium-emphasis ms-1 mt-1"
                          v-if="item.getInvestmentProfileText()">
@@ -204,7 +250,7 @@
                             variant="text"
                             color="secondary"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewLearningSuggestion(item, 'accept')">
                             {{ tt('Apply Suggestion') }}
                         </v-btn>
@@ -212,7 +258,7 @@
                             variant="text"
                             color="error"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewLearningSuggestion(item, 'reject')">
                             {{ tt('Reject Learning Suggestion') }}
                         </v-btn>
@@ -236,7 +282,7 @@
                             variant="text"
                             color="warning"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewLearningSuggestion(item, 'clear')">
                             {{ tt('Clear Learning Decision') }}
                         </v-btn>
@@ -260,7 +306,7 @@
                             variant="text"
                             color="warning"
                             size="x-small"
-                            :disabled="!!disabled || isEditing || learningDecisionLoadingId !== null"
+                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                             @click.stop="reviewLearningSuggestion(item, 'clear')">
                             {{ tt('Clear Learning Decision') }}
                         </v-btn>
@@ -301,7 +347,7 @@
                         variant="text"
                         color="success"
                         size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || recurringDecisionLoadingId !== null"
+                        :disabled="!!disabled || isEditing || !props.sessionId || isMatchingDecisionBusy"
                         @click.stop="openRecurringCandidateDialog(item)">
                         {{ tt('Choose Scheduled Match') }}
                     </v-btn>
@@ -379,7 +425,7 @@
                     {{ tt('Likely Transfer') }}
                 </v-chip>
                 <v-chip
-                    v-if="item.hasInvestmentSignal()"
+                    v-if="item.hasPendingInvestmentSignal()"
                     class="mt-1"
                     color="info"
                     variant="tonal"
@@ -388,8 +434,28 @@
                     :title="item.investmentSignalReason">
                     {{ tt('Investment Signal') }}
                 </v-chip>
+                <v-chip
+                    v-else-if="item.isInvestmentSignalAccepted()"
+                    class="mt-1"
+                    color="success"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiCheck"
+                    :title="item.investmentSignalReason">
+                    {{ tt('Investment Signal Accepted') }}
+                </v-chip>
+                <v-chip
+                    v-else-if="item.isInvestmentSignalRejected()"
+                    class="mt-1"
+                    color="error"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="mdiAlertOutline"
+                    :title="item.investmentSignalReason">
+                    {{ tt('Investment Signal Rejected') }}
+                </v-chip>
                 <div class="text-caption text-medium-emphasis mt-1"
-                     v-if="item.hasInvestmentSignal() && item.getInvestmentProfileText()">
+                     v-if="(item.hasPendingInvestmentSignal() || item.isInvestmentSignalAccepted() || item.isInvestmentSignalRejected()) && item.getInvestmentProfileText()">
                     {{ item.getInvestmentProfileText() }}
                 </div>
                 <v-chip
@@ -439,7 +505,7 @@
                         variant="text"
                         color="success"
                         size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || recurringDecisionLoadingId !== null"
+                        :disabled="!!disabled || isEditing || !props.sessionId || isMatchingDecisionBusy"
                         @click.stop="openRecurringCandidateDialog(item)">
                         {{ tt('Choose Scheduled Match') }}
                     </v-btn>
@@ -448,7 +514,7 @@
                         variant="text"
                         color="warning"
                         size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || !item.hasRecurringMatch() || recurringDecisionLoadingId !== null"
+                        :disabled="!!disabled || isEditing || !props.sessionId || !item.hasRecurringMatch() || isMatchingDecisionBusy"
                         @click.stop="clearRecurringMatch(item)">
                         {{ tt('Clear Scheduled Match') }}
                     </v-btn>
@@ -1037,17 +1103,17 @@
             </v-card-text>
             <v-card-actions class="justify-center gap-4 flex-wrap">
                 <v-btn color="primary"
-                       :disabled="!selectedRecurringCandidateId || isEditing || recurringDecisionLoadingId !== null"
+                       :disabled="!selectedRecurringCandidateId || isEditing || isMatchingDecisionBusy"
                        @click="applySelectedRecurringCandidate">
                     {{ tt('Apply') }}
                 </v-btn>
                 <v-btn color="warning"
                        variant="tonal"
-                       :disabled="!recurringCandidateTarget || isEditing || !recurringCandidateTarget.hasRecurringMatch() || recurringDecisionLoadingId !== null"
+                       :disabled="!recurringCandidateTarget || isEditing || !recurringCandidateTarget.hasRecurringMatch() || isMatchingDecisionBusy"
                        @click="clearRecurringMatchFromDialog">
                     {{ tt('Clear Scheduled Match') }}
                 </v-btn>
-                <v-btn color="secondary" variant="tonal" :disabled="recurringDecisionLoadingId !== null" @click="closeRecurringCandidateDialog">
+                <v-btn color="secondary" variant="tonal" :disabled="isMatchingDecisionBusy" @click="closeRecurringCandidateDialog">
                     {{ tt('Cancel') }}
                 </v-btn>
             </v-card-actions>
@@ -1137,6 +1203,10 @@ import {
     hasImportCheckLearningTextDrift,
     type ImportCheckLearningDecisionBaseline
 } from '../checkDataLearning.ts';
+import {
+    buildImportCheckDecisionExpectedState,
+    buildImportCheckLearningDecisionExpectedState
+} from '../checkDataCandidateReview.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -1356,8 +1426,13 @@ const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
 const transferDecisionLoadingId = ref<number | null>(null);
+const investmentDecisionLoadingId = ref<number | null>(null);
 const learningDecisionLoadingId = ref<number | null>(null);
 const recurringDecisionLoadingId = ref<number | null>(null);
+const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId.value !== null
+    || investmentDecisionLoadingId.value !== null
+    || learningDecisionLoadingId.value !== null
+    || recurringDecisionLoadingId.value !== null);
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -1538,7 +1613,7 @@ async function updatePreviewRecurringMatch(
         return false;
     }
 
-    if (recurringDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null || learningDecisionLoadingId.value !== null) {
+    if (isMatchingDecisionBusy.value) {
         return false;
     }
 
@@ -1955,43 +2030,36 @@ function getPreviewTransactionTypeNumber(previewType?: string): number | undefin
     return undefined;
 }
 
-function getPreviewTransactionTypeText(type: number): string {
-    if (type === TransactionType.Income) {
-        return '收入';
-    }
-    if (type === TransactionType.Expense) {
-        return '支出';
-    }
-    if (type === TransactionType.Transfer) {
-        return '转账';
-    }
-    if (type === TransactionType.Investment) {
-        return '投资';
-    }
-
-    return '支出';
-}
-
 function getTransferDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
-    return {
+    return buildImportCheckDecisionExpectedState({
         sessionId: props.sessionId || '',
         reviewStatus: item.getTransferSuggestionReviewStatus(),
-        previewType: getPreviewTransactionTypeText(item.type),
-        categoryId: item.categoryId ? parseInt(item.categoryId, 10) : null,
-        recurringId: item.recurringTemplateId ? parseInt(item.recurringTemplateId, 10) : null
-    };
+        type: item.type,
+        categoryId: item.categoryId,
+        recurringTemplateId: item.recurringTemplateId
+    });
+}
+
+function getInvestmentDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
+    return buildImportCheckDecisionExpectedState({
+        sessionId: props.sessionId || '',
+        reviewStatus: item.getInvestmentSignalReviewStatus(),
+        type: item.type,
+        categoryId: item.categoryId,
+        recurringTemplateId: item.recurringTemplateId
+    });
 }
 
 function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
-    return {
+    return buildImportCheckLearningDecisionExpectedState({
         sessionId: props.sessionId || '',
         reviewStatus: item.getLearningRecommendationReviewStatus(),
-        previewType: getPreviewTransactionTypeText(item.type),
-        categoryId: item.categoryId ? parseInt(item.categoryId, 10) : null,
-        recurringId: item.recurringTemplateId ? parseInt(item.recurringTemplateId, 10) : null,
-        sourceAccountId: item.sourceAccountId ? parseInt(item.sourceAccountId, 10) : null,
-        destinationAccountId: item.destinationAccountId ? parseInt(item.destinationAccountId, 10) : null
-    };
+        type: item.type,
+        categoryId: item.categoryId,
+        recurringTemplateId: item.recurringTemplateId,
+        sourceAccountId: item.sourceAccountId,
+        destinationAccountId: item.destinationAccountId
+    });
 }
 
 function getActionErrorMessage(error: unknown, fallbackMessage: string): string {
@@ -2109,6 +2177,14 @@ function getLearningDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'):
     return 'Clear Learning Decision';
 }
 
+function getInvestmentDecisionMessageKey(decision: 'accept' | 'reject'): string {
+    if (decision === 'accept') {
+        return 'Investment Signal Accepted';
+    }
+
+    return 'Investment Signal Rejected';
+}
+
 async function reviewTransferSuggestion(
     item: ImportTransaction,
     decision: 'accept' | 'reject' | 'clear'
@@ -2119,7 +2195,7 @@ async function reviewTransferSuggestion(
         return;
     }
 
-    if (transferDecisionLoadingId.value !== null) {
+    if (isMatchingDecisionBusy.value) {
         return;
     }
 
@@ -2193,7 +2269,7 @@ async function reviewLearningSuggestion(
         return;
     }
 
-    if (learningDecisionLoadingId.value !== null || transferDecisionLoadingId.value !== null || recurringDecisionLoadingId.value !== null) {
+    if (isMatchingDecisionBusy.value) {
         return;
     }
 
@@ -2262,6 +2338,63 @@ async function reviewLearningSuggestion(
         snackbar.value?.showMessage(errorMessage);
     } finally {
         learningDecisionLoadingId.value = null;
+    }
+}
+
+async function reviewInvestmentSignal(
+    item: ImportTransaction,
+    decision: 'accept' | 'reject'
+): Promise<void> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || !previewId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (isMatchingDecisionBusy.value) {
+        return;
+    }
+
+    if (hasTransferDecisionRelevantDraftChanges(item)) {
+        snackbar.value?.showMessage(tt('Please sync manual preview edits before reviewing investment signals'));
+        return;
+    }
+
+    const candidateId = `preview:${previewId}:investment`;
+    const payload: Record<string, unknown> = {
+        expectedState: getInvestmentDecisionExpectedState(item)
+    };
+
+    investmentDecisionLoadingId.value = previewId;
+
+    try {
+        const response = decision === 'accept'
+            ? await services.acceptMatchingCandidate({ candidateId, payload })
+            : await services.rejectMatchingCandidate({ candidateId, payload });
+
+        const result = response.data?.result;
+        if (!result || (result.sessionId || '') !== props.sessionId) {
+            throw new Error('Investment decision response is out of date');
+        }
+
+        commitEditingTransactionDraft();
+
+        const previewData = Array.isArray(result.preview)
+            ? result.preview as unknown as ImportPreviewRecord[]
+            : [];
+        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        if (!refreshedPreview) {
+            throw new Error('Investment decision response missing preview item');
+        }
+
+        syncTransactionFromPreviewDecision(item, refreshedPreview);
+        snackbar.value?.showMessage(tt(getInvestmentDecisionMessageKey(decision)));
+    } catch (error) {
+        const errorMessage = getActionErrorMessage(error, 'Investment decision failed');
+        logger.error(`[投资信号决策] 失败: ${errorMessage}`, error);
+        snackbar.value?.showMessage(errorMessage);
+    } finally {
+        investmentDecisionLoadingId.value = null;
     }
 }
 

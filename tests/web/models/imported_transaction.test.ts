@@ -386,6 +386,85 @@ describe('ImportTransaction model', () => {
         expect(rejected.canClearLearningRecommendationDecision()).toBe(true);
     });
 
+    test('investment review helpers expose pending, accepted, and rejected states', () => {
+        const pending = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Investment,
+            destinationAccountId: '203',
+            destinationAmount: 1200,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                investment: {
+                    ...BASE_RESPONSE.matching!.investment,
+                    score: 0.81,
+                    level: 'high',
+                    reason: 'investment_keyword',
+                    platform: '蚂蚁财富',
+                    product: '黄金ETF',
+                    review_status: 'pending',
+                    suppressed: false
+                }
+            }
+        }, 15);
+        const accepted = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Investment,
+            destinationAccountId: '204',
+            destinationAmount: 1200,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                investment: {
+                    ...BASE_RESPONSE.matching!.investment,
+                    score: 0.83,
+                    level: 'high',
+                    reason: 'investment_keyword',
+                    platform: '蚂蚁财富',
+                    product: '黄金ETF',
+                    review_status: 'accepted',
+                    suppressed: false
+                }
+            }
+        }, 16);
+        const rejected = ImportTransaction.of({
+            ...BASE_RESPONSE,
+            type: TransactionType.Investment,
+            destinationAccountId: '205',
+            destinationAmount: 1200,
+            matching: {
+                ...BASE_RESPONSE.matching!,
+                investment: {
+                    ...BASE_RESPONSE.matching!.investment,
+                    score: 0.79,
+                    level: 'medium',
+                    reason: 'investment_keyword',
+                    platform: '蚂蚁财富',
+                    product: '黄金ETF',
+                    review_status: 'rejected',
+                    suppressed: true
+                }
+            }
+        }, 17);
+
+        expect(pending.hasInvestmentSignal()).toBe(true);
+        expect(pending.hasPendingInvestmentSignal()).toBe(true);
+        expect(pending.getInvestmentSignalReviewStatus()).toBe('pending');
+        expect(pending.isInvestmentSignalAccepted()).toBe(false);
+        expect(pending.isInvestmentSignalRejected()).toBe(false);
+        expect(pending.isInvestmentSignalSuppressed()).toBe(false);
+
+        expect(accepted.hasInvestmentSignal()).toBe(true);
+        expect(accepted.hasPendingInvestmentSignal()).toBe(false);
+        expect(accepted.isInvestmentSignalAccepted()).toBe(true);
+        expect(accepted.isInvestmentSignalRejected()).toBe(false);
+        expect(accepted.isInvestmentSignalSuppressed()).toBe(false);
+
+        expect(rejected.hasInvestmentSignal()).toBe(true);
+        expect(rejected.hasPendingInvestmentSignal()).toBe(false);
+        expect(rejected.isInvestmentSignalAccepted()).toBe(false);
+        expect(rejected.isInvestmentSignalRejected()).toBe(true);
+        expect(rejected.isInvestmentSignalSuppressed()).toBe(true);
+    });
+
     test('learning input fingerprint tracks parser-aware text fields', () => {
         const base = ImportTransaction.of(BASE_RESPONSE, 12);
         const same = ImportTransaction.of({

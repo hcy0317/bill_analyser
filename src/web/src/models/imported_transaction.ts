@@ -249,6 +249,29 @@ export class ImportTransaction implements ImportTransactionResponse {
         return this.type === TransactionType.Investment && this.investmentSignalScore > 0;
     }
 
+    public hasPendingInvestmentSignal(): boolean {
+        return this.hasInvestmentSignal()
+            && !this.isInvestmentSignalAccepted()
+            && !this.isInvestmentSignalRejected()
+            && !this.isInvestmentSignalSuppressed();
+    }
+
+    public getInvestmentSignalReviewStatus(): string {
+        return (this.matching?.investment.review_status || '').trim().toLowerCase();
+    }
+
+    public isInvestmentSignalSuppressed(): boolean {
+        return !!this.matching?.investment.suppressed || this.isInvestmentSignalRejected();
+    }
+
+    public isInvestmentSignalAccepted(): boolean {
+        return this.getInvestmentSignalReviewStatus() === 'accepted';
+    }
+
+    public isInvestmentSignalRejected(): boolean {
+        return this.getInvestmentSignalReviewStatus() === 'rejected';
+    }
+
     public hasLearningRecommendation(): boolean {
         const learningRuleId = this.matching?.learning.rule_id;
         return this.learningRecommendationScore > 0

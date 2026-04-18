@@ -14,6 +14,8 @@ export interface ImportMatchingInvestmentPayload {
     reason: string;
     platform: string;
     product: string;
+    review_status?: string;
+    suppressed?: boolean;
 }
 
 export interface ImportMatchingLearningPayload {
