@@ -344,6 +344,7 @@
 </template>
 
 <script setup lang="ts">
+import axios from 'axios';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import {
@@ -351,6 +352,7 @@ import {
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
     mdiTestTube, mdiDatabaseImportOutline, mdiFinance,
 } from '@mdi/js';
+import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
@@ -370,12 +372,33 @@ const successMsg = ref<string | null>(null);
 const activeTab = ref('rules');
 
 // ── Overview (existing tabs) ────────
+interface LearningRuleOverviewItem {
+    matchType: string;
+    matchValue: string;
+    learnedType: string;
+    appliedCount: number;
+    enabled: boolean;
+}
+
+interface CategoryKeywordOverviewItem {
+    keyword: string;
+    categoryName: string;
+}
+
+interface RecurringRuleOverviewItem {
+    name: string;
+    amount: number | null;
+    frequency: string;
+    nextDate: string | null;
+    enabled: boolean;
+}
+
 interface Overview {
-    learningRules: any[];
+    learningRules: LearningRuleOverviewItem[];
     learningRuleCount: number;
-    categoryKeywords: any[];
+    categoryKeywords: CategoryKeywordOverviewItem[];
     categoryKeywordCount: number;
-    recurringRules: any[];
+    recurringRules: RecurringRuleOverviewItem[];
     recurringRuleCount: number;
     totalRuleCount: number;
 }
@@ -388,7 +411,37 @@ const overview = ref<Overview>({
 });
 
 // ── Category Rules ────────
-const categoryRules = ref<any[]>([]);
+interface CategoryRuleItem {
+    id: number;
+    name: string;
+    category_id: number | null;
+    category_name: string | null;
+    sub_category_name: string | null;
+    priority: number;
+    rule_expression: string;
+    regex_enabled: boolean;
+    enabled: boolean;
+    applied_count: number;
+}
+
+interface CategoryRuleForm {
+    name: string;
+    category_id: number | null;
+    priority: number;
+    rule_expression: string;
+    regex_enabled: boolean;
+    enabled: boolean;
+}
+
+interface CategoryRuleTestResult {
+    matched?: boolean | null;
+}
+
+interface CategoryKeywordMigrationResult {
+    migrated_count?: number | string | null;
+}
+
+const categoryRules = ref<CategoryRuleItem[]>([]);
 
 const ruleHeaders = computed(() => [
     { title: tt('Priority'), key: 'priority', sortable: true },
@@ -451,9 +504,9 @@ const categoryOptions = computed(() => {
 
 // ── Edit dialog state ────────
 const showEditDialog = ref(false);
-const editingRule = ref<any>(null);
-const ruleFormRef = ref<any>(null);
-const ruleForm = ref({
+const editingRule = ref<CategoryRuleItem | null>(null);
+const ruleFormRef = ref<unknown>(null);
+const ruleForm = ref<CategoryRuleForm>({
     name: '',
     category_id: null as number | null,
     priority: 100,
@@ -462,13 +515,68 @@ const ruleForm = ref({
     enabled: true,
 });
 
+function extractPayloadMessage(payload: unknown, depth = 0): string | null {
+    if (depth > 2) {
+        return null;
+    }
+
+    if (typeof payload === 'string' && payload) {
+        return payload;
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const typedPayload = payload as Partial<ErrorResponse> & {
+        error?: unknown;
+        message?: unknown;
+    };
+
+    return extractPayloadMessage(
+        typedPayload.errorMessage ?? typedPayload.error ?? typedPayload.message,
+        depth + 1
+    );
+}
+
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+    if (axios.isAxiosError(error)) {
+        return extractPayloadMessage(error.response?.data) || error.message || fallback;
+    }
+
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+
+    return fallback;
+}
+
+function requireApiSuccess<T>(response: { data?: ApiResponse<T> }, fallback: string): T {
+    if (response.data?.success) {
+        return response.data.result;
+    }
+
+    throw new Error(fallback);
+}
+
+function buildCategoryRuleCreatePayload(form: CategoryRuleForm): CategoryRuleForm & { category_id: number } {
+    if (form.category_id == null) {
+        throw new Error('Category is required');
+    }
+
+    return {
+        ...form,
+        category_id: form.category_id,
+    };
+}
+
 function openCreateDialog() {
     editingRule.value = null;
     ruleForm.value = { name: '', category_id: null, priority: 100, rule_expression: '', regex_enabled: false, enabled: true };
     showEditDialog.value = true;
 }
 
-function openEditDialog(item: any) {
+function openEditDialog(item: CategoryRuleItem) {
     editingRule.value = item;
     ruleForm.value = {
         name: item.name,
@@ -486,35 +594,45 @@ async function saveRule() {
     error.value = null;
     try {
         if (editingRule.value) {
-            await services.updateCategoryRule(editingRule.value.id, ruleForm.value);
+            requireApiSuccess(
+                await services.updateCategoryRule(editingRule.value.id, ruleForm.value),
+                'Failed to save rule'
+            );
             successMsg.value = 'Rule updated';
         } else {
-            await services.createCategoryRule(ruleForm.value as any);
+            requireApiSuccess(
+                await services.createCategoryRule(buildCategoryRuleCreatePayload(ruleForm.value)),
+                'Failed to save rule'
+            );
             successMsg.value = 'Rule created';
         }
         showEditDialog.value = false;
         await fetchCategoryRules();
-    } catch (e: any) {
-        error.value = e.message || 'Failed to save rule';
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Failed to save rule');
     } finally {
         saving.value = false;
     }
 }
 
-async function toggleEnabled(item: any) {
+async function toggleEnabled(item: CategoryRuleItem) {
+    error.value = null;
     try {
-        await services.updateCategoryRule(item.id, { enabled: !item.enabled });
+        requireApiSuccess(
+            await services.updateCategoryRule(item.id, { enabled: !item.enabled }),
+            'Failed to toggle rule'
+        );
         await fetchCategoryRules();
-    } catch (e: any) {
-        error.value = e.message || 'Failed to toggle rule';
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Failed to toggle rule');
     }
 }
 
 // ── Delete ────────
 const showDeleteDialog = ref(false);
-const deletingRule = ref<any>(null);
+const deletingRule = ref<CategoryRuleItem | null>(null);
 
-function confirmDelete(item: any) {
+function confirmDelete(item: CategoryRuleItem) {
     deletingRule.value = item;
     showDeleteDialog.value = true;
 }
@@ -524,12 +642,15 @@ async function doDelete() {
     deleting.value = true;
     error.value = null;
     try {
-        await services.deleteCategoryRule(deletingRule.value.id);
+        requireApiSuccess(
+            await services.deleteCategoryRule(deletingRule.value.id),
+            'Failed to delete rule'
+        );
         showDeleteDialog.value = false;
         successMsg.value = 'Rule deleted';
         await fetchCategoryRules();
-    } catch (e: any) {
-        error.value = e.message || 'Failed to delete rule';
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Failed to delete rule');
     } finally {
         deleting.value = false;
     }
@@ -542,7 +663,7 @@ const testRuleName = ref('');
 const testText = ref('');
 const testResult = ref<boolean | null>(null);
 
-function openTestDialog(item: any) {
+function openTestDialog(item: CategoryRuleItem) {
     testRuleId.value = item.id;
     testRuleName.value = item.name;
     testText.value = '';
@@ -553,11 +674,16 @@ function openTestDialog(item: any) {
 async function runTest() {
     if (!testText.value) return;
     testing.value = true;
+    error.value = null;
     try {
-        const resp = await services.testCategoryRule(testRuleId.value, testText.value);
-        testResult.value = !!resp.data?.result?.matched;
-    } catch (e: any) {
-        error.value = e.message || 'Test failed';
+        const result = requireApiSuccess<CategoryRuleTestResult>(
+            await services.testCategoryRule(testRuleId.value, testText.value),
+            'Test failed'
+        );
+        testResult.value = !!result?.matched;
+    } catch (e: unknown) {
+        testResult.value = null;
+        error.value = getRequestErrorMessage(e, 'Test failed');
     } finally {
         testing.value = false;
     }
@@ -568,12 +694,15 @@ async function migrateKeywords() {
     loading.value = true;
     error.value = null;
     try {
-        const resp = await services.migrateCategoryKeywords();
-        const count = resp.data?.result?.migrated_count ?? 0;
+        const result = requireApiSuccess<CategoryKeywordMigrationResult>(
+            await services.migrateCategoryKeywords(),
+            'Migration failed'
+        );
+        const count = Number(result?.migrated_count ?? 0);
         successMsg.value = `Migrated ${count} keyword(s) to category rules`;
         await fetchAll();
-    } catch (e: any) {
-        error.value = e.message || 'Migration failed';
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Migration failed');
     } finally {
         loading.value = false;
     }
@@ -582,23 +711,27 @@ async function migrateKeywords() {
 // ── Data fetching ────────
 async function fetchCategoryRules() {
     try {
-        const resp = await services.getCategoryRules();
-        if (resp.data?.success) {
-            categoryRules.value = resp.data.result ?? [];
-        }
-    } catch (e: any) {
-        error.value = e.message || 'Failed to load category rules';
+        const result = requireApiSuccess<CategoryRuleItem[]>(
+            await services.getCategoryRules(),
+            'Failed to load category rules'
+        );
+        categoryRules.value = result ?? [];
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Failed to load category rules');
     }
 }
 
 async function fetchOverview() {
     try {
-        const resp = await services.getRulesOverview();
-        if (resp.data?.success && resp.data.result) {
-            overview.value = resp.data.result;
+        const result = requireApiSuccess<Overview>(
+            await services.getRulesOverview(),
+            'Failed to load rules overview'
+        );
+        if (result) {
+            overview.value = result;
         }
-    } catch (e: any) {
-        error.value = e.message || 'Failed to load rules overview';
+    } catch (e: unknown) {
+        error.value = getRequestErrorMessage(e, 'Failed to load rules overview');
     }
 }
 
