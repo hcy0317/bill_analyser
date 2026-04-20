@@ -5,14 +5,12 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import re
 import sqlite3
 from pathlib import Path
 
-import aiosqlite
 import pytest
-
-from bill_analyser.utils.config import load_default_user_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DB_PATH = REPO_ROOT / "data" / "bills.db"
@@ -20,14 +18,24 @@ SUSPICIOUS_NONPREFIXED_USER_PATTERNS = (
     re.compile(r"^cat_reg_\d+$"),
     re.compile(r"^comprehensive_test$"),
 )
+OPTIONAL_CONFIG_DEPENDENCY_MODULES = {
+    "dotenv",
+    "watchdog",
+    "watchdog.events",
+    "watchdog.observers",
+}
 
 
 async def _attempt_aiosqlite_runtime_connection(runtime_db_path: Path) -> None:
+    import aiosqlite
+
     connection = await aiosqlite.connect(str(runtime_db_path))
     await connection.close()
 
 
 async def _attempt_aiosqlite_runtime_connection_via_uri(runtime_db_path: Path) -> None:
+    import aiosqlite
+
     connection = await aiosqlite.connect(f"file:{runtime_db_path.as_posix()}?mode=rw", uri=True)
     await connection.close()
 
@@ -36,13 +44,38 @@ def _open_runtime_db_readonly() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{RUNTIME_DB_PATH.as_posix()}?mode=ro", uri=True)
 
 
+def _load_default_user_settings_safe() -> dict[str, object] | None:
+    try:
+        config_module = importlib.import_module("bill_analyser.utils.config")
+    except ModuleNotFoundError as exc:
+        if exc.name in OPTIONAL_CONFIG_DEPENDENCY_MODULES:
+            return None
+        raise
+
+    load_default_user_settings = getattr(config_module, "load_default_user_settings", None)
+    if not callable(load_default_user_settings):
+        return None
+
+    try:
+        loaded_settings = load_default_user_settings()
+    except ModuleNotFoundError as exc:
+        if exc.name in OPTIONAL_CONFIG_DEPENDENCY_MODULES:
+            return None
+        raise
+
+    if isinstance(loaded_settings, dict):
+        return loaded_settings
+
+    return None
+
+
 def get_runtime_bills_db_cleanliness_issues() -> list[str]:
     """Collect runtime bills.db cleanliness issues without mutating the database."""
     if not RUNTIME_DB_PATH.exists():
         return []
 
     issues: list[str] = []
-    default_user = load_default_user_settings()
+    default_user = _load_default_user_settings_safe()
     protected_username = str((default_user or {}).get("username") or "admin").strip().lower()
     protected_email = str((default_user or {}).get("email") or "").strip()
     protected_nickname = str((default_user or {}).get("nickname") or "").strip()
@@ -206,11 +239,42 @@ def test_pytest_blocks_runtime_db_connections() -> None:
     with pytest.raises(RuntimeError, match="must not open"):
         sqlite3.connect(f"file:{RUNTIME_DB_PATH.as_posix()}?mode=rw", uri=True)
 
+    pytest.importorskip("aiosqlite")
+
     with pytest.raises(RuntimeError, match="must not open"):
         asyncio.run(_attempt_aiosqlite_runtime_connection(RUNTIME_DB_PATH))
 
     with pytest.raises(RuntimeError, match="must not open"):
         asyncio.run(_attempt_aiosqlite_runtime_connection_via_uri(RUNTIME_DB_PATH))
+
+
+def test_load_default_user_settings_safe_returns_none_when_optional_dependency_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runtime DB cleanliness helper should stay importable in minimal pytest-only environments."""
+    original_import_module = importlib.import_module
+
+    def fake_import_module(name: str, package: str | None = None):
+        if name == "bill_analyser.utils.config":
+            raise ModuleNotFoundError("No module named 'dotenv'", name="dotenv")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    assert _load_default_user_settings_safe() is None
+
+
+def test_load_default_user_settings_safe_reraises_non_optional_dependency_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-optional import regressions must still fail loudly."""
+    original_import_module = importlib.import_module
+
+    def fake_import_module(name: str, package: str | None = None):
+        if name == "bill_analyser.utils.config":
+            raise ModuleNotFoundError("No module named 'yaml'", name="yaml")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    with pytest.raises(ModuleNotFoundError, match="yaml"):
+        _load_default_user_settings_safe()
 
 
 def test_tests_python_files_do_not_reference_runtime_bills_db_directly() -> None:

@@ -326,7 +326,7 @@
                                             </td>
                                             <td>{{ candidate.category_name || candidate.target_category || '-' }}</td>
                                             <td>
-                                                <v-chip size="x-small" :color="confidenceColor(candidate.confidence)">
+                                                <v-chip size="x-small" :color="confidenceColor(candidate.confidence ?? 0)">
                                                     {{ ((candidate.confidence || 0) * 100).toFixed(0) }}%
                                                 </v-chip>
                                             </td>
@@ -413,6 +413,7 @@
 </template>
 
 <script setup lang="ts">
+import axios from 'axios';
 import { ref, computed, watch } from 'vue';
 import { useDisplay } from 'vuetify';
 
@@ -436,6 +437,35 @@ import {
     mdiRobotOutline,
     mdiCog
 } from '@mdi/js';
+
+interface LLMConfigItem {
+    id: number;
+    name: string;
+    provider: string;
+    model: string;
+    api_key?: string;
+    base_url?: string;
+    is_active?: boolean;
+    created_at?: string;
+    updated_at?: string;
+}
+
+interface LLMAnalyzeResult {
+    candidates_created?: number;
+}
+
+interface LLMCandidateItem {
+    id: number;
+    type?: string;
+    status: string;
+    confidence?: number;
+    rule_type?: string;
+    rule_content?: string;
+    expression?: string;
+    reason?: string;
+    category_name?: string;
+    target_category?: string;
+}
 
 const props = defineProps<{
     initTab?: string
@@ -486,6 +516,65 @@ const indeterminate = computed(() => {
 
 function clearError() {
     store.error = null;
+}
+
+function toLLMConfigs(result: unknown): LLMConfigItem[] {
+    return Array.isArray(result) ? result as LLMConfigItem[] : [];
+}
+
+function toLLMCandidates(result: unknown): LLMCandidateItem[] {
+    if (Array.isArray(result)) {
+        return result as LLMCandidateItem[];
+    }
+
+    if (result && typeof result === 'object' && 'candidates' in result) {
+        const candidates = (result as { candidates?: unknown }).candidates;
+        return Array.isArray(candidates) ? candidates as LLMCandidateItem[] : [];
+    }
+
+    return [];
+}
+
+function extractPayloadMessage(payload: unknown, depth = 0): string | null {
+    if (depth > 2) {
+        return null;
+    }
+
+    if (typeof payload === 'string' && payload) {
+        return payload;
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const errorMessage = 'error' in payload ? extractPayloadMessage(payload.error, depth + 1) : null;
+    if (errorMessage) {
+        return errorMessage;
+    }
+
+    const message = 'message' in payload ? extractPayloadMessage(payload.message, depth + 1) : null;
+    if (message) {
+        return message;
+    }
+
+    return null;
+}
+
+function getPayloadErrorMessage(payload: unknown, fallback: string): string {
+    return extractPayloadMessage(payload) || fallback;
+}
+
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+    if (axios.isAxiosError(error)) {
+        return getPayloadErrorMessage(error.response?.data, fallback);
+    }
+
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+
+    return fallback;
 }
 
 function getFeatureSummary(item: LearningSuggestion): string {
@@ -595,20 +684,20 @@ async function saveEditRule() {
             editRuleDialog.value = false;
             await store.loadRules();
         } else {
-            store.error = resp.data?.error || 'Failed to update rule';
+            store.error = getPayloadErrorMessage(resp.data?.result, 'Failed to update rule');
         }
-    } catch (e: any) {
-        store.error = e.message || 'Failed to update rule';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to update rule');
     } finally {
         editRuleSaving.value = false;
     }
 }
 
 // ── LLM 归纳 state ──────────
-const llmSavedConfigs = ref<any[]>([]);
+const llmSavedConfigs = ref<LLMConfigItem[]>([]);
 const llmAnalyzing = ref(false);
-const llmAnalyzeResult = ref<any>(null);
-const llmCandidates = ref<any[]>([]);
+const llmAnalyzeResult = ref<LLMAnalyzeResult | null>(null);
+const llmCandidates = ref<LLMCandidateItem[]>([]);
 const llmStatusFilter = ref<string>('');
 
 // Add Config Dialog
@@ -653,7 +742,7 @@ async function loadLLMConfigs() {
     try {
         const resp = await services.getLLMConfigs();
         if (resp.data?.success && resp.data.result) {
-            llmSavedConfigs.value = Array.isArray(resp.data.result) ? resp.data.result : [];
+            llmSavedConfigs.value = toLLMConfigs(resp.data.result);
         }
     } catch { /* ignore config load errors */ }
 }
@@ -678,10 +767,10 @@ async function saveNewConfig() {
             addConfigDialog.value = false;
             await loadLLMConfigs();
         } else {
-            store.error = resp.data?.error || 'Failed to create config';
+            store.error = getPayloadErrorMessage(resp.data?.result, 'Failed to create config');
         }
-    } catch (e: any) {
-        store.error = e.message || 'Failed to create config';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to create config');
     } finally {
         addConfigSaving.value = false;
     }
@@ -691,8 +780,8 @@ async function handleActivateConfig(configId: number) {
     try {
         await services.activateLLMConfig(configId);
         await loadLLMConfigs();
-    } catch (e: any) {
-        store.error = e.message || 'Failed to activate config';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to activate config');
     }
 }
 
@@ -700,8 +789,8 @@ async function handleDeleteConfig(configId: number) {
     try {
         await services.deleteLLMConfig(configId);
         await loadLLMConfigs();
-    } catch (e: any) {
-        store.error = e.message || 'Failed to delete config';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to delete config');
     }
 }
 
@@ -709,12 +798,10 @@ async function loadLLMCandidates() {
     try {
         const resp = await services.getLLMCandidates({ limit: 100 });
         if (resp.data?.success && resp.data.result) {
-            llmCandidates.value = Array.isArray(resp.data.result)
-                ? resp.data.result
-                : (resp.data.result.candidates || []);
+            llmCandidates.value = toLLMCandidates(resp.data.result);
         }
-    } catch (e: any) {
-        store.error = e.message || 'Failed to load LLM candidates';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to load LLM candidates');
     }
 }
 
@@ -727,8 +814,8 @@ async function handleLLMAnalyze() {
             llmAnalyzeResult.value = resp.data.result;
         }
         await loadLLMCandidates();
-    } catch (e: any) {
-        store.error = e.message || 'LLM analysis failed';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'LLM analysis failed');
     } finally {
         llmAnalyzing.value = false;
     }
@@ -738,8 +825,8 @@ async function handleLLMAccept(id: number) {
     try {
         await services.acceptLLMCandidate(id);
         await loadLLMCandidates();
-    } catch (e: any) {
-        store.error = e.message || 'Failed to accept candidate';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to accept candidate');
     }
 }
 
@@ -747,8 +834,8 @@ async function handleLLMReject(id: number) {
     try {
         await services.rejectLLMCandidate(id);
         await loadLLMCandidates();
-    } catch (e: any) {
-        store.error = e.message || 'Failed to reject candidate';
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to reject candidate');
     }
 }
 
