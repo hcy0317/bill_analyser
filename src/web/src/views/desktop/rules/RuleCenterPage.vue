@@ -22,6 +22,30 @@
                     {{ successMsg }}
                 </v-alert>
 
+                <v-sheet border rounded="lg" class="mx-4 mb-4 pa-4">
+                    <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
+                        <div class="min-w-0">
+                            <div class="d-flex flex-wrap align-center ga-2">
+                                <v-icon :icon="mdiLinkVariant" size="small" />
+                                <span class="text-subtitle-1 font-weight-medium">
+                                    {{ tt('Temporary compatibility entry') }}
+                                </span>
+                                <v-chip size="small" color="warning" variant="tonal">
+                                    {{ tt('Legacy access point') }}
+                                </v-chip>
+                            </div>
+                            <div class="text-body-2 text-medium-emphasis mt-2">
+                                {{ tt('Rule Center stays available for existing deep links during migration. Use Pairing Center as the main home for pairing tools.') }}
+                            </div>
+                        </div>
+                        <v-spacer />
+                        <v-btn color="primary" variant="tonal" to="/pairing/list">
+                            <v-icon start :icon="mdiOpenInNew" />
+                            {{ tt('Open Pairing Center') }}
+                        </v-btn>
+                    </div>
+                </v-sheet>
+
                 <v-tabs v-model="activeTab" class="px-4">
                     <v-tab value="rules">
                         <v-icon start :icon="mdiBookCogOutline" />
@@ -350,7 +374,7 @@ import { useRouter } from 'vue-router';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiTagMultiple, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline, mdiFinance,
+    mdiTestTube, mdiDatabaseImportOutline, mdiFinance, mdiLinkVariant, mdiOpenInNew,
 } from '@mdi/js';
 import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';

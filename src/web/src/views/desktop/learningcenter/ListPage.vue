@@ -71,6 +71,30 @@
                     <!-- 主内容区 -->
                     <v-main>
                         <v-card-text>
+                            <v-sheet border rounded="lg" class="pa-4 mb-4">
+                                <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
+                                    <div class="min-w-0">
+                                        <div class="d-flex flex-wrap align-center ga-2">
+                                            <v-icon :icon="mdiLinkVariant" size="small" />
+                                            <span class="text-subtitle-1 font-weight-medium">
+                                                {{ tt('Temporary compatibility entry') }}
+                                            </span>
+                                            <v-chip size="small" color="warning" variant="tonal">
+                                                {{ tt('Legacy access point') }}
+                                            </v-chip>
+                                        </div>
+                                        <div class="text-body-2 text-medium-emphasis mt-2">
+                                            {{ tt('Learning Center stays available for existing deep links during migration. Use Pairing Center as the main home for pairing tools.') }}
+                                        </div>
+                                    </div>
+                                    <v-spacer />
+                                    <v-btn color="primary" variant="tonal" to="/pairing/list">
+                                        <v-icon start :icon="mdiOpenInNew" />
+                                        {{ tt('Open Pairing Center') }}
+                                    </v-btn>
+                                </div>
+                            </v-sheet>
+
                             <div class="d-flex align-center mb-4">
                                 <v-icon :icon="mdiBrain" class="mr-2" />
                                 <span class="text-h6">{{ tt('Learning Center') }}</span>
@@ -435,7 +459,9 @@ import {
     mdiLightbulbOutline,
     mdiBookOpenPageVariant,
     mdiRobotOutline,
-    mdiCog
+    mdiCog,
+    mdiLinkVariant,
+    mdiOpenInNew
 } from '@mdi/js';
 
 interface LLMConfigItem {
