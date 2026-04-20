@@ -8,6 +8,7 @@ from .db_bills import DatabaseBillsMixin
 from .db_budgets_reporting import DatabaseBudgetsReportingMixin
 from .db_categories import DatabaseCategoriesMixin
 from .db_category_rules import DatabaseCategoryRulesMixin
+from .db_llm_candidates import DatabaseLLMCandidatesMixin
 from .db_import_configs import DatabaseImportConfigsMixin
 from .db_import_learning import DatabaseImportLearningMixin
 from .db_import_preview import DatabaseImportPreviewMixin
@@ -45,6 +46,7 @@ class DatabaseTransactionalDataMixin(  # pylint: disable=too-many-ancestors
     DatabaseTemplatesMixin,
     DatabaseTagsMixin,
     DatabaseAccountsMixin,
+    DatabaseLLMCandidatesMixin,
     DatabaseCategoryRulesMixin,
     DatabaseCategoriesMixin,
     DatabaseMatchingMixin,

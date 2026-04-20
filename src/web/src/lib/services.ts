@@ -2163,6 +2163,50 @@ export default {
         });
     },
 
+    // ── LLM Learning (LLM 归纳学习) ──────────
+
+    getLLMConfig: (): ApiResponsePromise<any> => {
+        return axios.get('llm/config').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    updateLLMConfig: (config: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.post('llm/config', config).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    analyzeLLMTransactions: (billIds?: number[], limit?: number): ApiResponsePromise<any> => {
+        return axios.post('llm/analyze-transactions', {
+            bill_ids: billIds,
+            limit: limit || 20
+        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    induceLLMRules: (categoryId: number, sampleCount?: number): ApiResponsePromise<any> => {
+        return axios.post('llm/induce-rules', {
+            category_id: categoryId,
+            sample_count: sampleCount || 10
+        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    getLLMCandidates: (params?: { status?: string; type?: string; limit?: number; offset?: number }): ApiResponsePromise<any> => {
+        return axios.get('llm/candidates', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    acceptLLMCandidate: (candidateId: number): ApiResponsePromise<any> => {
+        return axios.post(`llm/candidates/${candidateId}/accept`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    rejectLLMCandidate: (candidateId: number): ApiResponsePromise<any> => {
+        return axios.post(`llm/candidates/${candidateId}/reject`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     // ── Anomaly Insights (异常洞察) ──────────
 
     getAnomalies: ({

@@ -39,6 +39,12 @@
                         <v-icon start :icon="mdiCalendarSync" />
                         Recurring Rules ({{ overview.recurringRuleCount }})
                     </v-tab>
+                    <v-tab value="llm">
+                        <v-icon start :icon="mdiRobotOutline" />
+                        LLM 候选
+                        <v-badge v-if="llmPendingCount > 0" :content="llmPendingCount"
+                                 color="warning" floating />
+                    </v-tab>
                 </v-tabs>
 
                 <v-tabs-window v-model="activeTab">
@@ -182,6 +188,63 @@
                             </template>
                         </v-data-table>
                     </v-tabs-window-item>
+
+                    <!-- LLM 候选 -->
+                    <v-tabs-window-item value="llm">
+                        <div class="pa-4">
+                            <v-progress-linear v-if="llmLoading" indeterminate color="secondary" class="mb-4" />
+
+                            <v-data-table
+                                v-if="llmCandidates.length > 0"
+                                :headers="llmHeaders"
+                                :items="llmCandidates"
+                                :items-per-page="20"
+                                density="compact"
+                            >
+                                <template #item.rule_type="{ item }">
+                                    <v-chip size="x-small" variant="tonal" color="info">
+                                        {{ item.rule_type || item.type || 'keyword' }}
+                                    </v-chip>
+                                </template>
+                                <template #item.confidence="{ item }">
+                                    <v-chip
+                                        size="x-small"
+                                        :color="(item.confidence || 0) >= 0.8 ? 'success' : (item.confidence || 0) >= 0.5 ? 'warning' : 'error'"
+                                    >
+                                        {{ ((item.confidence || 0) * 100).toFixed(0) }}%
+                                    </v-chip>
+                                </template>
+                                <template #item.status="{ item }">
+                                    <v-chip
+                                        size="small"
+                                        :color="item.status === 'accepted' ? 'success' : item.status === 'rejected' ? 'error' : 'warning'"
+                                    >
+                                        {{ item.status === 'accepted' ? '已采纳' : item.status === 'rejected' ? '已拒绝' : '待审核' }}
+                                    </v-chip>
+                                </template>
+                                <template #item.actions="{ item }">
+                                    <template v-if="item.status === 'pending'">
+                                        <v-btn size="small" variant="text" color="success" icon
+                                               @click="acceptLLMCandidate(item.id)">
+                                            <v-icon :icon="mdiCheckCircle" size="small" />
+                                            <v-tooltip activator="parent">采纳</v-tooltip>
+                                        </v-btn>
+                                        <v-btn size="small" variant="text" color="error" icon
+                                               @click="rejectLLMCandidate(item.id)">
+                                            <v-icon :icon="mdiCloseCircle" size="small" />
+                                            <v-tooltip activator="parent">拒绝</v-tooltip>
+                                        </v-btn>
+                                    </template>
+                                    <span v-else class="text-grey text-caption">—</span>
+                                </template>
+                            </v-data-table>
+
+                            <v-empty-state v-if="!llmLoading && llmCandidates.length === 0"
+                                           :icon="mdiRobotOutline"
+                                           headline="暂无 LLM 候选规则"
+                                           text="在学习中心使用 LLM 归纳功能来生成候选规则。" />
+                        </div>
+                    </v-tabs-window-item>
                 </v-tabs-window>
             </v-card>
         </v-col>
@@ -281,7 +344,7 @@ import { ref, computed, onMounted } from 'vue';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiTagMultiple, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline,
+    mdiTestTube, mdiDatabaseImportOutline, mdiRobotOutline,
 } from '@mdi/js';
 import services from '@/lib/services.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
@@ -348,6 +411,59 @@ const recurringHeaders = [
     { title: 'Next Date', key: 'nextDate' },
     { title: 'Enabled', key: 'enabled' },
 ];
+
+// ── LLM 候选 ────────
+const llmCandidates = ref<any[]>([]);
+const llmLoading = ref(false);
+
+const llmHeaders = [
+    { title: '类型', key: 'rule_type', width: 100 },
+    { title: '规则内容', key: 'rule_content' },
+    { title: '目标分类', key: 'category_name' },
+    { title: '置信度', key: 'confidence', width: 100 },
+    { title: '状态', key: 'status', width: 100 },
+    { title: '操作', key: 'actions', sortable: false, width: 120 },
+];
+
+const llmPendingCount = computed(() =>
+    llmCandidates.value.filter(c => c.status === 'pending').length
+);
+
+async function fetchLLMCandidates() {
+    llmLoading.value = true;
+    try {
+        const resp = await services.getLLMCandidates({ limit: 100 });
+        if (resp.data?.success && resp.data.result) {
+            llmCandidates.value = Array.isArray(resp.data.result)
+                ? resp.data.result
+                : (resp.data.result.candidates || []);
+        }
+    } catch (e: any) {
+        error.value = e.message || 'Failed to load LLM candidates';
+    } finally {
+        llmLoading.value = false;
+    }
+}
+
+async function acceptLLMCandidate(id: number) {
+    try {
+        await services.acceptLLMCandidate(id);
+        successMsg.value = '候选规则已采纳';
+        await fetchLLMCandidates();
+    } catch (e: any) {
+        error.value = e.message || 'Failed to accept LLM candidate';
+    }
+}
+
+async function rejectLLMCandidate(id: number) {
+    try {
+        await services.rejectLLMCandidate(id);
+        successMsg.value = '候选规则已拒绝';
+        await fetchLLMCandidates();
+    } catch (e: any) {
+        error.value = e.message || 'Failed to reject LLM candidate';
+    }
+}
 
 // ── Category selector options ────────
 const categoryOptions = computed(() => {
@@ -522,6 +638,7 @@ async function fetchAll() {
         await Promise.all([
             fetchCategoryRules(),
             fetchOverview(),
+            fetchLLMCandidates(),
             categoryStore.loadAllCategories({ force: false }),
         ]);
     } finally {

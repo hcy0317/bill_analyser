@@ -115,6 +115,31 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS llm_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                type TEXT NOT NULL DEFAULT 'classification',
+                source_bill_ids TEXT,
+                suggested_main_category TEXT,
+                suggested_sub_category TEXT,
+                suggested_rule_expression TEXT,
+                confidence REAL DEFAULT 0.0,
+                llm_provider TEXT,
+                llm_model TEXT,
+                llm_response_raw TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                reviewed_at TEXT
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_candidates_user_status "
+            "ON llm_candidates(user_id, status)"
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS account_types (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,
