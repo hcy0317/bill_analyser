@@ -793,7 +793,7 @@
                     {{ getAnnotationActionText() }}
                 </v-btn>
 
-                <!-- 快速编辑按钮组 -->
+                <!-- 导入会话主操作 -->
                 <v-btn-group class="ms-4" density="compact" variant="outlined" color="primary">
                     <!-- v6.56: 移除选择限制，重新分类按钮始终可点击 -->
                     <v-btn :disabled="!!disabled"
@@ -803,22 +803,28 @@
                     </v-btn>
                               <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
                                     :prepend-icon="mdiSchoolOutline"
-                                    @click="promoteSelectedToLongTermLearning">
-                                {{ tt('Save as Long-term Learning') }}
-                          </v-btn>
-                    <!-- v6.40: 分类按钮直接打开管理分类对话框 -->
-                    <v-btn :disabled="!!disabled"
-                           :prepend-icon="mdiTagMultiple"
-                           @click="openCategoryManagement">
-                        {{ tt('Manage Categories') }}
-                    </v-btn>
-                    <!-- v6.40: 账户按钮直接打开管理账户对话框 -->
-                    <v-btn :disabled="!!disabled"
-                           :prepend-icon="mdiWallet"
-                           @click="openAccountManagement">
-                        {{ tt('Manage Accounts') }}
-                    </v-btn>
+                                     @click="promoteSelectedToLongTermLearning">
+                                 {{ tt('Save as Long-term Learning') }}
+                           </v-btn>
                 </v-btn-group>
+                <v-btn class="ms-2"
+                       density="compact"
+                       variant="text"
+                       color="secondary"
+                       :disabled="!!disabled"
+                       :prepend-icon="mdiTagMultiple"
+                       @click="openCategoryManagement">
+                    {{ tt('Manage Categories') }}
+                </v-btn>
+                <v-btn class="ms-1"
+                       density="compact"
+                       variant="text"
+                       color="secondary"
+                       :disabled="!!disabled"
+                       :prepend-icon="mdiWallet"
+                       @click="openAccountManagement">
+                    {{ tt('Manage Accounts') }}
+                </v-btn>
 
                 <v-spacer v-if="importTransactions.length > 10"/>
                 <span v-if="importTransactions.length > 10">{{ tt('Transactions Per Page') }}</span>
