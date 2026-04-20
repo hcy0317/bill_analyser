@@ -48,8 +48,55 @@
                     <!-- 主内容区 -->
                     <v-main>
                         <v-card-text>
+                            <v-sheet border rounded="lg" class="pairing-shell pa-4 mb-4">
+                                <div class="d-flex flex-column flex-lg-row align-lg-center ga-4">
+                                    <div class="min-w-0">
+                                        <div class="d-flex align-center ga-2">
+                                            <v-icon :icon="mdiLinkVariant" />
+                                            <span class="text-h6">{{ tt('Pairing Center') }}</span>
+                                        </div>
+                                        <div class="text-body-2 text-medium-emphasis mt-2">
+                                            {{ tt('Use Pairing Center as the main home for pairing tools while Learning Center and Rule Center remain available as temporary compatibility pages.') }}
+                                        </div>
+                                    </div>
+                                    <v-spacer />
+                                    <div class="d-flex flex-wrap ga-2">
+                                        <v-btn
+                                            color="primary"
+                                            :variant="activeSection === 'pairs' ? 'flat' : 'tonal'"
+                                            @click="openPairsSection">
+                                            <v-icon start :icon="mdiFormatListBulleted" />
+                                            {{ tt('Pairs') }}
+                                        </v-btn>
+                                        <v-btn
+                                            variant="tonal"
+                                            color="secondary"
+                                            :to="{ path: '/learning/center', query: { tab: 'rules' } }">
+                                            <v-icon start :icon="mdiBrain" />
+                                            {{ tt('Learning Rules') }}
+                                            <v-icon end :icon="mdiOpenInNew" />
+                                        </v-btn>
+                                        <v-btn
+                                            variant="tonal"
+                                            color="secondary"
+                                            to="/rules/center">
+                                            <v-icon start :icon="mdiCog" />
+                                            {{ tt('Rule Center') }}
+                                            <v-icon end :icon="mdiOpenInNew" />
+                                        </v-btn>
+                                        <v-btn
+                                            color="secondary"
+                                            :variant="activeSection === 'investment-settings' ? 'flat' : 'tonal'"
+                                            @click="openInvestmentSettings">
+                                            <v-icon start :icon="mdiCog" />
+                                            {{ tt('Investment Settings') }}
+                                        </v-btn>
+                                    </div>
+                                </div>
+                            </v-sheet>
+
                             <div class="d-flex align-center mb-4">
-                                <v-icon :icon="mdiLinkVariant" class="mr-2" />
+                                <v-icon :icon="activeSectionIcon" class="mr-2" />
                                 <span class="text-h6">{{ activeSectionTitle }}</span>
                                 <v-spacer />
                                 <v-chip v-if="activeSection === 'pairs'" color="primary" variant="tonal" class="ml-2">
@@ -165,7 +212,8 @@ import {
     mdiFinance,
     mdiBrain,
     mdiLinkOff,
-    mdiCog
+    mdiCog,
+    mdiOpenInNew
 } from '@mdi/js';
 
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
@@ -207,7 +255,12 @@ const error = computed({
 const activeSectionTitle = computed(() => {
     return activeSection.value === 'investment-settings'
         ? tt('Investment Recognition Settings')
-        : tt('Pairing Center');
+        : tt('Pairs');
+});
+const activeSectionIcon = computed(() => {
+    return activeSection.value === 'investment-settings'
+        ? mdiCog
+        : mdiFormatListBulleted;
 });
 
 const pairTypeOptions = computed(() => [
@@ -286,6 +339,15 @@ function filterByType(pairType?: string): void {
     void loadAllPairs();
 }
 
+function openPairsSection(): void {
+    activeSection.value = 'pairs';
+    syncQuery('pairs', activePairType.value);
+
+    if (!matchingStore.loading && matchingStore.pairs.length === 0) {
+        void loadAllPairs();
+    }
+}
+
 function openInvestmentSettings(): void {
     activeSection.value = 'investment-settings';
     syncQuery('investment-settings', activePairType.value);
@@ -333,5 +395,9 @@ watch(
 
 .v-table :deep(th) {
     white-space: nowrap;
+}
+
+.pairing-shell {
+    background: rgba(var(--v-theme-surface), 1);
 }
 </style>
