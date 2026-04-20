@@ -90,6 +90,31 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS category_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                category_id INTEGER NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 100,
+                rule_expression TEXT NOT NULL,
+                regex_enabled BOOLEAN DEFAULT 0,
+                enabled BOOLEAN DEFAULT 1,
+                applied_count INTEGER DEFAULT 0,
+                last_applied_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_category_rules_user_priority "
+            "ON category_rules(user_id, enabled, priority)"
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS account_types (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,

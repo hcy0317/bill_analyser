@@ -2123,6 +2123,46 @@ export default {
         });
     },
 
+    // ── Category Rules (分类规则) ──────────
+
+    getCategoryRules: (categoryId?: number): ApiResponsePromise<any> => {
+        const params: any = {};
+        if (categoryId) params.category_id = categoryId;
+        return axios.get('category-rules/', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    createCategoryRule: (data: { category_id: number; name: string; priority: number; rule_expression: string; regex_enabled?: boolean; enabled?: boolean }): ApiResponsePromise<any> => {
+        return axios.post('category-rules/', data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    updateCategoryRule: (id: number, data: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.put(`category-rules/${id}`, data).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    deleteCategoryRule: (id: number): ApiResponsePromise<any> => {
+        return axios.delete(`category-rules/${id}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    reorderCategoryRules: (ruleIds: number[]): ApiResponsePromise<any> => {
+        return axios.post('category-rules/reorder', { rule_ids: ruleIds }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    migrateCategoryKeywords: (): ApiResponsePromise<any> => {
+        return axios.post('category-rules/migrate').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    testCategoryRule: (id: number, text: string): ApiResponsePromise<any> => {
+        return axios.post(`category-rules/${id}/test`, { text }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     // ── Anomaly Insights (异常洞察) ──────────
 
     getAnomalies: ({

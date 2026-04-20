@@ -57,6 +57,7 @@ async def test_category_engine_loads_rules_filters_types_and_handles_failures() 
     """分类引擎应按用户/类型加载规则，并在 DB 失败时安全降级。"""
     categories = [
         {
+            "id": 1,
             "main_category": "餐饮",
             "sub_category": "早餐",
             "priority": 1,
@@ -64,6 +65,7 @@ async def test_category_engine_loads_rules_filters_types_and_handles_failures() 
             "type": TransactionType.EXPENSE,
         },
         {
+            "id": 2,
             "main_category": "收入",
             "sub_category": "工资",
             "priority": 2,
@@ -71,6 +73,7 @@ async def test_category_engine_loads_rules_filters_types_and_handles_failures() 
             "type": TransactionType.INCOME,
         },
         {
+            "id": 3,
             "main_category": "无关键词",
             "sub_category": "忽略",
             "priority": 3,
@@ -144,6 +147,7 @@ async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
     """批量分类、分类树和全局引擎入口应保持当前契约。"""
     categories = [
         {
+            "id": 10,
             "main_category": "餐饮",
             "sub_category": "早餐",
             "priority": 1,
@@ -151,6 +155,7 @@ async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
             "type": TransactionType.EXPENSE,
         },
         {
+            "id": 11,
             "main_category": "收入",
             "sub_category": "工资",
             "priority": 1,
@@ -158,6 +163,7 @@ async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
             "type": TransactionType.INCOME,
         },
         {
+            "id": 12,
             "main_category": "转账",
             "sub_category": "内部转账",
             "priority": 1,
@@ -165,6 +171,7 @@ async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
             "type": TransactionType.TRANSFER,
         },
         {
+            "id": 13,
             "main_category": "投资",
             "sub_category": "基金",
             "priority": 1,

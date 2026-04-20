@@ -242,6 +242,95 @@ class KeywordMatcher:
             # 普通子串匹配
             return pattern in text_lower
 
+    def compile_rule_expression(self, expr: str, regex_enabled: bool = False) -> CompiledRule:
+        """Compile a new-syntax rule expression into a CompiledRule.
+
+        New syntax: ``OR={k1,k2}+AND={k3,k4}+NOT={k5}``
+        - ``+`` is the block separator
+        - ``OR={...}`` match any
+        - ``AND={...}`` must match all
+        - ``NOT={...}`` must not match any
+        - When *regex_enabled* is True each key is a regex pattern
+        - Falls back to ``compile_rule`` for old-syntax strings
+        """
+        if not expr:
+            return CompiledRule(is_empty=True)
+
+        # Backward compatible: if expression doesn't contain ={}, use old parser
+        if "={" not in expr:
+            return self.compile_rule(expr)
+
+        cache_key = f"v2:{expr}:{regex_enabled}"
+        if cache_key in self._compiled_rules_cache:
+            return self._compiled_rules_cache[cache_key]
+
+        or_blocks: list[list[str]] = []
+        not_patterns: list[str] = []
+        and_patterns: list[str] = []
+
+        blocks = expr.split("+")
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+
+            upper = block.upper()
+            # Extract content between ={ and }
+            eq_idx = block.find("={")
+            if eq_idx == -1:
+                # Treat as simple keyword
+                if regex_enabled:
+                    or_blocks.append([f"regex:{block}"])
+                    self._precompile_regex(block)
+                else:
+                    or_blocks.append([block.lower()])
+                continue
+
+            prefix = upper[:eq_idx]
+            content = block[eq_idx + 2:]
+            if content.endswith("}"):
+                content = content[:-1]
+
+            keywords = [k.strip() for k in content.split(",") if k.strip()]
+            if not keywords:
+                continue
+
+            if regex_enabled:
+                processed = []
+                for kw in keywords:
+                    processed.append(f"regex:{kw}")
+                    self._precompile_regex(kw)
+                keywords = processed
+            else:
+                keywords = [k.lower() for k in keywords]
+
+            if prefix == "OR":
+                or_blocks.append(keywords)
+            elif prefix == "AND":
+                and_patterns.extend(keywords)
+            elif prefix == "NOT":
+                not_patterns.extend(keywords)
+            else:
+                # Unknown prefix, treat as OR
+                or_blocks.append(keywords)
+
+        compiled = CompiledRule(
+            or_blocks=or_blocks,
+            not_patterns=not_patterns,
+            and_patterns=and_patterns,
+            is_empty=not (or_blocks or not_patterns or and_patterns),
+        )
+        self._compiled_rules_cache[cache_key] = compiled
+        return compiled
+
+    def _precompile_regex(self, pattern: str):
+        """Pre-compile a regex pattern into the cache."""
+        if pattern not in self._regex_cache:
+            try:
+                self._regex_cache[pattern] = re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                self.logger.warning("无效的正则表达式 '%s': %s", pattern, exc)
+
     def parse_and_match(self, text: str, rule: str) -> bool:
         """
         解析并匹配复杂规则
@@ -413,58 +502,103 @@ class CategoryEngine:
     @log_method
     @log_step("加载分类规则(DB)")
     async def load_rules_from_db(self, db, user_id: int = 1, types: list[int] | None = None):
-        """
-        从数据库加载分类规则
+        """从数据库加载分类规则（委托给 v2 实现）。"""
+        await self.load_rules_from_db_v2(db, user_id=user_id, types=types)
 
-        Args:
-            db: 数据库实例
-            user_id: 用户ID (默认1, 用于多用户数据隔离)
-            types: 可选的类型过滤列表，只加载指定类型的规则
-                   例如: [TransactionType.INVESTMENT] 只加载投资类型规则
-                   None表示加载所有类型
+    @log_method
+    async def load_rules_from_db_v2(self, db, user_id: int = 1, types: list[int] | None = None):
+        """从 category_rules 表和 categories.keywords 加载规则。
+
+        1. 从 category_rules 加载已启用的规则（JOIN categories 获取分类元数据）
+        2. 对于没有 category_rules 条目的分类，回退到 categories.keywords
+        3. 合并、按 priority 排序并预编译
         """
         try:
-            # 获取指定用户的所有分类
             types_str = str(types) if types else "all"
-            self.logger.info("从数据库加载分类规则 (user_id=%s, types=%s)", user_id, types_str)
+            self.logger.info(
+                "从数据库加载分类规则 v2 (user_id=%s, types=%s)", user_id, types_str
+            )
+
+            type_filter: set = set(types) if types else set()
+
+            valid_rules: list[dict[str, Any]] = []
+            categories_with_rules: set[int] = set()
+
+            # --- Phase 1: load from category_rules table ---
+            try:
+                cr_rows = await db.get_category_rules(
+                    user_id=user_id, enabled_only=True
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                # Table might not exist yet (pre-migration)
+                cr_rows = []
+
+            for row in cr_rows:
+                rule_type = row.get("category_type", TransactionType.EXPENSE)
+                if types and rule_type not in type_filter:
+                    continue
+
+                categories_with_rules.add(row["category_id"])
+
+                expr = row.get("rule_expression", "")
+                regex_enabled = bool(row.get("regex_enabled", False))
+
+                # Pre-compile using the new v2 compiler
+                compiled = self.keyword_matcher.compile_rule_expression(
+                    expr, regex_enabled=regex_enabled,
+                )
+
+                valid_rules.append(
+                    {
+                        "main": row.get("main_category", ""),
+                        "sub": row.get("sub_category", ""),
+                        "priority": row.get("priority", 100),
+                        "keywords": expr,
+                        "type": rule_type,
+                        "_compiled_v2": compiled,
+                    }
+                )
+
+            # --- Phase 2: fallback to categories.keywords ---
             categories = await db.get_all_categories(user_id=user_id)
 
-            # v6.53: 将types转换为set便于快速查找
-            type_filter: set = set()
-            if types:
-                type_filter = set(types)
-
-            valid_rules = []
             for cat in categories:
-                # 只有定义了关键词的分类才作为规则
+                cat_id = cat.get("id")
+                if cat_id is not None and cat_id in categories_with_rules:
+                    continue
+
                 keywords = cat.get("keywords")
-                if keywords:
-                    rule_type = cat.get("type", TransactionType.EXPENSE)
+                if not keywords:
+                    continue
 
-                    # v6.53: 如果指定了类型过滤，只加载匹配的类型
-                    if types and rule_type not in type_filter:
-                        continue
+                rule_type = cat.get("type", TransactionType.EXPENSE)
+                if types and rule_type not in type_filter:
+                    continue
 
-                    valid_rules.append(
-                        {
-                            "main": cat["main_category"],
-                            "sub": cat["sub_category"],
-                            "priority": cat.get("priority", 999),
-                            "keywords": keywords,
-                            "type": rule_type,  # 分类类型
-                        }
-                    )
+                valid_rules.append(
+                    {
+                        "main": cat["main_category"],
+                        "sub": cat["sub_category"],
+                        "priority": cat.get("priority", 999),
+                        "keywords": keywords,
+                        "type": rule_type,
+                    }
+                )
+
+            # Sort by priority
+            valid_rules.sort(key=lambda r: r.get("priority", 999))
 
             self.rules = valid_rules
             self._initialized = True
-            self._current_user_id = user_id  # 记录当前加载的用户ID
+            self._current_user_id = user_id
 
-            # v6.73: 预编译所有规则关键词，提升批量匹配性能
+            # Pre-compile rules (old-style ones that lack _compiled_v2)
             self._precompile_rules()
 
-            self.logger.info("从数据库加载了 %d 条分类规则 (user_id=%s)", len(valid_rules), user_id)
+            self.logger.info(
+                "从数据库加载了 %d 条分类规则 v2 (user_id=%s)", len(valid_rules), user_id
+            )
             if valid_rules:
-                # 记录前3条规则用于调试
                 for i, rule in enumerate(valid_rules[:3]):
                     self.logger.debug(
                         "规则#%d: %s/%s -> '%s...'",
