@@ -22,6 +22,27 @@
             <f7-list-item :title="tt('Scheduled Transactions')" :after="displayDataStatistics ? displayDataStatistics.totalScheduledTransactionCount : '-'"></f7-list-item>
         </f7-list>
 
+        <f7-block-title>{{ tt('Database Security') }}</f7-block-title>
+        <f7-list strong inset dividers class="margin-vertical skeleton-text" v-if="encryptionLoading">
+            <f7-list-item title="Encryption" after="Status"></f7-list-item>
+            <f7-list-item title="SQLCipher" after="Status"></f7-list-item>
+        </f7-list>
+
+        <f7-list strong inset dividers class="margin-vertical" v-else>
+            <f7-list-item
+                :title="tt('Database Encryption')"
+                :after="encryptionStatus.encrypted ? tt('Enabled') : tt('Disabled')"
+            >
+                <template #media>
+                    <f7-icon :f7="encryptionStatus.encrypted ? 'lock_fill' : 'lock_open'" :color="encryptionStatus.encrypted ? 'green' : 'gray'"></f7-icon>
+                </template>
+            </f7-list-item>
+            <f7-list-item
+                :title="tt('SQLCipher Available')"
+                :after="encryptionStatus.sqlcipher_available ? tt('Yes') : tt('No')"
+            ></f7-list-item>
+        </f7-list>
+
         <f7-list strong inset dividers class="margin-vertical" :class="{ 'disabled': loading }">
             <f7-list-button :class="{ 'disabled': !dataStatistics || !dataStatistics.totalTransactionCount || dataStatistics.totalTransactionCount === '0' }"
                             v-if="isDataExportingEnabled()"
@@ -100,6 +121,16 @@ import { useUserStore } from '@/stores/user.ts';
 
 import { isDataExportingEnabled } from '@/lib/server_settings.ts';
 
+import axios from 'axios';
+import { BASE_API_URL_PATH } from '@/consts/api.ts';
+
+interface EncryptionStatusData {
+    encrypted: boolean;
+    sqlcipher_available: boolean;
+    kdf_iter: number;
+    cipher_page_size: number;
+}
+
 const props = defineProps<{
     f7router: Router.Router;
 }>();
@@ -121,6 +152,13 @@ const clearingData = ref<boolean>(false);
 const showExportDataSheet = ref<boolean>(false);
 const showInputPasswordSheetForClearAllTransactions = ref<boolean>(false);
 const showInputPasswordSheetForClearAllData = ref<boolean>(false);
+const encryptionLoading = ref<boolean>(true);
+const encryptionStatus = ref<EncryptionStatusData>({
+    encrypted: false,
+    sqlcipher_available: false,
+    kdf_iter: 0,
+    cipher_page_size: 0,
+});
 
 const exportFileName = computed<string>(() => getExportFileName(exportFileType.value));
 
@@ -226,6 +264,21 @@ function onPageAfterIn(): void {
 }
 
 reloadUserDataStatistics();
+loadEncryptionStatus();
+
+function loadEncryptionStatus(): void {
+    encryptionLoading.value = true;
+    axios.get(`${BASE_API_URL_PATH}/settings/encryption/status`)
+        .then(response => {
+            if (response.data?.data) {
+                encryptionStatus.value = response.data.data;
+            }
+            encryptionLoading.value = false;
+        })
+        .catch(() => {
+            encryptionLoading.value = false;
+        });
+}
 </script>
 
 <style>

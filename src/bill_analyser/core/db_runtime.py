@@ -15,6 +15,12 @@ import aiosqlite
 from bill_analyser.constants import DATA_DIR, TEST_DB_DIR_ENV
 
 from ..utils.logger import get_logger, log_method
+from .db_encryption import (
+    apply_encryption_pragmas,
+    get_encryption_config,
+    patch_aiosqlite_for_sqlcipher,
+    verify_encryption,
+)
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now
 
@@ -95,6 +101,11 @@ class DatabaseRuntimeMixin(DatabaseFacadeBase):
         self._cache_expiry: dict[str, datetime] = {}
         self._cache_ttl = 60
 
+        # Encryption: opt-in via BILL_DB_ENCRYPT env var
+        self._encryption_config = get_encryption_config()
+        if self._encryption_config.enabled:
+            patch_aiosqlite_for_sqlcipher()
+
         self.logger.info("数据库管理器已初始化: %s", self.db_path)
 
     @log_method
@@ -102,6 +113,14 @@ class DatabaseRuntimeMixin(DatabaseFacadeBase):
         """获取数据库连接。"""
         if self._connection is None:
             self._connection = await aiosqlite.connect(str(self.db_path))
+            # Apply encryption pragmas BEFORE any other operations
+            await apply_encryption_pragmas(self._connection, self._encryption_config)
+            if self._encryption_config.enabled:
+                if not await verify_encryption(self._connection):
+                    raise RuntimeError(
+                        "Database encryption verification failed. "
+                        "Check BILL_DB_KEY or decrypt the database first."
+                    )
             self._connection.row_factory = aiosqlite.Row
         return self._connection
 
