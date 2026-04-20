@@ -82,96 +82,20 @@
         </v-col>
 
         <v-col cols="12">
-            <v-card :class="{ 'disabled': loadingRecognitionSettings || savingRecognitionSettings }">
+            <v-card>
                 <template #title>
-                    <div class="d-flex align-center">
-                        <span>{{ tt('Investment Recognition Settings') }}</span>
-                        <v-btn density="compact" color="default" variant="text" size="24"
-                               class="ms-2" :icon="true" :loading="loadingRecognitionSettings"
-                               @click="reloadRecognitionSettings(true)">
-                            <template #loader>
-                                <v-progress-circular indeterminate size="20"/>
-                            </template>
-                            <v-icon :icon="mdiRefresh" size="24" />
-                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                        </v-btn>
-                    </div>
+                    <span>{{ tt('Investment Recognition Settings') }}</span>
                 </template>
 
                 <v-card-text>
-                    <v-row>
-                        <v-col cols="12" md="6">
-                            <v-switch
-                                color="primary"
-                                hide-details
-                                inset
-                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                                :label="tt('Enable Import Learning')"
-                                v-model="recognitionSettings.importLearningEnabled"
-                            />
-                        </v-col>
-
-                        <v-col cols="12" md="12">
-                            <v-combobox
-                                color="primary"
-                                multiple
-                                chips
-                                closable-chips
-                                persistent-placeholder
-                                persistent-hint
-                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                                :label="tt('Investment Platform Keywords')"
-                                :placeholder="tt('Enter investment platform keywords')"
-                                :hint="tt('Press Enter to add investment platform keywords for import recognition')"
-                                v-model="recognitionSettings.investmentPlatformKeywords"
-                            />
-                        </v-col>
-
-                        <v-col cols="12" md="12">
-                            <v-combobox
-                                color="primary"
-                                multiple
-                                chips
-                                closable-chips
-                                persistent-placeholder
-                                persistent-hint
-                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                                :label="tt('Investment Product Keywords')"
-                                :placeholder="tt('Enter investment product keywords')"
-                                :hint="tt('Press Enter to add investment product keywords for import recognition')"
-                                v-model="recognitionSettings.investmentProductKeywords"
-                            />
-                        </v-col>
-
-                        <v-col cols="12" md="12">
-                            <v-combobox
-                                color="primary"
-                                multiple
-                                chips
-                                closable-chips
-                                persistent-placeholder
-                                persistent-hint
-                                :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                                :label="tt('Investment Exclude Keywords')"
-                                :placeholder="tt('Enter investment exclude keywords')"
-                                :hint="tt('Press Enter to add keywords that should block investment recognition')"
-                                v-model="recognitionSettings.investmentExcludeKeywords"
-                            />
-                        </v-col>
-                    </v-row>
+                    <v-alert type="info" variant="tonal">
+                        {{ tt('Investment recognition settings have moved to Pairing Center and are no longer edited in User Settings.') }}
+                    </v-alert>
                 </v-card-text>
 
                 <v-card-actions class="px-4 pb-4">
-                    <v-btn color="primary"
-                           :disabled="loadingRecognitionSettings || savingRecognitionSettings || !recognitionSettingsChanged"
-                           @click="saveRecognitionSettings">
-                        {{ tt('Save Changes') }}
-                        <v-progress-circular indeterminate size="20" class="ms-2" v-if="savingRecognitionSettings" />
-                    </v-btn>
-                    <v-btn color="default" variant="tonal"
-                           :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                           @click="resetRecognitionSettings">
-                        {{ tt('Reset') }}
+                    <v-btn color="primary" to="/pairing/list?view=investment-settings">
+                        {{ tt('Open Pairing Center') }}
                     </v-btn>
                 </v-card-actions>
             </v-card>
@@ -262,7 +186,7 @@
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { computed, onMounted, ref, useTemplateRef } from 'vue';
+import { onMounted, ref, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useDataManagementPageBase } from '@/views/base/users/DataManagementPageBase.ts';
@@ -273,7 +197,6 @@ import { useUserStore } from '@/stores/user.ts';
 import { isEquals } from '@/lib/common.ts';
 import { isDataExportingEnabled } from '@/lib/server_settings.ts';
 import { startDownloadFile } from '@/lib/ui/common.ts';
-import type { UserProfileUpdateRequest } from '@/models/user.ts';
 
 import {
     mdiRefresh,
@@ -290,13 +213,6 @@ import {
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
-interface RecognitionSettingsState {
-    importLearningEnabled: boolean;
-    investmentPlatformKeywords: string[];
-    investmentProductKeywords: string[];
-    investmentExcludeKeywords: string[];
-}
-
 const { tt } = useI18n();
 const { dataStatistics, displayDataStatistics, getExportFileName } = useDataManagementPageBase();
 
@@ -310,27 +226,6 @@ const loadingDataStatistics = ref<boolean>(true);
 const exportingData = ref<boolean>(false);
 const currentPasswordForClearData = ref<string>('');
 const clearingData = ref<boolean>(false);
-const loadingRecognitionSettings = ref<boolean>(true);
-const savingRecognitionSettings = ref<boolean>(false);
-const recognitionSettings = ref<RecognitionSettingsState>({
-    importLearningEnabled: false,
-    investmentPlatformKeywords: [],
-    investmentProductKeywords: [],
-    investmentExcludeKeywords: []
-});
-const recognitionSettingsSnapshot = ref<RecognitionSettingsState>({
-    importLearningEnabled: false,
-    investmentPlatformKeywords: [],
-    investmentProductKeywords: [],
-    investmentExcludeKeywords: []
-});
-
-const recognitionSettingsChanged = computed<boolean>(() => {
-    return recognitionSettings.value.importLearningEnabled !== recognitionSettingsSnapshot.value.importLearningEnabled
-        || !isEquals(recognitionSettings.value.investmentPlatformKeywords, recognitionSettingsSnapshot.value.investmentPlatformKeywords)
-        || !isEquals(recognitionSettings.value.investmentProductKeywords, recognitionSettingsSnapshot.value.investmentProductKeywords)
-        || !isEquals(recognitionSettings.value.investmentExcludeKeywords, recognitionSettingsSnapshot.value.investmentExcludeKeywords);
-});
 
 function reloadUserDataStatistics(force: boolean): void {
     loadingDataStatistics.value = true;
@@ -348,78 +243,6 @@ function reloadUserDataStatistics(force: boolean): void {
         loadingDataStatistics.value = false;
     }).catch(error => {
         loadingDataStatistics.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
-}
-
-function normalizeRecognitionSettings(profile: {
-    importLearningEnabled?: boolean;
-    investmentPlatformKeywords?: string[];
-    investmentProductKeywords?: string[];
-    investmentExcludeKeywords?: string[];
-}): RecognitionSettingsState {
-    return {
-        importLearningEnabled: !!profile.importLearningEnabled,
-        investmentPlatformKeywords: [...(profile.investmentPlatformKeywords || [])],
-        investmentProductKeywords: [...(profile.investmentProductKeywords || [])],
-        investmentExcludeKeywords: [...(profile.investmentExcludeKeywords || [])]
-    };
-}
-
-function resetRecognitionSettings(): void {
-    recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
-}
-
-function reloadRecognitionSettings(force: boolean): void {
-    loadingRecognitionSettings.value = true;
-
-    userStore.getCurrentUserProfile().then(profile => {
-        const nextState = normalizeRecognitionSettings(profile);
-
-        if (force) {
-            if (isEquals(recognitionSettingsSnapshot.value, nextState)) {
-                snackbar.value?.showMessage('Data is up to date');
-            } else {
-                snackbar.value?.showMessage('Data has been updated');
-            }
-        }
-
-        recognitionSettingsSnapshot.value = nextState;
-        recognitionSettings.value = normalizeRecognitionSettings(nextState);
-        loadingRecognitionSettings.value = false;
-    }).catch(error => {
-        loadingRecognitionSettings.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
-}
-
-function saveRecognitionSettings(): void {
-    if (!recognitionSettingsChanged.value || savingRecognitionSettings.value) {
-        return;
-    }
-
-    savingRecognitionSettings.value = true;
-
-    const request: UserProfileUpdateRequest = {
-        importLearningEnabled: recognitionSettings.value.importLearningEnabled,
-        investmentPlatformKeywords: [...recognitionSettings.value.investmentPlatformKeywords],
-        investmentProductKeywords: [...recognitionSettings.value.investmentProductKeywords],
-        investmentExcludeKeywords: [...recognitionSettings.value.investmentExcludeKeywords]
-    };
-
-    rootStore.updateUserProfile(request).then(response => {
-        recognitionSettingsSnapshot.value = normalizeRecognitionSettings(response.user || recognitionSettings.value);
-        recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
-        savingRecognitionSettings.value = false;
-        snackbar.value?.showMessage('Your profile has been successfully updated');
-    }).catch(error => {
-        savingRecognitionSettings.value = false;
 
         if (!error.processed) {
             snackbar.value?.showError(error);
@@ -510,11 +333,9 @@ function clearAllData(): void {
 
 onMounted(() => {
     reloadUserDataStatistics(false);
-    reloadRecognitionSettings(false);
 });
 
 defineExpose({
-    reloadUserDataStatistics,
-    reloadRecognitionSettings
+    reloadUserDataStatistics
 });
 </script>

@@ -195,7 +195,8 @@ const router = createRouter({
                     component: PairingCenterPage,
                     beforeEnter: checkLogin,
                     props: route => ({
-                        initPairType: route.query['pairType']
+                        initPairType: route.query['pairType'],
+                        initView: route.query['view']
                     })
                 },
                 {

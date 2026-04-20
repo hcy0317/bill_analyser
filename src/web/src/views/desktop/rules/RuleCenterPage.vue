@@ -486,7 +486,7 @@ const investmentKeywords = computed(() => {
 });
 
 function goToInvestmentSettings() {
-    router.push('/user/settings?tab=dataManagementSetting');
+    router.push('/pairing/list?view=investment-settings');
 }
 
 // ── Category selector options ────────

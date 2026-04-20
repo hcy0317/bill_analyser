@@ -16,7 +16,7 @@
                         <v-divider class="mt-4" />
                         <v-list density="compact" nav class="mt-2">
                             <v-list-item
-                                :active="activePairType === undefined"
+                                :active="activeSection === 'pairs' && activePairType === undefined"
                                 :prepend-icon="mdiFormatListBulleted"
                                 class="mb-1"
                                 @click="filterByType(undefined)">
@@ -25,7 +25,7 @@
                             <v-list-item
                                 v-for="pairType in pairTypeOptions"
                                 :key="pairType.value"
-                                :active="activePairType === pairType.value"
+                                :active="activeSection === 'pairs' && activePairType === pairType.value"
                                 :prepend-icon="pairTypeIcon(pairType.value)"
                                 class="mb-1"
                                 @click="filterByType(pairType.value)">
@@ -33,12 +33,16 @@
                             </v-list-item>
                         </v-list>
                         <v-divider class="mt-2" />
-                        <div class="mx-6 mt-4">
-                            <v-btn block variant="outlined" color="green" @click="goToInvestmentSettings">
-                                <v-icon start :icon="mdiCog" />
-                                {{ tt('Investment Settings') }}
-                            </v-btn>
-                        </div>
+                        <v-list density="compact" nav class="mt-2">
+                            <v-list-item
+                                :active="activeSection === 'investment-settings'"
+                                :prepend-icon="mdiCog"
+                                class="mb-1"
+                                @click="openInvestmentSettings"
+                            >
+                                <v-list-item-title>{{ tt('Investment Settings') }}</v-list-item-title>
+                            </v-list-item>
+                        </v-list>
                     </v-navigation-drawer>
 
                     <!-- 主内容区 -->
@@ -46,74 +50,83 @@
                         <v-card-text>
                             <div class="d-flex align-center mb-4">
                                 <v-icon :icon="mdiLinkVariant" class="mr-2" />
-                                <span class="text-h6">{{ tt('Pairing Center') }}</span>
+                                <span class="text-h6">{{ activeSectionTitle }}</span>
                                 <v-spacer />
-                                <v-chip color="primary" variant="tonal" class="ml-2">
+                                <v-chip v-if="activeSection === 'pairs'" color="primary" variant="tonal" class="ml-2">
                                     {{ pairCount }} {{ tt('pairs') }}
                                 </v-chip>
                             </div>
 
-                            <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
+                            <v-progress-linear v-if="activeSection === 'pairs' && loading" indeterminate color="primary" class="mb-4" />
 
-                            <v-alert v-if="error" type="error" closable class="mb-4"
+                            <v-alert v-if="activeSection === 'pairs' && error" type="error" closable class="mb-4"
                                      @click:close="error = null">
                                 {{ error }}
                             </v-alert>
 
-                            <v-table v-if="!loading && pairs.length > 0" hover density="comfortable">
-                                <thead>
-                                    <tr>
-                                        <th>{{ tt('Type') }}</th>
-                                        <th>{{ tt('Source') }}</th>
-                                        <th>{{ tt('Left Bill') }}</th>
-                                        <th>{{ tt('Right Bill') }}</th>
-                                        <th>{{ tt('Created At') }}</th>
-                                        <th class="text-center">{{ tt('Actions') }}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="pair in pairs" :key="pair.id">
-                                        <td>
-                                            <v-chip size="small" :color="pairTypeColor(pair.pairType)">
-                                                {{ pairTypeLabel(pair.pairType) }}
-                                            </v-chip>
-                                        </td>
-                                        <td>{{ pair.source }}</td>
-                                        <td>
-                                            <template v-if="pair.leftBill">
-                                                <div class="text-body-2">{{ pair.leftBill.description }}</div>
-                                                <div class="text-caption text-grey">
-                                                    {{ formatAmount(pair.leftBill.amount) }} · {{ pair.leftBill.date }}
-                                                </div>
-                                            </template>
-                                            <span v-else class="text-grey">ID: {{ pair.leftBillId }}</span>
-                                        </td>
-                                        <td>
-                                            <template v-if="pair.rightBill">
-                                                <div class="text-body-2">{{ pair.rightBill.description }}</div>
-                                                <div class="text-caption text-grey">
-                                                    {{ formatAmount(pair.rightBill.amount) }} · {{ pair.rightBill.date }}
-                                                </div>
-                                            </template>
-                                            <span v-else class="text-grey">ID: {{ pair.rightBillId }}</span>
-                                        </td>
-                                        <td class="text-caption">{{ pair.createdAt }}</td>
-                                        <td class="text-center">
-                                            <v-btn icon size="small" variant="text" color="error"
-                                                   :disabled="deleting === pair.id"
-                                                   @click="confirmDeletePair(pair)">
-                                                <v-icon :icon="mdiDeleteOutline" />
-                                                <v-tooltip activator="parent" location="top">{{ tt('Delete') }}</v-tooltip>
-                                            </v-btn>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </v-table>
+                            <template v-if="activeSection === 'pairs'">
+                                <v-table v-if="!loading && pairs.length > 0" hover density="comfortable">
+                                    <thead>
+                                        <tr>
+                                            <th>{{ tt('Type') }}</th>
+                                            <th>{{ tt('Source') }}</th>
+                                            <th>{{ tt('Left Bill') }}</th>
+                                            <th>{{ tt('Right Bill') }}</th>
+                                            <th>{{ tt('Created At') }}</th>
+                                            <th class="text-center">{{ tt('Actions') }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="pair in pairs" :key="pair.id">
+                                            <td>
+                                                <v-chip size="small" :color="pairTypeColor(pair.pairType)">
+                                                    {{ pairTypeLabel(pair.pairType) }}
+                                                </v-chip>
+                                            </td>
+                                            <td>{{ pair.source }}</td>
+                                            <td>
+                                                <template v-if="pair.leftBill">
+                                                    <div class="text-body-2">{{ pair.leftBill.description }}</div>
+                                                    <div class="text-caption text-grey">
+                                                        {{ formatAmount(pair.leftBill.amount) }} · {{ pair.leftBill.date }}
+                                                    </div>
+                                                </template>
+                                                <span v-else class="text-grey">ID: {{ pair.leftBillId }}</span>
+                                            </td>
+                                            <td>
+                                                <template v-if="pair.rightBill">
+                                                    <div class="text-body-2">{{ pair.rightBill.description }}</div>
+                                                    <div class="text-caption text-grey">
+                                                        {{ formatAmount(pair.rightBill.amount) }} · {{ pair.rightBill.date }}
+                                                    </div>
+                                                </template>
+                                                <span v-else class="text-grey">ID: {{ pair.rightBillId }}</span>
+                                            </td>
+                                            <td class="text-caption">{{ pair.createdAt }}</td>
+                                            <td class="text-center">
+                                                <v-btn icon size="small" variant="text" color="error"
+                                                       :disabled="deleting === pair.id"
+                                                       @click="confirmDeletePair(pair)">
+                                                    <v-icon :icon="mdiDeleteOutline" />
+                                                    <v-tooltip activator="parent" location="top">{{ tt('Delete') }}</v-tooltip>
+                                                </v-btn>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </v-table>
 
-                            <v-empty-state v-if="!loading && pairs.length === 0"
-                                           :icon="mdiLinkOff"
-                                           :headline="tt('No Pairs')"
-                                           :text="tt('No matching pairs found. Pairs are created when transactions are linked across accounts.')" />
+                                <v-empty-state v-if="!loading && pairs.length === 0"
+                                               :icon="mdiLinkOff"
+                                               :headline="tt('No Pairs')"
+                                               :text="tt('No matching pairs found. Pairs are created when transactions are linked across accounts.')" />
+                            </template>
+
+                            <template v-else>
+                                <v-alert type="info" variant="tonal" class="mb-4">
+                                    {{ tt('Investment recognition settings now belong to Pairing Center and are no longer managed from User Settings.') }}
+                                </v-alert>
+                                <investment-recognition-settings-card />
+                            </template>
                         </v-card-text>
                     </v-main>
                 </v-layout>
@@ -139,9 +152,9 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useDisplay } from 'vuetify';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import {
     mdiLinkVariant,
@@ -158,11 +171,16 @@ import {
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
 import { useMatchingStore } from '@/stores/matching.ts';
 import { useI18n } from '@/locales/helpers.ts';
+import InvestmentRecognitionSettingsCard from '@/views/desktop/pairingcenter/components/InvestmentRecognitionSettingsCard.vue';
+
+type PairingCenterSection = 'pairs' | 'investment-settings';
 
 const props = defineProps<{
-    initPairType?: string
+    initPairType?: string;
+    initView?: string;
 }>();
 
+const route = useRoute();
 const router = useRouter();
 const display = useDisplay();
 const { tt } = useI18n();
@@ -170,7 +188,8 @@ const matchingStore = useMatchingStore();
 
 const showNav = ref(true);
 const alwaysShowNav = computed(() => display.lgAndUp.value);
-const activePairType = ref<string | undefined>(props.initPairType || undefined);
+const activeSection = ref<PairingCenterSection>('pairs');
+const activePairType = ref<string | undefined>(undefined);
 const showDeleteDialog = ref(false);
 const pairToDelete = ref<BillMatchingPairDetail | null>(null);
 const deleting = ref<number | null>(null);
@@ -184,6 +203,11 @@ const loading = computed(() => matchingStore.loading);
 const error = computed({
     get: () => matchingStore.error,
     set: (val) => { matchingStore.error = val; }
+});
+const activeSectionTitle = computed(() => {
+    return activeSection.value === 'investment-settings'
+        ? tt('Investment Recognition Settings')
+        : tt('Pairing Center');
 });
 
 const pairTypeOptions = computed(() => [
@@ -227,9 +251,44 @@ async function loadAllPairs(): Promise<void> {
     await matchingStore.loadPairs();
 }
 
+function normalizeSection(view?: string): PairingCenterSection {
+    return view === 'investment-settings' ? 'investment-settings' : 'pairs';
+}
+
+function normalizePairType(pairType?: string): string | undefined {
+    return typeof pairType === 'string' && pairType ? pairType : undefined;
+}
+
+function syncQuery(nextSection: PairingCenterSection, nextPairType?: string): void {
+    const nextQuery: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(route.query)) {
+        if (typeof value === 'string' && key !== 'view' && key !== 'pairType') {
+            nextQuery[key] = value;
+        }
+    }
+
+    if (nextSection === 'investment-settings') {
+        nextQuery['view'] = 'investment-settings';
+    }
+
+    if (nextPairType) {
+        nextQuery['pairType'] = nextPairType;
+    }
+
+    void router.replace({ path: '/pairing/list', query: nextQuery });
+}
+
 function filterByType(pairType?: string): void {
+    activeSection.value = 'pairs';
     activePairType.value = pairType;
-    loadAllPairs();
+    syncQuery('pairs', pairType);
+    void loadAllPairs();
+}
+
+function openInvestmentSettings(): void {
+    activeSection.value = 'investment-settings';
+    syncQuery('investment-settings', activePairType.value);
 }
 
 function confirmDeletePair(pair: BillMatchingPairDetail): void {
@@ -246,13 +305,24 @@ async function doDeletePair(): Promise<void> {
     pairToDelete.value = null;
 }
 
-function goToInvestmentSettings() {
-    router.push('/user/settings?tab=dataManagementSetting');
-}
+watch(
+    () => [props.initView, props.initPairType] as const,
+    ([initView, initPairType]) => {
+        activeSection.value = normalizeSection(initView);
+        activePairType.value = normalizePairType(initPairType);
+    },
+    { immediate: true }
+);
 
-onMounted(() => {
-    loadAllPairs();
-});
+watch(
+    activeSection,
+    (section) => {
+        if (section === 'pairs' && !matchingStore.loading && matchingStore.pairs.length === 0) {
+            void loadAllPairs();
+        }
+    },
+    { immediate: true }
+);
 </script>
 
 <style scoped>
