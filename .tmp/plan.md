@@ -74,6 +74,10 @@
 ### 依赖关系
 - 依赖阶段 1 的前端类型契约清障完成。
 
+### 已完成切片
+- ✅ `src/web/src/views/desktop/MainLayout.vue` 已移除 Learning / Rule Center 的并列主导航，只保留 Pairing Center 作为唯一可见中心入口，提交 `d5244e1`
+- ✅ `src/web/src/views/desktop/pairingcenter/ListPage.vue` 已补统一壳层 quick-entry，当前可从 Pairing Center 内部进入 Pairs、Investment Settings，并通过临时兼容入口跳转 Learning / Rule Center，提交 `d5244e1`
+
 ## 阶段 3: 统一配对中心持久化域收口（学习 / 规则 / 投资） — 预计 todo 数: 7
 ### 目标
 把规则中心、学习中心、投资识别设置收口为同一个持久化配对中心域，并移除“投资设置属于用户设置”的旧归属。
