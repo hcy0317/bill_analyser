@@ -78,6 +78,10 @@
 - ✅ `src/web/src/views/desktop/MainLayout.vue` 已移除 Learning / Rule Center 的并列主导航，只保留 Pairing Center 作为唯一可见中心入口，提交 `d5244e1`
 - ✅ `src/web/src/views/desktop/pairingcenter/ListPage.vue` 已补统一壳层 quick-entry，当前可从 Pairing Center 内部进入 Pairs、Investment Settings，并通过临时兼容入口跳转 Learning / Rule Center，提交 `d5244e1`
 - ✅ `src/web/src/views/desktop/learningcenter/ListPage.vue` 与 `src/web/src/views/desktop/rules/RuleCenterPage.vue` 已增加兼容入口横幅，明确它们只是过渡期 legacy deep-link 页面，并引导返回 Pairing Center，提交 `8dc2af9`
+- ✅ `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue` 已弱化全局管理按钮在导入预览中的视觉权重，明确导入预览只承担 session-assistant 角色而不是第二中心，提交 `afb23fd`
+
+### 阶段结论
+- ✅ 阶段 2 当前已完成：桌面主导航、统一 Pairing Center 壳层、legacy 兼容入口、投资设置归位与导入预览 session-assistant 边界都已建立，后续进入阶段 3 的统一持久化域收口。
 
 ## 阶段 3: 统一配对中心持久化域收口（学习 / 规则 / 投资） — 预计 todo 数: 7
 ### 目标
