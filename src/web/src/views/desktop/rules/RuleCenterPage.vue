@@ -4,11 +4,11 @@
             <v-card>
                 <v-card-title class="d-flex align-center">
                     <v-icon :icon="mdiBookCogOutline" class="me-2" />
-                    <span>Rule Center</span>
+                    <span>{{ tt('Rule Center') }}</span>
                     <v-spacer />
                     <v-btn variant="outlined" :disabled="loading" @click="fetchAll">
                         <v-icon start :icon="mdiRefresh" />
-                        Refresh
+                        {{ tt('Refresh') }}
                     </v-btn>
                 </v-card-title>
 
@@ -25,25 +25,23 @@
                 <v-tabs v-model="activeTab" class="px-4">
                     <v-tab value="rules">
                         <v-icon start :icon="mdiBookCogOutline" />
-                        Category Rules ({{ categoryRules.length }})
+                        {{ tt('Category Rules') }} ({{ categoryRules.length }})
                     </v-tab>
                     <v-tab value="learning">
                         <v-icon start :icon="mdiBrain" />
-                        Learning Rules ({{ overview.learningRuleCount }})
+                        {{ tt('Learning Rules') }} ({{ overview.learningRuleCount }})
+                    </v-tab>
+                    <v-tab value="investment">
+                        <v-icon start :icon="mdiFinance" />
+                        {{ tt('Investment Keywords') }}
                     </v-tab>
                     <v-tab value="keywords">
                         <v-icon start :icon="mdiTagMultiple" />
-                        Legacy Keywords ({{ overview.categoryKeywordCount }})
+                        {{ tt('Legacy Keywords') }} ({{ overview.categoryKeywordCount }})
                     </v-tab>
                     <v-tab value="recurring">
                         <v-icon start :icon="mdiCalendarSync" />
-                        Recurring Rules ({{ overview.recurringRuleCount }})
-                    </v-tab>
-                    <v-tab value="llm">
-                        <v-icon start :icon="mdiRobotOutline" />
-                        LLM 候选
-                        <v-badge v-if="llmPendingCount > 0" :content="llmPendingCount"
-                                 color="warning" floating />
+                        {{ tt('Recurring Rules') }} ({{ overview.recurringRuleCount }})
                     </v-tab>
                 </v-tabs>
 
@@ -52,10 +50,10 @@
                     <v-tabs-window-item value="rules">
                         <div class="d-flex align-center pa-4 ga-2">
                             <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
-                                Add Rule
+                                {{ tt('Add Rule') }}
                             </v-btn>
                             <v-btn variant="outlined" :prepend-icon="mdiDatabaseImportOutline" @click="migrateKeywords">
-                                Migrate from Keywords
+                                {{ tt('Migrate from Keywords') }}
                             </v-btn>
                         </div>
                         <v-data-table
@@ -96,7 +94,7 @@
                                 />
                             </template>
                             <template #item.actions="{ item }">
-                                <v-tooltip text="Edit" location="top">
+                                <v-tooltip :text="tt('Edit')" location="top">
                                     <template #activator="{ props }">
                                         <v-btn
                                             v-bind="props"
@@ -109,7 +107,7 @@
                                         </v-btn>
                                     </template>
                                 </v-tooltip>
-                                <v-tooltip text="Test" location="top">
+                                <v-tooltip :text="tt('Test')" location="top">
                                     <template #activator="{ props }">
                                         <v-btn
                                             v-bind="props"
@@ -122,7 +120,7 @@
                                         </v-btn>
                                     </template>
                                 </v-tooltip>
-                                <v-tooltip text="Delete" location="top">
+                                <v-tooltip :text="tt('Delete')" location="top">
                                     <template #activator="{ props }">
                                         <v-btn
                                             v-bind="props"
@@ -168,6 +166,69 @@
                         />
                     </v-tabs-window-item>
 
+                    <!-- Investment Keywords -->
+                    <v-tabs-window-item value="investment">
+                        <v-card-text>
+                            <div class="d-flex align-center mb-4">
+                                <span class="text-subtitle-1 font-weight-medium">{{ tt('Investment Recognition Keywords') }}</span>
+                                <v-spacer />
+                                <v-btn variant="outlined" size="small" @click="goToInvestmentSettings">
+                                    <v-icon start :icon="mdiPencilOutline" />
+                                    {{ tt('Manage') }}
+                                </v-btn>
+                            </div>
+
+                            <v-row>
+                                <v-col cols="12" md="4">
+                                    <v-card variant="outlined">
+                                        <v-card-subtitle class="pt-3">{{ tt('Platform Keywords') }}</v-card-subtitle>
+                                        <v-card-text>
+                                            <v-chip v-for="kw in investmentKeywords.platform" :key="kw"
+                                                    size="small" class="ma-1" color="green" variant="tonal">
+                                                {{ kw }}
+                                            </v-chip>
+                                            <span v-if="investmentKeywords.platform.length === 0" class="text-grey text-caption">
+                                                {{ tt('Using defaults') }}
+                                            </span>
+                                        </v-card-text>
+                                    </v-card>
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                    <v-card variant="outlined">
+                                        <v-card-subtitle class="pt-3">{{ tt('Product Keywords') }}</v-card-subtitle>
+                                        <v-card-text>
+                                            <v-chip v-for="kw in investmentKeywords.product" :key="kw"
+                                                    size="small" class="ma-1" color="blue" variant="tonal">
+                                                {{ kw }}
+                                            </v-chip>
+                                            <span v-if="investmentKeywords.product.length === 0" class="text-grey text-caption">
+                                                {{ tt('Using defaults') }}
+                                            </span>
+                                        </v-card-text>
+                                    </v-card>
+                                </v-col>
+                                <v-col cols="12" md="4">
+                                    <v-card variant="outlined">
+                                        <v-card-subtitle class="pt-3">{{ tt('Exclude Keywords') }}</v-card-subtitle>
+                                        <v-card-text>
+                                            <v-chip v-for="kw in investmentKeywords.exclude" :key="kw"
+                                                    size="small" class="ma-1" color="red" variant="tonal">
+                                                {{ kw }}
+                                            </v-chip>
+                                            <span v-if="investmentKeywords.exclude.length === 0" class="text-grey text-caption">
+                                                {{ tt('Using defaults') }}
+                                            </span>
+                                        </v-card-text>
+                                    </v-card>
+                                </v-col>
+                            </v-row>
+
+                            <v-alert type="info" variant="tonal" class="mt-4" density="compact">
+                                {{ tt('Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.') }}
+                            </v-alert>
+                        </v-card-text>
+                    </v-tabs-window-item>
+
                     <!-- Recurring Rules -->
                     <v-tabs-window-item value="recurring">
                         <v-data-table
@@ -188,63 +249,6 @@
                             </template>
                         </v-data-table>
                     </v-tabs-window-item>
-
-                    <!-- LLM 候选 -->
-                    <v-tabs-window-item value="llm">
-                        <div class="pa-4">
-                            <v-progress-linear v-if="llmLoading" indeterminate color="secondary" class="mb-4" />
-
-                            <v-data-table
-                                v-if="llmCandidates.length > 0"
-                                :headers="llmHeaders"
-                                :items="llmCandidates"
-                                :items-per-page="20"
-                                density="compact"
-                            >
-                                <template #item.rule_type="{ item }">
-                                    <v-chip size="x-small" variant="tonal" color="info">
-                                        {{ item.rule_type || item.type || 'keyword' }}
-                                    </v-chip>
-                                </template>
-                                <template #item.confidence="{ item }">
-                                    <v-chip
-                                        size="x-small"
-                                        :color="(item.confidence || 0) >= 0.8 ? 'success' : (item.confidence || 0) >= 0.5 ? 'warning' : 'error'"
-                                    >
-                                        {{ ((item.confidence || 0) * 100).toFixed(0) }}%
-                                    </v-chip>
-                                </template>
-                                <template #item.status="{ item }">
-                                    <v-chip
-                                        size="small"
-                                        :color="item.status === 'accepted' ? 'success' : item.status === 'rejected' ? 'error' : 'warning'"
-                                    >
-                                        {{ item.status === 'accepted' ? '已采纳' : item.status === 'rejected' ? '已拒绝' : '待审核' }}
-                                    </v-chip>
-                                </template>
-                                <template #item.actions="{ item }">
-                                    <template v-if="item.status === 'pending'">
-                                        <v-btn size="small" variant="text" color="success" icon
-                                               @click="acceptLLMCandidate(item.id)">
-                                            <v-icon :icon="mdiCheckCircle" size="small" />
-                                            <v-tooltip activator="parent">采纳</v-tooltip>
-                                        </v-btn>
-                                        <v-btn size="small" variant="text" color="error" icon
-                                               @click="rejectLLMCandidate(item.id)">
-                                            <v-icon :icon="mdiCloseCircle" size="small" />
-                                            <v-tooltip activator="parent">拒绝</v-tooltip>
-                                        </v-btn>
-                                    </template>
-                                    <span v-else class="text-grey text-caption">—</span>
-                                </template>
-                            </v-data-table>
-
-                            <v-empty-state v-if="!llmLoading && llmCandidates.length === 0"
-                                           :icon="mdiRobotOutline"
-                                           headline="暂无 LLM 候选规则"
-                                           text="在学习中心使用 LLM 归纳功能来生成候选规则。" />
-                        </div>
-                    </v-tabs-window-item>
                 </v-tabs-window>
             </v-card>
         </v-col>
@@ -253,49 +257,49 @@
     <!-- Create / Edit Dialog -->
     <v-dialog v-model="showEditDialog" max-width="700" persistent>
         <v-card>
-            <v-card-title>{{ editingRule ? 'Edit Rule' : 'Create Rule' }}</v-card-title>
+            <v-card-title>{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</v-card-title>
             <v-card-text>
                 <v-form ref="ruleFormRef">
                     <v-text-field
                         v-model="ruleForm.name"
-                        label="Name"
-                        :rules="[v => !!v || 'Name is required']"
+                        :label="tt('Name')"
+                        :rules="[v => !!v || tt('Name is required')]"
                         class="mb-2"
                     />
                     <v-autocomplete
                         v-model="ruleForm.category_id"
-                        label="Category"
+                        :label="tt('Category')"
                         :items="categoryOptions"
                         item-title="text"
                         item-value="value"
-                        :rules="[v => !!v || 'Category is required']"
+                        :rules="[v => !!v || tt('Category is required')]"
                         class="mb-2"
                     />
                     <v-text-field
                         v-model.number="ruleForm.priority"
-                        label="Priority"
+                        :label="tt('Priority')"
                         type="number"
-                        hint="Lower number = higher priority"
+                        :hint="tt('Lower number = higher priority')"
                         persistent-hint
                         class="mb-2"
                     />
                     <v-textarea
                         v-model="ruleForm.rule_expression"
-                        label="Rule Expression"
+                        :label="tt('Rule Expression')"
                         hint="OR={k1,k2}+AND={k3}+NOT={k4}"
                         persistent-hint
                         rows="3"
-                        :rules="[v => !!v || 'Expression is required']"
+                        :rules="[v => !!v || tt('Expression is required')]"
                         class="mb-2"
                     />
-                    <v-checkbox v-model="ruleForm.regex_enabled" label="Enable Regex" hide-details />
-                    <v-checkbox v-model="ruleForm.enabled" label="Enabled" hide-details />
+                    <v-checkbox v-model="ruleForm.regex_enabled" :label="tt('Enable Regex')" hide-details />
+                    <v-checkbox v-model="ruleForm.enabled" :label="tt('Enabled')" hide-details />
                 </v-form>
             </v-card-text>
             <v-card-actions>
                 <v-spacer />
-                <v-btn @click="showEditDialog = false">Cancel</v-btn>
-                <v-btn color="primary" :loading="saving" @click="saveRule">Save</v-btn>
+                <v-btn @click="showEditDialog = false">{{ tt('Cancel') }}</v-btn>
+                <v-btn color="primary" :loading="saving" @click="saveRule">{{ tt('Save') }}</v-btn>
             </v-card-actions>
         </v-card>
     </v-dialog>
@@ -303,22 +307,22 @@
     <!-- Test Dialog -->
     <v-dialog v-model="showTestDialog" max-width="500">
         <v-card>
-            <v-card-title>Test Rule: {{ testRuleName }}</v-card-title>
+            <v-card-title>{{ tt('Test Rule') }}: {{ testRuleName }}</v-card-title>
             <v-card-text>
                 <v-text-field
                     v-model="testText"
-                    label="Text to test"
+                    :label="tt('Text to test')"
                     placeholder="Enter description or counterparty text..."
                     @keyup.enter="runTest"
                 />
                 <v-alert v-if="testResult !== null" :type="testResult ? 'success' : 'warning'" class="mt-3">
-                    {{ testResult ? 'Match!' : 'No match' }}
+                    {{ testResult ? tt('Match!') : tt('No match') }}
                 </v-alert>
             </v-card-text>
             <v-card-actions>
                 <v-spacer />
-                <v-btn @click="showTestDialog = false">Close</v-btn>
-                <v-btn color="primary" :loading="testing" @click="runTest">Test</v-btn>
+                <v-btn @click="showTestDialog = false">{{ tt('Close') }}</v-btn>
+                <v-btn color="primary" :loading="testing" @click="runTest">{{ tt('Test') }}</v-btn>
             </v-card-actions>
         </v-card>
     </v-dialog>
@@ -326,14 +330,14 @@
     <!-- Delete Confirmation -->
     <v-dialog v-model="showDeleteDialog" max-width="400">
         <v-card>
-            <v-card-title>Delete Rule</v-card-title>
+            <v-card-title>{{ tt('Delete Rule') }}</v-card-title>
             <v-card-text>
-                Are you sure you want to delete rule "{{ deletingRule?.name }}"?
+                {{ tt('Are you sure you want to delete rule') }} "{{ deletingRule?.name }}"?
             </v-card-text>
             <v-card-actions>
                 <v-spacer />
-                <v-btn @click="showDeleteDialog = false">Cancel</v-btn>
-                <v-btn color="error" :loading="deleting" @click="doDelete">Delete</v-btn>
+                <v-btn @click="showDeleteDialog = false">{{ tt('Cancel') }}</v-btn>
+                <v-btn color="error" :loading="deleting" @click="doDelete">{{ tt('Delete') }}</v-btn>
             </v-card-actions>
         </v-card>
     </v-dialog>
@@ -341,15 +345,21 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiTagMultiple, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline, mdiRobotOutline,
+    mdiTestTube, mdiDatabaseImportOutline, mdiFinance,
 } from '@mdi/js';
 import services from '@/lib/services.ts';
+import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { useUserStore } from '@/stores/user.ts';
 
+const router = useRouter();
 const categoryStore = useTransactionCategoriesStore();
+const userStore = useUserStore();
+const { tt } = useI18n();
 
 const loading = ref(false);
 const saving = ref(false);
@@ -380,89 +390,50 @@ const overview = ref<Overview>({
 // ── Category Rules ────────
 const categoryRules = ref<any[]>([]);
 
-const ruleHeaders = [
-    { title: 'Priority', key: 'priority', sortable: true },
-    { title: 'Name', key: 'name' },
-    { title: 'Category', key: 'category_name' },
-    { title: 'Expression', key: 'rule_expression' },
-    { title: 'Regex', key: 'regex_enabled', width: 80 },
-    { title: 'Enabled', key: 'enabled', width: 100 },
-    { title: 'Applied', key: 'applied_count', width: 80 },
-    { title: 'Actions', key: 'actions', sortable: false, width: 140 },
-];
+const ruleHeaders = computed(() => [
+    { title: tt('Priority'), key: 'priority', sortable: true },
+    { title: tt('Name'), key: 'name' },
+    { title: tt('Category'), key: 'category_name' },
+    { title: tt('Expression'), key: 'rule_expression' },
+    { title: tt('Regex'), key: 'regex_enabled', width: 80 },
+    { title: tt('Enabled'), key: 'enabled', width: 100 },
+    { title: tt('Applied'), key: 'applied_count', width: 80 },
+    { title: tt('Actions'), key: 'actions', sortable: false, width: 140 },
+]);
 
-const learningHeaders = [
-    { title: 'Match Type', key: 'matchType' },
-    { title: 'Match Value', key: 'matchValue' },
-    { title: 'Learned Type', key: 'learnedType' },
-    { title: 'Applied', key: 'appliedCount' },
-    { title: 'Enabled', key: 'enabled' },
-];
+const learningHeaders = computed(() => [
+    { title: tt('Match Type'), key: 'matchType' },
+    { title: tt('Match Value'), key: 'matchValue' },
+    { title: tt('Learned Type'), key: 'learnedType' },
+    { title: tt('Applied'), key: 'appliedCount' },
+    { title: tt('Enabled'), key: 'enabled' },
+]);
 
-const keywordHeaders = [
-    { title: 'Keyword', key: 'keyword' },
-    { title: 'Category', key: 'categoryName' },
-];
+const keywordHeaders = computed(() => [
+    { title: tt('Keyword'), key: 'keyword' },
+    { title: tt('Category'), key: 'categoryName' },
+]);
 
-const recurringHeaders = [
-    { title: 'Name', key: 'name' },
-    { title: 'Amount', key: 'amount' },
-    { title: 'Frequency', key: 'frequency' },
-    { title: 'Next Date', key: 'nextDate' },
-    { title: 'Enabled', key: 'enabled' },
-];
+const recurringHeaders = computed(() => [
+    { title: tt('Name'), key: 'name' },
+    { title: tt('Amount'), key: 'amount' },
+    { title: tt('Frequency'), key: 'frequency' },
+    { title: tt('Next Date'), key: 'nextDate' },
+    { title: tt('Enabled'), key: 'enabled' },
+]);
 
-// ── LLM 候选 ────────
-const llmCandidates = ref<any[]>([]);
-const llmLoading = ref(false);
+// ── Investment Keywords (read from user profile) ────────
+const investmentKeywords = computed(() => {
+    const info = userStore.currentUserBasicInfo;
+    return {
+        platform: info?.investmentPlatformKeywords || [],
+        product: info?.investmentProductKeywords || [],
+        exclude: info?.investmentExcludeKeywords || [],
+    };
+});
 
-const llmHeaders = [
-    { title: '类型', key: 'rule_type', width: 100 },
-    { title: '规则内容', key: 'rule_content' },
-    { title: '目标分类', key: 'category_name' },
-    { title: '置信度', key: 'confidence', width: 100 },
-    { title: '状态', key: 'status', width: 100 },
-    { title: '操作', key: 'actions', sortable: false, width: 120 },
-];
-
-const llmPendingCount = computed(() =>
-    llmCandidates.value.filter(c => c.status === 'pending').length
-);
-
-async function fetchLLMCandidates() {
-    llmLoading.value = true;
-    try {
-        const resp = await services.getLLMCandidates({ limit: 100 });
-        if (resp.data?.success && resp.data.result) {
-            llmCandidates.value = Array.isArray(resp.data.result)
-                ? resp.data.result
-                : (resp.data.result.candidates || []);
-        }
-    } catch (e: any) {
-        error.value = e.message || 'Failed to load LLM candidates';
-    } finally {
-        llmLoading.value = false;
-    }
-}
-
-async function acceptLLMCandidate(id: number) {
-    try {
-        await services.acceptLLMCandidate(id);
-        successMsg.value = '候选规则已采纳';
-        await fetchLLMCandidates();
-    } catch (e: any) {
-        error.value = e.message || 'Failed to accept LLM candidate';
-    }
-}
-
-async function rejectLLMCandidate(id: number) {
-    try {
-        await services.rejectLLMCandidate(id);
-        successMsg.value = '候选规则已拒绝';
-        await fetchLLMCandidates();
-    } catch (e: any) {
-        error.value = e.message || 'Failed to reject LLM candidate';
-    }
+function goToInvestmentSettings() {
+    router.push('/user/settings?tab=dataManagementSetting');
 }
 
 // ── Category selector options ────────
@@ -638,7 +609,6 @@ async function fetchAll() {
         await Promise.all([
             fetchCategoryRules(),
             fetchOverview(),
-            fetchLLMCandidates(),
             categoryStore.loadAllCategories({ force: false }),
         ]);
     } finally {

@@ -32,6 +32,13 @@
                                 <v-list-item-title>{{ pairType.label }}</v-list-item-title>
                             </v-list-item>
                         </v-list>
+                        <v-divider class="mt-2" />
+                        <div class="mx-6 mt-4">
+                            <v-btn block variant="outlined" color="green" @click="goToInvestmentSettings">
+                                <v-icon start :icon="mdiCog" />
+                                {{ tt('Investment Settings') }}
+                            </v-btn>
+                        </div>
                     </v-navigation-drawer>
 
                     <!-- 主内容区 -->
@@ -134,6 +141,7 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted } from 'vue';
 import { useDisplay } from 'vuetify';
+import { useRouter } from 'vue-router';
 
 import {
     mdiLinkVariant,
@@ -143,7 +151,8 @@ import {
     mdiSwapHorizontal,
     mdiFinance,
     mdiBrain,
-    mdiLinkOff
+    mdiLinkOff,
+    mdiCog
 } from '@mdi/js';
 
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
@@ -154,6 +163,7 @@ const props = defineProps<{
     initPairType?: string
 }>();
 
+const router = useRouter();
 const display = useDisplay();
 const { tt } = useI18n();
 const matchingStore = useMatchingStore();
@@ -234,6 +244,10 @@ async function doDeletePair(): Promise<void> {
     deleting.value = null;
     showDeleteDialog.value = false;
     pairToDelete.value = null;
+}
+
+function goToInvestmentSettings() {
+    router.push('/user/settings?tab=dataManagementSetting');
 }
 
 onMounted(() => {

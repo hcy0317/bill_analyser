@@ -33,8 +33,8 @@
             <div class="flex-grow-1">
                 <v-combobox
                     v-model="group.keywords"
-                    :label="tt('Keywords')"
-                    :placeholder="tt('Type and press Enter')"
+                    :label="group.type === 'REGEX' ? tt('Regex Patterns') : tt('Keywords')"
+                    :placeholder="group.type === 'REGEX' ? tt('Enter regex pattern') : tt('Type and press Enter')"
                     chips
                     closable-chips
                     multiple
@@ -60,51 +60,70 @@ import { mdiPlus, mdiDelete } from '@mdi/js';
 
 const { tt } = useI18n();
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     modelValue: string;
     disabled?: boolean;
-}>();
+    format?: 'legacy' | 'composite';
+}>(), {
+    format: 'legacy',
+});
 
 const emit = defineEmits(['update:modelValue']);
 
-type KeywordType = 'OR' | 'AND' | 'NOT';
+type KeywordType = 'OR' | 'AND' | 'NOT' | 'REGEX';
 
 interface KeywordGroup {
     type: KeywordType;
     keywords: string[];
 }
 
-const types = computed(() => [
-    { title: tt('OR'), value: 'OR' },
-    { title: tt('AND'), value: 'AND' },
-    { title: tt('NOT'), value: 'NOT' }
-]);
+const types = computed(() => {
+    const base = [
+        { title: tt('Include (OR)'), value: 'OR' as KeywordType },
+        { title: tt('Require (AND)'), value: 'AND' as KeywordType },
+        { title: tt('Exclude (NOT)'), value: 'NOT' as KeywordType },
+    ];
+    if (props.format === 'composite') {
+        base.push({ title: tt('Regex'), value: 'REGEX' as KeywordType });
+    }
+    return base;
+});
 
 const groups = ref<KeywordGroup[]>([]);
 
 watch(() => props.modelValue, (newVal: string) => {
-    const currentSerialized = serializeToString(groups.value);
+    const currentSerialized = serialize(groups.value);
     if (newVal !== currentSerialized) {
-        parseKeywords(newVal);
+        parseExpression(newVal);
     }
 }, { immediate: true });
 
-function parseKeywords(str: string) {
+function detectFormat(str: string): 'composite' | 'legacy' {
+    if (str.includes('={')) return 'composite';
+    return 'legacy';
+}
+
+function parseExpression(str: string) {
     if (!str) {
         groups.value = [];
         return;
     }
+    const fmt = detectFormat(str);
+    if (fmt === 'composite') {
+        parseComposite(str);
+    } else {
+        parseLegacy(str);
+    }
+}
 
+function parseLegacy(str: string) {
     const result: KeywordGroup[] = [];
     const parts = str.split('&');
-
     for (const part of parts) {
         const trimmedPart = part.trim();
         if (!trimmedPart) continue;
-
         let type: KeywordType = 'OR';
         let content = trimmedPart;
-
         if (trimmedPart.startsWith('OR:')) {
             type = 'OR';
             content = trimmedPart.substring(3);
@@ -115,7 +134,6 @@ function parseKeywords(str: string) {
             type = 'NOT';
             content = trimmedPart.substring(4);
         }
-
         const keywords = content.split('|').map(k => k.trim()).filter(k => k);
         if (keywords.length > 0) {
             result.push({ type, keywords });
@@ -124,21 +142,59 @@ function parseKeywords(str: string) {
     groups.value = result;
 }
 
-function serializeToString(currentGroups: KeywordGroup[]): string {
-    const parts: string[] = [];
+function parseComposite(str: string) {
+    const result: KeywordGroup[] = [];
+    const blocks = str.split('+');
+    for (const block of blocks) {
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+        const eqIdx = trimmed.indexOf('={');
+        if (eqIdx === -1) {
+            result.push({ type: 'OR', keywords: [trimmed] });
+            continue;
+        }
+        const prefix = trimmed.substring(0, eqIdx).toUpperCase() as KeywordType;
+        let content = trimmed.substring(eqIdx + 2);
+        if (content.endsWith('}')) content = content.slice(0, -1);
+        const keywords = content.split(',').map(k => k.trim()).filter(k => k);
+        if (keywords.length > 0) {
+            const type: KeywordType = ['OR', 'AND', 'NOT', 'REGEX'].includes(prefix) ? prefix : 'OR';
+            result.push({ type, keywords });
+        }
+    }
+    groups.value = result;
+}
 
+function serialize(currentGroups: KeywordGroup[]): string {
+    if (props.format === 'legacy') {
+        return serializeLegacy(currentGroups);
+    }
+    return serializeComposite(currentGroups);
+}
+
+function serializeLegacy(currentGroups: KeywordGroup[]): string {
+    const parts: string[] = [];
     for (const group of currentGroups) {
         if (group.keywords.length > 0) {
-            const typePrefix = group.type === 'OR' ? 'OR:' : (group.type === 'AND' ? 'AND:' : 'NOT:');
+            const typePrefix = `${group.type === 'REGEX' ? 'OR' : group.type}:`;
             parts.push(`${typePrefix}${group.keywords.join('|')}`);
         }
     }
-
     return parts.join('&');
 }
 
+function serializeComposite(currentGroups: KeywordGroup[]): string {
+    const parts: string[] = [];
+    for (const group of currentGroups) {
+        if (group.keywords.length > 0) {
+            parts.push(`${group.type}={${group.keywords.join(',')}}`);
+        }
+    }
+    return parts.join('+');
+}
+
 function serializeKeywords() {
-    const str = serializeToString(groups.value);
+    const str = serialize(groups.value);
     emit('update:modelValue', str);
 }
 

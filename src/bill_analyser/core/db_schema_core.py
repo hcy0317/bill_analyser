@@ -140,6 +140,28 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS llm_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'openai',
+                model TEXT NOT NULL DEFAULT '',
+                api_key TEXT DEFAULT '',
+                base_url TEXT DEFAULT '',
+                is_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(user_id, name)
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_configs_user_active "
+            "ON llm_configs(user_id, is_active)"
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS account_types (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,

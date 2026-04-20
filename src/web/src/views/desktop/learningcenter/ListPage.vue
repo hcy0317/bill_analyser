@@ -31,7 +31,7 @@
                                          :prepend-icon="mdiRobotOutline"
                                          class="mb-1"
                                          @click="switchTab('llm')">
-                                <v-list-item-title>LLM 归纳</v-list-item-title>
+                                <v-list-item-title>{{ tt('LLM Induction') }}</v-list-item-title>
                                 <template #append v-if="llmPendingCount > 0">
                                     <v-badge :content="llmPendingCount" color="warning" inline />
                                 </template>
@@ -57,13 +57,13 @@
                                    :disabled="loading || llmAnalyzing"
                                    @click="handleLLMAnalyze">
                                 <v-icon start :icon="mdiAutoFix" />
-                                分析未分类交易
+                                {{ tt('Analyze Uncategorized') }}
                             </v-btn>
                             <v-btn block variant="tonal" color="primary" class="mt-2"
                                    :disabled="loading"
                                    @click="loadLLMCandidates">
                                 <v-icon start :icon="mdiRefresh" />
-                                刷新候选
+                                {{ tt('Refresh Candidates') }}
                             </v-btn>
                         </div>
                     </v-navigation-drawer>
@@ -75,12 +75,6 @@
                                 <v-icon :icon="mdiBrain" class="mr-2" />
                                 <span class="text-h6">{{ tt('Learning Center') }}</span>
                                 <v-spacer />
-                                <v-btn-toggle v-model="activeTab" mandatory density="compact"
-                                              color="primary" variant="outlined">
-                                    <v-btn value="suggestions" size="small">{{ tt('Suggestions') }}</v-btn>
-                                    <v-btn value="rules" size="small">{{ tt('Rules') }}</v-btn>
-                                    <v-btn value="llm" size="small">LLM 归纳</v-btn>
-                                </v-btn-toggle>
                             </div>
 
                             <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
@@ -130,7 +124,7 @@
                                                                 :disabled="item.status !== 'pending'" />
                                             </td>
                                             <td>
-                                                <div class="text-body-2 font-weight-medium">{{ item.matchType }}</div>
+                                                <div class="text-body-2 font-weight-medium">{{ translateMatchType(item.matchType) }}</div>
                                                 <div class="text-caption text-grey">{{ item.matchValue }}</div>
                                             </td>
                                             <td>
@@ -193,7 +187,7 @@
                                     <tbody>
                                         <tr v-for="rule in rules" :key="rule.id">
                                             <td>
-                                                <div class="text-body-2 font-weight-medium">{{ rule.matchType }}</div>
+                                                <div class="text-body-2 font-weight-medium">{{ translateMatchType(rule.matchType) }}</div>
                                                 <div class="text-caption text-grey">{{ rule.matchValue }}</div>
                                             </td>
                                             <td>
@@ -216,6 +210,11 @@
                                                           @update:model-value="(v: boolean | null) => handleToggleRule(rule.id, !!v)" />
                                             </td>
                                             <td class="text-center">
+                                                <v-btn size="small" variant="text" color="primary"
+                                                       :icon="true" @click="openEditRuleDialog(rule)">
+                                                    <v-icon :icon="mdiPencil" />
+                                                    <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
+                                                </v-btn>
                                                 <v-btn size="small" variant="text" color="error"
                                                        :icon="true" @click="handleDeleteRule(rule.id)">
                                                     <v-icon :icon="mdiDelete" />
@@ -234,66 +233,70 @@
 
                             <!-- ── LLM 归纳 Tab ── -->
                             <template v-if="activeTab === 'llm'">
-                                <!-- LLM 配置 -->
+                                <!-- LLM 多配置管理 -->
                                 <v-card variant="outlined" class="mb-4">
-                                    <v-card-title class="text-subtitle-1">
+                                    <v-card-title class="text-subtitle-1 d-flex align-center">
                                         <v-icon start :icon="mdiCog" size="small" />
-                                        LLM 配置
+                                        {{ tt('LLM Config') }}
+                                        <v-spacer />
+                                        <v-btn size="small" variant="tonal" color="primary"
+                                               @click="openAddConfigDialog">
+                                            {{ tt('Add Config') }}
+                                        </v-btn>
                                     </v-card-title>
                                     <v-card-text>
-                                        <v-row dense>
-                                            <v-col cols="12" sm="4">
-                                                <v-select v-model="llmConfig.provider" label="提供商"
-                                                           :items="['openai', 'anthropic', 'deepseek', 'ollama']"
-                                                           density="compact" hide-details />
-                                            </v-col>
-                                            <v-col cols="12" sm="4">
-                                                <v-text-field v-model="llmConfig.model" label="模型"
-                                                              density="compact" hide-details
-                                                              placeholder="gpt-4o-mini" />
-                                            </v-col>
-                                            <v-col cols="12" sm="4">
-                                                <v-text-field v-model="llmConfig.api_key" label="API Key"
-                                                              density="compact" hide-details
-                                                              type="password" placeholder="sk-..." />
-                                            </v-col>
-                                        </v-row>
-                                        <v-row dense class="mt-2">
-                                            <v-col cols="12" sm="6">
-                                                <v-text-field v-model="llmConfig.base_url" label="Base URL (可选)"
-                                                              density="compact" hide-details
-                                                              placeholder="https://api.openai.com/v1" />
-                                            </v-col>
-                                            <v-col cols="12" sm="3">
-                                                <v-switch v-model="llmConfig.enabled" label="启用"
-                                                          density="compact" hide-details color="success" />
-                                            </v-col>
-                                            <v-col cols="12" sm="3" class="d-flex align-center">
-                                                <v-btn variant="tonal" color="primary" size="small"
-                                                       :loading="llmConfigSaving"
-                                                       @click="saveLLMConfig">
-                                                    保存配置
-                                                </v-btn>
-                                            </v-col>
-                                        </v-row>
+                                        <v-table v-if="llmSavedConfigs.length > 0" density="compact" hover>
+                                            <thead>
+                                                <tr>
+                                                    <th>{{ tt('Name') }}</th>
+                                                    <th>{{ tt('Provider') }}</th>
+                                                    <th>{{ tt('Model') }}</th>
+                                                    <th class="text-center">{{ tt('Active') }}</th>
+                                                    <th class="text-center">{{ tt('Actions') }}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr v-for="cfg in llmSavedConfigs" :key="cfg.id">
+                                                    <td>{{ cfg.name }}</td>
+                                                    <td>{{ cfg.provider }}</td>
+                                                    <td>{{ cfg.model }}</td>
+                                                    <td class="text-center">
+                                                        <v-icon v-if="cfg.is_active" :icon="mdiCheck" color="success" size="small" />
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <v-btn v-if="!cfg.is_active" size="x-small" variant="text" color="primary"
+                                                               @click="handleActivateConfig(cfg.id)">
+                                                            {{ tt('Activate') }}
+                                                        </v-btn>
+                                                        <v-btn size="x-small" variant="text" color="error"
+                                                               @click="handleDeleteConfig(cfg.id)">
+                                                            <v-icon :icon="mdiDelete" size="small" />
+                                                        </v-btn>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </v-table>
+                                        <div v-else class="text-center text-caption text-medium-emphasis py-3">
+                                            {{ tt('No saved configs. Click Add Config to create one.') }}
+                                        </div>
                                     </v-card-text>
                                 </v-card>
 
                                 <!-- 分析结果提示 -->
                                 <v-alert v-if="llmAnalyzeResult" type="info" closable class="mb-4"
                                          @click:close="llmAnalyzeResult = null">
-                                    分析完成：生成 {{ llmAnalyzeResult.candidates_created || 0 }} 条候选规则
+                                    {{ tt('Analysis complete') }}: {{ tt('Generated') }} {{ llmAnalyzeResult.candidates_created || 0 }} {{ tt('candidate rules') }}
                                 </v-alert>
 
                                 <!-- 候选列表 -->
                                 <div class="d-flex align-center mb-2">
-                                    <span class="text-subtitle-2">候选规则</span>
+                                    <span class="text-subtitle-2">{{ tt('Candidate Rules') }}</span>
                                     <v-spacer />
                                     <v-chip-group v-model="llmStatusFilter" mandatory>
-                                        <v-chip value="" variant="tonal" size="small">全部</v-chip>
-                                        <v-chip value="pending" variant="tonal" color="warning" size="small">待审核</v-chip>
-                                        <v-chip value="accepted" variant="tonal" color="success" size="small">已采纳</v-chip>
-                                        <v-chip value="rejected" variant="tonal" color="error" size="small">已拒绝</v-chip>
+                                        <v-chip value="" variant="tonal" size="small">{{ tt('All') }}</v-chip>
+                                        <v-chip value="pending" variant="tonal" color="warning" size="small">{{ tt('Pending') }}</v-chip>
+                                        <v-chip value="accepted" variant="tonal" color="success" size="small">{{ tt('Accepted') }}</v-chip>
+                                        <v-chip value="rejected" variant="tonal" color="error" size="small">{{ tt('Rejected') }}</v-chip>
                                     </v-chip-group>
                                 </div>
 
@@ -302,12 +305,12 @@
                                 <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
                                     <thead>
                                         <tr>
-                                            <th>类型</th>
-                                            <th>规则内容</th>
-                                            <th>目标分类</th>
-                                            <th>置信度</th>
-                                            <th>状态</th>
-                                            <th class="text-center">操作</th>
+                                            <th>{{ tt('Type') }}</th>
+                                            <th>{{ tt('Rule Content') }}</th>
+                                            <th>{{ tt('Target Category') }}</th>
+                                            <th>{{ tt('Confidence') }}</th>
+                                            <th>{{ tt('Status') }}</th>
+                                            <th class="text-center">{{ tt('Actions') }}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -337,12 +340,12 @@
                                                     <v-btn size="small" variant="text" color="success"
                                                            :icon="true" @click="handleLLMAccept(candidate.id)">
                                                         <v-icon :icon="mdiCheck" />
-                                                        <v-tooltip activator="parent">采纳</v-tooltip>
+                                                        <v-tooltip activator="parent">{{ tt('Accept') }}</v-tooltip>
                                                     </v-btn>
                                                     <v-btn size="small" variant="text" color="error"
                                                            :icon="true" @click="handleLLMReject(candidate.id)">
                                                         <v-icon :icon="mdiClose" />
-                                                        <v-tooltip activator="parent">拒绝</v-tooltip>
+                                                        <v-tooltip activator="parent">{{ tt('Reject') }}</v-tooltip>
                                                     </v-btn>
                                                 </template>
                                                 <span v-else class="text-grey text-caption">—</span>
@@ -353,8 +356,8 @@
 
                                 <v-empty-state v-if="!llmAnalyzing && filteredLLMCandidates.length === 0"
                                                :icon="mdiRobotOutline"
-                                               headline="暂无候选规则"
-                                               text="点击左侧「分析未分类交易」按钮，让 LLM 自动归纳分类规则。" />
+                                               :headline="tt('No Candidate Rules')"
+                                               :text="tt('Click Analyze Uncategorized to let LLM induce classification rules.')" />
                             </template>
                         </v-card-text>
                     </v-main>
@@ -362,6 +365,51 @@
             </v-card>
         </v-col>
     </v-row>
+
+    <!-- Edit Rule Dialog -->
+    <v-dialog v-model="editRuleDialog" max-width="500" persistent>
+        <v-card>
+            <v-card-title>{{ tt('Edit Rule') }}</v-card-title>
+            <v-card-text>
+                <v-text-field v-model="editRuleForm.matchValue" :label="tt('Match Value')"
+                              density="compact" class="mb-3" />
+                <v-text-field v-model="editRuleForm.learnedType" :label="tt('Learned Type')"
+                              density="compact" class="mb-3" />
+            </v-card-text>
+            <v-card-actions>
+                <v-spacer />
+                <v-btn variant="text" @click="editRuleDialog = false">{{ tt('Cancel') }}</v-btn>
+                <v-btn color="primary" variant="tonal" :loading="editRuleSaving"
+                       @click="saveEditRule">{{ tt('Save') }}</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
+
+    <!-- Add Config Dialog -->
+    <v-dialog v-model="addConfigDialog" max-width="500" persistent>
+        <v-card>
+            <v-card-title>{{ tt('Add Config') }}</v-card-title>
+            <v-card-text>
+                <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
+                              density="compact" class="mb-3" placeholder="My OpenAI Config" />
+                <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
+                          :items="['openai', 'anthropic', 'deepseek', 'ollama']"
+                          density="compact" class="mb-3" />
+                <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
+                              density="compact" class="mb-3" placeholder="gpt-4o-mini" />
+                <v-text-field v-model="newConfigForm.api_key" label="API Key"
+                              density="compact" class="mb-3" type="password" placeholder="sk-..." />
+                <v-text-field v-model="newConfigForm.base_url" :label="tt('Base URL (optional)')"
+                              density="compact" placeholder="https://api.openai.com/v1" />
+            </v-card-text>
+            <v-card-actions>
+                <v-spacer />
+                <v-btn variant="text" @click="addConfigDialog = false">{{ tt('Cancel') }}</v-btn>
+                <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
+                       @click="saveNewConfig">{{ tt('Save') }}</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -382,6 +430,7 @@ import {
     mdiCheck,
     mdiClose,
     mdiDelete,
+    mdiPencil,
     mdiLightbulbOutline,
     mdiBookOpenPageVariant,
     mdiRobotOutline,
@@ -465,6 +514,18 @@ function statusLabel(status: string): string {
     }
 }
 
+function translateMatchType(type: string): string {
+    const map: Record<string, string> = {
+        'composite': tt('Composite Rule'),
+        'counterparty': tt('Counterparty'),
+        'description': tt('Description'),
+        'keyword': tt('Keyword'),
+        'amount': tt('Amount'),
+        'payment_method': tt('Payment Method'),
+    };
+    return map[type] || type;
+}
+
 function switchTab(tab: string) {
     activeTab.value = tab;
 }
@@ -508,27 +569,52 @@ async function handleDeleteRule(ruleId: number) {
     await store.deleteRule(ruleId);
 }
 
-// ── LLM 归纳 state ──────────
-interface LLMConfig {
-    provider: string;
-    model: string;
-    api_key: string;
-    base_url: string;
-    enabled: boolean;
+// ── Edit Rule Dialog ──────────
+const editRuleDialog = ref(false);
+const editRuleSaving = ref(false);
+const editRuleForm = ref({ id: 0, matchValue: '', learnedType: '' });
+
+function openEditRuleDialog(rule: LearningRule) {
+    editRuleForm.value = {
+        id: rule.id,
+        matchValue: rule.matchValue || '',
+        learnedType: rule.learnedType || '',
+    };
+    editRuleDialog.value = true;
 }
 
-const llmConfig = ref<LLMConfig>({
-    provider: 'openai',
-    model: '',
-    api_key: '',
-    base_url: '',
-    enabled: false,
-});
-const llmConfigSaving = ref(false);
+async function saveEditRule() {
+    editRuleSaving.value = true;
+    try {
+        const resp = await services.updateLearningRule({
+            ruleId: editRuleForm.value.id,
+            matchValue: editRuleForm.value.matchValue,
+            learnedType: editRuleForm.value.learnedType,
+        });
+        if (resp.data?.success) {
+            editRuleDialog.value = false;
+            await store.loadRules();
+        } else {
+            store.error = resp.data?.error || 'Failed to update rule';
+        }
+    } catch (e: any) {
+        store.error = e.message || 'Failed to update rule';
+    } finally {
+        editRuleSaving.value = false;
+    }
+}
+
+// ── LLM 归纳 state ──────────
+const llmSavedConfigs = ref<any[]>([]);
 const llmAnalyzing = ref(false);
 const llmAnalyzeResult = ref<any>(null);
 const llmCandidates = ref<any[]>([]);
 const llmStatusFilter = ref<string>('');
+
+// Add Config Dialog
+const addConfigDialog = ref(false);
+const addConfigSaving = ref(false);
+const newConfigForm = ref({ name: '', provider: 'openai', model: '', api_key: '', base_url: '' });
 
 const llmPendingCount = computed(() =>
     llmCandidates.value.filter(c => c.status === 'pending').length
@@ -550,9 +636,9 @@ function llmStatusColor(status: string): string {
 
 function llmStatusLabel(status: string): string {
     switch (status) {
-        case 'pending': return '待审核';
-        case 'accepted': return '已采纳';
-        case 'rejected': return '已拒绝';
+        case 'pending': return tt('Pending');
+        case 'accepted': return tt('Accepted');
+        case 'rejected': return tt('Rejected');
         default: return status;
     }
 }
@@ -563,30 +649,59 @@ function confidenceColor(confidence: number): string {
     return 'error';
 }
 
-async function loadLLMConfig() {
+async function loadLLMConfigs() {
     try {
-        const resp = await services.getLLMConfig();
+        const resp = await services.getLLMConfigs();
         if (resp.data?.success && resp.data.result) {
-            const cfg = resp.data.result;
-            llmConfig.value = {
-                provider: cfg.provider || 'openai',
-                model: cfg.model || '',
-                api_key: cfg.api_key || '',
-                base_url: cfg.base_url || '',
-                enabled: !!cfg.enabled,
-            };
+            llmSavedConfigs.value = Array.isArray(resp.data.result) ? resp.data.result : [];
         }
     } catch { /* ignore config load errors */ }
 }
 
-async function saveLLMConfig() {
-    llmConfigSaving.value = true;
+function openAddConfigDialog() {
+    newConfigForm.value = { name: '', provider: 'openai', model: '', api_key: '', base_url: '' };
+    addConfigDialog.value = true;
+}
+
+async function saveNewConfig() {
+    if (!newConfigForm.value.name.trim()) {
+        store.error = 'Name is required';
+        return;
+    }
+    addConfigSaving.value = true;
     try {
-        await services.updateLLMConfig(llmConfig.value);
+        const resp = await services.createLLMConfig({
+            ...newConfigForm.value,
+            is_active: llmSavedConfigs.value.length === 0, // auto-activate first config
+        });
+        if (resp.data?.success) {
+            addConfigDialog.value = false;
+            await loadLLMConfigs();
+        } else {
+            store.error = resp.data?.error || 'Failed to create config';
+        }
     } catch (e: any) {
-        store.error = e.message || 'Failed to save LLM config';
+        store.error = e.message || 'Failed to create config';
     } finally {
-        llmConfigSaving.value = false;
+        addConfigSaving.value = false;
+    }
+}
+
+async function handleActivateConfig(configId: number) {
+    try {
+        await services.activateLLMConfig(configId);
+        await loadLLMConfigs();
+    } catch (e: any) {
+        store.error = e.message || 'Failed to activate config';
+    }
+}
+
+async function handleDeleteConfig(configId: number) {
+    try {
+        await services.deleteLLMConfig(configId);
+        await loadLLMConfigs();
+    } catch (e: any) {
+        store.error = e.message || 'Failed to delete config';
     }
 }
 
@@ -641,7 +756,7 @@ watch(activeTab, (tab) => {
     if (tab === 'suggestions') {
         store.loadSuggestions();
     } else if (tab === 'llm') {
-        loadLLMConfig();
+        loadLLMConfigs();
         loadLLMCandidates();
     } else {
         store.loadRules();

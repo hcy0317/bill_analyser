@@ -116,8 +116,8 @@ async function fetchAnomalies() {
     error.value = null;
     try {
         const resp = await services.getAnomalies({ months: months.value });
-        if (resp.success && resp.data) {
-            data.value = resp.data;
+        if (resp.data.success && resp.data.result) {
+            data.value = resp.data.result;
         }
     } catch (e: any) {
         error.value = e.message || 'Failed to analyze';

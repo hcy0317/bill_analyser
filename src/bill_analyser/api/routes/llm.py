@@ -264,3 +264,126 @@ def update_config():
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("更新 LLM 配置失败: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ------------------------------------------------------------------
+# Multi-config CRUD endpoints
+# ------------------------------------------------------------------
+
+def _get_db() -> Any:
+    return cast("Any", current_app.config.get("DB_INSTANCE"))
+
+
+@bp.route("/configs", methods=["GET"])
+@log_method
+@require_auth
+def list_configs():
+    """列出所有保存的 LLM 配置。"""
+    try:
+        db = _get_db()
+        user_id = _get_request_user_id()
+        items = _run_async(db.get_llm_configs(user_id=user_id))
+        # Mask API keys
+        for item in items:
+            if item.get("api_key"):
+                item["api_key"] = item["api_key"][:4] + "****"
+        return jsonify({"success": True, "data": items})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("列出 LLM 配置失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/configs", methods=["POST"])
+@log_method
+@require_auth
+def create_config():
+    """创建新的 LLM 配置。"""
+    try:
+        db = _get_db()
+        user_id = _get_request_user_id()
+        data = request.get_json(silent=True) or {}
+
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"success": False, "error": "name is required"}), 400
+
+        result = _run_async(db.create_llm_config(
+            user_id=user_id,
+            name=name,
+            provider=data.get("provider", "openai"),
+            model=data.get("model", ""),
+            api_key=data.get("api_key", ""),
+            base_url=data.get("base_url", ""),
+            is_active=bool(data.get("is_active", False)),
+        ))
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("创建 LLM 配置失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/configs/<int:config_id>", methods=["PUT"])
+@log_method
+@require_auth
+def update_saved_config(config_id: int):
+    """更新保存的 LLM 配置。"""
+    try:
+        db = _get_db()
+        user_id = _get_request_user_id()
+        data = request.get_json(silent=True) or {}
+
+        result = _run_async(db.update_llm_config(config_id, user_id=user_id, **data))
+        if result is None:
+            return jsonify({"success": False, "error": "config_not_found"}), 404
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("更新 LLM 配置失败: id=%s, %s", config_id, exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/configs/<int:config_id>", methods=["DELETE"])
+@log_method
+@require_auth
+def delete_saved_config(config_id: int):
+    """删除保存的 LLM 配置。"""
+    try:
+        db = _get_db()
+        user_id = _get_request_user_id()
+        success = _run_async(db.delete_llm_config(config_id, user_id=user_id))
+        if not success:
+            return jsonify({"success": False, "error": "config_not_found"}), 404
+        return jsonify({"success": True})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("删除 LLM 配置失败: id=%s, %s", config_id, exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/configs/<int:config_id>/activate", methods=["POST"])
+@log_method
+@require_auth
+def activate_saved_config(config_id: int):
+    """激活指定的 LLM 配置并同步到运行时。"""
+    try:
+        db = _get_db()
+        user_id = _get_request_user_id()
+        success = _run_async(db.activate_llm_config(config_id, user_id=user_id))
+        if not success:
+            return jsonify({"success": False, "error": "config_not_found"}), 404
+
+        # Sync active config to runtime
+        active = _run_async(db.get_active_llm_config(user_id=user_id))
+        if active:
+            current_app.config["LLM_CONFIG"] = {
+                "enabled": True,
+                "provider": active["provider"],
+                "provider_config": {
+                    "api_key": active["api_key"],
+                    "base_url": active["base_url"],
+                    "model": active["model"],
+                },
+            }
+
+        return jsonify({"success": True})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("激活 LLM 配置失败: id=%s, %s", config_id, exc)
+        return jsonify({"success": False, "error": str(exc)}), 500

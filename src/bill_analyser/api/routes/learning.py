@@ -207,6 +207,38 @@ def toggle_rule(rule_id: int):
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@bp.route("/rules/<int:rule_id>", methods=["PUT"])
+@log_method
+@require_auth
+def update_rule(rule_id: int):
+    """更新学习规则的可编辑字段。"""
+    try:
+        db = _get_db()
+        user_id = _get_user_id()
+        data = request.get_json(silent=True) or {}
+
+        kwargs: dict[str, Any] = {}
+        if "matchValue" in data:
+            kwargs["match_value"] = str(data["matchValue"]).strip()
+        if "learnedType" in data:
+            kwargs["learned_type"] = str(data["learnedType"]).strip()
+        if "learnedCategoryId" in data:
+            kwargs["learned_category_id"] = int(data["learnedCategoryId"])
+        if "enabled" in data:
+            kwargs["enabled"] = bool(data["enabled"])
+
+        if not kwargs:
+            return jsonify({"success": False, "error": "no_fields_to_update"}), 400
+
+        result = _run_async(db.update_import_learning_rule(rule_id, user_id=user_id, **kwargs))
+        if result is None:
+            return jsonify({"success": False, "error": "rule_not_found"}), 404
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:
+        logger.error("[学习规则更新] id=%s, error=%s", rule_id, exc, exc_info=True)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @bp.route("/rules/<int:rule_id>", methods=["DELETE"])
 @log_method
 @require_auth

@@ -552,6 +552,76 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         return True
 
     @log_method
+    async def update_import_learning_rule(
+        self,
+        rule_id: int,
+        user_id: int = 1,
+        *,
+        match_value: str | None = None,
+        learned_type: str | None = None,
+        learned_category_id: int | None = None,
+        enabled: bool | None = None,
+    ) -> dict[str, Any] | None:
+        """Update editable fields of a learning rule. Returns updated row or None if not found."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1",
+            (rule_id, user_id),
+        ) as cursor:
+            existing = await cursor.fetchone()
+        if not existing:
+            return None
+
+        now = utc_now_iso()
+        updates: list[str] = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        if match_value is not None:
+            updates.append("match_value = ?")
+            params.append(match_value)
+            normalized = match_value.strip().lower()
+            updates.append("normalized_match_value = ?")
+            params.append(normalized)
+
+        if learned_type is not None:
+            updates.append("learned_type = ?")
+            params.append(learned_type)
+
+        if learned_category_id is not None:
+            updates.append("learned_category_id = ?")
+            params.append(learned_category_id)
+
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        params.extend([rule_id, user_id])
+        await conn.execute(
+            f"UPDATE import_learning_rules SET {', '.join(updates)} WHERE id = ? AND user_id = ?",
+            tuple(params),
+        )
+        await self._record_import_learning_rule_log(
+            conn,
+            rule_id=rule_id,
+            user_id=user_id,
+            action="updated",
+            match_type=existing["match_type"],
+            match_value=match_value or existing["match_value"],
+            normalized_match_value=(match_value or existing["match_value"]).strip().lower(),
+            session_id=existing["source_session_id"],
+            preview_id=existing["source_preview_id"],
+            payload={"match_value": match_value, "learned_type": learned_type, "enabled": enabled},
+        )
+        await conn.commit()
+
+        async with conn.execute(
+            "SELECT * FROM import_learning_rules WHERE id = ? AND user_id = ? LIMIT 1",
+            (rule_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    @log_method
     async def delete_import_learning_rule(self, rule_id: int, user_id: int = 1) -> bool:
         conn = await self._get_connection()
         async with conn.execute(

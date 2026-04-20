@@ -2047,6 +2047,12 @@ export default {
         });
     },
 
+    updateLearningRule: ({ ruleId, ...fields }: { ruleId: number, matchValue?: string, learnedType?: string, learnedCategoryId?: number, enabled?: boolean }): ApiResponsePromise<any> => {
+        return axios.put(`learning/rules/${ruleId}`, fields).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     deleteLearningRule: ({ ruleId }: { ruleId: number }): ApiResponsePromise<any> => {
         return axios.delete(`learning/rules/${ruleId}`).then(response => {
             return buildApiResponse(response, response.data?.data);
@@ -2203,6 +2209,38 @@ export default {
     },
     rejectLLMCandidate: (candidateId: number): ApiResponsePromise<any> => {
         return axios.post(`llm/candidates/${candidateId}/reject`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    // ── LLM Multi-Config (LLM 多配置管理) ──────────
+
+    getLLMConfigs: (): ApiResponsePromise<any> => {
+        return axios.get('llm/configs').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    createLLMConfig: (config: { name: string; provider: string; model: string; api_key?: string; base_url?: string; is_active?: boolean }): ApiResponsePromise<any> => {
+        return axios.post('llm/configs', config).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    updateLLMSavedConfig: (configId: number, fields: Record<string, any>): ApiResponsePromise<any> => {
+        return axios.put(`llm/configs/${configId}`, fields).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    deleteLLMConfig: (configId: number): ApiResponsePromise<any> => {
+        return axios.delete(`llm/configs/${configId}`).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    activateLLMConfig: (configId: number): ApiResponsePromise<any> => {
+        return axios.post(`llm/configs/${configId}/activate`).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },
