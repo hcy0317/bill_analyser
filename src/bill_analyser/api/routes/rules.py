@@ -34,7 +34,7 @@ def _run_async(coroutine: Any) -> Any:
 @log_method
 @require_auth
 def get_rules_overview():
-    """统一规则聚合：learning rules + category keywords + recurring rules。"""
+    """统一规则聚合：learning rules + category rules + recurring rules。"""
     try:
         db = _get_db()
         user_id = _get_user_id()
@@ -56,24 +56,21 @@ def get_rules_overview():
                     "appliedCount": r.get("applied_count", 0),
                     "source": "learning",
                 })
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.warning("Failed to load learning rules: %s", exc)
 
-        # 2. Category keywords
-        category_keywords = []
+        # 2. Category rules (canonical source)
+        category_rule_count = 0
         try:
-            conn = _run_async(db._get_connection())
-            rows = _run_async(_fetch_category_keywords(conn, user_id))
-            for kw in rows:
-                category_keywords.append({
-                    "id": kw.get("id"),
-                    "keyword": kw.get("keyword"),
-                    "categoryId": kw.get("category_id"),
-                    "categoryName": kw.get("category_name"),
-                    "source": "category_keyword",
-                })
-        except Exception as exc:
-            logger.warning("Failed to load category keywords: %s", exc)
+            category_rules = _run_async(
+                db.get_category_rules(
+                    user_id=user_id,
+                    enabled_only=True,
+                )
+            )
+            category_rule_count = len(category_rules)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to load category rules: %s", exc)
 
         # 3. Recurring rules
         recurring_rules = []
@@ -89,7 +86,7 @@ def get_rules_overview():
                     "nextDate": t.get("next_date"),
                     "source": "recurring",
                 })
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.warning("Failed to load recurring rules: %s", exc)
 
         return jsonify({
@@ -97,34 +94,12 @@ def get_rules_overview():
             "data": {
                 "learningRules": learning_rules,
                 "learningRuleCount": learning_count,
-                "categoryKeywords": category_keywords,
-                "categoryKeywordCount": len(category_keywords),
+                "categoryRuleCount": category_rule_count,
                 "recurringRules": recurring_rules,
                 "recurringRuleCount": len(recurring_rules),
-                "totalRuleCount": learning_count + len(category_keywords) + len(recurring_rules),
+                "totalRuleCount": learning_count + category_rule_count + len(recurring_rules),
             },
         })
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("get_rules_overview error: %s", exc)
         return jsonify({"success": False, "message": str(exc)}), 500
-
-
-async def _fetch_category_keywords(conn: Any, user_id: int) -> list[dict[str, Any]]:
-    """Fetch category keywords with category name join."""
-    try:
-        async with conn.execute(
-            """
-            SELECT ck.id, ck.keyword, ck.category_id,
-                   COALESCE(tc.name, '') as category_name
-            FROM category_keywords ck
-            LEFT JOIN transaction_categories tc ON ck.category_id = tc.id
-            WHERE ck.user_id = ?
-            ORDER BY ck.keyword
-            """,
-            (user_id,),
-        ) as cursor:
-            rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-    except Exception:
-        # Table might not exist, return empty
-        return []

@@ -57,11 +57,7 @@
                     </v-tab>
                     <v-tab value="investment">
                         <v-icon start :icon="mdiFinance" />
-                        {{ tt('Investment Keywords') }}
-                    </v-tab>
-                    <v-tab value="keywords">
-                        <v-icon start :icon="mdiTagMultiple" />
-                        {{ tt('Legacy Keywords') }} ({{ overview.categoryKeywordCount }})
+                        {{ tt('Investment Settings') }}
                     </v-tab>
                     <v-tab value="recurring">
                         <v-icon start :icon="mdiCalendarSync" />
@@ -180,21 +176,11 @@
                         </v-data-table>
                     </v-tabs-window-item>
 
-                    <!-- Category Keywords -->
-                    <v-tabs-window-item value="keywords">
-                        <v-data-table
-                            :headers="keywordHeaders"
-                            :items="overview.categoryKeywords"
-                            :items-per-page="20"
-                            density="compact"
-                        />
-                    </v-tabs-window-item>
-
-                    <!-- Investment Keywords -->
+                    <!-- Investment Settings -->
                     <v-tabs-window-item value="investment">
                         <v-card-text>
                             <div class="d-flex align-center mb-4">
-                                <span class="text-subtitle-1 font-weight-medium">{{ tt('Investment Recognition Keywords') }}</span>
+                                <span class="text-subtitle-1 font-weight-medium">{{ tt('Investment Recognition Settings') }}</span>
                                 <v-spacer />
                                 <v-btn variant="outlined" size="small" @click="goToInvestmentSettings">
                                     <v-icon start :icon="mdiPencilOutline" />
@@ -207,11 +193,11 @@
                                     <v-card variant="outlined">
                                         <v-card-subtitle class="pt-3">{{ tt('Platform Keywords') }}</v-card-subtitle>
                                         <v-card-text>
-                                            <v-chip v-for="kw in investmentKeywords.platform" :key="kw"
+                                            <v-chip v-for="kw in investmentSettingsSummary.platform" :key="kw"
                                                     size="small" class="ma-1" color="green" variant="tonal">
                                                 {{ kw }}
                                             </v-chip>
-                                            <span v-if="investmentKeywords.platform.length === 0" class="text-grey text-caption">
+                                            <span v-if="investmentSettingsSummary.platform.length === 0" class="text-grey text-caption">
                                                 {{ tt('Using defaults') }}
                                             </span>
                                         </v-card-text>
@@ -221,11 +207,11 @@
                                     <v-card variant="outlined">
                                         <v-card-subtitle class="pt-3">{{ tt('Product Keywords') }}</v-card-subtitle>
                                         <v-card-text>
-                                            <v-chip v-for="kw in investmentKeywords.product" :key="kw"
+                                            <v-chip v-for="kw in investmentSettingsSummary.product" :key="kw"
                                                     size="small" class="ma-1" color="blue" variant="tonal">
                                                 {{ kw }}
                                             </v-chip>
-                                            <span v-if="investmentKeywords.product.length === 0" class="text-grey text-caption">
+                                            <span v-if="investmentSettingsSummary.product.length === 0" class="text-grey text-caption">
                                                 {{ tt('Using defaults') }}
                                             </span>
                                         </v-card-text>
@@ -235,11 +221,11 @@
                                     <v-card variant="outlined">
                                         <v-card-subtitle class="pt-3">{{ tt('Exclude Keywords') }}</v-card-subtitle>
                                         <v-card-text>
-                                            <v-chip v-for="kw in investmentKeywords.exclude" :key="kw"
+                                            <v-chip v-for="kw in investmentSettingsSummary.exclude" :key="kw"
                                                     size="small" class="ma-1" color="red" variant="tonal">
                                                 {{ kw }}
                                             </v-chip>
-                                            <span v-if="investmentKeywords.exclude.length === 0" class="text-grey text-caption">
+                                            <span v-if="investmentSettingsSummary.exclude.length === 0" class="text-grey text-caption">
                                                 {{ tt('Using defaults') }}
                                             </span>
                                         </v-card-text>
@@ -248,7 +234,7 @@
                             </v-row>
 
                             <v-alert type="info" variant="tonal" class="mt-4" density="compact">
-                                {{ tt('Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.') }}
+                                {{ tt('Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.') }}
                             </v-alert>
                         </v-card-text>
                     </v-tabs-window-item>
@@ -372,7 +358,7 @@ import axios from 'axios';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-    mdiBookCogOutline, mdiRefresh, mdiBrain, mdiTagMultiple, mdiCalendarSync,
+    mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
     mdiTestTube, mdiDatabaseImportOutline, mdiFinance, mdiLinkVariant, mdiOpenInNew,
 } from '@mdi/js';
@@ -404,11 +390,6 @@ interface LearningRuleOverviewItem {
     enabled: boolean;
 }
 
-interface CategoryKeywordOverviewItem {
-    keyword: string;
-    categoryName: string;
-}
-
 interface RecurringRuleOverviewItem {
     name: string;
     amount: number | null;
@@ -420,8 +401,7 @@ interface RecurringRuleOverviewItem {
 interface Overview {
     learningRules: LearningRuleOverviewItem[];
     learningRuleCount: number;
-    categoryKeywords: CategoryKeywordOverviewItem[];
-    categoryKeywordCount: number;
+    categoryRuleCount: number;
     recurringRules: RecurringRuleOverviewItem[];
     recurringRuleCount: number;
     totalRuleCount: number;
@@ -429,7 +409,7 @@ interface Overview {
 
 const overview = ref<Overview>({
     learningRules: [], learningRuleCount: 0,
-    categoryKeywords: [], categoryKeywordCount: 0,
+    categoryRuleCount: 0,
     recurringRules: [], recurringRuleCount: 0,
     totalRuleCount: 0,
 });
@@ -486,11 +466,6 @@ const learningHeaders = computed(() => [
     { title: tt('Enabled'), key: 'enabled' },
 ]);
 
-const keywordHeaders = computed(() => [
-    { title: tt('Keyword'), key: 'keyword' },
-    { title: tt('Category'), key: 'categoryName' },
-]);
-
 const recurringHeaders = computed(() => [
     { title: tt('Name'), key: 'name' },
     { title: tt('Amount'), key: 'amount' },
@@ -499,8 +474,8 @@ const recurringHeaders = computed(() => [
     { title: tt('Enabled'), key: 'enabled' },
 ]);
 
-// ── Investment Keywords (read from user profile) ────────
-const investmentKeywords = computed(() => {
+// ── Investment settings summary (read from user profile) ────────
+const investmentSettingsSummary = computed(() => {
     const info = userStore.currentUserBasicInfo;
     return {
         platform: info?.investmentPlatformKeywords || [],
@@ -752,7 +727,14 @@ async function fetchOverview() {
             'Failed to load rules overview'
         );
         if (result) {
-            overview.value = result;
+            overview.value = {
+                learningRules: result.learningRules ?? [],
+                learningRuleCount: result.learningRuleCount ?? 0,
+                categoryRuleCount: result.categoryRuleCount ?? 0,
+                recurringRules: result.recurringRules ?? [],
+                recurringRuleCount: result.recurringRuleCount ?? 0,
+                totalRuleCount: result.totalRuleCount ?? 0,
+            };
         }
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, 'Failed to load rules overview');

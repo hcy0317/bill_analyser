@@ -2876,5 +2876,6 @@
     "Using defaults": "Using defaults",
     "Manage": "Manage",
     "Investment Settings": "Investment Settings",
-    "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.": "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55."
+    "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.": "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.",
+    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center."
 }

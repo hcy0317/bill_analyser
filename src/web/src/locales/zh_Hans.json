@@ -2881,5 +2881,6 @@
     "Using defaults": "使用默认值",
     "Manage": "管理",
     "Investment Settings": "投资识别设置",
-    "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.": "投资关键词用于自动识别投资类交易。识别阈值：0.55。"
+    "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.": "投资关键词用于自动识别投资类交易。识别阈值：0.55。",
+    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "规则中心这里只保留只读兼容摘要。正式的投资识别设置请在配对中心维护。"
 }

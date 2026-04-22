@@ -2577,5 +2577,7 @@
     "Secondary Category Budget": "二級分類預算",
     "No historical budget data": "暫無往期預算資料",
     "No selected transactions require AI annotation": "目前沒有已選中的待AI標註交易",
-    "No description": "無描述"
+    "No description": "無描述",
+    "Investment Settings": "投資識別設定",
+    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "規則中心這裡只保留唯讀相容摘要。正式的投資識別設定請在配對中心維護。"
 }

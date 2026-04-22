@@ -141,6 +141,11 @@
 - 依赖阶段 1 的前端类型基线。
 - 与阶段 3 高度耦合，建议在统一配对中心域结构基本确定后执行。
 
+### 已完成切片
+- ✅ `src/bill_analyser/api/routes/rules.py` 的 overview 聚合已停止读取 legacy `category_keywords`，改为暴露 `categoryRuleCount`，并由新增 `tests/domains/categories/unit/test_rules_route_branches.py` 锁住“category_rules 为 canonical source”的契约
+- ✅ `src/web/src/views/desktop/rules/RuleCenterPage.vue` 已移除 Legacy Keywords 独立 tab，并把 `Investment Keywords` 调整为仅保留只读兼容摘要的 `Investment Settings` 入口，避免继续把旧关键词体系当作独立中心能力
+- ✅ 为修复 CI `verify-agent-stack` 的 `repo.codex-baseline` fail，仓库已补齐最小 `.codex/config.toml` fallback，使 `scripts/agent_stack_health.py --mode repo` 在无用户级 `~/.codex/config.toml` 的环境下也能通过
+
 ## 阶段 5: LLM 入口迁移到导入预览 session-assistant 域 — 预计 todo 数: 6
 ### 目标
 把 LLM 归纳/业务入口从“已落库未分类账单分析”改到“导入预览、写库前的会话级辅助”，同时与统一配对中心的长期规则域形成明确分层。

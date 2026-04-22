@@ -22,8 +22,9 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 ## MCP Baseline
 
-The active Codex baseline now lives in the user-level profile at `~/.codex/config.toml`.
-This repository should keep only Codex-specific discovery notes and repository deltas, not a second full harness copy.
+The active Codex baseline usually lives in the user-level profile at `~/.codex/config.toml`.
+This repository also keeps a thin fallback `.codex/config.toml` so CI / doctor checks still see the minimum multi-agent + MCP baseline when no home-level profile is available.
+Keep the repo copy minimal; do not mirror the full user-level harness back into the repository.
 
 ## Codex-specific runtime layer
 

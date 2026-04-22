@@ -41,8 +41,10 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - `auth.py`：登录、鉴权、用户资料
 - `bills.py`：账单 CRUD、导入、预览、确认、批量操作
 - `matching.py`：导入会话级 matching candidate 投影、preview family generic accept/reject、历史正式账单后配对与 pair 列表接口，以及配对中心 investment settings 的 canonical REST 读写接口
+- `rules.py`：规则中心 legacy 兼容聚合口；当前 overview 只聚合 learning rules、category rule count 与 recurring rules，不再把 legacy `category_keywords` 作为运行时总览来源
 - `accounts.py`：账户管理、余额同步
 - `categories.py`：分类管理、规则维护
+- `category_rules.py`：分类规则的 canonical CRUD / migrate / test 接口；category rules 是当前分类规则体系的正式入口
 - `tags.py`：标签管理与关联
 - `budgets.py`：预算 CRUD、执行统计、导入导出
 - `statistics.py`：统计总览、趋势、汇率
