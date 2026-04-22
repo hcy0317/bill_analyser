@@ -179,7 +179,7 @@
 ### 已完成切片
 - ✅ 导入预览会话 LLM 归纳链路已切到 `ImportTransactionCheckDataTab.vue -> services.ts -> /api/llm/analyze-transactions -> LLMLearningService._analyze_import_session(...)`；Learning Center 仅保留配置与历史候选兼容壳。同步补齐了 `preview_ids / preview_updates` 约束、candidate user-scope、防重复提交 UI 与 `tests/new_ui/test_llm_import_session_analysis_api.py` 回归；当前已通过全量 `pytest tests/ -v`、相关 `pylint`、`vue-tsc`、最小前端 `eslint` 与 `npm run build` 验证，repo 级 `npm run lint` 仍受仓库既有前端 lint debt 阻塞。
 
-## 阶段 6: cutover、兼容包装与最终清理 — 预计 todo 数: 6
+## 阶段 6: cutover、兼容包装与最终清理 ✅ (`5f023112`) — 预计 todo 数: 6
 ### 目标
 在统一配对中心上线后完成路由切换、兼容包装、旧页面降级和全链路验收。
 
@@ -203,6 +203,15 @@
 
 ### 依赖关系
 - 依赖阶段 2、阶段 3、阶段 4、阶段 5 全部完成。
+
+### 已完成切片
+- ✅ `src/web/src/router/desktop.ts` 已将 `/learning/center` 与 `/rules/center` 正式收口为指向 `/pairing/list` 的 redirect，并修复 redirect helper 的 vue-router 类型签名，提交 `5f023112`
+- ✅ `src/web/src/views/desktop/pairingcenter/ListPage.vue` 已承接 Learning / Rule Center 的持久化能力壳层；新增 `src/web/src/views/desktop/pairingcenter/components/LearningCenterPanel.vue` 与 `RuleCenterPanel.vue` 承载原页面主体，实现 `/pairing/list` 作为唯一 canonical 持久化中心
+- ✅ `src/web/src/views/desktop/learningcenter/ListPage.vue` 与 `src/web/src/views/desktop/rules/RuleCenterPage.vue` 已降级为最薄 redirect wrapper，不再保有独立持久化业务实现；`docs/PROJECT_OVERVIEW.md` 已同步更新当前系统事实
+- ✅ 本阶段验收结果：`Set-Location src\web; npm run build` 通过；`Set-Location src\web; npx vue-tsc --noEmit` 通过；针对本切片触达文件的 `npx eslint ...` 通过；repo 级 `npm run lint` 在本仓库现状下长时间未结束（两次超时），未再出现此前由 router 类型不匹配导致的前端 gate 失败；`.\.venv\Scripts\python.exe -m pytest tests\ -v` 全量通过
+
+### 阶段结论
+- ✅ 阶段 6 当前已完成：`/pairing/list` 已成为唯一持久化中心入口，`/learning/center` 与 `/rules/center` 仅保留 redirect / wrapper 语义，分类规则 / 投资识别设置 / 长期学习规则 / 导入预览 session-assistant 的边界已完成切割。
 
 ## 风险与缓解
 
