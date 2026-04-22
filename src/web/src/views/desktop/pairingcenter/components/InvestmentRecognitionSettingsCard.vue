@@ -106,21 +106,19 @@
 import { computed, onMounted, ref } from 'vue';
 import { mdiRefresh } from '@mdi/js';
 
-import type { UserProfileUpdateRequest } from '@/models/user.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { isEquals } from '@/lib/common.ts';
-import { useRootStore } from '@/stores/index.ts';
+import {
+    EMPTY_PAIRING_CENTER_INVESTMENT_SETTINGS,
+    normalizePairingCenterInvestmentSettings,
+    toPairingCenterInvestmentSettingsUpdateRequest,
+    type PairingCenterInvestmentSettings
+} from '@/models/pairing_center.ts';
 import { useUserStore } from '@/stores/user.ts';
 
-interface RecognitionSettingsState {
-    importLearningEnabled: boolean;
-    investmentPlatformKeywords: string[];
-    investmentProductKeywords: string[];
-    investmentExcludeKeywords: string[];
-}
+type RecognitionSettingsState = PairingCenterInvestmentSettings;
 
 const { tt } = useI18n();
-const rootStore = useRootStore();
 const userStore = useUserStore();
 
 const loadingRecognitionSettings = ref<boolean>(true);
@@ -138,25 +136,11 @@ const recognitionSettingsChanged = computed<boolean>(() => {
 });
 
 function createEmptyRecognitionSettings(): RecognitionSettingsState {
-    return {
-        importLearningEnabled: false,
-        investmentPlatformKeywords: [],
-        investmentProductKeywords: [],
-        investmentExcludeKeywords: []
-    };
-}
-
-function normalizeRecognitionSettings(profile: Partial<RecognitionSettingsState>): RecognitionSettingsState {
-    return {
-        importLearningEnabled: !!profile.importLearningEnabled,
-        investmentPlatformKeywords: [...(profile.investmentPlatformKeywords || [])],
-        investmentProductKeywords: [...(profile.investmentProductKeywords || [])],
-        investmentExcludeKeywords: [...(profile.investmentExcludeKeywords || [])]
-    };
+    return normalizePairingCenterInvestmentSettings(EMPTY_PAIRING_CENTER_INVESTMENT_SETTINGS);
 }
 
 function resetRecognitionSettings(): void {
-    recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
+    recognitionSettings.value = normalizePairingCenterInvestmentSettings(recognitionSettingsSnapshot.value);
     error.value = null;
     successMessage.value = null;
 }
@@ -199,8 +183,9 @@ async function reloadRecognitionSettings(force: boolean): Promise<void> {
     error.value = null;
 
     try {
-        const profile = await userStore.getCurrentUserProfile();
-        const nextState = normalizeRecognitionSettings(profile);
+        const nextState = normalizePairingCenterInvestmentSettings(
+            await userStore.getPairingInvestmentSettings()
+        );
 
         if (force) {
             successMessage.value = isEquals(recognitionSettingsSnapshot.value, nextState)
@@ -209,7 +194,7 @@ async function reloadRecognitionSettings(force: boolean): Promise<void> {
         }
 
         recognitionSettingsSnapshot.value = nextState;
-        recognitionSettings.value = normalizeRecognitionSettings(nextState);
+        recognitionSettings.value = normalizePairingCenterInvestmentSettings(nextState);
     } catch (caughtError: unknown) {
         successMessage.value = null;
         error.value = getErrorMessage(caughtError, 'Failed to load investment recognition settings');
@@ -227,17 +212,12 @@ async function saveRecognitionSettings(): Promise<void> {
     error.value = null;
     successMessage.value = null;
 
-    const request: UserProfileUpdateRequest = {
-        importLearningEnabled: recognitionSettings.value.importLearningEnabled,
-        investmentPlatformKeywords: [...recognitionSettings.value.investmentPlatformKeywords],
-        investmentProductKeywords: [...recognitionSettings.value.investmentProductKeywords],
-        investmentExcludeKeywords: [...recognitionSettings.value.investmentExcludeKeywords]
-    };
-
     try {
-        const response = await rootStore.updateUserProfile(request);
-        recognitionSettingsSnapshot.value = normalizeRecognitionSettings(response.user || recognitionSettings.value);
-        recognitionSettings.value = normalizeRecognitionSettings(recognitionSettingsSnapshot.value);
+        const response = await userStore.updatePairingInvestmentSettings(
+            toPairingCenterInvestmentSettingsUpdateRequest(recognitionSettings.value)
+        );
+        recognitionSettingsSnapshot.value = normalizePairingCenterInvestmentSettings(response);
+        recognitionSettings.value = normalizePairingCenterInvestmentSettings(recognitionSettingsSnapshot.value);
         successMessage.value = 'Investment recognition settings updated';
     } catch (caughtError: unknown) {
         error.value = getErrorMessage(caughtError, 'Failed to update investment recognition settings');

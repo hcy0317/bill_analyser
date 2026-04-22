@@ -32,12 +32,59 @@ class FakeLoop:
 class FakeMatchingDB:
     """Async DB stub for matching route branch tests."""
 
+    _UNSET = object()
+
     def __init__(self) -> None:
         self.import_session_result: dict[str, Any] | None = {"session_id": "session-1", "user_id": 9}
+        self.pairing_investment_settings_result: dict[str, Any] | None = {
+            "user_id": 9,
+            "import_learning_enabled": True,
+            "investment_platform_keywords": ["蚂蚁财富"],
+            "investment_product_keywords": ["基金"],
+            "investment_exclude_keywords": ["还款"],
+        }
+        self.update_pairing_investment_settings_calls: list[dict[str, Any]] = []
 
     async def get_import_session(self, session_id: str, user_id: int = 1) -> dict[str, Any] | None:
         _ = (session_id, user_id)
         return dict(self.import_session_result) if self.import_session_result else None
+
+    async def get_pairing_investment_settings(self, user_id: int = 1) -> dict[str, Any] | None:
+        _ = user_id
+        return dict(self.pairing_investment_settings_result) if self.pairing_investment_settings_result else None
+
+    async def update_pairing_investment_settings(
+        self,
+        *,
+        user_id: int = 1,
+        import_learning_enabled: Any = _UNSET,
+        investment_platform_keywords: Any = _UNSET,
+        investment_product_keywords: Any = _UNSET,
+        investment_exclude_keywords: Any = _UNSET,
+    ) -> dict[str, Any] | None:
+        self.update_pairing_investment_settings_calls.append(
+            {
+                "user_id": user_id,
+                "import_learning_enabled": import_learning_enabled,
+                "investment_platform_keywords": investment_platform_keywords,
+                "investment_product_keywords": investment_product_keywords,
+                "investment_exclude_keywords": investment_exclude_keywords,
+            }
+        )
+        if self.pairing_investment_settings_result is None:
+            return None
+
+        next_settings = dict(self.pairing_investment_settings_result)
+        if import_learning_enabled is not self._UNSET:
+            next_settings["import_learning_enabled"] = bool(import_learning_enabled)
+        if investment_platform_keywords is not self._UNSET:
+            next_settings["investment_platform_keywords"] = list(investment_platform_keywords)
+        if investment_product_keywords is not self._UNSET:
+            next_settings["investment_product_keywords"] = list(investment_product_keywords)
+        if investment_exclude_keywords is not self._UNSET:
+            next_settings["investment_exclude_keywords"] = list(investment_exclude_keywords)
+        self.pairing_investment_settings_result = next_settings
+        return dict(next_settings)
 
 
 class FakeMatchingService:
@@ -364,6 +411,100 @@ def test_matching_route_returns_candidates_404_and_500(
     with matching_route_app.test_request_context("/api/matching/sessions/session-1/candidates", method="GET"):
         _set_request_user_id(9)
         response, status = _unwrap_response(route("session-1"))
+        assert status == 500
+        assert response.get_json()["error"] == "Internal Server Error"
+
+
+def test_matching_investment_settings_route_covers_get_put_and_validation(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pairing investment settings route 应覆盖 GET/PUT 成功、404、校验与异常分支。"""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.manage_matching_investment_settings)
+
+    with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+        assert payload == {
+            "success": True,
+            "data": {
+                "importLearningEnabled": True,
+                "investmentPlatformKeywords": ["蚂蚁财富"],
+                "investmentProductKeywords": ["基金"],
+                "investmentExcludeKeywords": ["还款"],
+            },
+        }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/investment-settings",
+        method="PUT",
+        json={
+            "importLearningEnabled": False,
+            "investmentPlatformKeywords": ["京东金融"],
+            "investmentProductKeywords": ["ETF"],
+            "investmentExcludeKeywords": ["账单"],
+        },
+    ):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+        assert payload == {
+            "success": True,
+            "data": {
+                "importLearningEnabled": False,
+                "investmentPlatformKeywords": ["京东金融"],
+                "investmentProductKeywords": ["ETF"],
+                "investmentExcludeKeywords": ["账单"],
+            },
+        }
+        assert db.update_pairing_investment_settings_calls[-1] == {
+            "user_id": 9,
+            "import_learning_enabled": False,
+            "investment_platform_keywords": ["京东金融"],
+            "investment_product_keywords": ["ETF"],
+            "investment_exclude_keywords": ["账单"],
+        }
+
+    with matching_route_app.test_request_context(
+        "/api/matching/investment-settings",
+        method="PUT",
+        json={"importLearningEnabled": "yes"},
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    with matching_route_app.test_request_context(
+        "/api/matching/investment-settings",
+        method="PUT",
+        json=["invalid"],
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid request"
+
+    db.pairing_investment_settings_result = None
+    with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 404
+        assert response.get_json()["error"] == "User not found"
+
+    async def raise_matching_settings_error(user_id: int = 1) -> dict[str, Any]:
+        _ = user_id
+        raise RuntimeError("matching settings boom")
+
+    monkeypatch.setattr(db, "get_pairing_investment_settings", raise_matching_settings_error)
+    with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
         assert status == 500
         assert response.get_json()["error"] == "Internal Server Error"
 

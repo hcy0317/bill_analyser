@@ -183,6 +183,10 @@ import type {
     OAuth2CallbackLoginRequest
 } from '@/models/oauth2.ts';
 import type {
+    PairingCenterInvestmentSettings,
+    PairingCenterInvestmentSettingsUpdateRequest
+} from '@/models/pairing_center.ts';
+import type {
     UserApplicationCloudSettingsUpdateRequest
 } from '@/models/user_app_cloud_setting.ts';
 import type {
@@ -1446,6 +1450,16 @@ export default {
         if (page !== undefined) params['page'] = String(page);
         if (pageSize !== undefined) params['page_size'] = String(pageSize);
         return axios.get<ApiDataResponse<MatchingPairsResponse>>('matching/pairs', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    getPairingInvestmentSettings: (): ApiResponsePromise<PairingCenterInvestmentSettings> => {
+        return axios.get<ApiDataResponse<PairingCenterInvestmentSettings>>('matching/investment-settings').then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    updatePairingInvestmentSettings: (payload: PairingCenterInvestmentSettingsUpdateRequest): ApiResponsePromise<PairingCenterInvestmentSettings> => {
+        return axios.put<ApiDataResponse<PairingCenterInvestmentSettings>>('matching/investment-settings', payload).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },
