@@ -282,14 +282,11 @@
 
                                 <div class="d-flex flex-wrap align-center ga-2 mb-4">
                                     <v-chip size="small" color="warning" variant="tonal">
-                                        {{ tt('Legacy compatibility action') }}
+                                        {{ tt('Historical compatibility queue') }}
                                     </v-chip>
-                                    <v-btn size="small" variant="outlined" color="secondary"
-                                           :disabled="loading || llmAnalyzing"
-                                           @click="handleLLMAnalyze">
-                                        <v-icon start :icon="mdiAutoFix" />
-                                        {{ tt('Analyze Persisted Uncategorized (Legacy)') }}
-                                    </v-btn>
+                                    <span class="text-body-2 text-medium-emphasis">
+                                        {{ tt('Generate new LLM rule candidates from the import preview session assistant. This page now keeps configuration and historical candidate review only.') }}
+                                    </span>
                                 </div>
 
                                 <!-- LLM 多配置管理 -->
@@ -341,12 +338,6 @@
                                     </v-card-text>
                                 </v-card>
 
-                                <!-- 分析结果提示 -->
-                                <v-alert v-if="llmAnalyzeResult" type="info" closable class="mb-4"
-                                         @click:close="llmAnalyzeResult = null">
-                                    {{ tt('Analysis complete') }}: {{ tt('Generated') }} {{ llmAnalyzeResult.candidates_created || 0 }} {{ tt('candidate rules') }}
-                                </v-alert>
-
                                 <!-- 候选列表 -->
                                 <div class="d-flex align-center mb-2">
                                     <span class="text-subtitle-2">{{ tt('Candidate Rules') }}</span>
@@ -358,8 +349,6 @@
                                         <v-chip value="rejected" variant="tonal" color="error" size="small">{{ tt('Rejected') }}</v-chip>
                                     </v-chip-group>
                                 </div>
-
-                                <v-progress-linear v-if="llmAnalyzing" indeterminate color="secondary" class="mb-2" />
 
                                 <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
                                     <thead>
@@ -413,7 +402,7 @@
                                     </tbody>
                                 </v-table>
 
-                                <v-empty-state v-if="!llmAnalyzing && filteredLLMCandidates.length === 0"
+                                <v-empty-state v-if="filteredLLMCandidates.length === 0"
                                                :icon="mdiRobotOutline"
                                                :headline="tt('No Candidate Rules')"
                                                :text="tt('Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.')" />
@@ -509,10 +498,6 @@ interface LLMConfigItem {
     is_active?: boolean;
     created_at?: string;
     updated_at?: string;
-}
-
-interface LLMAnalyzeResult {
-    candidates_created?: number;
 }
 
 interface LLMCandidateItem {
@@ -756,8 +741,6 @@ async function saveEditRule() {
 
 // ── LLM 归纳 state ──────────
 const llmSavedConfigs = ref<LLMConfigItem[]>([]);
-const llmAnalyzing = ref(false);
-const llmAnalyzeResult = ref<LLMAnalyzeResult | null>(null);
 const llmCandidates = ref<LLMCandidateItem[]>([]);
 const llmStatusFilter = ref<string>('');
 
@@ -863,22 +846,6 @@ async function loadLLMCandidates() {
         }
     } catch (error: unknown) {
         store.error = getRequestErrorMessage(error, 'Failed to load LLM candidates');
-    }
-}
-
-async function handleLLMAnalyze() {
-    llmAnalyzing.value = true;
-    llmAnalyzeResult.value = null;
-    try {
-        const resp = await services.analyzeLLMTransactions(undefined, 20);
-        if (resp.data?.success && resp.data.result) {
-            llmAnalyzeResult.value = resp.data.result;
-        }
-        await loadLLMCandidates();
-    } catch (error: unknown) {
-        store.error = getRequestErrorMessage(error, 'LLM analysis failed');
-    } finally {
-        llmAnalyzing.value = false;
     }
 }
 

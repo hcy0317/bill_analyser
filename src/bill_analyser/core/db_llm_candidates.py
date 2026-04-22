@@ -1,4 +1,5 @@
 """LLM candidates persistence helpers for the split database facade."""
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,redefined-builtin
 
 from __future__ import annotations
 
@@ -51,14 +52,15 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
     async def get_llm_candidate_by_id(
         self,
         candidate_id: int,
+        user_id: int,
     ) -> dict[str, Any] | None:
         """获取单条 LLM 候选建议。"""
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
 
         async with conn.execute(
-            "SELECT * FROM llm_candidates WHERE id = ?",
-            (candidate_id,),
+            "SELECT * FROM llm_candidates WHERE id = ? AND user_id = ?",
+            (candidate_id, user_id),
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
@@ -121,6 +123,7 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
         self,
         candidate_id: int,
         status: str,
+        user_id: int,
         reviewed_at: str | None = None,
     ) -> bool:
         """更新 LLM 候选建议状态。"""
@@ -130,14 +133,26 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
 
         try:
             cursor = await conn.execute(
-                "UPDATE llm_candidates SET status = ?, reviewed_at = ? WHERE id = ?",
-                (status, reviewed_at, candidate_id),
+                (
+                    "UPDATE llm_candidates SET status = ?, reviewed_at = ? "
+                    "WHERE id = ? AND user_id = ?"
+                ),
+                (status, reviewed_at, candidate_id, user_id),
             )
             await conn.commit()
             if cursor.rowcount == 0:
-                self.logger.warning("LLM 候选建议 ID %s 不存在", candidate_id)
+                self.logger.warning(
+                    "LLM 候选建议 ID %s 不存在或不属于 user_id=%s",
+                    candidate_id,
+                    user_id,
+                )
                 return False
-            self.logger.info("已更新 LLM 候选建议状态: ID=%s, status=%s", candidate_id, status)
+            self.logger.info(
+                "已更新 LLM 候选建议状态: ID=%s, status=%s, user_id=%s",
+                candidate_id,
+                status,
+                user_id,
+            )
             return True
         except sqlite3.Error as exc:
             self.logger.error("更新 LLM 候选建议状态失败: %s", exc, exc_info=True)
@@ -147,17 +162,23 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
     async def delete_llm_candidate(
         self,
         candidate_id: int,
+        user_id: int,
     ) -> bool:
         """删除 LLM 候选建议。"""
         conn = await self._get_connection()
         try:
             cursor = await conn.execute(
-                "DELETE FROM llm_candidates WHERE id = ?",
-                (candidate_id,),
+                "DELETE FROM llm_candidates WHERE id = ? AND user_id = ?",
+                (candidate_id, user_id),
             )
             await conn.commit()
             deleted = cursor.rowcount > 0
-            self.logger.info("删除 LLM 候选建议: ID=%s, deleted=%s", candidate_id, deleted)
+            self.logger.info(
+                "删除 LLM 候选建议: ID=%s, deleted=%s, user_id=%s",
+                candidate_id,
+                deleted,
+                user_id,
+            )
             return deleted
         except sqlite3.Error as exc:
             self.logger.error("删除 LLM 候选建议失败: %s", exc, exc_info=True)

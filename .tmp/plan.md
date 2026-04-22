@@ -176,6 +176,9 @@
 - 依赖阶段 3 的域边界梳理，以便区分持久化配对中心域与 session-assistant 域。
 - 若阶段 4 已完成，可直接复用新的规则表达式和长期规则沉淀路径。
 
+### 已完成切片
+- ✅ 导入预览会话 LLM 归纳链路已切到 `ImportTransactionCheckDataTab.vue -> services.ts -> /api/llm/analyze-transactions -> LLMLearningService._analyze_import_session(...)`；Learning Center 仅保留配置与历史候选兼容壳。同步补齐了 `preview_ids / preview_updates` 约束、candidate user-scope、防重复提交 UI 与 `tests/new_ui/test_llm_import_session_analysis_api.py` 回归；当前已通过全量 `pytest tests/ -v`、相关 `pylint`、`vue-tsc`、最小前端 `eslint` 与 `npm run build` 验证，repo 级 `npm run lint` 仍受仓库既有前端 lint debt 阻塞。
+
 ## 阶段 6: cutover、兼容包装与最终清理 — 预计 todo 数: 6
 ### 目标
 在统一配对中心上线后完成路由切换、兼容包装、旧页面降级和全链路验收。

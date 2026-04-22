@@ -268,6 +268,32 @@ interface MatchingPairOperationResponse {
     pair?: BillMatchingPairSummary;
 }
 
+interface AnalyzeLLMTransactionsRequest {
+    billIds?: number[];
+    limit?: number;
+    sessionId?: string;
+    previewIds?: number[];
+    previewUpdates?: Array<Record<string, unknown>>;
+}
+
+interface LLMAnalyzeTransactionCandidate {
+    id: number;
+    session_id?: string;
+    source_preview_ids?: number[];
+    rule_name?: string;
+    rule_expression?: string;
+    confidence?: number;
+    category_name?: string;
+    explanation?: string;
+}
+
+interface LLMAnalyzeTransactionsResponse {
+    candidates_created: number;
+    candidates: LLMAnalyzeTransactionCandidate[];
+    session_id?: string;
+    mode?: 'import_session' | 'persisted_selection' | 'persisted_uncategorized';
+}
+
 interface UpdateImportPreviewItemPayload {
     id: number;
     type?: string;
@@ -2195,11 +2221,23 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    analyzeLLMTransactions: (billIds?: number[], limit?: number): ApiResponsePromise<any> => {
+    analyzeLLMTransactions: ({
+        billIds,
+        limit,
+        sessionId,
+        previewIds,
+        previewUpdates
+    }: AnalyzeLLMTransactionsRequest = {}): ApiResponsePromise<LLMAnalyzeTransactionsResponse> => {
+        const requestConfig: AxiosRequestConfig = {
+            timeout: DEFAULT_LLM_API_TIMEOUT
+        };
         return axios.post('llm/analyze-transactions', {
             bill_ids: billIds,
-            limit: limit || 20
-        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
+            limit: limit || 20,
+            session_id: sessionId,
+            preview_ids: previewIds,
+            preview_updates: previewUpdates
+        }, requestConfig).then(response => {
             return buildApiResponse(response, response.data?.data);
         });
     },

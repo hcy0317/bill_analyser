@@ -820,6 +820,11 @@
                                @click="reclassifySelected">
                             {{ tt('Reclassify') }}
                         </v-btn>
+                        <v-btn :disabled="!!disabled || llmSessionAnalyzing || selectedImportTransactionCount < 1 || !props.sessionId"
+                               :prepend-icon="mdiAutoFix"
+                               @click="analyzeSelectedPreviewWithLLM">
+                            {{ tt('Generate LLM Rule Candidates') }}
+                        </v-btn>
                         <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
                                :prepend-icon="mdiSchoolOutline"
                                @click="promoteSelectedToLongTermLearning">
@@ -1475,6 +1480,7 @@ const transferDecisionLoadingId = ref<number | null>(null);
 const investmentDecisionLoadingId = ref<number | null>(null);
 const learningDecisionLoadingId = ref<number | null>(null);
 const recurringDecisionLoadingId = ref<number | null>(null);
+const llmSessionAnalyzing = ref<boolean>(false);
 const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId.value !== null
     || investmentDecisionLoadingId.value !== null
     || learningDecisionLoadingId.value !== null
@@ -2718,6 +2724,53 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
             selected: transaction.selected
         };
     }).filter(item => !!item.id);
+}
+
+async function analyzeSelectedPreviewWithLLM(): Promise<void> {
+    commitEditingTransactionDraft();
+
+    if (!props.sessionId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (llmSessionAnalyzing.value) {
+        return;
+    }
+
+    llmSessionAnalyzing.value = true;
+    try {
+        const previewUpdates = buildSelectedPreviewUpdates();
+        if (!previewUpdates.length) {
+            return;
+        }
+
+        const response = await services.analyzeLLMTransactions({
+            sessionId: props.sessionId,
+            previewUpdates
+        });
+        const created = Number(response.data?.result?.candidates_created || 0);
+
+        if (created > 0) {
+            snackbar.value?.showMessage(
+                tt('LLM session analysis created {count} candidate rules', {
+                    count: created
+                })
+            );
+            return;
+        }
+
+        snackbar.value?.showMessage(
+            tt('LLM session analysis found no candidate rules for the selected preview rows')
+        );
+    } catch (error) {
+        logger.error(`[LLM 会话分析] 失败: ${error}`);
+        snackbar.value?.showMessage(
+            tt('LLM session analysis failed. Please check your LLM config and selected preview rows.')
+        );
+    } finally {
+        llmSessionAnalyzing.value = false;
+    }
 }
 
 async function promoteSelectedToLongTermLearning(): Promise<void> {

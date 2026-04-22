@@ -2887,8 +2887,14 @@
     "Import Preview Session Assistant": "导入预览会话助手",
     "Primary entrypoint": "主入口",
     "Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.": "导入预览会话助手现已成为 LLM 辅助学习的主入口。请先从交易页发起导入，审核选中的预览行，再把确认后的建议提升为长期学习规则。学习中心当前仅保留兼容期配置与历史候选队列。",
+    "Historical compatibility queue": "历史兼容队列",
+    "Generate new LLM rule candidates from the import preview session assistant. This page now keeps configuration and historical candidate review only.": "新的 LLM 规则候选请从导入预览会话助手生成。此页现在只保留配置与历史候选审查。",
     "Legacy compatibility action": "旧流程兼容操作",
     "Analyze Persisted Uncategorized (Legacy)": "分析已落库未分类交易（兼容入口）",
     "Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.": "请从交易页进入导入预览会话助手，先审核选中的预览行，再提升为长期学习。迁移期间，这里仅继续展示历史候选规则。",
-    "Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.": "请在这里审核所选预览行后，再保存为长期学习规则。配对中心仍是持久化匹配设置的正式主页。"
+    "Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.": "请在这里审核所选预览行后，再保存为长期学习规则。配对中心仍是持久化匹配设置的正式主页。",
+    "Generate LLM Rule Candidates": "生成 LLM 规则候选",
+    "LLM session analysis created {count} candidate rules": "LLM 会话分析已生成 {count} 条候选规则",
+    "LLM session analysis found no candidate rules for the selected preview rows": "LLM 会话分析未为所选预览行生成候选规则",
+    "LLM session analysis failed. Please check your LLM config and selected preview rows.": "LLM 会话分析失败，请检查 LLM 配置和所选预览行。"
 }

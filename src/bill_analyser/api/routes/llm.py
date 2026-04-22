@@ -54,18 +54,47 @@ def analyze_transactions():
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
         user_id = _get_request_user_id()
 
         bill_ids = data.get("bill_ids")
         limit = data.get("limit", 20)
+        session_id = data.get("session_id")
+        preview_ids = data.get("preview_ids")
+        preview_updates = data.get("preview_updates")
 
         service = _get_llm_service()
         candidates = _run_async(
-            service.analyze_transactions(user_id=user_id, bill_ids=bill_ids, limit=limit)
+            service.analyze_transactions(
+                user_id=user_id,
+                bill_ids=bill_ids,
+                limit=limit,
+                session_id=session_id,
+                preview_ids=preview_ids,
+                preview_updates=preview_updates,
+            )
         )
 
-        return jsonify({"success": True, "data": candidates, "total": len(candidates)})
+        response_payload = {
+            "candidates_created": len(candidates),
+            "candidates": candidates,
+        }
+        if session_id:
+            response_payload["session_id"] = session_id
+            response_payload["mode"] = "import_session"
+        elif bill_ids:
+            response_payload["mode"] = "persisted_selection"
+        else:
+            response_payload["mode"] = "persisted_uncategorized"
+
+        return jsonify({"success": True, "data": response_payload, "total": len(candidates)})
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "Import session not found" else 400
+        return jsonify({"success": False, "error": str(exc)}), status_code
     except RuntimeError as exc:
         logger.warning("LLM 分析交易失败: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 429
@@ -97,7 +126,11 @@ def induce_rules():
 
         service = _get_llm_service()
         candidates = _run_async(
-            service.induce_rules(user_id=user_id, category_id=category_id, sample_count=sample_count)
+            service.induce_rules(
+                user_id=user_id,
+                category_id=category_id,
+                sample_count=sample_count,
+            )
         )
 
         return jsonify({"success": True, "data": candidates, "total": len(candidates)})
@@ -129,7 +162,13 @@ def list_candidates():
         offset = request.args.get("offset", 0, type=int)
 
         candidates = _run_async(
-            db.get_llm_candidates(user_id=user_id, status=status, type=type_, limit=limit, offset=offset)
+            db.get_llm_candidates(
+                user_id=user_id,
+                status=status,
+                type=type_,
+                limit=limit,
+                offset=offset,
+            )
         )
         total = _run_async(db.get_llm_candidates_count(user_id=user_id, status=status))
 
@@ -149,10 +188,11 @@ def get_candidate(candidate_id: int):
     """获取单条 LLM 候选建议"""
     try:
         db = cast("Any", current_app.config.get("DB_INSTANCE"))
-        candidate = _run_async(db.get_llm_candidate_by_id(candidate_id))
+        user_id = _get_request_user_id()
+        candidate = _run_async(db.get_llm_candidate_by_id(candidate_id, user_id=user_id))
 
         if not candidate:
-            return jsonify({"success": False, "error": "Candidate not found"}), 404
+            return jsonify({"success": False, "error": f"Candidate {candidate_id} not found"}), 404
 
         return jsonify({"success": True, "data": candidate})
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -173,8 +213,9 @@ def accept_candidate(candidate_id: int):
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
+        user_id = _get_request_user_id()
         service = _get_llm_service()
-        result = _run_async(service.accept_candidate(candidate_id))
+        result = _run_async(service.accept_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": result})
     except ValueError as exc:
@@ -197,8 +238,9 @@ def reject_candidate(candidate_id: int):
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
+        user_id = _get_request_user_id()
         service = _get_llm_service()
-        result = _run_async(service.reject_candidate(candidate_id))
+        result = _run_async(service.reject_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": {"rejected": result}})
     except ValueError as exc:
