@@ -1,4 +1,4 @@
-import { type NavigationGuardReturn, createRouter, createWebHashHistory } from 'vue-router';
+import { type NavigationGuardReturn, type RouteLocation, createRouter, createWebHashHistory } from 'vue-router';
 
 import { TemplateType } from '@/core/template.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
@@ -33,9 +33,7 @@ import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 import BudgetListPage from '@/views/desktop/budgets/ListPage.vue';
 import PairingCenterPage from '@/views/desktop/pairingcenter/ListPage.vue';
-import LearningCenterPage from '@/views/desktop/learningcenter/ListPage.vue';
 import RecurringDiscoverPage from '@/views/desktop/recurring/DiscoverPage.vue';
-import RuleCenterPage from '@/views/desktop/rules/RuleCenterPage.vue';
 import InsightsPage from '@/views/desktop/insights/InsightsPage.vue';
 
 function checkLogin(): NavigationGuardReturn {
@@ -90,6 +88,32 @@ function checkNotLogin(): NavigationGuardReturn {
     }
 
     return true;
+}
+
+function buildPairingCenterRedirect(route: RouteLocation, view: 'learning' | 'rules') {
+    const query: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(route.query)) {
+        if (typeof value === 'string') {
+            query[key] = value;
+        }
+    }
+
+    query['view'] = view;
+
+    if (view === 'learning' && !query['tab']) {
+        query['tab'] = 'suggestions';
+    }
+
+    if (view === 'rules' && !query['tab']) {
+        query['tab'] = 'rules';
+    }
+
+    return {
+        path: '/pairing/list',
+        query,
+        replace: true
+    };
 }
 
 const router = createRouter({
@@ -196,16 +220,13 @@ const router = createRouter({
                     beforeEnter: checkLogin,
                     props: route => ({
                         initPairType: route.query['pairType'],
-                        initView: route.query['view']
+                        initView: route.query['view'],
+                        initTab: route.query['tab']
                     })
                 },
                 {
                     path: '/learning/center',
-                    component: LearningCenterPage,
-                    beforeEnter: checkLogin,
-                    props: route => ({
-                        initTab: route.query['tab']
-                    })
+                    redirect: route => buildPairingCenterRedirect(route, 'learning')
                 },
                 {
                     path: '/recurring/discover',
@@ -215,8 +236,7 @@ const router = createRouter({
 
                 {
                     path: '/rules/center',
-                    component: RuleCenterPage,
-                    beforeEnter: checkLogin
+                    redirect: route => buildPairingCenterRedirect(route, 'rules')
                 },
                 {
                     path: '/insights',

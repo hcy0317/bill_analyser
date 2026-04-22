@@ -3,9 +3,8 @@
         <v-col cols="12">
             <v-card>
                 <v-layout>
-                    <!-- 左侧筛选抽屉 -->
                     <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav">
-                        <div class="mx-6 mt-4">
+                        <div class="mx-6 mt-4" v-if="activeSection === 'pairs'">
                             <v-btn block variant="tonal" color="primary"
                                    :disabled="loading"
                                    @click="loadAllPairs">
@@ -13,8 +12,8 @@
                                 {{ tt('Refresh') }}
                             </v-btn>
                         </div>
-                        <v-divider class="mt-4" />
-                        <v-list density="compact" nav class="mt-2">
+                        <v-divider class="mt-4" v-if="activeSection === 'pairs'" />
+                        <v-list density="compact" nav class="mt-2" v-if="activeSection === 'pairs'">
                             <v-list-item
                                 :active="activeSection === 'pairs' && activePairType === undefined"
                                 :prepend-icon="mdiFormatListBulleted"
@@ -35,6 +34,30 @@
                         <v-divider class="mt-2" />
                         <v-list density="compact" nav class="mt-2">
                             <v-list-item
+                                :active="activeSection === 'pairs'"
+                                :prepend-icon="mdiFormatListBulleted"
+                                class="mb-1"
+                                @click="openPairsSection()"
+                            >
+                                <v-list-item-title>{{ tt('Pairs') }}</v-list-item-title>
+                            </v-list-item>
+                            <v-list-item
+                                :active="activeSection === 'learning-center'"
+                                :prepend-icon="mdiBrain"
+                                class="mb-1"
+                                @click="openLearningCenter('rules')"
+                            >
+                                <v-list-item-title>{{ tt('Learning Rules') }}</v-list-item-title>
+                            </v-list-item>
+                            <v-list-item
+                                :active="activeSection === 'rule-center'"
+                                :prepend-icon="mdiBookCogOutline"
+                                class="mb-1"
+                                @click="openRuleCenter('rules')"
+                            >
+                                <v-list-item-title>{{ tt('Category & Recurring Rules') }}</v-list-item-title>
+                            </v-list-item>
+                            <v-list-item
                                 :active="activeSection === 'investment-settings'"
                                 :prepend-icon="mdiCog"
                                 class="mb-1"
@@ -45,7 +68,6 @@
                         </v-list>
                     </v-navigation-drawer>
 
-                    <!-- 主内容区 -->
                     <v-main>
                         <v-card-text>
                             <v-sheet border rounded="lg" class="pairing-shell pa-4 mb-4">
@@ -56,7 +78,7 @@
                                             <span class="text-h6">{{ tt('Pairing Center') }}</span>
                                         </div>
                                         <div class="text-body-2 text-medium-emphasis mt-2">
-                                            {{ tt('Use Pairing Center as the main home for pairing tools while Learning Center and Rule Center remain available as temporary compatibility pages.') }}
+                                            {{ tt('Pairing Center is now the only canonical persistent home for pairs, learning rules, category and recurring rules, and investment recognition settings. Legacy Learning Center and Rule Center routes only forward here.') }}
                                         </div>
                                     </div>
                                     <v-spacer />
@@ -64,25 +86,23 @@
                                         <v-btn
                                             color="primary"
                                             :variant="activeSection === 'pairs' ? 'flat' : 'tonal'"
-                                            @click="openPairsSection">
+                                            @click="openPairsSection()">
                                             <v-icon start :icon="mdiFormatListBulleted" />
                                             {{ tt('Pairs') }}
                                         </v-btn>
                                         <v-btn
-                                            variant="tonal"
                                             color="secondary"
-                                            :to="{ path: '/learning/center', query: { tab: 'rules' } }">
+                                            :variant="activeSection === 'learning-center' ? 'flat' : 'tonal'"
+                                            @click="openLearningCenter('rules')">
                                             <v-icon start :icon="mdiBrain" />
                                             {{ tt('Learning Rules') }}
-                                            <v-icon end :icon="mdiOpenInNew" />
                                         </v-btn>
                                         <v-btn
-                                            variant="tonal"
                                             color="secondary"
-                                            to="/rules/center">
-                                            <v-icon start :icon="mdiCog" />
-                                            {{ tt('Rule Center') }}
-                                            <v-icon end :icon="mdiOpenInNew" />
+                                            :variant="activeSection === 'rule-center' ? 'flat' : 'tonal'"
+                                            @click="openRuleCenter('rules')">
+                                            <v-icon start :icon="mdiBookCogOutline" />
+                                            {{ tt('Category Rules') }}
                                         </v-btn>
                                         <v-btn
                                             color="secondary"
@@ -95,14 +115,16 @@
                                 </div>
                             </v-sheet>
 
-                            <div class="d-flex align-center mb-4">
-                                <v-icon :icon="activeSectionIcon" class="mr-2" />
-                                <span class="text-h6">{{ activeSectionTitle }}</span>
-                                <v-spacer />
-                                <v-chip v-if="activeSection === 'pairs'" color="primary" variant="tonal" class="ml-2">
-                                    {{ pairCount }} {{ tt('pairs') }}
-                                </v-chip>
-                            </div>
+                            <template v-if="activeSection === 'pairs' || activeSection === 'investment-settings'">
+                                <div class="d-flex align-center mb-4">
+                                    <v-icon :icon="activeSectionIcon" class="mr-2" />
+                                    <span class="text-h6">{{ activeSectionTitle }}</span>
+                                    <v-spacer />
+                                    <v-chip v-if="activeSection === 'pairs'" color="primary" variant="tonal" class="ml-2">
+                                        {{ pairCount }} {{ tt('pairs') }}
+                                    </v-chip>
+                                </div>
+                            </template>
 
                             <v-progress-linear v-if="activeSection === 'pairs' && loading" indeterminate color="primary" class="mb-4" />
 
@@ -168,11 +190,19 @@
                                                :text="tt('No matching pairs found. Pairs are created when transactions are linked across accounts.')" />
                             </template>
 
-                            <template v-else>
+                            <template v-else-if="activeSection === 'investment-settings'">
                                 <v-alert type="info" variant="tonal" class="mb-4">
-                                    {{ tt('Investment recognition settings now belong to Pairing Center and are no longer managed from User Settings.') }}
+                                    {{ tt('Investment recognition settings now belong to Pairing Center and are no longer managed from User Settings, Learning Center, or Rule Center.') }}
                                 </v-alert>
                                 <investment-recognition-settings-card />
+                            </template>
+
+                            <template v-else-if="activeSection === 'learning-center'">
+                                <learning-center-panel :init-tab="activeLearningTab" />
+                            </template>
+
+                            <template v-else>
+                                <rule-center-panel :init-tab="activeRuleTab" />
                             </template>
                         </v-card-text>
                     </v-main>
@@ -181,7 +211,6 @@
         </v-col>
     </v-row>
 
-    <!-- 删除确认对话框 -->
     <v-dialog v-model="showDeleteDialog" max-width="400" persistent>
         <v-card>
             <v-card-title>{{ tt('Delete Pair') }}</v-card-title>
@@ -213,19 +242,25 @@ import {
     mdiBrain,
     mdiLinkOff,
     mdiCog,
-    mdiOpenInNew
+    mdiBookCogOutline
 } from '@mdi/js';
 
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
 import { useMatchingStore } from '@/stores/matching.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import InvestmentRecognitionSettingsCard from '@/views/desktop/pairingcenter/components/InvestmentRecognitionSettingsCard.vue';
+import LearningCenterPanel from '@/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
+import RuleCenterPanel from '@/views/desktop/pairingcenter/components/RuleCenterPanel.vue';
 
-type PairingCenterSection = 'pairs' | 'investment-settings';
+type PairingCenterSection = 'pairs' | 'learning-center' | 'rule-center' | 'investment-settings';
+
+type LearningCenterTab = 'suggestions' | 'rules' | 'llm';
+type RuleCenterTab = 'rules' | 'learning' | 'investment' | 'recurring';
 
 const props = defineProps<{
     initPairType?: string;
     initView?: string;
+    initTab?: string;
 }>();
 
 const route = useRoute();
@@ -238,6 +273,8 @@ const showNav = ref(true);
 const alwaysShowNav = computed(() => display.lgAndUp.value);
 const activeSection = ref<PairingCenterSection>('pairs');
 const activePairType = ref<string | undefined>(undefined);
+const activeLearningTab = ref<LearningCenterTab>('suggestions');
+const activeRuleTab = ref<RuleCenterTab>('rules');
 const showDeleteDialog = ref(false);
 const pairToDelete = ref<BillMatchingPairDetail | null>(null);
 const deleting = ref<number | null>(null);
@@ -253,9 +290,11 @@ const error = computed({
     set: (val) => { matchingStore.error = val; }
 });
 const activeSectionTitle = computed(() => {
-    return activeSection.value === 'investment-settings'
-        ? tt('Investment Recognition Settings')
-        : tt('Pairs');
+    if (activeSection.value === 'investment-settings') {
+        return tt('Investment Recognition Settings');
+    }
+
+    return tt('Pairs');
 });
 const activeSectionIcon = computed(() => {
     return activeSection.value === 'investment-settings'
@@ -305,6 +344,14 @@ async function loadAllPairs(): Promise<void> {
 }
 
 function normalizeSection(view?: string): PairingCenterSection {
+    if (view === 'learning' || view === 'learning-center') {
+        return 'learning-center';
+    }
+
+    if (view === 'rules' || view === 'rule-center') {
+        return 'rule-center';
+    }
+
     return view === 'investment-settings' ? 'investment-settings' : 'pairs';
 }
 
@@ -312,20 +359,44 @@ function normalizePairType(pairType?: string): string | undefined {
     return typeof pairType === 'string' && pairType ? pairType : undefined;
 }
 
-function syncQuery(nextSection: PairingCenterSection, nextPairType?: string): void {
+function normalizeLearningTab(tab?: string): LearningCenterTab {
+    if (tab === 'rules' || tab === 'llm') {
+        return tab;
+    }
+
+    return 'suggestions';
+}
+
+function normalizeRuleTab(tab?: string): RuleCenterTab {
+    if (tab === 'learning' || tab === 'investment' || tab === 'recurring') {
+        return tab;
+    }
+
+    return 'rules';
+}
+
+function syncQuery(nextSection: PairingCenterSection, nextPairType?: string, nextTab?: string): void {
     const nextQuery: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(route.query)) {
-        if (typeof value === 'string' && key !== 'view' && key !== 'pairType') {
+        if (typeof value === 'string' && key !== 'view' && key !== 'pairType' && key !== 'tab') {
             nextQuery[key] = value;
         }
     }
 
     if (nextSection === 'investment-settings') {
         nextQuery['view'] = 'investment-settings';
-    }
-
-    if (nextPairType) {
+    } else if (nextSection === 'learning-center') {
+        nextQuery['view'] = 'learning';
+        if (nextTab) {
+            nextQuery['tab'] = nextTab;
+        }
+    } else if (nextSection === 'rule-center') {
+        nextQuery['view'] = 'rules';
+        if (nextTab) {
+            nextQuery['tab'] = nextTab;
+        }
+    } else if (nextPairType) {
         nextQuery['pairType'] = nextPairType;
     }
 
@@ -348,9 +419,21 @@ function openPairsSection(): void {
     }
 }
 
+function openLearningCenter(tab?: string): void {
+    activeSection.value = 'learning-center';
+    activeLearningTab.value = normalizeLearningTab(tab);
+    syncQuery('learning-center', undefined, activeLearningTab.value);
+}
+
+function openRuleCenter(tab?: string): void {
+    activeSection.value = 'rule-center';
+    activeRuleTab.value = normalizeRuleTab(tab);
+    syncQuery('rule-center', undefined, activeRuleTab.value);
+}
+
 function openInvestmentSettings(): void {
     activeSection.value = 'investment-settings';
-    syncQuery('investment-settings', activePairType.value);
+    syncQuery('investment-settings');
 }
 
 function confirmDeletePair(pair: BillMatchingPairDetail): void {
@@ -368,10 +451,17 @@ async function doDeletePair(): Promise<void> {
 }
 
 watch(
-    () => [props.initView, props.initPairType] as const,
-    ([initView, initPairType]) => {
-        activeSection.value = normalizeSection(initView);
+    () => [props.initView, props.initPairType, props.initTab] as const,
+    ([initView, initPairType, initTab]) => {
+        const nextSection = normalizeSection(initView);
+        activeSection.value = nextSection;
         activePairType.value = normalizePairType(initPairType);
+
+        if (nextSection === 'learning-center') {
+            activeLearningTab.value = normalizeLearningTab(initTab);
+        } else if (nextSection === 'rule-center') {
+            activeRuleTab.value = normalizeRuleTab(initTab);
+        }
     },
     { immediate: true }
 );
