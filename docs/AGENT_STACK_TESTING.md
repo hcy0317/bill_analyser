@@ -10,7 +10,7 @@
 
 它验证：
 
-- 仓库级入口文件是否齐全：`AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`、`.codex/AGENTS.md`、`.codex/config.toml`、`opencode.json`
+- 仓库级入口文件是否齐全：`AGENTS.md`、`CLAUDE.md`、`.github/copilot-instructions.md`、`.codex/AGENTS.md`、`opencode.json`
 - legacy `.cursor/` 兼容镜像是否真的已经被移除，且最多只保留单文件 `.cursor/mcp.json` 薄适配器
 - 最小 hooks 基线是否齐全：`.github/hooks/*.json`、项目级 `.claude/settings.json`、`scripts/hooks/*`
 - Codex 的多 agent / MCP 基线是否还在
@@ -32,7 +32,7 @@
 当前脚本会检查：
 
 - `~/.claude/settings.json` 是否存在（如果你额外叠加全局 Claude hooks）
-- `~/.codex/config.toml` 是否存在，并能读出模型/MCP 基线
+- `~/.codex/config.toml` 是否存在，并能读出模型/MCP 基线；如果仓库不再保留 `.codex/config.toml`，健康检查应自动回退到用户级 Codex 配置
 - `~/.codex/skills` 是否有额外自定义内容
 
 运行方式：
@@ -72,6 +72,10 @@
    - 尝试编辑 `.tmp/ecc-unpacked/...` 或 `src/web/node_modules/...` 中的文件
    - 期待 PreToolUse hook 在写入前拒绝，并说明受保护目录不可直接改动
 
+5. **repo-guard-gitignored-write**
+   - 尝试向 `bills/fixture.txt` 写入内容（该路径匹配 `bills/*` ignore 规则）
+   - 期待 PreToolUse hook 在写入前拒绝，并提示运行 `git check-ignore -v -- bills/fixture.txt`
+
 ## 推荐执行节奏
 
 ### 日常（每次改 agent/skill/rule/hook 相关文件后）
@@ -96,13 +100,15 @@
 
 如果这次改动涉及以下目录，建议把验活结果贴到 PR 描述里：
 
-- `.github/agents`
-- `.github/skills`
+- `.github/copilot-instructions.md`
 - `.github/instructions`
+- `.github/prompts`
 - `.github/hooks`
+- `.github/skills`
 - `.claude`
 - `.codex`
 - `.agents`
+- `scripts/hooks`
 
 建议附带：
 

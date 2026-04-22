@@ -7,7 +7,7 @@ agent: 'agent'
 
 排查并修复当前工作区中的账单导入预览问题。
 
-优先参考 [bill-import-workflow](../skills/bill-import-workflow/SKILL.md)，但本次任务聚焦“前端导入预览”这一件事，不扩散到无关模块。
+优先参考 `AGENTS.md`、`docs/PROJECT_OVERVIEW.md` 与 `.agents/skills/bill-analyser-conventions/SKILL.md`，但本次任务聚焦“前端导入预览”这一件事，不扩散到无关模块。
 
 ## 输入
 
@@ -45,7 +45,7 @@ agent: 'agent'
 - `src/web/src/views/desktop/transactions/import/ImportDialog.vue`
 - `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue`
 - `src/web/src/models/transaction.ts`
-- 如有必要，检查 `src/core/bill_service.py` 和 `src/api/routes/bills.py`
+- 如有必要，检查 `src/bill_analyser/core/bill_service.py` 和 `src/bill_analyser/api/routes/bills.py`
 
 ## 完成标准
 

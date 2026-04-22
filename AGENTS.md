@@ -81,6 +81,7 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 
 - 不要使用 `taskkill /f /im python.exe`。
 - 不要提交本地数据库、日志、上传文件或密钥。
+- CLI 提交 / 上传 / 会话快照必须尊重 `.gitignore`、`.git/info/exclude` 与 `core.excludesFile`；判断候选文件时优先使用 git-aware 枚举（如 `git ls-files --others --exclude-standard`），有疑问时先运行 `git check-ignore -v -- <path>`，若怀疑该路径已被追踪，再补 `git ls-files -- <path>` 核对。
 - 不要在没有充分理由的情况下改动构建产物、历史快照目录或第三方参考代码。
 - 不要把同一套仓库级规则完整复制到多个平台入口文件里；共享规则优先回收到 `AGENTS.md`。
 - Legacy `.cursor/` compatibility mirrors were intentionally removed；不要重新引入整套镜像目录。

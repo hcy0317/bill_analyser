@@ -7,7 +7,7 @@ agent: 'agent'
 
 排查并修复当前工作区中的资产趋势问题。
 
-优先参考 [statistics-workflow](../skills/statistics-workflow/SKILL.md)，但本次任务只聚焦“资产趋势”这一条链路，不扩散到无关的分类统计、趋势统计或预算模块。
+优先参考 `AGENTS.md`、`docs/PROJECT_OVERVIEW.md` 与 `.agents/skills/bill-analyser-conventions/SKILL.md`，但本次任务只聚焦“资产趋势”这一条链路，不扩散到无关的分类统计、趋势统计或预算模块。
 
 ## 输入
 
@@ -42,11 +42,11 @@ agent: 'agent'
 
 ## 最少检查项
 
-- `src/api/routes/statistics.py`
+- `src/bill_analyser/api/routes/statistics.py`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`
-- 如有必要，检查 `src/core/db.py` 或相关汇率/账户模型
+- 如有必要，检查 `src/bill_analyser/core/db.py` 或相关汇率/账户模型
 
 ## 完成标准
 

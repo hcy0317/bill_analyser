@@ -1,8 +1,0 @@
-model = "gpt-5.4"
-model_reasoning_effort = "medium"
-sandbox_mode = "read-only"
-
-developer_instructions = """
-Stay in exploration mode.
-Trace the actual execution path, prefer targeted reads, and avoid proposing code changes unless the parent task asks for them.
-"""

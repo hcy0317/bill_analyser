@@ -14,12 +14,12 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Canonical shared rules: `AGENTS.md`
 - Copilot / VS Code adapter: `.github/copilot-instructions.md`
 - File-scoped instructions: `.github/instructions/**/*.instructions.md`
-- Copilot custom agents: `.github/agents/*.agent.md`
+- Repo-specific Copilot agent metadata: `.github/agents/openai.yaml`
 - Prompt library: `.github/prompts/*.prompt.md`
 - Copilot-native hooks: `.github/hooks/*.json`
 - Copilot workflows and health checks: `.github/workflows/*`
 - Shared cross-tool skills: `.agents/skills/`
-- Copilot-local skills: `.github/skills/`
+- Repo-specific Copilot-local skills: `.github/skills/`
 
 ## Copilot-specific guidance
 
@@ -28,12 +28,13 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Prefer `.github/instructions/**/*.instructions.md` only when Copilot needs `applyTo`-style scoping or file-family-specific guidance.
 - Prefer `.agents/skills/` for reusable cross-tool workflows; use `.github/skills/` only for Copilot-only or migration-stage skills.
 - Prefer `.github/prompts/` for repeatable task entrypoints rather than growing this adapter or `AGENTS.md` into prompt catalogs.
+- Generic agents / skills / prompts belong at user level; keep repo copies only when they encode Bill Analyser-specific delta.
 - Keep this adapter focused on discovery, runtime wiring, and Copilot-specific deltas; if it starts reading like a second `AGENTS.md`, it has eaten too much spinach.
 
 ## Current Bill Analyser Copilot surfaces
 
 - Modular workspace instructions: `.github/instructions/ecc/`
-- Copilot agents: `.github/agents/`
+- Copilot agent metadata: `.github/agents/openai.yaml`
 - Copilot prompts: `.github/prompts/`
 - Copilot-local skills: `.github/skills/`
 - Shared repository skills: `.agents/skills/`
@@ -47,6 +48,7 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - The shared guard implementation lives in `scripts/hooks/pre_tool_repo_guard.py`.
 - Copilot native `preToolUse` / `postToolUse` / `stop` hooks also bridge to `scripts/hooks/copilot_global_hook_bridge.py`, which can dispatch optional user-level hooks from `~/.copilot/hooks/` when that global layer exists.
 - Project-level Claude settings in `.claude/settings.json` point at the same repo guard so Copilot and Claude stay aligned.
+- Commit / upload candidate discovery must stay git-aware: respect `.gitignore`, `.git/info/exclude`, and `core.excludesFile`; use `git check-ignore -v -- <path>` when auditing a disputed path, and `git ls-files -- <path>` when you need to confirm it is already tracked.
 - Post-edit and stop-session reminders live under `.github/hooks/` and should stay thin, deterministic, and repository-specific.
 - Use `/hooks` when you want a visible diagnostic entrypoint that explains which hooks are active, bridged, or missing.
 
@@ -55,6 +57,7 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 - Treat `AGENTS.md` as the canonical source for shared repository rules.
 - Treat `.agents/skills/` as the canonical source for shared repository workflows.
 - Keep `CLAUDE.md`, `.github/copilot-instructions.md`, and `.codex/AGENTS.md` as platform adapters, not competing rule stores.
+- Keep generic harness capabilities in user-level config instead of mirroring them into repo-level `.github/**`.
 - When a rule applies across tools, move it to `AGENTS.md` or a shared skill first, then keep only the platform-native delta here.
 
 ## Default workflow baseline

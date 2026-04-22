@@ -155,7 +155,6 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         repo_root / "CLAUDE.md",
         repo_root / ".github" / "copilot-instructions.md",
         repo_root / ".codex" / "AGENTS.md",
-        repo_root / ".codex" / "config.toml",
         repo_root / "opencode.json",
     ]
     missing_entrypoints = [str(path.relative_to(repo_root)) for path in entrypoints if not path.exists()]
@@ -637,12 +636,33 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 )
             )
 
-    codex_config = _load_toml(repo_root / ".codex" / "config.toml")
+    repo_codex_config_path = repo_root / ".codex" / "config.toml"
+    global_codex_config_path = Path.home() / ".codex" / "config.toml"
+    codex_config_path = repo_codex_config_path if repo_codex_config_path.exists() else global_codex_config_path
+
+    if not codex_config_path.exists():
+        checks.append(
+            _result(
+                "repo.codex-baseline",
+                "repo",
+                "fail",
+                "未发现可用的 Codex 基线配置；既没有仓库级 `.codex/config.toml`，也没有用户级 `~/.codex/config.toml`。",
+                [
+                    str(repo_codex_config_path.relative_to(repo_root)),
+                    str(global_codex_config_path),
+                ],
+                "补齐用户级 `~/.codex/config.toml`，或在确有仓库专属 delta 时恢复最小 `.codex/config.toml`。",
+            )
+        )
+        codex_config = {}
+    else:
+        codex_config = _load_toml(codex_config_path)
+
     mcp_servers = codex_config.get("mcp_servers", {})
     features = codex_config.get("features", {})
     expected_servers = {"github", "context7", "memory", "playwright", "sequential-thinking"}
     missing_servers = sorted(expected_servers - set(mcp_servers))
-    if features.get("multi_agent") is True and not missing_servers:
+    if codex_config_path.exists() and features.get("multi_agent") is True and not missing_servers:
         checks.append(
             _result(
                 "repo.codex-baseline",
@@ -650,12 +670,13 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 "pass",
                 "Codex 基线配置包含多 agent 与最小 MCP 组合。",
                 [
+                    f"source={codex_config_path}",
                     "features.multi_agent=true",
                     f"mcp_servers={sorted(mcp_servers)}",
                 ],
             )
         )
-    else:
+    elif codex_config_path.exists():
         checks.append(
             _result(
                 "repo.codex-baseline",
@@ -663,10 +684,11 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 "fail",
                 "Codex 基线配置缺少关键能力，仓库级 agent 行为可能退化。",
                 [
+                    f"source={codex_config_path}",
                     f"features.multi_agent={features.get('multi_agent')}",
                     f"missing_mcp_servers={missing_servers}",
                 ],
-                "恢复 `.codex/config.toml` 里的多 agent 与 MCP 基线。",
+                "补齐用户级 `~/.codex/config.toml` 或仓库级 `.codex/config.toml` 中的多 agent 与 MCP 基线。",
             )
         )
 

@@ -3658,7 +3658,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -3749,7 +3749,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -3950,7 +3950,7 @@ class BillService:
                 if destination_account_state_required
                 else current_preview_destination_account_id
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -4103,7 +4103,7 @@ class BillService:
             expected_recurring_id = (
                 None if expected_recurring_id_raw in (None, "", 0, "0") else int(expected_recurring_id_raw)
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
         if (
@@ -4234,7 +4234,7 @@ class BillService:
 
         try:
             payload = json.loads(raw_payload)
-        except TypeError, ValueError, json.JSONDecodeError:
+        except (TypeError, ValueError, json.JSONDecodeError):
             return {}
 
         if not isinstance(payload, dict):

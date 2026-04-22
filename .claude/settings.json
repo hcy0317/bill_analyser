@@ -2,16 +2,16 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write",
+        "matcher": "Bash|PowerShell|Shell|Execute|run_in_terminal|Edit|Write|Create|create_file|apply_patch|Delete|delete_file|Remove|remove",
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/hooks/pre_tool_repo_guard.py",
+            "command": "python -X utf8 scripts/hooks/pre_tool_repo_guard.py",
             "timeout": 20
           },
           {
             "type": "command",
-            "command": "python scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+            "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
             "timeout": 20
           }
         ]

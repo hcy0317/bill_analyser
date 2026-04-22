@@ -16,6 +16,8 @@
     - original_category: 原始分类 (str, 如支付宝的"投资理财"等)
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime

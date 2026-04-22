@@ -22,17 +22,16 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 ## MCP Baseline
 
-The project-local Codex baseline is defined in [.codex/config.toml](.codex/config.toml).
-It keeps a small MCP set aligned with the repository's VS Code setup.
+The active Codex baseline now lives in the user-level profile at `~/.codex/config.toml`.
+This repository should keep only Codex-specific discovery notes and repository deltas, not a second full harness copy.
 
 ## Codex-specific runtime layer
 
 - Root `AGENTS.md` is the primary instructions source that Codex discovers automatically.
-- `.codex/config.toml` contains Codex runtime configuration, MCP defaults, and Codex-specific agent wiring.
-- `.codex/agents/*.toml` remains Codex-native because its schema is not shared with Copilot / Claude / OpenCode agent manifests.
+- User-level `~/.codex/config.toml`, `~/.codex/hooks.json`, `~/.codex/agents/*.toml`, and `~/.codex/harness/**` provide the active Codex runtime configuration.
+- Repo-local `.codex/` should stay thin and only document Bill Analyser-specific Codex guidance that is not already covered by `AGENTS.md`.
 
 ## Multi-Agent Roles
 
-- `.codex/agents/explorer.toml` for read-only evidence gathering
-- `.codex/agents/reviewer.toml` for correctness and regression review
-- `.codex/agents/docs-researcher.toml` for API and docs verification
+- Prefer the user-level Codex custom agents for read-only exploration, review, planning, ultrawork orchestration, and other generic harness roles.
+- If the repository ever needs a truly Bill Analyser-specific Codex agent again, add only that delta instead of mirroring the whole user-level harness back into `.codex/`.

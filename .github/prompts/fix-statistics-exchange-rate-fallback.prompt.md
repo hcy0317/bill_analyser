@@ -7,7 +7,7 @@ agent: 'agent'
 
 排查并修复当前工作区中的 statistics 汇率链路，以及所有依赖汇率结果的统计展示问题。
 
-优先参考 [statistics-workflow](../skills/statistics-workflow/SKILL.md)，但本次任务只聚焦“汇率链路 + 依赖汇率的 statistics 展示”。不要扩散到无关的预算、账单导入或纯样式问题。
+优先参考 `AGENTS.md`、`docs/PROJECT_OVERVIEW.md` 与 `.agents/skills/bill-analyser-conventions/SKILL.md`，但本次任务只聚焦“汇率链路 + 依赖汇率的 statistics 展示”。不要扩散到无关的预算、账单导入或纯样式问题。
 
 ## 输入
 
@@ -49,8 +49,8 @@ agent: 'agent'
 
 ## 最少检查项
 
-- `src/api/routes/statistics.py`
-- `src/core/exchange_rate_providers.py`
+- `src/bill_analyser/api/routes/statistics.py`
+- `src/bill_analyser/core/exchange_rate_providers.py`
 - `src/web/src/lib/services.ts`
 - `src/web/src/stores/statistics.ts`
 - `src/web/src/views/desktop/statistics/TransactionPage.vue`

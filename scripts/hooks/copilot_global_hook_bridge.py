@@ -1,4 +1,8 @@
+"""Bridge repo-local hook entrypoints to optional user-level Copilot hooks."""
+
 from __future__ import annotations
+
+# pylint: disable=wrong-import-position
 
 import json
 import shutil
@@ -17,6 +21,8 @@ from scripts.hooks.pre_tool_repo_guard import build_hook_output, load_payload
 
 @dataclass(frozen=True)
 class HookSpec:
+    """Metadata needed to invoke one global hook."""
+
     hook_id: str
     script_relative_path: str
     profiles: str
@@ -24,6 +30,8 @@ class HookSpec:
 
 @dataclass(frozen=True)
 class HookInvocation:
+    """Normalized subprocess result from one hook invocation."""
+
     exit_code: int
     stdout: str
     stderr: str
@@ -31,6 +39,8 @@ class HookInvocation:
 
 @dataclass(frozen=True)
 class StageResult:
+    """Merged output for one hook stage."""
+
     exit_code: int
     stdout: str = ""
     stderr: str = ""
@@ -38,9 +48,17 @@ class StageResult:
 
 HOOKS_BY_STAGE: dict[str, tuple[HookSpec, ...]] = {
     "pre-tool": (
-        HookSpec("pre:config-protection", "pre-tool/config-protection.js", "standard,strict"),
+        HookSpec(
+            "pre:config-protection",
+            "pre-tool/config-protection.js",
+            "standard,strict",
+        ),
         HookSpec("pre:secret-scan", "pre-tool/secret-scan.js", "standard,strict"),
-        HookSpec("pre:danger-guard", "pre-tool/danger-guard.js", "minimal,standard,strict"),
+        HookSpec(
+            "pre:danger-guard",
+            "pre-tool/danger-guard.js",
+            "minimal,standard,strict",
+        ),
     ),
     "post-tool": (
         HookSpec("post:quality-reminder", "post-tool/quality-reminder.js", "standard,strict"),
@@ -66,27 +84,33 @@ STAGE_ALIASES = {
 }
 
 UTF8 = "utf-8"
+GLOBAL_HOOK_TIMEOUT_S = 5
+GLOBAL_HOOK_TIMEOUT_EXIT_CODE = 124
 ENCODING_TRIGGER = "hook-bridge:windows-stdio-encoding"
 ENCODING_ACTION = "force-utf8-stdio-or-buffer-fallback"
 OBSERVATION_KEYS_EMITTED: set[str] = set()
 
 
 def normalize_stage(raw_stage: str) -> str | None:
+    """Map host-specific stage aliases to the canonical hook stage names."""
     key = str(raw_stage or "").strip().lower().replace("_", "-")
     return STAGE_ALIASES.get(key)
 
 
 def locate_runner(home: Path | None = None) -> Path:
+    """Locate the user-level Copilot hook runner."""
     base_home = home or Path.home()
     return base_home / ".copilot" / "hooks" / "run-with-flags.js"
 
 
 def locate_learning_engine(home: Path | None = None) -> Path:
+    """Locate the optional learning engine used for environment observations."""
     base_home = home or Path.home()
     return base_home / ".copilot" / "scripts" / "learning-engine.js"
 
 
 def locate_node() -> str | None:
+    """Locate a usable Node.js binary."""
     return shutil.which("node") or shutil.which("node.exe")
 
 
@@ -96,6 +120,7 @@ def record_learning_observation(
     context: dict[str, object] | None = None,
     once_key: str | None = None,
 ) -> None:
+    """Best-effort emission of one environment observation to the user-level engine."""
     if once_key and once_key in OBSERVATION_KEYS_EMITTED:
         return
 
@@ -116,7 +141,7 @@ def record_learning_observation(
     }
 
     try:
-        subprocess.Popen(
+        subprocess.Popen(  # pylint: disable=consider-using-with
             [
                 node_binary,
                 str(learning_engine),
@@ -132,7 +157,7 @@ def record_learning_observation(
             start_new_session=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-    except Exception:
+    except (OSError, ValueError):
         if once_key:
             OBSERVATION_KEYS_EMITTED.discard(once_key)
         return
@@ -142,7 +167,8 @@ def _is_utf8_encoding(value: str | None) -> bool:
     return str(value or "").strip().lower().replace("_", "-") == UTF8
 
 
-def ensure_utf8_text_stream(stream: TextIO, stream_name: str, *, record: bool = True) -> bool:
+def ensure_utf8_text_stream(stream: TextIO) -> bool:
+    """Try to reconfigure a text stream to UTF-8 in place."""
     encoding = getattr(stream, "encoding", None)
     if _is_utf8_encoding(encoding):
         return False
@@ -152,7 +178,7 @@ def ensure_utf8_text_stream(stream: TextIO, stream_name: str, *, record: bool = 
         try:
             reconfigure(encoding=UTF8, errors="replace")
             return True
-        except Exception:
+        except (AttributeError, LookupError, ValueError):
             return False
 
     return False
@@ -163,16 +189,18 @@ def prepare_standard_streams_for_unicode(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> tuple[str, ...]:
+    """Reconfigure stdout/stderr to UTF-8 when the host starts in a legacy code page."""
     changed: list[str] = []
     stdout_stream = stdout or sys.stdout
     stderr_stream = stderr or sys.stderr
-    if ensure_utf8_text_stream(stdout_stream, "stdout", record=False):
+    if ensure_utf8_text_stream(stdout_stream):
         changed.append("stdout")
-    if ensure_utf8_text_stream(stderr_stream, "stderr", record=False):
+    if ensure_utf8_text_stream(stderr_stream):
         changed.append("stderr")
     if changed:
         record_learning_observation(
-            f"Hook bridge auto-reconfigured {', '.join(changed)} to utf-8 for Unicode-safe hook output.",
+            "Hook bridge auto-reconfigured "
+            f"{', '.join(changed)} to utf-8 for Unicode-safe hook output.",
             context={"streams": changed, "strategy": "reconfigure"},
             once_key="stdio-reconfigure",
         )
@@ -180,6 +208,7 @@ def prepare_standard_streams_for_unicode(
 
 
 def write_text(stream: TextIO, text: str, stream_name: str) -> None:
+    """Write text with UTF-8 fallbacks when the current stream encoding is unsafe."""
     if not text:
         return
 
@@ -193,7 +222,8 @@ def write_text(stream: TextIO, text: str, stream_name: str) -> None:
     if buffer is not None:
         buffer.write(text.encode(UTF8, errors="replace"))
         record_learning_observation(
-            f"Hook bridge used UTF-8 buffer fallback for {stream_name} after UnicodeEncodeError.",
+            f"Hook bridge used UTF-8 buffer fallback for {stream_name} "
+            "after UnicodeEncodeError.",
             context={"stream": stream_name, "strategy": "buffer-fallback"},
             once_key=f"{stream_name}-buffer-fallback",
         )
@@ -203,7 +233,8 @@ def write_text(stream: TextIO, text: str, stream_name: str) -> None:
     safe_text = text.encode(encoding, "backslashreplace").decode(encoding, "strict")
     stream.write(safe_text)
     record_learning_observation(
-        f"Hook bridge used backslashreplace fallback for {stream_name} because no binary buffer was available.",
+        f"Hook bridge used backslashreplace fallback for {stream_name} "
+        "because no binary buffer was available.",
         context={"stream": stream_name, "strategy": "backslashreplace", "encoding": encoding},
         once_key=f"{stream_name}-backslashreplace",
     )
@@ -228,16 +259,31 @@ def invoke_global_hook(
     runner_path: Path,
     node_binary: str,
 ) -> HookInvocation:
-    result = subprocess.run(
-        [node_binary, str(runner_path), spec.hook_id, spec.script_relative_path, spec.profiles],
-        cwd=REPO_ROOT,
-        input=payload_raw,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    """Invoke one optional user-level hook and normalize timeout handling."""
+    try:
+        result = subprocess.run(
+            [
+                node_binary,
+                str(runner_path),
+                spec.hook_id,
+                spec.script_relative_path,
+                spec.profiles,
+            ],
+            cwd=REPO_ROOT,
+            input=payload_raw,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=GLOBAL_HOOK_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return HookInvocation(
+            exit_code=GLOBAL_HOOK_TIMEOUT_EXIT_CODE,
+            stdout="",
+            stderr=f"Global hook `{spec.hook_id}` timed out after {GLOBAL_HOOK_TIMEOUT_S}s.",
+        )
 
     return HookInvocation(
         exit_code=result.returncode,
@@ -247,6 +293,7 @@ def invoke_global_hook(
 
 
 def _merge_messages(parts: list[str]) -> str:
+    """Join unique non-empty messages in arrival order."""
     merged: list[str] = []
     seen: set[str] = set()
     for part in parts:
@@ -259,6 +306,7 @@ def _merge_messages(parts: list[str]) -> str:
 
 
 def execute_stage(stage: str, payload_raw: str) -> StageResult:
+    """Run all configured hooks for one stage and merge the resulting output."""
     normalized_stage = normalize_stage(stage)
     if not normalized_stage:
         return StageResult(exit_code=1, stderr=f"Unknown hook stage: {stage}")
@@ -286,7 +334,10 @@ def execute_stage(stage: str, payload_raw: str) -> StageResult:
         if invocation.stderr:
             stderr_parts.append(invocation.stderr)
 
-        if normalized_stage == "pre-tool" and invocation.exit_code == 2:
+        if normalized_stage == "pre-tool" and invocation.exit_code in {
+            2,
+            GLOBAL_HOOK_TIMEOUT_EXIT_CODE,
+        }:
             reason = invocation.stderr or f"全局 Copilot hook `{spec.hook_id}` 阻止了当前操作。"
             decision = build_hook_output(payload, reason)
             return StageResult(
@@ -307,6 +358,7 @@ def execute_stage(stage: str, payload_raw: str) -> StageResult:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for the Copilot global hook bridge."""
     args = argv if argv is not None else sys.argv[1:]
     stage = args[0] if args else ""
     prepare_standard_streams_for_unicode()
