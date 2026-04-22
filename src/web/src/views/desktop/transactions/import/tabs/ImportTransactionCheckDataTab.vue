@@ -771,76 +771,96 @@
             </div>
         </template>
         <template #bottom>
-            <div class="title-and-toolbar d-flex align-center text-no-wrap mt-2" v-if="importTransactions">
-                <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
-                    {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
-                </span>
-                <v-chip class="ms-3"
-                        color="warning"
-                        variant="tonal"
-                        size="small"
-                        v-if="annotationTransactionCount > 0">
-                    {{ getNeedsAnnotationText() }} {{ getDisplayCount(annotationTransactionCount) }}
-                </v-chip>
-                <v-btn class="ms-2"
-                       v-if="aiAnnotationEnabled"
-                       density="compact"
-                       variant="tonal"
-                       color="warning"
-                       :disabled="!!disabled || selectedAnnotationTransactionCount < 1"
-                       :prepend-icon="mdiMessageAlertOutline"
-                       @click="openAnnotationDialog">
-                    {{ getAnnotationActionText() }}
-                </v-btn>
+            <div v-if="importTransactions">
+                <v-alert class="mb-2"
+                         density="compact"
+                         variant="tonal"
+                         color="primary"
+                         :icon="mdiSchoolOutline">
+                    <div class="d-flex flex-wrap align-center ga-2">
+                        <span class="text-subtitle-2 font-weight-medium">
+                            {{ tt('Import Preview Session Assistant') }}
+                        </span>
+                        <v-chip size="x-small" color="primary" variant="outlined">
+                            {{ tt('Primary entrypoint') }}
+                        </v-chip>
+                    </div>
+                    <div class="text-body-2 mt-1">
+                        {{ tt('Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.') }}
+                    </div>
+                </v-alert>
 
-                <!-- 导入会话主操作 -->
-                <v-btn-group class="ms-4" density="compact" variant="outlined" color="primary">
-                    <!-- v6.56: 移除选择限制，重新分类按钮始终可点击 -->
-                    <v-btn :disabled="!!disabled"
-                           :prepend-icon="mdiAutoFix"
-                           @click="reclassifySelected">
-                        {{ tt('Reclassify') }}
+                <div class="title-and-toolbar d-flex align-center text-no-wrap mt-2">
+                    <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
+                        {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
+                    </span>
+                    <v-chip class="ms-3"
+                            color="warning"
+                            variant="tonal"
+                            size="small"
+                            v-if="annotationTransactionCount > 0">
+                        {{ getNeedsAnnotationText() }} {{ getDisplayCount(annotationTransactionCount) }}
+                    </v-chip>
+                    <v-btn class="ms-2"
+                           v-if="aiAnnotationEnabled"
+                           density="compact"
+                           variant="tonal"
+                           color="warning"
+                           :disabled="!!disabled || selectedAnnotationTransactionCount < 1"
+                           :prepend-icon="mdiMessageAlertOutline"
+                           @click="openAnnotationDialog">
+                        {{ getAnnotationActionText() }}
                     </v-btn>
-                              <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
-                                    :prepend-icon="mdiSchoolOutline"
-                                     @click="promoteSelectedToLongTermLearning">
-                                 {{ tt('Save as Long-term Learning') }}
-                           </v-btn>
-                </v-btn-group>
-                <v-btn class="ms-2"
-                       density="compact"
-                       variant="text"
-                       color="secondary"
-                       :disabled="!!disabled"
-                       :prepend-icon="mdiTagMultiple"
-                       @click="openCategoryManagement">
-                    {{ tt('Manage Categories') }}
-                </v-btn>
-                <v-btn class="ms-1"
-                       density="compact"
-                       variant="text"
-                       color="secondary"
-                       :disabled="!!disabled"
-                       :prepend-icon="mdiWallet"
-                       @click="openAccountManagement">
-                    {{ tt('Manage Accounts') }}
-                </v-btn>
 
-                <v-spacer v-if="importTransactions.length > 10"/>
-                <span v-if="importTransactions.length > 10">{{ tt('Transactions Per Page') }}</span>
-                <v-select class="ms-2" density="compact" max-width="100"
-                          item-title="name"
-                          item-value="value"
-                          :disabled="!!disabled"
-                          :items="importTransactionsTablePageOptions"
-                          v-model="countPerPage"
-                          v-if="importTransactions.length > 10"
-                />
-                <pagination-buttons density="compact"
-                                    :disabled="!!disabled"
-                                    :totalPageCount="totalPageCount"
-                                    v-model="currentPage"
-                                    v-if="importTransactions.length > 10"></pagination-buttons>
+                    <!-- 导入会话主操作 -->
+                    <v-btn-group class="ms-4" density="compact" variant="outlined" color="primary">
+                        <!-- v6.56: 移除选择限制，重新分类按钮始终可点击 -->
+                        <v-btn :disabled="!!disabled"
+                               :prepend-icon="mdiAutoFix"
+                               @click="reclassifySelected">
+                            {{ tt('Reclassify') }}
+                        </v-btn>
+                        <v-btn :disabled="!!disabled || selectedImportTransactionCount < 1 || !props.sessionId"
+                               :prepend-icon="mdiSchoolOutline"
+                               @click="promoteSelectedToLongTermLearning">
+                            {{ tt('Save as Long-term Learning') }}
+                        </v-btn>
+                    </v-btn-group>
+                    <v-btn class="ms-2"
+                           density="compact"
+                           variant="text"
+                           color="secondary"
+                           :disabled="!!disabled"
+                           :prepend-icon="mdiTagMultiple"
+                           @click="openCategoryManagement">
+                        {{ tt('Manage Categories') }}
+                    </v-btn>
+                    <v-btn class="ms-1"
+                           density="compact"
+                           variant="text"
+                           color="secondary"
+                           :disabled="!!disabled"
+                           :prepend-icon="mdiWallet"
+                           @click="openAccountManagement">
+                        {{ tt('Manage Accounts') }}
+                    </v-btn>
+
+                    <v-spacer v-if="importTransactions.length > 10"/>
+                    <span v-if="importTransactions.length > 10">{{ tt('Transactions Per Page') }}</span>
+                    <v-select class="ms-2" density="compact" max-width="100"
+                              item-title="name"
+                              item-value="value"
+                              :disabled="!!disabled"
+                              :items="importTransactionsTablePageOptions"
+                              v-model="countPerPage"
+                              v-if="importTransactions.length > 10"
+                    />
+                    <pagination-buttons density="compact"
+                                        :disabled="!!disabled"
+                                        :totalPageCount="totalPageCount"
+                                        v-model="currentPage"
+                                        v-if="importTransactions.length > 10"></pagination-buttons>
+                </div>
             </div>
         </template>
     </v-data-table>

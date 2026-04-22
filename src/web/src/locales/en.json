@@ -2877,5 +2877,13 @@
     "Manage": "Manage",
     "Investment Settings": "Investment Settings",
     "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.": "Investment keywords are used to automatically identify investment transactions. Score threshold: 0.55.",
-    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center."
+    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.",
+    "Open Transactions": "Open Transactions",
+    "Import Preview Session Assistant": "Import Preview Session Assistant",
+    "Primary entrypoint": "Primary entrypoint",
+    "Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.": "Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.",
+    "Legacy compatibility action": "Legacy compatibility action",
+    "Analyze Persisted Uncategorized (Legacy)": "Analyze Persisted Uncategorized (Legacy)",
+    "Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.": "Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.",
+    "Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.": "Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings."
 }

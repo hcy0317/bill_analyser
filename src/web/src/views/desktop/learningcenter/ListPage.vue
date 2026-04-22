@@ -53,11 +53,11 @@
                             </v-btn>
                         </div>
                         <div class="mx-6 mt-4" v-if="activeTab === 'llm'">
-                            <v-btn block variant="outlined" color="secondary"
-                                   :disabled="loading || llmAnalyzing"
-                                   @click="handleLLMAnalyze">
-                                <v-icon start :icon="mdiAutoFix" />
-                                {{ tt('Analyze Uncategorized') }}
+                            <v-btn block variant="outlined" color="primary"
+                                   :disabled="loading"
+                                   to="/transaction/list">
+                                <v-icon start :icon="mdiOpenInNew" />
+                                {{ tt('Open Transactions') }}
                             </v-btn>
                             <v-btn block variant="tonal" color="primary" class="mt-2"
                                    :disabled="loading"
@@ -257,6 +257,41 @@
 
                             <!-- ── LLM 归纳 Tab ── -->
                             <template v-if="activeTab === 'llm'">
+                                <v-alert type="info" variant="tonal" class="mb-4">
+                                    <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
+                                        <div class="min-w-0">
+                                            <div class="d-flex flex-wrap align-center ga-2">
+                                                <span class="text-subtitle-2 font-weight-medium">
+                                                    {{ tt('Import Preview Session Assistant') }}
+                                                </span>
+                                                <v-chip size="x-small" color="primary" variant="outlined">
+                                                    {{ tt('Primary entrypoint') }}
+                                                </v-chip>
+                                            </div>
+                                            <div class="text-body-2 mt-2">
+                                                {{ tt('Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.') }}
+                                            </div>
+                                        </div>
+                                        <v-spacer />
+                                        <v-btn color="primary" variant="tonal" to="/transaction/list">
+                                            <v-icon start :icon="mdiOpenInNew" />
+                                            {{ tt('Open Transactions') }}
+                                        </v-btn>
+                                    </div>
+                                </v-alert>
+
+                                <div class="d-flex flex-wrap align-center ga-2 mb-4">
+                                    <v-chip size="small" color="warning" variant="tonal">
+                                        {{ tt('Legacy compatibility action') }}
+                                    </v-chip>
+                                    <v-btn size="small" variant="outlined" color="secondary"
+                                           :disabled="loading || llmAnalyzing"
+                                           @click="handleLLMAnalyze">
+                                        <v-icon start :icon="mdiAutoFix" />
+                                        {{ tt('Analyze Persisted Uncategorized (Legacy)') }}
+                                    </v-btn>
+                                </div>
+
                                 <!-- LLM 多配置管理 -->
                                 <v-card variant="outlined" class="mb-4">
                                     <v-card-title class="text-subtitle-1 d-flex align-center">
@@ -381,7 +416,7 @@
                                 <v-empty-state v-if="!llmAnalyzing && filteredLLMCandidates.length === 0"
                                                :icon="mdiRobotOutline"
                                                :headline="tt('No Candidate Rules')"
-                                               :text="tt('Click Analyze Uncategorized to let LLM induce classification rules.')" />
+                                               :text="tt('Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.')" />
                             </template>
                         </v-card-text>
                     </v-main>

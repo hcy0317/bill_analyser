@@ -2579,5 +2579,13 @@
     "No selected transactions require AI annotation": "目前沒有已選中的待AI標註交易",
     "No description": "無描述",
     "Investment Settings": "投資識別設定",
-    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "規則中心這裡只保留唯讀相容摘要。正式的投資識別設定請在配對中心維護。"
+    "Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.": "規則中心這裡只保留唯讀相容摘要。正式的投資識別設定請在配對中心維護。",
+    "Open Transactions": "開啟交易頁",
+    "Import Preview Session Assistant": "匯入預覽會話助手",
+    "Primary entrypoint": "主入口",
+    "Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.": "匯入預覽會話助手現在是 LLM 輔助學習的主入口。請先從交易頁發起匯入，檢視選中的預覽列，再把確認後的建議提升為長期學習規則。學習中心目前只保留相容期設定與歷史候選佇列。",
+    "Legacy compatibility action": "舊流程相容操作",
+    "Analyze Persisted Uncategorized (Legacy)": "分析已落庫未分類交易（相容入口）",
+    "Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.": "請從交易頁進入匯入預覽會話助手，先檢視選中的預覽列，再提升為長期學習。遷移期間，這裡只繼續顯示歷史候選規則。",
+    "Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.": "請先在這裡檢視所選預覽列，再儲存為長期學習規則。配對中心仍是持久化匹配設定的正式首頁。"
 }
