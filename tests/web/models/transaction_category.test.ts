@@ -125,7 +125,7 @@ describe('TransactionCategory model', () => {
             comment: '已更新',
             hidden: true,
             displayOrder: 9,
-            keywords: '地铁|打车'
+            ruleExpression: 'OR={地铁,打车}'
         });
 
         target.fillFrom(source);
@@ -136,13 +136,14 @@ describe('TransactionCategory model', () => {
         expect(target.comment).toBe('已更新');
         expect(target.displayOrder).toBe(9);
         expect(target.visible).toBe(false);
-        expect(target.keywords).toBe('地铁|打车');
+        expect(target.ruleExpression).toBe('OR={地铁,打车}');
+        expect(target.keywords).toBe('OR={地铁,打车}');
     });
 
-    test('TransactionCategory request converters preserve category fields', () => {
+    test('TransactionCategory request converters preserve canonical rule expression and legacy alias', () => {
         const category = TransactionCategory.of({
             ...SAMPLE_CATEGORY_RESPONSE,
-            keywords: '早餐|咖啡'
+            ruleExpression: 'OR={早餐,咖啡}'
         });
 
         expect(category.toCreateRequest('session-1')).toStrictEqual({
@@ -153,7 +154,8 @@ describe('TransactionCategory model', () => {
             color: '#5470c6',
             comment: '主分类',
             displayOrder: 1,
-            keywords: '早餐|咖啡',
+            ruleExpression: 'OR={早餐,咖啡}',
+            keywords: 'OR={早餐,咖啡}',
             clientSessionId: 'session-1'
         });
 
@@ -165,9 +167,20 @@ describe('TransactionCategory model', () => {
             color: '#5470c6',
             comment: '主分类',
             displayOrder: 1,
-            keywords: '早餐|咖啡',
+            ruleExpression: 'OR={早餐,咖啡}',
+            keywords: 'OR={早餐,咖啡}',
             hidden: false
         });
+    });
+
+    test('TransactionCategory.of accepts legacy keywords payloads as ruleExpression compatibility input', () => {
+        const category = TransactionCategory.of({
+            ...SAMPLE_CATEGORY_RESPONSE,
+            keywords: '早餐|咖啡'
+        });
+
+        expect(category.ruleExpression).toBe('早餐|咖啡');
+        expect(category.keywords).toBe('早餐|咖啡');
     });
 
     test('TransactionCategory collection helpers build arrays, maps and lookups', () => {

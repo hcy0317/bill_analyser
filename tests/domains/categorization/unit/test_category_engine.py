@@ -13,16 +13,32 @@ from bill_analyser.utils.constants import TransactionType
 class FakeCategoryDB:
     """Minimal async DB stub for category-engine tests."""
 
-    def __init__(self, categories: list[dict[str, Any]] | None = None, error: Exception | None = None) -> None:
-        self.categories = categories or []
+    def __init__(
+        self,
+        category_rules: list[dict[str, Any]] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.category_rules = category_rules or []
         self.error = error
         self.user_calls: list[int] = []
+        self.legacy_categories_requested = False
 
-    async def get_all_categories(self, user_id: int = 1) -> list[dict[str, Any]]:
+    async def get_category_rules(
+        self,
+        user_id: int = 1,
+        category_id: int | None = None,
+        enabled_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        _ = (category_id, enabled_only)
         self.user_calls.append(user_id)
         if self.error is not None:
             raise self.error
-        return list(self.categories)
+        return list(self.category_rules)
+
+    async def get_all_categories(self, user_id: int = 1) -> list[dict[str, Any]]:
+        _ = user_id
+        self.legacy_categories_requested = True
+        raise AssertionError("category_engine should not fallback to legacy categories.keywords")
 
 
 
@@ -55,42 +71,38 @@ def test_keyword_matcher_supports_or_not_and_regex_extract_and_cache_lifecycle()
 @pytest.mark.asyncio
 async def test_category_engine_loads_rules_filters_types_and_handles_failures() -> None:
     """分类引擎应按用户/类型加载规则，并在 DB 失败时安全降级。"""
-    categories = [
+    category_rules = [
         {
-            "id": 1,
+            "id": 101,
+            "category_id": 1,
             "main_category": "餐饮",
             "sub_category": "早餐",
             "priority": 1,
-            "keywords": "OR:早餐|包子",
-            "type": TransactionType.EXPENSE,
+            "rule_expression": "OR={早餐,包子}",
+            "category_type": TransactionType.EXPENSE,
         },
         {
-            "id": 2,
+            "id": 102,
+            "category_id": 2,
             "main_category": "收入",
             "sub_category": "工资",
             "priority": 2,
-            "keywords": "工资",
-            "type": TransactionType.INCOME,
-        },
-        {
-            "id": 3,
-            "main_category": "无关键词",
-            "sub_category": "忽略",
-            "priority": 3,
-            "keywords": "",
-            "type": TransactionType.EXPENSE,
+            "rule_expression": "OR={工资}",
+            "category_type": TransactionType.INCOME,
         },
     ]
     engine = CategoryEngine()
-    db = FakeCategoryDB(categories)
+    db = FakeCategoryDB(category_rules)
 
     await engine.load_rules_from_db(db, user_id=9, types=[TransactionType.EXPENSE])
     assert engine.is_initialized is True
     assert engine.current_user_id == 9
     assert len(engine.rules) == 1
     assert engine.rules[0]["main"] == "餐饮"
-    assert "OR:早餐|包子" in engine._compiled_rules
+    assert engine.rules[0]["keywords"] == "OR={早餐,包子}"
+    assert engine.rules[0]["_compiled_v2"].or_blocks == [["早餐", "包子"]]
     assert db.user_calls == [9]
+    assert db.legacy_categories_requested is False
 
     failed_engine = CategoryEngine()
     await failed_engine.load_rules_from_db(FakeCategoryDB(error=RuntimeError("db down")), user_id=1)
@@ -145,42 +157,46 @@ def test_category_engine_matches_by_type_filters_transfer_and_default_fallbacks(
 @pytest.mark.asyncio
 async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
     """批量分类、分类树和全局引擎入口应保持当前契约。"""
-    categories = [
+    category_rules = [
         {
-            "id": 10,
+            "id": 201,
+            "category_id": 10,
             "main_category": "餐饮",
             "sub_category": "早餐",
             "priority": 1,
-            "keywords": "早餐",
-            "type": TransactionType.EXPENSE,
+            "rule_expression": "OR={早餐}",
+            "category_type": TransactionType.EXPENSE,
         },
         {
-            "id": 11,
+            "id": 202,
+            "category_id": 11,
             "main_category": "收入",
             "sub_category": "工资",
             "priority": 1,
-            "keywords": "工资",
-            "type": TransactionType.INCOME,
+            "rule_expression": "OR={工资}",
+            "category_type": TransactionType.INCOME,
         },
         {
-            "id": 12,
+            "id": 203,
+            "category_id": 12,
             "main_category": "转账",
             "sub_category": "内部转账",
             "priority": 1,
-            "keywords": "转账",
-            "type": TransactionType.TRANSFER,
+            "rule_expression": "OR={转账}",
+            "category_type": TransactionType.TRANSFER,
         },
         {
-            "id": 13,
+            "id": 204,
+            "category_id": 13,
             "main_category": "投资",
             "sub_category": "基金",
             "priority": 1,
-            "keywords": "基金",
-            "type": TransactionType.INVESTMENT,
+            "rule_expression": "OR={基金}",
+            "category_type": TransactionType.INVESTMENT,
         },
     ]
     engine = CategoryEngine()
-    await engine.load_rules_from_db(FakeCategoryDB(categories), user_id=1)
+    await engine.load_rules_from_db(FakeCategoryDB(category_rules), user_id=1)
 
     categorized = await engine.batch_match_categories(
         [
@@ -198,12 +214,40 @@ async def test_batch_match_categories_tree_and_global_engine_reload() -> None:
     assert tree["投资"] == {"投资": ["基金"]}
 
     category_engine_module._category_engine_v2 = CategoryEngine()
-    global_engine = await category_engine_module.get_category_engine(FakeCategoryDB(categories), user_id=1)
+    global_engine = await category_engine_module.get_category_engine(FakeCategoryDB(category_rules), user_id=1)
     assert global_engine.is_initialized is True
     assert global_engine.current_user_id == 1
 
-    await category_engine_module.get_category_engine(FakeCategoryDB(categories), user_id=2)
+    await category_engine_module.get_category_engine(FakeCategoryDB(category_rules), user_id=2)
     assert category_engine_module._category_engine_v2.current_user_id == 2
+
+
+@pytest.mark.asyncio
+async def test_category_engine_matches_new_rule_expression_without_legacy_fallback() -> None:
+    """从 category_rules 加载的新语法表达式应直接参与运行时匹配。"""
+    engine = CategoryEngine()
+    db = FakeCategoryDB(
+        [
+            {
+                "id": 301,
+                "category_id": 30,
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+                "priority": 1,
+                "rule_expression": "OR={早餐,包子}+NOT={退款}",
+                "category_type": TransactionType.EXPENSE,
+            }
+        ]
+    )
+
+    await engine.load_rules_from_db(db, user_id=5, types=[TransactionType.EXPENSE])
+
+    matched_bill = {"counterparty": "早餐铺", "description": "早餐套餐", "type": "支出", "amount": -18.0}
+    assert engine.match_category(matched_bill) == ("餐饮", "早餐")
+
+    blocked_bill = {"counterparty": "早餐铺", "description": "早餐退款", "type": "支出", "amount": -18.0}
+    assert engine.match_category(blocked_bill) == (None, None)
+    assert db.legacy_categories_requested is False
 
 
 

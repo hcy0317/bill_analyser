@@ -14,10 +14,11 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
     public comment: string;
     public displayOrder: number;
     public visible: boolean;
-    public keywords?: string;
+    public ruleExpression?: string;
+    public categoryRules?: TransactionCategoryRuleSummary[];
     public subCategories?: TransactionCategory[];
 
-    private constructor(id: string, name: string, parentId: string, type: CategoryType, icon: string, color: ColorValue, comment: string, displayOrder: number, visible: boolean, keywords?: string, subCategories?: TransactionCategory[]) {
+    private constructor(id: string, name: string, parentId: string, type: CategoryType, icon: string, color: ColorValue, comment: string, displayOrder: number, visible: boolean, ruleExpression?: string, categoryRules?: TransactionCategoryRuleSummary[], subCategories?: TransactionCategory[]) {
         this.id = id;
         this.name = name;
         this.parentId = parentId;
@@ -27,13 +28,22 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         this.comment = comment;
         this.displayOrder = displayOrder;
         this.visible = visible;
-        this.keywords = keywords;
+        this.ruleExpression = ruleExpression;
+        this.categoryRules = categoryRules;
 
         if (subCategories) {
             this.subCategories = subCategories;
         } else if (!subCategories && (!parentId || parentId === '0')) {
             this.subCategories = [];
         }
+    }
+
+    public get keywords(): string | undefined {
+        return this.ruleExpression;
+    }
+
+    public set keywords(value: string | undefined) {
+        this.ruleExpression = value;
     }
 
     public get hidden(): boolean {
@@ -49,7 +59,8 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             this.color === other.color &&
             this.comment === other.comment &&
             this.displayOrder === other.displayOrder &&
-            this.visible === other.visible;
+            this.visible === other.visible &&
+            this.ruleExpression === other.ruleExpression;
 
         if (!isEqual) {
             return false;
@@ -82,10 +93,13 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         this.comment = other.comment;
         this.displayOrder = other.displayOrder;
         this.visible = other.visible;
-        this.keywords = other.keywords;
+        this.ruleExpression = other.ruleExpression;
+        this.categoryRules = other.categoryRules;
     }
 
     public toCreateRequest(clientSessionId: string): TransactionCategoryCreateRequest {
+        const ruleExpression = this.ruleExpression;
+
         return {
             name: this.name,
             type: this.type,
@@ -94,12 +108,15 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             color: this.color,
             comment: this.comment,
             displayOrder: this.displayOrder,
-            keywords: this.keywords,
+            ruleExpression,
+            keywords: ruleExpression,
             clientSessionId: clientSessionId
         };
     }
 
     public toModifyRequest(): TransactionCategoryModifyRequest {
+        const ruleExpression = this.ruleExpression;
+
         return {
             id: this.id,
             name: this.name,
@@ -108,12 +125,13 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             color: this.color,
             comment: this.comment,
             displayOrder: this.displayOrder,
-            keywords: this.keywords,
+            ruleExpression,
+            keywords: ruleExpression,
             hidden: !this.visible
         };
     }
 
-    public static of(json: any): TransactionCategory {
+    public static of(json: Partial<TransactionCategoryInfoResponse> | null | undefined): TransactionCategory {
         if (!json) {
             throw new Error('JSON cannot be null');
         }
@@ -136,17 +154,23 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             }
         }
 
+        const categoryRules = Array.isArray(json.categoryRules)
+            ? (json.categoryRules as TransactionCategoryRuleSummary[])
+            : undefined;
+        const ruleExpression = json.ruleExpression ?? json.keywords;
+
         return new TransactionCategory(
-            json.id,
-            json.name,
-            json.parentId,
-            json.type,
-            json.icon,
-            json.color,
-            json.comment,
-            json.displayOrder,
+            String(json.id),
+            String(json.name),
+            json.parentId ?? '0',
+            (json.type ?? CategoryType.Income) as CategoryType,
+            json.icon ?? DEFAULT_CATEGORY_ICON_ID,
+            json.color ?? DEFAULT_CATEGORY_COLOR,
+            json.comment ?? '',
+            json.displayOrder ?? 0,
             json.hidden !== true,
-            json.keywords,
+            ruleExpression,
+            categoryRules,
             subCategories
         );
     }
@@ -182,8 +206,17 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
     }
 
     public static createNewCategory(type?: CategoryType, parentId?: string): TransactionCategory {
-        return new TransactionCategory('', '', parentId || '0', type || CategoryType.Income, DEFAULT_CATEGORY_ICON_ID, DEFAULT_CATEGORY_COLOR, '', 0, true, '');
+        return new TransactionCategory('', '', parentId || '0', type || CategoryType.Income, DEFAULT_CATEGORY_ICON_ID, DEFAULT_CATEGORY_COLOR, '', 0, true, '', []);
     }
+}
+
+export interface TransactionCategoryRuleSummary {
+    readonly id?: string | number;
+    readonly name?: string;
+    readonly ruleExpression?: string;
+    readonly priority?: number;
+    readonly enabled?: boolean;
+    readonly regexEnabled?: boolean;
 }
 
 export interface TransactionCategoryCreateRequest {
@@ -194,6 +227,7 @@ export interface TransactionCategoryCreateRequest {
     readonly color: string;
     readonly comment: string;
     readonly displayOrder: number;
+    readonly ruleExpression?: string;
     readonly keywords?: string;
     readonly clientSessionId: string;
 }
@@ -218,6 +252,7 @@ export interface TransactionCategoryModifyRequest {
     readonly color: string;
     readonly comment: string;
     readonly displayOrder: number;
+    readonly ruleExpression?: string;
     readonly keywords?: string;
     readonly hidden: boolean;
 }
@@ -250,6 +285,9 @@ export interface TransactionCategoryInfoResponse {
     readonly comment: string;
     readonly displayOrder: number;
     readonly hidden: boolean;
+    readonly ruleExpression?: string;
+    readonly categoryRules?: TransactionCategoryRuleSummary[];
+    readonly keywords?: string;
     readonly subCategories?: TransactionCategoryInfoResponse[];
 }
 

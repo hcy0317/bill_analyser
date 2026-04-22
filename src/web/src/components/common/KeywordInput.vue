@@ -1,7 +1,7 @@
 <template>
-    <div class="keyword-input">
+    <div class="rule-expression-input">
         <div class="d-flex align-center mb-2">
-            <span class="text-subtitle-2">{{ tt('Keyword Logic') }}</span>
+            <span class="text-subtitle-2">{{ resolvedTitle }}</span>
             <v-spacer />
             <v-btn
                 size="small"
@@ -11,12 +11,12 @@
                 @click="addGroup"
                 :disabled="disabled"
             >
-                {{ tt('Add') }}
+                {{ resolvedAddButtonText }}
             </v-btn>
         </div>
 
         <div v-if="groups.length === 0" class="text-center text-caption text-medium-emphasis py-2">
-            {{ tt('No keywords set') }}
+            {{ resolvedEmptyStateText }}
         </div>
 
         <div v-for="(group, index) in groups" :key="index" class="d-flex align-start mb-2">
@@ -33,8 +33,8 @@
             <div class="flex-grow-1">
                 <v-combobox
                     v-model="group.keywords"
-                    :label="group.type === 'REGEX' ? tt('Regex Patterns') : tt('Keywords')"
-                    :placeholder="group.type === 'REGEX' ? tt('Enter regex pattern') : tt('Type and press Enter')"
+                    :label="group.type === 'REGEX' ? tt('Regex Patterns') : tt('Expression Terms')"
+                    :placeholder="group.type === 'REGEX' ? tt('Enter regex patterns and press Enter') : tt('Enter terms and press Enter')"
                     chips
                     closable-chips
                     multiple
@@ -48,6 +48,14 @@
             <div class="ms-2">
                 <v-btn :icon="mdiDelete" size="small" variant="text" color="error" @click="removeGroup(index)"></v-btn>
             </div>
+        </div>
+
+        <div class="text-caption text-medium-emphasis mt-2">
+            {{ resolvedHelpText }}
+        </div>
+
+        <div v-if="resolvedExampleText" class="text-caption text-medium-emphasis mt-1">
+            {{ resolvedExampleText }}
         </div>
     </div>
 </template>
@@ -63,7 +71,13 @@ const { tt } = useI18n();
 const props = withDefaults(defineProps<{
     modelValue: string;
     disabled?: boolean;
+    expressionFormat?: 'legacy' | 'composite';
     format?: 'legacy' | 'composite';
+    title?: string;
+    emptyStateText?: string;
+    helpText?: string;
+    exampleText?: string;
+    addButtonText?: string;
 }>(), {
     format: 'legacy',
 });
@@ -77,14 +91,29 @@ interface KeywordGroup {
     keywords: string[];
 }
 
+const resolvedFormat = computed(() => props.expressionFormat ?? props.format);
+const resolvedTitle = computed(() => props.title || tt('Rule Expression'));
+const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Clause'));
+const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
+const resolvedHelpText = computed(() => props.helpText || (
+    resolvedFormat.value === 'composite'
+        ? tt('Build a boolean rule expression with OR / AND / NOT blocks. Regex clauses are also supported in composite mode.')
+        : tt('Build a rule expression with OR / AND / NOT blocks. Legacy syntax is still accepted for compatibility.')
+));
+const resolvedExampleText = computed(() => props.exampleText || (
+    resolvedFormat.value === 'composite'
+        ? tt('Example: OR={早餐,咖啡}+NOT={退款}')
+        : ''
+));
+
 const types = computed(() => {
     const base = [
-        { title: tt('Include (OR)'), value: 'OR' as KeywordType },
-        { title: tt('Require (AND)'), value: 'AND' as KeywordType },
+        { title: tt('Match Any (OR)'), value: 'OR' as KeywordType },
+        { title: tt('Require All (AND)'), value: 'AND' as KeywordType },
         { title: tt('Exclude (NOT)'), value: 'NOT' as KeywordType },
     ];
-    if (props.format === 'composite') {
-        base.push({ title: tt('Regex'), value: 'REGEX' as KeywordType });
+    if (resolvedFormat.value === 'composite') {
+        base.push({ title: tt('Regex Clause'), value: 'REGEX' as KeywordType });
     }
     return base;
 });
@@ -166,7 +195,7 @@ function parseComposite(str: string) {
 }
 
 function serialize(currentGroups: KeywordGroup[]): string {
-    if (props.format === 'legacy') {
+    if (resolvedFormat.value === 'legacy') {
         return serializeLegacy(currentGroups);
     }
     return serializeComposite(currentGroups);
@@ -209,7 +238,7 @@ function removeGroup(index: number) {
 </script>
 
 <style scoped>
-.keyword-input {
+.rule-expression-input {
     width: 100%;
 }
 </style>

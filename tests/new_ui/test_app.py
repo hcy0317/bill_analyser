@@ -49,13 +49,25 @@ class TestApp:
 
     @pytest.mark.asyncio
     async def test_category_engine_has_rules(self, category_engine, db):
-        """测试分类引擎已加载规则"""
-        # 确保至少存在一条规则
-        await db.create_category({
+        """测试分类引擎从 category_rules canonical source 加载规则。"""
+        category_id = await db.create_category({
             "main_category": "TestMain",
             "sub_category": "TestSub",
-            "keywords": "test_keyword"
+            "keywords": "test_keyword",
         })
+        assert category_id is not None
+
+        rule_id = await db.create_category_rule(
+            {
+                "category_id": category_id,
+                "name": "test canonical rule",
+                "priority": 1,
+                "rule_expression": "OR={test_keyword}",
+                "regex_enabled": False,
+                "enabled": True,
+            }
+        )
+        assert rule_id is not None
 
         # 重新加载规则
         await category_engine.load_rules_from_db(db)

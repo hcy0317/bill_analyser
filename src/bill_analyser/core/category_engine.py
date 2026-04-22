@@ -100,7 +100,7 @@ class KeywordMatcher:
         返回：
             CompiledRule: 预编译的规则对象
         """
-        # pylint: disable=too-many-branches
+        # pylint: disable=too-many-branches,too-many-locals
         if not rule:
             return CompiledRule(is_empty=True)
 
@@ -253,6 +253,7 @@ class KeywordMatcher:
         - When *regex_enabled* is True each key is a regex pattern
         - Falls back to ``compile_rule`` for old-syntax strings
         """
+        # pylint: disable=too-many-branches,too-many-locals
         if not expr:
             return CompiledRule(is_empty=True)
 
@@ -507,12 +508,13 @@ class CategoryEngine:
 
     @log_method
     async def load_rules_from_db_v2(self, db, user_id: int = 1, types: list[int] | None = None):
-        """从 category_rules 表和 categories.keywords 加载规则。
+        """从 category_rules canonical source 加载规则。
 
         1. 从 category_rules 加载已启用的规则（JOIN categories 获取分类元数据）
-        2. 对于没有 category_rules 条目的分类，回退到 categories.keywords
-        3. 合并、按 priority 排序并预编译
+        2. 不再回退到 categories.keywords，避免运行时双规则源
+        3. 按 priority 排序并预编译
         """
+        # pylint: disable=too-many-locals
         try:
             types_str = str(types) if types else "all"
             self.logger.info(
@@ -522,23 +524,20 @@ class CategoryEngine:
             type_filter: set = set(types) if types else set()
 
             valid_rules: list[dict[str, Any]] = []
-            categories_with_rules: set[int] = set()
 
-            # --- Phase 1: load from category_rules table ---
+            # --- Canonical source: category_rules table ---
             try:
                 cr_rows = await db.get_category_rules(
                     user_id=user_id, enabled_only=True
                 )
             except Exception:  # pylint: disable=broad-exception-caught
-                # Table might not exist yet (pre-migration)
+                # Table might not exist yet (pre-migration) or the query failed.
                 cr_rows = []
 
             for row in cr_rows:
                 rule_type = row.get("category_type", TransactionType.EXPENSE)
                 if types and rule_type not in type_filter:
                     continue
-
-                categories_with_rules.add(row["category_id"])
 
                 expr = row.get("rule_expression", "")
                 regex_enabled = bool(row.get("regex_enabled", False))
@@ -556,32 +555,6 @@ class CategoryEngine:
                         "keywords": expr,
                         "type": rule_type,
                         "_compiled_v2": compiled,
-                    }
-                )
-
-            # --- Phase 2: fallback to categories.keywords ---
-            categories = await db.get_all_categories(user_id=user_id)
-
-            for cat in categories:
-                cat_id = cat.get("id")
-                if cat_id is not None and cat_id in categories_with_rules:
-                    continue
-
-                keywords = cat.get("keywords")
-                if not keywords:
-                    continue
-
-                rule_type = cat.get("type", TransactionType.EXPENSE)
-                if types and rule_type not in type_filter:
-                    continue
-
-                valid_rules.append(
-                    {
-                        "main": cat["main_category"],
-                        "sub": cat["sub_category"],
-                        "priority": cat.get("priority", 999),
-                        "keywords": keywords,
-                        "type": rule_type,
                     }
                 )
 
@@ -735,7 +708,13 @@ class CategoryEngine:
                 continue
 
             # v6.73: 使用预编译规则进行快速匹配
-            if self._match_keywords_fast(combined_text, keywords):
+            compiled_v2 = rule.get("_compiled_v2")
+            if compiled_v2 is not None:
+                matched = self.keyword_matcher.match_compiled(combined_text, compiled_v2)
+            else:
+                matched = self._match_keywords_fast(combined_text, keywords)
+
+            if matched:
                 rule_type = rule.get("type")
                 main_cat = rule["main"]
                 sub_cat = rule["sub"]

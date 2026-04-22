@@ -145,6 +145,10 @@
 - ✅ `src/bill_analyser/api/routes/rules.py` 的 overview 聚合已停止读取 legacy `category_keywords`，改为暴露 `categoryRuleCount`，并由新增 `tests/domains/categories/unit/test_rules_route_branches.py` 锁住“category_rules 为 canonical source”的契约
 - ✅ `src/web/src/views/desktop/rules/RuleCenterPage.vue` 已移除 Legacy Keywords 独立 tab，并把 `Investment Keywords` 调整为仅保留只读兼容摘要的 `Investment Settings` 入口，避免继续把旧关键词体系当作独立中心能力
 - ✅ 为修复 CI `verify-agent-stack` 的 `repo.codex-baseline` fail，仓库已补齐最小 `.codex/config.toml` fallback，使 `scripts/agent_stack_health.py --mode repo` 在无用户级 `~/.codex/config.toml` 的环境下也能通过
+- ✅ `src/bill_analyser/core/category_engine.py` 已去掉 `load_rules_from_db_v2` 对 `categories.keywords` 的 runtime fallback，并由 `tests/domains/categorization/unit/test_category_engine.py` 与 `tests/new_ui/test_app.py` 锁住“运行时只从 category_rules 读取分类规则”的契约
+- ✅ `src/web/src/models/transaction_category.ts` 已把前端模型 canonical 字段收口到 `ruleExpression`，`keywords` 仅保留兼容桥接；配套 `tests/web/models/transaction_category.test.ts` 已补 ruleExpression 主断言
+- ✅ `src/web/src/components/common/KeywordInput.vue` 已完成前半刀语义收口：组件标题、空态、帮助文案、按钮与 clause 语义已从 legacy keyword list 转向布尔表达式 / ruleExpression 输入器
+- ✅ `src/web/src/views/desktop/categories/list/dialogs/EditDialog.vue` 已完成后半刀认知收口：分类编辑弹窗中的字段标题、帮助说明、保存语义与表达式示例已统一切到“分类规则表达式”，不再把该输入区表述为关键词列表
 
 ## 阶段 5: LLM 入口迁移到导入预览 session-assistant 域 — 预计 todo 数: 6
 ### 目标

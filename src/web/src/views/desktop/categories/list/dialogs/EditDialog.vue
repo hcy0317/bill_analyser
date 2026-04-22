@@ -70,7 +70,16 @@
                             />
                         </v-col>
                         <v-col cols="12" md="12" v-if="category.parentId && category.parentId !== '0'">
-                            <keyword-input :model-value="category.keywords || ''" @update:model-value="category.keywords = $event" />
+                            <rule-expression-input
+                                :model-value="category.ruleExpression || ''"
+                                expression-format="composite"
+                                :title="tt('Category Matching Rule Expression')"
+                                :add-button-text="tt('Add Rule Block')"
+                                :empty-state-text="tt('No rule expression defined yet')"
+                                :help-text="tt('This secondary category is matched by a boolean rule expression instead of a legacy keyword list. Use OR / AND / NOT blocks to describe when transactions should be assigned here. Saving this form stores the expression as the category matching rule.')"
+                                :example-text="tt('Example: OR={早餐,咖啡}+NOT={退款}')"
+                                @update:model-value="category.ruleExpression = $event"
+                            />
                         </v-col>
                         <v-col cols="12" md="12">
                             <v-textarea
@@ -115,7 +124,7 @@
 <script setup lang="ts">
 import ColorSelect from '@/components/desktop/ColorSelect.vue';
 import IconSelect from '@/components/desktop/IconSelect.vue';
-import KeywordInput from '@/components/common/KeywordInput.vue';
+import RuleExpressionInput from '@/components/common/KeywordInput.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
