@@ -106,11 +106,10 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 
 # 前端检查
 Set-Location src\web
-npx vue-tsc --noEmit
-npx eslint <touched frontend files>
+npm run lint
 ```
 
-提交前最低检查：受影响的 pytest 用例通过；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npx vue-tsc --noEmit` 与 `npx eslint <touched frontend files>`；接口或金额字段变更时人工复核一次元/分转换。
+提交前最低检查：受影响的 pytest 用例通过；Python 改动至少通过对应模块的 pylint；前端改动至少通过 `npm run lint` 或最小构建验证；接口或金额字段变更时人工复核一次元/分转换。
 
 ## Default AI workflow
 
@@ -119,7 +118,7 @@ npx eslint <touched frontend files>
 - 普通任务优先保持单 agent、小步修改、就地验证；只有在架构设计、显式代码评审、安全审查、构建故障、关键 E2E 等场景才升级为专项 agent。
 - 按改动路径选择验证动作：
 	- `src/bill_analyser/**`：先跑受影响 pytest / pylint；业务代码验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`
-	- `src/web/**`：至少运行 `npx vue-tsc --noEmit` 与 `npx eslint <touched frontend files>`；必要时做最小构建验证；全量 `eslint .` 超时只能记录为 inconclusive
+	- `src/web/**`：至少运行 `npm run lint`，必要时做最小构建验证
 	- `.github/**`、`.agents/**`、`.claude/**`、`scripts/hooks/**`：运行 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` 与相关 hook / 健康检查 pytest
 
 ## Audit gate for business-code changes

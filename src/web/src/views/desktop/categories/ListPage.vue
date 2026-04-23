@@ -553,7 +553,7 @@ function onFileSelected(event: Event) {
                     loading.value = false;
                     snackbar.value?.showError(error);
                 });
-            } catch (err) {
+            } catch {
                 snackbar.value?.showError('Invalid JSON file');
             }
             // Reset input

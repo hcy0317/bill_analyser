@@ -70,7 +70,7 @@ export default defineConfig(() => {
     let commitHash = 'dev';
     try {
         commitHash = git.short();
-    } catch (error) {
+    } catch (_error) {
         console.warn('Not in a git repository, using default commit hash');
     }
 

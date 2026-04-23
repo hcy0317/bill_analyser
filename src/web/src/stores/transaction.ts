@@ -169,7 +169,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
             let currentMonthList: TransactionMonthList | null = null;
 
             for (const [item, index] of itemAndIndex(transactionPageWrapper.items)) {
-                fillTransactionObject(item, currentUtcOffset);
+                fillTransactionObject(item);
 
                 const transactionTime = parseDateTimeFromUnixTime(item.time, item.utcOffset, currentUtcOffset);
                 const transactionYear = transactionTime.getGregorianCalendarYear();
@@ -255,7 +255,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
 
             for (const [transaction, transactionIndex] of itemAndIndex(transactionMonthList.items)) {
                 if (transaction.id === currentTransaction.id) {
-                    fillTransactionObject(currentTransaction, currentUtcOffset);
+                    fillTransactionObject(currentTransaction);
 
                     if (transactionYear !== transactionMonthList.year ||
                         transactionMonth !== transactionMonthList.month ||
@@ -424,7 +424,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         }
     }
 
-    function fillTransactionObject(transaction: Transaction, currentUtcOffset: number): void {
+    function fillTransactionObject(transaction: Transaction): void {
         if (!transaction.category) {
             if (transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId]) {
                 transaction.setCategory(transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId]);

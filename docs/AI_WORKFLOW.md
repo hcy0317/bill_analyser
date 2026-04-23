@@ -113,7 +113,7 @@
 它做的是**仓库语义感知**的完整验证，例如：
 
 - 后端改动 → pytest / pylint
-- 前端改动 → `npx vue-tsc --noEmit` + `npx eslint <touched frontend files>`
+- 前端改动 → `npm run lint`
 - AI 定制层改动 → `agent_stack_health.py --mode repo`
 - API 契约改动 → 检查 `src/web/src/lib/services.ts`
 - 金额/统计改动 → 人工复核元/分
@@ -202,8 +202,7 @@
 ### `src/web/**`
 
 - 至少在 `src/web` 下运行：
-  - `npx vue-tsc --noEmit`
-  - `npx eslint <touched frontend files>`
+  - `npm run lint`
 - 复杂 UI/契约改动再补最小构建或测试
 
 ### `.github/**` / `.agents/**` / `.claude/**` / `scripts/hooks/**`

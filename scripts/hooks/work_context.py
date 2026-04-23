@@ -141,7 +141,7 @@ def build_verification_steps(paths: Sequence[str]) -> tuple[str, ...]:
         steps.append("如果触及业务运行时代码，验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`。")
 
     if any(path.startswith(FRONTEND_PREFIX) for path in normalized_paths):
-        steps.append("在 `src/web` 下运行 `npx vue-tsc --noEmit` 与 `npx eslint <touched frontend files>`，必要时补最小构建验证；全量 `eslint .` 超时只能记录为 inconclusive。")
+        steps.append("在 `src/web` 下运行 `npm run lint`，必要时补最小构建验证。")
 
     if any(
         path == "AGENTS.md"
