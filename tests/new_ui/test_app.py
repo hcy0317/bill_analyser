@@ -2,6 +2,7 @@
 测试Flask应用的基本功能
 """
 import json
+from uuid import uuid4
 
 import pytest
 
@@ -50,9 +51,10 @@ class TestApp:
     @pytest.mark.asyncio
     async def test_category_engine_has_rules(self, category_engine, db):
         """测试分类引擎从 category_rules canonical source 加载规则。"""
+        suffix = uuid4().hex[:8]
         category_id = await db.create_category({
-            "main_category": "TestMain",
-            "sub_category": "TestSub",
+            "main_category": f"TestMain-{suffix}",
+            "sub_category": f"TestSub-{suffix}",
             "keywords": "test_keyword",
         })
         assert category_id is not None

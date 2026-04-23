@@ -326,7 +326,7 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     assert response.status_code == 200, response.get_data(as_text=True)
     payload = response.get_json() or {}
     assert payload["success"] is True
-    assert payload["data"] == {"migrated": 2, "skipped": 1}
+    assert payload["data"] == {"migrated": 3, "skipped": 0}
 
     migrated_rules = _run(
         db_instance.get_category_rules(
@@ -357,8 +357,14 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
             enabled_only=False,
         )
     )
-    assert [rule["id"] for rule in existing_rules] == [existing_rule_id]
-    assert [rule["rule_expression"] for rule in existing_rules] == ["OR={手工规则}"]
+    assert [rule["rule_expression"] for rule in existing_rules] == [
+        "OR={手工规则}",
+        "OR={不应重复迁移}",
+    ]
+    migrated_existing_rule = next(
+        rule for rule in existing_rules if rule["id"] != existing_rule_id
+    )
+    assert migrated_existing_rule["name"] == f"migrated:迁移测试{suffix}/已有规则"
 
     other_user_rules = _run(
         db_instance.get_category_rules(
@@ -369,20 +375,30 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     )
     assert other_user_rules == []
 
+    migrated_rule_id = migrated_rules[0]["id"]
+    assert _run(db_instance.delete_category_rule(migrated_rule_id, user_id=user_id)) is True
+
+    recreate_response = client.post("/api/category-rules/migrate", headers=headers)
+    assert recreate_response.status_code == 200, recreate_response.get_data(as_text=True)
+    recreate_payload = recreate_response.get_json() or {}
+    assert recreate_payload["success"] is True
+    assert recreate_payload["data"] == {"migrated": 1, "skipped": 2}
+    recreated_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=migrated_category_id,
+            enabled_only=False,
+        )
+    )
+    assert [rule["rule_expression"] for rule in recreated_rules] == [
+        "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}",
+    ]
+
     repeat_response = client.post("/api/category-rules/migrate", headers=headers)
     assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
     repeat_payload = repeat_response.get_json() or {}
     assert repeat_payload["success"] is True
     assert repeat_payload["data"] == {"migrated": 0, "skipped": 3}
-    assert len(
-        _run(
-            db_instance.get_category_rules(
-                user_id=user_id,
-                category_id=migrated_category_id,
-                enabled_only=False,
-            )
-        )
-    ) == 1
 
     engine_rules = client.application.config["CATEGORY_ENGINE_INSTANCE"].rules
     assert any(

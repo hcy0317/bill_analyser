@@ -294,37 +294,44 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
         for cat in categories:
             cat_id = cat["id"]
             old_kw: str = cat["keywords"]
-            priority = cat.get("priority", 0)
-
             new_expr = self._convert_old_keyword_syntax(old_kw)
+
             try:
-                cursor = await conn.execute(
+                async with conn.execute(
+                    (
+                        "SELECT 1 FROM category_rules "
+                        "WHERE user_id = ? AND category_id = ? "
+                        "AND rule_expression = ? AND regex_enabled = 0 "
+                        "LIMIT 1"
+                    ),
+                    (
+                        user_id,
+                        cat_id,
+                        new_expr,
+                    ),
+                ) as duplicate_cursor:
+                    if await duplicate_cursor.fetchone() is not None:
+                        skipped += 1
+                        continue
+
+                await conn.execute(
                     (
                         "INSERT INTO category_rules "
                         "(user_id, category_id, name, priority, rule_expression, "
                         "regex_enabled, enabled, created_at, updated_at) "
-                        "SELECT ?, ?, ?, ?, ?, 0, 1, ?, ? "
-                        "WHERE NOT EXISTS ("
-                        "SELECT 1 FROM category_rules "
-                        "WHERE category_id = ? AND user_id = ?"
-                        ")"
+                        "VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)"
                     ),
                     (
                         user_id,
                         cat_id,
                         f"migrated:{cat.get('main_category', '')}/{cat.get('sub_category', '')}",
-                        priority,
+                        cat.get("priority", 0),
                         new_expr,
                         now,
                         now,
-                        cat_id,
-                        user_id,
                     ),
                 )
-                if cursor.rowcount == 0:
-                    skipped += 1
-                else:
-                    migrated += 1
+                migrated += 1
             except sqlite3.Error as exc:
                 self.logger.warning("迁移分类 %s 的关键词失败: %s", cat_id, exc)
                 skipped += 1
