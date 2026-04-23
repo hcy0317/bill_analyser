@@ -26,6 +26,15 @@ _MAX_SESSION_CATEGORY_GROUPS = 10
 _MAX_PREVIEW_UPDATE_BATCH = 20
 
 
+class LLMImportSessionAnalysisError(ValueError):
+    """Stable import-session LLM analysis error for API/UI branching."""
+
+    def __init__(self, code: str, message: str, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
+
 class LLMLearningService:
     """Orchestrates LLM analysis of transactions and rule induction."""
 
@@ -73,7 +82,8 @@ class LLMLearningService:
             if not isinstance(preview_ids, list):
                 raise ValueError("preview_ids must be a list")
             if len(preview_ids) > _MAX_SESSION_SELECTION:
-                raise ValueError(
+                raise LLMImportSessionAnalysisError(
+                    "PREVIEW_SELECTION_TOO_LARGE",
                     (
                         "Too many preview rows selected for session analysis "
                         f"(max {_MAX_SESSION_SELECTION})"
@@ -90,7 +100,8 @@ class LLMLearningService:
                     ordered_ids.append(preview_id)
 
         if len(ordered_ids) > _MAX_SESSION_SELECTION:
-            raise ValueError(
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_TOO_LARGE",
                 (
                     "Too many preview rows selected for session analysis "
                     f"(max {_MAX_SESSION_SELECTION})"
@@ -109,7 +120,8 @@ class LLMLearningService:
         if not isinstance(preview_updates, list):
             raise ValueError("preview_updates must be a list")
         if len(preview_updates) > _MAX_PREVIEW_UPDATE_BATCH:
-            raise ValueError(
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_TOO_LARGE",
                 (
                     "Too many preview updates submitted for session analysis "
                     f"(max {_MAX_PREVIEW_UPDATE_BATCH})"
@@ -245,7 +257,11 @@ class LLMLearningService:
         """Generate rule-induction candidates from import preview rows."""
         session = await self._db.get_import_session(session_id, user_id=user_id)
         if not session:
-            raise ValueError("Import session not found")
+            raise LLMImportSessionAnalysisError(
+                "IMPORT_SESSION_NOT_FOUND",
+                "Import session not found",
+                status_code=404,
+            )
 
         normalized_preview_updates = self._normalize_preview_updates(preview_updates)
         selected_preview_ids = self._normalize_selected_preview_ids(
@@ -269,7 +285,10 @@ class LLMLearningService:
                     session_id,
                     user_id,
                 )
-                return []
+                raise LLMImportSessionAnalysisError(
+                    "PREVIEW_SELECTION_EMPTY",
+                    "No preview rows selected for import-session LLM analysis",
+                )
             preview_loader = getattr(self._db, "get_preview_bill_by_id", None)
             if callable(preview_loader):
                 previews = []
@@ -299,7 +318,10 @@ class LLMLearningService:
                 session_id,
                 user_id,
             )
-            return []
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_EMPTY",
+                "No preview rows available for import-session LLM analysis",
+            )
 
         preview_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for preview in previews:
@@ -320,10 +342,47 @@ class LLMLearningService:
                 session_id,
                 user_id,
             )
-            return []
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_INSUFFICIENT",
+                "Selected preview rows need confirmed category data before LLM rule induction",
+                status_code=422,
+            )
+
+        usable_preview_groups = {
+            key: [
+                preview
+                for preview in group
+                if any(
+                    str(preview.get(field) or "").strip()
+                    for field in (
+                        "preview_counterparty",
+                        "preview_description",
+                        "preview_payment_method",
+                    )
+                )
+            ]
+            for key, group in preview_groups.items()
+        }
+        preview_groups = {
+            key: group
+            for key, group in usable_preview_groups.items()
+            if group
+        }
+        if not preview_groups:
+            logger.info(
+                "No preview rows with usable text fields found for import session %s (user %s)",
+                session_id,
+                user_id,
+            )
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_INSUFFICIENT",
+                "Selected preview rows need counterparty, description, or payment method data",
+                status_code=422,
+            )
 
         if len(preview_groups) > _MAX_SESSION_CATEGORY_GROUPS:
-            raise ValueError(
+            raise LLMImportSessionAnalysisError(
+                "PREVIEW_SELECTION_TOO_LARGE",
                 (
                     "Too many category groups selected for session analysis "
                     f"(max {_MAX_SESSION_CATEGORY_GROUPS})"

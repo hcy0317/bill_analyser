@@ -1697,6 +1697,58 @@ function getActionErrorMessage(error: unknown, fallbackMessage: string): string 
     return fallbackMessage;
 }
 
+interface LLMAnalysisErrorDetails {
+    code: string;
+    status?: number;
+}
+
+function getLLMAnalysisErrorDetails(error: unknown): LLMAnalysisErrorDetails {
+    const response = (error as {
+        response?: {
+            status?: number;
+            data?: Record<string, unknown>;
+        };
+    })?.response;
+    const data = response?.data;
+    const code = data?.['code'] || data?.['error_code'] || data?.['error'];
+
+    return {
+        code: typeof code === 'string' ? code : '',
+        status: response?.status
+    };
+}
+
+function getLLMAnalysisErrorMessageKey(details: LLMAnalysisErrorDetails): string {
+    if (details.code === 'LLM_DISABLED') {
+        return 'LLM is disabled. Enable LLM config before generating rule candidates.';
+    }
+
+    if (details.code === 'IMPORT_SESSION_NOT_FOUND' || details.status === 404) {
+        return 'LLM session analysis cannot run because the import session is missing.';
+    }
+
+    if (
+        details.code === 'PREVIEW_SELECTION_EMPTY'
+        || details.code === 'PREVIEW_SELECTION_INSUFFICIENT'
+        || details.status === 422
+    ) {
+        return 'Selected preview rows are insufficient for LLM rule induction. Select more rows with category and transaction details.';
+    }
+
+    if (details.code === 'PREVIEW_SELECTION_TOO_LARGE') {
+        return 'Too many preview rows selected for LLM session analysis.';
+    }
+
+    if (
+        details.code === 'LLM_PROVIDER_UNAVAILABLE'
+        || details.status === 503
+    ) {
+        return 'LLM connection failed. Check LLM config and provider availability.';
+    }
+
+    return 'LLM session analysis failed. Please check your LLM config and selected preview rows.';
+}
+
 function resolvePreviewCategoryId(previewData: ImportPreviewRecord): string {
     const mainCategory = previewData.preview_main_category || '';
     const subCategory = previewData.preview_sub_category || '';
@@ -2398,6 +2450,9 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
     try {
         const previewUpdates = buildSelectedPreviewUpdates();
         if (!previewUpdates.length) {
+            snackbar.value?.showMessage(
+                tt('Selected preview rows are insufficient for LLM rule induction. Select more rows with category and transaction details.')
+            );
             return;
         }
 
@@ -2417,12 +2472,16 @@ async function analyzeSelectedPreviewWithLLM(): Promise<void> {
         }
 
         snackbar.value?.showMessage(
-            tt('LLM session analysis found no candidate rules for the selected preview rows')
+            tt('LLM session analysis completed, but no candidate rules satisfied induction conditions')
         );
     } catch (error) {
-        logger.error(`[LLM 会话分析] 失败: ${error}`);
+        const details = getLLMAnalysisErrorDetails(error);
+        logger.error(
+            `[LLM 会话分析] 失败 code=${details.code || 'unknown'} `
+            + `status=${details.status || 'unknown'}: ${getActionErrorMessage(error, '')}`
+        );
         snackbar.value?.showMessage(
-            tt('LLM session analysis failed. Please check your LLM config and selected preview rows.')
+            tt(getLLMAnalysisErrorMessageKey(details))
         );
     } finally {
         llmSessionAnalyzing.value = false;

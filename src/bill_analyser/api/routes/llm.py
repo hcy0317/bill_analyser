@@ -11,7 +11,10 @@ from bill_analyser.api.routes.request_context_helpers import (
 from bill_analyser.api.routes.request_context_helpers import (
     run_async_in_new_loop as _run_async,
 )
-from bill_analyser.core.llm_learning_service import LLMLearningService
+from bill_analyser.core.llm_learning_service import (
+    LLMLearningService,
+    LLMImportSessionAnalysisError,
+)
 from bill_analyser.core.llm_provider import ProviderFactory
 from bill_analyser.utils.logger import get_logger, log_method
 
@@ -41,18 +44,28 @@ def _get_llm_service() -> LLMLearningService:
     return LLMLearningService(db=db, provider=provider)
 
 
+def _error_response(message: str, code: str, status_code: int):
+    """Build a stable LLM API error payload."""
+    return jsonify({
+        "success": False,
+        "error": message,
+        "code": code,
+        "error_code": code,
+    }), status_code
+
+
 # ------------------------------------------------------------------
 # POST /analyze-transactions
 # ------------------------------------------------------------------
 @bp.route("/analyze-transactions", methods=["POST"])
 @log_method
 @require_auth
-def analyze_transactions():
+def analyze_transactions():  # pylint: disable=too-many-return-statements
     """使用 LLM 分析未分类交易并生成分类建议"""
     try:
         config = _get_llm_config()
         if not config.get("enabled", False):
-            return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
+            return _error_response("LLM service is not enabled", "LLM_DISABLED", 400)
 
         data = request.get_json(silent=True)
         if data is None:
@@ -92,15 +105,20 @@ def analyze_transactions():
             response_payload["mode"] = "persisted_uncategorized"
 
         return jsonify({"success": True, "data": response_payload, "total": len(candidates)})
+    except LLMImportSessionAnalysisError as exc:
+        return _error_response(str(exc), exc.code, exc.status_code)
     except ValueError as exc:
         status_code = 404 if str(exc) == "Import session not found" else 400
-        return jsonify({"success": False, "error": str(exc)}), status_code
+        code = "IMPORT_SESSION_NOT_FOUND" if status_code == 404 else "INVALID_REQUEST"
+        return _error_response(str(exc), code, status_code)
     except RuntimeError as exc:
         logger.warning("LLM 分析交易失败: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 429
+        if str(exc).startswith("Rate limit exceeded"):
+            return _error_response(str(exc), "LLM_RATE_LIMITED", 429)
+        return _error_response(str(exc), "LLM_PROVIDER_UNAVAILABLE", 503)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("LLM 分析交易失败: %s", exc)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return _error_response(str(exc), "INTERNAL_ERROR", 500)
 
 
 # ------------------------------------------------------------------

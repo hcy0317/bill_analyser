@@ -36,6 +36,22 @@ class _FakeLLMProvider:
         )
 
 
+class _NoRuleLLMProvider:
+    async def generate(self, **kwargs) -> LLMResponse:  # pragma: no cover - trivial async stub
+        return LLMResponse(
+            content="[]",
+            model="fake-model",
+            provider="fake-provider",
+            tokens_used=12,
+            raw_response={"stub": True},
+        )
+
+
+class _FailingLLMProvider:
+    async def generate(self, **kwargs) -> LLMResponse:
+        raise RuntimeError("provider unavailable")
+
+
 def _list_llm_candidates_for_user(*, user_id: int) -> list[dict]:
     from bill_analyser.api.app import db
 
@@ -158,6 +174,33 @@ class TestLLMImportSessionAnalysisAPI:
         assert len(session_candidates) == 1
         assert json.loads(session_candidates[0]["source_bill_ids"]) == [first_preview_id, second_preview_id]
 
+    def test_llm_analysis_returns_stable_code_when_llm_disabled(self, client):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_disabled")
+
+        from bill_analyser.api import app as api_app
+
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": False,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": "pytest-disabled-session",
+                "preview_updates": [],
+            },
+        )
+
+        payload = response.get_json()
+        assert response.status_code == 400
+        assert payload["success"] is False
+        assert payload["error"] == "LLM service is not enabled"
+        assert payload["code"] == "LLM_DISABLED"
+
     def test_llm_analysis_returns_404_for_missing_import_session(self, client, monkeypatch):
         _reset_llm_rate_limit_state()
         auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_missing")
@@ -182,7 +225,211 @@ class TestLLMImportSessionAnalysisAPI:
         )
 
         assert response.status_code == 404
-        assert response.get_json()["error"] == "Import session not found"
+        payload = response.get_json()
+        assert payload["error"] == "Import session not found"
+        assert payload["code"] == "IMPORT_SESSION_NOT_FOUND"
+
+    def test_llm_analysis_rejects_empty_preview_selection(self, client, monkeypatch):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_empty_selection")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-llm-import-empty-{int(time.time() * 1000)}"
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: _FakeLLMProvider())
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        async def _prepare() -> None:
+            await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+
+        asyncio.run(_prepare())
+
+        response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": session_id,
+                "preview_updates": [],
+            },
+        )
+
+        payload = response.get_json()
+        assert response.status_code == 400
+        assert payload["code"] == "PREVIEW_SELECTION_EMPTY"
+
+    def test_llm_analysis_rejects_insufficient_preview_rows(self, client, monkeypatch):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(
+            client,
+            "test_llm_import_session_insufficient_rows",
+        )
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-llm-import-insufficient-{int(time.time() * 1000)}"
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: _FakeLLMProvider())
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        async def _prepare() -> int:
+            await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await api_app.db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-08 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 32.5,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_prepare())
+
+        response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": session_id,
+                "preview_updates": [{"id": preview_id}],
+            },
+        )
+
+        payload = response.get_json()
+        assert response.status_code == 422
+        assert payload["code"] == "PREVIEW_SELECTION_INSUFFICIENT"
+
+    def test_llm_analysis_returns_provider_error_code_for_runtime_failure(self, client, monkeypatch):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_provider_failure")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        session_id = f"pytest-llm-import-provider-{int(time.time() * 1000)}"
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: _FailingLLMProvider())
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        async def _prepare() -> int:
+            await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await api_app.db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-08 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 32.5,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_prepare())
+
+        response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": session_id,
+                "preview_updates": [
+                    {
+                        "id": preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                    }
+                ],
+            },
+        )
+
+        payload = response.get_json()
+        assert response.status_code == 503
+        assert payload["code"] == "LLM_PROVIDER_UNAVAILABLE"
+        assert "LLM request failed" in payload["error"]
+
+    def test_llm_analysis_allows_zero_candidates_when_no_rules_satisfy_conditions(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_zero_candidates")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        session_id = f"pytest-llm-import-zero-{int(time.time() * 1000)}"
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: _NoRuleLLMProvider())
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        async def _prepare() -> int:
+            await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await api_app.db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-08 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 32.5,
+                    "preview_counterparty": "星巴克咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_prepare())
+
+        response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": session_id,
+                "preview_updates": [
+                    {
+                        "id": preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                    }
+                ],
+            },
+        )
+
+        payload = response.get_json()
+        assert response.status_code == 200
+        assert payload["success"] is True
+        assert payload["data"]["candidates_created"] == 0
+        assert payload["data"]["candidates"] == []
 
     def test_llm_analysis_rejects_too_many_preview_updates(self, client, monkeypatch):
         _reset_llm_rate_limit_state()
@@ -215,7 +462,9 @@ class TestLLMImportSessionAnalysisAPI:
         )
 
         assert response.status_code == 400
-        assert "Too many preview updates submitted" in response.get_json()["error"]
+        payload = response.get_json()
+        assert "Too many preview updates submitted" in payload["error"]
+        assert payload["code"] == "PREVIEW_SELECTION_TOO_LARGE"
 
     def test_llm_analysis_rejects_too_many_preview_update_items_even_for_same_id(
         self,
@@ -269,7 +518,9 @@ class TestLLMImportSessionAnalysisAPI:
         )
 
         assert response.status_code == 400
-        assert "Too many preview updates submitted" in response.get_json()["error"]
+        payload = response.get_json()
+        assert "Too many preview updates submitted" in payload["error"]
+        assert payload["code"] == "PREVIEW_SELECTION_TOO_LARGE"
 
     def test_llm_analysis_persists_preview_updates_but_filters_by_explicit_preview_ids(
         self,
@@ -422,7 +673,9 @@ class TestLLMImportSessionAnalysisAPI:
 
         blocked_response = _post_once()
         assert blocked_response.status_code == 429
-        assert "Rate limit exceeded" in blocked_response.get_json()["error"]
+        blocked_payload = blocked_response.get_json()
+        assert "Rate limit exceeded" in blocked_payload["error"]
+        assert blocked_payload["code"] == "LLM_RATE_LIMITED"
 
     def test_llm_candidate_routes_are_user_scoped(self, client):
         _reset_llm_rate_limit_state()
