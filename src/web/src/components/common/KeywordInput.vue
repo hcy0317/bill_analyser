@@ -6,6 +6,16 @@
             <v-btn
                 size="small"
                 variant="text"
+                color="secondary"
+                :prepend-icon="mdiPlus"
+                @click="addRegexClause"
+                :disabled="disabled || isRawMode"
+            >
+                {{ tt('Regex Clause') }}
+            </v-btn>
+            <v-btn
+                size="small"
+                variant="text"
                 color="primary"
                 :prepend-icon="mdiPlus"
                 @click="addClause"
@@ -214,7 +224,7 @@ const validationErrorKey = ref('');
 let localClauseId = 0;
 
 const supportsCompositeGrouping = computed(() => resolvedFormat.value === 'composite');
-const showGroupingControls = computed(() => supportsCompositeGrouping.value && clauses.value.some(clause => clause.openParens > 0 || clause.closeParens > 0));
+const showGroupingControls = computed(() => supportsCompositeGrouping.value);
 const isRawMode = computed(() => rawExpression.value.length > 0);
 const types = computed(() => {
     const base = [
@@ -288,6 +298,14 @@ function addClause() {
     rawExpression.value = '';
     parseErrorKey.value = '';
     clauses.value.push(createRuleClause({ operator: 'OR' }, createLocalClauseId));
+    syncDraftTerms();
+    serializeKeywords();
+}
+
+function addRegexClause() {
+    rawExpression.value = '';
+    parseErrorKey.value = '';
+    clauses.value.push(createRuleClause({ operator: 'REGEX' }, createLocalClauseId));
     syncDraftTerms();
     serializeKeywords();
 }

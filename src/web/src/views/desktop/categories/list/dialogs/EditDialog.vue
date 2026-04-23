@@ -366,7 +366,10 @@ function getSortedCategoryRules(rules: CategoryRuleItem[]): CategoryRuleItem[] {
     ));
 }
 
-async function loadPrimaryCategoryRule(categoryId?: string | null): Promise<void> {
+async function loadPrimaryCategoryRule(
+    categoryId?: string | null,
+    options: { rethrowOnError?: boolean; showError?: boolean } = {}
+): Promise<void> {
     if (!categoryId || !isSecondaryCategory.value) {
         resetCategoryRuleEditor();
         return;
@@ -417,7 +420,12 @@ async function loadPrimaryCategoryRule(categoryId?: string | null): Promise<void
         }));
     } catch (error) {
         resetCategoryRuleEditor();
-        showDialogError(error, 'Failed to load canonical category rule');
+        if (options.showError !== false) {
+            showDialogError(error, 'Failed to load canonical category rule');
+        }
+        if (options.rethrowOnError) {
+            throw error;
+        }
     } finally {
         ruleLoading.value = false;
     }
@@ -425,6 +433,14 @@ async function loadPrimaryCategoryRule(categoryId?: string | null): Promise<void
 
 function shouldSyncLegacyRuleMirror(): boolean {
     return primaryCategoryRuleId.value !== null || categoryRuleDraft.value.ruleExpression.trim().length > 0;
+}
+
+function hasCanonicalRuleState(): boolean {
+    return primaryCategoryRuleId.value !== null || additionalCategoryRulesCount.value > 0;
+}
+
+function getPrimaryRuleExpressionFromEditorState(): string {
+    return categoryRuleDraft.value.ruleExpression.trim();
 }
 
 function buildPrimaryCategoryRulePayload(categoryId: string): CategoryRulePayload | null {
@@ -572,12 +588,13 @@ async function save(): Promise<void> {
     submitting.value = true;
 
     const wasEdit = !!editCategoryId.value;
-    const shouldSyncLegacyMirror = isSecondaryCategory.value && shouldSyncLegacyRuleMirror();
-    const syncedRuleExpression = categoryRuleDraft.value.ruleExpression.trim();
+    const shouldManageCanonicalRule = isSecondaryCategory.value
+        && (hasCanonicalRuleState() || shouldSyncLegacyRuleMirror());
+    const syncedRuleExpression = getPrimaryRuleExpressionFromEditorState();
     let savedCategory: TransactionCategory | null = null;
 
     try {
-        if (shouldSyncLegacyMirror) {
+        if (shouldManageCanonicalRule) {
             category.value.ruleExpression = syncedRuleExpression;
         }
 
@@ -592,11 +609,25 @@ async function save(): Promise<void> {
 
         if (isSecondaryCategory.value && savedCategory.id) {
             await syncPrimaryCategoryRule(savedCategory.id);
-            await loadPrimaryCategoryRule(savedCategory.id);
+            await loadPrimaryCategoryRule(savedCategory.id, {
+                rethrowOnError: true,
+                showError: false
+            });
 
-            if (shouldSyncLegacyMirror) {
-                savedCategory.ruleExpression = syncedRuleExpression;
-                category.value.ruleExpression = syncedRuleExpression;
+            if (shouldManageCanonicalRule) {
+                const persistedLegacyMirror = (savedCategory.ruleExpression || '').trim();
+                const currentPrimaryRuleExpression = getPrimaryRuleExpressionFromEditorState();
+
+                savedCategory.ruleExpression = currentPrimaryRuleExpression;
+                category.value.ruleExpression = currentPrimaryRuleExpression;
+
+                if (persistedLegacyMirror !== currentPrimaryRuleExpression) {
+                    await transactionCategoriesStore.saveCategory({
+                        category: savedCategory,
+                        isEdit: true,
+                        clientSessionId: clientSessionId.value
+                    });
+                }
             }
         }
 
