@@ -24,6 +24,7 @@ export interface ImportCheckMatchingDedupTitleOptions {
     currentParserSource?: string;
     parserLabels?: Record<string, string>;
     sourceRows?: ImportCheckMatchingSourceRow[];
+    sourceRowLookup?: ReadonlyMap<string, string>;
 }
 
 export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected';
@@ -159,6 +160,13 @@ export function resolveImportCheckMatchingTransferParserSources(
     options: ImportCheckMatchingDedupTitleOptions = {}
 ): string[] {
     const sourceRows = options.sourceRows || [];
+    const sourceRowLookup = options.sourceRowLookup || (sourceRows.length > 0
+        ? new Map(
+            sourceRows
+                .map(sourceRow => [String(sourceRow.id), (sourceRow.parserSource || '').trim()] as const)
+                .filter(([, parserSource]) => !!parserSource)
+        )
+        : null);
     const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
 
     if (normalizedDedupType !== 'transfer') {
@@ -176,9 +184,7 @@ export function resolveImportCheckMatchingTransferParserSources(
     addParserSource(options.currentParserSource || summary.parserId);
 
     for (const sourceId of summary.dedupSourceIds) {
-        const sourceIdText = String(sourceId);
-        const sourceRow = sourceRows.find(row => String(row.id) === sourceIdText);
-        addParserSource(sourceRow?.parserSource);
+        addParserSource(sourceRowLookup?.get(String(sourceId)));
     }
 
     return parserSources;

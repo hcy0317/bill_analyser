@@ -56,6 +56,27 @@ describe('checkDataMatching helpers', () => {
         expect(hasImportCheckMatchingContext(summary)).toBe(false);
     });
 
+    test('resolves transfer dedup parser labels from a prebuilt lookup keyed by row index or preview id', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            parserSource: 'bank',
+            dedupType: 'transfer',
+            dedupSourceIds: [12, 'preview:9']
+        });
+
+        expect(getImportCheckMatchingDedupTitle(summary, {
+            matchLabel: '匹配',
+            parserLabels: {
+                bank: '银行卡',
+                wechat: '微信',
+                alipay: '支付宝'
+            },
+            sourceRowLookup: new Map([
+                ['12', 'wechat'],
+                ['preview:9', 'alipay']
+            ])
+        })).toBe('匹配 | 银行卡 | 微信 | 支付宝');
+    });
+
     test('surfaces non-transfer dedup rows with stable labels', () => {
         const summary = getImportCheckMatchingContextSummary({
             dedupType: 'platform_bank',

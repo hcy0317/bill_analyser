@@ -52,15 +52,20 @@
         </div>
 
         <div class="signal-group" v-if="viewModel.investment">
-            <v-chip
-                :color="viewModel.investment.color"
-                variant="tonal"
-                size="x-small"
-                :prepend-icon="getInvestmentIcon(viewModel.investment.status)"
-                :title="viewModel.investment.title">
-                {{ tt(viewModel.investment.labelKey) }}
-            </v-chip>
-            <div class="d-inline-flex flex-wrap ga-1 ms-1">
+            <div class="d-flex flex-column align-start ga-1">
+                <v-chip
+                    :color="viewModel.investment.color"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="getInvestmentIcon(viewModel.investment.status)"
+                    :title="viewModel.investment.title">
+                    {{ tt(viewModel.investment.labelKey) }}
+                </v-chip>
+                <div class="text-caption text-medium-emphasis" v-if="viewModel.investment.profileText">
+                    {{ viewModel.investment.profileText }}
+                </div>
+            </div>
+            <div class="d-flex flex-wrap ga-1 mt-1">
                 <v-btn
                     v-for="action in viewModel.investment.actions"
                     :key="`investment-${action.decision}`"
@@ -71,9 +76,6 @@
                     @click.stop="emit('reviewInvestment', action.decision)">
                     {{ tt(action.labelKey) }}
                 </v-btn>
-            </div>
-            <div class="text-caption text-medium-emphasis ms-1" v-if="viewModel.investment.profileText">
-                {{ viewModel.investment.profileText }}
             </div>
         </div>
 

@@ -115,11 +115,11 @@
         <template #item.type="{ item }">
             <!-- 非编辑状态：显示类型标签；解析器/匹配/投资/标注等信号在信号列展示 -->
             <div v-if="editingTransaction !== item" :key="`type-view-${item.index}`">
-                <v-chip label color="secondary" variant="outlined" size="x-small" v-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
-                <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Income">{{ tt('Income') }}</v-chip>
-                <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
-                <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
-                <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
+                <v-chip label color="secondary" variant="outlined" size="x-small" v-if="item.type === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
+                <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Income">{{ tt('Income') }}</v-chip>
+                <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
+                <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
+                <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
                 <v-chip label color="default" variant="outlined" size="x-small" v-else>{{ tt('Unknown') }}</v-chip>
             </div>
             <!-- 编辑状态：类型选择器（余额调整类型不可编辑） -->
@@ -813,11 +813,8 @@ import {
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
-    buildImportPreviewTypeColumnViewModel,
-    type ImportCheckMatchingSourceRow,
     type ImportPreviewSignalStatus,
-    type ImportPreviewSignalViewModel,
-    type ImportPreviewTypeColumnViewModel
+    type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
@@ -934,6 +931,20 @@ interface AnnotationReasonSummary {
     key: string;
     label: string;
     count: number;
+}
+
+interface ImportTransactionSelectionSummary {
+    annotationIssuesByIndex: Record<number, string[]>;
+    selectedCount: number;
+    selectedExpenseCount: number;
+    selectedIncomeCount: number;
+    selectedTransferCount: number;
+    selectedRecurringMatchCount: number;
+    selectedInvalidCount: number;
+    annotationCount: number;
+    selectedAnnotationCount: number;
+    selectedAnnotationTransactions: ImportTransaction[];
+    annotationReasonSummaries: AnnotationReasonSummary[];
 }
 
 interface RecurringCandidateItem {
@@ -2206,27 +2217,25 @@ function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
     return null;
 }
 
-const importPreviewSignalSourceRows = computed<ImportCheckMatchingSourceRow[]>(() => {
-    return (props.importTransactions || []).flatMap(item => {
-        const previewId = getPreviewId(item);
-        const parserSource = item.parserSource || '';
-        const rows: ImportCheckMatchingSourceRow[] = [
-            { id: item.index, parserSource }
-        ];
+const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSignalViewModel>>(() => {
+    const importTransactions = props.importTransactions || [];
+    const sourceRowLookup = new Map<string, string>();
+    const signalViewModels: Record<number, ImportPreviewSignalViewModel> = {};
 
-        if (previewId !== null) {
-            rows.push({ id: previewId, parserSource });
+    for (const item of importTransactions) {
+        const parserSource = (item.parserSource || '').trim();
+        if (!parserSource) {
+            continue;
         }
 
-        return rows;
-    });
-});
+        sourceRowLookup.set(String(item.index), parserSource);
+        const previewId = getPreviewId(item);
+        if (previewId !== null) {
+            sourceRowLookup.set(String(previewId), parserSource);
+        }
+    }
 
-const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSignalViewModel>>(() => {
-    const signalViewModels: Record<number, ImportPreviewSignalViewModel> = {};
-    const sourceRows = importPreviewSignalSourceRows.value;
-
-    for (const item of props.importTransactions || []) {
+    for (const item of importTransactions) {
         signalViewModels[item.index] = buildImportPreviewSignalViewModel({
             parserSource: item.parserSource,
             parserTags: item.parserTags,
@@ -2250,21 +2259,11 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             matchLabel: tt('Matching'),
             parserLabels: PARSER_LABELS,
             parserColors: PARSER_COLORS,
-            sourceRows
+            sourceRowLookup
         });
     }
 
     return signalViewModels;
-});
-
-const importPreviewTypeColumnViewModels = computed<Record<number, ImportPreviewTypeColumnViewModel>>(() => {
-    const typeColumnViewModels: Record<number, ImportPreviewTypeColumnViewModel> = {};
-
-    for (const item of props.importTransactions || []) {
-        typeColumnViewModels[item.index] = buildImportPreviewTypeColumnViewModel(item.type);
-    }
-
-    return typeColumnViewModels;
 });
 
 function getImportTransactionRowKey(item: ImportTransaction): string {
@@ -2276,7 +2275,7 @@ function getImportTransactionRowKey(item: ImportTransaction): string {
     return `row:${item.index}`;
 }
 
-function getAnnotationIssues(item: ImportTransaction): string[] {
+function collectAnnotationIssues(item: ImportTransaction): string[] {
     const reasons: string[] = [];
 
     if (item.type !== TransactionType.ModifyBalance && (!item.categoryId || item.categoryId === '0')) {
@@ -2301,6 +2300,89 @@ function getAnnotationIssues(item: ImportTransaction): string[] {
     }
 
     return reasons;
+}
+
+const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => {
+    const annotationIssuesByIndex: Record<number, string[]> = {};
+    const annotationReasonSummaryMap: Record<string, AnnotationReasonSummary> = {};
+    const selectedAnnotationTransactions: ImportTransaction[] = [];
+    let selectedCount = 0;
+    let selectedExpenseCount = 0;
+    let selectedIncomeCount = 0;
+    let selectedTransferCount = 0;
+    let selectedRecurringMatchCount = 0;
+    let selectedInvalidCount = 0;
+    let annotationCount = 0;
+    let selectedAnnotationCount = 0;
+
+    for (const transaction of props.importTransactions || []) {
+        const annotationIssues = collectAnnotationIssues(transaction);
+        annotationIssuesByIndex[transaction.index] = annotationIssues;
+        const hasAnnotationIssues = annotationIssues.length > 0;
+
+        if (hasAnnotationIssues) {
+            annotationCount++;
+        }
+
+        if (!transaction.selected) {
+            continue;
+        }
+
+        selectedCount++;
+
+        if (transaction.type === TransactionType.Expense) {
+            selectedExpenseCount++;
+        } else if (transaction.type === TransactionType.Income) {
+            selectedIncomeCount++;
+        } else if (transaction.type === TransactionType.Transfer) {
+            selectedTransferCount++;
+        }
+
+        if (transaction.hasRecurringMatch()) {
+            selectedRecurringMatchCount++;
+        }
+
+        if (!transaction.valid) {
+            selectedInvalidCount++;
+        }
+
+        if (!hasAnnotationIssues) {
+            continue;
+        }
+
+        selectedAnnotationCount++;
+        selectedAnnotationTransactions.push(transaction);
+
+        for (const reason of annotationIssues) {
+            if (!annotationReasonSummaryMap[reason]) {
+                annotationReasonSummaryMap[reason] = {
+                    key: reason,
+                    label: reason,
+                    count: 0
+                };
+            }
+
+            annotationReasonSummaryMap[reason].count++;
+        }
+    }
+
+    return {
+        annotationIssuesByIndex,
+        selectedCount,
+        selectedExpenseCount,
+        selectedIncomeCount,
+        selectedTransferCount,
+        selectedRecurringMatchCount,
+        selectedInvalidCount,
+        annotationCount,
+        selectedAnnotationCount,
+        selectedAnnotationTransactions,
+        annotationReasonSummaries: Object.values(annotationReasonSummaryMap).sort((left, right) => right.count - left.count)
+    };
+});
+
+function getAnnotationIssues(item: ImportTransaction): string[] {
+    return importTransactionSelectionSummary.value.annotationIssuesByIndex[item.index] || collectAnnotationIssues(item);
 }
 
 function needsAnnotation(item: ImportTransaction): boolean {
@@ -3271,161 +3353,16 @@ const currentPageTransactions = computed<ImportTransaction[]>(() => {
     return ret;
 });
 
-const selectedImportTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedExpenseTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected && importTransaction.type === TransactionType.Expense) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedIncomeTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected && importTransaction.type === TransactionType.Income) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedTransferTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected && importTransaction.type === TransactionType.Transfer) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedRecurringMatchCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected && importTransaction.hasRecurringMatch()) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedInvalidTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (!importTransaction.valid && importTransaction.selected) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const annotationTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (needsAnnotation(importTransaction)) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedAnnotationTransactionCount = computed<number>(() => {
-    let count = 0;
-
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return count;
-    }
-
-    for (const importTransaction of props.importTransactions) {
-        if (importTransaction.selected && needsAnnotation(importTransaction)) {
-            count++;
-        }
-    }
-
-    return count;
-});
-
-const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
-        return [];
-    }
-
-    return props.importTransactions.filter(transaction => transaction.selected && needsAnnotation(transaction));
-});
-
-const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => {
-    const summary: Record<string, AnnotationReasonSummary> = {};
-
-    for (const transaction of selectedAnnotationTransactions.value) {
-        for (const reason of getAnnotationIssues(transaction)) {
-            if (!summary[reason]) {
-                summary[reason] = {
-                    key: reason,
-                    label: reason,
-                    count: 0
-                };
-            }
-
-            summary[reason].count++;
-        }
-    }
-
-    return Object.values(summary).sort((left, right) => right.count - left.count);
-});
+const selectedImportTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedCount);
+const selectedExpenseTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedExpenseCount);
+const selectedIncomeTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedIncomeCount);
+const selectedTransferTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedTransferCount);
+const selectedRecurringMatchCount = computed<number>(() => importTransactionSelectionSummary.value.selectedRecurringMatchCount);
+const selectedInvalidTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedInvalidCount);
+const annotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.annotationCount);
+const selectedAnnotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedAnnotationCount);
+const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => importTransactionSelectionSummary.value.selectedAnnotationTransactions);
+const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => importTransactionSelectionSummary.value.annotationReasonSummaries);
 
 const anyButNotAllTransactionSelected = computed<boolean>(() => !!props.importTransactions && selectedImportTransactionCount.value > 0 && selectedImportTransactionCount.value !== props.importTransactions.length);
 const allTransactionSelected = computed<boolean>(() => !!props.importTransactions && selectedImportTransactionCount.value === props.importTransactions.length);
