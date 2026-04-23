@@ -3969,6 +3969,12 @@ def test_bills_context_picture_modify_and_parser_routes_cover_remaining_tail_bra
         assert status == 400
         assert response.get_json()["error"] == "No file selected"
 
+    with bills_route_app.test_request_context("/api/bills/import/parsers", method="GET"):
+        payload = parsers_route().get_json() or {}
+        parsers_by_id = {parser["id"]: parser for parser in payload.get("result", [])}
+        assert parsers_by_id["cmbc"]["name"] == "民生银行"
+        assert parsers_by_id["cmbc"]["description"] == "解析民生银行流水文件"
+
     original_jsonify = bills_module.jsonify
     jsonify_calls = {"count": 0}
 

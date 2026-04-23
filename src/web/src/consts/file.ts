@@ -233,11 +233,11 @@ export const SUPPORTED_IMPORT_FILE_CATEGORY_AND_TYPES: ImportFileCategoryAndType
             },
             {
                 type: 'cmbc',
-                name: 'CMBC (招商银行) Statement File',
+                name: 'CMBC (民生银行) Statement File',
                 extensions: '.csv,.xlsx,.xls',
                 document: {
                     supportMultiLanguages: 'zh-Hans',
-                    anchor: '如何获取招商银行流水文件'
+                    anchor: '如何获取民生银行流水文件'
                 }
             },
             {

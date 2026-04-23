@@ -2654,8 +2654,8 @@ def get_available_parsers():
             },
             {
                 "id": "cmbc",
-                "name": "招商银行",
-                "description": "解析招商银行流水文件",
+                "name": "民生银行",
+                "description": "解析民生银行流水文件",
                 "supported_formats": ["csv", "xlsx", "xls"],
             },
             {

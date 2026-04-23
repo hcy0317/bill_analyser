@@ -2520,7 +2520,7 @@ const PARSER_LABELS: Record<string, string> = {
     wechat: '微信',
     alipay: '支付宝',
     icbc: '工商银行',
-    cmbc: '招商银行',
+    cmbc: '民生银行',
     abc: '农业银行',
     ccb: '建设银行',
     generic: '通用',
