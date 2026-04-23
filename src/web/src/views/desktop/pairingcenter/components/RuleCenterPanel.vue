@@ -72,8 +72,13 @@
                             <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
                                 {{ tt('Add Rule') }}
                             </v-btn>
-                            <v-btn variant="outlined" :prepend-icon="mdiDatabaseImportOutline" @click="migrateKeywords">
-                                {{ tt('Migrate from Keywords') }}
+                            <v-btn
+                                variant="outlined"
+                                :prepend-icon="mdiDatabaseImportOutline"
+                                :disabled="loading"
+                                @click="migrateKeywords"
+                            >
+                                {{ tt('Import Rules from Legacy Keywords') }}
                             </v-btn>
                         </div>
                         <v-data-table
@@ -296,7 +301,7 @@
                     <v-textarea
                         v-model="ruleForm.rule_expression"
                         :label="tt('Rule Expression')"
-                        hint="OR={k1,k2}+AND={k3}+NOT={k4}"
+                        :hint="tt('Expression example: OR={coffee,breakfast}+AND={shop}+NOT={refund}; parentheses can group clauses, e.g. (OR={coffee}+AND={shop})+NOT={refund}.')"
                         persistent-hint
                         rows="3"
                         :rules="[v => !!v || tt('Expression is required')]"
@@ -453,7 +458,10 @@ interface CategoryRuleTestResult {
 }
 
 interface CategoryKeywordMigrationResult {
+    migrated?: number | string | null;
     migrated_count?: number | string | null;
+    skipped?: number | string | null;
+    skipped_count?: number | string | null;
 }
 
 const categoryRules = ref<CategoryRuleItem[]>([]);
@@ -578,6 +586,11 @@ function buildCategoryRuleCreatePayload(form: CategoryRuleForm): CategoryRuleFor
         ...form,
         category_id: form.category_id,
     };
+}
+
+function getMigrationCount(value: number | string | null | undefined): number {
+    const count = Number(value ?? 0);
+    return Number.isFinite(count) ? count : 0;
 }
 
 function openCreateDialog() {
@@ -706,13 +719,18 @@ async function migrateKeywords() {
     try {
         const result = requireApiSuccess<CategoryKeywordMigrationResult>(
             await services.migrateCategoryKeywords(),
-            'Migration failed'
+            tt('Migration failed')
         );
-        const count = Number(result?.migrated_count ?? 0);
-        successMsg.value = `Migrated ${count} keyword(s) to category rules`;
+        const migrated = getMigrationCount(result?.migrated ?? result?.migrated_count);
+        const skipped = getMigrationCount(result?.skipped ?? result?.skipped_count);
+        successMsg.value = tt('Migration completed: migrated {migrated}, skipped {skipped}', {
+            migrated,
+            skipped,
+        });
+        categoryStore.updateTransactionCategoryListInvalidState(true);
         await fetchAll();
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Migration failed');
+        error.value = getRequestErrorMessage(e, tt('Migration failed'));
     } finally {
         loading.value = false;
     }

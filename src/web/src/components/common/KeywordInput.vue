@@ -97,12 +97,12 @@ const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Clau
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText || (
     resolvedFormat.value === 'composite'
-        ? tt('Build a boolean rule expression with OR / AND / NOT blocks. Regex clauses are also supported in composite mode.')
+        ? tt('Build a boolean rule expression with OR / AND / NOT blocks. Parentheses can group rule blocks when editing raw expressions, and regex clauses are also supported in composite mode.')
         : tt('Build a rule expression with OR / AND / NOT blocks. Legacy syntax is still accepted for compatibility.')
 ));
 const resolvedExampleText = computed(() => props.exampleText || (
     resolvedFormat.value === 'composite'
-        ? tt('Example: OR={早餐,咖啡}+NOT={退款}')
+        ? tt('Example: (OR={早餐}+AND={咖啡})+NOT={退款}')
         : ''
 ));
 
