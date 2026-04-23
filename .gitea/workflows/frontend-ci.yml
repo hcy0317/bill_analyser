@@ -1,0 +1,46 @@
+name: Frontend CI
+
+on:
+  push:
+    paths:
+      - 'src/web/**'
+      - 'tests/web/**'
+      - '.gitea/workflows/frontend-ci.yml'
+  pull_request:
+    paths:
+      - 'src/web/**'
+      - 'tests/web/**'
+      - '.gitea/workflows/frontend-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: gitea-${{ gitea.workflow }}-${{ gitea.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+
+      - name: Run lint
+        working-directory: src/web
+        run: npm run lint:ci
+
+      - name: Run tests
+        working-directory: src/web
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: src/web
+        run: npm run build

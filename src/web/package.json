@@ -14,6 +14,7 @@
     "build": "cross-env NODE_ENV=production vite build",
     "serve:dist": "vite preview",
     "lint": "vue-tsc --noEmit && eslint . --fix",
+    "lint:ci": "vue-tsc --noEmit && eslint .",
     "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand",
     "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch"
   },

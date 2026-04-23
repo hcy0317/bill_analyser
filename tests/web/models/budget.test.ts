@@ -187,6 +187,7 @@ describe('Budget model', () => {
     test('Budget.updateExecution refreshes execution fields', () => {
         const budget = Budget.createNew();
         const execution: BudgetCategoryExecution = {
+            budgetId: 'b-0',
             categoryId: 'c-2',
             categoryName: '交通-地铁',
             budgetAmount: 5000,
