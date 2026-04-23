@@ -1007,7 +1007,7 @@
             </v-card-title>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('Select a category to edit its keywords and settings') }}
+                    {{ tt('Select a category to edit its rule expression and settings') }}
                 </p>
                 <!-- 分类类型切换 -->
                 <v-tabs v-model="manageCategoryType" class="mb-4">

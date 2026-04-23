@@ -2773,7 +2773,7 @@
     "Destination Amount": "目标金额",
 
     "Select Category to Edit": "选择要编辑的分类",
-    "Select a category to edit its keywords and settings": "选择一个分类以编辑其关键词和设置",
+    "Select a category to edit its rule expression and settings": "选择一个分类以编辑其规则表达式和设置",
     "Select Account to Edit": "选择要编辑的账户",
     "Select an account to edit its aliases and settings": "选择一个账户以编辑其别名和设置",
     "Select Account": "选择账户",
