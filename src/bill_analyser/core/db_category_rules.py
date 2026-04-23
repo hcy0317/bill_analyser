@@ -8,8 +8,67 @@ from typing import Any
 import aiosqlite
 
 from ..utils.logger import log_method
+from .category_engine import escape_rule_expression_term
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+
+
+_LEGACY_RULE_PREFIXES = ("OR:", "AND:", "NOT:", "REGEX:")
+_LEGACY_RULE_OPERATORS = (
+    ("OR:", "OR", "|"),
+    ("AND:", "AND", "|"),
+    ("NOT:", "NOT", "|"),
+    ("REGEX:", "REGEX", None),
+)
+
+
+def _split_legacy_delimited_text(text: str, separator: str) -> list[str]:
+    """Split legacy keyword text while allowing ``\\|``/``\\&`` literals."""
+    parts: list[str] = []
+    current: list[str] = []
+    escape_pending = False
+
+    for char in text:
+        if escape_pending:
+            if char == separator:
+                current.append(separator)
+            else:
+                current.extend(["\\", char])
+            escape_pending = False
+            continue
+        if char == "\\":
+            escape_pending = True
+            continue
+        if char == separator:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+
+    if escape_pending:
+        current.append("\\")
+    parts.append("".join(current))
+    return parts
+
+
+def _has_legacy_rule_prefix(keyword_text: str) -> bool:
+    """Return whether old keyword text uses legacy operator prefixes."""
+    return any(
+        part.strip().upper().startswith(_LEGACY_RULE_PREFIXES)
+        for part in _split_legacy_delimited_text(keyword_text, "&")
+    )
+
+
+def _format_rule_clause(operator: str, keywords: list[str]) -> str:
+    """Format escaped terms as one rule-expression clause."""
+    escaped_keywords = [
+        escape_rule_expression_term(keyword.strip())
+        for keyword in keywords
+        if keyword.strip()
+    ]
+    if not escaped_keywords:
+        return ""
+    return f"{operator}=" + "{" + ",".join(escaped_keywords) + "}"
 
 
 class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
@@ -285,11 +344,19 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
 
         Old: ``OR:k1|k2&AND:k3&NOT:k4`` or plain ``keyword``
         New: ``OR={k1,k2}+AND={k3}+NOT={k4}``
+
+        Literal terms are escaped when serialized so legacy keywords containing
+        expression delimiters such as ``,``, ``+``, ``{}``, or ``|`` remain a
+        single literal after migration.
         """
         if not old_kw:
             return ""
 
-        parts = old_kw.split("&")
+        old_kw = old_kw.strip()
+        if not _has_legacy_rule_prefix(old_kw):
+            return _format_rule_clause("OR", [old_kw])
+
+        parts = _split_legacy_delimited_text(old_kw, "&")
         blocks: list[str] = []
 
         for part in parts:
@@ -297,25 +364,27 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
             if not part:
                 continue
 
-            upper = part.upper()
-            if upper.startswith("OR:"):
-                keywords = [k.strip() for k in part[3:].split("|") if k.strip()]
-                if keywords:
-                    blocks.append("OR={" + ",".join(keywords) + "}")
-            elif upper.startswith("AND:"):
-                keywords = [k.strip() for k in part[4:].split("|") if k.strip()]
-                if keywords:
-                    blocks.append("AND={" + ",".join(keywords) + "}")
-            elif upper.startswith("NOT:"):
-                keywords = [k.strip() for k in part[4:].split("|") if k.strip()]
-                if keywords:
-                    blocks.append("NOT={" + ",".join(keywords) + "}")
-            elif upper.startswith("REGEX:"):
-                regex_pattern = part[6:].strip()
-                if regex_pattern:
-                    blocks.append("OR={" + regex_pattern + "}")
-            else:
+            matched_operator = False
+            for prefix, operator, separator in _LEGACY_RULE_OPERATORS:
+                if not part.upper().startswith(prefix):
+                    continue
+
+                payload = part[len(prefix) :]
+                keywords = (
+                    [payload.strip()]
+                    if separator is None
+                    else _split_legacy_delimited_text(payload, separator)
+                )
+                clause = _format_rule_clause(operator, keywords)
+                if clause:
+                    blocks.append(clause)
+                matched_operator = True
+                break
+
+            if not matched_operator:
                 # Simple keyword
-                blocks.append("OR={" + part + "}")
+                clause = _format_rule_clause("OR", [part])
+                if clause:
+                    blocks.append(clause)
 
         return "+".join(blocks) if blocks else old_kw

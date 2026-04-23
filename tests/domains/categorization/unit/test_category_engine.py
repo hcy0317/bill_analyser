@@ -7,6 +7,7 @@ import pytest
 
 from bill_analyser.core import category_engine as category_engine_module
 from bill_analyser.core.category_engine import CategoryEngine, KeywordMatcher
+from bill_analyser.core.db_category_rules import DatabaseCategoryRulesMixin
 from bill_analyser.utils.constants import TransactionType
 
 
@@ -108,6 +109,55 @@ def test_keyword_matcher_rule_expression_regex_switch_and_regex_clause() -> None
     assert matcher.match_compiled("瑞幸生椰咖啡", regex_clause_rule) is True
     assert matcher.match_compiled("门店 瑞幸生椰咖啡", regex_clause_rule) is False
     assert matcher.match_compiled("瑞幸生椰咖啡退款", regex_clause_rule) is False
+
+
+def test_keyword_migration_escapes_expression_delimiters_as_literals() -> None:
+    """旧关键词迁移时不应把逗号、加号、花括号和竖线误当新语法分隔符。"""
+    matcher = KeywordMatcher()
+
+    plain_legacy = "商户A,咖啡+拿铁{热}|杯"
+    plain_expr = DatabaseCategoryRulesMixin._convert_old_keyword_syntax(plain_legacy)
+    assert plain_expr == r"OR={商户A\,咖啡\+拿铁\{热\}\|杯}"
+
+    plain_compiled = matcher.compile_rule_expression(plain_expr)
+    assert matcher.match_compiled("订单 商户A,咖啡+拿铁{热}|杯", plain_compiled) is True
+    assert matcher.match_compiled("订单 商户A 咖啡 拿铁 热 杯", plain_compiled) is False
+
+    legacy_expr = DatabaseCategoryRulesMixin._convert_old_keyword_syntax(
+        r"OR:商户A\|联名|普通,门店&AND:上海\&浦东|午餐+套餐&NOT:退款\|撤销"
+    )
+    assert legacy_expr == (
+        r"OR={商户A\|联名,普通\,门店}"
+        r"+AND={上海&浦东,午餐\+套餐}"
+        r"+NOT={退款\|撤销}"
+    )
+
+    legacy_compiled = matcher.compile_rule_expression(legacy_expr)
+    assert matcher.match_compiled("商户A|联名 上海&浦东 午餐+套餐", legacy_compiled) is True
+    assert matcher.match_compiled("普通,门店 上海&浦东 午餐+套餐", legacy_compiled) is True
+    assert matcher.match_compiled("商户A|联名 上海&浦东", legacy_compiled) is False
+    assert (
+        matcher.match_compiled(
+            "商户A|联名 上海&浦东 午餐+套餐 退款|撤销",
+            legacy_compiled,
+        )
+        is False
+    )
+
+
+def test_keyword_migration_preserves_legacy_regex_patterns_with_delimiters() -> None:
+    """旧 REGEX 规则迁移后仍按正则匹配，并保留正则内的新语法分隔字符。"""
+    matcher = KeywordMatcher()
+
+    regex_expr = DatabaseCategoryRulesMixin._convert_old_keyword_syntax(
+        r"REGEX:^商户\d{2},(咖啡|茶)\+$"
+    )
+    regex_compiled = matcher.compile_rule_expression(regex_expr)
+
+    assert regex_expr.startswith("REGEX={")
+    assert matcher.match_compiled("商户12,咖啡+", regex_compiled) is True
+    assert matcher.match_compiled("商户12,咖啡", regex_compiled) is False
+    assert matcher.match_compiled("商户AB,咖啡+", regex_compiled) is False
 
 
 @pytest.mark.asyncio

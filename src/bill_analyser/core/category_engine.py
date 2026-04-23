@@ -28,6 +28,74 @@ from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
 
 
+_RULE_EXPRESSION_ESCAPABLE_CHARS = frozenset("\\,+{}|()")
+
+
+def escape_rule_expression_term(term: str) -> str:
+    """Escape one literal term for ``OR={...}``-style rule expressions.
+
+    Terms are comma-separated inside ``{...}``, while braces participate in
+    clause scanning and ``+``/``|``/parentheses are expression delimiters
+    outside a clause. Escaping all expression delimiters keeps migrated legacy
+    keywords round-trippable even when a literal keyword contains those chars.
+    """
+    return "".join(
+        f"\\{char}" if char in _RULE_EXPRESSION_ESCAPABLE_CHARS else char
+        for char in term
+    )
+
+
+def _unescape_rule_expression_term(term: str) -> str:
+    """Unescape one term from ``OR={...}`` content."""
+    chars: list[str] = []
+    index = 0
+    while index < len(term):
+        char = term[index]
+        if (
+            char == "\\"
+            and index + 1 < len(term)
+            and term[index + 1] in _RULE_EXPRESSION_ESCAPABLE_CHARS
+        ):
+            chars.append(term[index + 1])
+            index += 2
+            continue
+        chars.append(char)
+        index += 1
+    return "".join(chars)
+
+
+def _split_rule_expression_terms(content: str) -> list[str]:
+    """Split comma-separated rule-expression terms while honoring escapes."""
+    terms: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(content):
+        char = content[index]
+        if (
+            char == "\\"
+            and index + 1 < len(content)
+            and content[index + 1] in _RULE_EXPRESSION_ESCAPABLE_CHARS
+        ):
+            current.append(char)
+            current.append(content[index + 1])
+            index += 2
+            continue
+        if char == ",":
+            term = _unescape_rule_expression_term("".join(current).strip())
+            if term:
+                terms.append(term)
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+
+    term = _unescape_rule_expression_term("".join(current).strip())
+    if term:
+        terms.append(term)
+    return terms
+
+
 @dataclass
 class RuleExpressionNode:
     """Boolean AST node for category rule expressions.
@@ -37,6 +105,7 @@ class RuleExpressionNode:
     ``and_expr := factor ('+' factor)*``
     ``factor := clause | '(' expression ')'``
     ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
+    ``term`` may escape delimiters with ``\\`` (for example ``\\,`` or ``\\{``).
 
     ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
     ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
@@ -305,6 +374,7 @@ class KeywordMatcher:
         ``and_expr := factor ('+' factor)*``
         ``factor := clause | '(' expression ')'``
         ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
+        ``term`` may escape delimiters with ``\\`` (for example ``\\,``).
 
         ``+`` keeps the existing no-parentheses syntax as a conjunction:
         ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
@@ -439,6 +509,14 @@ class KeywordMatcher:
         brace_depth = 0
         while index < len(expr):
             char = expr[index]
+            if (
+                char == "\\"
+                and brace_depth
+                and index + 1 < len(expr)
+                and expr[index + 1] in _RULE_EXPRESSION_ESCAPABLE_CHARS
+            ):
+                index += 2
+                continue
             if char == "{":
                 brace_depth += 1
             elif char == "}" and brace_depth:
@@ -471,7 +549,7 @@ class KeywordMatcher:
             raise ValueError(f"missing closing '}}' in clause {block!r}")
         content = content[:-1]
 
-        keywords = [keyword.strip() for keyword in content.split(",") if keyword.strip()]
+        keywords = _split_rule_expression_terms(content)
         operator = prefix if prefix in {"OR", "AND", "NOT"} else "OR"
         force_regex = prefix == "REGEX"
 

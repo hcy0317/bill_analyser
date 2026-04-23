@@ -265,6 +265,20 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     )
     assert migrated_category_id is not None
 
+    special_keyword_category_id = _run(
+        db_instance.create_category(
+            {
+                "main_category": f"特殊字符迁移测试{suffix}",
+                "sub_category": "完整字面量",
+                "type": 3,
+                "priority": 10,
+                "keywords": "商户A,咖啡+拿铁{热}|杯",
+            },
+            user_id=user_id,
+        )
+    )
+    assert special_keyword_category_id is not None
+
     existing_rule_category_id = _run(
         db_instance.create_category(
             {
@@ -312,7 +326,7 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     assert response.status_code == 200, response.get_data(as_text=True)
     payload = response.get_json() or {}
     assert payload["success"] is True
-    assert payload["data"] == {"migrated": 1, "skipped": 1}
+    assert payload["data"] == {"migrated": 2, "skipped": 1}
 
     migrated_rules = _run(
         db_instance.get_category_rules(
@@ -323,6 +337,17 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     )
     assert [rule["rule_expression"] for rule in migrated_rules] == [
         "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}",
+    ]
+
+    special_keyword_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=special_keyword_category_id,
+            enabled_only=False,
+        )
+    )
+    assert [rule["rule_expression"] for rule in special_keyword_rules] == [
+        r"OR={商户A\,咖啡\+拿铁\{热\}\|杯}",
     ]
 
     existing_rules = _run(
@@ -348,7 +373,7 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
     assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
     repeat_payload = repeat_response.get_json() or {}
     assert repeat_payload["success"] is True
-    assert repeat_payload["data"] == {"migrated": 0, "skipped": 2}
+    assert repeat_payload["data"] == {"migrated": 0, "skipped": 3}
     assert len(
         _run(
             db_instance.get_category_rules(
@@ -366,3 +391,12 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
         and rule.get("keywords") == "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}"
         for rule in engine_rules
     )
+    engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    assert engine.match_category(
+        {
+            "counterparty": "商户A,咖啡+拿铁{热}|杯",
+            "description": "",
+            "type": "支出",
+            "amount": -29.0,
+        }
+    ) == (f"特殊字符迁移测试{suffix}", "完整字面量")
