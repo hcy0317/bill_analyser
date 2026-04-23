@@ -43,7 +43,7 @@
             </div>
 
             <div v-for="clause in clauses" :key="clause.id" class="rule-clause-row mb-2">
-                <div v-if="supportsCompositeGrouping" class="paren-control" :title="tt('Left parentheses')">
+                <div v-if="showGroupingControls" class="paren-control" :title="tt('Left parentheses')">
                     <v-btn
                         size="x-small"
                         variant="text"
@@ -75,8 +75,6 @@
                     />
                 </div>
 
-                <span class="clause-equals">=</span>
-
                 <div class="clause-terms">
                     <v-combobox
                         v-model="clause.terms"
@@ -96,7 +94,7 @@
                     />
                 </div>
 
-                <div v-if="supportsCompositeGrouping" class="paren-control" :title="tt('Right parentheses')">
+                <div v-if="showGroupingControls" class="paren-control" :title="tt('Right parentheses')">
                     <v-btn
                         size="x-small"
                         variant="text"
@@ -216,6 +214,7 @@ const validationErrorKey = ref('');
 let localClauseId = 0;
 
 const supportsCompositeGrouping = computed(() => resolvedFormat.value === 'composite');
+const showGroupingControls = computed(() => supportsCompositeGrouping.value && clauses.value.some(clause => clause.openParens > 0 || clause.closeParens > 0));
 const isRawMode = computed(() => rawExpression.value.length > 0);
 const types = computed(() => {
     const base = [
@@ -223,7 +222,7 @@ const types = computed(() => {
         { title: tt('Require All (AND)'), value: 'AND' as RuleOperator },
         { title: tt('Exclude (NOT)'), value: 'NOT' as RuleOperator },
     ];
-    if (resolvedFormat.value === 'composite' || clauses.value.some(clause => clause.operator === 'REGEX')) {
+    if (clauses.value.some(clause => clause.operator === 'REGEX')) {
         base.push({ title: tt('Regex Clause'), value: 'REGEX' as RuleOperator });
     }
     return base;
@@ -368,14 +367,8 @@ function repeatParen(paren: '(' | ')', count: number): string {
 }
 
 .clause-operator {
-    flex: 0 0 118px;
-    max-width: 118px;
-}
-
-.clause-equals {
-    flex: 0 0 auto;
-    line-height: 40px;
-    font-weight: 600;
+    flex: 0 0 148px;
+    max-width: 148px;
 }
 
 .clause-terms {

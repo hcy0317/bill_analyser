@@ -184,40 +184,43 @@
             <v-card-title>{{ editingRule ? tt('Edit Rule') : tt('Create Rule') }}</v-card-title>
             <v-card-text>
                 <v-form ref="ruleFormRef">
-                    <v-text-field
-                        v-model="ruleForm.name"
-                        :label="tt('Name')"
-                        :rules="[v => !!v || tt('Name is required')]"
-                        class="mb-2"
-                    />
-                    <v-autocomplete
+                    <two-column-select
                         v-model="ruleForm.category_id"
+                        density="comfortable"
+                        variant="outlined"
+                        primary-key-field="id"
+                        primary-value-field="id"
+                        primary-title-field="name"
+                        primary-header-field="typeLabel"
+                        primary-icon-field="icon"
+                        primary-icon-type="category"
+                        primary-color-field="color"
+                        primary-hidden-field="hidden"
+                        primary-sub-items-field="subCategories"
+                        secondary-key-field="id"
+                        secondary-value-field="id"
+                        secondary-title-field="name"
+                        secondary-icon-field="icon"
+                        secondary-icon-type="category"
+                        secondary-color-field="color"
+                        secondary-hidden-field="hidden"
+                        :show-selection-primary-text="true"
+                        :custom-selection-primary-text="ruleCategorySelection.primaryText"
+                        :custom-selection-secondary-text="ruleCategorySelection.secondaryText"
+                        :enable-filter="true"
+                        :filter-placeholder="tt('Find category')"
+                        :filter-no-items-text="tt('No available category')"
+                        :items="categoryPickerItems"
                         :label="tt('Category')"
-                        :items="categoryOptions"
-                        item-title="text"
-                        item-value="value"
-                        :rules="[v => !!v || tt('Category is required')]"
                         class="mb-2"
                     />
-                    <v-text-field
-                        v-model.number="ruleForm.priority"
-                        :label="tt('Priority')"
-                        type="number"
-                        :hint="tt('Lower number = higher priority')"
-                        persistent-hint
-                        class="mb-2"
+                    <category-rule-builder-fields
+                        v-model="ruleBuilderModel"
+                        :auto-rule-name="autoRuleName"
+                        :disabled="saving"
+                        :title="tt('Canonical Category Rule')"
+                        :description="editingRule ? 'Edit the canonical category rule for the selected category.' : 'Create the canonical category rule for the selected category.'"
                     />
-                    <v-textarea
-                        v-model="ruleForm.rule_expression"
-                        :label="tt('Rule Expression')"
-                        :hint="tt('Expression example: OR={coffee,breakfast}+AND={shop}+NOT={refund}; parentheses can group clauses, e.g. (OR={coffee}+AND={shop})+NOT={refund}.')"
-                        persistent-hint
-                        rows="3"
-                        :rules="[v => !!v || tt('Expression is required')]"
-                        class="mb-2"
-                    />
-                    <v-checkbox v-model="ruleForm.regex_enabled" :label="tt('Enable Regex')" hide-details />
-                    <v-checkbox v-model="ruleForm.enabled" :label="tt('Enabled')" hide-details />
                 </v-form>
             </v-card-text>
             <v-card-actions>
@@ -279,6 +282,9 @@ import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { CategoryType } from '@/core/category.ts';
+import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
+import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 
 const categoryStore = useTransactionCategoriesStore();
 const { tt } = useI18n();
@@ -364,12 +370,44 @@ interface CategoryRuleItem {
 }
 
 interface CategoryRuleForm {
-    name: string;
-    category_id: number | null;
+    category_id: string;
     priority: number;
     rule_expression: string;
     regex_enabled: boolean;
     enabled: boolean;
+}
+
+interface CategoryRulePayload {
+    category_id: number;
+    name: string;
+    priority: number;
+    rule_expression: string;
+    regex_enabled: boolean;
+    enabled: boolean;
+}
+
+interface CategoryPickerSecondaryItem extends Record<string, unknown> {
+    id: string;
+    name: string;
+    icon: string;
+    color: string;
+    hidden: boolean;
+}
+
+interface CategoryPickerPrimaryItem extends Record<string, unknown> {
+    id: string;
+    name: string;
+    icon: string;
+    color: string;
+    hidden: boolean;
+    typeLabel: string;
+    subCategories: CategoryPickerSecondaryItem[];
+}
+
+interface ResolvedRuleCategorySelection {
+    primaryText: string;
+    secondaryText: string;
+    label: string;
 }
 
 interface CategoryRuleTestResult {
@@ -413,29 +451,116 @@ const recurringHeaders = computed(() => [
 ]);
 
 // ── Category selector options ────────
-const categoryOptions = computed(() => {
-    const options: { text: string; value: number }[] = [];
-    const catMap = categoryStore.allTransactionCategoriesMap;
-    for (const key of Object.keys(catMap)) {
-        const cat = catMap[key];
-        if (cat) {
-            options.push({ text: cat.name, value: Number(cat.id) });
+function getCategoryTypeLabel(type: number): string {
+    switch (type) {
+        case CategoryType.Expense:
+            return tt('Expense');
+        case CategoryType.Income:
+            return tt('Income');
+        case CategoryType.Transfer:
+            return tt('Transfer');
+        case CategoryType.Investment:
+            return tt('Investment');
+        default:
+            return tt('Category');
+    }
+}
+
+const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
+    const orderedTypes = [
+        CategoryType.Expense,
+        CategoryType.Income,
+        CategoryType.Transfer,
+        CategoryType.Investment,
+    ];
+
+    return orderedTypes.flatMap(type => (
+        categoryStore.allTransactionCategories[type] || []
+    ).map(primaryCategory => ({
+        id: String(primaryCategory.id),
+        name: primaryCategory.name,
+        icon: primaryCategory.icon,
+        color: primaryCategory.color,
+        hidden: primaryCategory.hidden,
+        typeLabel: getCategoryTypeLabel(primaryCategory.type),
+        subCategories: (primaryCategory.subCategories || []).map(subCategory => ({
+            id: String(subCategory.id),
+            name: subCategory.name,
+            icon: subCategory.icon,
+            color: subCategory.color,
+            hidden: subCategory.hidden,
+        })),
+    })));
+});
+
+function resolveRuleCategorySelection(categoryId: string): ResolvedRuleCategorySelection {
+    const normalizedCategoryId = String(categoryId || '');
+
+    for (const primaryCategory of categoryPickerItems.value) {
+        if (primaryCategory.id === normalizedCategoryId) {
+            return {
+                primaryText: primaryCategory.name,
+                secondaryText: '',
+                label: primaryCategory.name,
+            };
+        }
+
+        for (const secondaryCategory of primaryCategory.subCategories) {
+            if (secondaryCategory.id === normalizedCategoryId) {
+                return {
+                    primaryText: primaryCategory.name,
+                    secondaryText: secondaryCategory.name,
+                    label: `${primaryCategory.name} / ${secondaryCategory.name}`,
+                };
+            }
         }
     }
-    return options;
-});
+
+    return {
+        primaryText: '',
+        secondaryText: '',
+        label: '',
+    };
+}
 
 // ── Edit dialog state ────────
 const showEditDialog = ref(false);
 const editingRule = ref<CategoryRuleItem | null>(null);
 const ruleFormRef = ref<unknown>(null);
 const ruleForm = ref<CategoryRuleForm>({
-    name: '',
-    category_id: null as number | null,
+    category_id: '',
     priority: 100,
     rule_expression: '',
     regex_enabled: false,
     enabled: true,
+});
+const ruleCategorySelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(ruleForm.value.category_id));
+const autoRuleName = computed(() => {
+    const selectionLabel = ruleCategorySelection.value.label || tt('Unassigned Category');
+    const priority = Number.isFinite(ruleForm.value.priority) ? ruleForm.value.priority : 0;
+    return `${selectionLabel} · P${priority}`;
+});
+const ruleBuilderModel = computed({
+    get: () => ({
+        priority: ruleForm.value.priority,
+        ruleExpression: ruleForm.value.rule_expression,
+        regexEnabled: ruleForm.value.regex_enabled,
+        enabled: ruleForm.value.enabled,
+    }),
+    set: (value: {
+        priority: number;
+        ruleExpression: string;
+        regexEnabled: boolean;
+        enabled: boolean;
+    }) => {
+        ruleForm.value = {
+            ...ruleForm.value,
+            priority: value.priority,
+            rule_expression: value.ruleExpression,
+            regex_enabled: value.regexEnabled,
+            enabled: value.enabled,
+        };
+    },
 });
 
 function extractPayloadMessage(payload: unknown, depth = 0): string | null {
@@ -482,14 +607,24 @@ function requireApiSuccess<T>(response: { data?: ApiResponse<T> }, fallback: str
     throw new Error(fallback);
 }
 
-function buildCategoryRuleCreatePayload(form: CategoryRuleForm): CategoryRuleForm & { category_id: number } {
-    if (form.category_id == null) {
+function buildCategoryRulePayload(form: CategoryRuleForm): CategoryRulePayload {
+    const categoryId = Number.parseInt(String(form.category_id || ''), 10);
+    if (!Number.isFinite(categoryId)) {
         throw new Error('Category is required');
     }
 
+    const ruleExpression = String(form.rule_expression || '').trim();
+    if (!ruleExpression) {
+        throw new Error('Expression is required');
+    }
+
     return {
-        ...form,
-        category_id: form.category_id,
+        category_id: categoryId,
+        name: autoRuleName.value,
+        priority: form.priority,
+        rule_expression: ruleExpression,
+        regex_enabled: !!form.regex_enabled,
+        enabled: !!form.enabled,
     };
 }
 
@@ -500,15 +635,14 @@ function getMigrationCount(value: number | string | null | undefined): number {
 
 function openCreateDialog() {
     editingRule.value = null;
-    ruleForm.value = { name: '', category_id: null, priority: 100, rule_expression: '', regex_enabled: false, enabled: true };
+    ruleForm.value = { category_id: '', priority: 100, rule_expression: '', regex_enabled: false, enabled: true };
     showEditDialog.value = true;
 }
 
 function openEditDialog(item: CategoryRuleItem) {
     editingRule.value = item;
     ruleForm.value = {
-        name: item.name,
-        category_id: item.category_id,
+        category_id: item.category_id ? String(item.category_id) : '',
         priority: item.priority,
         rule_expression: item.rule_expression,
         regex_enabled: !!item.regex_enabled,
@@ -521,15 +655,16 @@ async function saveRule() {
     saving.value = true;
     error.value = null;
     try {
+        const payload = buildCategoryRulePayload(ruleForm.value);
         if (editingRule.value) {
             requireApiSuccess(
-                await services.updateCategoryRule(editingRule.value.id, ruleForm.value),
+                await services.updateCategoryRule(editingRule.value.id, payload),
                 'Failed to save rule'
             );
             successMsg.value = 'Rule updated';
         } else {
             requireApiSuccess(
-                await services.createCategoryRule(buildCategoryRuleCreatePayload(ruleForm.value)),
+                await services.createCategoryRule(payload),
                 'Failed to save rule'
             );
             successMsg.value = 'Rule created';
@@ -644,11 +779,27 @@ async function migrateKeywords() {
 // ── Data fetching ────────
 async function fetchCategoryRules() {
     try {
-        const result = requireApiSuccess<CategoryRuleItem[]>(
-            await services.getCategoryRules(),
-            'Failed to load category rules'
-        );
-        categoryRules.value = result ?? [];
+        const response = await axios.get<{
+            success?: boolean;
+            data?: Array<CategoryRuleItem & {
+                main_category?: string | null;
+                sub_category?: string | null;
+            }>;
+            error?: string;
+        }>('category-rules/', {
+            params: {
+                enabled_only: false,
+            },
+        });
+        if (!response.data?.success) {
+            throw new Error(response.data?.error || 'Failed to load category rules');
+        }
+        const result = response.data.data ?? [];
+        categoryRules.value = result.map(item => ({
+            ...item,
+            category_name: item.category_name ?? item.main_category ?? null,
+            sub_category_name: item.sub_category_name ?? item.sub_category ?? null,
+        }));
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, 'Failed to load category rules');
     }
