@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from typing import Any, cast
 
 import pytest
 from flask import Flask
 
 from bill_analyser.api.routes import rules as rules_module
+from tests.user_cleanup_support import register_test_user_for_cleanup
 
 rules_module = cast("Any", rules_module)
 
@@ -118,6 +121,11 @@ def _unwrap_all(func: Any) -> Any:
     return second or first
 
 
+def _run(coroutine: Any) -> Any:
+    """Run an async DB helper from route-level sync tests."""
+    return asyncio.run(coroutine)
+
+
 def test_rules_overview_uses_category_rules_as_canonical_source(
     rules_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -213,3 +221,148 @@ def test_rules_overview_falls_back_to_zero_when_category_rules_load_fails(
     assert "categoryKeywords" not in payload["data"]
     assert "categoryKeywordCount" not in payload["data"]
     assert db.connection_requested is False
+
+
+def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scoped(
+    client: Any,
+    auth_context: dict[str, Any],
+    db_instance: Any,
+) -> None:
+    """Migrating legacy keywords should be repeat-safe and scoped to the current user."""
+    unauthorized = client.post("/api/category-rules/migrate")
+    assert unauthorized.status_code == 401
+
+    suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    user_id = int(auth_context["user"]["id"])
+
+    other_username = f"test_slice04a_other_{suffix}"
+    other_password = "Test123456!"
+    other_register = client.post(
+        "/api/auth/register",
+        json={
+            "username": other_username,
+            "email": f"{other_username}@example.com",
+            "password": other_password,
+            "nickname": other_username,
+        },
+    )
+    assert other_register.status_code in (200, 201), other_register.get_data(as_text=True)
+    register_test_user_for_cleanup(db_instance, other_username)
+    other_user = _run(db_instance.get_user_by_username(other_username))
+    other_user_id = int(other_user["id"])
+
+    migrated_category_id = _run(
+        db_instance.create_category(
+            {
+                "main_category": f"迁移测试{suffix}",
+                "sub_category": "咖啡",
+                "type": 3,
+                "priority": 11,
+                "keywords": "OR:星巴克|咖啡&AND:早餐&NOT:退款",
+            },
+            user_id=user_id,
+        )
+    )
+    assert migrated_category_id is not None
+
+    existing_rule_category_id = _run(
+        db_instance.create_category(
+            {
+                "main_category": f"迁移测试{suffix}",
+                "sub_category": "已有规则",
+                "type": 3,
+                "priority": 12,
+                "keywords": "OR:不应重复迁移",
+            },
+            user_id=user_id,
+        )
+    )
+    assert existing_rule_category_id is not None
+    existing_rule_id = _run(
+        db_instance.create_category_rule(
+            {
+                "category_id": existing_rule_category_id,
+                "name": "manual existing rule",
+                "priority": 3,
+                "rule_expression": "OR={手工规则}",
+                "regex_enabled": False,
+                "enabled": True,
+            },
+            user_id=user_id,
+        )
+    )
+    assert existing_rule_id is not None
+
+    other_category_id = _run(
+        db_instance.create_category(
+            {
+                "main_category": f"跨用户迁移测试{suffix}",
+                "sub_category": "隔离",
+                "type": 3,
+                "priority": 13,
+                "keywords": "OR:跨用户关键词",
+            },
+            user_id=other_user_id,
+        )
+    )
+    assert other_category_id is not None
+
+    headers = auth_context["headers"]
+    response = client.post("/api/category-rules/migrate", headers=headers)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json() or {}
+    assert payload["success"] is True
+    assert payload["data"] == {"migrated": 1, "skipped": 1}
+
+    migrated_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=migrated_category_id,
+            enabled_only=False,
+        )
+    )
+    assert [rule["rule_expression"] for rule in migrated_rules] == [
+        "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}",
+    ]
+
+    existing_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=existing_rule_category_id,
+            enabled_only=False,
+        )
+    )
+    assert [rule["id"] for rule in existing_rules] == [existing_rule_id]
+    assert [rule["rule_expression"] for rule in existing_rules] == ["OR={手工规则}"]
+
+    other_user_rules = _run(
+        db_instance.get_category_rules(
+            user_id=other_user_id,
+            category_id=other_category_id,
+            enabled_only=False,
+        )
+    )
+    assert other_user_rules == []
+
+    repeat_response = client.post("/api/category-rules/migrate", headers=headers)
+    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
+    repeat_payload = repeat_response.get_json() or {}
+    assert repeat_payload["success"] is True
+    assert repeat_payload["data"] == {"migrated": 0, "skipped": 2}
+    assert len(
+        _run(
+            db_instance.get_category_rules(
+                user_id=user_id,
+                category_id=migrated_category_id,
+                enabled_only=False,
+            )
+        )
+    ) == 1
+
+    engine_rules = client.application.config["CATEGORY_ENGINE_INSTANCE"].rules
+    assert any(
+        rule.get("main") == f"迁移测试{suffix}"
+        and rule.get("sub") == "咖啡"
+        and rule.get("keywords") == "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}"
+        for rule in engine_rules
+    )

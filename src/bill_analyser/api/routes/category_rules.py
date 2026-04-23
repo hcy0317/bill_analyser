@@ -1,7 +1,8 @@
 """分类规则 API 路由"""
 
+from typing import cast
+
 from flask import Blueprint, current_app, jsonify, request
-from typing import cast, Any
 
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.api.routes.request_context_helpers import (
@@ -75,7 +76,15 @@ def create_rule():
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         if "category_id" not in data or "rule_expression" not in data:
-            return jsonify({"success": False, "error": "category_id and rule_expression are required"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "category_id and rule_expression are required",
+                    }
+                ),
+                400,
+            )
 
         db, engine = _get_app_services()
         user_id = _get_request_user_id()

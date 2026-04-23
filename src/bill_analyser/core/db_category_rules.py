@@ -220,7 +220,10 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
         conn.row_factory = aiosqlite.Row
 
         async with conn.execute(
-            "SELECT * FROM categories WHERE user_id = ? AND keywords IS NOT NULL AND keywords != ''",
+            (
+                "SELECT * FROM categories "
+                "WHERE user_id = ? AND keywords IS NOT NULL AND keywords != ''"
+            ),
             (user_id,),
         ) as cursor:
             categories = [dict(row) for row in await cursor.fetchall()]
@@ -234,24 +237,18 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
             old_kw: str = cat["keywords"]
             priority = cat.get("priority", 0)
 
-            # Check if rules already exist for this category
-            async with conn.execute(
-                "SELECT COUNT(*) FROM category_rules WHERE category_id = ? AND user_id = ?",
-                (cat_id, user_id),
-            ) as cur:
-                count = (await cur.fetchone())[0]
-            if count > 0:
-                skipped += 1
-                continue
-
             new_expr = self._convert_old_keyword_syntax(old_kw)
             try:
-                await conn.execute(
+                cursor = await conn.execute(
                     (
                         "INSERT INTO category_rules "
                         "(user_id, category_id, name, priority, rule_expression, "
                         "regex_enabled, enabled, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)"
+                        "SELECT ?, ?, ?, ?, ?, 0, 1, ?, ? "
+                        "WHERE NOT EXISTS ("
+                        "SELECT 1 FROM category_rules "
+                        "WHERE category_id = ? AND user_id = ?"
+                        ")"
                     ),
                     (
                         user_id,
@@ -261,9 +258,14 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
                         new_expr,
                         now,
                         now,
+                        cat_id,
+                        user_id,
                     ),
                 )
-                migrated += 1
+                if cursor.rowcount == 0:
+                    skipped += 1
+                else:
+                    migrated += 1
             except sqlite3.Error as exc:
                 self.logger.warning("迁移分类 %s 的关键词失败: %s", cat_id, exc)
                 skipped += 1
