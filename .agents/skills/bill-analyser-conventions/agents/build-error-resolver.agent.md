@@ -24,7 +24,7 @@ You are an expert build error resolution specialist. Your mission is to get buil
 npx tsc --noEmit --pretty
 npx tsc --noEmit --pretty --incremental false   # Show all errors
 npm run build
-npx eslint . --ext .ts,.tsx,.js,.jsx
+npx eslint <changed-files>
 ```
 
 ## Workflow
@@ -90,7 +90,7 @@ rm -rf .next node_modules/.cache && npm run build
 rm -rf node_modules package-lock.json && npm install
 
 # Fix ESLint auto-fixable
-npx eslint . --fix
+npx eslint <changed-files> --fix
 ```
 
 ## Success Metrics

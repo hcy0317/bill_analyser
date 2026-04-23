@@ -22,7 +22,7 @@ You are an expert refactoring specialist focused on code cleanup and consolidati
 npx knip                                    # Unused files, exports, dependencies
 npx depcheck                                # Unused npm dependencies
 npx ts-prune                                # Unused TypeScript exports
-npx eslint . --report-unused-disable-directives  # Unused eslint directives
+npx eslint <changed-files> --report-unused-disable-directives  # Unused eslint directives
 ```
 
 ## Workflow

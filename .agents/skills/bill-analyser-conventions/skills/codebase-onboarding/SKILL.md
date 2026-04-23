@@ -152,7 +152,7 @@ Produce two outputs:
 <!-- Example for a Node.js project — replace with detected commands -->
 - **Run dev server**: `npm run dev`
 - **Run tests**: `npm test`
-- **Run linter**: `npm run lint`
+- **Run linter**: `npx eslint <paths>`
 - **Database migrations**: `npx prisma migrate dev`
 - **Build for production**: `npm run build`
 

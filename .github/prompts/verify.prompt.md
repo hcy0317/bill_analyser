@@ -25,7 +25,7 @@ Execute verification in this exact order:
    - If business runtime code changed, require full `./.venv/Scripts/python.exe -m pytest tests/ -v` before reporting PASS
 
 3. **Frontend Checks**
-   - For `src/web/**`, run `npm run lint` inside `src/web`
+   - For `src/web/**`, run `npx vue-tsc --noEmit` and `npx eslint <touched frontend files>` inside `src/web`; treat full-tree `eslint .` timeouts as inconclusive
    - If the UI or contract change is broad, add the smallest useful build/test verification
 
 4. **AI Customization / Hook Checks**

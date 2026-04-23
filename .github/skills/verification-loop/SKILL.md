@@ -48,7 +48,8 @@ Run this when `src/web/**` changed:
 
 ```powershell
 Set-Location src\web
-npm run lint
+npx vue-tsc --noEmit
+npx eslint <touched frontend files>
 ```
 
 If the change is UI-heavy or contract-sensitive, add the smallest useful build or test validation on top.

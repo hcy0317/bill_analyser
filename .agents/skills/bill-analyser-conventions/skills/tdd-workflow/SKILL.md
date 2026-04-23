@@ -371,7 +371,7 @@ npm test -- --watch
 ### Pre-Commit Hook
 ```bash
 # Runs before every commit
-npm test && npm run lint
+npm test && npx eslint <paths>
 ```
 
 ### CI/CD Integration

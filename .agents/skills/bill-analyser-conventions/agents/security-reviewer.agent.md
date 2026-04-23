@@ -39,7 +39,7 @@ When invoked:
 
 ```bash
 npm audit --audit-level=high
-npx eslint . --plugin security
+npx eslint <changed-files> --plugin security
 ```
 
 ## Review Workflow

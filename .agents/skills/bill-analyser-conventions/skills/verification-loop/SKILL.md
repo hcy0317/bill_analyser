@@ -42,7 +42,7 @@ Report all type errors. Fix critical ones before continuing.
 ### Phase 3: Lint Check
 ```bash
 # JavaScript/TypeScript
-npm run lint 2>&1 | head -30
+npx eslint <changed-files> 2>&1 | head -30
 
 # Python
 ruff check . 2>&1 | head -30
