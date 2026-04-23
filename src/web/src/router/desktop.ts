@@ -90,24 +90,17 @@ function checkNotLogin(): NavigationGuardReturn {
     return true;
 }
 
-function buildPairingCenterRedirect(route: RouteLocation, view: 'learning' | 'rules') {
+function buildRuleCenterRedirect(route: RouteLocation, domain: 'learning' | 'llm') {
     const query: Record<string, string> = {};
 
     for (const [key, value] of Object.entries(route.query)) {
-        if (typeof value === 'string') {
+        if (typeof value === 'string' && key !== 'view' && key !== 'pairType') {
             query[key] = value;
         }
     }
 
-    query['view'] = view;
-
-    if (view === 'learning' && !query['tab']) {
-        query['tab'] = 'suggestions';
-    }
-
-    if (view === 'rules' && !query['tab']) {
-        query['tab'] = 'rules';
-    }
+    query['domain'] = domain;
+    query['tab'] = domain === 'llm' ? 'overview' : (query['tab'] || 'rules');
 
     return {
         path: '/pairing/list',
@@ -219,6 +212,7 @@ const router = createRouter({
                     component: PairingCenterPage,
                     beforeEnter: checkLogin,
                     props: route => ({
+                        initDomain: route.query['domain'],
                         initPairType: route.query['pairType'],
                         initView: route.query['view'],
                         initTab: route.query['tab']
@@ -226,7 +220,7 @@ const router = createRouter({
                 },
                 {
                     path: '/learning/center',
-                    redirect: route => buildPairingCenterRedirect(route, 'learning')
+                    redirect: route => buildRuleCenterRedirect(route, 'learning')
                 },
                 {
                     path: '/recurring/discover',
@@ -236,7 +230,7 @@ const router = createRouter({
 
                 {
                     path: '/rules/center',
-                    redirect: route => buildPairingCenterRedirect(route, 'rules')
+                    redirect: route => buildRuleCenterRedirect(route, 'learning')
                 },
                 {
                     path: '/insights',

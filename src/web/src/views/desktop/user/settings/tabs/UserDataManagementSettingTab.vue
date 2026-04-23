@@ -89,13 +89,13 @@
 
                 <v-card-text>
                     <v-alert type="info" variant="tonal">
-                        {{ tt('Investment recognition settings have moved to Pairing Center and are no longer edited in User Settings.') }}
+                        {{ tt('Investment recognition settings have moved to Rule Center and are no longer edited in User Settings.') }}
                     </v-alert>
                 </v-card-text>
 
                 <v-card-actions class="px-4 pb-4">
-                    <v-btn color="primary" to="/pairing/list?view=investment-settings">
-                        {{ tt('Open Pairing Center') }}
+                    <v-btn color="primary" to="/pairing/list?domain=investment&tab=rules">
+                        {{ tt('Open Rule Center') }}
                     </v-btn>
                 </v-card-actions>
             </v-card>

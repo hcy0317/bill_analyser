@@ -1,118 +1,47 @@
 <template>
-    <v-row class="match-height">
-        <v-col cols="12">
-            <v-card>
-                <v-layout>
-                    <!-- 左侧操作面板 -->
-                    <v-navigation-drawer :permanent="alwaysShowNav" v-model="showNav">
-                        <div class="mx-6 mt-4">
-                            <v-btn block variant="tonal" color="primary"
-                                   :disabled="loading"
-                                   @click="refreshCurrentTab">
-                                <v-icon start :icon="mdiRefresh" />
-                                {{ tt('Refresh') }}
-                            </v-btn>
-                        </div>
-                        <v-divider class="mt-4" />
-                        <v-list density="compact" nav class="mt-2">
-                            <v-list-item :active="activeTab === 'suggestions'"
-                                         :prepend-icon="mdiLightbulbOutline"
-                                         class="mb-1"
-                                         @click="switchTab('suggestions')">
-                                <v-list-item-title>{{ tt('Learning Suggestions') }}</v-list-item-title>
-                            </v-list-item>
-                            <v-list-item :active="activeTab === 'rules'"
-                                         :prepend-icon="mdiBookOpenPageVariant"
-                                         class="mb-1"
-                                         @click="switchTab('rules')">
-                                <v-list-item-title>{{ tt('Learning Rules') }}</v-list-item-title>
-                            </v-list-item>
-                            <v-list-item :active="activeTab === 'llm'"
-                                         :prepend-icon="mdiRobotOutline"
-                                         class="mb-1"
-                                         @click="switchTab('llm')">
-                                <v-list-item-title>{{ tt('LLM Induction') }}</v-list-item-title>
-                                <template #append v-if="llmPendingCount > 0">
-                                    <v-badge :content="llmPendingCount" color="warning" inline />
-                                </template>
-                            </v-list-item>
-                        </v-list>
-                        <v-divider />
-                        <div class="mx-6 mt-4" v-if="activeTab === 'suggestions'">
-                            <v-btn block variant="outlined" color="secondary"
-                                   :disabled="loading"
-                                   @click="handleGenerate">
-                                <v-icon start :icon="mdiAutoFix" />
-                                {{ tt('Generate Suggestions') }}
-                            </v-btn>
-                            <v-btn block variant="tonal" color="success" class="mt-2"
-                                   :disabled="loading || selectedIds.length === 0"
-                                   @click="handleBatchAccept">
-                                <v-icon start :icon="mdiCheckAll" />
-                                {{ tt('Batch Accept') }} ({{ selectedIds.length }})
-                            </v-btn>
-                        </div>
-                        <div class="mx-6 mt-4" v-if="activeTab === 'llm'">
-                            <v-btn block variant="outlined" color="primary"
-                                   :disabled="loading"
-                                   to="/transaction/list">
-                                <v-icon start :icon="mdiOpenInNew" />
-                                {{ tt('Open Transactions') }}
-                            </v-btn>
-                            <v-btn block variant="tonal" color="primary" class="mt-2"
-                                   :disabled="loading"
-                                   @click="loadLLMCandidates">
-                                <v-icon start :icon="mdiRefresh" />
-                                {{ tt('Refresh Candidates') }}
-                            </v-btn>
-                        </div>
-                    </v-navigation-drawer>
+    <v-card>
+        <v-card-title class="d-flex flex-wrap align-center ga-2">
+            <v-icon :icon="activeTab === 'llm' || activeTab === 'llm-config' ? mdiRobotOutline : mdiBrain" class="me-1" />
+            <span>{{ panelTitle }}</span>
+            <v-chip v-if="activeTab === 'llm' && llmPendingCount > 0" size="small" color="warning" variant="tonal">
+                {{ llmPendingCount }} {{ tt('Pending') }}
+            </v-chip>
+            <v-spacer />
+            <v-btn v-if="activeTab === 'suggestions'" variant="outlined" color="secondary"
+                   :disabled="loading"
+                   @click="handleGenerate">
+                <v-icon start :icon="mdiAutoFix" />
+                {{ tt('Generate Suggestions') }}
+            </v-btn>
+            <v-btn v-if="activeTab === 'suggestions'" variant="tonal" color="success"
+                   :disabled="loading || selectedIds.length === 0"
+                   @click="handleBatchAccept">
+                <v-icon start :icon="mdiCheckAll" />
+                {{ tt('Batch Accept') }} ({{ selectedIds.length }})
+            </v-btn>
+            <v-btn v-if="activeTab === 'llm-config'" size="small" variant="tonal" color="primary"
+                   @click="openAddConfigDialog">
+                {{ tt('Add Config') }}
+            </v-btn>
+            <v-btn variant="outlined" :disabled="loading" @click="refreshCurrentTab">
+                <v-icon start :icon="mdiRefresh" />
+                {{ tt('Refresh') }}
+            </v-btn>
+        </v-card-title>
 
-                    <!-- 主内容区 -->
-                    <v-main>
-                        <v-card-text>
-                            <v-sheet border rounded="lg" class="pa-4 mb-4">
-                                <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
-                                    <div class="min-w-0">
-                                        <div class="d-flex flex-wrap align-center ga-2">
-                                            <v-icon :icon="mdiLinkVariant" size="small" />
-                                            <span class="text-subtitle-1 font-weight-medium">
-                                                {{ tt('Temporary compatibility entry') }}
-                                            </span>
-                                            <v-chip size="small" color="warning" variant="tonal">
-                                                {{ tt('Legacy access point') }}
-                                            </v-chip>
-                                        </div>
-                                        <div class="text-body-2 text-medium-emphasis mt-2">
-                                            {{ tt('Learning Center stays available for existing deep links during migration. Use Pairing Center as the main home for pairing tools.') }}
-                                        </div>
-                                    </div>
-                                    <v-spacer />
-                                    <v-btn color="primary" variant="tonal" to="/pairing/list">
-                                        <v-icon start :icon="mdiOpenInNew" />
-                                        {{ tt('Open Pairing Center') }}
-                                    </v-btn>
-                                </div>
-                            </v-sheet>
+        <v-progress-linear v-if="loading" indeterminate color="primary" />
 
-                            <div class="d-flex align-center mb-4">
-                                <v-icon :icon="mdiBrain" class="mr-2" />
-                                <span class="text-h6">{{ tt('Learning Center') }}</span>
-                                <v-spacer />
-                            </div>
+        <v-card-text>
+            <v-alert v-if="error" type="error" closable class="mb-4"
+                     @click:close="clearError">
+                {{ error }}
+            </v-alert>
 
-                            <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
-
-                            <v-alert v-if="error" type="error" closable class="mb-4"
-                                     @click:close="clearError">
-                                {{ error }}
-                            </v-alert>
-
-                            <v-alert v-if="lastGenerateResult" type="info" closable class="mb-4"
-                                     @click:close="lastGenerateResult = null">
-                                {{ tt('Generated') }}: {{ lastGenerateResult.created }} {{ tt('new') }},
-                                {{ lastGenerateResult.updated }} {{ tt('updated') }}
-                            </v-alert>
+            <v-alert v-if="lastGenerateResult" type="info" closable class="mb-4"
+                     @click:close="lastGenerateResult = null">
+                {{ tt('Generated') }}: {{ lastGenerateResult.created }} {{ tt('new') }},
+                {{ lastGenerateResult.updated }} {{ tt('updated') }}
+            </v-alert>
 
                             <!-- ── Suggestions Tab ── -->
                             <template v-if="activeTab === 'suggestions'">
@@ -255,50 +184,12 @@
                                                :text="tt('Accept suggestions to create learning rules that auto-classify future imports.')" />
                             </template>
 
-                            <!-- ── LLM 归纳 Tab ── -->
-                            <template v-if="activeTab === 'llm'">
-                                <v-alert type="info" variant="tonal" class="mb-4">
-                                    <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
-                                        <div class="min-w-0">
-                                            <div class="d-flex flex-wrap align-center ga-2">
-                                                <span class="text-subtitle-2 font-weight-medium">
-                                                    {{ tt('Import Preview Session Assistant') }}
-                                                </span>
-                                                <v-chip size="x-small" color="primary" variant="outlined">
-                                                    {{ tt('Primary entrypoint') }}
-                                                </v-chip>
-                                            </div>
-                                            <div class="text-body-2 mt-2">
-                                                {{ tt('Import Preview Session Assistant is now the primary entrypoint for LLM-assisted learning. Start an import from Transactions, review selected preview rows, then promote the confirmed suggestions into long-term learning rules. This page only keeps compatibility config and historical candidate queues during migration.') }}
-                                            </div>
-                                        </div>
-                                        <v-spacer />
-                                        <v-btn color="primary" variant="tonal" to="/transaction/list">
-                                            <v-icon start :icon="mdiOpenInNew" />
-                                            {{ tt('Open Transactions') }}
-                                        </v-btn>
-                                    </div>
-                                </v-alert>
-
-                                <div class="d-flex flex-wrap align-center ga-2 mb-4">
-                                    <v-chip size="small" color="warning" variant="tonal">
-                                        {{ tt('Historical compatibility queue') }}
-                                    </v-chip>
-                                    <span class="text-body-2 text-medium-emphasis">
-                                        {{ tt('Generate new LLM rule candidates from the import preview session assistant. This page now keeps configuration and historical candidate review only.') }}
-                                    </span>
-                                </div>
-
+            <template v-if="activeTab === 'llm-config'">
                                 <!-- LLM 多配置管理 -->
                                 <v-card variant="outlined" class="mb-4">
                                     <v-card-title class="text-subtitle-1 d-flex align-center">
                                         <v-icon start :icon="mdiCog" size="small" />
                                         {{ tt('LLM Config') }}
-                                        <v-spacer />
-                                        <v-btn size="small" variant="tonal" color="primary"
-                                               @click="openAddConfigDialog">
-                                            {{ tt('Add Config') }}
-                                        </v-btn>
                                     </v-card-title>
                                     <v-card-text>
                                         <v-table v-if="llmSavedConfigs.length > 0" density="compact" hover>
@@ -337,7 +228,9 @@
                                         </div>
                                     </v-card-text>
                                 </v-card>
+            </template>
 
+            <template v-if="activeTab === 'llm'">
                                 <!-- 候选列表 -->
                                 <div class="d-flex align-center mb-2">
                                     <span class="text-subtitle-2">{{ tt('Candidate Rules') }}</span>
@@ -405,14 +298,10 @@
                                 <v-empty-state v-if="filteredLLMCandidates.length === 0"
                                                :icon="mdiRobotOutline"
                                                :headline="tt('No Candidate Rules')"
-                                               :text="tt('Use the import preview session assistant from Transactions to review selected preview rows before promoting long-term learning. Historical candidate rules remain visible here during migration.')" />
-                            </template>
-                        </v-card-text>
-                    </v-main>
-                </v-layout>
-            </v-card>
-        </v-col>
-    </v-row>
+                                               :text="tt('No LLM rule candidates are waiting for review.')" />
+            </template>
+        </v-card-text>
+    </v-card>
 
     <!-- Edit Rule Dialog -->
     <v-dialog v-model="editRuleDialog" max-width="500" persistent>
@@ -463,7 +352,6 @@
 <script setup lang="ts">
 import axios from 'axios';
 import { ref, computed, watch } from 'vue';
-import { useDisplay } from 'vuetify';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useLearningStore } from '@/stores/learning.ts';
@@ -483,9 +371,7 @@ import {
     mdiLightbulbOutline,
     mdiBookOpenPageVariant,
     mdiRobotOutline,
-    mdiCog,
-    mdiLinkVariant,
-    mdiOpenInNew
+    mdiCog
 } from '@mdi/js';
 
 interface LLMConfigItem {
@@ -517,21 +403,41 @@ const props = defineProps<{
     initTab?: string
 }>();
 
-const display = useDisplay();
 const { tt } = useI18n();
 const store = useLearningStore();
 
-const activeTab = ref<string>(props.initTab || 'suggestions');
+function normalizePanelTab(tab?: string): string {
+    if (tab === 'rules' || tab === 'llm' || tab === 'llm-config') {
+        return tab;
+    }
+
+    return 'suggestions';
+}
+
+const activeTab = ref<string>(normalizePanelTab(props.initTab));
 const statusFilter = ref<string>('');
-const showNav = ref(true);
 const selectedIds = ref<number[]>([]);
 const lastGenerateResult = ref<GenerateSuggestionsResponse | null>(null);
 
-const alwaysShowNav = computed(() => !display.mdAndDown.value);
 const loading = computed(() => store.suggestionsLoading || store.rulesLoading);
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);
+const panelTitle = computed(() => {
+    if (activeTab.value === 'rules') {
+        return tt('Learning Rules');
+    }
+
+    if (activeTab.value === 'llm') {
+        return tt('Induction Overview');
+    }
+
+    if (activeTab.value === 'llm-config') {
+        return tt('LLM Config');
+    }
+
+    return tt('Learning Overview');
+});
 
 const filteredSuggestions = computed(() => {
     if (!statusFilter.value) return store.suggestions;
@@ -661,15 +567,13 @@ function translateMatchType(type: string): string {
     return map[type] || type;
 }
 
-function switchTab(tab: string) {
-    activeTab.value = tab;
-}
-
 async function refreshCurrentTab() {
     if (activeTab.value === 'suggestions') {
         await store.loadSuggestions();
     } else if (activeTab.value === 'llm') {
         await loadLLMCandidates();
+    } else if (activeTab.value === 'llm-config') {
+        await loadLLMConfigs();
     } else {
         await store.loadRules();
     }
@@ -867,12 +771,21 @@ async function handleLLMReject(id: number) {
     }
 }
 
+watch(
+    () => props.initTab,
+    (initTab) => {
+        activeTab.value = normalizePanelTab(initTab);
+    },
+    { immediate: true }
+);
+
 watch(activeTab, (tab) => {
     if (tab === 'suggestions') {
         store.loadSuggestions();
     } else if (tab === 'llm') {
-        loadLLMConfigs();
         loadLLMCandidates();
+    } else if (tab === 'llm-config') {
+        loadLLMConfigs();
     } else {
         store.loadRules();
     }

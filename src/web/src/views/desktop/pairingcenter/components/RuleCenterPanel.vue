@@ -4,7 +4,7 @@
             <v-card>
                 <v-card-title class="d-flex align-center">
                     <v-icon :icon="mdiBookCogOutline" class="me-2" />
-                    <span>{{ tt('Rule Center') }}</span>
+                    <span>{{ title || tt('Category and Recurring Rules') }}</span>
                     <v-spacer />
                     <v-btn variant="outlined" :disabled="loading" @click="fetchAll">
                         <v-icon start :icon="mdiRefresh" />
@@ -22,44 +22,16 @@
                     {{ successMsg }}
                 </v-alert>
 
-                <v-sheet border rounded="lg" class="mx-4 mb-4 pa-4">
-                    <div class="d-flex flex-column flex-lg-row align-lg-center ga-3">
-                        <div class="min-w-0">
-                            <div class="d-flex flex-wrap align-center ga-2">
-                                <v-icon :icon="mdiLinkVariant" size="small" />
-                                <span class="text-subtitle-1 font-weight-medium">
-                                    {{ tt('Temporary compatibility entry') }}
-                                </span>
-                                <v-chip size="small" color="warning" variant="tonal">
-                                    {{ tt('Legacy access point') }}
-                                </v-chip>
-                            </div>
-                            <div class="text-body-2 text-medium-emphasis mt-2">
-                                {{ tt('Rule Center stays available for existing deep links during migration. Use Pairing Center as the main home for pairing tools.') }}
-                            </div>
-                        </div>
-                        <v-spacer />
-                        <v-btn color="primary" variant="tonal" to="/pairing/list">
-                            <v-icon start :icon="mdiOpenInNew" />
-                            {{ tt('Open Pairing Center') }}
-                        </v-btn>
-                    </div>
-                </v-sheet>
-
                 <v-tabs v-model="activeTab" class="px-4">
-                    <v-tab value="rules">
+                    <v-tab v-if="hasTab('rules')" value="rules">
                         <v-icon start :icon="mdiBookCogOutline" />
                         {{ tt('Category Rules') }} ({{ categoryRules.length }})
                     </v-tab>
-                    <v-tab value="learning">
+                    <v-tab v-if="hasTab('learning')" value="learning">
                         <v-icon start :icon="mdiBrain" />
                         {{ tt('Learning Rules') }} ({{ overview.learningRuleCount }})
                     </v-tab>
-                    <v-tab value="investment">
-                        <v-icon start :icon="mdiFinance" />
-                        {{ tt('Investment Settings') }}
-                    </v-tab>
-                    <v-tab value="recurring">
+                    <v-tab v-if="hasTab('recurring')" value="recurring">
                         <v-icon start :icon="mdiCalendarSync" />
                         {{ tt('Recurring Rules') }} ({{ overview.recurringRuleCount }})
                     </v-tab>
@@ -67,7 +39,7 @@
 
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
-                    <v-tabs-window-item value="rules">
+                    <v-tabs-window-item v-if="hasTab('rules')" value="rules">
                         <div class="d-flex align-center pa-4 ga-2">
                             <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
                                 {{ tt('Add Rule') }}
@@ -164,7 +136,7 @@
                     </v-tabs-window-item>
 
                     <!-- Learning Rules -->
-                    <v-tabs-window-item value="learning">
+                    <v-tabs-window-item v-if="hasTab('learning')" value="learning">
                         <v-data-table
                             :headers="learningHeaders"
                             :items="overview.learningRules"
@@ -181,71 +153,8 @@
                         </v-data-table>
                     </v-tabs-window-item>
 
-                    <!-- Investment Settings -->
-                    <v-tabs-window-item value="investment">
-                        <v-card-text>
-                            <div class="d-flex align-center mb-4">
-                                <span class="text-subtitle-1 font-weight-medium">{{ tt('Investment Recognition Settings') }}</span>
-                                <v-spacer />
-                                <v-btn variant="outlined" size="small" @click="goToInvestmentSettings">
-                                    <v-icon start :icon="mdiPencilOutline" />
-                                    {{ tt('Manage') }}
-                                </v-btn>
-                            </div>
-
-                            <v-row>
-                                <v-col cols="12" md="4">
-                                    <v-card variant="outlined">
-                                        <v-card-subtitle class="pt-3">{{ tt('Platform Keywords') }}</v-card-subtitle>
-                                        <v-card-text>
-                                            <v-chip v-for="kw in investmentSettingsSummary.platform" :key="kw"
-                                                    size="small" class="ma-1" color="green" variant="tonal">
-                                                {{ kw }}
-                                            </v-chip>
-                                            <span v-if="investmentSettingsSummary.platform.length === 0" class="text-grey text-caption">
-                                                {{ tt('Using defaults') }}
-                                            </span>
-                                        </v-card-text>
-                                    </v-card>
-                                </v-col>
-                                <v-col cols="12" md="4">
-                                    <v-card variant="outlined">
-                                        <v-card-subtitle class="pt-3">{{ tt('Product Keywords') }}</v-card-subtitle>
-                                        <v-card-text>
-                                            <v-chip v-for="kw in investmentSettingsSummary.product" :key="kw"
-                                                    size="small" class="ma-1" color="blue" variant="tonal">
-                                                {{ kw }}
-                                            </v-chip>
-                                            <span v-if="investmentSettingsSummary.product.length === 0" class="text-grey text-caption">
-                                                {{ tt('Using defaults') }}
-                                            </span>
-                                        </v-card-text>
-                                    </v-card>
-                                </v-col>
-                                <v-col cols="12" md="4">
-                                    <v-card variant="outlined">
-                                        <v-card-subtitle class="pt-3">{{ tt('Exclude Keywords') }}</v-card-subtitle>
-                                        <v-card-text>
-                                            <v-chip v-for="kw in investmentSettingsSummary.exclude" :key="kw"
-                                                    size="small" class="ma-1" color="red" variant="tonal">
-                                                {{ kw }}
-                                            </v-chip>
-                                            <span v-if="investmentSettingsSummary.exclude.length === 0" class="text-grey text-caption">
-                                                {{ tt('Using defaults') }}
-                                            </span>
-                                        </v-card-text>
-                                    </v-card>
-                                </v-col>
-                            </v-row>
-
-                            <v-alert type="info" variant="tonal" class="mt-4" density="compact">
-                                {{ tt('Rule Center keeps a read-only compatibility summary here. Manage the canonical investment recognition settings in Pairing Center.') }}
-                            </v-alert>
-                        </v-card-text>
-                    </v-tabs-window-item>
-
                     <!-- Recurring Rules -->
-                    <v-tabs-window-item value="recurring">
+                    <v-tabs-window-item v-if="hasTab('recurring')" value="recurring">
                         <v-data-table
                             :headers="recurringHeaders"
                             :items="overview.recurringRules"
@@ -361,24 +270,24 @@
 <script setup lang="ts">
 import axios from 'axios';
 import { ref, computed, onMounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline, mdiFinance, mdiLinkVariant, mdiOpenInNew,
+    mdiTestTube, mdiDatabaseImportOutline,
 } from '@mdi/js';
 import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
-import { useUserStore } from '@/stores/user.ts';
 
-const router = useRouter();
 const categoryStore = useTransactionCategoriesStore();
-const userStore = useUserStore();
 const { tt } = useI18n();
+type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
+
 const props = defineProps<{
     initTab?: string;
+    tabs?: RuleCenterPanelTab[];
+    title?: string;
 }>();
 
 const loading = ref(false);
@@ -387,15 +296,25 @@ const deleting = ref(false);
 const testing = ref(false);
 const error = ref<string | null>(null);
 const successMsg = ref<string | null>(null);
-function normalizeTab(tab?: string): 'rules' | 'learning' | 'investment' | 'recurring' {
-    if (tab === 'learning' || tab === 'investment' || tab === 'recurring') {
+const visibleTabs = computed<RuleCenterPanelTab[]>(() => props.tabs && props.tabs.length > 0
+    ? props.tabs
+    : ['rules', 'learning', 'recurring']
+);
+const title = computed(() => props.title);
+
+function hasTab(tab: RuleCenterPanelTab): boolean {
+    return visibleTabs.value.includes(tab);
+}
+
+function normalizeTab(tab?: string): RuleCenterPanelTab {
+    if ((tab === 'learning' || tab === 'recurring') && hasTab(tab)) {
         return tab;
     }
 
-    return 'rules';
+    return visibleTabs.value[0] ?? 'rules';
 }
 
-const activeTab = ref(normalizeTab(props.initTab));
+const activeTab = ref<RuleCenterPanelTab>(normalizeTab(props.initTab));
 
 // ── Overview (existing tabs) ────────
 interface LearningRuleOverviewItem {
@@ -492,20 +411,6 @@ const recurringHeaders = computed(() => [
     { title: tt('Next Date'), key: 'nextDate' },
     { title: tt('Enabled'), key: 'enabled' },
 ]);
-
-// ── Investment settings summary (read from user profile) ────────
-const investmentSettingsSummary = computed(() => {
-    const info = userStore.currentUserBasicInfo;
-    return {
-        platform: info?.investmentPlatformKeywords || [],
-        product: info?.investmentProductKeywords || [],
-        exclude: info?.investmentExcludeKeywords || [],
-    };
-});
-
-function goToInvestmentSettings() {
-    router.push('/pairing/list?view=investment-settings');
-}
 
 // ── Category selector options ────────
 const categoryOptions = computed(() => {
@@ -785,8 +690,8 @@ async function fetchAll() {
 }
 
 watch(
-    () => props.initTab,
-    (initTab) => {
+    () => [props.initTab, props.tabs] as const,
+    ([initTab]) => {
         activeTab.value = normalizeTab(initTab);
     },
     { immediate: true }

@@ -87,8 +87,8 @@
                 </li>
                 <li class="nav-link">
                     <router-link to="/pairing/list">
-                        <v-icon class="nav-item-icon" :icon="mdiLinkVariant"/>
-                        <span class="nav-item-title">{{ tt('Pairing Center') }}</span>
+                        <v-icon class="nav-item-icon" :icon="mdiBookCogOutline"/>
+                        <span class="nav-item-title">{{ tt('Rule Center') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-section-title">
@@ -252,7 +252,7 @@ import {
     mdiLockOutline,
     mdiLogout,
     mdiCalculatorVariantOutline,
-    mdiLinkVariant
+    mdiBookCogOutline
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;
