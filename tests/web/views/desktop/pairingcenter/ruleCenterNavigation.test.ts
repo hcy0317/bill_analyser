@@ -39,9 +39,23 @@ describe('rule center navigation mapping', () => {
         });
 
         expect(normalizeRuleCenterSelection({ view: 'rules', tab: 'recurring' })).toMatchObject({
-            domain: 'learning',
+            domain: 'transfer',
             tab: 'rules',
             legacyRuleTab: 'recurring',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ view: 'rule-center' })).toMatchObject({
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'rules',
+            shouldRewriteQuery: true,
+        });
+
+        expect(normalizeRuleCenterSelection({ view: 'rule-center', tab: 'investment' })).toMatchObject({
+            domain: 'investment',
+            tab: 'rules',
+            legacyRuleTab: 'rules',
             shouldRewriteQuery: true,
         });
     });

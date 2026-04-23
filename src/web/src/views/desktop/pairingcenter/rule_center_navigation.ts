@@ -112,7 +112,7 @@ export function normalizeRuleCenterSelection(input: {
         }
 
         return {
-            domain: 'learning',
+            domain: 'transfer',
             tab: 'rules',
             legacyRuleTab: normalizeLegacyRuleTab(tab),
             shouldRewriteQuery: true,

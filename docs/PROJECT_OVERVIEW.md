@@ -97,8 +97,8 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ### 4.1 视图（`src/web/src/views/`）
 - `desktop/`：桌面主界面（账户、交易、统计、预算、分类、标签、模板、用户设置）
-- `desktop/pairingcenter/ListPage.vue` 当前承载桌面端 canonical 规则中心：页面展示为“Rule Center / 规则中心”，以转账配对、投资配对、长期学习、LLM 识别四个一级入口组织持久化匹配治理、学习规则与识别配置；转账配对与投资配对分别提供 pair 总览，投资配对的识别设置通过 matching-domain canonical API 写入。
-- `/pairing/list` 是规则中心运行态主路由，并使用 `domain/tab` query 表达当前信息架构；旧深链 `pairType` / `view` / `tab` query 会被归一化到新 domain/tab。`/rules/center` 与 `/learning/center` 只重定向到同一规则中心页面，不再保有独立持久化业务中心语义。
+- `desktop/pairingcenter/ListPage.vue` 当前承载桌面端 canonical 规则中心：页面以左侧纵向域导航组织“转账配对 / 投资配对 / 长期学习 / LLM 识别”四个一级入口。转账配对当前同时承载 `Pairing Overview` 与 `Pairing Rules`，其中 `Pairing Rules` 统一容纳 category rules 与 recurring rules；投资配对继续提供 pair 总览与 investment recognition settings；长期学习域只保留 suggestions / learning rules；LLM 域承载 candidate rules 与 config。
+- `/pairing/list` 是规则中心运行态主路由，并使用 `domain/tab` query 表达当前信息架构；旧深链 `pairType` / `view` / `tab` query 会被归一化到新 domain/tab，其中 legacy `view=rules|rule-center` 默认改写到 `domain=transfer&tab=rules`，`view=investment-settings` 仍改写到 `domain=investment&tab=rules`，`view=learning&tab=llm` 仍改写到 LLM 域。`/rules/center` 与 `/learning/center` 只重定向到同一规则中心页面，不再保有独立持久化业务中心语义。
 - `mobile/`：移动端界面（交易、账户、统计、设置等）
 - `base/`：公共页面基础
 
