@@ -8,47 +8,143 @@
                 variant="text"
                 color="primary"
                 :prepend-icon="mdiPlus"
-                @click="addGroup"
-                :disabled="disabled"
+                @click="addClause"
+                :disabled="disabled || isRawMode"
             >
                 {{ resolvedAddButtonText }}
             </v-btn>
         </div>
 
-        <div v-if="groups.length === 0" class="text-center text-caption text-medium-emphasis py-2">
-            {{ resolvedEmptyStateText }}
-        </div>
+        <v-alert
+            v-if="parseErrorKey"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-2"
+        >
+            {{ tt(parseErrorKey) }}
+        </v-alert>
 
-        <div v-for="(group, index) in groups" :key="index" class="d-flex align-start mb-2">
-            <div style="width: 120px" class="me-2">
-                <v-select
-                    v-model="group.type"
-                    :items="types"
-                    density="compact"
-                    hide-details
-                    variant="outlined"
-                    @update:model-value="serializeKeywords"
-                ></v-select>
+        <v-textarea
+            v-if="isRawMode"
+            :model-value="rawExpression"
+            :label="tt('Original rule expression')"
+            rows="2"
+            readonly
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-2"
+        />
+
+        <template v-else>
+            <div v-if="clauses.length === 0" class="text-center text-caption text-medium-emphasis py-2">
+                {{ resolvedEmptyStateText }}
             </div>
-            <div class="flex-grow-1">
-                <v-combobox
-                    v-model="group.keywords"
-                    :label="group.type === 'REGEX' ? tt('Regex Patterns') : tt('Expression Terms')"
-                    :placeholder="group.type === 'REGEX' ? tt('Enter regex patterns and press Enter') : tt('Enter terms and press Enter')"
-                    chips
-                    closable-chips
-                    multiple
-                    density="compact"
-                    hide-details
-                    variant="outlined"
-                    append-inner-icon=""
-                    @update:model-value="serializeKeywords"
-                ></v-combobox>
+
+            <div v-for="clause in clauses" :key="clause.id" class="rule-clause-row mb-2">
+                <div v-if="supportsCompositeGrouping" class="paren-control" :title="tt('Left parentheses')">
+                    <v-btn
+                        size="x-small"
+                        variant="text"
+                        :disabled="disabled"
+                        @click="increaseOpenParen(clause)"
+                    >
+                        {{ tt('Add left parenthesis') }}
+                    </v-btn>
+                    <span class="paren-display">{{ repeatParen('(', clause.openParens) }}</span>
+                    <v-btn
+                        size="x-small"
+                        variant="text"
+                        :disabled="disabled || clause.openParens === 0"
+                        @click="decreaseOpenParen(clause)"
+                    >
+                        {{ tt('Remove left parenthesis') }}
+                    </v-btn>
+                </div>
+
+                <div class="clause-operator">
+                    <v-select
+                        v-model="clause.operator"
+                        :items="types"
+                        density="compact"
+                        hide-details
+                        variant="outlined"
+                        :disabled="disabled"
+                        @update:model-value="serializeKeywords"
+                    />
+                </div>
+
+                <span class="clause-equals">=</span>
+
+                <div class="clause-terms">
+                    <v-combobox
+                        v-model="clause.terms"
+                        v-model:search="draftTerms[clause.id]"
+                        :label="clause.operator === 'REGEX' ? tt('Regex Patterns') : tt('Expression Terms')"
+                        :placeholder="clause.operator === 'REGEX' ? tt('Enter regex patterns and press Enter') : tt('Enter terms and press Enter')"
+                        chips
+                        closable-chips
+                        multiple
+                        density="compact"
+                        hide-details
+                        variant="outlined"
+                        append-inner-icon=""
+                        :disabled="disabled"
+                        @keydown.enter.prevent="commitPendingTerm(clause)"
+                        @update:model-value="onTermsUpdated(clause)"
+                    />
+                </div>
+
+                <div v-if="supportsCompositeGrouping" class="paren-control" :title="tt('Right parentheses')">
+                    <v-btn
+                        size="x-small"
+                        variant="text"
+                        :disabled="disabled"
+                        @click="increaseCloseParen(clause)"
+                    >
+                        {{ tt('Add right parenthesis') }}
+                    </v-btn>
+                    <span class="paren-display">{{ repeatParen(')', clause.closeParens) }}</span>
+                    <v-btn
+                        size="x-small"
+                        variant="text"
+                        :disabled="disabled || clause.closeParens === 0"
+                        @click="decreaseCloseParen(clause)"
+                    >
+                        {{ tt('Remove right parenthesis') }}
+                    </v-btn>
+                </div>
+
+                <v-btn
+                    :icon="mdiPlus"
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    :title="tt('Insert clause after this row')"
+                    :disabled="disabled"
+                    @click="insertClauseAfterRow(clause)"
+                />
+                <v-btn
+                    :icon="mdiDelete"
+                    size="small"
+                    variant="text"
+                    color="error"
+                    :disabled="disabled"
+                    @click="removeClause(clause.id)"
+                />
             </div>
-            <div class="ms-2">
-                <v-btn :icon="mdiDelete" size="small" variant="text" color="error" @click="removeGroup(index)"></v-btn>
-            </div>
-        </div>
+
+            <v-alert
+                v-if="validationErrorKey"
+                type="error"
+                variant="tonal"
+                density="compact"
+                class="mb-2"
+            >
+                {{ tt(validationErrorKey) }}
+            </v-alert>
+        </template>
 
         <div class="text-caption text-medium-emphasis mt-2">
             {{ resolvedHelpText }}
@@ -63,6 +159,17 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
+import {
+    addTermToClause,
+    createRuleClause,
+    insertClauseAfter,
+    normalizeRuleTerms,
+    parseExpression,
+    serializeForFormat,
+    type ExpressionFormat,
+    type RuleClause,
+    type RuleOperator
+} from '@/components/common/keywordExpression.ts';
 
 import { mdiPlus, mdiDelete } from '@mdi/js';
 
@@ -71,8 +178,8 @@ const { tt } = useI18n();
 const props = withDefaults(defineProps<{
     modelValue: string;
     disabled?: boolean;
-    expressionFormat?: 'legacy' | 'composite';
-    format?: 'legacy' | 'composite';
+    expressionFormat?: ExpressionFormat;
+    format?: ExpressionFormat;
     title?: string;
     emptyStateText?: string;
     helpText?: string;
@@ -82,22 +189,17 @@ const props = withDefaults(defineProps<{
     format: 'legacy',
 });
 
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits<{
+    'update:modelValue': [value: string];
+}>();
 
-type KeywordType = 'OR' | 'AND' | 'NOT' | 'REGEX';
-
-interface KeywordGroup {
-    type: KeywordType;
-    keywords: string[];
-}
-
-const resolvedFormat = computed(() => props.expressionFormat ?? props.format);
+const resolvedFormat = computed<ExpressionFormat>(() => props.expressionFormat ?? props.format);
 const resolvedTitle = computed(() => props.title || tt('Rule Expression'));
 const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Clause'));
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText || (
     resolvedFormat.value === 'composite'
-        ? tt('Build a boolean rule expression with OR / AND / NOT blocks. Parentheses can group rule blocks when editing raw expressions, and regex clauses are also supported in composite mode.')
+        ? tt('Build a boolean rule expression with OR / AND / NOT rows. Use parentheses on any row to control precedence; each row serializes to backend-supported OR={...}+AND={...}+NOT={...} syntax.')
         : tt('Build a rule expression with OR / AND / NOT blocks. Legacy syntax is still accepted for compatibility.')
 ));
 const resolvedExampleText = computed(() => props.exampleText || (
@@ -106,139 +208,210 @@ const resolvedExampleText = computed(() => props.exampleText || (
         : ''
 ));
 
+const clauses = ref<RuleClause[]>([]);
+const draftTerms = ref<Record<string, string>>({});
+const rawExpression = ref('');
+const parseErrorKey = ref('');
+const validationErrorKey = ref('');
+let localClauseId = 0;
+
+const supportsCompositeGrouping = computed(() => resolvedFormat.value === 'composite');
+const isRawMode = computed(() => rawExpression.value.length > 0);
 const types = computed(() => {
     const base = [
-        { title: tt('Match Any (OR)'), value: 'OR' as KeywordType },
-        { title: tt('Require All (AND)'), value: 'AND' as KeywordType },
-        { title: tt('Exclude (NOT)'), value: 'NOT' as KeywordType },
+        { title: tt('Match Any (OR)'), value: 'OR' as RuleOperator },
+        { title: tt('Require All (AND)'), value: 'AND' as RuleOperator },
+        { title: tt('Exclude (NOT)'), value: 'NOT' as RuleOperator },
     ];
-    if (resolvedFormat.value === 'composite') {
-        base.push({ title: tt('Regex Clause'), value: 'REGEX' as KeywordType });
+    if (resolvedFormat.value === 'composite' || clauses.value.some(clause => clause.operator === 'REGEX')) {
+        base.push({ title: tt('Regex Clause'), value: 'REGEX' as RuleOperator });
     }
     return base;
 });
 
-const groups = ref<KeywordGroup[]>([]);
-
-watch(() => props.modelValue, (newVal: string) => {
-    const currentSerialized = serialize(groups.value);
-    if (newVal !== currentSerialized) {
-        parseExpression(newVal);
-    }
-}, { immediate: true });
-
-function detectFormat(str: string): 'composite' | 'legacy' {
-    if (str.includes('={')) return 'composite';
-    return 'legacy';
-}
-
-function parseExpression(str: string) {
-    if (!str) {
-        groups.value = [];
+watch(() => [props.modelValue, resolvedFormat.value] as const, ([newVal]) => {
+    const currentSerialized = getCurrentSerializedExpression();
+    if (!rawExpression.value && currentSerialized !== null && newVal === currentSerialized) {
         return;
     }
-    const fmt = detectFormat(str);
-    if (fmt === 'composite') {
-        parseComposite(str);
-    } else {
-        parseLegacy(str);
+    if (rawExpression.value && newVal === rawExpression.value) {
+        return;
     }
+    parseModelValue(newVal);
+}, { immediate: true });
+
+function parseModelValue(value: string) {
+    const result = parseExpression(value, {
+        format: resolvedFormat.value,
+        idFactory: createLocalClauseId
+    });
+    clauses.value = result.clauses;
+    rawExpression.value = result.rawExpression ?? '';
+    parseErrorKey.value = result.errorKey ?? '';
+    validationErrorKey.value = '';
+    syncDraftTerms();
 }
 
-function parseLegacy(str: string) {
-    const result: KeywordGroup[] = [];
-    const parts = str.split('&');
-    for (const part of parts) {
-        const trimmedPart = part.trim();
-        if (!trimmedPart) continue;
-        let type: KeywordType = 'OR';
-        let content = trimmedPart;
-        if (trimmedPart.startsWith('OR:')) {
-            type = 'OR';
-            content = trimmedPart.substring(3);
-        } else if (trimmedPart.startsWith('AND:')) {
-            type = 'AND';
-            content = trimmedPart.substring(4);
-        } else if (trimmedPart.startsWith('NOT:')) {
-            type = 'NOT';
-            content = trimmedPart.substring(4);
-        }
-        const keywords = content.split('|').map(k => k.trim()).filter(k => k);
-        if (keywords.length > 0) {
-            result.push({ type, keywords });
-        }
+function getCurrentSerializedExpression(): string | null {
+    const result = serializeForFormat(clauses.value, resolvedFormat.value);
+    if (result.errorKey) {
+        return null;
     }
-    groups.value = result;
+    return result.expression;
 }
 
-function parseComposite(str: string) {
-    const result: KeywordGroup[] = [];
-    const blocks = str.split('+');
-    for (const block of blocks) {
-        const trimmed = block.trim();
-        if (!trimmed) continue;
-        const eqIdx = trimmed.indexOf('={');
-        if (eqIdx === -1) {
-            result.push({ type: 'OR', keywords: [trimmed] });
-            continue;
-        }
-        const prefix = trimmed.substring(0, eqIdx).toUpperCase() as KeywordType;
-        let content = trimmed.substring(eqIdx + 2);
-        if (content.endsWith('}')) content = content.slice(0, -1);
-        const keywords = content.split(',').map(k => k.trim()).filter(k => k);
-        if (keywords.length > 0) {
-            const type: KeywordType = ['OR', 'AND', 'NOT', 'REGEX'].includes(prefix) ? prefix : 'OR';
-            result.push({ type, keywords });
-        }
-    }
-    groups.value = result;
+function createLocalClauseId(): string {
+    localClauseId += 1;
+    return `rule-clause-local-${localClauseId}`;
 }
 
-function serialize(currentGroups: KeywordGroup[]): string {
-    if (resolvedFormat.value === 'legacy') {
-        return serializeLegacy(currentGroups);
+function syncDraftTerms() {
+    const nextDraftTerms: Record<string, string> = {};
+    for (const clause of clauses.value) {
+        nextDraftTerms[clause.id] = draftTerms.value[clause.id] ?? '';
     }
-    return serializeComposite(currentGroups);
-}
-
-function serializeLegacy(currentGroups: KeywordGroup[]): string {
-    const parts: string[] = [];
-    for (const group of currentGroups) {
-        if (group.keywords.length > 0) {
-            const typePrefix = `${group.type === 'REGEX' ? 'OR' : group.type}:`;
-            parts.push(`${typePrefix}${group.keywords.join('|')}`);
-        }
-    }
-    return parts.join('&');
-}
-
-function serializeComposite(currentGroups: KeywordGroup[]): string {
-    const parts: string[] = [];
-    for (const group of currentGroups) {
-        if (group.keywords.length > 0) {
-            parts.push(`${group.type}={${group.keywords.join(',')}}`);
-        }
-    }
-    return parts.join('+');
+    draftTerms.value = nextDraftTerms;
 }
 
 function serializeKeywords() {
-    const str = serialize(groups.value);
-    emit('update:modelValue', str);
+    if (isRawMode.value) {
+        return;
+    }
+    const result = serializeForFormat(clauses.value, resolvedFormat.value);
+    validationErrorKey.value = result.errorKey ?? '';
+    if (result.errorKey) {
+        return;
+    }
+    emit('update:modelValue', result.expression);
 }
 
-function addGroup() {
-    groups.value.push({ type: 'OR', keywords: [] });
-}
-
-function removeGroup(index: number) {
-    groups.value.splice(index, 1);
+function addClause() {
+    rawExpression.value = '';
+    parseErrorKey.value = '';
+    clauses.value.push(createRuleClause({ operator: 'OR' }, createLocalClauseId));
+    syncDraftTerms();
     serializeKeywords();
+}
+
+function insertClauseAfterRow(clause: RuleClause) {
+    clauses.value = insertClauseAfter(
+        clauses.value,
+        clause.id,
+        createRuleClause({ operator: 'OR' }, createLocalClauseId)
+    );
+    syncDraftTerms();
+    serializeKeywords();
+}
+
+function removeClause(clauseId: string) {
+    clauses.value = clauses.value.filter(clause => clause.id !== clauseId);
+    syncDraftTerms();
+    serializeKeywords();
+}
+
+function replaceClause(updatedClause: RuleClause) {
+    const clauseIndex = clauses.value.findIndex(clause => clause.id === updatedClause.id);
+    if (clauseIndex === -1) {
+        return;
+    }
+    clauses.value.splice(clauseIndex, 1, updatedClause);
+}
+
+function onTermsUpdated(clause: RuleClause) {
+    clause.terms = normalizeRuleTerms(clause.terms);
+    serializeKeywords();
+}
+
+function commitPendingTerm(clause: RuleClause) {
+    const draftTerm = draftTerms.value[clause.id] ?? '';
+    const updatedClause = addTermToClause(clause, draftTerm);
+    replaceClause(updatedClause);
+    draftTerms.value[clause.id] = '';
+    serializeKeywords();
+}
+
+function increaseOpenParen(clause: RuleClause) {
+    clause.openParens += 1;
+    serializeKeywords();
+}
+
+function decreaseOpenParen(clause: RuleClause) {
+    clause.openParens = Math.max(0, clause.openParens - 1);
+    serializeKeywords();
+}
+
+function increaseCloseParen(clause: RuleClause) {
+    clause.closeParens += 1;
+    serializeKeywords();
+}
+
+function decreaseCloseParen(clause: RuleClause) {
+    clause.closeParens = Math.max(0, clause.closeParens - 1);
+    serializeKeywords();
+}
+
+function repeatParen(paren: '(' | ')', count: number): string {
+    return paren.repeat(count) || '·';
 }
 </script>
 
 <style scoped>
 .rule-expression-input {
     width: 100%;
+}
+
+.rule-clause-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+}
+
+.clause-operator {
+    flex: 0 0 118px;
+    max-width: 118px;
+}
+
+.clause-equals {
+    flex: 0 0 auto;
+    line-height: 40px;
+    font-weight: 600;
+}
+
+.clause-terms {
+    flex: 1 1 210px;
+    min-width: 180px;
+}
+
+.paren-control {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    min-height: 40px;
+}
+
+.paren-control :deep(.v-btn) {
+    min-width: 24px;
+    padding-inline: 4px;
+    font-family: monospace;
+}
+
+.paren-display {
+    min-width: 28px;
+    text-align: center;
+    font-family: monospace;
+    color: rgba(var(--v-theme-on-surface), 0.72);
+}
+
+@media (max-width: 720px) {
+    .rule-clause-row {
+        flex-wrap: wrap;
+    }
+
+    .clause-terms {
+        flex-basis: 100%;
+        order: 2;
+    }
 }
 </style>
