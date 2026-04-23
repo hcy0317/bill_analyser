@@ -22,8 +22,33 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+# pylint: disable=too-many-lines
+
 from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
+
+
+@dataclass
+class RuleExpressionNode:
+    """Boolean AST node for category rule expressions.
+
+    Grammar supported by ``compile_rule_expression``:
+    ``expression := and_expr ('|' and_expr)*``
+    ``and_expr := factor ('+' factor)*``
+    ``factor := clause | '(' expression ')'``
+    ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
+
+    ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
+    ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
+    logical AND, while top-level ``|`` is an optional expression-level OR for
+    parenthesized priority. Legacy ``OR:a|b&AND:c&NOT:d`` is still compiled by
+    ``compile_rule``.
+    """
+
+    kind: str
+    operator: str = ""
+    patterns: tuple[str, ...] = ()
+    children: tuple["RuleExpressionNode", ...] = ()
 
 
 @dataclass
@@ -43,6 +68,7 @@ class CompiledRule:
     not_patterns: list[str] = field(default_factory=list)
     and_patterns: list[str] = field(default_factory=list)
     is_empty: bool = True
+    expression_ast: RuleExpressionNode | None = None
 
 
 class KeywordMatcher:
@@ -190,6 +216,9 @@ class KeywordMatcher:
 
         text_lower = text.lower()
 
+        if compiled.expression_ast is not None:
+            return self._match_expression_node(text_lower, compiled.expression_ast)
+
         # 1. 检查NOT条件(排除) - 任一匹配则失败
         for pattern in compiled.not_patterns:
             if self._match_pattern(text_lower, pattern):
@@ -218,6 +247,32 @@ class KeywordMatcher:
 
         return False
 
+    def _match_expression_node(self, text_lower: str, node: RuleExpressionNode) -> bool:
+        """Evaluate a compiled rule-expression AST against normalized text."""
+        if node.kind == "all":
+            result = bool(node.children) and all(
+                self._match_expression_node(text_lower, child) for child in node.children
+            )
+        elif node.kind == "any":
+            result = any(
+                self._match_expression_node(text_lower, child) for child in node.children
+            )
+        elif node.kind != "clause":
+            result = False
+        elif node.operator == "OR":
+            result = any(self._match_pattern(text_lower, pattern) for pattern in node.patterns)
+        elif node.operator == "AND":
+            result = bool(node.patterns) and all(
+                self._match_pattern(text_lower, pattern) for pattern in node.patterns
+            )
+        elif node.operator == "NOT":
+            result = not any(
+                self._match_pattern(text_lower, pattern) for pattern in node.patterns
+            )
+        else:
+            result = False
+        return result
+
     def _match_pattern(self, text_lower: str, pattern: str) -> bool:
         """匹配单个模式（支持正则表达式）
 
@@ -243,17 +298,21 @@ class KeywordMatcher:
             return pattern in text_lower
 
     def compile_rule_expression(self, expr: str, regex_enabled: bool = False) -> CompiledRule:
-        """Compile a new-syntax rule expression into a CompiledRule.
+        """Compile a category rule expression into a ``CompiledRule``.
 
-        New syntax: ``OR={k1,k2}+AND={k3,k4}+NOT={k5}``
-        - ``+`` is the block separator
-        - ``OR={...}`` match any
-        - ``AND={...}`` must match all
-        - ``NOT={...}`` must not match any
-        - When *regex_enabled* is True each key is a regex pattern
-        - Falls back to ``compile_rule`` for old-syntax strings
+        Composite grammar:
+        ``expression := and_expr ('|' and_expr)*``
+        ``and_expr := factor ('+' factor)*``
+        ``factor := clause | '(' expression ')'``
+        ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
+
+        ``+`` keeps the existing no-parentheses syntax as a conjunction:
+        ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
+        ``(k1 or k2) and k3 and not k4``. Parentheses can group any nested
+        expression, and top-level ``|`` is supported as an expression-level OR
+        where grouping is needed. Old ``OR:k1|k2&AND:k3&NOT:k4`` strings still
+        fall back to ``compile_rule``.
         """
-        # pylint: disable=too-many-branches,too-many-locals
         if not expr:
             return CompiledRule(is_empty=True)
 
@@ -265,64 +324,208 @@ class KeywordMatcher:
         if cache_key in self._compiled_rules_cache:
             return self._compiled_rules_cache[cache_key]
 
+        try:
+            expression_ast, index = self._parse_rule_or_expression(expr, 0, regex_enabled)
+            index = self._skip_expression_space(expr, index)
+            if index != len(expr):
+                raise ValueError(f"unexpected token at offset {index}: {expr[index:index + 10]!r}")
+        except ValueError as exc:
+            self.logger.warning("无效的分类规则表达式 '%s': %s", expr, exc)
+            compiled = CompiledRule(is_empty=True)
+            self._compiled_rules_cache[cache_key] = compiled
+            return compiled
+
         or_blocks: list[list[str]] = []
         not_patterns: list[str] = []
         and_patterns: list[str] = []
-
-        blocks = expr.split("+")
-        for block in blocks:
-            block = block.strip()
-            if not block:
-                continue
-
-            upper = block.upper()
-            # Extract content between ={ and }
-            eq_idx = block.find("={")
-            if eq_idx == -1:
-                # Treat as simple keyword
-                if regex_enabled:
-                    or_blocks.append([f"regex:{block}"])
-                    self._precompile_regex(block)
-                else:
-                    or_blocks.append([block.lower()])
-                continue
-
-            prefix = upper[:eq_idx]
-            content = block[eq_idx + 2:]
-            if content.endswith("}"):
-                content = content[:-1]
-
-            keywords = [k.strip() for k in content.split(",") if k.strip()]
-            if not keywords:
-                continue
-
-            if regex_enabled:
-                processed = []
-                for kw in keywords:
-                    processed.append(f"regex:{kw}")
-                    self._precompile_regex(kw)
-                keywords = processed
-            else:
-                keywords = [k.lower() for k in keywords]
-
-            if prefix == "OR":
-                or_blocks.append(keywords)
-            elif prefix == "AND":
-                and_patterns.extend(keywords)
-            elif prefix == "NOT":
-                not_patterns.extend(keywords)
-            else:
-                # Unknown prefix, treat as OR
-                or_blocks.append(keywords)
+        self._collect_legacy_compiled_fields(
+            expression_ast,
+            or_blocks,
+            and_patterns,
+            not_patterns,
+        )
 
         compiled = CompiledRule(
             or_blocks=or_blocks,
             not_patterns=not_patterns,
             and_patterns=and_patterns,
-            is_empty=not (or_blocks or not_patterns or and_patterns),
+            is_empty=expression_ast is None,
+            expression_ast=expression_ast,
         )
         self._compiled_rules_cache[cache_key] = compiled
         return compiled
+
+    def _parse_rule_or_expression(
+        self,
+        expr: str,
+        index: int,
+        regex_enabled: bool,
+    ) -> tuple[RuleExpressionNode | None, int]:
+        """Parse expression-level OR chains, stopping at a closing parenthesis."""
+        children: list[RuleExpressionNode] = []
+        left, index = self._parse_rule_and_expression(expr, index, regex_enabled)
+        if left is not None:
+            children.append(left)
+
+        while True:
+            index = self._skip_expression_space(expr, index)
+            if index >= len(expr) or expr[index] != "|":
+                break
+            index += 1
+            right, index = self._parse_rule_and_expression(expr, index, regex_enabled)
+            if right is not None:
+                children.append(right)
+
+        if not children:
+            return None, index
+        if len(children) == 1:
+            return children[0], index
+        return RuleExpressionNode(kind="any", children=tuple(children)), index
+
+    def _parse_rule_and_expression(
+        self,
+        expr: str,
+        index: int,
+        regex_enabled: bool,
+    ) -> tuple[RuleExpressionNode | None, int]:
+        """Parse ``+``-joined clause/group chains."""
+        children: list[RuleExpressionNode] = []
+
+        while True:
+            index = self._skip_expression_space(expr, index)
+            if index >= len(expr) or expr[index] in ")|":
+                break
+            if expr[index] == "+":
+                index += 1
+                continue
+
+            child, index = self._parse_rule_factor(expr, index, regex_enabled)
+            if child is not None:
+                children.append(child)
+
+            index = self._skip_expression_space(expr, index)
+            if index >= len(expr) or expr[index] in ")|":
+                break
+            if expr[index] == "+":
+                index += 1
+                continue
+            raise ValueError(f"expected '+' or '|' at offset {index}")
+
+        if not children:
+            return None, index
+        if len(children) == 1:
+            return children[0], index
+        return RuleExpressionNode(kind="all", children=tuple(children)), index
+
+    def _parse_rule_factor(
+        self,
+        expr: str,
+        index: int,
+        regex_enabled: bool,
+    ) -> tuple[RuleExpressionNode | None, int]:
+        """Parse a parenthesized expression or one rule clause."""
+        index = self._skip_expression_space(expr, index)
+        if index >= len(expr):
+            return None, index
+
+        if expr[index] == "(":
+            node, index = self._parse_rule_or_expression(expr, index + 1, regex_enabled)
+            index = self._skip_expression_space(expr, index)
+            if index >= len(expr) or expr[index] != ")":
+                raise ValueError("missing closing ')' in rule expression")
+            return node, index + 1
+
+        start = index
+        brace_depth = 0
+        while index < len(expr):
+            char = expr[index]
+            if char == "{":
+                brace_depth += 1
+            elif char == "}" and brace_depth:
+                brace_depth -= 1
+            elif brace_depth == 0 and char in "+|)":
+                break
+            index += 1
+
+        block = expr[start:index].strip()
+        if not block:
+            return None, index
+        return self._parse_rule_clause(block, regex_enabled), index
+
+    def _parse_rule_clause(
+        self,
+        block: str,
+        regex_enabled: bool,
+    ) -> RuleExpressionNode:
+        """Parse a single ``OR={...}``/``AND={...}``/``NOT={...}`` clause."""
+        eq_idx = block.find("={")
+        if eq_idx == -1:
+            pattern = f"regex:{block}" if regex_enabled else block.lower()
+            if regex_enabled:
+                self._precompile_regex(block)
+            return RuleExpressionNode(kind="clause", operator="OR", patterns=(pattern,))
+
+        prefix = block[:eq_idx].strip().upper()
+        content = block[eq_idx + 2 :].strip()
+        if not content.endswith("}"):
+            raise ValueError(f"missing closing '}}' in clause {block!r}")
+        content = content[:-1]
+
+        keywords = [keyword.strip() for keyword in content.split(",") if keyword.strip()]
+        operator = prefix if prefix in {"OR", "AND", "NOT"} else "OR"
+        force_regex = prefix == "REGEX"
+
+        patterns: list[str] = []
+        for keyword in keywords:
+            if regex_enabled or force_regex:
+                patterns.append(f"regex:{keyword}")
+                self._precompile_regex(keyword)
+            else:
+                patterns.append(keyword.lower())
+
+        return RuleExpressionNode(
+            kind="clause",
+            operator=operator,
+            patterns=tuple(patterns),
+        )
+
+    @staticmethod
+    def _skip_expression_space(expr: str, index: int) -> int:
+        """Skip whitespace while parsing a rule expression."""
+        while index < len(expr) and expr[index].isspace():
+            index += 1
+        return index
+
+    def _collect_legacy_compiled_fields(
+        self,
+        node: RuleExpressionNode | None,
+        or_blocks: list[list[str]],
+        and_patterns: list[str],
+        not_patterns: list[str],
+    ) -> None:
+        """Populate legacy CompiledRule fields for diagnostics/back-compat tests."""
+        if node is None:
+            return
+        if node.kind in {"all", "any"}:
+            for child in node.children:
+                self._collect_legacy_compiled_fields(
+                    child,
+                    or_blocks,
+                    and_patterns,
+                    not_patterns,
+                )
+            return
+        if node.kind != "clause":
+            return
+
+        patterns = list(node.patterns)
+        if node.operator == "OR":
+            if patterns:
+                or_blocks.append(patterns)
+        elif node.operator == "AND":
+            and_patterns.extend(patterns)
+        elif node.operator == "NOT":
+            not_patterns.extend(patterns)
 
     def _precompile_regex(self, pattern: str):
         """Pre-compile a regex pattern into the cache."""

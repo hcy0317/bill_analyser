@@ -68,6 +68,48 @@ def test_keyword_matcher_supports_or_not_and_regex_extract_and_cache_lifecycle()
     assert matcher._regex_cache == {}
 
 
+def test_keyword_matcher_rule_expression_ast_preserves_old_and_new_semantics() -> None:
+    """分类规则表达式应兼容旧语法、新语法，并支持括号优先级。"""
+    matcher = KeywordMatcher()
+
+    legacy = matcher.compile_rule_expression("OR:星巴克|瑞幸&AND:咖啡&NOT:退款")
+    assert matcher.match_compiled("星巴克咖啡", legacy) is True
+    assert matcher.match_compiled("瑞幸咖啡", legacy) is True
+    assert matcher.match_compiled("星巴克退款咖啡", legacy) is False
+    assert matcher.match_compiled("星巴克早餐", legacy) is False
+
+    composite = matcher.compile_rule_expression("OR={星巴克,瑞幸}+AND={咖啡}+NOT={退款}")
+    assert matcher.match_compiled("星巴克咖啡", composite) is True
+    assert matcher.match_compiled("瑞幸咖啡", composite) is True
+    assert matcher.match_compiled("星巴克退款咖啡", composite) is False
+    assert matcher.match_compiled("星巴克早餐", composite) is False
+
+    parenthesized = matcher.compile_rule_expression(
+        "(OR={星巴克}+AND={咖啡})|OR={瑞幸}"
+    )
+    assert matcher.match_compiled("星巴克咖啡", parenthesized) is True
+    assert matcher.match_compiled("瑞幸拿铁", parenthesized) is True
+    assert matcher.match_compiled("星巴克早餐", parenthesized) is False
+
+
+def test_keyword_matcher_rule_expression_regex_switch_and_regex_clause() -> None:
+    """regex_enabled 与 REGEX 子句都应进入真实匹配语义。"""
+    matcher = KeywordMatcher()
+
+    regex_enabled_rule = matcher.compile_rule_expression(
+        "OR={^星巴克.*咖啡$}+NOT={退款}",
+        regex_enabled=True,
+    )
+    assert matcher.match_compiled("星巴克冰咖啡", regex_enabled_rule) is True
+    assert matcher.match_compiled("门店 星巴克冰咖啡", regex_enabled_rule) is False
+    assert matcher.match_compiled("星巴克冰咖啡退款", regex_enabled_rule) is False
+
+    regex_clause_rule = matcher.compile_rule_expression("REGEX={^瑞幸.*咖啡$}+NOT={退款}")
+    assert matcher.match_compiled("瑞幸生椰咖啡", regex_clause_rule) is True
+    assert matcher.match_compiled("门店 瑞幸生椰咖啡", regex_clause_rule) is False
+    assert matcher.match_compiled("瑞幸生椰咖啡退款", regex_clause_rule) is False
+
+
 @pytest.mark.asyncio
 async def test_category_engine_loads_rules_filters_types_and_handles_failures() -> None:
     """分类引擎应按用户/类型加载规则，并在 DB 失败时安全降级。"""
