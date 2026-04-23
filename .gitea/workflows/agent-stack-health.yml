@@ -3,42 +3,49 @@ name: agent-stack-health
 on:
   push:
     paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - ".github/**"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "scripts/hooks/**"
-      - "scripts/agent_stack_health.py"
-      - "docs/AI_WORKFLOW.md"
-      - "tests/test_agent_stack_health.py"
-      - "tests/test_ai_workflow_docs.py"
-      - "tests/test_task_state.py"
-      - "tests/test_task_state_reader.py"
-      - "tests/test_reviewer_agent_diff_contract.py"
-      - "pyproject.toml"
-      - ".gitea/workflows/agent-stack-health.yml"
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.agents/**'
+      - '.gitea/**'
+      - 'scripts/hooks/**'
+      - 'scripts/agent_stack_health.py'
+      - 'docs/AI_WORKFLOW.md'
+      - 'tests/test_agent_stack_health.py'
+      - 'tests/test_ai_workflow_docs.py'
+      - 'tests/test_task_state.py'
+      - 'tests/test_task_state_reader.py'
+      - 'tests/test_reviewer_agent_diff_contract.py'
+      - 'tests/test_gitea_workflows.py'
+      - 'pyproject.toml'
   pull_request:
     paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - ".github/**"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "scripts/hooks/**"
-      - "scripts/agent_stack_health.py"
-      - "docs/AI_WORKFLOW.md"
-      - "tests/test_agent_stack_health.py"
-      - "tests/test_ai_workflow_docs.py"
-      - "tests/test_task_state.py"
-      - "tests/test_task_state_reader.py"
-      - "tests/test_reviewer_agent_diff_contract.py"
-      - "pyproject.toml"
-      - ".gitea/workflows/agent-stack-health.yml"
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.agents/**'
+      - '.gitea/**'
+      - 'scripts/hooks/**'
+      - 'scripts/agent_stack_health.py'
+      - 'docs/AI_WORKFLOW.md'
+      - 'tests/test_agent_stack_health.py'
+      - 'tests/test_ai_workflow_docs.py'
+      - 'tests/test_task_state.py'
+      - 'tests/test_task_state_reader.py'
+      - 'tests/test_reviewer_agent_diff_contract.py'
+      - 'tests/test_gitea_workflows.py'
+      - 'pyproject.toml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Gitea 1.26 now supports concurrency, but keep the key in the documented/simple subset.
+# This dedupes only the same workflow on the same ref; it intentionally does not collapse push + PR lanes.
 concurrency:
   group: gitea-${{ gitea.workflow }}-${{ gitea.ref }}
   cancel-in-progress: true
@@ -51,12 +58,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: https://github.com/actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: https://github.com/actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: '3.14'
           allow-prereleases: true
 
       - name: Install test dependencies
@@ -66,4 +73,4 @@ jobs:
         run: python scripts/agent_stack_health.py --mode repo
 
       - name: Run agent-stack regression tests
-        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py -v
+        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v

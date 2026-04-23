@@ -13,6 +13,11 @@ on:
       - '.gitea/workflows/frontend-ci.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Gitea 1.26 now supports concurrency, but keep the key in the documented/simple subset.
+# This dedupes only the same workflow on the same ref; it intentionally does not collapse push + PR lanes.
 concurrency:
   group: gitea-${{ gitea.workflow }}-${{ gitea.ref }}
   cancel-in-progress: true
@@ -22,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: https://github.com/actions/checkout@v4
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: https://github.com/actions/setup-node@v4
         with:
           node-version: '22'
 
