@@ -5,7 +5,7 @@
         show-select
         multi-sort
         density="compact"
-        item-value="index"
+        :item-value="getImportTransactionRowKey"
         :class="{ 'import-transaction-table': true, 'disabled': !!disabled }"
         :height="importTransactionsTableHeight"
         :headers="importTransactionHeaders"
@@ -99,308 +99,28 @@
             <v-chip class="ms-1" variant="flat" color="grey" size="x-small"
                     v-if="item.utcOffset !== currentTimezoneOffsetMinutes">{{ getDisplayTimezone(item) }}</v-chip>
         </template>
+        <template #item.parserSource="{ item }">
+            <import-preview-signal-cell
+                :view-model="importPreviewSignalViewModels[item.index]"
+                :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                :has-session="!!props.sessionId"
+                @review-transfer="reviewTransferSuggestion(item, $event)"
+                @review-investment="reviewInvestmentSignal(item, $event)"
+                @review-learning="reviewLearningSuggestion(item, $event)"
+                @open-recurring="openRecurringCandidateDialog(item)"
+                @clear-recurring="clearRecurringMatch(item)"
+            />
+        </template>
         <!-- v6.77: 类型列 - 支持编辑模式切换 -->
         <template #item.type="{ item }">
-            <!-- 非编辑状态：显示类型标签 -->
+            <!-- 非编辑状态：显示类型标签；解析器/匹配/投资/标注等信号在信号列展示 -->
             <div v-if="editingTransaction !== item" :key="`type-view-${item.index}`">
-                <v-chip label color="secondary" variant="outlined" size="x-small" v-if="item.type === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
-                <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Income">{{ tt('Income') }}</v-chip>
-                <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
-                <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
-                <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="item.type === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
+                <v-chip label color="secondary" variant="outlined" size="x-small" v-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.ModifyBalance">{{ tt('Modify Balance') }}</v-chip>
+                <v-chip label class="text-income" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Income">{{ tt('Income') }}</v-chip>
+                <v-chip label class="text-expense" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Expense">{{ tt('Expense') }}</v-chip>
+                <v-chip label color="primary" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Transfer">{{ tt('Transfer') }}</v-chip>
+                <v-chip label color="warning" variant="outlined" size="x-small" v-else-if="importPreviewTypeColumnViewModels[item.index]?.type === TransactionType.Investment">{{ tt('Investment') }}</v-chip>
                 <v-chip label color="default" variant="outlined" size="x-small" v-else>{{ tt('Unknown') }}</v-chip>
-                <div class="mt-1" v-if="item.hasTransferSuggestion()">
-                    <v-chip
-                        color="warning"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiLightbulbOutline"
-                        :title="item.transferSuggestionReason">
-                        {{ tt('Likely Transfer') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewTransferSuggestion(item, 'accept')">
-                            {{ tt('Apply Suggestion') }}
-                        </v-btn>
-                        <v-btn
-                            variant="text"
-                            color="error"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewTransferSuggestion(item, 'reject')">
-                            {{ tt('Reject Transfer Suggestion') }}
-                        </v-btn>
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isTransferSuggestionAccepted()">
-                    <v-chip
-                        color="success"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiCheck">
-                        {{ tt('Transfer Suggestion Accepted') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewTransferSuggestion(item, 'clear')">
-                            {{ tt('Clear Transfer Decision') }}
-                        </v-btn>
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isTransferSuggestionRejected()">
-                    <v-chip
-                        color="error"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiAlertOutline"
-                        :title="item.transferSuggestionReason">
-                        {{ tt('Transfer Suggestion Rejected') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewTransferSuggestion(item, 'clear')">
-                            {{ tt('Clear Transfer Decision') }}
-                        </v-btn>
-                    </div>
-                </div>
-                <div class="mt-1" v-if="item.hasPendingInvestmentSignal()">
-                    <v-chip
-                        color="info"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiChartLine"
-                        :title="item.investmentSignalReason">
-                        {{ tt('Investment Signal') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="info"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewInvestmentSignal(item, 'accept')">
-                            {{ tt('Accept Investment Signal') }}
-                        </v-btn>
-                        <v-btn
-                            variant="text"
-                            color="error"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewInvestmentSignal(item, 'reject')">
-                            {{ tt('Reject Investment Signal') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.getInvestmentProfileText()">
-                        {{ item.getInvestmentProfileText() }}
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isInvestmentSignalAccepted()">
-                    <v-chip
-                        color="success"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiCheck"
-                        :title="item.investmentSignalReason">
-                        {{ tt('Investment Signal Accepted') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewInvestmentSignal(item, 'clear')">
-                            {{ tt('Clear Investment Decision') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.getInvestmentProfileText()">
-                        {{ item.getInvestmentProfileText() }}
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isInvestmentSignalRejected()">
-                    <v-chip
-                        color="error"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiAlertOutline"
-                        :title="item.investmentSignalReason">
-                        {{ tt('Investment Signal Rejected') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewInvestmentSignal(item, 'clear')">
-                            {{ tt('Clear Investment Decision') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.getInvestmentProfileText()">
-                        {{ item.getInvestmentProfileText() }}
-                    </div>
-                </div>
-                <div class="mt-1" v-if="item.hasPendingLearningRecommendation()">
-                    <v-chip
-                        color="secondary"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiSchoolOutline"
-                        :title="item.learningRecommendationReason">
-                        {{ tt('Learning Suggestion') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="secondary"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewLearningSuggestion(item, 'accept')">
-                            {{ tt('Apply Suggestion') }}
-                        </v-btn>
-                        <v-btn
-                            variant="text"
-                            color="error"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewLearningSuggestion(item, 'reject')">
-                            {{ tt('Reject Learning Suggestion') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.learningRecommendationSummary">
-                        {{ item.learningRecommendationSummary }}
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isLearningRecommendationAccepted()">
-                    <v-chip
-                        color="success"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiCheck"
-                        :title="item.learningRecommendationReason">
-                        {{ tt('Learning Suggestion Accepted') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewLearningSuggestion(item, 'clear')">
-                            {{ tt('Clear Learning Decision') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.learningRecommendationSummary">
-                        {{ item.learningRecommendationSummary }}
-                    </div>
-                </div>
-                <div class="mt-1" v-else-if="item.isLearningRecommendationRejected()">
-                    <v-chip
-                        color="error"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiAlertOutline"
-                        :title="item.learningRecommendationReason">
-                        {{ tt('Learning Suggestion Rejected') }}
-                    </v-chip>
-                    <div class="d-flex flex-wrap ga-1 mt-1">
-                        <v-btn
-                            variant="text"
-                            color="warning"
-                            size="x-small"
-                            :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
-                            @click.stop="reviewLearningSuggestion(item, 'clear')">
-                            {{ tt('Clear Learning Decision') }}
-                        </v-btn>
-                    </div>
-                    <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                         v-if="item.learningRecommendationSummary">
-                        {{ item.learningRecommendationSummary }}
-                    </div>
-                </div>
-                <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
-                    <v-chip
-                        v-if="item.hasRecurringMatch()"
-                        color="success"
-                        variant="tonal"
-                        size="x-small"
-                        :title="getRecurringMatchSummary(item)">
-                        {{ tt('Scheduled Match') }}
-                    </v-chip>
-                    <v-chip
-                        v-if="item.recurringCandidateCount > 0"
-                        class="ms-1"
-                        color="info"
-                        variant="outlined"
-                        size="x-small">
-                        {{ tt('Scheduled Candidates') }} {{ getDisplayCount(item.recurringCandidateCount) }}
-                    </v-chip>
-                    <v-chip
-                        v-if="item.recurringCandidateCount > 0 && getPrimaryRecurringReason(item)"
-                        class="ms-1"
-                        color="amber"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="mdiStar">
-                        {{ tt('Best Candidate') }} · {{ getPrimaryRecurringReason(item) }}
-                    </v-chip>
-                    <v-btn
-                        class="mt-1"
-                        variant="text"
-                        color="success"
-                        size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || isMatchingDecisionBusy"
-                        @click.stop="openRecurringCandidateDialog(item)">
-                        {{ tt('Choose Scheduled Match') }}
-                    </v-btn>
-                </div>
-                <div class="mt-1 d-flex flex-wrap ga-1" v-if="hasMatchingContextSummary(item)">
-                    <v-chip
-                        v-if="getMatchingContextSummary(item).parserId"
-                        size="x-small"
-                        variant="outlined"
-                        :color="getParserColor(getMatchingContextSummary(item).parserId)"
-                        :title="getMatchingParserTagsText(item)">
-                        {{ tt('Parser') }} · {{ getParserLabel(getMatchingContextSummary(item).parserId) }}
-                    </v-chip>
-                    <v-chip
-                        v-if="hasMatchingDedupContext(item)"
-                        :color="getMatchingContextSummary(item).dedupType === 'transfer' ? 'primary' : 'secondary'"
-                        variant="outlined"
-                        size="x-small"
-                        :title="getMatchingDedupTitle(item)">
-                        {{ tt(getMatchingDedupLabel(item)) }} · {{ getDisplayCount(getMatchingContextSummary(item).dedupSourceIds.length) }}
-                    </v-chip>
-                    <v-chip
-                        v-if="getMatchingContextSummary(item).isManuallyAnnotated"
-                        color="info"
-                        variant="outlined"
-                        size="x-small">
-                        {{ tt('Manually Annotated') }}
-                    </v-chip>
-                </div>
-                <div class="text-caption text-medium-emphasis ms-1 mt-1"
-                     v-if="getMatchingParserTagsText(item)">
-                    {{ getMatchingParserTagsText(item) }}
-                </div>
             </div>
             <!-- 编辑状态：类型选择器（余额调整类型不可编辑） -->
             <div style="width: 120px" v-else :key="`type-edit-${item.index}`">
@@ -415,130 +135,6 @@
                     v-model="item.type"
                     @update:model-value="onTransactionTypeChange(item)"
                 ></v-select>
-                <v-chip
-                    v-if="item.isTransferSuggestionAccepted()"
-                    class="mt-1"
-                    color="success"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiCheck">
-                    {{ tt('Transfer Suggestion Accepted') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.isTransferSuggestionRejected()"
-                    class="mt-1"
-                    color="error"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiAlertOutline"
-                    :title="item.transferSuggestionReason">
-                    {{ tt('Transfer Suggestion Rejected') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.hasTransferSuggestion()"
-                    class="mt-1"
-                    color="warning"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiLightbulbOutline"
-                    :title="item.transferSuggestionReason">
-                    {{ tt('Likely Transfer') }}
-                </v-chip>
-                <v-chip
-                    v-if="item.hasPendingInvestmentSignal()"
-                    class="mt-1"
-                    color="info"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiChartLine"
-                    :title="item.investmentSignalReason">
-                    {{ tt('Investment Signal') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.isInvestmentSignalAccepted()"
-                    class="mt-1"
-                    color="success"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiCheck"
-                    :title="item.investmentSignalReason">
-                    {{ tt('Investment Signal Accepted') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.isInvestmentSignalRejected()"
-                    class="mt-1"
-                    color="error"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiAlertOutline"
-                    :title="item.investmentSignalReason">
-                    {{ tt('Investment Signal Rejected') }}
-                </v-chip>
-                <div class="text-caption text-medium-emphasis mt-1"
-                     v-if="(item.hasPendingInvestmentSignal() || item.isInvestmentSignalAccepted() || item.isInvestmentSignalRejected()) && item.getInvestmentProfileText()">
-                    {{ item.getInvestmentProfileText() }}
-                </div>
-                <v-chip
-                    v-if="item.isLearningRecommendationAccepted()"
-                    class="mt-1"
-                    color="success"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiCheck">
-                    {{ tt('Learning Suggestion Accepted') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.isLearningRecommendationRejected()"
-                    class="mt-1"
-                    color="error"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiAlertOutline"
-                    :title="item.learningRecommendationReason">
-                    {{ tt('Learning Suggestion Rejected') }}
-                </v-chip>
-                <v-chip
-                    v-else-if="item.hasPendingLearningRecommendation()"
-                    class="mt-1"
-                    color="secondary"
-                    variant="tonal"
-                    size="x-small"
-                    :prepend-icon="mdiSchoolOutline"
-                    :title="item.learningRecommendationReason">
-                    {{ tt('Learning Suggestion') }}
-                </v-chip>
-                <div class="text-caption text-medium-emphasis mt-1"
-                     v-if="item.hasLearningRecommendation() && item.learningRecommendationSummary">
-                    {{ item.learningRecommendationSummary }}
-                </div>
-                <div class="mt-1" v-if="item.hasRecurringMatch() || item.recurringCandidateCount > 0">
-                    <v-chip
-                        v-if="item.hasRecurringMatch()"
-                        color="success"
-                        variant="tonal"
-                        size="x-small"
-                        :title="getRecurringMatchSummary(item)">
-                        {{ tt('Scheduled Match') }}
-                    </v-chip>
-                    <v-btn
-                        class="mt-1"
-                        variant="text"
-                        color="success"
-                        size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || isMatchingDecisionBusy"
-                        @click.stop="openRecurringCandidateDialog(item)">
-                        {{ tt('Choose Scheduled Match') }}
-                    </v-btn>
-                    <v-btn
-                        class="mt-1"
-                        variant="text"
-                        color="warning"
-                        size="x-small"
-                        :disabled="!!disabled || isEditing || !props.sessionId || !item.hasRecurringMatch() || isMatchingDecisionBusy"
-                        @click.stop="clearRecurringMatch(item)">
-                        {{ tt('Clear Scheduled Match') }}
-                    </v-btn>
-                </div>
             </div>
         </template>
         <template #item.actualCategoryName="{ item }">
@@ -751,12 +347,6 @@
                               v-model="item.paymentMethod" />
             </div>
         </template>
-        <template #item.parserSource="{ item }">
-            <v-chip v-if="item.parserSource" size="x-small" :color="getParserColor(item.parserSource)">
-                {{ getParserLabel(item.parserSource) }}
-            </v-chip>
-            <span v-else>-</span>
-        </template>
         <template #item.comment="{ item }">
             <!-- 非编辑状态：显示备注 -->
             <span v-if="editingTransaction !== item" :key="`comment-view-${item.index}`">{{ item.comment || '' }}</span>
@@ -772,24 +362,6 @@
         </template>
         <template #bottom>
             <div v-if="importTransactions">
-                <v-alert class="mb-2"
-                         density="compact"
-                         variant="tonal"
-                         color="primary"
-                         :icon="mdiSchoolOutline">
-                    <div class="d-flex flex-wrap align-center ga-2">
-                        <span class="text-subtitle-2 font-weight-medium">
-                            {{ tt('Import Preview Session Assistant') }}
-                        </span>
-                        <v-chip size="x-small" color="primary" variant="outlined">
-                            {{ tt('Primary entrypoint') }}
-                        </v-chip>
-                    </div>
-                    <div class="text-body-2 mt-1">
-                        {{ tt('Review selected preview rows here before saving long-term learning rules. Pairing Center remains the home for persistent matching settings.') }}
-                    </div>
-                </v-alert>
-
                 <div class="title-and-toolbar d-flex align-center text-no-wrap mt-2">
                     <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
                         {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
@@ -1222,6 +794,7 @@
 <script setup lang="ts">
 import PaginationButtons from '@/components/desktop/PaginationButtons.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import ImportPreviewSignalCell from './ImportPreviewSignalCell.vue';
 import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/BatchReplaceDialog.vue';
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
@@ -1239,13 +812,12 @@ import {
     type ImportCheckAnnotationFilterValue
 } from '../checkDataAnnotation.ts';
 import {
-    getImportCheckMatchingContextSummary,
-    getImportCheckMatchingDedupLabel,
-    getImportCheckMatchingDedupTitle,
-    getImportCheckMatchingParserTagsText,
-    hasImportCheckMatchingDedupContext,
-    hasImportCheckMatchingContext,
-    type ImportCheckMatchingContextSummary
+    buildImportPreviewSignalViewModel,
+    buildImportPreviewTypeColumnViewModel,
+    type ImportCheckMatchingSourceRow,
+    type ImportPreviewSignalStatus,
+    type ImportPreviewSignalViewModel,
+    type ImportPreviewTypeColumnViewModel
 } from '../checkDataMatching.ts';
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
@@ -1319,8 +891,6 @@ import {
     mdiTagMultiple,
     mdiWallet,
     mdiMessageAlertOutline,
-    mdiLightbulbOutline,
-    mdiChartLine,
     mdiStar
 } from '@mdi/js';
 
@@ -2536,36 +2106,122 @@ const PARSER_COLORS: Record<string, string> = {
     generic: 'grey',
 };
 
-function getParserLabel(parserId: string): string {
-    return PARSER_LABELS[parserId] || parserId;
+function getTransferSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
+    if (item.hasTransferSuggestion()) {
+        return 'pending';
+    }
+
+    if (item.isTransferSuggestionAccepted()) {
+        return 'accepted';
+    }
+
+    if (item.isTransferSuggestionRejected()) {
+        return 'rejected';
+    }
+
+    return null;
 }
 
-function getParserColor(parserId: string): string {
-    return PARSER_COLORS[parserId] || 'grey';
+function getInvestmentSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
+    if (item.hasPendingInvestmentSignal()) {
+        return 'pending';
+    }
+
+    if (item.isInvestmentSignalAccepted()) {
+        return 'accepted';
+    }
+
+    if (item.isInvestmentSignalRejected()) {
+        return 'rejected';
+    }
+
+    return null;
 }
 
-function getMatchingContextSummary(item: ImportTransaction): ImportCheckMatchingContextSummary {
-    return getImportCheckMatchingContextSummary(item);
+function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
+    if (item.hasPendingLearningRecommendation()) {
+        return 'pending';
+    }
+
+    if (item.isLearningRecommendationAccepted()) {
+        return 'accepted';
+    }
+
+    if (item.isLearningRecommendationRejected()) {
+        return 'rejected';
+    }
+
+    return null;
 }
 
-function hasMatchingContextSummary(item: ImportTransaction): boolean {
-    return hasImportCheckMatchingContext(getMatchingContextSummary(item));
-}
+const importPreviewSignalSourceRows = computed<ImportCheckMatchingSourceRow[]>(() => {
+    return (props.importTransactions || []).flatMap(item => {
+        const previewId = getPreviewId(item);
+        const parserSource = item.parserSource || '';
+        const rows: ImportCheckMatchingSourceRow[] = [
+            { id: item.index, parserSource }
+        ];
 
-function hasMatchingDedupContext(item: ImportTransaction): boolean {
-    return hasImportCheckMatchingDedupContext(getMatchingContextSummary(item));
-}
+        if (previewId !== null) {
+            rows.push({ id: previewId, parserSource });
+        }
 
-function getMatchingDedupLabel(item: ImportTransaction): string {
-    return getImportCheckMatchingDedupLabel(getMatchingContextSummary(item));
-}
+        return rows;
+    });
+});
 
-function getMatchingDedupTitle(item: ImportTransaction): string {
-    return getImportCheckMatchingDedupTitle(getMatchingContextSummary(item));
-}
+const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSignalViewModel>>(() => {
+    const signalViewModels: Record<number, ImportPreviewSignalViewModel> = {};
+    const sourceRows = importPreviewSignalSourceRows.value;
 
-function getMatchingParserTagsText(item: ImportTransaction): string {
-    return getImportCheckMatchingParserTagsText(getMatchingContextSummary(item));
+    for (const item of props.importTransactions || []) {
+        signalViewModels[item.index] = buildImportPreviewSignalViewModel({
+            parserSource: item.parserSource,
+            parserTags: item.parserTags,
+            dedupType: item.dedupType,
+            dedupSourceIds: item.dedupSourceIds,
+            isManuallyAnnotated: item.isManuallyAnnotated,
+            transferStatus: getTransferSignalStatus(item),
+            transferTitle: item.transferSuggestionReason,
+            investmentStatus: getInvestmentSignalStatus(item),
+            investmentTitle: item.investmentSignalReason,
+            investmentProfileText: item.getInvestmentProfileText(),
+            learningStatus: getLearningSignalStatus(item),
+            learningTitle: item.learningRecommendationReason,
+            learningSummary: item.learningRecommendationSummary,
+            hasRecurringMatch: item.hasRecurringMatch(),
+            recurringTitle: getRecurringMatchSummary(item),
+            recurringCandidateCount: item.recurringCandidateCount,
+            recurringPrimaryReason: getPrimaryRecurringReason(item)
+        }, {
+            currentParserSource: item.parserSource,
+            matchLabel: tt('Matching'),
+            parserLabels: PARSER_LABELS,
+            parserColors: PARSER_COLORS,
+            sourceRows
+        });
+    }
+
+    return signalViewModels;
+});
+
+const importPreviewTypeColumnViewModels = computed<Record<number, ImportPreviewTypeColumnViewModel>>(() => {
+    const typeColumnViewModels: Record<number, ImportPreviewTypeColumnViewModel> = {};
+
+    for (const item of props.importTransactions || []) {
+        typeColumnViewModels[item.index] = buildImportPreviewTypeColumnViewModel(item.type);
+    }
+
+    return typeColumnViewModels;
+});
+
+function getImportTransactionRowKey(item: ImportTransaction): string {
+    const previewId = getPreviewId(item);
+    if (previewId !== null) {
+        return `preview:${previewId}`;
+    }
+
+    return `row:${item.index}`;
 }
 
 function getAnnotationIssues(item: ImportTransaction): string[] {
@@ -3497,7 +3153,7 @@ const importTransactionHeaders = computed<object[]>(() => {
     return [
         { value: 'valid', sortable: true, nowrap: true, width: 35 },
         { value: 'time', title: tt('Transaction Time'), sortable: true, nowrap: true, maxWidth: 280 },
-        { value: 'parserSource', title: '解析器', sortable: true, nowrap: true },
+        { value: 'parserSource', title: tt('Signals'), sortable: true, nowrap: true, maxWidth: 260 },
         { value: 'type', title: tt('Type'), sortable: true, nowrap: true, maxWidth: 140 },
         { value: 'actualCategoryName', title: tt('Category'), sortable: true, nowrap: true },
         { value: 'sourceAmount', title: tt('Amount'), sortable: true, nowrap: true },

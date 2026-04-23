@@ -1,6 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+    buildImportPreviewSignalViewModel,
+    buildImportPreviewTypeColumnViewModel,
     getImportCheckMatchingContextSummary,
     getImportCheckMatchingDedupLabel,
     getImportCheckMatchingDedupTitle,
@@ -27,7 +29,18 @@ describe('checkDataMatching helpers', () => {
             isManuallyAnnotated: true
         });
         expect(hasImportCheckMatchingContext(summary)).toBe(true);
-        expect(getImportCheckMatchingDedupTitle(summary)).toBe('transfer | 101|102');
+        expect(getImportCheckMatchingDedupLabel(summary)).toBe('Transfer Match');
+        expect(getImportCheckMatchingDedupTitle(summary, {
+            matchLabel: '匹配',
+            parserLabels: {
+                alipay: '支付宝',
+                wechat: '微信'
+            },
+            sourceRows: [
+                { id: 101, parserSource: 'wechat' },
+                { id: 102, parserSource: 'alipay' }
+            ]
+        })).toBe('匹配 | 支付宝 | 微信');
         expect(getImportCheckMatchingParserTagsText(summary)).toBe('parser:alipay · channel:wallet');
     });
 
@@ -63,6 +76,51 @@ describe('checkDataMatching helpers', () => {
 
         expect(hasImportCheckMatchingDedupContext(summary)).toBe(true);
         expect(getImportCheckMatchingDedupLabel(summary)).toBe('Split-Merge Duplicate');
+    });
+
+    test('builds compact signal cell model without exposing raw parser tags in body labels', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'alipay',
+            parserTags: ['parser:alipay', 'channel:wallet'],
+            dedupType: 'transfer',
+            dedupSourceIds: [9],
+            isManuallyAnnotated: true,
+            investmentStatus: 'pending',
+            investmentTitle: 'investment candidate'
+        }, {
+            matchLabel: '匹配',
+            parserLabels: {
+                alipay: '支付宝',
+                wechat: '微信'
+            },
+            parserColors: {
+                alipay: 'blue'
+            },
+            sourceRows: [
+                { id: 9, parserSource: 'wechat' }
+            ]
+        });
+
+        expect(viewModel.parser).toStrictEqual({
+            parserId: 'alipay',
+            label: '支付宝',
+            color: 'blue',
+            title: 'parser:alipay · channel:wallet'
+        });
+        expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
+        expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
+        expect(viewModel.isManuallyAnnotated).toBe(true);
+        expect(viewModel.investment?.labelKey).toBe('Investment Signal');
+        expect(viewModel.investment?.actions.map(action => action.labelKey)).toStrictEqual(['Accept', 'Reject']);
+    });
+
+    test('keeps parser and investment signals out of the type column model', () => {
+        const typeColumn = buildImportPreviewTypeColumnViewModel(5);
+
+        expect(typeColumn).toStrictEqual({
+            type: 5,
+            signalKeys: []
+        });
     });
 
     test('returns false when parser, dedup, and manual annotation context are all empty', () => {
