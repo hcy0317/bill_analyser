@@ -25,6 +25,10 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
         return tab === 'config' ? 'config' : 'overview';
     }
 
+    if (domain === 'transfer' && tab === 'recurring') {
+        return 'rules';
+    }
+
     return tab === 'rules' ? 'rules' : 'overview';
 }
 
@@ -111,6 +115,15 @@ export function normalizeRuleCenterSelection(input: {
             };
         }
 
+        if (tab === 'learning') {
+            return {
+                domain: 'learning',
+                tab: 'rules',
+                legacyRuleTab: 'learning',
+                shouldRewriteQuery: true,
+            };
+        }
+
         return {
             domain: 'transfer',
             tab: 'rules',
@@ -130,7 +143,8 @@ export function normalizeRuleCenterSelection(input: {
 export function buildRuleCenterQuery(
     currentQuery: Record<string, unknown>,
     domain: RuleCenterDomain,
-    tab: RuleCenterTab
+    tab: RuleCenterTab,
+    legacyRuleTab: LegacyRuleTab = 'rules'
 ): Record<string, string> {
     const nextQuery: Record<string, string> = {};
 
@@ -145,6 +159,8 @@ export function buildRuleCenterQuery(
     }
 
     nextQuery['domain'] = domain;
-    nextQuery['tab'] = normalizeRuleCenterTab(domain, tab);
+    nextQuery['tab'] = domain === 'transfer' && tab === 'rules' && legacyRuleTab === 'recurring'
+        ? 'recurring'
+        : normalizeRuleCenterTab(domain, tab);
     return nextQuery;
 }

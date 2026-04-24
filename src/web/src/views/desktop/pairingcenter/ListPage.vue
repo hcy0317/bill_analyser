@@ -3,37 +3,31 @@
         <v-col cols="12">
             <v-card>
                 <v-layout class="rule-center-layout">
-                    <v-navigation-drawer width="320"
-                                         :permanent="alwaysShowNav"
+                    <v-navigation-drawer :permanent="alwaysShowNav"
                                          v-model="showNav"
                                          class="rule-center-navigation">
-                        <div class="rule-center-nav-stack mx-4 my-4">
-                            <div class="rule-center-nav-section">
-                                <button v-for="domain in domainOptions"
-                                        :key="domain.value"
-                                        type="button"
-                                        class="rule-center-nav-item"
-                                        :class="{ 'rule-center-nav-item--active': activeDomain === domain.value }"
-                                        :aria-current="activeDomain === domain.value ? 'page' : undefined"
-                                        @click="selectDomain(domain.value)">
-                                    <span class="rule-center-nav-item-label">{{ domain.label }}</span>
-                                </button>
-                            </div>
-
-                            <v-divider class="rule-center-nav-divider" />
-
-                            <div class="rule-center-nav-section">
-                                <button v-for="tab in secondaryTabs"
-                                        :key="tab.value"
-                                        type="button"
-                                        class="rule-center-nav-item"
-                                        :class="{ 'rule-center-nav-item--active': activeTab === tab.value }"
-                                        :aria-current="activeTab === tab.value ? 'page' : undefined"
-                                        @click="selectTab(tab.value)">
-                                    <span class="rule-center-nav-item-label">{{ tab.label }}</span>
-                                </button>
-                            </div>
+                        <div class="mx-6 mt-4">
+                            <btn-vertical-group
+                                class="rule-center-nav-buttons"
+                                :buttons="primaryNavButtons"
+                                :model-value="activePrimary"
+                                @update:model-value="selectPrimaryNav"
+                            />
                         </div>
+                        <v-divider class="mt-4" />
+                        <v-tabs show-arrows
+                                class="my-4"
+                                direction="vertical"
+                                :model-value="activeSecondary"
+                                @update:model-value="selectSecondaryNav">
+                            <v-tab
+                                v-for="tab in secondaryTabs"
+                                :key="tab.value"
+                                class="tab-text-truncate"
+                                :value="tab.value">
+                                <span class="text-truncate">{{ tab.label }}</span>
+                            </v-tab>
+                        </v-tabs>
                     </v-navigation-drawer>
 
                     <v-main>
@@ -50,9 +44,7 @@
                                         <v-icon :icon="mdiMenu" size="24" />
                                     </v-btn>
 
-                                    <div class="min-w-0">
-                                        <div class="text-h6">{{ currentTabOption.label }}</div>
-                                    </div>
+                                    <span>{{ currentTabOption.label }}</span>
 
                                     <v-chip v-if="isPairingOverview" color="primary" variant="tonal">
                                         {{ filteredPairs.length }} {{ tt('pairs') }}
@@ -91,11 +83,19 @@
                                                           @delete="confirmDeletePair" />
                                 </template>
 
-                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules'">
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'rules'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="rules"
-                                                           :tabs="['rules', 'recurring']"
-                                                           :title="tt('Pairing Rules')" />
+                                                           :tabs="['rules']"
+                                                           :title="tt('Category Recognition')" />
+                                    </div>
+                                </template>
+
+                                <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'recurring'">
+                                    <div class="embedded-rule-panel">
+                                        <rule-center-panel init-tab="recurring"
+                                                           :tabs="['recurring']"
+                                                           :title="tt('Recurring Recognition')" />
                                     </div>
                                 </template>
 
@@ -163,18 +163,33 @@ import {
     buildRuleCenterQuery,
     normalizeRuleCenterSelection,
     normalizeRuleCenterTab,
+    type LegacyRuleTab,
     type RuleCenterDomain,
+    type RuleCenterSelection,
     type RuleCenterTab,
 } from '@/views/desktop/pairingcenter/rule_center_navigation.ts';
 
-type DomainOption = {
-    value: RuleCenterDomain;
+type PrimaryNavValue = 'pairing-overview' | 'rule-config' | 'learning' | 'llm';
+type SecondaryNavValue =
+    | 'transfer-overview'
+    | 'investment-overview'
+    | 'category-recognition'
+    | 'investment-recognition'
+    | 'recurring-recognition'
+    | 'learning-overview'
+    | 'learning-rules'
+    | 'llm-recognition'
+    | 'llm-config';
+
+type PrimaryNavOption = {
+    value: PrimaryNavValue;
     label: string;
 };
 
 type SecondaryTabOption = {
-    value: RuleCenterTab;
+    value: SecondaryNavValue;
     label: string;
+    selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'legacyRuleTab'>;
 };
 
 const props = defineProps<{
@@ -199,6 +214,7 @@ const initialSelection = normalizeRuleCenterSelection({
 
 const activeDomain = ref<RuleCenterDomain>(initialSelection.domain);
 const activeTab = ref<RuleCenterTab>(initialSelection.tab);
+const activeLegacyRuleTab = ref<LegacyRuleTab>(initialSelection.legacyRuleTab);
 const alwaysShowNav = ref<boolean>(display.mdAndUp.value);
 const showNav = ref<boolean>(display.mdAndUp.value);
 const showDeleteDialog = ref(false);
@@ -211,14 +227,14 @@ const error = computed({
     set: (val) => { matchingStore.error = val; }
 });
 
-const domainOptions = computed<DomainOption[]>(() => [
+const primaryNavButtons = computed<PrimaryNavOption[]>(() => [
     {
-        value: 'transfer',
-        label: tt('Transfer Pairing'),
+        value: 'pairing-overview',
+        label: tt('Pairing Overview'),
     },
     {
-        value: 'investment',
-        label: tt('Investment Pairing'),
+        value: 'rule-config',
+        label: tt('Rules Configuration'),
     },
     {
         value: 'learning',
@@ -230,60 +246,163 @@ const domainOptions = computed<DomainOption[]>(() => [
     },
 ]);
 
-const secondaryTabs = computed<SecondaryTabOption[]>(() => {
-    if (activeDomain.value === 'transfer') {
-        return [
-            {
-                value: 'overview',
-                label: tt('Pairing Overview'),
-            },
-            {
-                value: 'rules',
-                label: tt('Pairing Rules'),
-            },
-        ];
+const activePrimary = computed<PrimaryNavValue>(() => {
+    if (activeDomain.value === 'learning') {
+        return 'learning';
     }
 
-    if (activeDomain.value === 'investment') {
-        return [
-            {
-                value: 'overview',
-                label: tt('Pairing Overview'),
-            },
-            {
-                value: 'rules',
-                label: tt('Pairing Rules'),
-            },
-        ];
+    if (activeDomain.value === 'llm') {
+        return 'llm';
+    }
+
+    if (activeTab.value === 'rules') {
+        return 'rule-config';
+    }
+
+    return 'pairing-overview';
+});
+
+const activeSecondary = computed<SecondaryNavValue>(() => {
+    if (activeDomain.value === 'investment' && activeTab.value === 'overview') {
+        return 'investment-overview';
+    }
+
+    if (activeDomain.value === 'investment' && activeTab.value === 'rules') {
+        return 'investment-recognition';
+    }
+
+    if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring') {
+        return 'recurring-recognition';
+    }
+
+    if (activeDomain.value === 'transfer' && activeTab.value === 'rules') {
+        return 'category-recognition';
+    }
+
+    if (activeDomain.value === 'learning' && activeTab.value === 'rules') {
+        return 'learning-rules';
     }
 
     if (activeDomain.value === 'learning') {
+        return 'learning-overview';
+    }
+
+    if (activeDomain.value === 'llm' && activeTab.value === 'config') {
+        return 'llm-config';
+    }
+
+    if (activeDomain.value === 'llm') {
+        return 'llm-recognition';
+    }
+
+    return 'transfer-overview';
+});
+
+function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[] {
+    if (primary === 'pairing-overview') {
         return [
             {
-                value: 'overview',
-                label: tt('Suggestions'),
+                value: 'transfer-overview',
+                label: tt('Transfer Pairing'),
+                selection: {
+                    domain: 'transfer',
+                    tab: 'overview',
+                    legacyRuleTab: 'rules',
+                },
             },
             {
-                value: 'rules',
+                value: 'investment-overview',
+                label: tt('Investment Pairing'),
+                selection: {
+                    domain: 'investment',
+                    tab: 'overview',
+                    legacyRuleTab: 'rules',
+                },
+            },
+        ];
+    }
+
+    if (primary === 'rule-config') {
+        return [
+            {
+                value: 'category-recognition',
+                label: tt('Category Recognition'),
+                selection: {
+                    domain: 'transfer',
+                    tab: 'rules',
+                    legacyRuleTab: 'rules',
+                },
+            },
+            {
+                value: 'investment-recognition',
+                label: tt('Investment Recognition'),
+                selection: {
+                    domain: 'investment',
+                    tab: 'rules',
+                    legacyRuleTab: 'rules',
+                },
+            },
+            {
+                value: 'recurring-recognition',
+                label: tt('Recurring Recognition'),
+                selection: {
+                    domain: 'transfer',
+                    tab: 'rules',
+                    legacyRuleTab: 'recurring',
+                },
+            },
+        ];
+    }
+
+    if (primary === 'learning') {
+        return [
+            {
+                value: 'learning-overview',
+                label: tt('Suggestions'),
+                selection: {
+                    domain: 'learning',
+                    tab: 'overview',
+                    legacyRuleTab: 'learning',
+                },
+            },
+            {
+                value: 'learning-rules',
                 label: tt('Learning Rules'),
+                selection: {
+                    domain: 'learning',
+                    tab: 'rules',
+                    legacyRuleTab: 'learning',
+                },
             },
         ];
     }
 
     return [
         {
-            value: 'overview',
-            label: tt('Candidate Rules'),
+            value: 'llm-recognition',
+            label: tt('LLM Recognition'),
+            selection: {
+                domain: 'llm',
+                tab: 'overview',
+                legacyRuleTab: 'learning',
+            },
         },
         {
-            value: 'config',
+            value: 'llm-config',
             label: tt('LLM Config'),
+            selection: {
+                domain: 'llm',
+                tab: 'config',
+                legacyRuleTab: 'learning',
+            },
         },
     ];
-});
+}
+
+const secondaryTabs = computed<SecondaryTabOption[]>(() => secondaryTabsForPrimary(activePrimary.value));
 
 const currentTabOption = computed<SecondaryTabOption>(() => {
-    return secondaryTabs.value.find(option => option.value === activeTab.value) ?? secondaryTabs.value[0]!;
+    return secondaryTabs.value.find(option => option.value === activeSecondary.value) ?? secondaryTabs.value[0]!;
 });
 
 const isPairingOverview = computed(() =>
@@ -299,42 +418,50 @@ function collapseNavOnMobile(): void {
     }
 }
 
-function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab): void {
+function syncQuery(domain: RuleCenterDomain, tab: RuleCenterTab, legacyRuleTab: LegacyRuleTab): void {
     void router.replace({
         path: '/pairing/list',
-        query: buildRuleCenterQuery(route.query, domain, tab),
+        query: buildRuleCenterQuery(route.query, domain, tab, legacyRuleTab),
     });
 }
 
-function selectDomain(domain: RuleCenterDomain): void {
-    const nextTab = normalizeRuleCenterTab(domain, activeTab.value);
-    const unchanged = activeDomain.value === domain && activeTab.value === nextTab;
+function applySelection(selection: Pick<RuleCenterSelection, 'domain' | 'tab' | 'legacyRuleTab'>): void {
+    const nextTab = normalizeRuleCenterTab(selection.domain, selection.tab);
+    const unchanged = activeDomain.value === selection.domain
+        && activeTab.value === nextTab
+        && activeLegacyRuleTab.value === selection.legacyRuleTab;
 
-    activeDomain.value = domain;
+    activeDomain.value = selection.domain;
     activeTab.value = nextTab;
+    activeLegacyRuleTab.value = selection.legacyRuleTab;
     collapseNavOnMobile();
 
     if (unchanged) {
         return;
     }
 
-    syncQuery(activeDomain.value, activeTab.value);
+    syncQuery(activeDomain.value, activeTab.value, activeLegacyRuleTab.value);
     void refreshActiveView();
 }
 
-function selectTab(tabValue: RuleCenterTab): void {
-    const nextTab = normalizeRuleCenterTab(activeDomain.value, tabValue);
-    const unchanged = activeTab.value === nextTab;
+function selectPrimaryNav(value: unknown): void {
+    const targetPrimary = String(value) as PrimaryNavValue;
+    const firstTarget = (activePrimary.value === targetPrimary
+        ? currentTabOption.value
+        : secondaryTabsForPrimary(targetPrimary)[0]);
 
-    activeTab.value = nextTab;
-    collapseNavOnMobile();
-
-    if (unchanged) {
-        return;
+    if (firstTarget) {
+        applySelection(firstTarget.selection);
     }
+}
 
-    syncQuery(activeDomain.value, activeTab.value);
-    void refreshActiveView();
+function selectSecondaryNav(value: unknown): void {
+    const targetValue = String(value) as SecondaryNavValue;
+    const target = secondaryTabs.value.find(option => option.value === targetValue);
+
+    if (target) {
+        applySelection(target.selection);
+    }
 }
 
 async function refreshActiveView(): Promise<void> {
@@ -380,9 +507,10 @@ watch(
 
         activeDomain.value = selection.domain;
         activeTab.value = selection.tab;
+        activeLegacyRuleTab.value = selection.legacyRuleTab;
 
         if (selection.shouldRewriteQuery) {
-            syncQuery(selection.domain, selection.tab);
+            syncQuery(selection.domain, selection.tab, selection.legacyRuleTab);
         }
     },
     { immediate: true }
@@ -404,69 +532,26 @@ watch(
     min-height: 760px;
 }
 
-.rule-center-nav-section {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.rule-center-navigation {
+    border-inline-end: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
 
-.rule-center-nav-stack {
-    max-width: 240px;
-    margin-inline: auto;
+.rule-center-nav-buttons {
+    width: 100%;
 }
 
-.rule-center-nav-divider {
-    margin-block: 14px;
+.rule-center-nav-buttons:deep(.v-btn) {
+    width: 100%;
 }
 
-.rule-center-nav-item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    min-height: 38px;
-    padding: 8px 12px 8px 18px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: rgba(var(--v-theme-on-surface), 0.78);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1.25;
+.tab-text-truncate {
+    justify-content: flex-start;
+    padding-inline: 12px;
+}
+
+.tab-text-truncate .text-truncate {
+    width: 100%;
     text-align: left;
-    transition: background-color 0.16s ease, color 0.16s ease;
-}
-
-.rule-center-nav-item::before {
-    position: absolute;
-    inset-block: 8px;
-    inset-inline-start: 0;
-    width: 3px;
-    border-radius: 999px;
-    background: transparent;
-    content: "";
-    transition: background-color 0.16s ease;
-}
-
-.rule-center-nav-item:hover {
-    background: rgba(var(--v-theme-on-surface), 0.05);
-}
-
-.rule-center-nav-item--active {
-    background: rgba(var(--v-theme-primary), 0.09);
-    color: rgb(var(--v-theme-primary));
-    font-weight: 600;
-}
-
-.rule-center-nav-item--active::before {
-    background: rgb(var(--v-theme-primary));
-}
-
-.rule-center-nav-item-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .embedded-rule-panel :deep(> .v-row) {
