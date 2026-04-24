@@ -2980,5 +2980,6 @@
     "Source": "Source",
     "Test failed": "Test failed",
     "Unassigned Category": "Unassigned Category",
-    "Views": "Views"
+    "Views": "Views",
+    "Generated Suggestions Summary": "Generated: {created} new, {updated} updated"
 }

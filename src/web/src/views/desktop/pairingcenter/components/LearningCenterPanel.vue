@@ -54,12 +54,6 @@
                 {{ error }}
             </v-alert>
 
-            <v-alert v-if="lastGenerateResult" type="info" closable class="mb-4"
-                     @click:close="lastGenerateResult = null">
-                {{ tt('Generated') }}: {{ lastGenerateResult.created }} {{ tt('new') }},
-                {{ lastGenerateResult.updated }} {{ tt('updated') }}
-            </v-alert>
-
                             <!-- ── Suggestions Tab ── -->
                             <template v-if="activeTab === 'suggestions'">
                                 <div class="d-flex align-center mb-2">
@@ -387,15 +381,18 @@
             </form>
         </v-card>
     </v-dialog>
+
+    <snack-bar ref="snackbar" />
 </template>
 
 <script setup lang="ts">
 import axios from 'axios';
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, useTemplateRef } from 'vue';
 
+import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useLearningStore } from '@/stores/learning.ts';
-import type { LearningSuggestion, LearningRule, GenerateSuggestionsResponse } from '@/models/learning_center.ts';
+import type { LearningSuggestion, LearningRule } from '@/models/learning_center.ts';
 import { getSuggestionFeatureSummary, getRuleFeatureSummary } from '@/models/learning_center.ts';
 import services from '@/lib/services.ts';
 
@@ -455,8 +452,11 @@ const props = defineProps<{
     initTab?: string
 }>();
 
+type SnackBarType = InstanceType<typeof SnackBar>;
+
 const { tt } = useI18n();
 const store = useLearningStore();
+const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 function normalizePanelTab(tab?: string): string {
     if (tab === 'rules' || tab === 'llm' || tab === 'llm-config') {
@@ -469,7 +469,6 @@ function normalizePanelTab(tab?: string): string {
 const activeTab = ref<string>(normalizePanelTab(props.initTab));
 const statusFilter = ref<string>('');
 const selectedIds = ref<number[]>([]);
-const lastGenerateResult = ref<GenerateSuggestionsResponse | null>(null);
 
 const llmProviderOptions: LLMProviderOption[] = [
     {
@@ -581,6 +580,10 @@ const indeterminate = computed(() => {
 
 function clearError() {
     store.error = null;
+}
+
+function showInfoMessage(message: string, options?: Record<string, unknown>): void {
+    snackbar.value?.showMessage(message, options);
 }
 
 function toLLMConfigs(result: unknown): LLMConfigItem[] {
@@ -703,7 +706,10 @@ async function refreshCurrentTab() {
 async function handleGenerate() {
     const result = await store.generateSuggestions();
     if (result) {
-        lastGenerateResult.value = result;
+        showInfoMessage('Generated Suggestions Summary', {
+            created: result.created,
+            updated: result.updated,
+        });
     }
 }
 

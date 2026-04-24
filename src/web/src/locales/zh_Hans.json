@@ -2985,5 +2985,6 @@
     "Source": "来源",
     "Test failed": "测试失败",
     "Unassigned Category": "未分配分类",
-    "Views": "视图"
+    "Views": "视图",
+    "Generated Suggestions Summary": "已生成：{created} 条新建，{updated} 条更新"
 }

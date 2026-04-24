@@ -8,32 +8,30 @@
                                          v-model="showNav"
                                          class="rule-center-navigation">
                         <div class="rule-center-nav-stack mx-4 my-4">
-                            <div class="rule-center-nav-group">
-                                <v-btn v-for="domain in domainOptions"
-                                       :key="domain.value"
-                                       block
-                                       border
-                                       class="rule-center-nav-button text-none"
-                                       :color="activeDomain === domain.value ? 'primary' : 'default'"
-                                       :variant="activeDomain === domain.value ? 'tonal' : 'outlined'"
-                                       @click="selectDomain(domain.value)">
-                                    <span>{{ domain.label }}</span>
-                                </v-btn>
+                            <div class="rule-center-nav-section">
+                                <button v-for="domain in domainOptions"
+                                        :key="domain.value"
+                                        type="button"
+                                        class="rule-center-nav-item"
+                                        :class="{ 'rule-center-nav-item--active': activeDomain === domain.value }"
+                                        :aria-current="activeDomain === domain.value ? 'page' : undefined"
+                                        @click="selectDomain(domain.value)">
+                                    <span class="rule-center-nav-item-label">{{ domain.label }}</span>
+                                </button>
                             </div>
 
-                            <v-divider class="my-3" />
+                            <v-divider class="rule-center-nav-divider" />
 
-                            <div class="rule-center-nav-group">
-                                <v-btn v-for="tab in secondaryTabs"
-                                       :key="tab.value"
-                                       block
-                                       border
-                                       class="rule-center-nav-button text-none"
-                                       :color="activeTab === tab.value ? 'primary' : 'default'"
-                                       :variant="activeTab === tab.value ? 'tonal' : 'outlined'"
-                                       @click="selectTab(tab.value)">
-                                    <span>{{ tab.label }}</span>
-                                </v-btn>
+                            <div class="rule-center-nav-section">
+                                <button v-for="tab in secondaryTabs"
+                                        :key="tab.value"
+                                        type="button"
+                                        class="rule-center-nav-item"
+                                        :class="{ 'rule-center-nav-item--active': activeTab === tab.value }"
+                                        :aria-current="activeTab === tab.value ? 'page' : undefined"
+                                        @click="selectTab(tab.value)">
+                                    <span class="rule-center-nav-item-label">{{ tab.label }}</span>
+                                </button>
                             </div>
                         </div>
                     </v-navigation-drawer>
@@ -53,11 +51,8 @@
                                     </v-btn>
 
                                     <div class="min-w-0">
-                                        <div class="text-h6">{{ currentDomainOption.label }}</div>
-                                        <div class="text-body-2 text-medium-emphasis">{{ currentTabOption.label }}</div>
+                                        <div class="text-h6">{{ currentTabOption.label }}</div>
                                     </div>
-
-                                    <v-spacer />
 
                                     <v-chip v-if="isPairingOverview" color="primary" variant="tonal">
                                         {{ filteredPairs.length }} {{ tt('pairs') }}
@@ -97,9 +92,11 @@
                                 </template>
 
                                 <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules'">
-                                    <rule-center-panel init-tab="rules"
-                                                       :tabs="['rules', 'recurring']"
-                                                       :title="tt('Pairing Rules')" />
+                                    <div class="embedded-rule-panel">
+                                        <rule-center-panel init-tab="rules"
+                                                           :tabs="['rules', 'recurring']"
+                                                           :title="tt('Pairing Rules')" />
+                                    </div>
                                 </template>
 
                                 <template v-else-if="activeDomain === 'investment' && activeTab === 'rules'">
@@ -285,10 +282,6 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
     ];
 });
 
-const currentDomainOption = computed<DomainOption>(() => {
-    return domainOptions.value.find(option => option.value === activeDomain.value) ?? domainOptions.value[0]!;
-});
-
 const currentTabOption = computed<SecondaryTabOption>(() => {
     return secondaryTabs.value.find(option => option.value === activeTab.value) ?? secondaryTabs.value[0]!;
 });
@@ -411,37 +404,102 @@ watch(
     min-height: 760px;
 }
 
-.rule-center-nav-group {
+.rule-center-nav-section {
     display: flex;
     flex-direction: column;
+    gap: 4px;
 }
 
 .rule-center-nav-stack {
-    max-width: 220px;
+    max-width: 240px;
     margin-inline: auto;
 }
 
-.rule-center-nav-group .v-btn:not(:first-child) {
-    border-top-left-radius: inherit;
-    border-top-right-radius: inherit;
+.rule-center-nav-divider {
+    margin-block: 14px;
 }
 
-.rule-center-nav-group .v-btn:not(:last-child) {
-    border-bottom: 0;
-    border-bottom-left-radius: inherit;
-    border-bottom-right-radius: inherit;
-}
-
-.rule-center-nav-button {
-    justify-content: center;
-    min-height: 40px;
-    height: 40px;
+.rule-center-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 12px 8px 18px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(var(--v-theme-on-surface), 0.78);
+    cursor: pointer;
+    font: inherit;
     font-size: 0.875rem;
     font-weight: 500;
+    line-height: 1.25;
+    text-align: left;
+    transition: background-color 0.16s ease, color 0.16s ease;
 }
 
-.rule-center-nav-button :deep(.v-btn__content) {
-    width: 100%;
-    justify-content: center;
+.rule-center-nav-item::before {
+    position: absolute;
+    inset-block: 8px;
+    inset-inline-start: 0;
+    width: 3px;
+    border-radius: 999px;
+    background: transparent;
+    content: "";
+    transition: background-color 0.16s ease;
+}
+
+.rule-center-nav-item:hover {
+    background: rgba(var(--v-theme-on-surface), 0.05);
+}
+
+.rule-center-nav-item--active {
+    background: rgba(var(--v-theme-primary), 0.09);
+    color: rgb(var(--v-theme-primary));
+    font-weight: 600;
+}
+
+.rule-center-nav-item--active::before {
+    background: rgb(var(--v-theme-primary));
+}
+
+.rule-center-nav-item-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.embedded-rule-panel :deep(> .v-row) {
+    margin: 0;
+}
+
+.embedded-rule-panel :deep(> .v-row > .v-col) {
+    padding: 0;
+}
+
+.embedded-rule-panel :deep(.v-card-title) {
+    justify-content: flex-start;
+    gap: 8px;
+    padding-inline: 0;
+    padding-top: 0;
+}
+
+.embedded-rule-panel :deep(.v-card-title > .v-icon),
+.embedded-rule-panel :deep(.v-card-title > span),
+.embedded-rule-panel :deep(.v-card-title > .v-spacer) {
+    display: none;
+}
+
+.embedded-rule-panel :deep(.v-card-title > .v-btn) {
+    min-width: 32px;
+    width: 32px;
+    height: 32px;
+    padding-inline: 0;
+    font-size: 0;
+}
+
+.embedded-rule-panel :deep(.v-card-title > .v-btn .v-icon) {
+    margin-inline: 0;
+    font-size: 20px;
 }
 </style>
