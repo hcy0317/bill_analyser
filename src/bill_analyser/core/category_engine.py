@@ -29,10 +29,12 @@ from ..utils.logger import get_logger, log_method, log_step
 
 
 _RULE_EXPRESSION_ESCAPABLE_CHARS = frozenset("\\,+{}|()/×")
-_RULE_EXPRESSION_AND_CONNECTORS = frozenset({"+", "×"})
+_RULE_EXPRESSION_AND_CONNECTORS = frozenset({"+"})
+_RULE_EXPRESSION_NOT_CONNECTORS = frozenset({"×"})
 _RULE_EXPRESSION_OR_CONNECTORS = frozenset({"|", "/"})
 _RULE_EXPRESSION_FACTOR_TERMINATORS = (
     _RULE_EXPRESSION_AND_CONNECTORS
+    | _RULE_EXPRESSION_NOT_CONNECTORS
     | _RULE_EXPRESSION_OR_CONNECTORS
     | frozenset({")"})
 )
@@ -120,18 +122,18 @@ class RuleExpressionNode:
 
     Grammar supported by ``compile_rule_expression``:
     ``expression := and_expr (('|' | '/') and_expr)*``
-    ``and_expr := factor (('+' | '×') factor)*``
+    ``and_expr := factor (('+' factor) | ('×' factor))*``
     ``factor := clause | '(' expression ')'``
     ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
     ``term`` may escape delimiters with ``\\`` (for example ``\\,`` or ``\\{``).
 
     ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
     ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
-    logical AND, ``×`` is accepted as the visible AND connector, ``/`` is the
-    visible OR connector, and ``|`` is the canonical separator between
-    top-level expression groups. Both OR connectors parse to logical OR;
-    parentheses preserve the intended grouping. Legacy ``OR:a|b&AND:c&NOT:d``
-    is still compiled by ``compile_rule``.
+    logical AND, ``×`` is the visible block-level NOT connector (AND NOT the
+    following clause/group), ``/`` is the visible OR connector, and ``|`` is the
+    canonical separator between top-level expression groups. Both OR connectors
+    parse to logical OR; parentheses preserve the intended grouping. Legacy
+    ``OR:a|b&AND:c&NOT:d`` is still compiled by ``compile_rule``.
     """
 
     kind: str
@@ -346,6 +348,11 @@ class KeywordMatcher:
             result = any(
                 self._match_expression_node(text_lower, child) for child in node.children
             )
+        elif node.kind == "not":
+            result = len(node.children) == 1 and not self._match_expression_node(
+                text_lower,
+                node.children[0],
+            )
         elif node.kind != "clause":
             result = False
         elif node.operator == "OR":
@@ -391,18 +398,19 @@ class KeywordMatcher:
 
         Composite grammar:
         ``expression := and_expr (('|' | '/') and_expr)*``
-        ``and_expr := factor (('+' | '×') factor)*``
+        ``and_expr := factor (('+' factor) | ('×' factor))*``
         ``factor := clause | '(' expression ')'``
         ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
         ``term`` may escape delimiters with ``\\`` (for example ``\\,``).
 
         ``+`` keeps the existing no-parentheses syntax as a conjunction:
         ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
-        ``(k1 or k2) and k3 and not k4``. ``×`` is accepted as the visible AND
-        connector (for example ``×NOT={k4}``), ``/`` is accepted as the visible
-        OR connector inside an expression, and ``|`` is the canonical separator
-        between top-level expression groups. Both OR connectors parse to
-        logical OR; parentheses preserve the intended grouping. Old
+        ``(k1 or k2) and k3 and not k4``. ``×`` is accepted as the visible
+        block-level NOT connector (for example ``×OR={k4}`` means AND NOT the
+        next block), ``/`` is accepted as the visible OR connector inside an
+        expression, and ``|`` is the canonical separator between top-level
+        expression groups. Both OR connectors parse to logical OR; parentheses
+        preserve the intended grouping. Old
         ``OR:k1|k2&AND:k3&NOT:k4`` strings still fall back to ``compile_rule``.
         """
         if not expr:
@@ -480,8 +488,9 @@ class KeywordMatcher:
         index: int,
         regex_enabled: bool,
     ) -> tuple[RuleExpressionNode | None, int]:
-        """Parse ``+``/``×``-joined clause/group chains."""
+        """Parse ``+``-joined chains and ``×`` block-level negation."""
         children: list[RuleExpressionNode] = []
+        pending_negated_connector = False
 
         while True:
             index = self._skip_expression_space(expr, index)
@@ -492,11 +501,19 @@ class KeywordMatcher:
             ):
                 break
             if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
+                pending_negated_connector = False
+                index += 1
+                continue
+            if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
+                pending_negated_connector = True
                 index += 1
                 continue
 
             child, index = self._parse_rule_factor(expr, index, regex_enabled)
             if child is not None:
+                if pending_negated_connector:
+                    child = self._apply_not_connector(child)
+                    pending_negated_connector = False
                 children.append(child)
 
             index = self._skip_expression_space(expr, index)
@@ -507,6 +524,11 @@ class KeywordMatcher:
             ):
                 break
             if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
+                pending_negated_connector = False
+                index += 1
+                continue
+            if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
+                pending_negated_connector = True
                 index += 1
                 continue
             raise ValueError(f"expected AND/OR connector at offset {index}")
@@ -516,6 +538,18 @@ class KeywordMatcher:
         if len(children) == 1:
             return children[0], index
         return RuleExpressionNode(kind="all", children=tuple(children)), index
+
+    @staticmethod
+    def _apply_not_connector(child: RuleExpressionNode) -> RuleExpressionNode:
+        """Apply the visible ``×`` connector without mutating clause operators.
+
+        Older UI states could serialize the same intent as ``×NOT={term}``;
+        keep that accepted spelling as a single NOT clause instead of turning
+        it into a double-negative.
+        """
+        if child.kind == "clause" and child.operator == "NOT":
+            return child
+        return RuleExpressionNode(kind="not", children=(child,))
 
     def _parse_rule_factor(
         self,
@@ -622,6 +656,8 @@ class KeywordMatcher:
                     and_patterns,
                     not_patterns,
                 )
+            return
+        if node.kind == "not":
             return
         if node.kind != "clause":
             return

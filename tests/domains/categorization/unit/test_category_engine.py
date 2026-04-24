@@ -111,6 +111,17 @@ def test_keyword_matcher_rule_expression_ast_preserves_old_and_new_semantics() -
     assert matcher.match_compiled("早餐套餐", visible_not) is True
     assert matcher.match_compiled("早饭退款", visible_not) is False
 
+    decoupled_not = matcher.compile_rule_expression("OR={早餐,早饭}×OR={退款}")
+    assert matcher.match_compiled("早餐套餐", decoupled_not) is True
+    assert matcher.match_compiled("早饭退款", decoupled_not) is False
+
+    block_level_or_priority = matcher.compile_rule_expression(
+        "OR={早餐}/(OR={咖啡}+AND={拿铁})"
+    )
+    assert matcher.match_compiled("早餐店", block_level_or_priority) is True
+    assert matcher.match_compiled("咖啡 拿铁", block_level_or_priority) is True
+    assert matcher.match_compiled("咖啡 美式", block_level_or_priority) is False
+
     malformed_nested = matcher.compile_rule_expression("(OR={早餐}/AND={咖啡}")
     assert malformed_nested.is_empty is True
     assert matcher.match_compiled("早餐咖啡", malformed_nested) is False

@@ -129,17 +129,17 @@ describe('keywordExpression helpers', () => {
 
         expect(parsed.sourceFormat).toBe('composite');
         expect(parsed.clauses).toMatchObject([
-            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
-            { joiner: 'OR', operator: 'OR', terms: ['咖啡'] },
-            { joiner: 'AND', operator: 'NOT', terms: ['退款'] },
-            { joiner: 'AND', operator: 'NOT', terms: ['测试'] }
+            { joiner: 'AND', negated: false, operator: 'OR', terms: ['早餐'] },
+            { joiner: 'OR', negated: false, operator: 'OR', terms: ['咖啡'] },
+            { joiner: 'AND', negated: true, operator: 'OR', terms: ['退款'] },
+            { joiner: 'AND', negated: true, operator: 'OR', terms: ['测试'] }
         ]);
         expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
-            expression: 'OR={早餐}/OR={咖啡}+NOT={退款}+NOT={测试}'
+            expression: 'OR={早餐}/OR={咖啡}×OR={退款}×OR={测试}'
         });
     });
 
-    test('treats bare visible multiplication connector as canonical AND instead of NOT', () => {
+    test('treats bare visible multiplication connector as block-level NOT without changing inner operator', () => {
         const expression = 'OR={早餐}×OR={咖啡}';
         const parsed = parseExpression(expression, {
             format: 'composite',
@@ -148,11 +148,55 @@ describe('keywordExpression helpers', () => {
 
         expect(parsed.sourceFormat).toBe('composite');
         expect(parsed.clauses).toMatchObject([
-            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
-            { joiner: 'AND', operator: 'OR', terms: ['咖啡'] }
+            { joiner: 'AND', negated: false, operator: 'OR', terms: ['早餐'] },
+            { joiner: 'AND', negated: true, operator: 'OR', terms: ['咖啡'] }
         ]);
         expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
-            expression: 'OR={早餐}+OR={咖啡}'
+            expression
+        });
+    });
+
+    test('keeps block connector and inner operator independent when serializing', () => {
+        const firstClause = createRuleClause({ id: 'first', operator: 'AND', terms: ['早餐', '咖啡'] });
+        const excludedClause = createRuleClause({
+            id: 'excluded',
+            joiner: 'AND',
+            negated: true,
+            operator: 'AND',
+            terms: ['退款', '撤销']
+        });
+        const alternativeClause = createRuleClause({
+            id: 'alternative',
+            joiner: 'OR',
+            operator: 'AND',
+            terms: ['午餐', '套餐']
+        });
+
+        expect(serializeComposite([firstClause, excludedClause, alternativeClause])).toStrictEqual({
+            expression: 'AND={早餐,咖啡}×AND={退款,撤销}/AND={午餐,套餐}'
+        });
+
+        const reparsed = parseExpression('AND={早餐,咖啡}×AND={退款,撤销}/AND={午餐,套餐}', {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+        expect(reparsed.clauses).toMatchObject([
+            { joiner: 'AND', negated: false, operator: 'AND', terms: ['早餐', '咖啡'] },
+            { joiner: 'AND', negated: true, operator: 'AND', terms: ['退款', '撤销'] },
+            { joiner: 'OR', negated: false, operator: 'AND', terms: ['午餐', '套餐'] }
+        ]);
+
+        expect(serializeComposite([
+            createRuleClause({ id: 'base', operator: 'OR', terms: ['早餐'] }),
+            createRuleClause({
+                id: 'negated-not',
+                joiner: 'AND',
+                negated: true,
+                operator: 'NOT',
+                terms: ['退款']
+            })
+        ])).toStrictEqual({
+            expression: 'OR={早餐}×NOT={退款}'
         });
     });
 
@@ -314,6 +358,7 @@ describe('keyword expression component copy', () => {
         );
         expect(combinedSource).not.toContain('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}');
         expect(combinedSource).not.toContain('Rule Priority');
+        expect(combinedSource).not.toContain('× NOT');
         expect(combinedSource).toContain('category-rule-builder__header');
         expect(combinedSource).toContain('v-if="clauseIndex > 0"');
     });

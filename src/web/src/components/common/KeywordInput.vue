@@ -247,7 +247,7 @@ type ClauseConnector = 'AND' | 'OR' | 'NOT';
 const connectorItems = [
     { title: '+', value: 'AND' as ClauseConnector },
     { title: '/', value: 'OR' as ClauseConnector },
-    { title: '× NOT', value: 'NOT' as ClauseConnector },
+    { title: '×', value: 'NOT' as ClauseConnector },
 ];
 const types = computed(() => {
     return [
@@ -339,32 +339,27 @@ function normalizeClauseJoiners() {
     const firstClause = clauses.value[0];
     if (firstClause) {
         firstClause.joiner = 'AND';
+        firstClause.negated = false;
         firstClause.startsExpression = false;
     }
 }
 
 function getClauseConnector(clause: RuleClause): ClauseConnector {
+    if (clause.negated) {
+        return 'NOT';
+    }
     if (clause.joiner === 'OR') {
         return 'OR';
-    }
-    if (clause.operator === 'NOT') {
-        return 'NOT';
     }
     return 'AND';
 }
 
 function updateClauseConnector(clause: RuleClause, value: unknown) {
     const connector = value === 'OR' || value === 'NOT' ? value : 'AND';
-    const operator: RuleOperator = connector === 'NOT'
-        ? 'NOT'
-        : clause.operator === 'NOT'
-            ? 'OR'
-            : clause.operator;
-
     replaceClause({
         ...clause,
         joiner: connector === 'OR' ? 'OR' : 'AND',
-        operator,
+        negated: connector === 'NOT',
         startsExpression: false,
     });
     serializeKeywords();
@@ -414,11 +409,12 @@ function removeClause(clauseId: string) {
     const nextClauses = clauses.value.filter(clause => clause.id !== clauseId);
     if (nextClauses.length > 0) {
         if (clauseIndex === 0) {
-            nextClauses[0] = { ...nextClauses[0]!, joiner: 'AND', startsExpression: false };
-        } else if (removedClause?.joiner === 'OR' && clauseIndex < nextClauses.length) {
+            nextClauses[0] = { ...nextClauses[0]!, joiner: 'AND', negated: false, startsExpression: false };
+        } else if ((removedClause?.joiner === 'OR' || removedClause?.negated) && clauseIndex < nextClauses.length) {
             nextClauses[clauseIndex] = {
                 ...nextClauses[clauseIndex]!,
-                joiner: 'OR',
+                joiner: removedClause.joiner,
+                negated: removedClause.negated,
                 startsExpression: removedClause.startsExpression,
             };
         }
