@@ -28,15 +28,76 @@ def _get_request_user_id() -> int:
     return get_required_request_int("user_id")
 
 
-def _get_llm_config() -> dict[str, Any]:
-    """Get LLM configuration from app config."""
-    return cast("dict[str, Any]", current_app.config.get("LLM_CONFIG", {}))
+def _copy_runtime_llm_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Copy a runtime LLM config without sharing nested mutable state."""
+    provider_config = config.get("provider_config") or {}
+    if not isinstance(provider_config, dict):
+        provider_config = {}
+    advanced_settings = normalize_llm_advanced_settings(
+        config.get("advanced_settings") or provider_config.get("advanced_settings") or {}
+    )
+    return {
+        "enabled": bool(config.get("enabled", False)),
+        "provider": config.get("provider", "openai"),
+        "provider_config": dict(provider_config),
+        "advanced_settings": advanced_settings,
+    }
 
 
-def _get_llm_service() -> LLMLearningService:
+def _build_runtime_config_from_saved_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Build request-local provider settings from a persisted user-scoped config."""
+    return {
+        "enabled": True,
+        "provider": config.get("provider", "openai"),
+        "advanced_settings": normalize_llm_advanced_settings(config.get("advanced_settings")),
+        "provider_config": {
+            "api_key": config.get("api_key", ""),
+            "base_url": config.get("base_url", ""),
+            "model": config.get("model", ""),
+        },
+    }
+
+
+def _get_user_runtime_config_store() -> dict[int, dict[str, Any]]:
+    """Return per-user legacy runtime configs kept out of process-global LLM_CONFIG."""
+    store = current_app.config.setdefault("LLM_CONFIG_BY_USER", {})
+    if not isinstance(store, dict):
+        store = {}
+        current_app.config["LLM_CONFIG_BY_USER"] = store
+    return cast("dict[int, dict[str, Any]]", store)
+
+
+def _set_user_runtime_config(user_id: int, config: dict[str, Any]) -> None:
+    _get_user_runtime_config_store()[user_id] = _copy_runtime_llm_config(config)
+
+
+def _clear_user_runtime_config(user_id: int) -> None:
+    _get_user_runtime_config_store().pop(user_id, None)
+
+
+def _get_llm_config(user_id: int | None = None) -> dict[str, Any]:
+    """Get the effective LLM config without leaking one user's saved config to another."""
+    if user_id is not None:
+        user_runtime_config = _get_user_runtime_config_store().get(user_id)
+        if user_runtime_config:
+            return _copy_runtime_llm_config(user_runtime_config)
+
+        db = cast("Any", current_app.config.get("DB_INSTANCE"))
+        if db is not None and hasattr(db, "get_active_llm_config"):
+            active_config = _run_async(db.get_active_llm_config(user_id=user_id))
+            if active_config:
+                return _copy_runtime_llm_config(
+                    _build_runtime_config_from_saved_config(active_config)
+                )
+
+    default_config = cast("dict[str, Any]", current_app.config.get("LLM_CONFIG", {}))
+    return _copy_runtime_llm_config(default_config)
+
+
+def _get_llm_service(user_id: int) -> LLMLearningService:
     """Build LLM learning service from current config."""
     db = cast("Any", current_app.config.get("DB_INSTANCE"))
-    config = _get_llm_config()
+    config = _get_llm_config(user_id)
 
     provider_name = config.get("provider", "openai")
     provider_config = config.get("provider_config", {})
@@ -70,21 +131,6 @@ def _safe_llm_config_payload(config: dict[str, Any]) -> dict[str, Any]:
     return safe_config
 
 
-def _sync_saved_config_to_runtime(config: dict[str, Any]) -> None:
-    """Sync a persisted active config into the in-memory provider settings."""
-    advanced_settings = normalize_llm_advanced_settings(config.get("advanced_settings"))
-    current_app.config["LLM_CONFIG"] = {
-        "enabled": True,
-        "provider": config["provider"],
-        "advanced_settings": advanced_settings,
-        "provider_config": {
-            "api_key": config.get("api_key", ""),
-            "base_url": config.get("base_url", ""),
-            "model": config.get("model", ""),
-        },
-    }
-
-
 # ------------------------------------------------------------------
 # POST /analyze-transactions
 # ------------------------------------------------------------------
@@ -94,7 +140,8 @@ def _sync_saved_config_to_runtime(config: dict[str, Any]) -> None:
 def analyze_transactions():  # pylint: disable=too-many-return-statements
     """使用 LLM 分析未分类交易并生成分类建议"""
     try:
-        config = _get_llm_config()
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
         if not config.get("enabled", False):
             return _error_response("LLM service is not enabled", "LLM_DISABLED", 400)
 
@@ -103,15 +150,13 @@ def analyze_transactions():  # pylint: disable=too-many-return-statements
             data = {}
         if not isinstance(data, dict):
             return jsonify({"success": False, "error": "Invalid request"}), 400
-        user_id = _get_request_user_id()
-
         bill_ids = data.get("bill_ids")
         limit = data.get("limit", 20)
         session_id = data.get("session_id")
         preview_ids = data.get("preview_ids")
         preview_updates = data.get("preview_updates")
 
-        service = _get_llm_service()
+        service = _get_llm_service(user_id)
         candidates = _run_async(
             service.analyze_transactions(
                 user_id=user_id,
@@ -161,7 +206,8 @@ def analyze_transactions():  # pylint: disable=too-many-return-statements
 def induce_rules():
     """使用 LLM 从已分类样本中归纳关键词规则"""
     try:
-        config = _get_llm_config()
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
@@ -169,11 +215,10 @@ def induce_rules():
         if not data or "category_id" not in data:
             return jsonify({"success": False, "error": "category_id is required"}), 400
 
-        user_id = _get_request_user_id()
         category_id = data["category_id"]
         sample_count = data.get("sample_count", 10)
 
-        service = _get_llm_service()
+        service = _get_llm_service(user_id)
         candidates = _run_async(
             service.induce_rules(
                 user_id=user_id,
@@ -258,12 +303,12 @@ def get_candidate(candidate_id: int):
 def accept_candidate(candidate_id: int):
     """接受 LLM 候选建议"""
     try:
-        config = _get_llm_config()
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
-        user_id = _get_request_user_id()
-        service = _get_llm_service()
+        service = _get_llm_service(user_id)
         result = _run_async(service.accept_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": result})
@@ -283,12 +328,12 @@ def accept_candidate(candidate_id: int):
 def reject_candidate(candidate_id: int):
     """拒绝 LLM 候选建议"""
     try:
-        config = _get_llm_config()
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
         if not config.get("enabled", False):
             return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
 
-        user_id = _get_request_user_id()
-        service = _get_llm_service()
+        service = _get_llm_service(user_id)
         result = _run_async(service.reject_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": {"rejected": result}})
@@ -308,7 +353,8 @@ def reject_candidate(candidate_id: int):
 def get_config():
     """获取当前 LLM 配置"""
     try:
-        config = _get_llm_config()
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
         # Return safe subset (no API keys)
         safe_config = {
             "enabled": config.get("enabled", False),
@@ -332,11 +378,12 @@ def get_config():
 def update_config():
     """更新 LLM 配置"""
     try:
+        user_id = _get_request_user_id()
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        config = _get_llm_config()
+        config = _get_llm_config(user_id)
 
         if "enabled" in data:
             config["enabled"] = bool(data["enabled"])
@@ -347,7 +394,7 @@ def update_config():
         if "advanced_settings" in data:
             config["advanced_settings"] = normalize_llm_advanced_settings(data["advanced_settings"])
 
-        current_app.config["LLM_CONFIG"] = config
+        _set_user_runtime_config(user_id, config)
 
         safe_config = {
             "enabled": config.get("enabled", False),
@@ -410,7 +457,7 @@ def create_config():
             is_active=bool(data.get("is_active", False)),
         ))
         if result.get("is_active"):
-            _sync_saved_config_to_runtime(result)
+            _clear_user_runtime_config(user_id)
         return jsonify({"success": True, "data": _safe_llm_config_payload(result)})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("创建 LLM 配置失败: %s", exc)
@@ -433,7 +480,7 @@ def update_saved_config(config_id: int):
         if result is None:
             return jsonify({"success": False, "error": "config_not_found"}), 404
         if result.get("is_active"):
-            _sync_saved_config_to_runtime(result)
+            _clear_user_runtime_config(user_id)
         return jsonify({"success": True, "data": _safe_llm_config_payload(result)})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("更新 LLM 配置失败: id=%s, %s", config_id, exc)
@@ -472,7 +519,7 @@ def activate_saved_config(config_id: int):
         # Sync active config to runtime
         active = _run_async(db.get_active_llm_config(user_id=user_id))
         if active:
-            _sync_saved_config_to_runtime(active)
+            _clear_user_runtime_config(user_id)
 
         return jsonify({"success": True})
     except Exception as exc:  # pylint: disable=broad-exception-caught

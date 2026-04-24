@@ -287,6 +287,64 @@ class TestLLMImportSessionAnalysisAPI:
         assert "自定义规则提示" in provider_call["prompt"]
         assert "高级配置咖啡" in provider_call["prompt"]
 
+    def test_active_llm_config_does_not_enable_other_users(
+        self,
+        client,
+        monkeypatch,
+    ):
+        user_a_headers = _build_isolated_auth_headers(client, "test_llm_config_scope_a")
+        user_b_headers = _build_isolated_auth_headers(client, "test_llm_config_scope_b")
+        secret_a = "sk-user-a-secret-should-not-cross-users"
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": False,
+            "provider": "openai",
+            "provider_config": {"model": "disabled-global"},
+        }
+        api_app.app.config["LLM_CONFIG_BY_USER"] = {}
+
+        create_response = client.post(
+            "/api/llm/configs",
+            headers=user_a_headers,
+            json={
+                "name": f"pytest-user-a-active-{int(time.time() * 1000)}",
+                "provider": "openai",
+                "model": "gpt-user-a",
+                "api_key": secret_a,
+                "is_active": True,
+                "advanced_settings": {"system_prompt": "user-a-only-system-prompt"},
+            },
+        )
+        assert create_response.status_code == 200
+
+        user_b_config_response = client.get("/api/llm/config", headers=user_b_headers)
+        assert user_b_config_response.status_code == 200
+        user_b_config = user_b_config_response.get_json()["data"]
+        assert user_b_config["enabled"] is False
+        assert user_b_config["model"] == "disabled-global"
+
+        provider_factory_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        def _capture_provider_factory(*args: Any, **kwargs: Any) -> _FakeLLMProvider:
+            provider_factory_calls.append((args, kwargs))
+            return _FakeLLMProvider()
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", _capture_provider_factory)
+
+        user_b_analyze_response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=user_b_headers,
+            json={},
+        )
+        user_b_analyze_payload = user_b_analyze_response.get_json()
+        assert user_b_analyze_response.status_code == 400
+        assert user_b_analyze_payload["code"] == "LLM_DISABLED"
+        assert provider_factory_calls == []
+        assert secret_a not in json.dumps(user_b_analyze_payload, ensure_ascii=False)
+
     def test_llm_analysis_uses_import_session_preview_updates(self, client, monkeypatch):
         _reset_llm_rate_limit_state()
         auth_headers = _build_isolated_auth_headers(client, "test_llm_import_session_analysis")
