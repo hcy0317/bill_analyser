@@ -36,8 +36,8 @@
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
                     <v-tabs-window-item v-if="hasTab('rules')" value="rules">
-                        <div class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center pa-4 ga-3">
-                            <div class="d-flex align-center flex-wrap ga-2">
+                        <div class="rule-center-table-toolbar d-flex flex-column flex-xl-row align-xl-center pa-4 ga-3">
+                            <div class="rule-center-primary-actions d-flex align-center flex-wrap ga-2">
                                 <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
                                     {{ tt('Add Rule') }}
                                 </v-btn>
@@ -53,7 +53,7 @@
                             <v-spacer />
                             <div class="rule-center-filter-toolbar d-flex align-center flex-wrap ga-2">
                                 <v-chip size="small" variant="tonal">
-                                    {{ filteredDisplayCategoryRules.length }} / {{ categoryRules.length }}
+                                    {{ rulePaginationLabel }}
                                 </v-chip>
                                 <div class="rule-center-category-filter">
                                     <two-column-select
@@ -95,6 +95,16 @@
                                 >
                                     {{ tt('Clear') }}
                                 </v-btn>
+                                <div class="rule-center-page-size">
+                                    <v-select
+                                        v-model="ruleItemsPerPage"
+                                        :items="rulePageSizeOptions"
+                                        density="compact"
+                                        variant="outlined"
+                                        hide-details
+                                        :label="tt('Rows')"
+                                    />
+                                </div>
                             </div>
                         </div>
                         <v-table class="rule-center-rules-table" density="compact" hover>
@@ -160,14 +170,17 @@
                                                     >
                                                         {{ clause.label }}
                                                     </v-chip>
-                                                    <span
+                                                    <v-chip
                                                         v-for="term in getVisibleExpressionTerms(item.id, expressionIndex, clauseIndex, clause.terms)"
                                                         :key="term"
+                                                        size="x-small"
+                                                        variant="tonal"
+                                                        color="primary"
                                                         class="rule-expression-term"
                                                         :title="term"
                                                     >
                                                         {{ term }}
-                                                    </span>
+                                                    </v-chip>
                                                     <v-chip
                                                         v-if="getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) > 0"
                                                         size="x-small"
@@ -203,46 +216,49 @@
                                     </td>
                                     <td class="rule-center-column-applied">{{ item.applied_count }}</td>
                                     <td class="rule-center-column-actions">
-                                        <v-tooltip :text="tt('Edit')" location="top">
-                                            <template #activator="{ props }">
-                                                <v-btn
-                                                    v-bind="props"
-                                                    icon
-                                                    variant="text"
-                                                    size="small"
-                                                    @click="openEditDialog(item)"
-                                                >
-                                                    <v-icon :icon="mdiPencilOutline" size="small" />
-                                                </v-btn>
-                                            </template>
-                                        </v-tooltip>
-                                        <v-tooltip :text="tt('Test')" location="top">
-                                            <template #activator="{ props }">
-                                                <v-btn
-                                                    v-bind="props"
-                                                    icon
-                                                    variant="text"
-                                                    size="small"
-                                                    @click="openTestDialog(item)"
-                                                >
-                                                    <v-icon :icon="mdiTestTube" size="small" />
-                                                </v-btn>
-                                            </template>
-                                        </v-tooltip>
-                                        <v-tooltip :text="tt('Delete')" location="top">
-                                            <template #activator="{ props }">
-                                                <v-btn
-                                                    v-bind="props"
-                                                    icon
-                                                    variant="text"
-                                                    size="small"
-                                                    color="error"
-                                                    @click="confirmDelete(item)"
-                                                >
-                                                    <v-icon :icon="mdiDeleteOutline" size="small" />
-                                                </v-btn>
-                                            </template>
-                                        </v-tooltip>
+                                        <div class="rule-center-actions-row">
+                                            <v-tooltip :text="tt('Test')" location="top">
+                                                <template #activator="{ props }">
+                                                    <v-btn
+                                                        v-bind="props"
+                                                        icon
+                                                        variant="text"
+                                                        size="small"
+                                                        color="success"
+                                                        @click="openTestDialog(item)"
+                                                    >
+                                                        <v-icon :icon="mdiTestTube" size="small" />
+                                                    </v-btn>
+                                                </template>
+                                            </v-tooltip>
+                                            <v-tooltip :text="tt('Edit')" location="top">
+                                                <template #activator="{ props }">
+                                                    <v-btn
+                                                        v-bind="props"
+                                                        icon
+                                                        variant="text"
+                                                        size="small"
+                                                        @click="openEditDialog(item)"
+                                                    >
+                                                        <v-icon :icon="mdiPencilOutline" size="small" />
+                                                    </v-btn>
+                                                </template>
+                                            </v-tooltip>
+                                            <v-tooltip :text="tt('Delete')" location="top">
+                                                <template #activator="{ props }">
+                                                    <v-btn
+                                                        v-bind="props"
+                                                        icon
+                                                        variant="text"
+                                                        size="small"
+                                                        color="error"
+                                                        @click="confirmDelete(item)"
+                                                    >
+                                                        <v-icon :icon="mdiDeleteOutline" size="small" />
+                                                    </v-btn>
+                                                </template>
+                                            </v-tooltip>
+                                        </div>
                                     </td>
                                 </tr>
                             </template>
@@ -255,6 +271,21 @@
                             </tr>
                             </tbody>
                         </v-table>
+                        <div
+                            v-if="filteredDisplayCategoryRules.length > 0"
+                            class="rule-center-pagination d-flex flex-column flex-sm-row align-sm-center justify-space-between ga-3 px-4 py-3"
+                        >
+                            <div class="text-caption text-medium-emphasis">
+                                {{ rulePaginationLabel }}
+                            </div>
+                            <v-pagination
+                                v-model="rulePage"
+                                :length="rulePageCount"
+                                :total-visible="5"
+                                density="comfortable"
+                                size="small"
+                            />
+                        </div>
                     </v-tabs-window-item>
 
                     <!-- Learning Rules -->
@@ -277,10 +308,10 @@
 
                     <!-- Recurring Rules -->
                     <v-tabs-window-item v-if="hasTab('recurring')" value="recurring">
-                        <v-card-text class="pb-0">
+                        <v-card-text>
                             <div class="d-flex flex-column flex-md-row align-md-center ga-3">
                                 <div class="text-body-2 text-medium-emphasis">
-                                    {{ tt('Recurring rules are scheduled templates. Add or delete them in Scheduled Templates; use discovery to review detected recurring bills.') }}
+                                    {{ tt('Recurring matching uses scheduled templates. Manage the templates in Scheduled Templates, or review newly detected recurring bills in discovery.') }}
                                 </div>
                                 <v-spacer />
                                 <v-btn
@@ -298,24 +329,16 @@
                                     {{ tt('Review Recurring Suggestions') }}
                                 </v-btn>
                             </div>
+                            <v-alert
+                                class="mt-4"
+                                variant="tonal"
+                                type="info"
+                                density="compact"
+                            >
+                                {{ tt('This panel does not edit scheduled-template matches directly. Current scheduled templates') }}:
+                                {{ overview.recurringRuleCount }}
+                            </v-alert>
                         </v-card-text>
-                        <v-data-table
-                            :headers="recurringHeaders"
-                            :items="overview.recurringRules"
-                            :items-per-page="20"
-                            density="compact"
-                        >
-                            <template #item.amount="{ item }">
-                                ¥{{ Math.abs(item.amount || 0).toFixed(2) }}
-                            </template>
-                            <template #item.enabled="{ item }">
-                                <v-icon
-                                    :icon="item.enabled ? mdiCheckCircle : mdiCloseCircle"
-                                    :color="item.enabled ? 'success' : 'grey'"
-                                    size="small"
-                                />
-                            </template>
-                        </v-data-table>
                     </v-tabs-window-item>
                 </v-tabs-window>
             </v-card>
@@ -604,20 +627,15 @@ const categoryRules = ref<CategoryRuleItem[]>([]);
 const togglingRuleIds = ref<number[]>([]);
 const expandedExpressionClauseKeys = ref<string[]>([]);
 const maxCollapsedExpressionTerms = 4;
+const rulePageSizeOptions = [10, 20, 50, 100];
+const ruleItemsPerPage = ref<number>(20);
+const rulePage = ref(1);
 
 const learningHeaders = computed(() => [
     { title: tt('Match Type'), key: 'matchType' },
     { title: tt('Match Value'), key: 'matchValue' },
     { title: tt('Learned Type'), key: 'learnedType' },
     { title: tt('Applied'), key: 'appliedCount' },
-    { title: tt('Enabled'), key: 'enabled' },
-]);
-
-const recurringHeaders = computed(() => [
-    { title: tt('Name'), key: 'name' },
-    { title: tt('Amount'), key: 'amount' },
-    { title: tt('Frequency'), key: 'frequency' },
-    { title: tt('Next Date'), key: 'nextDate' },
     { title: tt('Enabled'), key: 'enabled' },
 ]);
 
@@ -640,7 +658,7 @@ const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => categoryR
 const groupedCategoryRules = computed<CategoryRuleGroup[]>(() => {
     const groupsByKey = new Map<string, CategoryRuleGroup>();
 
-    for (const item of filteredDisplayCategoryRules.value) {
+    for (const item of paginatedDisplayCategoryRules.value) {
         const group = groupsByKey.get(item.category_group_key) ?? {
             key: item.category_group_key,
             title: item.category_group_name,
@@ -811,6 +829,15 @@ function compareDisplayCategoryRules(firstRule: DisplayCategoryRuleItem, secondR
         || firstRule.id - secondRule.id;
 }
 
+function compareDisplayCategoryRuleOrder(
+    firstRule: DisplayCategoryRuleItem,
+    secondRule: DisplayCategoryRuleItem
+): number {
+    return firstRule.category_group_name.localeCompare(secondRule.category_group_name, 'zh-Hans')
+        || firstRule.category_group_key.localeCompare(secondRule.category_group_key, 'zh-Hans')
+        || compareDisplayCategoryRules(firstRule, secondRule);
+}
+
 // ── Edit dialog state ────────
 const showEditDialog = ref(false);
 const editingRule = ref<CategoryRuleItem | null>(null);
@@ -853,6 +880,34 @@ const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
         const itemCategory = categoryStore.allTransactionCategoriesMap[itemCategoryId];
         return selectedIsPrimary && itemCategory?.parentId === filterId;
     });
+});
+
+const orderedFilteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => (
+    [...filteredDisplayCategoryRules.value].sort(compareDisplayCategoryRuleOrder)
+));
+const rulePageCount = computed(() => Math.max(
+    1,
+    Math.ceil(orderedFilteredDisplayCategoryRules.value.length / ruleItemsPerPage.value)
+));
+const paginatedDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
+    const startIndex = (rulePage.value - 1) * ruleItemsPerPage.value;
+    return orderedFilteredDisplayCategoryRules.value.slice(startIndex, startIndex + ruleItemsPerPage.value);
+});
+const rulePaginationStart = computed(() => (
+    filteredDisplayCategoryRules.value.length === 0
+        ? 0
+        : (rulePage.value - 1) * ruleItemsPerPage.value + 1
+));
+const rulePaginationEnd = computed(() => Math.min(
+    filteredDisplayCategoryRules.value.length,
+    rulePage.value * ruleItemsPerPage.value
+));
+const rulePaginationLabel = computed(() => {
+    if (filteredDisplayCategoryRules.value.length === 0) {
+        return `0 / ${categoryRules.value.length}`;
+    }
+
+    return `${rulePaginationStart.value}-${rulePaginationEnd.value} / ${filteredDisplayCategoryRules.value.length}`;
 });
 
 function clearRuleCategoryFilter(): void {
@@ -1238,6 +1293,9 @@ async function fetchCategoryRules() {
             ...item,
             category_name: item.category_name ?? item.main_category ?? null,
             sub_category_name: item.sub_category_name ?? item.sub_category ?? null,
+            regex_enabled: !!item.regex_enabled,
+            enabled: !!item.enabled,
+            applied_count: Number(item.applied_count ?? 0),
         }));
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, tt('Failed to load category rules'));
@@ -1294,17 +1352,43 @@ watch(
     { immediate: true }
 );
 
+watch(ruleCategoryFilterId, () => {
+    rulePage.value = 1;
+});
+
+watch(ruleItemsPerPage, () => {
+    rulePage.value = 1;
+});
+
+watch(
+    () => filteredDisplayCategoryRules.value.length,
+    () => {
+        if (rulePage.value > rulePageCount.value) {
+            rulePage.value = rulePageCount.value;
+        }
+    }
+);
+
 onMounted(() => fetchAll());
 </script>
 
 <style scoped>
 .rule-center-category-filter {
-    flex: 0 1 280px;
-    min-width: 220px;
+    flex: 1 1 320px;
+    min-width: 240px;
+}
+
+.rule-center-primary-actions {
+    flex: 0 0 auto;
 }
 
 .rule-center-filter-toolbar {
+    flex: 1 1 560px;
     justify-content: flex-end;
+}
+
+.rule-center-page-size {
+    flex: 0 0 112px;
 }
 
 .rule-center-rules-table {
@@ -1316,6 +1400,10 @@ onMounted(() => fetchAll());
     vertical-align: middle;
 }
 
+.rule-center-rules-table :deep(th) {
+    white-space: nowrap;
+}
+
 .rule-center-group-row {
     background: rgba(var(--v-theme-surface-variant), 0.46);
 }
@@ -1325,27 +1413,43 @@ onMounted(() => fetchAll());
 }
 
 .rule-center-column-category {
-    width: 220px;
+    width: 190px;
 }
 
 .rule-center-column-expression {
-    min-width: 360px;
+    min-width: 320px;
 }
 
 .rule-center-column-regex {
-    width: 96px;
+    width: 108px;
+    text-align: center;
 }
 
 .rule-center-column-enabled {
-    width: 112px;
+    width: 104px;
+    text-align: center;
 }
 
 .rule-center-column-applied {
-    width: 88px;
+    width: 84px;
+    text-align: center;
 }
 
 .rule-center-column-actions {
-    width: 140px;
+    width: 132px;
+    text-align: center;
+}
+
+.rule-center-actions-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+}
+
+.rule-center-pagination {
+    border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 }
 
 .rule-expression-stack {
@@ -1373,16 +1477,19 @@ onMounted(() => fetchAll());
 }
 
 .rule-expression-term {
-    display: inline-block;
+    flex: 0 1 auto;
     max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    border-radius: 6px;
-    padding: 2px 6px;
-    background: rgba(var(--v-theme-surface-variant), 0.7);
-    font-size: 0.78rem;
-    line-height: 1.4;
+    border: 1px solid rgba(var(--v-theme-primary), 0.18);
+}
+
+.rule-expression-term :deep(.v-chip__content) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rule-expression-more {
@@ -1393,6 +1500,7 @@ onMounted(() => fetchAll());
 @media (max-width: 960px) {
     .rule-center-filter-toolbar {
         justify-content: flex-start;
+        flex-basis: auto;
     }
 
     .rule-center-rules-table {
