@@ -232,11 +232,17 @@ function buildReviewView(
         return null;
     }
 
+    const titleParts = [title || '', profileText || ''].filter((part, index, parts) => {
+        const normalizedPart = part.trim();
+        return !!normalizedPart && parts.findIndex(candidate => candidate.trim() === normalizedPart) === index;
+    });
+    const resolvedTitle = titleParts.join(' | ');
+
     if (status === 'pending') {
         return {
             status,
             labelKey: pendingLabelKey,
-            title: title || '',
+            title: resolvedTitle,
             color: 'info',
             profileText,
             summary,
@@ -248,7 +254,7 @@ function buildReviewView(
         return {
             status,
             labelKey: acceptedLabelKey,
-            title: title || '',
+            title: resolvedTitle,
             color: 'success',
             profileText,
             summary,
@@ -259,7 +265,7 @@ function buildReviewView(
     return {
         status,
         labelKey: rejectedLabelKey,
-        title: title || '',
+        title: resolvedTitle,
         color: 'error',
         profileText,
         summary,

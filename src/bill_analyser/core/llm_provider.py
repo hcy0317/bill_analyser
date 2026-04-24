@@ -45,8 +45,9 @@ class OpenAIProvider:
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.api_key: str = config.get("api_key", "")
-        self.base_url: str = config.get("base_url", "https://api.openai.com/v1")
-        self.model: str = config.get("model", "gpt-4o-mini")
+        self.base_url: str = config.get("base_url") or "https://api.openai.com/v1"
+        self.model: str = config.get("model") or "gpt-4o-mini"
+        self.provider_name: str = config.get("provider_name") or "openai"
         self.timeout: float = config.get("timeout", _DEFAULT_TIMEOUT)
 
     async def generate(
@@ -84,7 +85,7 @@ class OpenAIProvider:
         return LLMResponse(
             content=content,
             model=self.model,
-            provider="openai",
+            provider=self.provider_name,
             tokens_used=tokens_used,
             raw_response=data,
         )
@@ -95,8 +96,8 @@ class ClaudeProvider:
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.api_key: str = config.get("api_key", "")
-        self.base_url: str = config.get("base_url", "https://api.anthropic.com/v1")
-        self.model: str = config.get("model", "claude-sonnet-4-20250514")
+        self.base_url: str = config.get("base_url") or "https://api.anthropic.com/v1"
+        self.model: str = config.get("model") or "claude-sonnet-4-20250514"
         self.timeout: float = config.get("timeout", _DEFAULT_TIMEOUT)
 
     async def generate(
@@ -146,8 +147,8 @@ class OllamaProvider:
     """Ollama local model provider using httpx."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        self.base_url: str = config.get("base_url", "http://localhost:11434")
-        self.model: str = config.get("model", "llama3")
+        self.base_url: str = config.get("base_url") or "http://localhost:11434"
+        self.model: str = config.get("model") or "llama3"
         self.timeout: float = config.get("timeout", _DEFAULT_TIMEOUT * 2)
 
     async def generate(
@@ -194,23 +195,101 @@ class ProviderFactory:
     _PROVIDERS: dict[str, type] = {
         "openai": OpenAIProvider,
         "claude": ClaudeProvider,
+        "anthropic": ClaudeProvider,
+        "deepseek": OpenAIProvider,
+        "xai": OpenAIProvider,
+        "google": OpenAIProvider,
+        "openrouter": OpenAIProvider,
+        "openai_compatible": OpenAIProvider,
+        "openai-compatible": OpenAIProvider,
+        "azure": OpenAIProvider,
+        "azure_openai": OpenAIProvider,
+        "azure-openai": OpenAIProvider,
         "ollama": OllamaProvider,
+    }
+
+    _ALIASES: dict[str, str] = {
+        "anthropic": "claude",
+        "openai-compatible": "openai_compatible",
+        "azure_openai": "azure",
+        "azure-openai": "azure",
+    }
+
+    _OPENAI_COMPATIBLE_DEFAULTS: dict[str, dict[str, str]] = {
+        "deepseek": {
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+        },
+        "xai": {
+            "base_url": "https://api.x.ai/v1",
+            "model": "grok-3-mini",
+        },
+        "google": {
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "model": "gemini-2.0-flash",
+        },
+        "openrouter": {
+            "base_url": "https://openrouter.ai/api/v1",
+            "model": "openai/gpt-4o-mini",
+        },
+        "openai_compatible": {
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+        },
+        "azure": {
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+        },
     }
 
     @classmethod
     def create(cls, provider_name: str, config: dict[str, Any]) -> LLMProvider:
         """Create a provider instance by name."""
-        provider_cls = cls._PROVIDERS.get(provider_name.lower())
+        normalized_name = cls._normalize_provider_name(provider_name)
+        provider_cls = cls._PROVIDERS.get(normalized_name)
         if provider_cls is None:
             raise ValueError(
                 f"Unknown provider '{provider_name}'. "
-                f"Available: {list(cls._PROVIDERS.keys())}"
+                f"Available: {cls.available_providers()}"
             )
-        return provider_cls(config)  # type: ignore[return-value]
+        provider_config = cls._with_provider_defaults(normalized_name, config)
+        return provider_cls(provider_config)  # type: ignore[return-value]
 
     @classmethod
     def available_providers(cls) -> list[str]:
-        return list(cls._PROVIDERS.keys())
+        return [
+            "openai",
+            "claude",
+            "anthropic",
+            "deepseek",
+            "ollama",
+            "xai",
+            "google",
+            "openrouter",
+            "openai_compatible",
+            "openai-compatible",
+            "azure",
+            "azure_openai",
+        ]
+
+    @classmethod
+    def _normalize_provider_name(cls, provider_name: str) -> str:
+        normalized_name = (provider_name or "openai").lower().strip()
+        return cls._ALIASES.get(normalized_name, normalized_name)
+
+    @classmethod
+    def _with_provider_defaults(
+        cls,
+        normalized_name: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider_config = dict(config)
+        defaults = cls._OPENAI_COMPATIBLE_DEFAULTS.get(normalized_name)
+        if defaults:
+            provider_config["base_url"] = provider_config.get("base_url") or defaults["base_url"]
+            provider_config["model"] = provider_config.get("model") or defaults["model"]
+            provider_config["provider_name"] = normalized_name
+        return provider_config
 
 
 async def _request_with_retries(

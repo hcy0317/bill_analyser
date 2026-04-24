@@ -1,37 +1,54 @@
 <template>
-    <v-card>
-        <v-card-title class="d-flex flex-wrap align-center ga-2">
-            <v-icon :icon="activeTab === 'llm' || activeTab === 'llm-config' ? mdiRobotOutline : mdiBrain" class="me-1" />
-            <span>{{ panelTitle }}</span>
-            <v-chip v-if="activeTab === 'llm' && llmPendingCount > 0" size="small" color="warning" variant="tonal">
-                {{ llmPendingCount }} {{ tt('Pending') }}
-            </v-chip>
-            <v-spacer />
-            <v-btn v-if="activeTab === 'suggestions'" variant="outlined" color="secondary"
-                   :disabled="loading"
-                   @click="handleGenerate">
-                <v-icon start :icon="mdiAutoFix" />
-                {{ tt('Generate Suggestions') }}
-            </v-btn>
-            <v-btn v-if="activeTab === 'suggestions'" variant="tonal" color="success"
-                   :disabled="loading || selectedIds.length === 0"
-                   @click="handleBatchAccept">
-                <v-icon start :icon="mdiCheckAll" />
-                {{ tt('Batch Accept') }} ({{ selectedIds.length }})
-            </v-btn>
-            <v-btn v-if="activeTab === 'llm-config'" size="small" variant="tonal" color="primary"
-                   @click="openAddConfigDialog">
-                {{ tt('Add Config') }}
-            </v-btn>
-            <v-btn variant="outlined" :disabled="loading" @click="refreshCurrentTab">
-                <v-icon start :icon="mdiRefresh" />
-                {{ tt('Refresh') }}
-            </v-btn>
-        </v-card-title>
+    <v-card variant="flat" class="learning-center-panel">
 
         <v-progress-linear v-if="loading" indeterminate color="primary" />
 
         <v-card-text>
+            <div class="learning-panel-toolbar d-flex flex-wrap align-center ga-2 mb-4">
+                <v-btn v-if="activeTab === 'suggestions'"
+                       class="learning-panel-action"
+                       size="small"
+                       variant="outlined"
+                       color="default"
+                       :disabled="loading"
+                       @click="handleGenerate">
+                    {{ tt('Generate Suggestions') }}
+                </v-btn>
+                <v-btn v-if="activeTab === 'suggestions'"
+                       class="learning-panel-action"
+                       size="small"
+                       variant="outlined"
+                       color="default"
+                       :disabled="loading || selectedIds.length === 0"
+                       @click="handleBatchAccept">
+                    {{ tt('Batch Accept') }} ({{ selectedIds.length }})
+                </v-btn>
+                <v-btn v-if="activeTab === 'llm-config'"
+                       class="learning-panel-action"
+                       size="small"
+                       variant="outlined"
+                       color="default"
+                       @click="openAddConfigDialog">
+                    {{ tt('Add Config') }}
+                </v-btn>
+                <v-chip v-if="activeTab === 'llm' && llmPendingCount > 0"
+                        size="small"
+                        color="warning"
+                        variant="tonal">
+                    {{ llmPendingCount }} {{ tt('Pending') }}
+                </v-chip>
+                <v-btn variant="text"
+                       color="default"
+                       size="32"
+                       density="compact"
+                       :icon="true"
+                       :loading="loading"
+                       @click="refreshCurrentTab">
+                    <v-icon :icon="mdiRefresh" size="20" />
+                    <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                </v-btn>
+            </div>
+
             <v-alert v-if="error" type="error" closable class="mb-4"
                      @click:close="clearError">
                 {{ error }}
@@ -187,11 +204,7 @@
             <template v-if="activeTab === 'llm-config'">
                                 <!-- LLM 多配置管理 -->
                                 <v-card variant="outlined" class="mb-4">
-                                    <v-card-title class="text-subtitle-1 d-flex align-center">
-                                        <v-icon start :icon="mdiCog" size="small" />
-                                        {{ tt('LLM Config') }}
-                                    </v-card-title>
-                                    <v-card-text>
+                                    <v-card-text class="pt-4">
                                         <v-table v-if="llmSavedConfigs.length > 0" density="compact" hover>
                                             <thead>
                                                 <tr>
@@ -205,7 +218,7 @@
                                             <tbody>
                                                 <tr v-for="cfg in llmSavedConfigs" :key="cfg.id">
                                                     <td>{{ cfg.name }}</td>
-                                                    <td>{{ cfg.provider }}</td>
+                                                    <td>{{ llmProviderLabel(cfg.provider) }}</td>
                                                     <td>{{ cfg.model }}</td>
                                                     <td class="text-center">
                                                         <v-icon v-if="cfg.is_active" :icon="mdiCheck" color="success" size="small" />
@@ -232,9 +245,7 @@
 
             <template v-if="activeTab === 'llm'">
                                 <!-- 候选列表 -->
-                                <div class="d-flex align-center mb-2">
-                                    <span class="text-subtitle-2">{{ tt('Candidate Rules') }}</span>
-                                    <v-spacer />
+                                <div class="d-flex flex-wrap align-center mb-2">
                                     <v-chip-group v-model="llmStatusFilter" mandatory>
                                         <v-chip value="" variant="tonal" size="small">{{ tt('All') }}</v-chip>
                                         <v-chip value="pending" variant="tonal" color="warning" size="small">{{ tt('Pending') }}</v-chip>
@@ -326,25 +337,54 @@
     <v-dialog v-model="addConfigDialog" max-width="500" persistent>
         <v-card>
             <v-card-title>{{ tt('Add Config') }}</v-card-title>
-            <v-card-text>
-                <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
-                              density="compact" class="mb-3" placeholder="My OpenAI Config" />
-                <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
-                          :items="['openai', 'anthropic', 'deepseek', 'ollama']"
-                          density="compact" class="mb-3" />
-                <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
-                              density="compact" class="mb-3" placeholder="gpt-4o-mini" />
-                <v-text-field v-model="newConfigForm.api_key" label="API Key"
-                              density="compact" class="mb-3" type="password" placeholder="sk-..." />
-                <v-text-field v-model="newConfigForm.base_url" :label="tt('Base URL (optional)')"
-                              density="compact" placeholder="https://api.openai.com/v1" />
-            </v-card-text>
-            <v-card-actions>
-                <v-spacer />
-                <v-btn variant="text" @click="addConfigDialog = false">{{ tt('Cancel') }}</v-btn>
-                <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
-                       @click="saveNewConfig">{{ tt('Save') }}</v-btn>
-            </v-card-actions>
+            <form autocomplete="off" @submit.prevent="saveNewConfig">
+                <v-card-text>
+                    <input class="llm-config-autofill-decoy"
+                           type="text"
+                           name="username"
+                           autocomplete="username"
+                           tabindex="-1"
+                           aria-hidden="true" />
+                    <input class="llm-config-autofill-decoy"
+                           type="password"
+                           name="password"
+                           autocomplete="current-password"
+                           tabindex="-1"
+                           aria-hidden="true" />
+                    <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
+                                  :name="llmConfigFieldNames.name"
+                                  autocomplete="off"
+                                  density="compact" class="mb-3" placeholder="My OpenAI Config" />
+                    <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
+                              :items="llmProviderOptions"
+                              item-title="title"
+                              item-value="value"
+                              :name="llmConfigFieldNames.provider"
+                              autocomplete="off"
+                              density="compact" class="mb-3" />
+                    <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
+                                  :name="llmConfigFieldNames.model"
+                                  autocomplete="off"
+                                  density="compact" class="mb-3"
+                                  :placeholder="selectedLLMProviderOption.modelPlaceholder" />
+                    <v-text-field v-model="newConfigForm.api_key" label="API Key"
+                                  :name="llmConfigFieldNames.apiKey"
+                                  autocomplete="new-password"
+                                  density="compact" class="mb-3" type="password"
+                                  :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
+                    <v-text-field v-model="newConfigForm.base_url" :label="baseUrlFieldLabel"
+                                  :name="llmConfigFieldNames.baseUrl"
+                                  autocomplete="off"
+                                  density="compact"
+                                  :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
+                </v-card-text>
+                <v-card-actions>
+                    <v-spacer />
+                    <v-btn variant="text" type="button" @click="addConfigDialog = false">{{ tt('Cancel') }}</v-btn>
+                    <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
+                           type="submit">{{ tt('Save') }}</v-btn>
+                </v-card-actions>
+            </form>
         </v-card>
     </v-dialog>
 </template>
@@ -361,17 +401,13 @@ import services from '@/lib/services.ts';
 
 import {
     mdiRefresh,
-    mdiAutoFix,
-    mdiCheckAll,
-    mdiBrain,
     mdiCheck,
     mdiClose,
     mdiDelete,
     mdiPencil,
     mdiLightbulbOutline,
     mdiBookOpenPageVariant,
-    mdiRobotOutline,
-    mdiCog
+    mdiRobotOutline
 } from '@mdi/js';
 
 interface LLMConfigItem {
@@ -379,11 +415,27 @@ interface LLMConfigItem {
     name: string;
     provider: string;
     model: string;
-    api_key?: string;
     base_url?: string;
     is_active?: boolean;
     created_at?: string;
     updated_at?: string;
+}
+
+interface LLMConfigForm {
+    name: string;
+    provider: string;
+    model: string;
+    api_key: string;
+    base_url: string;
+}
+
+interface LLMProviderOption {
+    title: string;
+    value: string;
+    modelPlaceholder: string;
+    apiKeyPlaceholder: string;
+    baseUrlPlaceholder: string;
+    requiresBaseUrl?: boolean;
 }
 
 interface LLMCandidateItem {
@@ -419,25 +471,86 @@ const statusFilter = ref<string>('');
 const selectedIds = ref<number[]>([]);
 const lastGenerateResult = ref<GenerateSuggestionsResponse | null>(null);
 
+const llmProviderOptions: LLMProviderOption[] = [
+    {
+        title: 'OpenAI',
+        value: 'openai',
+        modelPlaceholder: 'gpt-4o-mini',
+        apiKeyPlaceholder: 'sk-...',
+        baseUrlPlaceholder: 'https://api.openai.com/v1',
+    },
+    {
+        title: 'Claude (Anthropic)',
+        value: 'claude',
+        modelPlaceholder: 'claude-sonnet-4-20250514',
+        apiKeyPlaceholder: 'sk-ant-...',
+        baseUrlPlaceholder: 'https://api.anthropic.com/v1',
+    },
+    {
+        title: 'DeepSeek',
+        value: 'deepseek',
+        modelPlaceholder: 'deepseek-chat',
+        apiKeyPlaceholder: 'sk-...',
+        baseUrlPlaceholder: 'https://api.deepseek.com/v1',
+    },
+    {
+        title: 'Ollama (local)',
+        value: 'ollama',
+        modelPlaceholder: 'llama3.1',
+        apiKeyPlaceholder: tt('Not required'),
+        baseUrlPlaceholder: 'http://localhost:11434',
+    },
+    {
+        title: 'xAI',
+        value: 'xai',
+        modelPlaceholder: 'grok-3-mini',
+        apiKeyPlaceholder: 'xai-...',
+        baseUrlPlaceholder: 'https://api.x.ai/v1',
+    },
+    {
+        title: 'Google (Gemini)',
+        value: 'google',
+        modelPlaceholder: 'gemini-2.0-flash',
+        apiKeyPlaceholder: 'AIza...',
+        baseUrlPlaceholder: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    },
+    {
+        title: 'OpenRouter',
+        value: 'openrouter',
+        modelPlaceholder: 'openai/gpt-4o-mini',
+        apiKeyPlaceholder: 'sk-or-...',
+        baseUrlPlaceholder: 'https://openrouter.ai/api/v1',
+    },
+    {
+        title: 'OpenAI-compatible',
+        value: 'openai_compatible',
+        modelPlaceholder: 'gpt-4o-mini',
+        apiKeyPlaceholder: 'sk-...',
+        baseUrlPlaceholder: 'https://your-provider.example.com/v1',
+        requiresBaseUrl: true,
+    },
+    {
+        title: 'Azure OpenAI',
+        value: 'azure',
+        modelPlaceholder: 'deployment-name',
+        apiKeyPlaceholder: 'Azure API key',
+        baseUrlPlaceholder: 'https://<resource>.openai.azure.com/openai/v1',
+        requiresBaseUrl: true,
+    },
+];
+
+const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
+
+const legacyLLMProviderLabels: Record<string, string> = {
+    anthropic: 'Claude (Anthropic)',
+    'openai-compatible': 'OpenAI-compatible',
+    azure_openai: 'Azure OpenAI',
+};
+
 const loading = computed(() => store.suggestionsLoading || store.rulesLoading);
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);
-const panelTitle = computed(() => {
-    if (activeTab.value === 'rules') {
-        return tt('Learning Rules');
-    }
-
-    if (activeTab.value === 'llm') {
-        return tt('Induction Overview');
-    }
-
-    if (activeTab.value === 'llm-config') {
-        return tt('LLM Config');
-    }
-
-    return tt('Learning Overview');
-});
 
 const filteredSuggestions = computed(() => {
     if (!statusFilter.value) return store.suggestions;
@@ -471,7 +584,15 @@ function clearError() {
 }
 
 function toLLMConfigs(result: unknown): LLMConfigItem[] {
-    return Array.isArray(result) ? result as LLMConfigItem[] : [];
+    if (!Array.isArray(result)) {
+        return [];
+    }
+
+    return result.map((item) => {
+        const safeItem = { ...(item as Record<string, unknown>) };
+        delete safeItem['api_key'];
+        return safeItem as unknown as LLMConfigItem;
+    });
 }
 
 function toLLMCandidates(result: unknown): LLMCandidateItem[] {
@@ -651,7 +772,29 @@ const llmStatusFilter = ref<string>('');
 // Add Config Dialog
 const addConfigDialog = ref(false);
 const addConfigSaving = ref(false);
-const newConfigForm = ref({ name: '', provider: 'openai', model: '', api_key: '', base_url: '' });
+const autofillNonce = ref(Date.now());
+
+function createEmptyLLMConfigForm(): LLMConfigForm {
+    return { name: '', provider: 'openai', model: '', api_key: '', base_url: '' };
+}
+
+const newConfigForm = ref<LLMConfigForm>(createEmptyLLMConfigForm());
+
+const selectedLLMProviderOption = computed<LLMProviderOption>(() => (
+    llmProviderOptions.find(option => option.value === newConfigForm.value.provider) ?? defaultLLMProviderOption
+));
+
+const baseUrlFieldLabel = computed(() => (
+    selectedLLMProviderOption.value.requiresBaseUrl ? tt('Base URL') : tt('Base URL (optional)')
+));
+
+const llmConfigFieldNames = computed(() => ({
+    name: `llm-config-label-${autofillNonce.value}`,
+    provider: `llm-config-provider-${autofillNonce.value}`,
+    model: `llm-config-model-${autofillNonce.value}`,
+    apiKey: `llm-config-credential-${autofillNonce.value}`,
+    baseUrl: `llm-config-endpoint-${autofillNonce.value}`,
+}));
 
 const llmPendingCount = computed(() =>
     llmCandidates.value.filter(c => c.status === 'pending').length
@@ -696,23 +839,38 @@ async function loadLLMConfigs() {
 }
 
 function openAddConfigDialog() {
-    newConfigForm.value = { name: '', provider: 'openai', model: '', api_key: '', base_url: '' };
+    autofillNonce.value = Date.now();
+    newConfigForm.value = createEmptyLLMConfigForm();
     addConfigDialog.value = true;
 }
 
 async function saveNewConfig() {
-    if (!newConfigForm.value.name.trim()) {
+    const form = newConfigForm.value;
+    const payload = {
+        name: form.name.trim(),
+        provider: form.provider,
+        model: form.model.trim(),
+        api_key: form.api_key.trim(),
+        base_url: form.base_url.trim(),
+        is_active: llmSavedConfigs.value.length === 0,
+    };
+
+    if (!payload.name) {
         store.error = 'Name is required';
         return;
     }
+
+    if (selectedLLMProviderOption.value.requiresBaseUrl && !payload.base_url) {
+        store.error = `${selectedLLMProviderOption.value.title} requires a Base URL`;
+        return;
+    }
+
     addConfigSaving.value = true;
     try {
-        const resp = await services.createLLMConfig({
-            ...newConfigForm.value,
-            is_active: llmSavedConfigs.value.length === 0, // auto-activate first config
-        });
+        const resp = await services.createLLMConfig(payload);
         if (resp.data?.success) {
             addConfigDialog.value = false;
+            newConfigForm.value = createEmptyLLMConfigForm();
             await loadLLMConfigs();
         } else {
             store.error = getPayloadErrorMessage(resp.data?.result, 'Failed to create config');
@@ -722,6 +880,12 @@ async function saveNewConfig() {
     } finally {
         addConfigSaving.value = false;
     }
+}
+
+function llmProviderLabel(provider: string): string {
+    return llmProviderOptions.find(option => option.value === provider)?.title
+        ?? legacyLLMProviderLabels[provider]
+        ?? provider;
 }
 
 async function handleActivateConfig(configId: number) {
@@ -793,6 +957,30 @@ watch(activeTab, (tab) => {
 </script>
 
 <style scoped>
+.learning-center-panel {
+    background: transparent;
+}
+
+.learning-panel-toolbar {
+    min-height: 32px;
+}
+
+.learning-panel-action {
+    min-width: 152px;
+}
+
+.llm-config-autofill-decoy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    border: 0;
+}
+
 .v-table :deep(td) {
     padding-block: 12px;
     vertical-align: middle;

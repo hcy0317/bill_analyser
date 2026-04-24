@@ -29,9 +29,24 @@ def _get_app_services():
 
 
 def _reload_engine(engine, db, user_id: int):
-    """Invalidate cache and reload rules after mutation."""
-    engine.invalidate_cache()
-    _run_async(engine.load_rules_from_db(db, user_id=user_id))
+    """Invalidate and reload every category engine that can serve runtime matching.
+
+    The category-rules API owns the canonical mutation path, while import preview
+    matching is served through ``BillService``.  In older app wiring these two
+    paths can hold distinct CategoryEngine instances, so reload both when needed
+    instead of refreshing only the app-global engine.
+    """
+    engines = [engine]
+    bill_service = cast("Any", current_app.config.get("BILL_SERVICE_INSTANCE"))
+    bill_service_engine = cast("Any", getattr(bill_service, "category_engine", None))
+    if bill_service_engine is not None and bill_service_engine is not engine:
+        engines.append(bill_service_engine)
+
+    for runtime_engine in engines:
+        if runtime_engine is None:
+            continue
+        runtime_engine.invalidate_cache()
+        _run_async(runtime_engine.load_rules_from_db(db, user_id=user_id))
 
 
 # ------------------------------------------------------------------

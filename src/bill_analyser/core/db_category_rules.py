@@ -80,13 +80,22 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
         user_id: int = 1,
         category_id: int | None = None,
         enabled_only: bool = True,
+        include_category_priority: bool = False,
     ) -> list[dict[str, Any]]:
         """获取分类规则列表。"""
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
 
-        query = (
-            "SELECT cr.*, c.main_category, c.sub_category, c.type AS category_type "
+        select_fields = (
+            "SELECT cr.*, c.main_category, c.sub_category, "
+            "c.type AS category_type "
+        )
+        if include_category_priority:
+            select_fields = (
+                "SELECT cr.*, c.main_category, c.sub_category, "
+                "c.type AS category_type, c.priority AS category_priority "
+            )
+        query = select_fields + (
             "FROM category_rules cr "
             "JOIN categories c ON cr.category_id = c.id "
             "WHERE cr.user_id = ?"
@@ -100,7 +109,10 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
         if enabled_only:
             query += " AND cr.enabled = 1"
 
-        query += " ORDER BY cr.priority ASC, cr.id ASC"
+        if include_category_priority:
+            query += " ORDER BY c.priority ASC, c.id ASC, cr.id ASC"
+        else:
+            query += " ORDER BY cr.priority ASC, cr.id ASC"
 
         async with conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
@@ -353,8 +365,8 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
         New: ``OR={k1,k2}+AND={k3}+NOT={k4}``
 
         Literal terms are escaped when serialized so legacy keywords containing
-        expression delimiters such as ``,``, ``+``, ``{}``, or ``|`` remain a
-        single literal after migration.
+        expression delimiters such as ``,``, ``+``, ``×``, ``/``, ``{}``, or
+        ``|`` remain a single literal after migration.
         """
         if not old_kw:
             return ""

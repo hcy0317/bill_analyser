@@ -102,6 +102,42 @@ describe('keywordExpression helpers', () => {
         });
     });
 
+    test('accepts visible connector aliases but serializes back to canonical composite syntax', () => {
+        const expression = 'OR={早餐}/OR={咖啡}×NOT={退款} NOT OR={测试}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
+            { joiner: 'OR', operator: 'OR', terms: ['咖啡'] },
+            { joiner: 'AND', operator: 'NOT', terms: ['退款'] },
+            { joiner: 'AND', operator: 'NOT', terms: ['测试'] }
+        ]);
+        expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
+            expression: 'OR={早餐}|OR={咖啡}+NOT={退款}+NOT={测试}'
+        });
+    });
+
+    test('treats bare visible multiplication connector as canonical AND instead of NOT', () => {
+        const expression = 'OR={早餐}×OR={咖啡}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
+            { joiner: 'AND', operator: 'OR', terms: ['咖啡'] }
+        ]);
+        expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
+            expression: 'OR={早餐}+OR={咖啡}'
+        });
+    });
+
     test('keeps escaped pipe terms inside one expression while splitting top-level expressions', () => {
         const expression = 'OR={A\\|B}|OR={C}';
         const parsed = parseExpression(expression, {
@@ -115,6 +151,72 @@ describe('keywordExpression helpers', () => {
             { joiner: 'OR', operator: 'OR', terms: ['C'] }
         ]);
         expect(serializeComposite(parsed.clauses)).toStrictEqual({ expression });
+    });
+
+    test('roundtrips escaped slash and multiplication literals without double escaping', () => {
+        const expression = 'OR={拿铁\\/燕麦\\×热}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['拿铁/燕麦×热'] }
+        ]);
+        expect(serializeComposite(parsed.clauses)).toStrictEqual({ expression });
+    });
+
+    test('repairs escaped nested composite expressions instead of preserving malformed text terms', () => {
+        const expression = 'OR={\\(OR=\\{共享单车\\,摩拜\\}+OR=\\{549\\}\\)}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['共享单车', '摩拜'], openParens: 1, closeParens: 0 },
+            { joiner: 'AND', operator: 'OR', terms: ['549'], openParens: 0, closeParens: 1 }
+        ]);
+        expect(serializeComposite(parsed.clauses)).toStrictEqual({
+            expression: '(OR={共享单车,摩拜}+OR={549})'
+        });
+    });
+
+    test('does not repair nested composite literals under NOT wrappers', () => {
+        const expression = 'NOT={\\(OR=\\{退款\\}\\)}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'NOT', terms: ['(OR={退款})'], openParens: 0, closeParens: 0 }
+        ]);
+        expect(serializeComposite(parsed.clauses)).toStrictEqual({
+            expression
+        });
+        expect(serializeComposite(parsed.clauses)).not.toStrictEqual({
+            expression: 'OR={退款}'
+        });
+    });
+
+    test('does not repair nested composite literals under AND wrappers', () => {
+        const expression = 'AND={\\(OR=\\{门店\\}\\)}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'AND', terms: ['(OR={门店})'], openParens: 0, closeParens: 0 }
+        ]);
+        expect(serializeComposite(parsed.clauses)).toStrictEqual({
+            expression
+        });
     });
 
     test('supports Enter-style chip creation and removable chips as clause updates', () => {
@@ -179,33 +281,20 @@ describe('keywordExpression helpers', () => {
     });
 });
 
-describe('keyword expression i18n keys', () => {
-    test('new row editor messages exist in all frontend locale packs', () => {
-        const requiredKeys = [
-            'Build a boolean rule expression with OR / AND / NOT rows. Use parentheses on any row to control precedence; each row serializes to backend-supported OR={...}+AND={...}+NOT={...} syntax.',
-            'Rule expression parentheses are not balanced',
-            'Rule expression uses unsupported syntax and is preserved as raw text',
-            'Original rule expression',
-            'Regex Patterns',
-            'Left parentheses',
-            'Right parentheses',
-            'Add left parenthesis',
-            'Remove left parenthesis',
-            'Add right parenthesis',
-            'Remove right parenthesis',
-            'Insert clause after this row',
-            'Add Expression',
-            'Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.',
-            'Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}'
+describe('keyword expression component copy', () => {
+    test('builder components no longer render stale helper/example copy or priority control', () => {
+        const componentFiles = [
+            path.resolve(process.cwd(), 'src/components/common/KeywordInput.vue'),
+            path.resolve(process.cwd(), 'src/components/common/CategoryRuleBuilderFields.vue'),
         ];
-        const localeFiles = ['en.json', 'zh_Hans.json', 'zh_Hant.json'];
+        const combinedSource = componentFiles
+            .map(componentPath => fs.readFileSync(componentPath, 'utf-8'))
+            .join('\n');
 
-        for (const localeFile of localeFiles) {
-            const localePath = path.resolve(process.cwd(), 'src/locales', localeFile);
-            const locale = JSON.parse(fs.readFileSync(localePath, 'utf-8')) as Record<string, string>;
-            for (const key of requiredKeys) {
-                expect(locale[key]).toBeTruthy();
-            }
-        }
+        expect(combinedSource).not.toContain(
+            'Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.'
+        );
+        expect(combinedSource).not.toContain('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}');
+        expect(combinedSource).not.toContain('Rule Priority');
     });
 });

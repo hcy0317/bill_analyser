@@ -29,8 +29,9 @@ class FakeCategoryDB:
         user_id: int = 1,
         category_id: int | None = None,
         enabled_only: bool = True,
+        include_category_priority: bool = False,
     ) -> list[dict[str, Any]]:
-        _ = (category_id, enabled_only)
+        _ = (category_id, enabled_only, include_category_priority)
         self.user_calls.append(user_id)
         if self.error is not None:
             raise self.error
@@ -92,6 +93,19 @@ def test_keyword_matcher_rule_expression_ast_preserves_old_and_new_semantics() -
     assert matcher.match_compiled("瑞幸拿铁", parenthesized) is True
     assert matcher.match_compiled("星巴克早餐", parenthesized) is False
 
+    slash_or = matcher.compile_rule_expression("OR={早餐}/OR={早饭}")
+    assert matcher.match_compiled("早餐铺", slash_or) is True
+    assert matcher.match_compiled("早饭摊", slash_or) is True
+    assert matcher.match_compiled("咖啡店", slash_or) is False
+
+    visible_not = matcher.compile_rule_expression("OR={早餐,早饭}×NOT={退款}")
+    assert matcher.match_compiled("早餐套餐", visible_not) is True
+    assert matcher.match_compiled("早饭退款", visible_not) is False
+
+    malformed_nested = matcher.compile_rule_expression("(OR={早餐}/AND={咖啡}")
+    assert malformed_nested.is_empty is True
+    assert matcher.match_compiled("早餐咖啡", malformed_nested) is False
+
 
 def test_keyword_matcher_rule_expression_regex_switch_and_regex_clause() -> None:
     """regex_enabled 与 REGEX 子句都应进入真实匹配语义。"""
@@ -112,16 +126,16 @@ def test_keyword_matcher_rule_expression_regex_switch_and_regex_clause() -> None
 
 
 def test_keyword_migration_escapes_expression_delimiters_as_literals() -> None:
-    """旧关键词迁移时不应把逗号、加号、花括号和竖线误当新语法分隔符。"""
+    """旧关键词迁移时不应把表达式分隔符误当新语法。"""
     matcher = KeywordMatcher()
 
-    plain_legacy = "商户A,咖啡+拿铁{热}|杯"
+    plain_legacy = "商户A,咖啡+拿铁/燕麦×热{杯}|杯"
     plain_expr = DatabaseCategoryRulesMixin._convert_old_keyword_syntax(plain_legacy)
-    assert plain_expr == r"OR={商户A\,咖啡\+拿铁\{热\}\|杯}"
+    assert plain_expr == r"OR={商户A\,咖啡\+拿铁\/燕麦\×热\{杯\}\|杯}"
 
     plain_compiled = matcher.compile_rule_expression(plain_expr)
-    assert matcher.match_compiled("订单 商户A,咖啡+拿铁{热}|杯", plain_compiled) is True
-    assert matcher.match_compiled("订单 商户A 咖啡 拿铁 热 杯", plain_compiled) is False
+    assert matcher.match_compiled("订单 商户A,咖啡+拿铁/燕麦×热{杯}|杯", plain_compiled) is True
+    assert matcher.match_compiled("订单 商户A 咖啡 拿铁 燕麦 热 杯", plain_compiled) is False
 
     legacy_expr = DatabaseCategoryRulesMixin._convert_old_keyword_syntax(
         r"OR:商户A\|联名|普通,门店&AND:上海\&浦东|午餐+套餐&NOT:退款\|撤销"
@@ -199,6 +213,55 @@ async def test_category_engine_loads_rules_filters_types_and_handles_failures() 
     failed_engine = CategoryEngine()
     await failed_engine.load_rules_from_db(FakeCategoryDB(error=RuntimeError("db down")), user_id=1)
     assert failed_engine.rules == []
+
+
+@pytest.mark.asyncio
+async def test_category_engine_matching_order_uses_category_priority_not_rule_priority() -> None:
+    """运行时分类命中顺序应由 categories.priority 决定，而不是规则 priority。"""
+    engine = CategoryEngine()
+    db = FakeCategoryDB(
+        [
+            {
+                "id": 401,
+                "category_id": 40,
+                "main_category": "低分类优先级",
+                "sub_category": "咖啡",
+                "priority": 1,
+                "category_priority": 50,
+                "rule_expression": "OR={咖啡}",
+                "category_type": TransactionType.EXPENSE,
+            },
+            {
+                "id": 402,
+                "category_id": 41,
+                "main_category": "高分类优先级",
+                "sub_category": "咖啡",
+                "priority": 999,
+                "category_priority": 5,
+                "rule_expression": "OR={咖啡}",
+                "category_type": TransactionType.EXPENSE,
+            },
+        ]
+    )
+
+    await engine.load_rules_from_db(db, user_id=7, types=[TransactionType.EXPENSE])
+
+    loaded_order = [
+        (rule["main"], rule["priority"], rule["rule_priority"])
+        for rule in engine.rules
+    ]
+    assert loaded_order == [
+        ("高分类优先级", 5, 999),
+        ("低分类优先级", 50, 1),
+    ]
+    assert engine.match_category(
+        {
+            "counterparty": "咖啡店",
+            "description": "咖啡",
+            "type": "支出",
+            "amount": -20.0,
+        }
+    ) == ("高分类优先级", "咖啡")
 
 
 

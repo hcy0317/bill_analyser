@@ -70,38 +70,12 @@
                             />
                         </v-col>
                         <v-col cols="12" md="12" v-if="isSecondaryCategory">
-                            <div class="d-flex flex-column flex-sm-row align-sm-center ga-2 mb-3">
-                                <div class="text-caption text-medium-emphasis flex-grow-1">
-                                    {{ tt('Legacy keyword migration copies existing category keywords into canonical category rules. Repeat runs skip rules that already exist.') }}
-                                </div>
-                                <v-btn
-                                    size="small"
-                                    variant="outlined"
-                                    color="primary"
-                                    :prepend-icon="mdiDatabaseImportOutline"
-                                    :loading="migratingKeywords"
-                                    :disabled="loading || submitting || migratingKeywords || !editCategoryId"
-                                    @click="migrateLegacyKeywords"
-                                >
-                                    {{ tt('Import Rules from Legacy Keywords') }}
-                                </v-btn>
-                            </div>
                             <v-progress-linear v-if="ruleLoading" indeterminate color="primary" class="mb-3" />
-                            <v-alert
-                                v-if="hasAdditionalCategoryRules"
-                                type="info"
-                                variant="tonal"
-                                density="compact"
-                                class="mb-3"
-                            >
-                                {{ tt('Only the highest-priority canonical rule is editable here. Use Rule Center when this category needs multiple canonical rules.') }}
-                            </v-alert>
                             <category-rule-builder-fields
                                 v-model="categoryRuleBuilderModel"
                                 :auto-rule-name="autoPrimaryRuleName"
                                 :disabled="loading || submitting || ruleLoading"
                                 :title="tt('Category Matching Rule')"
-                                :description="tt('Edit the canonical primary rule for this secondary category. Leave the expression blank to remove the current primary rule.')"
                             />
                         </v-col>
                         <v-col cols="12" md="12">
@@ -153,7 +127,6 @@ import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
 import { ref, computed, useTemplateRef, onMounted, onUnmounted } from 'vue';
-import { mdiDatabaseImportOutline } from '@mdi/js';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useCategoryEditPageBase } from '@/views/base/categories/CategoryEditPageBase.ts';
@@ -174,13 +147,6 @@ interface TransactionCategoryEditResponse {
     message: string;
     id?: string;
     category?: TransactionCategory;
-}
-
-interface CategoryKeywordMigrationResult {
-    migrated?: number | string | null;
-    migrated_count?: number | string | null;
-    skipped?: number | string | null;
-    skipped_count?: number | string | null;
 }
 
 interface CategoryRuleBuilderModel {
@@ -230,7 +196,6 @@ const transactionCategoriesStore = useTransactionCategoriesStore();
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const showState = ref<boolean>(false);
-const migratingKeywords = ref<boolean>(false);
 const ruleLoading = ref<boolean>(false);
 const primaryCategoryRuleId = ref<number | null>(null);
 const additionalCategoryRulesCount = ref<number>(0);
@@ -240,7 +205,6 @@ let resolveFunc: ((value: TransactionCategoryEditResponse) => void) | null = nul
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
 const isSecondaryCategory = computed<boolean>(() => !!category.value.parentId && category.value.parentId !== '0');
-const hasAdditionalCategoryRules = computed<boolean>(() => additionalCategoryRulesCount.value > 0);
 const isCategoryModified = computed<boolean>(() => {
     if (!editCategoryId.value) { // Add
         return !category.value.equals(TransactionCategory.createNewCategory(category.value.type, category.value.parentId));
@@ -646,49 +610,6 @@ async function save(): Promise<void> {
         showDialogError(error, 'Unable to save category');
     } finally {
         submitting.value = false;
-    }
-}
-
-function getMigrationCount(value: number | string | null | undefined): number {
-    const count = Number(value ?? 0);
-    return Number.isFinite(count) ? count : 0;
-}
-
-async function refreshCurrentCategoryAfterMigration(): Promise<void> {
-    transactionCategoriesStore.updateTransactionCategoryListInvalidState(true);
-    await transactionCategoriesStore.loadAllCategories({ force: false });
-
-    if (!editCategoryId.value) {
-        return;
-    }
-
-    await loadPrimaryCategoryRule(editCategoryId.value);
-}
-
-async function migrateLegacyKeywords(): Promise<void> {
-    migratingKeywords.value = true;
-
-    try {
-        const response = await services.migrateCategoryKeywords();
-
-        if (!response.data?.success) {
-            throw new Error('Migration failed');
-        }
-
-        const result = (response.data.result ?? {}) as CategoryKeywordMigrationResult;
-        const migrated = getMigrationCount(result.migrated ?? result.migrated_count);
-        const skipped = getMigrationCount(result.skipped ?? result.skipped_count);
-
-        await refreshCurrentCategoryAfterMigration();
-
-        snackbar.value?.showMessage('Migration completed: migrated {migrated}, skipped {skipped}', {
-            migrated,
-            skipped
-        });
-    } catch {
-        snackbar.value?.showMessage('Migration failed');
-    } finally {
-        migratingKeywords.value = false;
     }
 }
 

@@ -7,9 +7,8 @@
                                          :permanent="alwaysShowNav"
                                          v-model="showNav"
                                          class="rule-center-navigation">
-                        <div class="mx-4 mt-4">
-                            <div class="text-overline text-medium-emphasis mb-2">{{ tt('Rule Domains') }}</div>
-                            <div class="rule-center-nav-group rule-center-nav-group--domains">
+                        <div class="rule-center-nav-stack mx-4 my-4">
+                            <div class="rule-center-nav-group">
                                 <v-btn v-for="domain in domainOptions"
                                        :key="domain.value"
                                        block
@@ -18,34 +17,24 @@
                                        :color="activeDomain === domain.value ? 'primary' : 'default'"
                                        :variant="activeDomain === domain.value ? 'tonal' : 'outlined'"
                                        @click="selectDomain(domain.value)">
-                                    <div class="d-flex align-center w-100">
-                                        <v-icon :icon="domain.icon" class="me-3" size="20" />
-                                        <span class="text-body-2 font-weight-medium">{{ domain.label }}</span>
-                                    </div>
+                                    <span>{{ domain.label }}</span>
                                 </v-btn>
                             </div>
-                        </div>
 
-                        <v-divider class="mt-4" />
+                            <v-divider class="my-3" />
 
-                        <div class="mx-4 my-4">
-                            <div class="text-overline text-medium-emphasis mb-2">{{ tt('Views') }}</div>
-                            <v-list density="compact" nav>
-                                <v-list-item
-                                    v-for="tab in secondaryTabs"
-                                    :key="tab.value"
-                                    :active="activeTab === tab.value"
-                                    :color="activeTab === tab.value ? 'primary' : undefined"
-                                    rounded="lg"
-                                    @click="selectTab(tab.value)">
-                                    <template #prepend>
-                                        <v-icon :icon="tab.icon" size="20" />
-                                    </template>
-                                    <v-list-item-title class="text-body-2">
-                                        {{ tab.label }}
-                                    </v-list-item-title>
-                                </v-list-item>
-                            </v-list>
+                            <div class="rule-center-nav-group">
+                                <v-btn v-for="tab in secondaryTabs"
+                                       :key="tab.value"
+                                       block
+                                       border
+                                       class="rule-center-nav-button text-none"
+                                       :color="activeTab === tab.value ? 'primary' : 'default'"
+                                       :variant="activeTab === tab.value ? 'tonal' : 'outlined'"
+                                       @click="selectTab(tab.value)">
+                                    <span>{{ tab.label }}</span>
+                                </v-btn>
+                            </div>
                         </div>
                     </v-navigation-drawer>
 
@@ -63,7 +52,6 @@
                                         <v-icon :icon="mdiMenu" size="24" />
                                     </v-btn>
 
-                                    <v-icon :icon="currentDomainOption.icon" />
                                     <div class="min-w-0">
                                         <div class="text-h6">{{ currentDomainOption.label }}</div>
                                         <div class="text-body-2 text-medium-emphasis">{{ currentTabOption.label }}</div>
@@ -76,12 +64,15 @@
                                     </v-chip>
 
                                     <v-btn v-if="isPairingOverview"
-                                           color="primary"
-                                           variant="tonal"
-                                           :disabled="loading"
+                                           color="default"
+                                           variant="text"
+                                           density="compact"
+                                           size="36"
+                                           :icon="true"
+                                           :loading="loading"
                                            @click="refreshActiveView">
-                                        <v-icon start :icon="mdiRefresh" />
-                                        {{ tt('Refresh') }}
+                                        <v-icon :icon="mdiRefresh" size="22" />
+                                        <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                     </v-btn>
                                 </div>
                             </template>
@@ -160,15 +151,8 @@ import { useRoute, useRouter } from 'vue-router';
 import { useDisplay } from 'vuetify';
 
 import {
-    mdiBookCogOutline,
-    mdiCog,
-    mdiBrain,
-    mdiFinance,
-    mdiFormatListBulleted,
     mdiMenu,
     mdiRefresh,
-    mdiRobotOutline,
-    mdiSwapHorizontal,
 } from '@mdi/js';
 
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
@@ -189,13 +173,11 @@ import {
 type DomainOption = {
     value: RuleCenterDomain;
     label: string;
-    icon: string;
 };
 
 type SecondaryTabOption = {
     value: RuleCenterTab;
     label: string;
-    icon: string;
 };
 
 const props = defineProps<{
@@ -236,22 +218,18 @@ const domainOptions = computed<DomainOption[]>(() => [
     {
         value: 'transfer',
         label: tt('Transfer Pairing'),
-        icon: mdiSwapHorizontal,
     },
     {
         value: 'investment',
         label: tt('Investment Pairing'),
-        icon: mdiFinance,
     },
     {
         value: 'learning',
         label: tt('Long-term Learning'),
-        icon: mdiBrain,
     },
     {
         value: 'llm',
         label: tt('LLM Recognition'),
-        icon: mdiRobotOutline,
     },
 ]);
 
@@ -261,12 +239,10 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
             {
                 value: 'overview',
                 label: tt('Pairing Overview'),
-                icon: mdiFormatListBulleted,
             },
             {
                 value: 'rules',
                 label: tt('Pairing Rules'),
-                icon: mdiBookCogOutline,
             },
         ];
     }
@@ -276,12 +252,10 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
             {
                 value: 'overview',
                 label: tt('Pairing Overview'),
-                icon: mdiFormatListBulleted,
             },
             {
                 value: 'rules',
                 label: tt('Pairing Rules'),
-                icon: mdiBookCogOutline,
             },
         ];
     }
@@ -291,12 +265,10 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
             {
                 value: 'overview',
                 label: tt('Suggestions'),
-                icon: mdiFormatListBulleted,
             },
             {
                 value: 'rules',
                 label: tt('Learning Rules'),
-                icon: mdiBookCogOutline,
             },
         ];
     }
@@ -305,12 +277,10 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
         {
             value: 'overview',
             label: tt('Candidate Rules'),
-            icon: mdiFormatListBulleted,
         },
         {
             value: 'config',
             label: tt('LLM Config'),
-            icon: mdiCog,
         },
     ];
 });
@@ -446,25 +416,32 @@ watch(
     flex-direction: column;
 }
 
-.rule-center-nav-group--domains .v-btn:not(:first-child) {
+.rule-center-nav-stack {
+    max-width: 220px;
+    margin-inline: auto;
+}
+
+.rule-center-nav-group .v-btn:not(:first-child) {
     border-top-left-radius: inherit;
     border-top-right-radius: inherit;
 }
 
-.rule-center-nav-group--domains .v-btn:not(:last-child) {
+.rule-center-nav-group .v-btn:not(:last-child) {
     border-bottom: 0;
     border-bottom-left-radius: inherit;
     border-bottom-right-radius: inherit;
 }
 
 .rule-center-nav-button {
-    justify-content: flex-start;
+    justify-content: center;
     min-height: 40px;
     height: 40px;
+    font-size: 0.875rem;
+    font-weight: 500;
 }
 
 .rule-center-nav-button :deep(.v-btn__content) {
     width: 100%;
-    justify-content: flex-start;
+    justify-content: center;
 }
 </style>

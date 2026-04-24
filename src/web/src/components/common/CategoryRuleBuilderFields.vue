@@ -10,20 +10,6 @@
 
                 <v-row>
                     <v-col cols="12" md="4">
-                        <v-text-field
-                            :model-value="draft.priority"
-                            type="number"
-                            density="comfortable"
-                            variant="outlined"
-                            :disabled="disabled"
-                            :label="tt('Rule Priority')"
-                            :hint="tt('Lower number means higher priority')"
-                            persistent-hint
-                            @update:model-value="updateNumberField('priority', $event)"
-                        />
-                    </v-col>
-
-                    <v-col cols="12" md="4">
                         <v-switch
                             :model-value="draft.regexEnabled"
                             color="primary"
@@ -56,8 +42,6 @@
                     :title="tt('Rule Expression Builder')"
                     :add-button-text="tt('Add Expression')"
                     :empty-state-text="tt('No rule expression defined yet')"
-                    :help-text="tt('Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.')"
-                    :example-text="tt('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
                 />
             </div>
@@ -107,11 +91,6 @@ function updateField<K extends keyof CategoryRuleBuilderModel>(key: K, value: Ca
 
 function updateTextField(key: 'ruleExpression', value: string): void {
     updateField(key, value);
-}
-
-function updateNumberField(key: 'priority', value: unknown): void {
-    const nextValue = Number(value ?? 0);
-    updateField(key, Number.isFinite(nextValue) ? nextValue : 0);
 }
 
 function updateBooleanField(key: 'regexEnabled' | 'enabled', value: unknown): void {

@@ -473,8 +473,7 @@ const vuetify = createVuetify({
                     }
 
                     if (params && params.length > 0) {
-                        // @ts-expect-error the arguments passed in are compatible with vue-i18n method arguments
-                        return i18nGlobal.t(mappedTextKey, ...params);
+                        return i18nGlobal.t(mappedTextKey, params);
                     } else {
                         return i18nGlobal.t(mappedTextKey);
                     }
@@ -495,7 +494,9 @@ const vuetify = createVuetify({
 // 键来自 Vuetify 原始 i18n 文本（见 vuetify/lib/locale/en.js），值为账单分析器 i18n 文件中的对应文本
 const vuetifyI18nTextKeyMap: Record<string, string> = {
     'open': 'Open',
-    'close': 'Close'
+    'close': 'Close',
+    'dataFooter.itemsPerPageText': 'Data Footer Items Per Page',
+    'dataFooter.pageText': 'Data Footer Page Text'
 }
 
 echarts.use([

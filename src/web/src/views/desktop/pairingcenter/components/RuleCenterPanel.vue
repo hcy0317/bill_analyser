@@ -36,152 +36,225 @@
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
                     <v-tabs-window-item v-if="hasTab('rules')" value="rules">
-                        <div class="d-flex align-center pa-4 ga-2">
-                            <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
-                                {{ tt('Add Rule') }}
-                            </v-btn>
-                            <v-btn
-                                variant="outlined"
-                                :prepend-icon="mdiDatabaseImportOutline"
-                                :disabled="loading"
-                                @click="migrateKeywords"
-                            >
-                                {{ tt('Import Rules from Legacy Keywords') }}
-                            </v-btn>
-                            <v-spacer />
-                            <div class="rule-center-category-filter">
-                                <two-column-select
-                                    v-model="ruleCategoryFilterId"
-                                    density="compact"
+                        <div class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center pa-4 ga-3">
+                            <div class="d-flex align-center flex-wrap ga-2">
+                                <v-btn color="primary" :prepend-icon="mdiPlus" @click="openCreateDialog">
+                                    {{ tt('Add Rule') }}
+                                </v-btn>
+                                <v-btn
                                     variant="outlined"
-                                    primary-key-field="id"
-                                    primary-value-field="id"
-                                    primary-title-field="name"
-                                    primary-header-field="typeLabel"
-                                    primary-icon-field="icon"
-                                    primary-icon-type="category"
-                                    primary-color-field="color"
-                                    primary-hidden-field="hidden"
-                                    primary-sub-items-field="subCategories"
-                                    secondary-key-field="id"
-                                    secondary-value-field="id"
-                                    secondary-title-field="name"
-                                    secondary-icon-field="icon"
-                                    secondary-icon-type="category"
-                                    secondary-color-field="color"
-                                    secondary-hidden-field="hidden"
-                                    :show-selection-primary-text="true"
-                                    :custom-selection-primary-text="ruleCategoryFilterSelection.primaryText"
-                                    :custom-selection-secondary-text="ruleCategoryFilterSelection.secondaryText"
-                                    :enable-filter="true"
-                                    :filter-placeholder="tt('Find category')"
-                                    :filter-no-items-text="tt('No available category')"
-                                    :no-item-text="tt('All Categories')"
-                                    :items="categoryPickerItems"
-                                    :label="tt('Category')"
-                                />
+                                    :prepend-icon="mdiDatabaseImportOutline"
+                                    :disabled="loading"
+                                    @click="migrateKeywords"
+                                >
+                                    {{ tt('Import Rules from Legacy Keywords') }}
+                                </v-btn>
                             </div>
-                            <v-btn
-                                v-if="ruleCategoryFilterId"
-                                variant="text"
-                                size="small"
-                                @click="clearRuleCategoryFilter"
-                            >
-                                {{ tt('Clear') }}
-                            </v-btn>
-                        </div>
-                        <v-data-table
-                            :headers="ruleHeaders"
-                            :items="filteredDisplayCategoryRules"
-                            :items-per-page="20"
-                            density="compact"
-                            :sort-by="[{ key: 'priority', order: 'asc' }]"
-                        >
-                            <template #item.priority="{ item }">
-                                <v-chip
-                                    size="small"
-                                    :color="item.priority <= 10 ? 'error' : item.priority <= 50 ? 'warning' : 'default'"
-                                >
-                                    {{ item.priority }}
+                            <v-spacer />
+                            <div class="rule-center-filter-toolbar d-flex align-center flex-wrap ga-2">
+                                <v-chip size="small" variant="tonal">
+                                    {{ filteredDisplayCategoryRules.length }} / {{ categoryRules.length }}
                                 </v-chip>
-                            </template>
-                            <template #item.category_display_name="{ item }">
-                                <div
-                                    class="d-flex align-center"
-                                    :title="item.category_full_name"
-                                >
-                                    <ItemIcon
-                                        v-if="item.category_icon && item.category_color"
-                                        icon-type="category"
-                                        size="24px"
-                                        :icon-id="item.category_icon"
-                                        :color="item.category_color"
+                                <div class="rule-center-category-filter">
+                                    <two-column-select
+                                        v-model="ruleCategoryFilterId"
+                                        density="compact"
+                                        variant="outlined"
+                                        primary-key-field="id"
+                                        primary-value-field="id"
+                                        primary-title-field="name"
+                                        primary-header-field="typeLabel"
+                                        primary-icon-field="icon"
+                                        primary-icon-type="category"
+                                        primary-color-field="color"
+                                        primary-hidden-field="hidden"
+                                        primary-sub-items-field="subCategories"
+                                        secondary-key-field="id"
+                                        secondary-value-field="id"
+                                        secondary-title-field="name"
+                                        secondary-icon-field="icon"
+                                        secondary-icon-type="category"
+                                        secondary-color-field="color"
+                                        secondary-hidden-field="hidden"
+                                        :show-selection-primary-text="true"
+                                        :custom-selection-primary-text="ruleCategoryFilterSelection.primaryText"
+                                        :custom-selection-secondary-text="ruleCategoryFilterSelection.secondaryText"
+                                        :enable-filter="true"
+                                        :filter-placeholder="tt('Find category')"
+                                        :filter-no-items-text="tt('No available category')"
+                                        :no-item-text="tt('All Categories')"
+                                        :items="categoryPickerItems"
+                                        :label="tt('Filter Category')"
                                     />
-                                    <v-icon v-else size="24" :icon="mdiCloseCircle" color="grey" />
-                                    <span class="ms-2">{{ item.category_display_name }}</span>
                                 </div>
-                            </template>
-                            <template #item.regex_enabled="{ item }">
-                                <v-icon
-                                    :icon="item.regex_enabled ? mdiCheckCircle : mdiCloseCircle"
-                                    :color="item.regex_enabled ? 'info' : 'grey'"
+                                <v-btn
+                                    v-if="ruleCategoryFilterId"
+                                    variant="text"
                                     size="small"
-                                />
-                            </template>
-                            <template #item.enabled="{ item }">
-                                <v-switch
-                                    :model-value="item.enabled"
-                                    density="compact"
-                                    hide-details
-                                    color="success"
-                                    :disabled="isRuleToggling(item.id)"
-                                    @click.stop
-                                    @update:model-value="toggleEnabled(item, $event)"
-                                />
-                            </template>
-                            <template #item.actions="{ item }">
-                                <v-tooltip :text="tt('Edit')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
+                                    @click="clearRuleCategoryFilter"
+                                >
+                                    {{ tt('Clear') }}
+                                </v-btn>
+                            </div>
+                        </div>
+                        <v-table class="rule-center-rules-table" density="compact" hover>
+                            <thead>
+                            <tr>
+                                <th class="rule-center-column-category">{{ tt('Category') }}</th>
+                                <th class="rule-center-column-expression">{{ tt('Expression') }}</th>
+                                <th class="rule-center-column-regex text-no-wrap">{{ tt('Regex') }}</th>
+                                <th class="rule-center-column-enabled text-no-wrap">{{ tt('Enabled') }}</th>
+                                <th class="rule-center-column-applied text-no-wrap">{{ tt('Applied') }}</th>
+                                <th class="rule-center-column-actions text-no-wrap">{{ tt('Actions') }}</th>
+                            </tr>
+                            </thead>
+                            <tbody v-if="groupedCategoryRules.length > 0">
+                            <template v-for="group in groupedCategoryRules" :key="group.key">
+                                <tr class="rule-center-group-row">
+                                    <td colspan="6">
+                                        <div class="d-flex align-center ga-2">
+                                            <ItemIcon
+                                                v-if="group.icon && group.color"
+                                                icon-type="category"
+                                                size="22px"
+                                                :icon-id="group.icon"
+                                                :color="group.color"
+                                            />
+                                            <v-icon v-else size="22" :icon="mdiCloseCircle" color="grey" />
+                                            <span class="font-weight-medium">{{ group.title }}</span>
+                                            <v-chip size="x-small" variant="tonal">{{ group.items.length }}</v-chip>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr v-for="item in group.items" :key="item.id">
+                                    <td class="rule-center-column-category">
+                                        <div class="d-flex align-center" :title="item.category_full_name">
+                                            <ItemIcon
+                                                v-if="item.category_icon && item.category_color"
+                                                icon-type="category"
+                                                size="24px"
+                                                :icon-id="item.category_icon"
+                                                :color="item.category_color"
+                                            />
+                                            <v-icon v-else size="24" :icon="mdiCloseCircle" color="grey" />
+                                            <span class="ms-2 text-truncate">{{ item.category_display_name }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="rule-center-column-expression">
+                                        <div class="rule-expression-stack">
+                                            <div
+                                                v-for="(expressionGroup, expressionIndex) in getRuleExpressionGroups(item)"
+                                                :key="`${item.id}-${expressionIndex}`"
+                                                class="rule-expression-line"
+                                            >
+                                                <template
+                                                    v-for="(clause, clauseIndex) in expressionGroup.clauses"
+                                                    :key="`${item.id}-${expressionIndex}-${clauseIndex}`"
+                                                >
+                                                    <v-chip
+                                                        class="rule-expression-operator"
+                                                        size="x-small"
+                                                        label
+                                                        variant="tonal"
+                                                        :color="clause.operator === 'NOT' ? 'warning' : clause.operator === 'REGEX' ? 'info' : 'primary'"
+                                                    >
+                                                        {{ clause.label }}
+                                                    </v-chip>
+                                                    <span
+                                                        v-for="term in getVisibleExpressionTerms(item.id, expressionIndex, clauseIndex, clause.terms)"
+                                                        :key="term"
+                                                        class="rule-expression-term"
+                                                        :title="term"
+                                                    >
+                                                        {{ term }}
+                                                    </span>
+                                                    <v-chip
+                                                        v-if="getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) > 0"
+                                                        size="x-small"
+                                                        label
+                                                        variant="outlined"
+                                                        class="rule-expression-more"
+                                                        @click="toggleExpressionClauseExpanded(item.id, expressionIndex, clauseIndex)"
+                                                    >
+                                                        +{{ getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) }}
+                                                    </v-chip>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="rule-center-column-regex text-no-wrap">
+                                        <v-icon
+                                            :icon="item.regex_enabled ? mdiCheckCircle : mdiCloseCircle"
+                                            :color="item.regex_enabled ? 'info' : 'grey'"
                                             size="small"
-                                            @click="openEditDialog(item)"
-                                        >
-                                            <v-icon :icon="mdiPencilOutline" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Test')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            @click="openTestDialog(item)"
-                                        >
-                                            <v-icon :icon="mdiTestTube" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
-                                <v-tooltip :text="tt('Delete')" location="top">
-                                    <template #activator="{ props }">
-                                        <v-btn
-                                            v-bind="props"
-                                            icon
-                                            variant="text"
-                                            size="small"
-                                            color="error"
-                                            @click="confirmDelete(item)"
-                                        >
-                                            <v-icon :icon="mdiDeleteOutline" size="small" />
-                                        </v-btn>
-                                    </template>
-                                </v-tooltip>
+                                        />
+                                    </td>
+                                    <td class="rule-center-column-enabled">
+                                        <div class="d-inline-flex" @click.stop>
+                                            <v-switch
+                                                :model-value="item.enabled"
+                                                density="compact"
+                                                hide-details
+                                                color="success"
+                                                :disabled="isRuleToggling(item.id)"
+                                                @update:model-value="toggleEnabled(item, $event)"
+                                            />
+                                        </div>
+                                    </td>
+                                    <td class="rule-center-column-applied">{{ item.applied_count }}</td>
+                                    <td class="rule-center-column-actions">
+                                        <v-tooltip :text="tt('Edit')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    @click="openEditDialog(item)"
+                                                >
+                                                    <v-icon :icon="mdiPencilOutline" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Test')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    @click="openTestDialog(item)"
+                                                >
+                                                    <v-icon :icon="mdiTestTube" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                        <v-tooltip :text="tt('Delete')" location="top">
+                                            <template #activator="{ props }">
+                                                <v-btn
+                                                    v-bind="props"
+                                                    icon
+                                                    variant="text"
+                                                    size="small"
+                                                    color="error"
+                                                    @click="confirmDelete(item)"
+                                                >
+                                                    <v-icon :icon="mdiDeleteOutline" size="small" />
+                                                </v-btn>
+                                            </template>
+                                        </v-tooltip>
+                                    </td>
+                                </tr>
                             </template>
-                        </v-data-table>
+                            </tbody>
+                            <tbody v-else>
+                            <tr>
+                                <td colspan="6" class="text-center text-medium-emphasis py-8">
+                                    {{ tt('No category rules') }}
+                                </td>
+                            </tr>
+                            </tbody>
+                        </v-table>
                     </v-tabs-window-item>
 
                     <!-- Learning Rules -->
@@ -204,6 +277,28 @@
 
                     <!-- Recurring Rules -->
                     <v-tabs-window-item v-if="hasTab('recurring')" value="recurring">
+                        <v-card-text class="pb-0">
+                            <div class="d-flex flex-column flex-md-row align-md-center ga-3">
+                                <div class="text-body-2 text-medium-emphasis">
+                                    {{ tt('Recurring rules are scheduled templates. Add or delete them in Scheduled Templates; use discovery to review detected recurring bills.') }}
+                                </div>
+                                <v-spacer />
+                                <v-btn
+                                    variant="outlined"
+                                    :prepend-icon="mdiTextBoxEditOutline"
+                                    :to="{ path: '/schedule/list' }"
+                                >
+                                    {{ tt('Manage Scheduled Templates') }}
+                                </v-btn>
+                                <v-btn
+                                    variant="tonal"
+                                    :prepend-icon="mdiCalendarSearch"
+                                    :to="{ path: '/recurring/discover' }"
+                                >
+                                    {{ tt('Review Recurring Suggestions') }}
+                                </v-btn>
+                            </div>
+                        </v-card-text>
                         <v-data-table
                             :headers="recurringHeaders"
                             :items="overview.recurringRules"
@@ -326,13 +421,15 @@ import { ref, computed, onMounted, watch, useTemplateRef } from 'vue';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
-    mdiTestTube, mdiDatabaseImportOutline,
+    mdiTestTube, mdiDatabaseImportOutline, mdiCalendarSearch, mdiTextBoxEditOutline,
 } from '@mdi/js';
 import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { CategoryType } from '@/core/category.ts';
+import { parseExpression } from '@/components/common/keywordExpression.ts';
+import type { RuleClause, RuleOperator } from '@/components/common/keywordExpression.ts';
 import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
@@ -427,6 +524,18 @@ interface DisplayCategoryRuleItem extends CategoryRuleItem {
     category_full_name: string;
     category_icon: string;
     category_color: string;
+    category_group_key: string;
+    category_group_name: string;
+    category_group_icon: string;
+    category_group_color: string;
+}
+
+interface CategoryRuleGroup {
+    key: string;
+    title: string;
+    icon: string;
+    color: string;
+    items: DisplayCategoryRuleItem[];
 }
 
 interface CategoryRuleForm {
@@ -481,18 +590,20 @@ interface CategoryKeywordMigrationResult {
     skipped_count?: number | string | null;
 }
 
+interface RuleExpressionDisplayClause {
+    label: string;
+    operator: RuleOperator | 'RAW';
+    terms: string[];
+}
+
+interface RuleExpressionDisplayGroup {
+    clauses: RuleExpressionDisplayClause[];
+}
+
 const categoryRules = ref<CategoryRuleItem[]>([]);
 const togglingRuleIds = ref<number[]>([]);
-
-const ruleHeaders = computed(() => [
-    { title: tt('Priority'), key: 'priority', sortable: true },
-    { title: tt('Category'), key: 'category_display_name' },
-    { title: tt('Expression'), key: 'rule_expression' },
-    { title: tt('Regex'), key: 'regex_enabled', width: 80 },
-    { title: tt('Enabled'), key: 'enabled', width: 100 },
-    { title: tt('Applied'), key: 'applied_count', width: 80 },
-    { title: tt('Actions'), key: 'actions', sortable: false, width: 140 },
-]);
+const expandedExpressionClauseKeys = ref<string[]>([]);
+const maxCollapsedExpressionTerms = 4;
 
 const learningHeaders = computed(() => [
     { title: tt('Match Type'), key: 'matchType' },
@@ -512,14 +623,42 @@ const recurringHeaders = computed(() => [
 
 const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => categoryRules.value.map(item => {
     const display = resolveCategoryDisplay(item);
+    const group = resolveCategoryGroup(item);
     return {
         ...item,
         category_display_name: display.name,
         category_full_name: display.fullName,
         category_icon: display.icon,
         category_color: display.color,
+        category_group_key: group.key,
+        category_group_name: group.name,
+        category_group_icon: group.icon,
+        category_group_color: group.color,
     };
 }));
+
+const groupedCategoryRules = computed<CategoryRuleGroup[]>(() => {
+    const groupsByKey = new Map<string, CategoryRuleGroup>();
+
+    for (const item of filteredDisplayCategoryRules.value) {
+        const group = groupsByKey.get(item.category_group_key) ?? {
+            key: item.category_group_key,
+            title: item.category_group_name,
+            icon: item.category_group_icon,
+            color: item.category_group_color,
+            items: [],
+        };
+        group.items.push(item);
+        groupsByKey.set(item.category_group_key, group);
+    }
+
+    return [...groupsByKey.values()]
+        .map(group => ({
+            ...group,
+            items: [...group.items].sort(compareDisplayCategoryRules),
+        }))
+        .sort((firstGroup, secondGroup) => firstGroup.title.localeCompare(secondGroup.title, 'zh-Hans'));
+});
 
 // ── Category selector options ────────
 function getCategoryTypeLabel(type: number): string {
@@ -639,6 +778,39 @@ function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullNam
     };
 }
 
+function resolveCategoryGroup(item: CategoryRuleItem): { key: string; name: string; icon: string; color: string } {
+    const categoryId = item.category_id !== null && item.category_id !== undefined
+        ? String(item.category_id)
+        : '';
+    const category = categoryId ? categoryStore.allTransactionCategoriesMap[categoryId] : null;
+    const primaryCategory = category && category.parentId && category.parentId !== '0'
+        ? categoryStore.allTransactionCategoriesMap[category.parentId]
+        : category;
+
+    if (primaryCategory) {
+        return {
+            key: `category:${primaryCategory.id}`,
+            name: primaryCategory.name,
+            icon: primaryCategory.icon,
+            color: String(primaryCategory.color),
+        };
+    }
+
+    const fallbackName = item.category_name || item.sub_category_name || tt('Unassigned Category');
+    return {
+        key: fallbackName ? `category-name:${fallbackName}` : 'unassigned',
+        name: fallbackName || tt('Unassigned Category'),
+        icon: '',
+        color: '',
+    };
+}
+
+function compareDisplayCategoryRules(firstRule: DisplayCategoryRuleItem, secondRule: DisplayCategoryRuleItem): number {
+    return firstRule.category_full_name.localeCompare(secondRule.category_full_name, 'zh-Hans')
+        || firstRule.name.localeCompare(secondRule.name, 'zh-Hans')
+        || firstRule.id - secondRule.id;
+}
+
 // ── Edit dialog state ────────
 const showEditDialog = ref(false);
 const editingRule = ref<CategoryRuleItem | null>(null);
@@ -655,8 +827,7 @@ const ruleCategorySelection = computed<ResolvedRuleCategorySelection>(() => reso
 const ruleCategoryFilterSelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(ruleCategoryFilterId.value));
 const autoRuleName = computed(() => {
     const selectionLabel = ruleCategorySelection.value.label || tt('Unassigned Category');
-    const priority = Number.isFinite(ruleForm.value.priority) ? ruleForm.value.priority : 0;
-    return `${selectionLabel} · P${priority}`;
+    return `${selectionLabel} · ${tt('Category Rule')}`;
 });
 
 const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
@@ -687,6 +858,92 @@ const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
 function clearRuleCategoryFilter(): void {
     ruleCategoryFilterId.value = '';
 }
+
+function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayGroup[] {
+    const expression = String(rule.rule_expression || '').trim();
+    const parsedExpression = parseExpression(expression, { format: 'composite' });
+
+    if (parsedExpression.clauses.length < 1) {
+        return [{
+            clauses: [{
+                label: parsedExpression.sourceFormat === 'empty' ? tt('Empty') : tt('Raw'),
+                operator: 'RAW',
+                terms: [parsedExpression.rawExpression || expression || tt('Empty')],
+            }],
+        }];
+    }
+
+    const groups: RuleExpressionDisplayGroup[] = [];
+    let currentClauses: RuleExpressionDisplayClause[] = [];
+    let parenthesisDepth = 0;
+
+    parsedExpression.clauses.forEach((clause, index) => {
+        if (index > 0 && clause.joiner === 'OR' && parenthesisDepth === 0 && currentClauses.length > 0) {
+            groups.push({ clauses: currentClauses });
+            currentClauses = [];
+        }
+
+        currentClauses.push(toExpressionDisplayClause(clause, currentClauses.length === 0));
+        parenthesisDepth = Math.max(0, parenthesisDepth + clause.openParens - clause.closeParens);
+    });
+
+    if (currentClauses.length > 0) {
+        groups.push({ clauses: currentClauses });
+    }
+
+    return groups;
+}
+
+function toExpressionDisplayClause(clause: RuleClause, isFirstClause: boolean): RuleExpressionDisplayClause {
+    const connector = isFirstClause ? '' : clause.joiner === 'OR' ? '/ ' : '+ ';
+    return {
+        label: `${connector}${clause.operator}`,
+        operator: clause.operator,
+        terms: clause.terms.length > 0 ? clause.terms : [tt('Empty')],
+    };
+}
+
+function makeExpressionClauseKey(ruleId: number, expressionIndex: number, clauseIndex: number): string {
+    return `${ruleId}:${expressionIndex}:${clauseIndex}`;
+}
+
+function isExpressionClauseExpanded(ruleId: number, expressionIndex: number, clauseIndex: number): boolean {
+    return expandedExpressionClauseKeys.value.includes(makeExpressionClauseKey(ruleId, expressionIndex, clauseIndex));
+}
+
+function toggleExpressionClauseExpanded(ruleId: number, expressionIndex: number, clauseIndex: number): void {
+    const key = makeExpressionClauseKey(ruleId, expressionIndex, clauseIndex);
+    expandedExpressionClauseKeys.value = expandedExpressionClauseKeys.value.includes(key)
+        ? expandedExpressionClauseKeys.value.filter(item => item !== key)
+        : [...expandedExpressionClauseKeys.value, key];
+}
+
+function getVisibleExpressionTerms(
+    ruleId: number,
+    expressionIndex: number,
+    clauseIndex: number,
+    terms: string[]
+): string[] {
+    if (isExpressionClauseExpanded(ruleId, expressionIndex, clauseIndex)) {
+        return terms;
+    }
+
+    return terms.slice(0, maxCollapsedExpressionTerms);
+}
+
+function getHiddenExpressionTermCount(
+    ruleId: number,
+    expressionIndex: number,
+    clauseIndex: number,
+    terms: string[]
+): number {
+    if (isExpressionClauseExpanded(ruleId, expressionIndex, clauseIndex)) {
+        return 0;
+    }
+
+    return Math.max(0, terms.length - maxCollapsedExpressionTerms);
+}
+
 const ruleBuilderModel = computed({
     get: () => ({
         priority: ruleForm.value.priority,
@@ -821,7 +1078,7 @@ async function saveRule() {
             showSuccessMessage('Rule created');
         }
         showEditDialog.value = false;
-        await fetchCategoryRules();
+        await refreshRuleTables();
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, tt('Failed to save rule'));
     } finally {
@@ -845,15 +1102,28 @@ async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
     }
 
     const normalizedNextEnabled = !!nextEnabled;
+    if (normalizedNextEnabled === item.enabled) {
+        return;
+    }
+
+    const previousEnabled = item.enabled;
     error.value = null;
     setRuleToggling(item.id, true);
+    categoryRules.value = categoryRules.value.map(rule => rule.id === item.id
+        ? { ...rule, enabled: normalizedNextEnabled }
+        : rule
+    );
     try {
         requireApiSuccess(
             await services.updateCategoryRule(item.id, { enabled: normalizedNextEnabled }),
             tt('Failed to toggle rule')
         );
-        await fetchCategoryRules();
+        await refreshRuleTables();
     } catch (e: unknown) {
+        categoryRules.value = categoryRules.value.map(rule => rule.id === item.id
+            ? { ...rule, enabled: previousEnabled }
+            : rule
+        );
         error.value = getRequestErrorMessage(e, tt('Failed to toggle rule'));
     } finally {
         setRuleToggling(item.id, false);
@@ -880,7 +1150,7 @@ async function doDelete() {
         );
         showDeleteDialog.value = false;
         showSuccessMessage('Rule deleted');
-        await fetchCategoryRules();
+        await refreshRuleTables();
     } catch (e: unknown) {
         error.value = getRequestErrorMessage(e, tt('Failed to delete rule'));
     } finally {
@@ -995,6 +1265,13 @@ async function fetchOverview() {
     }
 }
 
+async function refreshRuleTables() {
+    await Promise.all([
+        fetchCategoryRules(),
+        fetchOverview(),
+    ]);
+}
+
 async function fetchAll() {
     loading.value = true;
     error.value = null;
@@ -1024,5 +1301,102 @@ onMounted(() => fetchAll());
 .rule-center-category-filter {
     flex: 0 1 280px;
     min-width: 220px;
+}
+
+.rule-center-filter-toolbar {
+    justify-content: flex-end;
+}
+
+.rule-center-rules-table {
+    table-layout: fixed;
+}
+
+.rule-center-rules-table :deep(th),
+.rule-center-rules-table :deep(td) {
+    vertical-align: middle;
+}
+
+.rule-center-group-row {
+    background: rgba(var(--v-theme-surface-variant), 0.46);
+}
+
+.rule-center-group-row td {
+    padding-block: 8px;
+}
+
+.rule-center-column-category {
+    width: 220px;
+}
+
+.rule-center-column-expression {
+    min-width: 360px;
+}
+
+.rule-center-column-regex {
+    width: 96px;
+}
+
+.rule-center-column-enabled {
+    width: 112px;
+}
+
+.rule-center-column-applied {
+    width: 88px;
+}
+
+.rule-center-column-actions {
+    width: 140px;
+}
+
+.rule-expression-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-block: 6px;
+}
+
+.rule-expression-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    max-width: 100%;
+    padding: 4px 6px;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+    border-radius: 8px;
+    background: rgba(var(--v-theme-surface), 1);
+    overflow: hidden;
+}
+
+.rule-expression-operator {
+    flex: 0 0 auto;
+}
+
+.rule-expression-term {
+    display: inline-block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: 6px;
+    padding: 2px 6px;
+    background: rgba(var(--v-theme-surface-variant), 0.7);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.rule-expression-more {
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 960px) {
+    .rule-center-filter-toolbar {
+        justify-content: flex-start;
+    }
+
+    .rule-center-rules-table {
+        table-layout: auto;
+    }
 }
 </style>

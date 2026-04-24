@@ -81,26 +81,6 @@
             </v-card>
         </v-col>
 
-        <v-col cols="12">
-            <v-card>
-                <template #title>
-                    <span>{{ tt('Investment Recognition Settings') }}</span>
-                </template>
-
-                <v-card-text>
-                    <v-alert type="info" variant="tonal">
-                        {{ tt('Investment recognition settings have moved to Rule Center and are no longer edited in User Settings.') }}
-                    </v-alert>
-                </v-card-text>
-
-                <v-card-actions class="px-4 pb-4">
-                    <v-btn color="primary" to="/pairing/list?domain=investment&tab=rules">
-                        {{ tt('Open Rule Center') }}
-                    </v-btn>
-                </v-card-actions>
-            </v-card>
-        </v-col>
-
         <v-col cols="12" v-if="isDataExportingEnabled()">
             <v-card :class="{ 'disabled': exportingData }" :title="tt('Export Data')">
                 <v-card-text>

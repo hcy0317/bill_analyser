@@ -1,15 +1,21 @@
 <template>
-    <v-card :class="{ disabled: loadingRecognitionSettings || savingRecognitionSettings }">
+    <v-card variant="flat"
+            class="investment-settings-card"
+            :class="{ disabled: loadingRecognitionSettings || savingRecognitionSettings }">
         <template #title>
-            <div class="d-flex align-center">
+            <div class="investment-settings-title d-flex flex-wrap align-center ga-2">
                 <span>{{ tt('Investment Recognition Settings') }}</span>
-                <v-btn density="compact" color="default" variant="text" size="24"
-                       class="ms-2" :icon="true" :loading="loadingRecognitionSettings"
+                <v-btn density="compact"
+                       color="default"
+                       variant="text"
+                       size="32"
+                       :icon="true"
+                       :loading="loadingRecognitionSettings"
                        @click="reloadRecognitionSettings(true)">
                     <template #loader>
                         <v-progress-circular indeterminate size="20"/>
                     </template>
-                    <v-icon :icon="mdiRefresh" size="24" />
+                    <v-icon :icon="mdiRefresh" size="20" />
                     <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                 </v-btn>
             </div>
@@ -20,76 +26,88 @@
         </v-alert>
 
         <v-card-text>
-            <v-row>
-                <v-col cols="12" md="6">
-                    <v-switch
-                        v-model="recognitionSettings.importLearningEnabled"
-                        color="primary"
-                        hide-details
-                        inset
-                        :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                        :label="tt('Enable Import Learning')"
-                    />
-                </v-col>
+            <div class="investment-settings-form">
+                <v-row dense>
+                    <v-col cols="12">
+                        <v-switch
+                            v-model="recognitionSettings.importLearningEnabled"
+                            color="primary"
+                            density="compact"
+                            hide-details
+                            inset
+                            :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                            :label="tt('Enable Import Learning')"
+                        />
+                    </v-col>
 
-                <v-col cols="12">
-                    <v-combobox
-                        v-model="recognitionSettings.investmentPlatformKeywords"
-                        color="primary"
-                        multiple
-                        chips
-                        closable-chips
-                        persistent-placeholder
-                        persistent-hint
-                        :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                        :label="tt('Investment Platform Keywords')"
-                        :placeholder="tt('Enter investment platform keywords')"
-                        :hint="tt('Press Enter to add investment platform keywords for import recognition')"
-                    />
-                </v-col>
+                    <v-col cols="12">
+                        <v-combobox
+                            v-model="recognitionSettings.investmentPlatformKeywords"
+                            color="primary"
+                            density="compact"
+                            variant="outlined"
+                            multiple
+                            chips
+                            closable-chips
+                            hide-details
+                            persistent-placeholder
+                            :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                            :label="tt('Investment Platform Keywords')"
+                            :placeholder="tt('Enter investment platform keywords')"
+                        />
+                    </v-col>
 
-                <v-col cols="12">
-                    <v-combobox
-                        v-model="recognitionSettings.investmentProductKeywords"
-                        color="primary"
-                        multiple
-                        chips
-                        closable-chips
-                        persistent-placeholder
-                        persistent-hint
-                        :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                        :label="tt('Investment Product Keywords')"
-                        :placeholder="tt('Enter investment product keywords')"
-                        :hint="tt('Press Enter to add investment product keywords for import recognition')"
-                    />
-                </v-col>
+                    <v-col cols="12">
+                        <v-combobox
+                            v-model="recognitionSettings.investmentProductKeywords"
+                            color="primary"
+                            density="compact"
+                            variant="outlined"
+                            multiple
+                            chips
+                            closable-chips
+                            hide-details
+                            persistent-placeholder
+                            :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                            :label="tt('Investment Product Keywords')"
+                            :placeholder="tt('Enter investment product keywords')"
+                        />
+                    </v-col>
 
-                <v-col cols="12">
-                    <v-combobox
-                        v-model="recognitionSettings.investmentExcludeKeywords"
-                        color="primary"
-                        multiple
-                        chips
-                        closable-chips
-                        persistent-placeholder
-                        persistent-hint
-                        :disabled="loadingRecognitionSettings || savingRecognitionSettings"
-                        :label="tt('Investment Exclude Keywords')"
-                        :placeholder="tt('Enter investment exclude keywords')"
-                        :hint="tt('Press Enter to add keywords that should block investment recognition')"
-                    />
-                </v-col>
-            </v-row>
+                    <v-col cols="12">
+                        <v-combobox
+                            v-model="recognitionSettings.investmentExcludeKeywords"
+                            color="primary"
+                            density="compact"
+                            variant="outlined"
+                            multiple
+                            chips
+                            closable-chips
+                            hide-details
+                            persistent-placeholder
+                            :disabled="loadingRecognitionSettings || savingRecognitionSettings"
+                            :label="tt('Investment Exclude Keywords')"
+                            :placeholder="tt('Enter investment exclude keywords')"
+                        />
+                    </v-col>
+                </v-row>
+            </div>
         </v-card-text>
 
-        <v-card-actions class="px-4 pb-4">
+        <v-card-actions class="investment-settings-actions px-4 pb-4">
             <v-btn color="primary"
+                   variant="outlined"
+                   size="small"
+                   class="investment-settings-action"
                    :disabled="loadingRecognitionSettings || savingRecognitionSettings || !recognitionSettingsChanged"
                    @click="saveRecognitionSettings">
                 {{ tt('Save Changes') }}
                 <v-progress-circular v-if="savingRecognitionSettings" indeterminate size="20" class="ms-2" />
             </v-btn>
-            <v-btn color="default" variant="tonal"
+            <v-btn color="default"
+                   variant="outlined"
+                   size="small"
+                   class="investment-settings-action"
                    :disabled="loadingRecognitionSettings || savingRecognitionSettings"
                    @click="resetRecognitionSettings">
                 {{ tt('Reset') }}
@@ -231,3 +249,26 @@ onMounted(() => {
     reloadRecognitionSettings(false);
 });
 </script>
+
+<style scoped>
+.investment-settings-card {
+    background: transparent;
+}
+
+.investment-settings-title {
+    min-height: 32px;
+}
+
+.investment-settings-form {
+    max-width: 760px;
+}
+
+.investment-settings-actions {
+    justify-content: flex-start;
+    max-width: 760px;
+}
+
+.investment-settings-action {
+    min-width: 120px;
+}
+</style>

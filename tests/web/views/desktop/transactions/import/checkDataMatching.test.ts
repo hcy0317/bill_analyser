@@ -135,6 +135,17 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.investment?.actions.map(action => action.labelKey)).toStrictEqual(['Accept', 'Reject']);
     });
 
+    test('keeps investment profile in hover title instead of requiring duplicate body text', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            investmentStatus: 'pending',
+            investmentTitle: 'platform:蚂蚁财富, product:黄金ETF',
+            investmentProfileText: '蚂蚁财富 黄金ETF'
+        });
+
+        expect(viewModel.investment?.title).toBe('platform:蚂蚁财富, product:黄金ETF | 蚂蚁财富 黄金ETF');
+        expect(viewModel.investment?.profileText).toBe('蚂蚁财富 黄金ETF');
+    });
+
     test('keeps manual annotation out of visible signals when it is the only context', () => {
         const summary = getImportCheckMatchingContextSummary({
             isManuallyAnnotated: true

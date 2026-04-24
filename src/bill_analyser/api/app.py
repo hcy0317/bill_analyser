@@ -265,6 +265,7 @@ async def initialize(db_path: str | None = None):
 
         # 初始化账单服务
         BILL_SERVICE_INSTANCE = BillService(db=DB_INSTANCE)
+        BILL_SERVICE_INSTANCE.category_engine = CATEGORY_ENGINE_INSTANCE
         bill_service = BILL_SERVICE_INSTANCE
         await BILL_SERVICE_INSTANCE.initialize()
         app.config["BILL_SERVICE_INSTANCE"] = BILL_SERVICE_INSTANCE

@@ -42,7 +42,7 @@ interface CreateRuleClauseInput {
     closeParens?: number;
 }
 
-const ESCAPABLE_COMPOSITE_CHARS = new Set(['\\', ',', '+', '{', '}', '|', '(', ')']);
+const ESCAPABLE_COMPOSITE_CHARS = new Set(['\\', ',', '+', '{', '}', '|', '/', '×', '(', ')']);
 const VALID_OPERATORS = new Set(['OR', 'AND', 'NOT', 'REGEX']);
 const VALID_JOINERS = new Set(['AND', 'OR']);
 
@@ -286,13 +286,14 @@ function parseLegacyExpression(expression: string, idFactory: () => string): Rul
     return clauses;
 }
 
-function parseCompositeExpression(expression: string, idFactory: () => string): RuleClause[] | null {
+function parseCompositeExpression(expression: string, idFactory: () => string, repairDepth = 0): RuleClause[] | null {
     const clauses: RuleClause[] = [];
     let index = 0;
     let pendingOpenParens = 0;
     let expectingClause = true;
     let isFirstClause = true;
     let pendingJoiner: RuleJoiner = 'AND';
+    let pendingOperatorOverride: RuleOperator | null = null;
 
     while (index < expression.length) {
         index = skipSpaces(expression, index);
@@ -327,23 +328,26 @@ function parseCompositeExpression(expression: string, idFactory: () => string): 
 
         clauses.push(createRuleClause({
             joiner: isFirstClause ? 'AND' : pendingJoiner,
-            operator: parsedClause.operator,
+            operator: pendingOperatorOverride ?? parsedClause.operator,
             terms: parsedClause.terms,
             openParens: pendingOpenParens,
             closeParens
         }, idFactory));
         isFirstClause = false;
         pendingOpenParens = 0;
+        pendingOperatorOverride = null;
 
         if (index >= expression.length) {
             break;
         }
 
-        if (expression[index] !== '+' && expression[index] !== '|') {
+        const connector = readCompositeConnector(expression, index);
+        if (!connector) {
             return null;
         }
-        pendingJoiner = expression[index] === '|' ? 'OR' : 'AND';
-        index += 1;
+        pendingJoiner = connector.joiner;
+        pendingOperatorOverride = connector.operatorOverride;
+        index = connector.nextIndex;
         expectingClause = true;
     }
 
@@ -356,7 +360,108 @@ function parseCompositeExpression(expression: string, idFactory: () => string): 
         return null;
     }
 
+    if (repairDepth >= 2) {
+        return clauses.length > 0 ? clauses : null;
+    }
+
+    const repairedClauses = repairNestedCompositeTerms(clauses, idFactory, repairDepth);
+    if (repairedClauses !== clauses) {
+        const repairedValidation = validateParentheses(repairedClauses);
+        if (!repairedValidation.valid) {
+            return null;
+        }
+        return repairedClauses.length > 0 ? repairedClauses : null;
+    }
+
     return clauses.length > 0 ? clauses : null;
+}
+
+function readCompositeConnector(
+    expression: string,
+    startIndex: number
+): { joiner: RuleJoiner; operatorOverride: RuleOperator | null; nextIndex: number } | null {
+    let index = skipSpaces(expression, startIndex);
+    const char = expression[index];
+
+    if (char === '+') {
+        return { joiner: 'AND', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+    }
+    if (char === '|' || char === '/') {
+        return { joiner: 'OR', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+    }
+    if (char === '×') {
+        return { joiner: 'AND', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+    }
+
+    const remainingExpression = expression.slice(index);
+    const notMatch = /^NOT\b/i.exec(remainingExpression);
+    if (notMatch) {
+        index += notMatch[0].length;
+        return { joiner: 'AND', operatorOverride: 'NOT', nextIndex: skipSpaces(expression, index) };
+    }
+
+    return null;
+}
+
+function repairNestedCompositeTerms(
+    clauses: readonly RuleClause[],
+    idFactory: () => string,
+    repairDepth: number
+): RuleClause[] {
+    let changed = false;
+    const repairedClauses: RuleClause[] = [];
+
+    for (const clause of clauses) {
+        const nestedExpression = getRepairableNestedCompositeExpression(clause);
+        if (!nestedExpression) {
+            repairedClauses.push(clause);
+            continue;
+        }
+
+        const nestedClauses = parseCompositeExpression(nestedExpression, idFactory, repairDepth + 1);
+        if (!nestedClauses || nestedClauses.length === 0) {
+            repairedClauses.push(clause);
+            continue;
+        }
+
+        changed = true;
+        const lastNestedClause = nestedClauses[nestedClauses.length - 1]!;
+        repairedClauses.push(...nestedClauses.map((nestedClause, index) => ({
+            ...nestedClause,
+            joiner: index === 0 ? clause.joiner : nestedClause.joiner,
+            openParens: index === 0
+                ? nestedClause.openParens + clause.openParens
+                : nestedClause.openParens,
+            closeParens: nestedClause.id === lastNestedClause.id
+                ? nestedClause.closeParens + clause.closeParens
+                : nestedClause.closeParens,
+        })));
+    }
+
+    return changed ? repairedClauses : clauses as RuleClause[];
+}
+
+function getRepairableNestedCompositeExpression(clause: RuleClause): string | null {
+    if (clause.operator !== 'OR') {
+        return null;
+    }
+
+    if (clause.terms.length !== 1) {
+        return null;
+    }
+
+    const term = clause.terms[0]?.trim() ?? '';
+    if (!term.includes('={')) {
+        return null;
+    }
+
+    const isWrappedExpression = term.startsWith('(') && term.endsWith(')');
+    const containsCompositeConnector = /[+|/×]/.test(term) || /\bNOT\b/i.test(term);
+    if (!isWrappedExpression && !containsCompositeConnector) {
+        return null;
+    }
+
+    return term;
 }
 
 function readCompositeClause(expression: string, startIndex: number): { operator: RuleOperator; terms: string[]; nextIndex: number } | null {

@@ -45,13 +45,36 @@
             <div v-else class="rule-expression-groups">
                 <template v-for="(group, groupIndex) in expressionGroups" :key="group.id">
                     <div v-if="groupIndex > 0" class="expression-divider">
-                        <span>{{ tt('OR') }}</span>
                     </div>
 
                     <div class="expression-group">
                         <div class="expression-clause-list">
                             <template v-for="(clause, clauseIndex) in group.clauses" :key="clause.id">
-                                <div v-if="clauseIndex > 0" class="clause-separator">+</div>
+                                <div
+                                    v-if="!isFirstRenderedClause(groupIndex, clauseIndex)"
+                                    class="clause-connector-row"
+                                >
+                                    <v-btn-toggle
+                                        :model-value="getClauseConnector(clause)"
+                                        class="clause-connector-toggle"
+                                        density="compact"
+                                        variant="outlined"
+                                        divided
+                                        mandatory
+                                        :disabled="disabled"
+                                        @update:model-value="updateClauseConnector(clause, $event)"
+                                    >
+                                        <v-btn
+                                            v-for="item in connectorItems"
+                                            :key="item.value"
+                                            :value="item.value"
+                                            size="small"
+                                            :disabled="disabled"
+                                        >
+                                            {{ item.title }}
+                                        </v-btn>
+                                    </v-btn-toggle>
+                                </div>
 
                                 <div class="rule-clause-row">
                                     <button
@@ -147,7 +170,7 @@
             </v-alert>
         </template>
 
-        <div class="text-caption text-medium-emphasis mt-2">
+        <div v-if="resolvedHelpText" class="text-caption text-medium-emphasis mt-2">
             {{ resolvedHelpText }}
         </div>
 
@@ -204,16 +227,8 @@ const resolvedFormat = computed<ExpressionFormat>(() => props.expressionFormat ?
 const resolvedTitle = computed(() => props.title || tt('Rule Expression'));
 const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Expression'));
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
-const resolvedHelpText = computed(() => props.helpText || (
-    resolvedFormat.value === 'composite'
-        ? tt('Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.')
-        : tt('Add keyword chips with OR / AND / NOT blocks.')
-));
-const resolvedExampleText = computed(() => props.exampleText || (
-    resolvedFormat.value === 'composite'
-        ? tt('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}')
-        : ''
-));
+const resolvedHelpText = computed(() => props.helpText ?? '');
+const resolvedExampleText = computed(() => props.exampleText ?? '');
 const termsLabel = computed(() => props.regexEnabled ? tt('Regex Patterns') : tt('Expression Terms'));
 const termsPlaceholder = computed(() => props.regexEnabled
     ? tt('Enter regex patterns and press Enter')
@@ -228,6 +243,12 @@ let localClauseId = 0;
 
 const supportsCompositeGrouping = computed(() => resolvedFormat.value === 'composite');
 const isRawMode = computed(() => rawExpression.value.length > 0);
+type ClauseConnector = 'AND' | 'OR' | 'NOT';
+const connectorItems = [
+    { title: '+', value: 'AND' as ClauseConnector },
+    { title: '/', value: 'OR' as ClauseConnector },
+    { title: '× NOT', value: 'NOT' as ClauseConnector },
+];
 const types = computed(() => {
     return [
         { title: tt('OR'), value: 'OR' as RuleOperator },
@@ -281,6 +302,13 @@ function parseModelValue(value: string) {
     parseErrorKey.value = result.errorKey ?? '';
     validationErrorKey.value = '';
     syncDraftTerms();
+
+    if (result.sourceFormat === 'composite' && !result.errorKey) {
+        const repairedExpression = getCurrentSerializedExpression();
+        if (repairedExpression !== null && repairedExpression !== value.trim()) {
+            emit('update:modelValue', repairedExpression);
+        }
+    }
 }
 
 function getCurrentSerializedExpression(): string | null {
@@ -312,6 +340,36 @@ function normalizeClauseJoiners() {
     if (firstClause) {
         firstClause.joiner = 'AND';
     }
+}
+
+function isFirstRenderedClause(groupIndex: number, clauseIndex: number): boolean {
+    return groupIndex === 0 && clauseIndex === 0;
+}
+
+function getClauseConnector(clause: RuleClause): ClauseConnector {
+    if (clause.joiner === 'OR') {
+        return 'OR';
+    }
+    if (clause.operator === 'NOT') {
+        return 'NOT';
+    }
+    return 'AND';
+}
+
+function updateClauseConnector(clause: RuleClause, value: unknown) {
+    const connector = value === 'OR' || value === 'NOT' ? value : 'AND';
+    const operator: RuleOperator = connector === 'NOT'
+        ? 'NOT'
+        : clause.operator === 'NOT'
+            ? 'OR'
+            : clause.operator;
+
+    replaceClause({
+        ...clause,
+        joiner: connector === 'OR' ? 'OR' : 'AND',
+        operator,
+    });
+    serializeKeywords();
 }
 
 function serializeKeywords() {
@@ -441,13 +499,13 @@ function toggleCloseParen(clause: RuleClause) {
     gap: 8px;
 }
 
-.clause-separator {
+.clause-connector-row {
     align-self: center;
-    color: rgba(var(--v-theme-on-surface), 0.72);
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1;
-    margin-block: -2px;
+    margin-block: -1px;
+}
+
+.clause-connector-toggle {
+    background: rgba(var(--v-theme-surface), 1);
 }
 
 .rule-clause-row {
@@ -509,10 +567,17 @@ function toggleCloseParen(clause: RuleClause) {
     opacity: 0.38;
 }
 
+.paren-ghost--active {
+    border-radius: 8px;
+    background: rgba(var(--v-theme-primary), 0.12);
+    color: rgb(var(--v-theme-primary));
+    opacity: 1;
+}
+
 .rule-clause-row:hover .paren-ghost:hover,
 .rule-clause-row:hover .paren-ghost--active {
-    opacity: 0.78;
-    color: rgba(var(--v-theme-primary), 0.86);
+    opacity: 1;
+    color: rgb(var(--v-theme-primary));
 }
 
 @media (max-width: 720px) {

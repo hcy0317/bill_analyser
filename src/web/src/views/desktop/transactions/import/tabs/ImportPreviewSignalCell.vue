@@ -42,9 +42,10 @@
             </div>
         </div>
 
-        <div class="signal-group" v-if="viewModel.investment">
-            <div class="d-flex flex-column align-start ga-1">
+        <div class="signal-group investment-signal-group" v-if="viewModel.investment">
+            <div class="investment-signal-stack">
                 <v-chip
+                    class="investment-signal-chip"
                     :color="viewModel.investment.color"
                     variant="tonal"
                     size="x-small"
@@ -52,21 +53,18 @@
                     :title="viewModel.investment.title">
                     {{ tt(viewModel.investment.labelKey) }}
                 </v-chip>
-                <div class="text-caption text-medium-emphasis" v-if="viewModel.investment.profileText">
-                    {{ viewModel.investment.profileText }}
+                <div class="investment-signal-actions" v-if="viewModel.investment.actions.length > 0">
+                    <v-btn
+                        v-for="action in viewModel.investment.actions"
+                        :key="`investment-${action.decision}`"
+                        variant="text"
+                        :color="action.color"
+                        size="x-small"
+                        :disabled="disabled"
+                        @click.stop="emit('reviewInvestment', action.decision)">
+                        {{ tt(action.labelKey) }}
+                    </v-btn>
                 </div>
-            </div>
-            <div class="d-flex flex-wrap ga-1 mt-1">
-                <v-btn
-                    v-for="action in viewModel.investment.actions"
-                    :key="`investment-${action.decision}`"
-                    variant="text"
-                    :color="action.color"
-                    size="x-small"
-                    :disabled="disabled"
-                    @click.stop="emit('reviewInvestment', action.decision)">
-                    {{ tt(action.labelKey) }}
-                </v-btn>
             </div>
         </div>
 
@@ -204,3 +202,29 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
     return getStatusIcon(status);
 }
 </script>
+
+<style scoped>
+.investment-signal-stack {
+    display: inline-flex;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+}
+
+.investment-signal-chip {
+    align-self: flex-start;
+}
+
+.investment-signal-actions {
+    display: flex;
+    width: 100%;
+    gap: 4px;
+}
+
+.investment-signal-actions :deep(.v-btn) {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 6px;
+}
+</style>

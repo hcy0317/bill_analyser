@@ -28,16 +28,34 @@ from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
 
 
-_RULE_EXPRESSION_ESCAPABLE_CHARS = frozenset("\\,+{}|()")
+_RULE_EXPRESSION_ESCAPABLE_CHARS = frozenset("\\,+{}|()/×")
+_RULE_EXPRESSION_AND_CONNECTORS = frozenset({"+", "×"})
+_RULE_EXPRESSION_OR_CONNECTORS = frozenset({"|", "/"})
+_RULE_EXPRESSION_FACTOR_TERMINATORS = (
+    _RULE_EXPRESSION_AND_CONNECTORS
+    | _RULE_EXPRESSION_OR_CONNECTORS
+    | frozenset({")"})
+)
+
+
+def _coerce_sort_int(value: Any, default: int = 999_999) -> int:
+    """Return an integer sort key while tolerating DB/null/string values."""
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def escape_rule_expression_term(term: str) -> str:
     """Escape one literal term for ``OR={...}``-style rule expressions.
 
     Terms are comma-separated inside ``{...}``, while braces participate in
-    clause scanning and ``+``/``|``/parentheses are expression delimiters
-    outside a clause. Escaping all expression delimiters keeps migrated legacy
-    keywords round-trippable even when a literal keyword contains those chars.
+    clause scanning and ``+``/``×``/``|``/``/``/parentheses are expression
+    delimiters outside a clause. Escaping all expression delimiters keeps
+    migrated legacy keywords round-trippable even when a literal keyword
+    contains those chars.
     """
     return "".join(
         f"\\{char}" if char in _RULE_EXPRESSION_ESCAPABLE_CHARS else char
@@ -101,15 +119,16 @@ class RuleExpressionNode:
     """Boolean AST node for category rule expressions.
 
     Grammar supported by ``compile_rule_expression``:
-    ``expression := and_expr ('|' and_expr)*``
-    ``and_expr := factor ('+' factor)*``
+    ``expression := and_expr (('|' | '/') and_expr)*``
+    ``and_expr := factor (('+' | '×') factor)*``
     ``factor := clause | '(' expression ')'``
     ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
     ``term`` may escape delimiters with ``\\`` (for example ``\\,`` or ``\\{``).
 
     ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
     ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
-    logical AND, while top-level ``|`` is an optional expression-level OR for
+    logical AND, ``×`` is accepted as the visible AND connector, while
+    top-level ``|``/``/`` are optional expression-level OR connectors for
     parenthesized priority. Legacy ``OR:a|b&AND:c&NOT:d`` is still compiled by
     ``compile_rule``.
     """
@@ -370,18 +389,19 @@ class KeywordMatcher:
         """Compile a category rule expression into a ``CompiledRule``.
 
         Composite grammar:
-        ``expression := and_expr ('|' and_expr)*``
-        ``and_expr := factor ('+' factor)*``
+        ``expression := and_expr (('|' | '/') and_expr)*``
+        ``and_expr := factor (('+' | '×') factor)*``
         ``factor := clause | '(' expression ')'``
         ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
         ``term`` may escape delimiters with ``\\`` (for example ``\\,``).
 
         ``+`` keeps the existing no-parentheses syntax as a conjunction:
         ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
-        ``(k1 or k2) and k3 and not k4``. Parentheses can group any nested
-        expression, and top-level ``|`` is supported as an expression-level OR
-        where grouping is needed. Old ``OR:k1|k2&AND:k3&NOT:k4`` strings still
-        fall back to ``compile_rule``.
+        ``(k1 or k2) and k3 and not k4``. ``×`` is accepted as the visible AND
+        connector (for example ``×NOT={k4}``). Parentheses can group any nested
+        expression, and top-level ``|`` or ``/`` is supported as an
+        expression-level OR where grouping is needed. Old
+        ``OR:k1|k2&AND:k3&NOT:k4`` strings still fall back to ``compile_rule``.
         """
         if not expr:
             return CompiledRule(is_empty=True)
@@ -439,7 +459,7 @@ class KeywordMatcher:
 
         while True:
             index = self._skip_expression_space(expr, index)
-            if index >= len(expr) or expr[index] != "|":
+            if index >= len(expr) or expr[index] not in _RULE_EXPRESSION_OR_CONNECTORS:
                 break
             index += 1
             right, index = self._parse_rule_and_expression(expr, index, regex_enabled)
@@ -458,14 +478,18 @@ class KeywordMatcher:
         index: int,
         regex_enabled: bool,
     ) -> tuple[RuleExpressionNode | None, int]:
-        """Parse ``+``-joined clause/group chains."""
+        """Parse ``+``/``×``-joined clause/group chains."""
         children: list[RuleExpressionNode] = []
 
         while True:
             index = self._skip_expression_space(expr, index)
-            if index >= len(expr) or expr[index] in ")|":
+            if (
+                index >= len(expr)
+                or expr[index] == ")"
+                or expr[index] in _RULE_EXPRESSION_OR_CONNECTORS
+            ):
                 break
-            if expr[index] == "+":
+            if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
                 index += 1
                 continue
 
@@ -474,12 +498,16 @@ class KeywordMatcher:
                 children.append(child)
 
             index = self._skip_expression_space(expr, index)
-            if index >= len(expr) or expr[index] in ")|":
+            if (
+                index >= len(expr)
+                or expr[index] == ")"
+                or expr[index] in _RULE_EXPRESSION_OR_CONNECTORS
+            ):
                 break
-            if expr[index] == "+":
+            if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
                 index += 1
                 continue
-            raise ValueError(f"expected '+' or '|' at offset {index}")
+            raise ValueError(f"expected AND/OR connector at offset {index}")
 
         if not children:
             return None, index
@@ -521,7 +549,7 @@ class KeywordMatcher:
                 brace_depth += 1
             elif char == "}" and brace_depth:
                 brace_depth -= 1
-            elif brace_depth == 0 and char in "+|)":
+            elif brace_depth == 0 and char in _RULE_EXPRESSION_FACTOR_TERMINATORS:
                 break
             index += 1
 
@@ -699,6 +727,24 @@ class CategoryEngine:
         self._compiled_rules: dict[str, CompiledRule] = {}
         # Lock已移除 - SQLite自带线程安全
 
+    @staticmethod
+    def _rule_match_sort_key(
+        rule: dict[str, Any],
+        fallback_order: int = 0,
+    ) -> tuple[int, int, int, int]:
+        """Sort runtime matching by category priority, then stable identifiers.
+
+        ``category_rules.priority`` is kept as rule metadata for compatibility,
+        but it is intentionally not part of the runtime matching order.
+        """
+        category_priority = rule.get("category_priority", rule.get("priority"))
+        return (
+            _coerce_sort_int(category_priority),
+            _coerce_sort_int(rule.get("category_id")),
+            _coerce_sort_int(rule.get("id"), fallback_order),
+            fallback_order,
+        )
+
     def _precompile_rules(self):
         """预编译所有规则关键词
 
@@ -793,7 +839,7 @@ class CategoryEngine:
 
         1. 从 category_rules 加载已启用的规则（JOIN categories 获取分类元数据）
         2. 不再回退到 categories.keywords，避免运行时双规则源
-        3. 按 priority 排序并预编译
+        3. 按分类 priority 排序并预编译
         """
         # pylint: disable=too-many-locals
         try:
@@ -808,14 +854,24 @@ class CategoryEngine:
 
             # --- Canonical source: category_rules table ---
             try:
-                cr_rows = await db.get_category_rules(
-                    user_id=user_id, enabled_only=True
-                )
+                try:
+                    cr_rows = await db.get_category_rules(
+                        user_id=user_id,
+                        enabled_only=True,
+                        include_category_priority=True,
+                    )
+                except TypeError as exc:
+                    if "include_category_priority" not in str(exc):
+                        raise
+                    cr_rows = await db.get_category_rules(
+                        user_id=user_id,
+                        enabled_only=True,
+                    )
             except Exception:  # pylint: disable=broad-exception-caught
                 # Table might not exist yet (pre-migration) or the query failed.
                 cr_rows = []
 
-            for row in cr_rows:
+            for row_index, row in enumerate(cr_rows):
                 rule_type = row.get("category_type", TransactionType.EXPENSE)
                 if types and rule_type not in type_filter:
                     continue
@@ -830,17 +886,30 @@ class CategoryEngine:
 
                 valid_rules.append(
                     {
+                        "id": row.get("id"),
+                        "category_id": row.get("category_id"),
                         "main": row.get("main_category", ""),
                         "sub": row.get("sub_category", ""),
-                        "priority": row.get("priority", 100),
+                        "priority": row.get("category_priority", row.get("priority", 100)),
+                        "category_priority": row.get(
+                            "category_priority",
+                            row.get("priority", 100),
+                        ),
+                        "rule_priority": row.get("priority", 100),
                         "keywords": expr,
                         "type": rule_type,
+                        "_load_order": row_index,
                         "_compiled_v2": compiled,
                     }
                 )
 
-            # Sort by priority
-            valid_rules.sort(key=lambda r: r.get("priority", 999))
+            # Sort by transaction-category priority; rule priority is metadata only.
+            valid_rules.sort(
+                key=lambda r: self._rule_match_sort_key(
+                    r,
+                    fallback_order=_coerce_sort_int(r.get("_load_order"), 0),
+                )
+            )
 
             self.rules = valid_rules
             self._initialized = True
@@ -976,12 +1045,21 @@ class CategoryEngine:
                 amount,
             )
 
-        # ===== 第一步：在对应类型的分类规则中按关键词匹配（优先级排序）=====
+        # ===== 第一步：在对应类型的分类规则中按关键词匹配（分类优先级排序）=====
         # v6.72: 始终根据类型过滤规则，确保收入账单只匹配收入类规则，支出账单只匹配支出类规则
         rules_to_match = [r for r in self.rules if r.get("type") in type_filter]
         self.logger.debug("[分类匹配] 过滤后规则数: %d/%d", len(rules_to_match), len(self.rules))
 
-        sorted_rules = sorted(rules_to_match, key=lambda r: r.get("priority", 999))
+        sorted_rules = [
+            rule
+            for _, rule in sorted(
+                enumerate(rules_to_match),
+                key=lambda item: self._rule_match_sort_key(
+                    item[1],
+                    fallback_order=item[0],
+                ),
+            )
+        ]
 
         for rule in sorted_rules:
             keywords = rule.get("keywords")

@@ -146,71 +146,68 @@
                                         </v-list>
                                     </v-menu>
 
-                                    <v-select v-if="activeViewMode === 'forecast'"
-                                              class="ms-3 budget-forecast-strategy-select"
-                                              density="compact"
-                                              hide-details
-                                              variant="outlined"
-                                              :disabled="loading || forecastLoading"
-                                              :label="tt('Forecast Strategy')"
-                                              :items="forecastStrategies"
-                                              item-title="name"
-                                              item-value="value"
-                                              v-model="forecastStrategy" />
+                                    <div v-if="activeViewMode === 'forecast'" class="budget-forecast-controls ms-3">
+                                        <v-select class="budget-forecast-control"
+                                                  density="compact"
+                                                  hide-details
+                                                  variant="outlined"
+                                                  :disabled="loading || forecastLoading"
+                                                  :aria-label="tt('Forecast Strategy')"
+                                                  :items="forecastStrategies"
+                                                  item-title="name"
+                                                  item-value="value"
+                                                  v-model="forecastStrategy" />
 
-                                    <v-select v-if="activeViewMode === 'forecast'"
-                                              class="ms-2 budget-forecast-history-select"
-                                              density="compact"
-                                              hide-details
-                                              variant="outlined"
-                                              :disabled="loading || forecastLoading"
-                                              :label="tt('History Periods')"
-                                              :items="historyPeriodOptions"
-                                              v-model="forecastMonthsHistory" />
+                                        <v-select class="budget-forecast-control"
+                                                  density="compact"
+                                                  hide-details
+                                                  variant="outlined"
+                                                  :disabled="loading || forecastLoading"
+                                                  :aria-label="tt('History Periods')"
+                                                  :items="historyPeriodOptions"
+                                                  v-model="forecastMonthsHistory" />
 
-                                    <v-select v-if="activeViewMode === 'forecast'"
-                                              class="ms-2 budget-forecast-sort-select"
-                                              density="compact"
-                                              hide-details
-                                              variant="outlined"
-                                              :disabled="loading || forecastLoading"
-                                              :label="tt('Forecast Sort')"
-                                              :items="forecastSortOptions"
-                                              item-title="name"
-                                              item-value="value"
-                                              v-model="forecastSortBy" />
+                                        <v-select class="budget-forecast-control"
+                                                  density="compact"
+                                                  hide-details
+                                                  variant="outlined"
+                                                  :disabled="loading || forecastLoading"
+                                                  :aria-label="tt('Forecast Sort')"
+                                                  :items="forecastSortOptions"
+                                                  item-title="name"
+                                                  item-value="value"
+                                                  v-model="forecastSortBy" />
 
-                                    <v-btn v-if="activeViewMode === 'forecast'"
-                                           class="ms-2"
-                                           density="comfortable"
-                                           :color="forecastOnlyLowConfidence ? 'warning' : 'default'"
-                                           :variant="forecastOnlyLowConfidence ? 'flat' : 'outlined'"
-                                           :disabled="loading || forecastLoading"
-                                           @click="forecastOnlyLowConfidence = !forecastOnlyLowConfidence">
-                                        {{ tt('Low Confidence Only') }}
-                                    </v-btn>
+                                        <v-btn class="budget-forecast-filter-button"
+                                               density="compact"
+                                               :color="forecastOnlyLowConfidence ? 'warning' : 'default'"
+                                               :variant="forecastOnlyLowConfidence ? 'flat' : 'outlined'"
+                                               :disabled="loading || forecastLoading"
+                                               @click="forecastOnlyLowConfidence = !forecastOnlyLowConfidence">
+                                            {{ tt('Low Confidence Only') }}
+                                        </v-btn>
 
-                                    <v-btn v-if="activeViewMode === 'forecast'"
-                                           class="ms-2"
-                                           density="comfortable"
-                                           :color="forecastOnlyOverBudget ? 'error' : 'default'"
-                                           :variant="forecastOnlyOverBudget ? 'flat' : 'outlined'"
-                                           :disabled="loading || forecastLoading"
-                                           @click="forecastOnlyOverBudget = !forecastOnlyOverBudget">
-                                        {{ tt('Over Budget Only') }}
-                                    </v-btn>
+                                        <v-btn class="budget-forecast-filter-button"
+                                               density="compact"
+                                               :color="forecastOnlyOverBudget ? 'error' : 'default'"
+                                               :variant="forecastOnlyOverBudget ? 'flat' : 'outlined'"
+                                               :disabled="loading || forecastLoading"
+                                               @click="forecastOnlyOverBudget = !forecastOnlyOverBudget">
+                                            {{ tt('Over Budget Only') }}
+                                        </v-btn>
 
-                                    <v-btn v-if="activeViewMode === 'forecast' && (forecastOnlyLowConfidence || forecastOnlyOverBudget)"
-                                           class="ms-2"
-                                           density="comfortable"
-                                           color="default"
-                                           variant="text"
-                                           :disabled="loading || forecastLoading"
-                                           @click="clearForecastQuickFilters">
-                                        {{ tt('Clear Forecast Filters') }}
-                                    </v-btn>
+                                        <v-btn v-if="forecastOnlyLowConfidence || forecastOnlyOverBudget"
+                                               class="budget-forecast-clear-button"
+                                               density="compact"
+                                               color="default"
+                                               variant="text"
+                                               :disabled="loading || forecastLoading"
+                                               @click="clearForecastQuickFilters">
+                                            {{ tt('Clear Forecast Filters') }}
+                                        </v-btn>
+                                    </div>
 
-                                    <v-spacer/>
+                                    <v-spacer v-if="activeViewMode !== 'forecast'"/>
 
                                     <!-- 搜索框 -->
                                     <div class="budget-keyword-filter ms-2" v-if="activeViewMode !== 'history'">
@@ -3340,19 +3337,38 @@ watch(filterKeyword, (newVal) => {
     max-width: 300px;
 }
 
-.budget-forecast-strategy-select {
-    min-width: 220px;
-    max-width: 220px;
+.budget-forecast-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
 }
 
-.budget-forecast-history-select {
-    min-width: 170px;
-    max-width: 170px;
+.budget-forecast-control {
+    flex: 0 0 172px;
+    width: 172px;
+    max-width: 172px;
 }
 
-.budget-forecast-sort-select {
-    min-width: 220px;
-    max-width: 220px;
+.budget-forecast-control :deep(.v-field__input) {
+    min-width: 0;
+}
+
+.budget-forecast-control :deep(.v-select__selection-text) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.budget-forecast-filter-button {
+    flex: 0 0 152px;
+    width: 152px;
+    max-width: 152px;
+}
+
+.budget-forecast-clear-button {
+    flex: 0 0 auto;
+    padding-inline: 10px;
 }
 
 .tab-text-truncate {

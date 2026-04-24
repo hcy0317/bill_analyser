@@ -8,9 +8,11 @@ from typing import Any, cast
 import pytest
 from flask import Flask
 
+from bill_analyser.api.routes import category_rules as category_rules_module
 from bill_analyser.api.routes import rules as rules_module
 from tests.user_cleanup_support import register_test_user_for_cleanup
 
+category_rules_module = cast("Any", category_rules_module)
 rules_module = cast("Any", rules_module)
 
 
@@ -107,6 +109,28 @@ class FakeRulesDB:
         raise AssertionError("rules overview should not query legacy category_keywords")
 
 
+class FakeReloadEngine:
+    """Category engine stub that records cache invalidation and reloads."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.invalidate_calls = 0
+        self.load_calls: list[tuple[Any, int]] = []
+
+    def invalidate_cache(self) -> None:
+        self.invalidate_calls += 1
+
+    async def load_rules_from_db(self, database: Any, user_id: int = 1) -> None:
+        self.load_calls.append((database, user_id))
+
+
+class FakeBillServiceWithEngine:
+    """BillService stub exposing its category engine."""
+
+    def __init__(self, category_engine: FakeReloadEngine) -> None:
+        self.category_engine = category_engine
+
+
 def _install_fake_loop(monkeypatch: pytest.MonkeyPatch, loop: FakeLoop) -> None:
     monkeypatch.setattr(rules_module.asyncio, "new_event_loop", lambda: loop)
     monkeypatch.setattr(rules_module.asyncio, "set_event_loop", lambda _loop: None)
@@ -124,6 +148,28 @@ def _unwrap_all(func: Any) -> Any:
 def _run(coroutine: Any) -> Any:
     """Run an async DB helper from route-level sync tests."""
     return asyncio.run(coroutine)
+
+
+def test_category_rule_reload_refreshes_bill_service_engine_when_distinct(
+    rules_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule edits must refresh the import-preview BillService engine, not only the app-global engine."""
+    db = object()
+    global_engine = FakeReloadEngine("global")
+    bill_service_engine = FakeReloadEngine("bill-service")
+    bill_service = FakeBillServiceWithEngine(bill_service_engine)
+
+    monkeypatch.setattr(category_rules_module, "_run_async", _run)
+
+    with rules_route_app.app_context():
+        rules_route_app.config["BILL_SERVICE_INSTANCE"] = bill_service
+        category_rules_module._reload_engine(global_engine, db, user_id=42)
+
+    assert global_engine.invalidate_calls == 1
+    assert global_engine.load_calls == [(db, 42)]
+    assert bill_service_engine.invalidate_calls == 1
+    assert bill_service_engine.load_calls == [(db, 42)]
 
 
 def test_rules_overview_uses_category_rules_as_canonical_source(
