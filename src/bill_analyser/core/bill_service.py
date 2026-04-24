@@ -117,7 +117,35 @@ class BillService:
         already-initialized in-memory rule set.
         """
         await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
-        self.logger.debug("分类规则已刷新: user_id=%d, 规则数=%d", user_id, len(self.category_engine.rules))
+
+        if not self.category_engine.rules:
+            migrate_keywords_to_rules = getattr(self.db, "migrate_keywords_to_rules", None)
+            if callable(migrate_keywords_to_rules):
+                try:
+                    migration_result = await migrate_keywords_to_rules(user_id=user_id)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    self.logger.warning(
+                        "导入分类规则为空，自动迁移旧关键词失败: user_id=%d, error=%s",
+                        user_id,
+                        exc,
+                    )
+                else:
+                    migrated_count = 0
+                    if isinstance(migration_result, dict):
+                        migrated_count = int(migration_result.get("migrated") or 0)
+                    if migrated_count > 0:
+                        self.logger.info(
+                            "导入分类规则为空，已从旧关键词迁移 %d 条 canonical 规则: user_id=%d",
+                            migrated_count,
+                            user_id,
+                        )
+                        await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
+
+        self.logger.debug(
+            "分类规则已刷新: user_id=%d, 规则数=%d",
+            user_id,
+            len(self.category_engine.rules),
+        )
 
     @log_method
     @log_step("导入账单文件")

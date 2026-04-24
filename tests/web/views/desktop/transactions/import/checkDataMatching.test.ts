@@ -78,6 +78,29 @@ describe('checkDataMatching helpers', () => {
         })).toBe('匹配 | 银行卡 | 微信 | 支付宝');
     });
 
+    test('resolves transfer dedup parser labels from source-row parser tags', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            parserSource: 'bank',
+            dedupType: 'transfer',
+            dedupSourceIds: [12, 'preview:9']
+        });
+
+        expect(getImportCheckMatchingDedupTitle(summary, {
+            matchLabel: '匹配',
+            parserLabels: {
+                bank: '银行卡',
+                wechat: '微信',
+                cmbc: '民生银行',
+                alipay: '支付宝',
+                abc: '农业银行'
+            },
+            sourceRowLookup: new Map([
+                ['12', { parserSource: 'wechat', parserTags: ['parser:wechat', 'parser:cmbc'] }],
+                ['preview:9', { parserSource: 'alipay', parserTags: ['parser:alipay', 'parser:abc'] }]
+            ])
+        })).toBe('匹配 | 银行卡 | 微信 | 民生银行 | 支付宝 | 农业银行');
+    });
+
     test('resolves transfer dedup parser labels from combined parser tags', () => {
         const summary = getImportCheckMatchingContextSummary({
             parserSource: 'cmbc',
@@ -104,7 +127,15 @@ describe('checkDataMatching helpers', () => {
         expect(hasImportCheckMatchingDedupContext(summary)).toBe(true);
         expect(hasImportCheckMatchingContext(summary)).toBe(true);
         expect(getImportCheckMatchingDedupLabel(summary)).toBe('Platform-Bank Duplicate');
-        expect(getImportCheckMatchingDedupTitle(summary)).toBe('platform_bank | 301|302');
+        const title = getImportCheckMatchingDedupTitle(summary, {
+            dedupLabels: {
+                'Platform-Bank Duplicate': '平台-银行重复'
+            }
+        });
+        expect(title).toBe('平台-银行重复 · 2');
+        expect(title).not.toContain('platform_bank');
+        expect(title).not.toContain('301');
+        expect(title).not.toContain('302');
     });
 
     test('maps split dedup aliases to the split-merge label', () => {

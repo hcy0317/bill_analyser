@@ -137,6 +137,47 @@ class FakeStageImportDB(FakePipelineDB):
         return dict(self.clear_result)
 
 
+class FakeMigratingCategoryRuleDB(FakeStageImportDB):
+    """Stage DB stub that exposes old-keyword migration into canonical rules."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rule_rows_available = False
+        self.rule_query_user_ids: list[int] = []
+        self.migration_user_ids: list[int] = []
+
+    async def get_category_rules(
+        self,
+        user_id: int = 1,
+        category_id: int | None = None,
+        enabled_only: bool = True,
+        include_category_priority: bool = False,
+    ) -> list[dict[str, Any]]:
+        _ = (category_id, enabled_only, include_category_priority)
+        self.rule_query_user_ids.append(user_id)
+        if not self.rule_rows_available:
+            return []
+
+        return [
+            {
+                "id": 610,
+                "category_id": 91,
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+                "category_type": TransactionType.EXPENSE,
+                "category_priority": 1,
+                "priority": 1,
+                "rule_expression": "OR={自动识别早餐}",
+                "regex_enabled": 0,
+            }
+        ]
+
+    async def migrate_keywords_to_rules(self, user_id: int = 1) -> dict[str, int]:
+        self.migration_user_ids.append(user_id)
+        self.rule_rows_available = True
+        return {"migrated": 1, "skipped": 0}
+
+
 class FakePipelineCategoryEngine:
     """Category engine stub with call tracing hooks."""
 
@@ -406,6 +447,22 @@ async def test_import_bills_preview_reloads_canonical_category_rules_for_same_us
 
 
 @pytest.mark.asyncio
+async def test_reload_category_rules_migrates_legacy_keywords_when_canonical_rules_empty() -> None:
+    """导入分类前 canonical 规则为空时，应先迁移旧关键词再重载规则。"""
+    fake_db = FakeMigratingCategoryRuleDB()
+    service = BillService(db=cast(Any, fake_db))
+    service._initialized = True
+
+    await service._reload_category_rules_for_import(user_id=7)  # pylint: disable=protected-access
+
+    assert fake_db.migration_user_ids == [7]
+    assert fake_db.rule_query_user_ids == [7, 7]
+    assert len(service.category_engine.rules) == 1
+    assert service.category_engine.rules[0]["main"] == "餐饮"
+    assert service.category_engine.rules[0]["sub"] == "早餐"
+
+
+@pytest.mark.asyncio
 async def test_bill_service_lifecycle_and_import_early_return_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """初始化/上下文管理及 import_bills 的空解析、全无效和异常分支都应稳定返回。"""
     call_log: list[str] = []
@@ -588,6 +645,68 @@ async def test_import_stage2_dedup_handles_empty_templates_and_success_path(monk
     ]
     assert fake_db.updated_template_statuses == [([11], True)]
     assert fake_db.updated_statuses[-1] == ("session-stage2", "previewing", 0)
+
+
+@pytest.mark.asyncio
+async def test_import_stage2_dedup_migrates_rules_and_persists_preview_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """阶段2 应在旧关键词迁移后使用 canonical 规则分类并写入预览分类字段。"""
+    fake_db = FakeMigratingCategoryRuleDB()
+    fake_db.unprocessed_templates = [
+        {
+            "id": 21,
+            "parser_date": "2026-03-06 08:15:00",
+            "parser_amount": -12.5,
+            "parser_type": "支出",
+            "parser_description": "自动识别早餐 粥铺",
+            "parser_counterparty": "pytest 早餐店",
+            "parser_payment_method": "",
+            "parser_original_type": "支出",
+            "parser_original_category": "",
+            "parser_account_id": 4,
+            "parser_id": "wechat",
+        }
+    ]
+
+    service = BillService(db=cast(Any, fake_db))
+    service._initialized = True
+
+    async def fake_process_with_db(bills: list[dict[str, Any]], _db: object, _user_id: int):
+        return SimpleNamespace(
+            kept_bills=[dict(bills[0])],
+            original_count=1,
+            removed_count=0,
+            transfer_pairs=[],
+            split_groups=[],
+            duplicate_groups=[],
+        )
+
+    async def zero_learning(*_args: object, **_kwargs: object) -> int:
+        return 0
+
+    async def identity_step(bills: list[dict[str, Any]], user_id: int = 1):
+        _ = user_id
+        return bills
+
+    monkeypatch.setattr(service.smart_dedup_engine, "process_with_db", fake_process_with_db)
+    monkeypatch.setattr(service, "_apply_import_learning_rules", zero_learning)
+    monkeypatch.setattr(service, "_detect_investment_candidates", identity_step)
+    monkeypatch.setattr(service, "_match_accounts", identity_step)
+    monkeypatch.setattr(service, "_detect_cash_transfers", identity_step)
+    monkeypatch.setattr(service, "_validate_type_category_consistency", identity_step)
+
+    result = await service.import_stage2_dedup("session-stage2-migrate", user_id=7)
+
+    assert result["success"] is True
+    assert result["match_stats"] == {"category_matched": 1, "account_matched": 1, "total": 1}
+    assert fake_db.migration_user_ids == [7]
+    assert fake_db.rule_query_user_ids == [7, 7]
+
+    preview = fake_db.preview_batches[0][1][0]
+    assert preview["preview_main_category"] == "餐饮"
+    assert preview["preview_sub_category"] == "早餐"
+    assert preview["preview_parser_tags"] == ["parser:wechat", "channel:wallet"]
 
 
 @pytest.mark.asyncio

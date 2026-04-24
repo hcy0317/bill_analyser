@@ -17,6 +17,12 @@ export interface ImportCheckMatchingContextSummary {
 export interface ImportCheckMatchingSourceRow {
     id: number | string;
     parserSource?: string;
+    parserTags?: string[];
+}
+
+export interface ImportCheckMatchingSourceContext {
+    parserSource?: string;
+    parserTags?: string[];
 }
 
 export interface ImportCheckMatchingDedupTitleOptions {
@@ -24,7 +30,8 @@ export interface ImportCheckMatchingDedupTitleOptions {
     currentParserSource?: string;
     parserLabels?: Record<string, string>;
     sourceRows?: ImportCheckMatchingSourceRow[];
-    sourceRowLookup?: ReadonlyMap<string, string>;
+    sourceRowLookup?: ReadonlyMap<string, string | ImportCheckMatchingSourceContext>;
+    dedupLabels?: Record<string, string>;
 }
 
 export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected';
@@ -173,6 +180,16 @@ function getParserSourceFromTag(tag: string): string {
     return normalizedTag.slice(parserTagPrefix.length).trim();
 }
 
+function getSourceContextFromLookupValue(
+    value: string | ImportCheckMatchingSourceContext | undefined
+): ImportCheckMatchingSourceContext {
+    if (typeof value === 'string') {
+        return { parserSource: value };
+    }
+
+    return value || {};
+}
+
 export function resolveImportCheckMatchingTransferParserSources(
     summary: ImportCheckMatchingContextSummary,
     options: ImportCheckMatchingDedupTitleOptions = {}
@@ -181,8 +198,14 @@ export function resolveImportCheckMatchingTransferParserSources(
     const sourceRowLookup = options.sourceRowLookup || (sourceRows.length > 0
         ? new Map(
             sourceRows
-                .map(sourceRow => [String(sourceRow.id), (sourceRow.parserSource || '').trim()] as const)
-                .filter(([, parserSource]) => !!parserSource)
+                .map(sourceRow => [
+                    String(sourceRow.id),
+                    {
+                        parserSource: (sourceRow.parserSource || '').trim(),
+                        parserTags: sourceRow.parserTags || []
+                    }
+                ] as const)
+                .filter(([, sourceContext]) => !!sourceContext.parserSource || sourceContext.parserTags.length > 0)
         )
         : null);
     const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
@@ -198,15 +221,19 @@ export function resolveImportCheckMatchingTransferParserSources(
             parserSources.push(normalizedParserSource);
         }
     };
+    const addParserSourcesFromTags = (parserTags: string[] | undefined): void => {
+        for (const tag of parserTags || []) {
+            addParserSource(getParserSourceFromTag(tag));
+        }
+    };
 
     addParserSource(options.currentParserSource || summary.parserId);
-
-    for (const tag of summary.parserTags) {
-        addParserSource(getParserSourceFromTag(tag));
-    }
+    addParserSourcesFromTags(summary.parserTags);
 
     for (const sourceId of summary.dedupSourceIds) {
-        addParserSource(sourceRowLookup?.get(String(sourceId)));
+        const sourceContext = getSourceContextFromLookupValue(sourceRowLookup?.get(String(sourceId)));
+        addParserSource(sourceContext.parserSource);
+        addParserSourcesFromTags(sourceContext.parserTags);
     }
 
     return parserSources;
@@ -224,10 +251,15 @@ export function getImportCheckMatchingDedupTitle(
         ].filter(text => !!text).join(' | ');
     }
 
-    return [
-        summary.dedupType,
-        summary.dedupSourceIds.length > 0 ? summary.dedupSourceIds.join('|') : ''
-    ].filter(text => !!text).join(' | ');
+    const labelKey = getImportCheckMatchingDedupLabel(summary);
+    const dedupLabel = options.dedupLabels?.[labelKey] || labelKey;
+    if (!dedupLabel) {
+        return '';
+    }
+
+    return summary.dedupSourceIds.length > 0
+        ? `${dedupLabel} · ${summary.dedupSourceIds.length}`
+        : dedupLabel;
 }
 
 export function getImportCheckMatchingParserTagsText(summary: ImportCheckMatchingContextSummary): string {

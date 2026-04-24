@@ -813,6 +813,7 @@ import {
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
+    type ImportCheckMatchingSourceContext,
     type ImportPreviewSignalStatus,
     type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
@@ -2219,19 +2220,24 @@ function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
 
 const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSignalViewModel>>(() => {
     const importTransactions = props.importTransactions || [];
-    const sourceRowLookup = new Map<string, string>();
+    const sourceRowLookup = new Map<string, ImportCheckMatchingSourceContext>();
     const signalViewModels: Record<number, ImportPreviewSignalViewModel> = {};
 
     for (const item of importTransactions) {
         const parserSource = (item.parserSource || '').trim();
-        if (!parserSource) {
+        const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
+        if (!parserSource && parserTags.length < 1) {
             continue;
         }
+        const sourceContext = {
+            parserSource,
+            parserTags
+        };
 
-        sourceRowLookup.set(String(item.index), parserSource);
+        sourceRowLookup.set(String(item.index), sourceContext);
         const previewId = getPreviewId(item);
         if (previewId !== null) {
-            sourceRowLookup.set(String(previewId), parserSource);
+            sourceRowLookup.set(String(previewId), sourceContext);
         }
     }
 
@@ -2259,6 +2265,13 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             matchLabel: tt('Matching'),
             parserLabels: PARSER_LABELS,
             parserColors: PARSER_COLORS,
+            dedupLabels: {
+                'Transfer Match': tt('Transfer Match'),
+                'Platform-Bank Duplicate': tt('Platform-Bank Duplicate'),
+                'Similar Duplicate': tt('Similar Duplicate'),
+                'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
+                'Cross-Batch Transfer': tt('Cross-Batch Transfer')
+            },
             investmentReasonLabels: {
                 platform: tt('Investment Reason Platform'),
                 product: tt('Investment Reason Product'),
