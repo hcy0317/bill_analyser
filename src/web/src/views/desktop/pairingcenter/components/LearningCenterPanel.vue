@@ -4,51 +4,6 @@
         <v-progress-linear v-if="loading" indeterminate color="primary" />
 
         <v-card-text>
-            <div class="learning-panel-toolbar d-flex flex-wrap align-center ga-2 mb-4">
-                <v-btn v-if="activeTab === 'suggestions'"
-                       class="learning-panel-action"
-                       size="small"
-                       variant="outlined"
-                       color="default"
-                       :disabled="loading"
-                       @click="handleGenerate">
-                    {{ tt('Generate Suggestions') }}
-                </v-btn>
-                <v-btn v-if="activeTab === 'suggestions'"
-                       class="learning-panel-action"
-                       size="small"
-                       variant="outlined"
-                       color="default"
-                       :disabled="loading || selectedIds.length === 0"
-                       @click="handleBatchAccept">
-                    {{ tt('Batch Accept') }} ({{ selectedIds.length }})
-                </v-btn>
-                <v-btn v-if="activeTab === 'llm-config'"
-                       class="learning-panel-action"
-                       size="small"
-                       variant="outlined"
-                       color="default"
-                       @click="openAddConfigDialog">
-                    {{ tt('Add Config') }}
-                </v-btn>
-                <v-chip v-if="activeTab === 'llm' && llmPendingCount > 0"
-                        size="small"
-                        color="warning"
-                        variant="tonal">
-                    {{ llmPendingCount }} {{ tt('Pending') }}
-                </v-chip>
-                <v-btn variant="text"
-                       color="default"
-                       size="32"
-                       density="compact"
-                       :icon="true"
-                       :loading="loading"
-                       @click="refreshCurrentTab">
-                    <v-icon :icon="mdiRefresh" size="20" />
-                    <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                </v-btn>
-            </div>
-
             <v-alert v-if="error" type="error" closable class="mb-4"
                      @click:close="clearError">
                 {{ error }}
@@ -56,13 +11,45 @@
 
                             <!-- ── Suggestions Tab ── -->
                             <template v-if="activeTab === 'suggestions'">
-                                <div class="d-flex align-center mb-2">
-                                    <v-chip-group v-model="statusFilter" mandatory>
-                                        <v-chip value="" variant="tonal">{{ tt('All') }} ({{ suggestionsTotal }})</v-chip>
-                                        <v-chip value="pending" variant="tonal" color="warning">{{ tt('Pending') }}</v-chip>
-                                        <v-chip value="accepted" variant="tonal" color="success">{{ tt('Accepted') }}</v-chip>
-                                        <v-chip value="rejected" variant="tonal" color="error">{{ tt('Rejected') }}</v-chip>
-                                    </v-chip-group>
+                                <div class="learning-section-header">
+                                    <h3 class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
+                                    <div class="learning-section-actions">
+                                        <v-btn class="learning-panel-action"
+                                               size="small"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading"
+                                               @click="handleGenerate">
+                                            {{ tt('Generate Suggestions') }}
+                                        </v-btn>
+                                        <v-btn class="learning-panel-action"
+                                               size="small"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading || selectedIds.length === 0"
+                                               @click="handleBatchAccept">
+                                            {{ tt('Batch Accept') }} ({{ selectedIds.length }})
+                                        </v-btn>
+                                        <v-select v-model="statusFilter"
+                                                  class="learning-status-select"
+                                                  :items="suggestionStatusOptions"
+                                                  item-title="title"
+                                                  item-value="value"
+                                                  density="compact"
+                                                  variant="outlined"
+                                                  hide-details
+                                                  :aria-label="tt('Status')" />
+                                        <v-btn variant="text"
+                                               color="default"
+                                               size="32"
+                                               density="compact"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                    </div>
                                 </div>
 
                                 <v-table v-if="!loading && filteredSuggestions.length > 0" hover density="comfortable">
@@ -137,25 +124,104 @@
 
                             <!-- ── Rules Tab ── -->
                             <template v-if="activeTab === 'rules'">
-                                <v-table v-if="!loading && rules.length > 0" hover density="comfortable">
+                                <div class="learning-section-header">
+                                    <h3 class="learning-section-title">{{ tt('Learning Rules') }}</h3>
+                                    <div class="learning-section-actions">
+                                        <v-btn variant="text"
+                                               color="default"
+                                               size="32"
+                                               density="compact"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                    </div>
+                                </div>
+
+                                <v-table v-if="!loading && filteredRules.length > 0" hover density="comfortable">
                                     <thead>
                                         <tr>
-                                            <th>{{ tt('Match Pattern') }}</th>
-                                            <th>{{ tt('Features') }}</th>
-                                            <th>{{ tt('Learned Action') }}</th>
-                                            <th class="text-center">{{ tt('Applied') }}</th>
-                                            <th>{{ tt('Enabled') }}</th>
+                                            <th class="learning-filterable-header">
+                                                <div class="learning-table-header">
+                                                    <span>{{ tt('Match Pattern') }}</span>
+                                                    <v-select v-model="ruleMatchTypeFilter"
+                                                              class="learning-table-filter"
+                                                              :items="ruleMatchTypeOptions"
+                                                              item-title="title"
+                                                              item-value="value"
+                                                              density="compact"
+                                                              variant="plain"
+                                                              hide-details />
+                                                </div>
+                                            </th>
+                                            <th class="learning-filterable-header">
+                                                <div class="learning-table-header">
+                                                    <span>{{ tt('Features') }}</span>
+                                                    <v-text-field v-model="ruleFeatureFilter"
+                                                                  class="learning-table-filter"
+                                                                  density="compact"
+                                                                  variant="plain"
+                                                                  hide-details
+                                                                  :placeholder="tt('Filter')" />
+                                                </div>
+                                            </th>
+                                            <th class="learning-filterable-header">
+                                                <div class="learning-table-header">
+                                                    <span>{{ tt('Learned Action') }}</span>
+                                                    <v-text-field v-model="ruleLearnedActionFilter"
+                                                                  class="learning-table-filter"
+                                                                  density="compact"
+                                                                  variant="plain"
+                                                                  hide-details
+                                                                  :placeholder="tt('Filter')" />
+                                                </div>
+                                            </th>
+                                            <th class="learning-filterable-header">
+                                                <div class="learning-table-header">
+                                                    <span>{{ tt('Enabled') }}</span>
+                                                    <v-select v-model="ruleEnabledFilter"
+                                                              class="learning-table-filter"
+                                                              :items="ruleEnabledFilterOptions"
+                                                              item-title="title"
+                                                              item-value="value"
+                                                              density="compact"
+                                                              variant="plain"
+                                                              hide-details />
+                                                </div>
+                                            </th>
+                                            <th class="learning-filterable-header">
+                                                <div class="learning-table-header">
+                                                    <span>{{ tt('Applied') }}</span>
+                                                    <v-select v-model="ruleAppliedFilter"
+                                                              class="learning-table-filter"
+                                                              :items="ruleAppliedFilterOptions"
+                                                              item-title="title"
+                                                              item-value="value"
+                                                              density="compact"
+                                                              variant="plain"
+                                                              hide-details />
+                                                </div>
+                                            </th>
                                             <th class="text-center">{{ tt('Actions') }}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <tr v-for="rule in rules" :key="rule.id">
-                                            <td>
-                                                <div class="text-body-2 font-weight-medium">{{ translateMatchType(rule.matchType) }}</div>
-                                                <div class="text-caption text-grey">{{ rule.matchValue }}</div>
+                                        <tr v-for="rule in filteredRules" :key="rule.id">
+                                            <td class="text-center">
+                                                <v-chip size="small" variant="tonal" color="info">
+                                                    {{ translateMatchType(rule.matchType) }}
+                                                </v-chip>
                                             </td>
                                             <td>
-                                                <div class="d-flex flex-wrap ga-1">
+                                                <div class="d-flex flex-wrap ga-1 align-center">
+                                                    <v-chip v-if="rule.matchValue"
+                                                            size="x-small"
+                                                            variant="outlined"
+                                                            color="primary">
+                                                        {{ rule.matchValue }}
+                                                    </v-chip>
                                                     <v-chip v-for="(feat, idx) in getRuleFeatSummary(rule).split(' · ').filter(Boolean)"
                                                             :key="idx" size="x-small" variant="tonal" color="secondary">
                                                         {{ feat }}
@@ -166,12 +232,12 @@
                                                 <div class="text-body-2">{{ rule.learnedType }}</div>
                                             </td>
                                             <td class="text-center">
-                                                <v-chip size="x-small" color="info" variant="tonal">{{ rule.appliedCount }}</v-chip>
-                                            </td>
-                                            <td>
                                                 <v-switch density="compact" color="success" hide-details
                                                           :model-value="rule.enabled"
                                                           @update:model-value="(v: boolean | null) => handleToggleRule(rule.id, !!v)" />
+                                            </td>
+                                            <td class="text-center">
+                                                <v-chip size="x-small" color="info" variant="tonal">{{ rule.appliedCount }}</v-chip>
                                             </td>
                                             <td class="text-center">
                                                 <v-btn size="small" variant="text" color="primary"
@@ -189,7 +255,7 @@
                                     </tbody>
                                 </v-table>
 
-                                <v-empty-state v-if="!loading && rules.length === 0"
+                                <v-empty-state v-if="!loading && filteredRules.length === 0"
                                                :icon="mdiBookOpenPageVariant"
                                                :headline="tt('No Rules')"
                                                :text="tt('Accept suggestions to create learning rules that auto-classify future imports.')" />
@@ -197,6 +263,29 @@
 
             <template v-if="activeTab === 'llm-config'">
                                 <!-- LLM 多配置管理 -->
+                                <div class="learning-section-header">
+                                    <h3 class="learning-section-title">{{ tt('LLM Config') }}</h3>
+                                    <div class="learning-section-actions">
+                                        <v-btn class="learning-panel-action"
+                                               size="small"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading"
+                                               @click="openAddConfigDialog">
+                                            {{ tt('Add Config') }}
+                                        </v-btn>
+                                        <v-btn variant="text"
+                                               color="default"
+                                               size="32"
+                                               density="compact"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                    </div>
+                                </div>
                                 <v-card variant="outlined" class="mb-4">
                                     <v-card-text class="pt-4">
                                         <v-table v-if="llmSavedConfigs.length > 0" density="compact" hover>
@@ -238,19 +327,63 @@
             </template>
 
             <template v-if="activeTab === 'llm'">
-                                <!-- 候选列表 -->
-                                <div class="d-flex flex-wrap align-center mb-2">
-                                    <v-chip-group v-model="llmStatusFilter" mandatory>
-                                        <v-chip value="" variant="tonal" size="small">{{ tt('All') }}</v-chip>
-                                        <v-chip value="pending" variant="tonal" color="warning" size="small">{{ tt('Pending') }}</v-chip>
-                                        <v-chip value="accepted" variant="tonal" color="success" size="small">{{ tt('Accepted') }}</v-chip>
-                                        <v-chip value="rejected" variant="tonal" color="error" size="small">{{ tt('Rejected') }}</v-chip>
-                                    </v-chip-group>
+                                <!-- 建议规则列表 -->
+                                <div class="learning-section-header">
+                                    <h3 class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
+                                    <div class="learning-section-actions">
+                                        <v-btn class="learning-panel-action"
+                                               size="small"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading"
+                                               @click="handleLLMGenerate">
+                                            {{ tt('Generate Suggestions') }}
+                                        </v-btn>
+                                        <v-btn class="learning-panel-action"
+                                               size="small"
+                                               variant="outlined"
+                                               color="default"
+                                               :disabled="loading || selectedLLMIds.length === 0"
+                                               @click="handleLLMBatchAccept">
+                                            {{ tt('Batch Accept') }} ({{ selectedLLMIds.length }})
+                                        </v-btn>
+                                        <v-select v-model="llmStatusFilter"
+                                                  class="learning-status-select"
+                                                  :items="llmStatusOptions"
+                                                  item-title="title"
+                                                  item-value="value"
+                                                  density="compact"
+                                                  variant="outlined"
+                                                  hide-details
+                                                  :aria-label="tt('Status')" />
+                                        <v-btn variant="text"
+                                               color="default"
+                                               size="32"
+                                               density="compact"
+                                               :icon="true"
+                                               :loading="loading"
+                                               @click="refreshCurrentTab">
+                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                        </v-btn>
+                                        <v-chip v-if="llmPendingCount > 0"
+                                                size="small"
+                                                color="warning"
+                                                variant="tonal">
+                                            {{ llmPendingCount }} {{ tt('Pending') }}
+                                        </v-chip>
+                                    </div>
                                 </div>
 
                                 <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
                                     <thead>
                                         <tr>
+                                            <th style="width:40px">
+                                                <v-checkbox-btn v-model="selectAllLLM"
+                                                                :indeterminate="llmIndeterminate"
+                                                                density="compact"
+                                                                hide-details />
+                                            </th>
                                             <th>{{ tt('Type') }}</th>
                                             <th>{{ tt('Rule Content') }}</th>
                                             <th>{{ tt('Target Category') }}</th>
@@ -261,6 +394,13 @@
                                     </thead>
                                     <tbody>
                                         <tr v-for="candidate in filteredLLMCandidates" :key="candidate.id">
+                                            <td>
+                                                <v-checkbox-btn v-model="selectedLLMIds"
+                                                                :value="candidate.id"
+                                                                density="compact"
+                                                                hide-details
+                                                                :disabled="candidate.status !== 'pending'" />
+                                            </td>
                                             <td>
                                                 <v-chip size="x-small" variant="tonal" color="info">
                                                     {{ candidate.rule_type || candidate.type || 'keyword' }}
@@ -302,8 +442,8 @@
 
                                 <v-empty-state v-if="filteredLLMCandidates.length === 0"
                                                :icon="mdiRobotOutline"
-                                               :headline="tt('No Candidate Rules')"
-                                               :text="tt('No LLM rule candidates are waiting for review.')" />
+                                               :headline="tt('No Suggested Rules')"
+                                               :text="tt('No LLM suggested rules are waiting for review.')" />
             </template>
         </v-card-text>
     </v-card>
@@ -541,6 +681,11 @@ interface LLMCandidateItem {
     target_category?: string;
 }
 
+interface SelectOption {
+    title: string;
+    value: string;
+}
+
 const props = defineProps<{
     initTab?: string
 }>();
@@ -562,6 +707,17 @@ function normalizePanelTab(tab?: string): string {
 const activeTab = ref<string>(normalizePanelTab(props.initTab));
 const statusFilter = ref<string>('');
 const selectedIds = ref<number[]>([]);
+const ruleMatchTypeFilter = ref<string>('');
+const ruleFeatureFilter = ref<string>('');
+const ruleLearnedActionFilter = ref<string>('');
+const ruleEnabledFilter = ref<string>('all');
+const ruleAppliedFilter = ref<string>('all');
+const llmLoading = ref(false);
+const llmConfigLoading = ref(false);
+const llmSavedConfigs = ref<LLMConfigItem[]>([]);
+const llmCandidates = ref<LLMCandidateItem[]>([]);
+const llmStatusFilter = ref<string>('');
+const selectedLLMIds = ref<number[]>([]);
 
 const llmProviderOptions: LLMProviderOption[] = [
     {
@@ -646,15 +802,95 @@ const legacyLLMProviderLabels: Record<string, string> = {
     azure_openai: 'Azure OpenAI',
 };
 
-const loading = computed(() => store.suggestionsLoading || store.rulesLoading);
+const loading = computed(() => (
+    store.suggestionsLoading
+    || store.rulesLoading
+    || llmLoading.value
+    || llmConfigLoading.value
+));
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);
+
+const suggestionStatusOptions = computed<SelectOption[]>(() => [
+    { title: `${tt('All')} (${suggestionsTotal.value})`, value: '' },
+    { title: tt('Pending'), value: 'pending' },
+    { title: tt('Accepted'), value: 'accepted' },
+    { title: tt('Rejected'), value: 'rejected' },
+]);
 
 const filteredSuggestions = computed(() => {
     if (!statusFilter.value) return store.suggestions;
     return store.suggestions.filter(s => s.status === statusFilter.value);
 });
+
+const ruleMatchTypeOptions = computed<SelectOption[]>(() => {
+    const options = new Map<string, string>();
+    for (const rule of rules.value) {
+        if (rule.matchType) {
+            options.set(rule.matchType, translateMatchType(rule.matchType));
+        }
+    }
+
+    return [
+        { title: tt('All'), value: '' },
+        ...Array.from(options, ([value, title]) => ({ title, value }))
+    ];
+});
+
+const ruleEnabledFilterOptions = computed<SelectOption[]>(() => [
+    { title: tt('All'), value: 'all' },
+    { title: tt('Enabled'), value: 'enabled' },
+    { title: tt('Disabled'), value: 'disabled' },
+]);
+
+const ruleAppliedFilterOptions = computed<SelectOption[]>(() => [
+    { title: tt('All'), value: 'all' },
+    { title: tt('Applied'), value: 'applied' },
+    { title: tt('Not Applied'), value: 'not-applied' },
+]);
+
+function containsText(source: string, query: string): boolean {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+        return true;
+    }
+
+    return source.toLowerCase().includes(normalizedQuery);
+}
+
+const filteredRules = computed(() => rules.value.filter((rule) => {
+    if (ruleMatchTypeFilter.value && rule.matchType !== ruleMatchTypeFilter.value) {
+        return false;
+    }
+
+    const featureText = `${rule.matchValue} ${getRuleFeatSummary(rule)}`;
+    if (!containsText(featureText, ruleFeatureFilter.value)) {
+        return false;
+    }
+
+    if (!containsText(rule.learnedType, ruleLearnedActionFilter.value)) {
+        return false;
+    }
+
+    if (ruleEnabledFilter.value === 'enabled' && !rule.enabled) {
+        return false;
+    }
+
+    if (ruleEnabledFilter.value === 'disabled' && rule.enabled) {
+        return false;
+    }
+
+    if (ruleAppliedFilter.value === 'applied' && rule.appliedCount <= 0) {
+        return false;
+    }
+
+    if (ruleAppliedFilter.value === 'not-applied' && rule.appliedCount > 0) {
+        return false;
+    }
+
+    return true;
+}));
 
 const selectAll = computed({
     get() {
@@ -870,11 +1106,6 @@ async function saveEditRule() {
     }
 }
 
-// ── LLM 归纳 state ──────────
-const llmSavedConfigs = ref<LLMConfigItem[]>([]);
-const llmCandidates = ref<LLMCandidateItem[]>([]);
-const llmStatusFilter = ref<string>('');
-
 // Add Config Dialog
 const addConfigDialog = ref(false);
 const addConfigSaving = ref(false);
@@ -926,9 +1157,41 @@ const llmPendingCount = computed(() =>
     llmCandidates.value.filter(c => c.status === 'pending').length
 );
 
+const llmStatusOptions = computed<SelectOption[]>(() => [
+    { title: tt('All'), value: '' },
+    { title: tt('Pending'), value: 'pending' },
+    { title: tt('Accepted'), value: 'accepted' },
+    { title: tt('Rejected'), value: 'rejected' },
+]);
+
 const filteredLLMCandidates = computed(() => {
     if (!llmStatusFilter.value) return llmCandidates.value;
     return llmCandidates.value.filter(c => c.status === llmStatusFilter.value);
+});
+
+const selectableLLMCandidates = computed(() =>
+    filteredLLMCandidates.value.filter(candidate => candidate.status === 'pending')
+);
+
+const selectAllLLM = computed({
+    get() {
+        return selectableLLMCandidates.value.length > 0
+            && selectableLLMCandidates.value.every(candidate => selectedLLMIds.value.includes(candidate.id));
+    },
+    set(val: boolean) {
+        if (val) {
+            selectedLLMIds.value = selectableLLMCandidates.value.map(candidate => candidate.id);
+        } else {
+            selectedLLMIds.value = [];
+        }
+    }
+});
+
+const llmIndeterminate = computed(() => {
+    const selectedCount = selectableLLMCandidates.value
+        .filter(candidate => selectedLLMIds.value.includes(candidate.id))
+        .length;
+    return selectedCount > 0 && selectedCount < selectableLLMCandidates.value.length;
 });
 
 function llmStatusColor(status: string): string {
@@ -1022,12 +1285,16 @@ function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSettings 
 }
 
 async function loadLLMConfigs() {
+    llmConfigLoading.value = true;
     try {
         const resp = await services.getLLMConfigs();
         if (resp.data?.success && resp.data.result) {
             llmSavedConfigs.value = toLLMConfigs(resp.data.result);
         }
     } catch { /* ignore config load errors */ }
+    finally {
+        llmConfigLoading.value = false;
+    }
 }
 
 function openAddConfigDialog() {
@@ -1105,31 +1372,79 @@ async function handleDeleteConfig(configId: number) {
 }
 
 async function loadLLMCandidates() {
+    llmLoading.value = true;
     try {
         const resp = await services.getLLMCandidates({ limit: 100 });
         if (resp.data?.success && resp.data.result) {
             llmCandidates.value = toLLMCandidates(resp.data.result);
+            selectedLLMIds.value = selectedLLMIds.value.filter(id =>
+                llmCandidates.value.some(candidate => candidate.id === id && candidate.status === 'pending')
+            );
         }
     } catch (error: unknown) {
         store.error = getRequestErrorMessage(error, 'Failed to load LLM candidates');
+    } finally {
+        llmLoading.value = false;
+    }
+}
+
+async function handleLLMGenerate() {
+    llmLoading.value = true;
+    try {
+        const resp = await services.analyzeLLMTransactions({ limit: 20 });
+        const created = resp.data?.result?.candidates_created ?? 0;
+        showInfoMessage('Generated LLM Suggestions Summary', { count: created });
+        await loadLLMCandidates();
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to generate LLM suggestions');
+    } finally {
+        llmLoading.value = false;
+    }
+}
+
+async function handleLLMBatchAccept() {
+    const ids = [...selectedLLMIds.value];
+    if (ids.length === 0) {
+        return;
+    }
+
+    llmLoading.value = true;
+    try {
+        for (const id of ids) {
+            await services.acceptLLMCandidate(id);
+        }
+        selectedLLMIds.value = [];
+        await loadLLMCandidates();
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to batch accept LLM suggestions');
+    } finally {
+        llmLoading.value = false;
     }
 }
 
 async function handleLLMAccept(id: number) {
+    llmLoading.value = true;
     try {
         await services.acceptLLMCandidate(id);
+        selectedLLMIds.value = selectedLLMIds.value.filter(selectedId => selectedId !== id);
         await loadLLMCandidates();
     } catch (error: unknown) {
         store.error = getRequestErrorMessage(error, 'Failed to accept candidate');
+    } finally {
+        llmLoading.value = false;
     }
 }
 
 async function handleLLMReject(id: number) {
+    llmLoading.value = true;
     try {
         await services.rejectLLMCandidate(id);
+        selectedLLMIds.value = selectedLLMIds.value.filter(selectedId => selectedId !== id);
         await loadLLMCandidates();
     } catch (error: unknown) {
         store.error = getRequestErrorMessage(error, 'Failed to reject candidate');
+    } finally {
+        llmLoading.value = false;
     }
 }
 
@@ -1159,12 +1474,54 @@ watch(activeTab, (tab) => {
     background: transparent;
 }
 
-.learning-panel-toolbar {
-    min-height: 32px;
+.learning-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 36px;
+    margin-bottom: 12px;
+}
+
+.learning-section-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.learning-section-actions {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 .learning-panel-action {
     min-width: 152px;
+}
+
+.learning-status-select {
+    flex: 0 0 168px;
+}
+
+.learning-filterable-header {
+    min-width: 150px;
+    vertical-align: top;
+}
+
+.learning-table-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-block: 4px;
+}
+
+.learning-table-filter {
+    width: 100%;
+    min-width: 132px;
 }
 
 .llm-config-autofill-decoy {
@@ -1196,5 +1553,7 @@ watch(activeTab, (tab) => {
 
 .v-table :deep(th) {
     white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
 }
 </style>

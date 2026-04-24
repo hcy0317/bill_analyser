@@ -387,7 +387,7 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
         return [
             {
                 value: 'learning-overview',
-                label: tt('Suggestions'),
+                label: tt('Auto Suggestions'),
                 selection: {
                     domain: 'learning',
                     tab: 'overview',

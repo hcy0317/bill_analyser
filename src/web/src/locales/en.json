@@ -2796,6 +2796,7 @@
     "Learning Center": "Learning Center",
     "Learning Suggestions": "Learning Suggestions",
     "Learning Rules": "Learning Rules",
+    "Auto Suggestions": "Auto Suggestions",
     "Generate Suggestions": "Generate Suggestions",
     "Batch Accept": "Batch Accept",
     "Suggestions": "Suggestions",
@@ -2806,6 +2807,7 @@
     "Learned Action": "Learned Action",
     "Samples": "Samples",
     "Applied": "Applied",
+    "Not Applied": "Not Applied",
     "Enabled": "Enabled",
     "Accept": "Accept",
     "Reject": "Reject",
@@ -2819,6 +2821,7 @@
     "Generated": "Generated",
     "new": "new",
     "updated": "updated",
+    "Filter": "Filter",
     "Rule Center": "Rule Center",
     "Category Rules": "Category Rules",
     "Filter Category": "Filter Category",
@@ -2872,7 +2875,10 @@
     "Analysis complete": "Analysis complete",
     "candidate rules": "candidate rules",
     "Candidate Rules": "Candidate Rules",
+    "Suggested Rules": "Suggested Rules",
     "No Candidate Rules": "No Candidate Rules",
+    "No Suggested Rules": "No Suggested Rules",
+    "No LLM suggested rules are waiting for review.": "No LLM suggested rules are waiting for review.",
     "Click Analyze Uncategorized to let LLM induce classification rules.": "Click Analyze Uncategorized to let LLM induce classification rules.",
     "Rule Content": "Rule Content",
     "Match Type": "Match Type",
@@ -3018,5 +3024,6 @@
     "Selected rules deleted: {count}": "Selected rules deleted: {count}",
     "Failed to update selected rules": "Failed to update selected rules",
     "Failed to delete selected rules": "Failed to delete selected rules",
-    "Generated Suggestions Summary": "Generated: {created} new, {updated} updated"
+    "Generated Suggestions Summary": "Generated: {created} new, {updated} updated",
+    "Generated LLM Suggestions Summary": "Generated {count} suggested rules"
 }

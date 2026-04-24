@@ -2801,6 +2801,7 @@
     "Learning Center": "学习中心",
     "Learning Suggestions": "学习建议",
     "Learning Rules": "学习规则",
+    "Auto Suggestions": "自动建议",
     "Generate Suggestions": "生成建议",
     "Batch Accept": "批量接受",
     "Suggestions": "建议",
@@ -2811,6 +2812,7 @@
     "Learned Action": "学习动作",
     "Samples": "样本数",
     "Applied": "已应用",
+    "Not Applied": "未应用",
     "Enabled": "启用",
     "Accept": "接受",
     "Reject": "拒绝",
@@ -2824,6 +2826,7 @@
     "Generated": "已生成",
     "new": "条新建",
     "updated": "条更新",
+    "Filter": "筛选",
     "Rule Center": "规则中心",
     "Category Rules": "分类规则",
     "Filter Category": "筛选分类",
@@ -2877,7 +2880,10 @@
     "Analysis complete": "分析完成",
     "candidate rules": "条候选规则",
     "Candidate Rules": "候选规则",
+    "Suggested Rules": "建议规则",
     "No Candidate Rules": "暂无候选规则",
+    "No Suggested Rules": "暂无建议规则",
+    "No LLM suggested rules are waiting for review.": "暂无等待审核的 LLM 建议规则。",
     "Click Analyze Uncategorized to let LLM induce classification rules.": "点击「分析未分类交易」按钮，让 LLM 自动归纳分类规则。",
     "Rule Content": "规则内容",
     "Match Type": "匹配类型",
@@ -3023,5 +3029,6 @@
     "Selected rules deleted: {count}": "已删除选中规则：{count} 条",
     "Failed to update selected rules": "更新选中规则失败",
     "Failed to delete selected rules": "删除选中规则失败",
-    "Generated Suggestions Summary": "已生成：{created} 条新建，{updated} 条更新"
+    "Generated Suggestions Summary": "已生成：{created} 条新建，{updated} 条更新",
+    "Generated LLM Suggestions Summary": "已生成 {count} 条建议规则"
 }
