@@ -33,8 +33,8 @@
                     <v-main>
                         <v-card variant="flat" min-height="760">
                             <template #title>
-                                <div class="title-and-toolbar d-flex flex-wrap align-center ga-3">
-                                    <v-btn class="me-1 d-md-none"
+                                <div class="title-and-toolbar d-flex align-center text-no-wrap">
+                                    <v-btn class="me-3 d-md-none"
                                            density="compact"
                                            color="default"
                                            variant="plain"
@@ -44,23 +44,35 @@
                                         <v-icon :icon="mdiMenu" size="24" />
                                     </v-btn>
 
-                                    <span>{{ currentTabOption.label }}</span>
+                                    <span>{{ currentPageTitle }}</span>
 
-                                    <v-chip v-if="isPairingOverview" color="primary" variant="tonal">
-                                        {{ filteredPairs.length }} {{ tt('pairs') }}
-                                    </v-chip>
-
-                                    <v-btn v-if="isPairingOverview"
+                                    <v-spacer />
+                                    <v-btn v-if="canRefreshActiveView"
                                            color="default"
                                            variant="text"
                                            density="compact"
-                                           size="36"
+                                           size="24"
+                                           class="ms-2"
                                            :icon="true"
-                                           :loading="loading"
+                                           :loading="activeToolbarRefreshing"
                                            @click="refreshActiveView">
-                                        <v-icon :icon="mdiRefresh" size="22" />
+                                        <template #loader>
+                                            <v-progress-circular indeterminate size="20"/>
+                                        </template>
+                                        <v-icon :icon="mdiRefresh" size="24" />
                                         <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                     </v-btn>
+
+                                    <v-chip
+                                        v-if="isPairingOverview"
+                                        class="ms-2 rule-center-pair-count-chip"
+                                        color="primary"
+                                        variant="tonal"
+                                        size="small"
+                                        label
+                                    >
+                                        {{ filteredPairs.length }} {{ tt('pairs') }}
+                                    </v-chip>
                                 </div>
                             </template>
 
@@ -86,21 +98,28 @@
                                 <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'rules'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="rules"
+                                                           ref="categoryRulePanel"
                                                            :tabs="['rules']"
-                                                           :title="tt('Category Recognition')" />
+                                                           :title="tt('Category Recognition')"
+                                                           hide-header />
                                     </div>
                                 </template>
 
                                 <template v-else-if="activeDomain === 'transfer' && activeTab === 'rules' && activeLegacyRuleTab === 'recurring'">
                                     <div class="embedded-rule-panel">
                                         <rule-center-panel init-tab="recurring"
+                                                           ref="recurringRulePanel"
                                                            :tabs="['recurring']"
-                                                           :title="tt('Recurring Recognition')" />
+                                                           :title="tt('Recurring Recognition')"
+                                                           hide-header />
                                     </div>
                                 </template>
 
                                 <template v-else-if="activeDomain === 'investment' && activeTab === 'rules'">
-                                    <investment-recognition-settings-card />
+                                    <investment-recognition-settings-card
+                                        ref="investmentRecognitionSettings"
+                                        hide-header
+                                    />
                                 </template>
 
                                 <template v-else-if="activeDomain === 'learning' && activeTab === 'overview'">
@@ -220,6 +239,16 @@ const showNav = ref<boolean>(display.mdAndUp.value);
 const showDeleteDialog = ref(false);
 const pairToDelete = ref<BillMatchingPairDetail | null>(null);
 const deleting = ref<number | null>(null);
+const rulePanelRefreshing = ref(false);
+const investmentSettingsRefreshing = ref(false);
+
+interface RefreshablePanel {
+    refresh: () => Promise<void>;
+}
+
+const categoryRulePanel = ref<RefreshablePanel | null>(null);
+const recurringRulePanel = ref<RefreshablePanel | null>(null);
+const investmentRecognitionSettings = ref<RefreshablePanel | null>(null);
 
 const loading = computed(() => matchingStore.loading);
 const error = computed({
@@ -408,9 +437,36 @@ const currentTabOption = computed<SecondaryTabOption>(() => {
 const isPairingOverview = computed(() =>
     (activeDomain.value === 'transfer' || activeDomain.value === 'investment') && activeTab.value === 'overview'
 );
+const isCategoryRecognition = computed(() =>
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'rules'
+);
+const isRecurringRecognition = computed(() =>
+    activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring'
+);
+const isInvestmentRecognition = computed(() =>
+    activeDomain.value === 'investment' && activeTab.value === 'rules'
+);
+const currentPageTitle = computed(() => (
+    isInvestmentRecognition.value
+        ? tt('Investment Recognition Settings')
+        : currentTabOption.value.label
+));
 const filteredPairs = computed(() => matchingStore.pairs.filter(pair => pair.pairType === activeDomain.value));
 const showPairsLoading = computed(() => isPairingOverview.value && loading.value);
 const showPairsError = computed(() => isPairingOverview.value && !!error.value);
+const canRefreshActiveView = computed(() => (
+    isPairingOverview.value
+        || isCategoryRecognition.value
+        || isRecurringRecognition.value
+        || isInvestmentRecognition.value
+));
+const activeToolbarRefreshing = computed(() => (
+    isPairingOverview.value
+        ? loading.value
+        : isInvestmentRecognition.value
+            ? investmentSettingsRefreshing.value
+            : rulePanelRefreshing.value
+));
 
 function collapseNavOnMobile(): void {
     if (!alwaysShowNav.value) {
@@ -467,6 +523,32 @@ function selectSecondaryNav(value: unknown): void {
 async function refreshActiveView(): Promise<void> {
     if (isPairingOverview.value) {
         await matchingStore.loadPairs();
+        return;
+    }
+
+    if (isInvestmentRecognition.value) {
+        investmentSettingsRefreshing.value = true;
+        try {
+            await investmentRecognitionSettings.value?.refresh();
+        } finally {
+            investmentSettingsRefreshing.value = false;
+        }
+        return;
+    }
+
+    const activeRulePanel = isCategoryRecognition.value
+        ? categoryRulePanel.value
+        : isRecurringRecognition.value
+            ? recurringRulePanel.value
+            : null;
+
+    if (activeRulePanel) {
+        rulePanelRefreshing.value = true;
+        try {
+            await activeRulePanel.refresh();
+        } finally {
+            rulePanelRefreshing.value = false;
+        }
     }
 }
 
@@ -562,29 +644,8 @@ watch(
     padding: 0;
 }
 
-.embedded-rule-panel :deep(.v-card-title) {
-    justify-content: flex-start;
-    gap: 8px;
-    padding-inline: 0;
-    padding-top: 0;
-}
-
-.embedded-rule-panel :deep(.v-card-title > .v-icon),
-.embedded-rule-panel :deep(.v-card-title > span),
-.embedded-rule-panel :deep(.v-card-title > .v-spacer) {
-    display: none;
-}
-
-.embedded-rule-panel :deep(.v-card-title > .v-btn) {
-    min-width: 32px;
-    width: 32px;
-    height: 32px;
-    padding-inline: 0;
-    font-size: 0;
-}
-
-.embedded-rule-panel :deep(.v-card-title > .v-btn .v-icon) {
-    margin-inline: 0;
-    font-size: 20px;
+.rule-center-pair-count-chip {
+    cursor: default;
+    user-select: none;
 }
 </style>

@@ -2,7 +2,7 @@
     <v-card variant="flat"
             class="investment-settings-card"
             :class="{ disabled: loadingRecognitionSettings || savingRecognitionSettings }">
-        <template #title>
+        <template v-if="!props.hideHeader" #title>
             <div class="investment-settings-title d-flex flex-wrap align-center ga-2">
                 <span>{{ tt('Investment Recognition Settings') }}</span>
                 <v-btn density="compact"
@@ -136,6 +136,10 @@ import { useUserStore } from '@/stores/user.ts';
 type RecognitionSettingsState = PairingCenterInvestmentSettings;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
+const props = defineProps<{
+    hideHeader?: boolean;
+}>();
+
 const { tt } = useI18n();
 const userStore = useUserStore();
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -247,6 +251,10 @@ async function saveRecognitionSettings(): Promise<void> {
 
 onMounted(() => {
     reloadRecognitionSettings(false);
+});
+
+defineExpose({
+    refresh: () => reloadRecognitionSettings(true),
 });
 </script>
 

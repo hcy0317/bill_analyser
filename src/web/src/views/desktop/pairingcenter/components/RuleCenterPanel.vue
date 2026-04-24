@@ -2,7 +2,7 @@
     <v-row class="match-height">
         <v-col cols="12">
             <v-card>
-                <v-card-title class="d-flex align-center">
+                <v-card-title v-if="!props.hideHeader" class="d-flex align-center">
                     <v-icon :icon="mdiBookCogOutline" class="me-2" />
                     <span>{{ title || tt('Category and Recurring Rules') }}</span>
                     <v-spacer />
@@ -467,6 +467,7 @@ const props = defineProps<{
     initTab?: string;
     tabs?: RuleCenterPanelTab[];
     title?: string;
+    hideHeader?: boolean;
 }>();
 
 const loading = ref(false);
@@ -1370,6 +1371,10 @@ watch(
 );
 
 onMounted(() => fetchAll());
+
+defineExpose({
+    refresh: fetchAll,
+});
 </script>
 
 <style scoped>
