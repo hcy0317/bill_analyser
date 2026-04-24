@@ -51,7 +51,7 @@
                         <div class="expression-clause-list">
                             <template v-for="(clause, clauseIndex) in group.clauses" :key="clause.id">
                                 <div
-                                    v-if="!isFirstRenderedClause(groupIndex, clauseIndex)"
+                                    v-if="clauseIndex > 0"
                                     class="clause-connector-row"
                                 >
                                     <v-btn-toggle
@@ -262,7 +262,7 @@ const expressionGroups = computed<RuleExpressionGroup[]>(() => {
     let balance = 0;
 
     for (const clause of clauses.value) {
-        const startsNewGroup = !currentGroup || (clause.joiner === 'OR' && balance === 0);
+        const startsNewGroup = !currentGroup || (clause.startsExpression && balance === 0);
         if (startsNewGroup) {
             currentGroup = {
                 id: `expression-${clause.id}`,
@@ -339,11 +339,8 @@ function normalizeClauseJoiners() {
     const firstClause = clauses.value[0];
     if (firstClause) {
         firstClause.joiner = 'AND';
+        firstClause.startsExpression = false;
     }
-}
-
-function isFirstRenderedClause(groupIndex: number, clauseIndex: number): boolean {
-    return groupIndex === 0 && clauseIndex === 0;
 }
 
 function getClauseConnector(clause: RuleClause): ClauseConnector {
@@ -368,6 +365,7 @@ function updateClauseConnector(clause: RuleClause, value: unknown) {
         ...clause,
         joiner: connector === 'OR' ? 'OR' : 'AND',
         operator,
+        startsExpression: false,
     });
     serializeKeywords();
 }
@@ -390,7 +388,8 @@ function addExpression() {
     parseErrorKey.value = '';
     clauses.value.push(createRuleClause({
         joiner: clauses.value.length > 0 ? 'OR' : 'AND',
-        operator: 'OR'
+        operator: 'OR',
+        startsExpression: clauses.value.length > 0
     }, createLocalClauseId));
     syncDraftTerms();
     serializeKeywords();
@@ -415,9 +414,13 @@ function removeClause(clauseId: string) {
     const nextClauses = clauses.value.filter(clause => clause.id !== clauseId);
     if (nextClauses.length > 0) {
         if (clauseIndex === 0) {
-            nextClauses[0] = { ...nextClauses[0]!, joiner: 'AND' };
+            nextClauses[0] = { ...nextClauses[0]!, joiner: 'AND', startsExpression: false };
         } else if (removedClause?.joiner === 'OR' && clauseIndex < nextClauses.length) {
-            nextClauses[clauseIndex] = { ...nextClauses[clauseIndex]!, joiner: 'OR' };
+            nextClauses[clauseIndex] = {
+                ...nextClauses[clauseIndex]!,
+                joiner: 'OR',
+                startsExpression: removedClause.startsExpression,
+            };
         }
     }
     clauses.value = nextClauses;
@@ -470,16 +473,17 @@ function toggleCloseParen(clause: RuleClause) {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: rgba(var(--v-theme-on-surface), 0.58);
+    color: rgba(var(--v-theme-primary), 0.86);
     font-size: 12px;
     font-weight: 600;
+    padding-block: 2px;
 }
 
 .expression-divider::before,
 .expression-divider::after {
     content: '';
     flex: 1 1 auto;
-    border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.22);
+    border-top: 2px dashed rgba(var(--v-theme-primary), 0.42);
 }
 
 .expression-divider span {
@@ -569,9 +573,11 @@ function toggleCloseParen(clause: RuleClause) {
 
 .paren-ghost--active {
     border-radius: 8px;
-    background: rgba(var(--v-theme-primary), 0.12);
+    background: rgba(var(--v-theme-primary), 0.22);
     color: rgb(var(--v-theme-primary));
     opacity: 1;
+    box-shadow: inset 0 0 0 1px rgba(var(--v-theme-primary), 0.55);
+    font-weight: 700;
 }
 
 .rule-clause-row:hover .paren-ghost:hover,

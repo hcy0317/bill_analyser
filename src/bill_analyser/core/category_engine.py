@@ -127,10 +127,11 @@ class RuleExpressionNode:
 
     ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
     ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
-    logical AND, ``×`` is accepted as the visible AND connector, while
-    top-level ``|``/``/`` are optional expression-level OR connectors for
-    parenthesized priority. Legacy ``OR:a|b&AND:c&NOT:d`` is still compiled by
-    ``compile_rule``.
+    logical AND, ``×`` is accepted as the visible AND connector, ``/`` is the
+    visible OR connector, and ``|`` is the canonical separator between
+    top-level expression groups. Both OR connectors parse to logical OR;
+    parentheses preserve the intended grouping. Legacy ``OR:a|b&AND:c&NOT:d``
+    is still compiled by ``compile_rule``.
     """
 
     kind: str
@@ -398,9 +399,10 @@ class KeywordMatcher:
         ``+`` keeps the existing no-parentheses syntax as a conjunction:
         ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
         ``(k1 or k2) and k3 and not k4``. ``×`` is accepted as the visible AND
-        connector (for example ``×NOT={k4}``). Parentheses can group any nested
-        expression, and top-level ``|`` or ``/`` is supported as an
-        expression-level OR where grouping is needed. Old
+        connector (for example ``×NOT={k4}``), ``/`` is accepted as the visible
+        OR connector inside an expression, and ``|`` is the canonical separator
+        between top-level expression groups. Both OR connectors parse to
+        logical OR; parentheses preserve the intended grouping. Old
         ``OR:k1|k2&AND:k3&NOT:k4`` strings still fall back to ``compile_rule``.
         """
         if not expr:

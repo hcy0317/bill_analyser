@@ -49,6 +49,17 @@ class TestKeywordMatcher:
         assert self.matcher.parse_and_match("滴滴打车退款", rule) is False
         assert self.matcher.parse_and_match("滴滴外卖", rule) is False
 
+    def test_composite_visible_connectors_and_grouping(self):
+        """测试新表达式中可见连接符与表达式分组语义"""
+        rule = "(OR={早餐}/OR={早饭})+AND={咖啡}× NOT={退款}|OR={午餐}"
+        compiled = self.matcher.compile_rule_expression(rule)
+
+        assert self.matcher.match_compiled("早餐咖啡", compiled) is True
+        assert self.matcher.match_compiled("早饭咖啡", compiled) is True
+        assert self.matcher.match_compiled("早餐咖啡退款", compiled) is False
+        assert self.matcher.match_compiled("午餐套餐", compiled) is True
+        assert self.matcher.match_compiled("早饭摊", compiled) is False
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

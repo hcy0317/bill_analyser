@@ -98,6 +98,15 @@ def test_keyword_matcher_rule_expression_ast_preserves_old_and_new_semantics() -
     assert matcher.match_compiled("早饭摊", slash_or) is True
     assert matcher.match_compiled("咖啡店", slash_or) is False
 
+    grouped_aliases = matcher.compile_rule_expression(
+        "(OR={早餐}/OR={早饭})+AND={咖啡}× NOT={退款}|OR={午餐}"
+    )
+    assert matcher.match_compiled("早餐咖啡", grouped_aliases) is True
+    assert matcher.match_compiled("早饭咖啡", grouped_aliases) is True
+    assert matcher.match_compiled("早餐咖啡退款", grouped_aliases) is False
+    assert matcher.match_compiled("午餐套餐", grouped_aliases) is True
+    assert matcher.match_compiled("早饭摊", grouped_aliases) is False
+
     visible_not = matcher.compile_rule_expression("OR={早餐,早饭}×NOT={退款}")
     assert matcher.match_compiled("早餐套餐", visible_not) is True
     assert matcher.match_compiled("早饭退款", visible_not) is False

@@ -9,6 +9,7 @@ export interface RuleClause {
     terms: string[];
     openParens: number;
     closeParens: number;
+    startsExpression: boolean;
 }
 
 export interface ParseRuleExpressionOptions {
@@ -40,6 +41,7 @@ interface CreateRuleClauseInput {
     terms?: readonly string[];
     openParens?: number;
     closeParens?: number;
+    startsExpression?: boolean;
 }
 
 const ESCAPABLE_COMPOSITE_CHARS = new Set(['\\', ',', '+', '{', '}', '|', '/', '×', '(', ')']);
@@ -58,7 +60,8 @@ export function createRuleClause(input: CreateRuleClauseInput = {}, idFactory: (
         operator: input.operator ?? 'OR',
         terms: normalizeRuleTerms(input.terms ?? []),
         openParens: normalizeParenCount(input.openParens),
-        closeParens: normalizeParenCount(input.closeParens)
+        closeParens: normalizeParenCount(input.closeParens),
+        startsExpression: Boolean(input.startsExpression)
     };
 }
 
@@ -184,7 +187,13 @@ export function serializeComposite(clauses: readonly RuleClause[]): SerializeRul
     return {
         expression: serializableClauses
             .map((clause, index) => {
-                const joiner = index === 0 ? '' : normalizeJoiner(clause.joiner) === 'OR' ? '|' : '+';
+                const joiner = index === 0
+                    ? ''
+                    : clause.startsExpression
+                        ? '|'
+                        : normalizeJoiner(clause.joiner) === 'OR'
+                            ? '/'
+                            : '+';
                 const open = '('.repeat(clause.openParens);
                 const close = ')'.repeat(clause.closeParens);
                 const terms = clause.terms.map(escapeCompositeTerm).join(',');
@@ -197,24 +206,31 @@ export function serializeComposite(clauses: readonly RuleClause[]): SerializeRul
 function normalizeSerializableClauses(clauses: readonly RuleClause[]): RuleClause[] {
     const serializableClauses: RuleClause[] = [];
     let pendingJoiner: RuleJoiner = 'AND';
+    let pendingExpressionStart = false;
 
     for (const clause of clauses.map(item => createRuleClause(item))) {
         if (clause.terms.length === 0) {
             if (clause.joiner === 'OR') {
                 pendingJoiner = 'OR';
+                pendingExpressionStart = true;
             }
             continue;
         }
+
+        const startsExpression = serializableClauses.length > 0
+            && (pendingExpressionStart || clause.startsExpression);
 
         serializableClauses.push({
             ...clause,
             joiner: serializableClauses.length === 0
                 ? 'AND'
-                : pendingJoiner === 'OR' || clause.joiner === 'OR'
+                : startsExpression || pendingJoiner === 'OR' || clause.joiner === 'OR'
                     ? 'OR'
-                    : 'AND'
+                    : 'AND',
+            startsExpression
         });
         pendingJoiner = 'AND';
+        pendingExpressionStart = false;
     }
 
     return serializableClauses;
@@ -294,6 +310,8 @@ function parseCompositeExpression(expression: string, idFactory: () => string, r
     let isFirstClause = true;
     let pendingJoiner: RuleJoiner = 'AND';
     let pendingOperatorOverride: RuleOperator | null = null;
+    let pendingExpressionStart = false;
+    let depth = 0;
 
     while (index < expression.length) {
         index = skipSpaces(expression, index);
@@ -304,6 +322,7 @@ function parseCompositeExpression(expression: string, idFactory: () => string, r
         const char = expression[index];
         if (char === '(') {
             pendingOpenParens += 1;
+            depth += 1;
             index += 1;
             expectingClause = true;
             continue;
@@ -322,6 +341,7 @@ function parseCompositeExpression(expression: string, idFactory: () => string, r
         let closeParens = 0;
         while (expression[index] === ')') {
             closeParens += 1;
+            depth = Math.max(0, depth - 1);
             index += 1;
             index = skipSpaces(expression, index);
         }
@@ -331,22 +351,25 @@ function parseCompositeExpression(expression: string, idFactory: () => string, r
             operator: pendingOperatorOverride ?? parsedClause.operator,
             terms: parsedClause.terms,
             openParens: pendingOpenParens,
-            closeParens
+            closeParens,
+            startsExpression: !isFirstClause && pendingExpressionStart
         }, idFactory));
         isFirstClause = false;
         pendingOpenParens = 0;
         pendingOperatorOverride = null;
+        pendingExpressionStart = false;
 
         if (index >= expression.length) {
             break;
         }
 
-        const connector = readCompositeConnector(expression, index);
+        const connector = readCompositeConnector(expression, index, depth);
         if (!connector) {
             return null;
         }
         pendingJoiner = connector.joiner;
         pendingOperatorOverride = connector.operatorOverride;
+        pendingExpressionStart = connector.startsExpression;
         index = connector.nextIndex;
         expectingClause = true;
     }
@@ -378,26 +401,30 @@ function parseCompositeExpression(expression: string, idFactory: () => string, r
 
 function readCompositeConnector(
     expression: string,
-    startIndex: number
-): { joiner: RuleJoiner; operatorOverride: RuleOperator | null; nextIndex: number } | null {
+    startIndex: number,
+    depth: number
+): { joiner: RuleJoiner; operatorOverride: RuleOperator | null; startsExpression: boolean; nextIndex: number } | null {
     let index = skipSpaces(expression, startIndex);
     const char = expression[index];
 
     if (char === '+') {
-        return { joiner: 'AND', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+        return { joiner: 'AND', operatorOverride: null, startsExpression: false, nextIndex: skipSpaces(expression, index + 1) };
     }
-    if (char === '|' || char === '/') {
-        return { joiner: 'OR', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+    if (char === '|') {
+        return { joiner: 'OR', operatorOverride: null, startsExpression: depth === 0, nextIndex: skipSpaces(expression, index + 1) };
+    }
+    if (char === '/') {
+        return { joiner: 'OR', operatorOverride: null, startsExpression: false, nextIndex: skipSpaces(expression, index + 1) };
     }
     if (char === '×') {
-        return { joiner: 'AND', operatorOverride: null, nextIndex: skipSpaces(expression, index + 1) };
+        return { joiner: 'AND', operatorOverride: null, startsExpression: false, nextIndex: skipSpaces(expression, index + 1) };
     }
 
     const remainingExpression = expression.slice(index);
     const notMatch = /^NOT\b/i.exec(remainingExpression);
     if (notMatch) {
         index += notMatch[0].length;
-        return { joiner: 'AND', operatorOverride: 'NOT', nextIndex: skipSpaces(expression, index) };
+        return { joiner: 'AND', operatorOverride: 'NOT', startsExpression: false, nextIndex: skipSpaces(expression, index) };
     }
 
     return null;
@@ -429,6 +456,7 @@ function repairNestedCompositeTerms(
         repairedClauses.push(...nestedClauses.map((nestedClause, index) => ({
             ...nestedClause,
             joiner: index === 0 ? clause.joiner : nestedClause.joiner,
+            startsExpression: index === 0 ? clause.startsExpression : nestedClause.startsExpression,
             openParens: index === 0
                 ? nestedClause.openParens + clause.openParens
                 : nestedClause.openParens,

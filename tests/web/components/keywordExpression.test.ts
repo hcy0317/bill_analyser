@@ -94,15 +94,33 @@ describe('keywordExpression helpers', () => {
 
         expect(parsed.sourceFormat).toBe('composite');
         expect(parsed.clauses).toMatchObject([
-            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
-            { joiner: 'OR', operator: 'AND', terms: ['咖啡'] }
+            { joiner: 'AND', operator: 'OR', terms: ['早餐'], startsExpression: false },
+            { joiner: 'OR', operator: 'AND', terms: ['咖啡'], startsExpression: true }
         ]);
         expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
             expression
         });
     });
 
-    test('accepts visible connector aliases but serializes back to canonical composite syntax', () => {
+    test('keeps slash as an in-expression OR connector separate from pipe expression boundaries', () => {
+        const expression = '(OR={早餐}/OR={早饭})|AND={咖啡}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['早餐'], openParens: 1, startsExpression: false },
+            { joiner: 'OR', operator: 'OR', terms: ['早饭'], closeParens: 1, startsExpression: false },
+            { joiner: 'OR', operator: 'AND', terms: ['咖啡'], startsExpression: true }
+        ]);
+        expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
+            expression
+        });
+    });
+
+    test('accepts visible connector aliases and preserves slash for block-level OR', () => {
         const expression = 'OR={早餐}/OR={咖啡}×NOT={退款} NOT OR={测试}';
         const parsed = parseExpression(expression, {
             format: 'composite',
@@ -117,7 +135,7 @@ describe('keywordExpression helpers', () => {
             { joiner: 'AND', operator: 'NOT', terms: ['测试'] }
         ]);
         expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
-            expression: 'OR={早餐}|OR={咖啡}+NOT={退款}+NOT={测试}'
+            expression: 'OR={早餐}/OR={咖啡}+NOT={退款}+NOT={测试}'
         });
     });
 
@@ -296,5 +314,7 @@ describe('keyword expression component copy', () => {
         );
         expect(combinedSource).not.toContain('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}');
         expect(combinedSource).not.toContain('Rule Priority');
+        expect(combinedSource).toContain('category-rule-builder__header');
+        expect(combinedSource).toContain('v-if="clauseIndex > 0"');
     });
 });

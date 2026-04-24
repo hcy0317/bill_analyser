@@ -2,37 +2,38 @@
     <v-card variant="outlined" rounded="lg" class="category-rule-builder">
         <v-card-text class="pa-4">
             <div class="d-flex flex-column ga-4">
-                <div class="d-flex flex-column flex-md-row align-md-center ga-3">
+                <div class="category-rule-builder__header">
                     <div class="text-subtitle-1 font-weight-medium">
                         {{ tt(title) }}
                     </div>
-                </div>
 
-                <v-row>
-                    <v-col cols="12" md="4">
+                    <div class="category-rule-builder__toggles">
                         <v-switch
                             :model-value="draft.regexEnabled"
+                            class="category-rule-builder__switch"
                             color="primary"
+                            density="compact"
                             hide-details
                             inset
                             :disabled="disabled"
                             :label="tt('Enable Regex')"
                             @update:model-value="updateBooleanField('regexEnabled', $event)"
                         />
-                    </v-col>
 
-                    <v-col v-if="showEnabledToggle" cols="12" md="4">
                         <v-switch
+                            v-if="showEnabledToggle"
                             :model-value="draft.enabled"
+                            class="category-rule-builder__switch"
                             color="success"
+                            density="compact"
                             hide-details
                             inset
                             :disabled="disabled"
                             :label="tt('Enabled')"
                             @update:model-value="updateBooleanField('enabled', $event)"
                         />
-                    </v-col>
-                </v-row>
+                    </div>
+                </div>
 
                 <rule-expression-input
                     :model-value="draft.ruleExpression"
@@ -101,5 +102,24 @@ function updateBooleanField(key: 'regexEnabled' | 'enabled', value: unknown): vo
 <style scoped>
 .category-rule-builder {
     background: rgba(var(--v-theme-surface), 1);
+}
+
+.category-rule-builder__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 16px;
+}
+
+.category-rule-builder__toggles {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+}
+
+.category-rule-builder__switch {
+    flex: 0 0 auto;
 }
 </style>
