@@ -287,8 +287,9 @@ describe('historyPolarChart helpers', () => {
             data: Array<{ value: number }>;
         } | undefined;
         const secondaryLabelSeries = option.series.find(item => item['name'] === 'secondary-labels') as {
+            polarIndex?: number;
             data: Array<{
-                value: number;
+                value: [number, number];
                 label: {
                     formatter: string;
                     rotate: number;
@@ -297,7 +298,7 @@ describe('historyPolarChart helpers', () => {
         } | undefined;
         const lineSeries = option.series.find(item => item['name'] === '执行度') as {
             smooth?: boolean;
-            data: Array<number>;
+            data: Array<{ value: number }>;
         } | undefined;
 
         expect(primaryRingSeries).toBeDefined();
@@ -317,6 +318,8 @@ describe('historyPolarChart helpers', () => {
         expect(primaryRingSeries?.['radius']).toStrictEqual(['80%', '86%']);
         expect(option.polar[2]?.radius).toStrictEqual(['88%', '96%']);
         expect(primaryLabelSeries?.polarIndex).toBe(2);
+        expect(option.polar[3]?.radius).toStrictEqual(['20%', '74%']);
+        expect(secondaryLabelSeries?.polarIndex).toBe(3);
         expect(primaryLabelSeries?.data.map(item => item.label.formatter)).toStrictEqual(['餐饮', '交通']);
         expect(primaryLabelSeries?.data[0]?.label.width).toBe(BUDGET_HISTORY_CHART_CONFIG.PRIMARY_LABEL_TRUNCATE_WIDTH);
         expect(primaryLabelSeries?.data[0]?.label.overflow).toBe('truncate');
@@ -326,8 +329,9 @@ describe('historyPolarChart helpers', () => {
         expect(primaryLabelSeries?.data[0]?.value[1]).toBeGreaterThanOrEqual(0);
 
         expect(spentSeries!.data[0]?.value).toBe(620);
-        expect(secondaryLabelSeries!.data[0]?.value).toBeGreaterThan(800);
-        expect(secondaryLabelSeries!.data[0]?.value).toBeLessThan(model.amountAxisMax);
+        expect(secondaryLabelSeries!.data[0]?.value[0]).toBeGreaterThan(800);
+        expect(secondaryLabelSeries!.data[0]?.value[0]).toBeLessThan(model.amountAxisMax);
+        expect(secondaryLabelSeries!.data[0]?.value[1]).toBeGreaterThanOrEqual(0);
         expect(secondaryLabelSeries!.data[0]?.label?.formatter).toBe('早餐');
         expect(secondaryLabelSeries!.data[0]?.label?.rotate).toBeLessThan(0);
         expect(secondaryLabelSeries!.data[1]?.label?.formatter).toBe('午餐');
@@ -335,7 +339,7 @@ describe('historyPolarChart helpers', () => {
         expect(secondaryLabelSeries!.data[2]?.label?.formatter).toBe('打车');
         expect(secondaryLabelSeries!.data[2]?.label?.rotate).toBeGreaterThan(0);
         expect(Math.abs(secondaryLabelSeries!.data[1]?.label?.rotate || 0)).toBeLessThan(90);
-        expect(lineSeries!.data[2]).toBeCloseTo(117.1, 1);
+        expect(lineSeries!.data[2]?.value).toBeCloseTo(117.1, 1);
     });
 
     test('buildHistoricalPolarChartOption omits the primary ring when showPrimaryRing is false', () => {

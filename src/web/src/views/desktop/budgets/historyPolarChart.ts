@@ -547,6 +547,7 @@ export function buildHistoricalPolarChartOption(
             tooltip: { show: false },
             universalTransition: { enabled: true },
             data: model.primaryBands.map(band => ({
+                id: band.key,
                 name: band.label,
                 value: band.secondaryKeys.length,
                 itemStyle: {
@@ -602,6 +603,8 @@ export function buildHistoricalPolarChartOption(
             },
             tooltip: { show: false },
             data: model.primaryLabels.map(label => ({
+                id: label.key,
+                name: label.label,
                 value: [label.radiusValue, getPolarAngleAxisValue(label.angle)],
                 label: {
                     show: true,
@@ -621,6 +624,39 @@ export function buildHistoricalPolarChartOption(
         });
     }
 
+    const secondaryLabelPolarIndex = polar.length;
+
+    polar.push({
+        center: POLAR_CENTER,
+        radius: BAR_POLAR_RADIUS
+    });
+
+    angleAxis.push({
+        type: 'value',
+        min: 0,
+        max: 360,
+        startAngle: START_ANGLE,
+        clockwise: true,
+        polarIndex: secondaryLabelPolarIndex,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+    });
+
+    radiusAxis.push({
+        type: 'value',
+        min: 0,
+        max: model.amountAxisMax,
+        interval: model.amountAxisInterval,
+        splitNumber: 4,
+        polarIndex: secondaryLabelPolarIndex,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false }
+    });
+
     series.push(
         {
             name: args.budgetAmountLabel,
@@ -633,6 +669,8 @@ export function buildHistoricalPolarChartOption(
             z: 2,
             universalTransition: { enabled: true },
             data: model.slots.map(slot => ({
+                id: `${slot.key}:budget`,
+                name: slot.key,
                 value: slot.budgetAmount,
                 itemStyle: {
                     color: withAlpha(slot.color, 0.28)
@@ -650,6 +688,8 @@ export function buildHistoricalPolarChartOption(
             z: 3,
             universalTransition: { enabled: true },
             data: model.slots.map(slot => ({
+                id: `${slot.key}:spent`,
+                name: slot.key,
                 value: slot.spentAmount,
                 itemStyle: {
                     color: slot.color
@@ -660,7 +700,7 @@ export function buildHistoricalPolarChartOption(
             name: 'secondary-labels',
             type: 'scatter',
             coordinateSystem: 'polar',
-            polarIndex: 0,
+            polarIndex: secondaryLabelPolarIndex,
             symbolSize: 1,
             z: 4,
             animationDurationUpdate: 720,
@@ -670,7 +710,9 @@ export function buildHistoricalPolarChartOption(
                 color: 'rgba(0,0,0,0)'
             },
             data: model.slots.map(slot => ({
-                value: getSecondaryLabelValue(slot, model),
+                id: `${slot.key}:label`,
+                name: slot.key,
+                value: [getSecondaryLabelValue(slot, model), getPolarAngleAxisValue(slot.angle)],
                 label: {
                     show: true,
                     position: 'inside',
@@ -698,7 +740,11 @@ export function buildHistoricalPolarChartOption(
             universalTransition: { enabled: true },
             lineStyle: { width: 2.5, color: args.accentColor },
             itemStyle: { color: args.accentColor },
-            data: model.slots.map(slot => clamp(slot.executionRate, 0, MAX_EXECUTION_RATE))
+            data: model.slots.map(slot => ({
+                id: `${slot.key}:execution`,
+                name: slot.key,
+                value: clamp(slot.executionRate, 0, MAX_EXECUTION_RATE)
+            }))
         }
     );
 

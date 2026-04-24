@@ -3350,6 +3350,10 @@ watch(filterKeyword, (newVal) => {
     max-width: 172px;
 }
 
+.budget-forecast-control :deep(.v-field) {
+    min-height: 40px;
+}
+
 .budget-forecast-control :deep(.v-field__input) {
     min-width: 0;
 }
@@ -3364,10 +3368,14 @@ watch(filterKeyword, (newVal) => {
     flex: 0 0 152px;
     width: 152px;
     max-width: 152px;
+    height: 40px;
+    min-height: 40px;
 }
 
 .budget-forecast-clear-button {
     flex: 0 0 auto;
+    height: 40px;
+    min-height: 40px;
     padding-inline: 10px;
 }
 
