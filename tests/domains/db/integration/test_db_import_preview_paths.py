@@ -1012,3 +1012,47 @@ async def test_preview_confirm_handles_income_duplicates_missing_recurring_and_d
         ]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_preview_confirm_same_account_investment_pnl_affects_balance(tmp_path: Path) -> None:
+    """确认导入后的同账户投资盈亏变化应真实改变账户余额。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "preview_investment_pnl_user")
+        session_id = "preview-investment-pnl-session"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        account_id = await _create_account(db, user_id=user_id, name="支付宝")
+
+        for amount, description in [
+            (12.0, "沪深300ETF 分红发放"),
+            (5.0, "黄金ETF 亏损调整"),
+        ]:
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-06-01 10:00:00",
+                    "preview_type": "投资",
+                    "preview_amount": amount,
+                    "preview_destination_amount": amount,
+                    "preview_source_account_id": account_id,
+                    "preview_destination_account_id": account_id,
+                    "preview_counterparty": "天天基金",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": description,
+                },
+                user_id=user_id,
+            )
+            assert preview_id > 0
+
+        confirm_result = await db.confirm_preview_to_bills(session_id, user_id=user_id)
+
+        assert confirm_result == {
+            "confirmed_count": 2,
+            "skipped_count": 0,
+            "duplicate_count": 0,
+            "errors": [],
+        }
+        assert await db.calculate_account_balance(account_id, "支付宝") == pytest.approx(7.0)
+    finally:
+        await db.close()

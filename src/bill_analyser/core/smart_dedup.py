@@ -12,7 +12,7 @@ v6.57 版本 (2025-12-01):
 
 2. **支付平台/银行去重** (platform_bank):
    - 时间误差30秒以内
-   - 金额相等（绝对值相等且符号相同，都是支出或都是收入）
+   - 金额绝对值相等；同号直接视为重复，异号需排除明确转账意图并具备文本重复证据
    - 一个来自支付平台(wechat/alipay)，一个来自银行(icbc/cmbc/abc/ccb)
    - 优先保留支付平台账单（信息更丰富）
 
@@ -36,7 +36,7 @@ v6.57 版本 (2025-12-01):
    - 至少一条描述包含第三方支付关键词（支付宝、微信等）
    - 用于处理银行账单中同时出现原始流水和第三方支付代扣的情况
 
-去重优先级：完全重复 → 转账配对 → 支付平台/银行去重 → 类似账单去重 → 分账单去重 → 同源关联去重 → 数据库重复
+去重优先级：完全重复 → 支付平台/银行去重 → 转账配对 → 类似账单去重 → 分账单去重 → 同源关联去重 → 数据库重复
 
 **v6.57关键变更**:
 - 使用 pandas 向量化操作优化时间比对性能
@@ -129,6 +129,20 @@ class SmartDeduplicationEngine:
 
     # 相似度阈值
     SIMILARITY_THRESHOLD = 0.5
+
+    # 异号平台/银行候选里出现这些关键词时，优先保留为真实转账配对
+    TRANSFER_INTENT_KEYWORDS = {
+        "转账",
+        "转入",
+        "转出",
+        "提现",
+        "充值",
+        "还款",
+        "划转",
+        "内部转",
+        "存入",
+        "取出",
+    }
 
     def __init__(self):
         """初始化去重引擎"""
@@ -250,8 +264,8 @@ class SmartDeduplicationEngine:
 
         v6.42.1处理流程：
         1. 完全重复检测
-        2. 转账配对（时间30秒+金额相反+来源不同）
-        3. 支付平台/银行去重
+        2. 支付平台/银行去重
+        3. 转账配对（时间30秒+金额相反+来源不同）
         4. 类似账单去重
         5. 分账单去重
 
@@ -276,10 +290,10 @@ class SmartDeduplicationEngine:
         exact_groups = self._find_exact_duplicates(bills)
         duplicate_groups.extend(exact_groups)
 
-        transfer_pairs = self._find_transfer_pairs(bills)
-
         platform_bank_groups = self._find_platform_bank_duplicates(bills)
         duplicate_groups.extend(platform_bank_groups)
+
+        transfer_pairs = self._find_transfer_pairs(bills)
 
         similar_groups = self._find_similar_duplicates(bills)
         duplicate_groups.extend(similar_groups)
@@ -325,8 +339,8 @@ class SmartDeduplicationEngine:
 
         v6.42.1处理流程：
         1. 完全重复检测
-        2. 转账配对（时间30秒+金额相反+来源不同）
-        3. 支付平台/银行去重
+        2. 支付平台/银行去重
+        3. 转账配对（时间30秒+金额相反+来源不同）
         4. 类似账单去重
         5. 分账单去重
         6. 数据库重复检测
@@ -354,10 +368,10 @@ class SmartDeduplicationEngine:
         exact_groups = self._find_exact_duplicates(bills)
         duplicate_groups.extend(exact_groups)
 
-        transfer_pairs = self._find_transfer_pairs(bills)
-
         platform_bank_groups = self._find_platform_bank_duplicates(bills)
         duplicate_groups.extend(platform_bank_groups)
+
+        transfer_pairs = self._find_transfer_pairs(bills)
 
         similar_groups = self._find_similar_duplicates(bills)
         duplicate_groups.extend(similar_groups)
@@ -776,13 +790,81 @@ class SmartDeduplicationEngine:
 
         return ""
 
+    def _bill_text_for_intent(self, bill: dict[str, Any]) -> str:
+        """Return searchable text for transfer-intent and duplicate-evidence checks."""
+        return " ".join(
+            str(bill.get(field, "") or "").strip()
+            for field in [
+                "counterparty",
+                "payment_method",
+                "description",
+                "original_category",
+                "main_category",
+                "sub_category",
+            ]
+            if str(bill.get(field, "") or "").strip()
+        )
+
+    def _has_transfer_intent_keywords(self, bill: dict[str, Any]) -> bool:
+        """Whether a bill explicitly looks like a transfer."""
+        text_lower = self._bill_text_for_intent(bill).lower()
+        return any(keyword.lower() in text_lower for keyword in self.TRANSFER_INTENT_KEYWORDS)
+
+    def _has_platform_bank_duplicate_text_evidence(
+        self,
+        platform_bill: dict[str, Any],
+        bank_bill: dict[str, Any],
+    ) -> bool:
+        """Check whether an opposite-sign platform/bank pair looks duplicated."""
+        comparable_fields = [
+            "counterparty",
+            "description",
+            "payment_method",
+            "original_category",
+        ]
+        for field in comparable_fields:
+            left = str(platform_bill.get(field, "") or "").strip()
+            right = str(bank_bill.get(field, "") or "").strip()
+            if not left or not right:
+                continue
+            if left in right or right in left:
+                return True
+            if self._calculate_similarity(left, right) >= self.SIMILARITY_THRESHOLD:
+                return True
+
+        platform_text = self._bill_text_for_intent(platform_bill)
+        bank_text = self._bill_text_for_intent(bank_bill)
+        return bool(
+            platform_text
+            and bank_text
+            and self._calculate_similarity(platform_text, bank_text) >= 0.62
+        )
+
+    def _is_platform_bank_duplicate_candidate(
+        self,
+        platform_bill: dict[str, Any],
+        bank_bill: dict[str, Any],
+    ) -> bool:
+        """Return True when a platform/bank pair should win before transfer pairing."""
+        platform_amount = float(platform_bill.get("amount", 0) or 0)
+        bank_amount = float(bank_bill.get("amount", 0) or 0)
+        if (platform_amount >= 0) == (bank_amount >= 0):
+            return True
+
+        if self._has_transfer_intent_keywords(platform_bill) or self._has_transfer_intent_keywords(
+            bank_bill
+        ):
+            return False
+
+        return self._has_platform_bank_duplicate_text_evidence(platform_bill, bank_bill)
+
     def _find_platform_bank_duplicates(self, bills: list[dict[str, Any]]) -> list[DuplicateGroup]:
         """查找支付平台与银行的重复账单
 
         v6.57优化: 使用pandas向量化操作替代双重循环
         v6.42去重条件（全部满足）：
         1. 时间误差30秒以内
-        2. 金额相等（绝对值相等且符号相同）
+        2. 金额绝对值相等；同号直接通过，异号需排除转账意图且文本证据相似
         3. 一个来自支付平台(wechat/alipay)，一个来自银行(icbc/cmbc/abc/ccb)
 
         优先保留支付平台账单（信息更丰富）。
@@ -830,7 +912,11 @@ class SmartDeduplicationEngine:
             return groups
 
         # v6.57: 使用向量化查找时间接近的配对
-        time_close_pairs = self._find_time_close_pairs_vectorized(df_platform, df_bank, self.TIME_TOLERANCE)
+        time_close_pairs = self._find_time_close_pairs_vectorized(
+            df_platform,
+            df_bank,
+            self.TIME_TOLERANCE,
+        )
 
         if time_close_pairs.empty:
             self.logger.debug("[平台-银行去重] 无时间接近的配对")
@@ -850,12 +936,13 @@ class SmartDeduplicationEngine:
         )
 
         # v6.57: 向量化金额比较
-        # 条件2：金额绝对值相等且符号相同
+        # 条件2：金额绝对值相等；符号方向由逐条候选 guard 决定
         time_close_pairs["abs_amt_p"] = time_close_pairs["amt_p"].abs()
         time_close_pairs["abs_amt_b"] = time_close_pairs["amt_b"].abs()
         time_close_pairs["amount_match"] = (
-            np.abs(time_close_pairs["abs_amt_p"] - time_close_pairs["abs_amt_b"]) <= self.AMOUNT_TOLERANCE
-        ) & (time_close_pairs["pos_p"] == time_close_pairs["pos_b"])
+            np.abs(time_close_pairs["abs_amt_p"] - time_close_pairs["abs_amt_b"])
+            <= self.AMOUNT_TOLERANCE
+        )
 
         matched_pairs = time_close_pairs[time_close_pairs["amount_match"]]
 
@@ -879,6 +966,9 @@ class SmartDeduplicationEngine:
             b_bill = bank_bills[b_idx]
 
             if p_bill.get("_removed") or b_bill.get("_removed"):
+                continue
+
+            if not self._is_platform_bank_duplicate_candidate(p_bill, b_bill):
                 continue
 
             matched_bank_indices.add(b_idx)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from bill_analyser.core.investment_matching import (
+    classify_investment_pnl_change,
     extract_investment_profile,
     score_investment_candidate,
 )
@@ -91,3 +92,36 @@ def test_investment_matching_is_deterministic_for_specific_profile() -> None:
     assert first_candidate["platform"] == "天天基金"
     assert first_candidate["product"] == "沪深300ETF"
     assert first_candidate["reason"] == "platform:天天基金, product:沪深300ETF/基金/ETF"
+
+
+def test_investment_pnl_change_detects_gain_loss_and_rejects_generic_income() -> None:
+    """投资收益/分红/亏损应形成盈亏变化信号，但普通工资收益不能误报。"""
+    gain_signal = classify_investment_pnl_change(
+        {
+            "type": "投资",
+            "counterparty": "天天基金",
+            "payment_method": "银行卡",
+            "description": "沪深300ETF 分红发放",
+            "main_category": "投资理财",
+            "sub_category": "基金",
+        }
+    )
+    loss_signal = classify_investment_pnl_change(
+        {
+            "type": "投资",
+            "counterparty": "蚂蚁财富",
+            "payment_method": "支付宝",
+            "description": "黄金ETF 亏损调整",
+            "main_category": "投资理财",
+            "sub_category": "基金",
+        }
+    )
+
+    assert gain_signal is not None
+    assert gain_signal["label"] == "盈亏变化"
+    assert gain_signal["direction"] == "gain"
+    assert "盈亏变化:收益" in gain_signal["reason"]
+    assert loss_signal is not None
+    assert loss_signal["direction"] == "loss"
+    assert "盈亏变化:亏损" in loss_signal["reason"]
+    assert classify_investment_pnl_change({"type": "收入", "description": "工资收益"}) is None

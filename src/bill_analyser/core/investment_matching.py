@@ -25,8 +25,32 @@ INVESTMENT_ACTION_KEYWORDS = {
     "转入",
     "转出",
     "分红",
+    "分红发放",
+    "收益",
+    "收益发放",
+    "亏损",
     "确认份额",
     "购买",
+}
+
+INVESTMENT_PNL_GAIN_KEYWORDS = {
+    "收益",
+    "收益发放",
+    "分红",
+    "分红发放",
+    "红利",
+    "派息",
+    "利息",
+    "盈利",
+    "利润",
+}
+
+INVESTMENT_PNL_LOSS_KEYWORDS = {
+    "亏损",
+    "亏损调整",
+    "亏损扣款",
+    "损失",
+    "浮亏",
 }
 
 INTRINSIC_INVESTMENT_NEGATIVE_KEYWORDS = {
@@ -198,6 +222,116 @@ def score_investment_candidate(
         "hint_text": hint_text,
         "platform": normalized_platform,
         "product": normalized_product,
+    }
+
+
+def classify_investment_pnl_change(
+    bill: dict[str, Any],
+    *,
+    keyword_config: dict[str, list[str]] | None = None,
+) -> dict[str, Any] | None:
+    """Detect same-account investment profit/loss rows as balance-changing PnL signals."""
+    # pylint: disable=too-many-locals
+    current_type = str(bill.get("type", "") or "").strip().lower()
+    if current_type in ["转账", "transfer", "4"]:
+        return None
+
+    counterparty = str(bill.get("counterparty", "") or "").strip()
+    payment_method = str(bill.get("payment_method", "") or "").strip()
+    description = str(bill.get("description", "") or "").strip()
+    original_category = str(bill.get("original_category", "") or "").strip()
+    assigned_category_text = " ".join(
+        part
+        for part in [
+            str(bill.get("main_category", "") or "").strip(),
+            str(bill.get("sub_category", "") or "").strip(),
+        ]
+        if part
+    )
+    evidence_text = " ".join(
+        part for part in [counterparty, payment_method, description, original_category] if part
+    )
+    all_text = " ".join(part for part in [evidence_text, assigned_category_text] if part)
+    if not evidence_text:
+        return None
+
+    all_text_lower = all_text.lower()
+    loss_matches = _contains_any(all_text_lower, INVESTMENT_PNL_LOSS_KEYWORDS)
+    gain_matches = _contains_any(all_text_lower, INVESTMENT_PNL_GAIN_KEYWORDS)
+    if not loss_matches and not gain_matches:
+        return None
+
+    effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+    investment_profile = extract_investment_profile(
+        evidence_text,
+        keyword_config=effective_keyword_config,
+    )
+    normalized_platform = investment_profile.get("platform", "")
+    normalized_product = investment_profile.get("product", "")
+    has_config_platform = any(
+        keyword.lower() in all_text_lower
+        for keyword in effective_keyword_config["platform_keywords"]
+    )
+    has_config_product = any(
+        keyword.lower() in all_text_lower
+        for keyword in effective_keyword_config["product_keywords"]
+    )
+    investment_context_keywords = [
+        "投资",
+        "基金",
+        "理财",
+        "证券",
+        "股票",
+        "债券",
+        "黄金",
+        "etf",
+        "lof",
+        "reits",
+    ]
+    has_explicit_investment_context = current_type in EXPLICIT_INVESTMENT_TYPES or any(
+        keyword in all_text_lower for keyword in investment_context_keywords
+    )
+    if not (
+        normalized_platform
+        or normalized_product
+        or has_config_platform
+        or has_config_product
+        or has_explicit_investment_context
+    ):
+        return None
+
+    # Loss wins when both words are present in adjustment descriptions.
+    direction = "loss" if loss_matches else "gain"
+    direction_label = "亏损" if direction == "loss" else "收益"
+    matched_keywords = loss_matches if direction == "loss" else gain_matches
+
+    score = 0.72
+    if normalized_platform or has_config_platform:
+        score += 0.08
+    if normalized_product or has_config_product:
+        score += 0.06
+    if current_type in EXPLICIT_INVESTMENT_TYPES:
+        score += 0.04
+
+    reason_parts = [f"盈亏变化:{direction_label}"]
+    if normalized_platform:
+        reason_parts.append(f"platform:{normalized_platform}")
+    if normalized_product:
+        reason_parts.append(f"product:{normalized_product}")
+    reason_parts.append("keyword:" + "/".join(matched_keywords[:2]))
+
+    hint_tokens = [token for token in [normalized_platform, normalized_product] if token]
+
+    return {
+        "score": round(min(score, 1.0), 2),
+        "reason": ", ".join(reason_parts),
+        "hint_text": " ".join(hint_tokens),
+        "platform": normalized_platform,
+        "product": normalized_product,
+        "signal_type": "pnl_change",
+        "label": "盈亏变化",
+        "direction": direction,
+        "direction_label": direction_label,
     }
 
 

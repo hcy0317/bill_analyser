@@ -323,6 +323,27 @@ async def test_investment_helpers_detect_profiles_candidates_and_keyword_config(
     assert service._score_investment_candidate({"type": "转账", "description": "基金申购"}) is None
     assert service._score_investment_candidate({"type": "投资", "description": "基金申购"}) is None
 
+    pnl_bills = [
+        {
+            "date": "2026-06-01 10:00:00",
+            "type": "收入",
+            "amount": 12.0,
+            "counterparty": "天天基金",
+            "payment_method": "支付宝",
+            "description": "沪深300ETF 分红发放",
+            "main_category": "投资理财",
+            "sub_category": "基金",
+        }
+    ]
+    detected_pnl = await service._detect_investment_candidates(pnl_bills, user_id=1)
+    assert detected_pnl[0]["type"] == "投资"
+    assert detected_pnl[0]["_investment_signal_type"] == "pnl_change"
+    assert "盈亏变化:收益" in detected_pnl[0]["_investment_candidate_reason"]
+
+    matched_pnl = await service._match_accounts(detected_pnl, user_id=1)
+    assert matched_pnl[0]["source_account_id"] == 4
+    assert matched_pnl[0]["destination_account_id"] == 4
+
 
 @pytest.mark.asyncio
 async def test_detect_cash_transfers_and_type_category_consistency() -> None:
@@ -1310,6 +1331,18 @@ def test_transfer_and_investment_signals_cover_threshold_levels(monkeypatch: pyt
         lambda *_args, **_kwargs: {"score": 0.81, "reason": "candidate", "platform": "蚂蚁财富", "product": "黄金ETF"},
     )
     assert service._build_investment_signal_from_preview({"preview_type": "5"})["level"] == "high"
+
+    pnl_signal = service._build_investment_signal_from_preview(
+        {
+            "preview_type": "投资",
+            "preview_counterparty": "天天基金",
+            "preview_payment_method": "银行卡",
+            "preview_description": "沪深300ETF 分红发放",
+            "preview_main_category": "投资理财",
+            "preview_sub_category": "基金",
+        }
+    )
+    assert "盈亏变化:收益" in pnl_signal["reason"]
 
 
 def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch: pytest.MonkeyPatch) -> None:

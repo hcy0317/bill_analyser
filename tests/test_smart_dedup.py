@@ -262,13 +262,8 @@ class TestPlatformBankDedup:
         result = self.engine.process(bills)
         assert len(result.kept_bills) == 2, "超过30秒不应去重"
 
-    def test_platform_bank_different_direction_no_dedup(self):
-        """测试不同方向（一正一负）不应被平台-银行去重，但应被识别为转账配对
-
-        v6.62: 金额方向不同的平台-银行账单不符合平台-银行去重条件，
-        但符合转账配对条件（时间30秒内+金额相反+来源不同），所以应该被识别为转账。
-        转账配对后只保留转出账单（负金额），转入账单被标记为 _removed。
-        """
+    def test_platform_bank_different_direction_dedups_when_no_transfer_intent(self):
+        """异号平台/银行镜像账单没有转账语义时，平台银行重复应优先于转账。"""
         bills = [
             {
                 'date': '2025-01-15 10:00:00',
@@ -289,11 +284,10 @@ class TestPlatformBankDedup:
         ]
 
         result = self.engine.process(bills)
-        # v6.62: 应被识别为转账配对，只保留转出账单（负金额）
-        assert len(result.transfer_pairs) == 1, "应识别为转账配对"
-        assert len(result.kept_bills) == 1, "转账配对后只保留转出账单"
-        assert result.kept_bills[0]['type'] == '转账', "保留账单类型应为转账"
-        assert result.kept_bills[0]['amount'] < 0, "保留账单应为转出（负金额）"
+        assert len(result.transfer_pairs) == 0, "平台银行重复不应被转账配对吞掉"
+        assert len(result.kept_bills) == 1, "平台银行去重后只保留平台账单"
+        assert result.kept_bills[0]['type'] != '转账', "保留账单不应改成转账"
+        assert result.kept_bills[0].get('_dedup_type') == 'platform_bank'
 
     def test_platform_bank_same_source_no_dedup(self):
         """测试同一来源（都是平台或都是银行）不应去重"""

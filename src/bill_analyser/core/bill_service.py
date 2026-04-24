@@ -27,6 +27,7 @@ from .bill_date_utils import parse_bill_datetime
 from .category_engine import CategoryEngine
 from .db import Database
 from .investment_matching import (
+    classify_investment_pnl_change,
     clean_investment_product_name,
     extract_investment_profile,
     score_investment_candidate,
@@ -586,6 +587,16 @@ class BillService:
             is_investment = bill_type in ["投资", "investment", "5"]
 
             if is_investment:
+                if str(bill.get("_investment_signal_type", "") or "") == "pnl_change":
+                    source_id = bill.get("source_account_id")
+                    is_valid_source = isinstance(source_id, int) or (
+                        isinstance(source_id, str) and source_id.isdigit()
+                    )
+                    if is_valid_source and str(source_id) in account_by_id:
+                        bill["destination_account_id"] = source_id
+                        self.logger.debug("[投资盈亏变化] 使用同一账户作为目标账户: account_id=%s", source_id)
+                    continue
+
                 current_dest_id = bill.get("destination_account_id")
                 # 检查目标账户是否已有效
                 is_valid_dest = isinstance(current_dest_id, int) or (
@@ -761,23 +772,47 @@ class BillService:
 
         for bill in bills:
             candidate = self._score_investment_candidate(bill, keyword_config=keyword_config)
-            if not candidate:
+            pnl_signal = self._classify_investment_pnl_change(bill, keyword_config=keyword_config)
+            if not candidate and not pnl_signal:
                 continue
 
             bill["type"] = "投资"
-            bill["_investment_hint"] = candidate.get("hint_text", "")
-            bill["_investment_candidate_score"] = candidate.get("score", 0.0)
-            bill["_investment_candidate_reason"] = candidate.get("reason", "")
-            bill["_investment_platform"] = candidate.get("platform", "")
-            bill["_investment_product"] = candidate.get("product", "")
+            bill["_investment_hint"] = (
+                str((candidate or {}).get("hint_text") or "")
+                or str((pnl_signal or {}).get("hint_text") or "")
+            )
+            bill["_investment_candidate_score"] = max(
+                float((candidate or {}).get("score", 0.0) or 0.0),
+                float((pnl_signal or {}).get("score", 0.0) or 0.0),
+            )
+            reason_parts = [
+                str(reason)
+                for reason in [
+                    (pnl_signal or {}).get("reason", ""),
+                    (candidate or {}).get("reason", ""),
+                ]
+                if reason
+            ]
+            bill["_investment_candidate_reason"] = ", ".join(dict.fromkeys(reason_parts))
+            bill["_investment_platform"] = (
+                str((candidate or {}).get("platform") or "")
+                or str((pnl_signal or {}).get("platform") or "")
+            )
+            bill["_investment_product"] = (
+                str((candidate or {}).get("product") or "")
+                or str((pnl_signal or {}).get("product") or "")
+            )
+            if pnl_signal:
+                bill["_investment_signal_type"] = pnl_signal.get("signal_type", "")
+                bill["_investment_pnl_direction"] = pnl_signal.get("direction", "")
             detected_count += 1
 
             self.logger.debug(
                 "[投资候选识别] 命中: date=%s, score=%.2f, reason=%s, hint=%s",
                 str(bill.get("date", ""))[:19],
-                candidate.get("score", 0.0),
-                candidate.get("reason", ""),
-                candidate.get("hint_text", ""),
+                bill.get("_investment_candidate_score", 0.0),
+                bill.get("_investment_candidate_reason", ""),
+                bill.get("_investment_hint", ""),
             )
 
         self.logger.info("[投资候选识别] 完成: 命中 %d/%d 条", detected_count, len(bills))
@@ -800,6 +835,14 @@ class BillService:
             allow_existing_investment=allow_existing_investment,
             keyword_config=keyword_config,
         )
+
+    def _classify_investment_pnl_change(
+        self,
+        bill: dict[str, Any],
+        keyword_config: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any] | None:
+        """识别投资收益/分红/亏损这类同账户盈亏变化信号。"""
+        return classify_investment_pnl_change(bill, keyword_config=keyword_config)
 
     def _extract_investment_profile(
         self,
@@ -4592,38 +4635,54 @@ class BillService:
         if preview_type not in ["投资", "investment", "5"]:
             return {}
 
+        bill_like = {
+            "type": preview.get("preview_type", ""),
+            "counterparty": preview.get("preview_counterparty", ""),
+            "payment_method": preview.get("preview_payment_method", ""),
+            "description": preview.get("preview_description", ""),
+            "main_category": preview.get("preview_main_category", ""),
+            "sub_category": preview.get("preview_sub_category", ""),
+            "original_category": (
+                preview.get("preview_sub_category", "")
+                or preview.get("preview_main_category", "")
+            ),
+        }
         candidate = self._score_investment_candidate(
-            {
-                "type": preview.get("preview_type", ""),
-                "counterparty": preview.get("preview_counterparty", ""),
-                "payment_method": preview.get("preview_payment_method", ""),
-                "description": preview.get("preview_description", ""),
-                "main_category": preview.get("preview_main_category", ""),
-                "sub_category": preview.get("preview_sub_category", ""),
-                "original_category": (
-                    preview.get("preview_sub_category", "") or preview.get("preview_main_category", "")
-                ),
-            },
+            bill_like,
             allow_existing_investment=True,
             keyword_config=keyword_config,
         )
-        if not candidate:
+        pnl_signal = self._classify_investment_pnl_change(bill_like, keyword_config=keyword_config)
+        if not candidate and not pnl_signal:
             return {}
 
-        score = float(candidate.get("score", 0.0) or 0.0)
+        score = max(
+            float((candidate or {}).get("score", 0.0) or 0.0),
+            float((pnl_signal or {}).get("score", 0.0) or 0.0),
+        )
         if score >= 0.8:
             level = "high"
         elif score >= 0.65:
             level = "medium"
         else:
             level = "low"
+        reason_parts = [
+            str(reason)
+            for reason in [
+                (pnl_signal or {}).get("reason", ""),
+                (candidate or {}).get("reason", ""),
+            ]
+            if reason
+        ]
 
         return {
             "score": score,
             "level": level,
-            "reason": candidate.get("reason", ""),
-            "platform": candidate.get("platform", ""),
-            "product": candidate.get("product", ""),
+            "reason": ", ".join(dict.fromkeys(reason_parts)),
+            "platform": (candidate or {}).get("platform", "")
+            or (pnl_signal or {}).get("platform", ""),
+            "product": (candidate or {}).get("product", "")
+            or (pnl_signal or {}).get("product", ""),
         }
 
     @log_method

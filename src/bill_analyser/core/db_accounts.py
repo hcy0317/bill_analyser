@@ -10,6 +10,7 @@ from typing import Any
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+from .investment_matching import classify_investment_pnl_change
 
 
 class DatabaseAccountsMixin(DatabaseFacadeBase):
@@ -618,13 +619,16 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
                 transfer_in = row["transfer_in"] or 0.0
                 investment_in = row["investment_in"] or 0.0
 
+            pnl_correction = await self._calculate_same_account_investment_pnl_correction(account_id)
+
             calculated_balance = (
                 initial_balance + income - expense - transfer_out + transfer_in - investment_out + investment_in
+                + pnl_correction
             )
 
             self.logger.info(
                 "计算账户余额: account_id=%s, name=%s, 初始=%s, 收入=%s, 支出=%s, 转账转出=%s, "
-                "转账转入=%s, 投资转出=%s, 投资转入=%s, 实际=%s",
+                "转账转入=%s, 投资转出=%s, 投资转入=%s, 投资盈亏修正=%s, 实际=%s",
                 account_id,
                 account_name,
                 initial_balance,
@@ -634,12 +638,44 @@ class DatabaseAccountsMixin(DatabaseFacadeBase):
                 transfer_in,
                 investment_out,
                 investment_in,
+                pnl_correction,
                 calculated_balance,
             )
             return calculated_balance
         except Exception as exc:  # pragma: no cover - defensive logging branch
             self.logger.error("计算账户余额失败: %s", exc, exc_info=True)
             return 0.0
+
+    async def _calculate_same_account_investment_pnl_correction(self, account_id: int) -> float:
+        """修正同账户投资盈亏变化流水，让收益/亏损真实影响账户余额。"""
+        conn = await self._get_connection()
+        correction = 0.0
+        async with conn.execute(
+            """
+            SELECT
+                amount, destination_amount, type, counterparty, description,
+                payment_method, main_category, sub_category
+            FROM bills
+            WHERE type IN ('投资', 'investment', '5')
+              AND source_account_id = ?
+              AND destination_account_id = ?
+            """,
+            (account_id, account_id),
+        ) as cursor:
+            async for row in cursor:
+                bill = dict(row)
+                pnl_signal = classify_investment_pnl_change(bill)
+                if not pnl_signal:
+                    continue
+                amount = float(bill.get("amount") or 0.0)
+                destination_amount = float(bill.get("destination_amount") or 0.0)
+                pnl_amount = abs(amount) or abs(destination_amount)
+                if pnl_amount <= 0:
+                    continue
+                desired_effect = pnl_amount if pnl_signal.get("direction") == "gain" else -pnl_amount
+                current_effect = -amount + destination_amount
+                correction += desired_effect - current_effect
+        return correction
 
     @log_method
     async def sync_account_balance(self, account_id: int) -> bool:

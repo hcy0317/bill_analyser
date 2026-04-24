@@ -169,6 +169,74 @@ def test_process_marks_platform_bank_duplicates_and_merges_template_ids() -> Non
 
 
 
+def test_platform_bank_sample_wins_before_transfer_for_opposite_sign_duplicate() -> None:
+    """样例 platform_bank|555693|553498|553499|553498 不应被转账配对吞掉。"""
+    engine = SmartDeduplicationEngine()
+    platform_bill = make_bill(
+        date="2025-01-02 09:30:00",
+        amount=-88.88,
+        counterparty="蚂蚁基金销售",
+        description="基金交易 余额宝扣款",
+        payment_method="支付宝",
+        source_account_id="wallet-a",
+        _parser_id="alipay",
+        _template_id=555693,
+    )
+    bank_bill = make_bill(
+        date="2025-01-02 09:30:08",
+        amount=88.88,
+        counterparty="蚂蚁基金销售",
+        description="基金交易 余额宝扣款",
+        payment_method="农业银行",
+        source_account_id="bank-a",
+        _parser_id="abc",
+        _template_id=553498,
+        _merged_template_ids=[553499, 553498],
+    )
+
+    result = engine.process([platform_bill, bank_bill])
+
+    assert result.transfer_pairs == []
+    assert result.removed_count == 1
+    assert len(result.kept_bills) == 1
+    kept_bill = result.kept_bills[0]
+    assert kept_bill["_dedup_type"] == "platform_bank"
+    assert kept_bill["type"] != "转账"
+    assert result.duplicate_groups[0].type is DeduplicationType.PLATFORM_BANK
+    assert {555693, 553498, 553499}.issubset({kept_bill["_template_id"], *kept_bill["_merged_template_ids"]})
+
+
+def test_platform_bank_opposite_sign_with_transfer_intent_stays_transfer() -> None:
+    """带提现/转账语义的异号平台银行账单仍应走转账配对。"""
+    engine = SmartDeduplicationEngine()
+    outgoing_bill = make_bill(
+        date="2025-01-02 09:30:00",
+        amount=-100.0,
+        counterparty="本人银行卡",
+        description="支付宝提现到银行卡",
+        payment_method="支付宝",
+        source_account_id="wallet-a",
+        _parser_id="alipay",
+        _template_id=101,
+    )
+    incoming_bill = make_bill(
+        date="2025-01-02 09:30:05",
+        amount=100.0,
+        counterparty="支付宝提现",
+        description="转入 本人银行卡",
+        payment_method="工商银行",
+        source_account_id="bank-a",
+        _parser_id="icbc",
+        _template_id=102,
+    )
+
+    result = engine.process([outgoing_bill, incoming_bill])
+
+    assert len(result.transfer_pairs) == 1
+    assert result.duplicate_groups == []
+    assert result.kept_bills[0]["_dedup_type"] == "transfer"
+
+
 def test_similar_duplicates_prefer_primary_source_and_merge_secondary_fields() -> None:
     """类似账单去重应保留优先级更高的来源，并合并次账单信息。"""
     engine = SmartDeduplicationEngine()

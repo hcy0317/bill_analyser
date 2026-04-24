@@ -133,6 +133,47 @@ async def test_get_account_alias_mapping_includes_account_names_and_skips_invali
 
 
 @pytest.mark.asyncio
+async def test_same_account_investment_pnl_changes_account_balance(tmp_path: Path) -> None:
+    """同账户投资收益增加余额，亏损减少余额，而不是被净额为零的原路转账吞掉。"""
+    db = await _create_database(tmp_path)
+    try:
+        investment_account = await _create_account(db, name="支付宝", initial_balance=1000.0, balance=1000.0)
+
+        await _insert_bill(
+            db,
+            bill_type="投资",
+            amount=12.0,
+            date_text="2025-01-08 10:00:00",
+            source_account_id=investment_account,
+            destination_account_id=investment_account,
+            destination_amount=12.0,
+            payment_method="支付宝",
+            counterparty="天天基金",
+            description="沪深300ETF 分红发放",
+        )
+        await _insert_bill(
+            db,
+            bill_type="投资",
+            amount=5.0,
+            date_text="2025-01-09 10:00:00",
+            source_account_id=investment_account,
+            destination_account_id=investment_account,
+            destination_amount=5.0,
+            payment_method="支付宝",
+            counterparty="蚂蚁财富",
+            description="黄金ETF 亏损调整",
+        )
+
+        assert await db.calculate_account_balance(investment_account, "支付宝") == pytest.approx(1007.0)
+        assert await db.sync_account_balance(investment_account) is True
+        account = await db.get_account_by_id(investment_account)
+        assert account is not None
+        assert account["balance"] == pytest.approx(1007.0)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_historical_account_suggestions_score_matches_and_exclude_source_account(tmp_path: Path) -> None:
     """历史源/目标账户建议应根据匹配字段得分，并排除与源账户相同的目标账户。"""
     db = await _create_database(tmp_path)
