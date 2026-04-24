@@ -47,6 +47,9 @@ RUNTIME_DELETE_PATTERNS = (
         r'(?:[\\/](?:bills\.db(?:-(?:wal|shm))?|config(?:[\\/]|(?=\s|$)))|[\\/]?(?=\s|$))'
     ),
 )
+URL_SCHEME_PATTERN = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*://')
+WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r'^[A-Za-z]:[\\/]')
+UNC_PATH_PATTERN = re.compile(r'^(?:\\\\|//)[^\\/]+[\\/][^\\/]+')
 COMMAND_TOOL_NAMES = {'bash', 'powershell', 'shell', 'execute', 'run_in_terminal'}
 WRITE_TOOL_NAMES = {'edit', 'write', 'create', 'apply_patch', 'create_file'}
 DELETE_TOOL_NAMES = {'delete', 'remove', 'delete_file'}
@@ -697,15 +700,36 @@ def is_current_directory_pathspec(token: str) -> bool:
     return normalized == '.'
 
 
+def normalize_path_token_text(value: str) -> str:
+    """Normalize Windows-style command path tokens before pathlib resolution."""
+    text = strip_wrapping_quotes(value).strip()
+    if not text or URL_SCHEME_PATTERN.match(text):
+        return text
+    if text.startswith('/') and not text.startswith('//'):
+        return text
+    if '\\' in text:
+        return text.replace('\\', '/')
+    return text
+
+
+def is_windows_absolute_path_text(value: str) -> bool:
+    """Return whether text looks like a Windows absolute or UNC path."""
+    return bool(
+        WINDOWS_ABSOLUTE_PATH_PATTERN.match(value) or UNC_PATH_PATTERN.match(value)
+    )
+
+
 def resolve_candidate_path(path_value: Any, cwd_value: Any) -> Path | None:
     """Resolve an edited path against cwd or repo root."""
-    raw_path = str(path_value or '').strip()
+    raw_path = normalize_path_token_text(str(path_value or ''))
     if not raw_path:
         return None
 
     candidate = Path(raw_path)
     if candidate.is_absolute():
         return candidate.resolve()
+    if is_windows_absolute_path_text(raw_path):
+        return (Path('/') / raw_path).resolve()
 
     raw_cwd = str(cwd_value or '').strip()
     if raw_cwd:
@@ -736,10 +760,12 @@ def run_git(
 
 def format_display_path(path: Path, repo_root: Path = REPO_ROOT) -> str:
     """Render repo-relative paths when possible."""
+    resolved_path = path.resolve()
+    resolved_root = repo_root.resolve()
     try:
-        return path.relative_to(repo_root).as_posix()
+        return resolved_path.relative_to(resolved_root).as_posix()
     except ValueError:
-        return str(path)
+        return str(resolved_path)
 
 
 def build_git_check_failure_reason(

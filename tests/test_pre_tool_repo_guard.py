@@ -138,6 +138,44 @@ def test_runtime_delete_parent_directory_is_denied() -> None:
     )
 
 
+def test_windows_style_command_path_resolves_under_repo_cross_platform() -> None:
+    resolved = guard.resolve_candidate_path(
+        'output\\guard-test.txt',
+        str(guard.REPO_ROOT),
+    )
+
+    assert resolved == (guard.REPO_ROOT / 'output' / 'guard-test.txt').resolve()
+    assert guard.format_display_path(
+        guard.resolve_candidate_path('bills\\fixture.txt', str(guard.REPO_ROOT))
+    ) == 'bills/fixture.txt'
+
+
+def test_windows_absolute_command_path_is_outside_repo_cross_platform() -> None:
+    resolved = guard.resolve_candidate_path('C:\\temp\\input.txt', str(guard.REPO_ROOT))
+
+    assert resolved is not None
+    assert guard.outside_repo_denial_reason(resolved) is not None
+
+
+def test_unc_like_command_path_is_outside_repo_cross_platform() -> None:
+    resolved = guard.resolve_candidate_path(
+        '\\\\server\\share\\input.txt',
+        str(guard.REPO_ROOT),
+    )
+
+    assert resolved is not None
+    assert guard.outside_repo_denial_reason(resolved) is not None
+
+
+def test_path_token_normalization_preserves_posix_absolute_paths_and_urls() -> None:
+    assert guard.normalize_path_token_text('/tmp/name\\with-backslash.txt') == (
+        '/tmp/name\\with-backslash.txt'
+    )
+    assert guard.normalize_path_token_text('https://example.test/a\\b') == (
+        'https://example.test/a\\b'
+    )
+
+
 def test_command_tool_write_to_protected_directory_is_denied() -> None:
     tracked_result = subprocess.CompletedProcess(
         args=['git', 'ls-files'],
