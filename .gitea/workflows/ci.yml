@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.agents/**'
+      - '.gitea/**'
+      - 'docs/AI_WORKFLOW.md'
+      - 'scripts/hooks/**'
+      - 'scripts/agent_stack_health.py'
+      - 'src/bill_analyser/**'
+      - 'src/web/**'
+      - 'tests/**/*.py'
+      - 'tests/fixtures/**'
+      - 'tests/web/**'
+      - 'pytest.ini'
+      - 'pyproject.toml'
+      - '.python-version'
+      - 'uv.lock'
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/**'
+      - '.claude/**'
+      - '.codex/**'
+      - '.agents/**'
+      - '.gitea/**'
+      - 'docs/AI_WORKFLOW.md'
+      - 'scripts/hooks/**'
+      - 'scripts/agent_stack_health.py'
+      - 'src/bill_analyser/**'
+      - 'src/web/**'
+      - 'tests/**/*.py'
+      - 'tests/fixtures/**'
+      - 'tests/web/**'
+      - 'pytest.ini'
+      - 'pyproject.toml'
+      - '.python-version'
+      - 'uv.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Shanghai
+  JWT_SECRET_KEY: ci-test-jwt-secret
+  BILL_ANALYSER_OPERATION_PASSWORD: ci-test-operation-password
+
+jobs:
+  # Gitea 官方 comparison 文档没有把顶层 concurrency 列为兼容语法；
+  # 这里改为单 workflow 内的独立 jobs，在可用 runner 上并发执行。
+  backend-ci:
+    name: backend-ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: https://github.com/actions/checkout@v4
+
+      - name: Setup Python 3.14
+        uses: https://github.com/actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          allow-prereleases: true
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install project
+        run: python -m pip install -e .
+
+      - name: Install test dependencies
+        run: python -m pip install pytest pytest-asyncio pytest-cov pytest-mock pytest-xdist pytest-timeout python-dateutil inline-snapshot
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v
+
+  frontend-ci:
+    name: frontend-ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: https://github.com/actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: https://github.com/actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: src/web
+        run: npm ci
+
+      - name: Run lint
+        working-directory: src/web
+        run: npm run lint:ci
+
+      - name: Run tests
+        working-directory: src/web
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: src/web
+        run: npm run build
+
+  agent-stack-health:
+    name: agent-stack-health
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Checkout repository
+        uses: https://github.com/actions/checkout@v4
+
+      - name: Set up Python
+        uses: https://github.com/actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          allow-prereleases: true
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run agent-stack health check
+        run: python scripts/agent_stack_health.py --mode repo
+
+      - name: Run agent-stack regression tests
+        run: python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v

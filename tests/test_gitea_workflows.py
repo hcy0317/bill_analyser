@@ -6,11 +6,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO_ROOT / '.gitea' / 'workflows'
 EXPECTED_WORKFLOW_NAMES = {
-    'backend-ci.yml',
-    'frontend-ci.yml',
-    'agent-stack-health.yml',
+    'ci.yml',
 }
-EXPECTED_GROUP = 'group: gitea-${{ gitea.workflow }}-${{ gitea.ref }}'
+EXPECTED_JOB_IDS = {
+    'backend-ci',
+    'frontend-ci',
+    'agent-stack-health',
+}
 
 
 def _workflow_files() -> dict[str, Path]:
@@ -29,16 +31,23 @@ def test_all_expected_gitea_workflows_exist() -> None:
         assert path.exists(), f'missing workflow: {path}'
 
 
-def test_gitea_workflows_lock_supported_concurrency_contract() -> None:
-    for name in _workflow_files():
-        text = _read(name)
-        assert 'concurrency:' in text, f'{name} must declare concurrency'
-        assert EXPECTED_GROUP in text, f'{name} must keep the documented workflow+ref concurrency key'
-        assert 'cancel-in-progress: true' in text, f'{name} must cancel in-progress runs in the same lane'
-        assert 'timeout-minutes:' not in text, f'{name} must avoid unsupported timeout-minutes'
-        assert 'continue-on-error:' not in text, f'{name} must avoid unsupported continue-on-error'
-        assert re.search(r'(?m)^\s*environment:\s*', text) is None, f'{name} must avoid unsupported job environment'
-        assert 'intentionally does not collapse push + PR lanes' in text, f'{name} should document its concurrency lane boundary'
+def test_gitea_ci_workflow_uses_parallel_jobs_instead_of_top_level_concurrency() -> None:
+    text = _read('ci.yml')
+
+    assert 'concurrency:' not in text, 'ci.yml should avoid undocumented top-level concurrency on Gitea'
+    assert re.search(r'(?m)^\s*needs:\s*', text) is None, 'ci.yml jobs should stay independent for parallel execution'
+    for job_id in EXPECTED_JOB_IDS:
+        assert re.search(rf'(?m)^  {re.escape(job_id)}:\s*$', text), f'ci.yml should declare job {job_id}'
+
+    assert 'TZ: Asia/Shanghai' in text, 'ci.yml should pin the test timezone for deterministic date assertions'
+    assert 'JWT_SECRET_KEY: ci-test-jwt-secret' in text, 'ci.yml should inject a deterministic JWT secret for tests'
+    assert (
+        'BILL_ANALYSER_OPERATION_PASSWORD: ci-test-operation-password' in text
+    ), 'ci.yml should inject a deterministic operation password for auth-related tests'
+
+    assert 'timeout-minutes:' not in text, 'ci.yml must avoid unsupported timeout-minutes'
+    assert 'continue-on-error:' not in text, 'ci.yml must avoid unsupported continue-on-error'
+    assert re.search(r'(?m)^\s*environment:\s*', text) is None, 'ci.yml must avoid unsupported job environment'
 
 
 def test_gitea_workflows_pin_read_only_contents_permissions() -> None:
@@ -58,8 +67,11 @@ def test_gitea_workflows_use_absolute_action_urls() -> None:
             assert uses.startswith('https://github.com/'), f'{name} must use absolute GitHub action URLs on Gitea'
 
 
-def test_agent_stack_health_workflow_covers_gitea_contract_regression() -> None:
-    text = _read('agent-stack-health.yml')
-    assert '.gitea/**' in text, 'agent-stack workflow should trigger on Gitea workflow changes'
-    assert 'tests/test_gitea_workflows.py' in text, 'agent-stack workflow should cover the Gitea workflow contract test'
-    assert 'python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v' in text
+def test_ci_workflow_covers_gitea_contract_regression() -> None:
+    text = _read('ci.yml')
+    assert '.gitea/**' in text, 'ci workflow should trigger on Gitea workflow changes'
+    assert 'tests/test_gitea_workflows.py' in text, 'agent-stack job should cover the Gitea workflow contract test'
+    assert (
+        'python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v'
+        in text
+    )

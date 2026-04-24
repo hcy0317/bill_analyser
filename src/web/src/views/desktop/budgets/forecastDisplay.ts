@@ -16,6 +16,8 @@ export interface ForecastRiskSummary {
     readonly filteredCount: number;
 }
 
+const FORECAST_CATEGORY_NAME_COLLATOR = new Intl.Collator('zh-Hans-CN-u-co-pinyin');
+
 /**
  * 预测置信等级排序权重（越小越优先）
  */
@@ -50,6 +52,10 @@ export function compareNullableNumbers(left?: number | null, right?: number | nu
     return (left as number) - (right as number);
 }
 
+function compareForecastCategoryNames(left: string, right: string): number {
+    return FORECAST_CATEGORY_NAME_COLLATOR.compare(left, right);
+}
+
 /**
  * 对预算预测结果执行快速筛选和排序
  */
@@ -72,18 +78,18 @@ export function filterAndSortForecasts(
             case 'confidence':
                 return getForecastConfidenceRank(a.confidence) - getForecastConfidenceRank(b.confidence)
                     || compareNullableNumbers(a.backtestMape, b.backtestMape)
-                    || a.categoryName.localeCompare(b.categoryName);
+                    || compareForecastCategoryNames(a.categoryName, b.categoryName);
             case 'projected_total':
                 return b.projectedTotal - a.projectedTotal
                     || compareNullableNumbers(a.backtestMape, b.backtestMape)
-                    || a.categoryName.localeCompare(b.categoryName);
+                    || compareForecastCategoryNames(a.categoryName, b.categoryName);
             case 'category':
-                return a.categoryName.localeCompare(b.categoryName);
+                return compareForecastCategoryNames(a.categoryName, b.categoryName);
             case 'backtest':
             default:
                 return compareNullableNumbers(a.backtestMape, b.backtestMape)
                     || getForecastConfidenceRank(a.confidence) - getForecastConfidenceRank(b.confidence)
-                    || a.categoryName.localeCompare(b.categoryName);
+                    || compareForecastCategoryNames(a.categoryName, b.categoryName);
         }
     });
 
