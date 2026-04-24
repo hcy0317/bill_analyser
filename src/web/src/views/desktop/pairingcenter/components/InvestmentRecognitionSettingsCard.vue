@@ -19,10 +19,6 @@
             {{ error }}
         </v-alert>
 
-        <v-alert v-if="successMessage" type="success" closable class="mx-4 mt-4 mb-0" @click:close="successMessage = null">
-            {{ successMessage }}
-        </v-alert>
-
         <v-card-text>
             <v-row>
                 <v-col cols="12" md="6">
@@ -100,12 +96,15 @@
             </v-btn>
         </v-card-actions>
     </v-card>
+
+    <snack-bar ref="snackbar" />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, useTemplateRef } from 'vue';
 import { mdiRefresh } from '@mdi/js';
 
+import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { isEquals } from '@/lib/common.ts';
 import {
@@ -117,14 +116,15 @@ import {
 import { useUserStore } from '@/stores/user.ts';
 
 type RecognitionSettingsState = PairingCenterInvestmentSettings;
+type SnackBarType = InstanceType<typeof SnackBar>;
 
 const { tt } = useI18n();
 const userStore = useUserStore();
+const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const loadingRecognitionSettings = ref<boolean>(true);
 const savingRecognitionSettings = ref<boolean>(false);
 const error = ref<string | null>(null);
-const successMessage = ref<string | null>(null);
 const recognitionSettings = ref<RecognitionSettingsState>(createEmptyRecognitionSettings());
 const recognitionSettingsSnapshot = ref<RecognitionSettingsState>(createEmptyRecognitionSettings());
 
@@ -142,7 +142,10 @@ function createEmptyRecognitionSettings(): RecognitionSettingsState {
 function resetRecognitionSettings(): void {
     recognitionSettings.value = normalizePairingCenterInvestmentSettings(recognitionSettingsSnapshot.value);
     error.value = null;
-    successMessage.value = null;
+}
+
+function showSuccessMessage(message: string): void {
+    snackbar.value?.showMessage(message);
 }
 
 function extractPayloadMessage(payload: unknown, depth = 0): string | null {
@@ -188,16 +191,15 @@ async function reloadRecognitionSettings(force: boolean): Promise<void> {
         );
 
         if (force) {
-            successMessage.value = isEquals(recognitionSettingsSnapshot.value, nextState)
+            showSuccessMessage(isEquals(recognitionSettingsSnapshot.value, nextState)
                 ? 'Data is up to date'
-                : 'Data has been updated';
+                : 'Data has been updated');
         }
 
         recognitionSettingsSnapshot.value = nextState;
         recognitionSettings.value = normalizePairingCenterInvestmentSettings(nextState);
     } catch (caughtError: unknown) {
-        successMessage.value = null;
-        error.value = getErrorMessage(caughtError, 'Failed to load investment recognition settings');
+        error.value = getErrorMessage(caughtError, tt('Failed to load investment recognition settings'));
     } finally {
         loadingRecognitionSettings.value = false;
     }
@@ -210,7 +212,6 @@ async function saveRecognitionSettings(): Promise<void> {
 
     savingRecognitionSettings.value = true;
     error.value = null;
-    successMessage.value = null;
 
     try {
         const response = await userStore.updatePairingInvestmentSettings(
@@ -218,9 +219,9 @@ async function saveRecognitionSettings(): Promise<void> {
         );
         recognitionSettingsSnapshot.value = normalizePairingCenterInvestmentSettings(response);
         recognitionSettings.value = normalizePairingCenterInvestmentSettings(recognitionSettingsSnapshot.value);
-        successMessage.value = 'Investment recognition settings updated';
+        showSuccessMessage('Investment recognition settings updated');
     } catch (caughtError: unknown) {
-        error.value = getErrorMessage(caughtError, 'Failed to update investment recognition settings');
+        error.value = getErrorMessage(caughtError, tt('Failed to update investment recognition settings'));
     } finally {
         savingRecognitionSettings.value = false;
     }

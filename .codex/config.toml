@@ -2,8 +2,9 @@
 
 # Minimal repository-level Codex fallback for CI / doctor checks.
 # Keep this file intentionally thin; the user-level profile remains the primary runtime surface.
-model = "gpt-5.4"
 
+sandbox_mode = "workspace-write"
+approval_policy = "never"
 [features]
 multi_agent = true
 
@@ -26,3 +27,6 @@ args = ["-y", "@playwright/mcp@latest", "--extension"]
 [mcp_servers."sequential-thinking"]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+[sandbox_workspace_write]
+network_access = true

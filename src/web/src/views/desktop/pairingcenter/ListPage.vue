@@ -9,21 +9,18 @@
                                          class="rule-center-navigation">
                         <div class="mx-4 mt-4">
                             <div class="text-overline text-medium-emphasis mb-2">{{ tt('Rule Domains') }}</div>
-                            <div class="rule-center-nav-group">
+                            <div class="rule-center-nav-group rule-center-nav-group--domains">
                                 <v-btn v-for="domain in domainOptions"
                                        :key="domain.value"
                                        block
-                                       rounded="lg"
-                                       class="rule-center-nav-button text-none py-4"
+                                       border
+                                       class="rule-center-nav-button text-none"
                                        :color="activeDomain === domain.value ? 'primary' : 'default'"
                                        :variant="activeDomain === domain.value ? 'tonal' : 'outlined'"
                                        @click="selectDomain(domain.value)">
                                     <div class="d-flex align-center w-100">
-                                        <v-icon :icon="domain.icon" class="me-3" />
-                                        <div class="rule-center-nav-copy">
-                                            <span class="text-body-2 font-weight-medium">{{ domain.label }}</span>
-                                            <span class="text-caption text-medium-emphasis">{{ domain.description }}</span>
-                                        </div>
+                                        <v-icon :icon="domain.icon" class="me-3" size="20" />
+                                        <span class="text-body-2 font-weight-medium">{{ domain.label }}</span>
                                     </div>
                                 </v-btn>
                             </div>
@@ -33,24 +30,22 @@
 
                         <div class="mx-4 my-4">
                             <div class="text-overline text-medium-emphasis mb-2">{{ tt('Views') }}</div>
-                            <div class="rule-center-nav-group">
-                                <v-btn v-for="tab in secondaryTabs"
-                                       :key="tab.value"
-                                       block
-                                       rounded="lg"
-                                       class="rule-center-nav-button text-none py-4"
-                                       :color="activeTab === tab.value ? 'primary' : 'default'"
-                                       :variant="activeTab === tab.value ? 'tonal' : 'outlined'"
-                                       @click="selectTab(tab.value)">
-                                    <div class="d-flex align-center w-100">
-                                        <v-icon :icon="tab.icon" class="me-3" />
-                                        <div class="rule-center-nav-copy">
-                                            <span class="text-body-2 font-weight-medium">{{ tab.label }}</span>
-                                            <span class="text-caption text-medium-emphasis">{{ tab.description }}</span>
-                                        </div>
-                                    </div>
-                                </v-btn>
-                            </div>
+                            <v-list density="compact" nav>
+                                <v-list-item
+                                    v-for="tab in secondaryTabs"
+                                    :key="tab.value"
+                                    :active="activeTab === tab.value"
+                                    :color="activeTab === tab.value ? 'primary' : undefined"
+                                    rounded="lg"
+                                    @click="selectTab(tab.value)">
+                                    <template #prepend>
+                                        <v-icon :icon="tab.icon" size="20" />
+                                    </template>
+                                    <v-list-item-title class="text-body-2">
+                                        {{ tab.label }}
+                                    </v-list-item-title>
+                                </v-list-item>
+                            </v-list>
                         </div>
                     </v-navigation-drawer>
 
@@ -92,10 +87,6 @@
                             </template>
 
                             <v-card-text>
-                                <p class="text-body-2 text-medium-emphasis mb-4 rule-center-view-note">
-                                    {{ currentViewDescription }}
-                                </p>
-
                                 <v-progress-linear v-if="showPairsLoading" indeterminate color="primary" class="mb-4" />
 
                                 <v-alert v-if="showPairsError"
@@ -111,9 +102,6 @@
                                                           :pairs="filteredPairs"
                                                           :deleting-pair-id="deleting"
                                                           :empty-headline="tt(activeDomain === 'transfer' ? 'No Transfer Pairs' : 'No Investment Pairs')"
-                                                          :empty-text="tt(activeDomain === 'transfer'
-                                                              ? 'No transfer pairs found. Transfer pairs are created when opposite account movements are linked.'
-                                                              : 'No investment pairs found. Investment pairs are created when investment-related movements are linked.')"
                                                           @delete="confirmDeletePair" />
                                 </template>
 
@@ -202,14 +190,12 @@ type DomainOption = {
     value: RuleCenterDomain;
     label: string;
     icon: string;
-    description: string;
 };
 
 type SecondaryTabOption = {
     value: RuleCenterTab;
     label: string;
     icon: string;
-    description: string;
 };
 
 const props = defineProps<{
@@ -251,25 +237,21 @@ const domainOptions = computed<DomainOption[]>(() => [
         value: 'transfer',
         label: tt('Transfer Pairing'),
         icon: mdiSwapHorizontal,
-        description: tt('Review linked transfer pairs and the category or recurring rules that govern transfer matching.'),
     },
     {
         value: 'investment',
         label: tt('Investment Pairing'),
         icon: mdiFinance,
-        description: tt('Inspect investment pairs and manage the recognition settings that surface investment matches.'),
     },
     {
         value: 'learning',
         label: tt('Long-term Learning'),
         icon: mdiBrain,
-        description: tt('Generate suggestions and maintain durable learning rules without mixing in category or recurring governance.'),
     },
     {
         value: 'llm',
         label: tt('LLM Recognition'),
         icon: mdiRobotOutline,
-        description: tt('Review candidate rules from LLM induction and manage saved recognition configs.'),
     },
 ]);
 
@@ -280,13 +262,11 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
                 value: 'overview',
                 label: tt('Pairing Overview'),
                 icon: mdiFormatListBulleted,
-                description: tt('Review the persisted transfer pairs that have already been linked for this user.'),
             },
             {
                 value: 'rules',
                 label: tt('Pairing Rules'),
                 icon: mdiBookCogOutline,
-                description: tt('Category and recurring rules live here so transfer-pairing governance stays in one workspace.'),
             },
         ];
     }
@@ -297,13 +277,11 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
                 value: 'overview',
                 label: tt('Pairing Overview'),
                 icon: mdiFormatListBulleted,
-                description: tt('Review the persisted investment pairs that have already been linked for this user.'),
             },
             {
                 value: 'rules',
                 label: tt('Pairing Rules'),
                 icon: mdiBookCogOutline,
-                description: tt('Manage the investment recognition settings and keyword-based matching controls.'),
             },
         ];
     }
@@ -314,13 +292,11 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
                 value: 'overview',
                 label: tt('Suggestions'),
                 icon: mdiFormatListBulleted,
-                description: tt('Generate and review long-term learning suggestions before promoting them into durable rules.'),
             },
             {
                 value: 'rules',
                 label: tt('Learning Rules'),
                 icon: mdiBookCogOutline,
-                description: tt('Manage the durable long-term learning rules that have already been promoted.'),
             },
         ];
     }
@@ -330,13 +306,11 @@ const secondaryTabs = computed<SecondaryTabOption[]>(() => {
             value: 'overview',
             label: tt('Candidate Rules'),
             icon: mdiFormatListBulleted,
-            description: tt('Review candidate rules produced by the LLM induction flow before accepting or rejecting them.'),
         },
         {
             value: 'config',
             label: tt('LLM Config'),
             icon: mdiCog,
-            description: tt('Manage the saved provider and model configs that power LLM recognition.'),
         },
     ];
 });
@@ -349,7 +323,6 @@ const currentTabOption = computed<SecondaryTabOption>(() => {
     return secondaryTabs.value.find(option => option.value === activeTab.value) ?? secondaryTabs.value[0]!;
 });
 
-const currentViewDescription = computed(() => currentTabOption.value.description);
 const isPairingOverview = computed(() =>
     (activeDomain.value === 'transfer' || activeDomain.value === 'investment') && activeTab.value === 'overview'
 );
@@ -471,29 +444,27 @@ watch(
 .rule-center-nav-group {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+}
+
+.rule-center-nav-group--domains .v-btn:not(:first-child) {
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+}
+
+.rule-center-nav-group--domains .v-btn:not(:last-child) {
+    border-bottom: 0;
+    border-bottom-left-radius: inherit;
+    border-bottom-right-radius: inherit;
 }
 
 .rule-center-nav-button {
     justify-content: flex-start;
-    min-height: 78px;
+    min-height: 40px;
+    height: 40px;
 }
 
 .rule-center-nav-button :deep(.v-btn__content) {
     width: 100%;
     justify-content: flex-start;
-}
-
-.rule-center-nav-copy {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    min-width: 0;
-    text-align: left;
-    white-space: normal;
-}
-
-.rule-center-view-note {
-    max-width: 56rem;
 }
 </style>

@@ -17,15 +17,6 @@
                 :title="viewModel.dedup.title">
                 {{ tt(viewModel.dedup.labelKey) }} · {{ viewModel.dedup.sourceCount }}
             </v-chip>
-            <v-chip
-                v-if="viewModel.isManuallyAnnotated"
-                color="info"
-                variant="outlined"
-                size="x-small"
-                :prepend-icon="mdiAccountEditOutline"
-                :title="tt('Manually Annotated')">
-                {{ tt('Annotation') }}
-            </v-chip>
         </div>
 
         <div class="signal-group" v-if="viewModel.transferSuggestion">
@@ -161,7 +152,6 @@ import type {
     ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
 import {
-    mdiAccountEditOutline,
     mdiAlertOutline,
     mdiChartLine,
     mdiCheck,

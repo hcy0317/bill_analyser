@@ -18,10 +18,6 @@
                     {{ error }}
                 </v-alert>
 
-                <v-alert v-if="successMsg" type="success" closable class="ma-4" @click:close="successMsg = null">
-                    {{ successMsg }}
-                </v-alert>
-
                 <v-tabs v-model="activeTab" class="px-4">
                     <v-tab v-if="hasTab('rules')" value="rules">
                         <v-icon start :icon="mdiBookCogOutline" />
@@ -52,10 +48,51 @@
                             >
                                 {{ tt('Import Rules from Legacy Keywords') }}
                             </v-btn>
+                            <v-spacer />
+                            <div class="rule-center-category-filter">
+                                <two-column-select
+                                    v-model="ruleCategoryFilterId"
+                                    density="compact"
+                                    variant="outlined"
+                                    primary-key-field="id"
+                                    primary-value-field="id"
+                                    primary-title-field="name"
+                                    primary-header-field="typeLabel"
+                                    primary-icon-field="icon"
+                                    primary-icon-type="category"
+                                    primary-color-field="color"
+                                    primary-hidden-field="hidden"
+                                    primary-sub-items-field="subCategories"
+                                    secondary-key-field="id"
+                                    secondary-value-field="id"
+                                    secondary-title-field="name"
+                                    secondary-icon-field="icon"
+                                    secondary-icon-type="category"
+                                    secondary-color-field="color"
+                                    secondary-hidden-field="hidden"
+                                    :show-selection-primary-text="true"
+                                    :custom-selection-primary-text="ruleCategoryFilterSelection.primaryText"
+                                    :custom-selection-secondary-text="ruleCategoryFilterSelection.secondaryText"
+                                    :enable-filter="true"
+                                    :filter-placeholder="tt('Find category')"
+                                    :filter-no-items-text="tt('No available category')"
+                                    :no-item-text="tt('All Categories')"
+                                    :items="categoryPickerItems"
+                                    :label="tt('Category')"
+                                />
+                            </div>
+                            <v-btn
+                                v-if="ruleCategoryFilterId"
+                                variant="text"
+                                size="small"
+                                @click="clearRuleCategoryFilter"
+                            >
+                                {{ tt('Clear') }}
+                            </v-btn>
                         </div>
                         <v-data-table
                             :headers="ruleHeaders"
-                            :items="categoryRules"
+                            :items="filteredDisplayCategoryRules"
                             :items-per-page="20"
                             density="compact"
                             :sort-by="[{ key: 'priority', order: 'asc' }]"
@@ -68,11 +105,21 @@
                                     {{ item.priority }}
                                 </v-chip>
                             </template>
-                            <template #item.category_name="{ item }">
-                                <span>{{ item.category_name || '-' }}</span>
-                                <span v-if="item.sub_category_name" class="text-grey ms-1">
-                                    / {{ item.sub_category_name }}
-                                </span>
+                            <template #item.category_display_name="{ item }">
+                                <div
+                                    class="d-flex align-center"
+                                    :title="item.category_full_name"
+                                >
+                                    <ItemIcon
+                                        v-if="item.category_icon && item.category_color"
+                                        icon-type="category"
+                                        size="24px"
+                                        :icon-id="item.category_icon"
+                                        :color="item.category_color"
+                                    />
+                                    <v-icon v-else size="24" :icon="mdiCloseCircle" color="grey" />
+                                    <span class="ms-2">{{ item.category_display_name }}</span>
+                                </div>
                             </template>
                             <template #item.regex_enabled="{ item }">
                                 <v-icon
@@ -87,7 +134,9 @@
                                     density="compact"
                                     hide-details
                                     color="success"
-                                    @update:model-value="toggleEnabled(item)"
+                                    :disabled="isRuleToggling(item.id)"
+                                    @click.stop
+                                    @update:model-value="toggleEnabled(item, $event)"
                                 />
                             </template>
                             <template #item.actions="{ item }">
@@ -219,7 +268,6 @@
                         :auto-rule-name="autoRuleName"
                         :disabled="saving"
                         :title="tt('Canonical Category Rule')"
-                        :description="editingRule ? 'Edit the canonical category rule for the selected category.' : 'Create the canonical category rule for the selected category.'"
                     />
                 </v-form>
             </v-card-text>
@@ -239,7 +287,7 @@
                 <v-text-field
                     v-model="testText"
                     :label="tt('Text to test')"
-                    placeholder="Enter description or counterparty text..."
+                    :placeholder="tt('Enter description or counterparty text...')"
                     @keyup.enter="runTest"
                 />
                 <v-alert v-if="testResult !== null" :type="testResult ? 'success' : 'warning'" class="mt-3">
@@ -268,11 +316,13 @@
             </v-card-actions>
         </v-card>
     </v-dialog>
+
+    <snack-bar ref="snackbar" />
 </template>
 
 <script setup lang="ts">
 import axios from 'axios';
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, useTemplateRef } from 'vue';
 import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
@@ -284,10 +334,13 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { CategoryType } from '@/core/category.ts';
 import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
+import ItemIcon from '@/components/desktop/ItemIcon.vue';
+import SnackBar from '@/components/desktop/SnackBar.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 
 const categoryStore = useTransactionCategoriesStore();
 const { tt } = useI18n();
+type SnackBarType = InstanceType<typeof SnackBar>;
 type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
 
 const props = defineProps<{
@@ -301,7 +354,7 @@ const saving = ref(false);
 const deleting = ref(false);
 const testing = ref(false);
 const error = ref<string | null>(null);
-const successMsg = ref<string | null>(null);
+const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const visibleTabs = computed<RuleCenterPanelTab[]>(() => props.tabs && props.tabs.length > 0
     ? props.tabs
     : ['rules', 'learning', 'recurring']
@@ -369,6 +422,13 @@ interface CategoryRuleItem {
     applied_count: number;
 }
 
+interface DisplayCategoryRuleItem extends CategoryRuleItem {
+    category_display_name: string;
+    category_full_name: string;
+    category_icon: string;
+    category_color: string;
+}
+
 interface CategoryRuleForm {
     category_id: string;
     priority: number;
@@ -422,11 +482,11 @@ interface CategoryKeywordMigrationResult {
 }
 
 const categoryRules = ref<CategoryRuleItem[]>([]);
+const togglingRuleIds = ref<number[]>([]);
 
 const ruleHeaders = computed(() => [
     { title: tt('Priority'), key: 'priority', sortable: true },
-    { title: tt('Name'), key: 'name' },
-    { title: tt('Category'), key: 'category_name' },
+    { title: tt('Category'), key: 'category_display_name' },
     { title: tt('Expression'), key: 'rule_expression' },
     { title: tt('Regex'), key: 'regex_enabled', width: 80 },
     { title: tt('Enabled'), key: 'enabled', width: 100 },
@@ -449,6 +509,17 @@ const recurringHeaders = computed(() => [
     { title: tt('Next Date'), key: 'nextDate' },
     { title: tt('Enabled'), key: 'enabled' },
 ]);
+
+const displayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => categoryRules.value.map(item => {
+    const display = resolveCategoryDisplay(item);
+    return {
+        ...item,
+        category_display_name: display.name,
+        category_full_name: display.fullName,
+        category_icon: display.icon,
+        category_color: display.color,
+    };
+}));
 
 // ── Category selector options ────────
 function getCategoryTypeLabel(type: number): string {
@@ -523,10 +594,56 @@ function resolveRuleCategorySelection(categoryId: string): ResolvedRuleCategoryS
     };
 }
 
+function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullName: string; icon: string; color: string } {
+    const categoryId = item.category_id !== null && item.category_id !== undefined
+        ? String(item.category_id)
+        : '';
+    const category = categoryId ? categoryStore.allTransactionCategoriesMap[categoryId] : null;
+    const displayName = item.sub_category_name || category?.name || item.category_name || tt('Unassigned Category');
+    const fullName = item.category_name && item.sub_category_name
+        ? `${item.category_name} / ${item.sub_category_name}`
+        : displayName;
+
+    if (category) {
+        return {
+            name: displayName,
+            fullName,
+            icon: category.icon,
+            color: String(category.color),
+        };
+    }
+
+    if (item.sub_category_name) {
+        return {
+            name: item.sub_category_name,
+            fullName,
+            icon: '',
+            color: '',
+        };
+    }
+
+    if (item.category_name) {
+        return {
+            name: item.category_name,
+            fullName,
+            icon: '',
+            color: '',
+        };
+    }
+
+    return {
+        name: tt('Unassigned Category'),
+        fullName: tt('Unassigned Category'),
+        icon: '',
+        color: '',
+    };
+}
+
 // ── Edit dialog state ────────
 const showEditDialog = ref(false);
 const editingRule = ref<CategoryRuleItem | null>(null);
 const ruleFormRef = ref<unknown>(null);
+const ruleCategoryFilterId = ref<string>('');
 const ruleForm = ref<CategoryRuleForm>({
     category_id: '',
     priority: 100,
@@ -535,11 +652,41 @@ const ruleForm = ref<CategoryRuleForm>({
     enabled: true,
 });
 const ruleCategorySelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(ruleForm.value.category_id));
+const ruleCategoryFilterSelection = computed<ResolvedRuleCategorySelection>(() => resolveRuleCategorySelection(ruleCategoryFilterId.value));
 const autoRuleName = computed(() => {
     const selectionLabel = ruleCategorySelection.value.label || tt('Unassigned Category');
     const priority = Number.isFinite(ruleForm.value.priority) ? ruleForm.value.priority : 0;
     return `${selectionLabel} · P${priority}`;
 });
+
+const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
+    const filterId = String(ruleCategoryFilterId.value || '');
+    if (!filterId) {
+        return displayCategoryRules.value;
+    }
+
+    const selectedCategory = categoryStore.allTransactionCategoriesMap[filterId];
+    const selectedIsPrimary = !!selectedCategory && (!selectedCategory.parentId || selectedCategory.parentId === '0');
+
+    return displayCategoryRules.value.filter(item => {
+        const itemCategoryId = item.category_id !== null && item.category_id !== undefined
+            ? String(item.category_id)
+            : '';
+        if (!itemCategoryId) {
+            return false;
+        }
+        if (itemCategoryId === filterId) {
+            return true;
+        }
+
+        const itemCategory = categoryStore.allTransactionCategoriesMap[itemCategoryId];
+        return selectedIsPrimary && itemCategory?.parentId === filterId;
+    });
+});
+
+function clearRuleCategoryFilter(): void {
+    ruleCategoryFilterId.value = '';
+}
 const ruleBuilderModel = computed({
     get: () => ({
         priority: ruleForm.value.priority,
@@ -607,15 +754,19 @@ function requireApiSuccess<T>(response: { data?: ApiResponse<T> }, fallback: str
     throw new Error(fallback);
 }
 
+function showSuccessMessage(message: string, options?: Record<string, unknown>): void {
+    snackbar.value?.showMessage(message, options);
+}
+
 function buildCategoryRulePayload(form: CategoryRuleForm): CategoryRulePayload {
     const categoryId = Number.parseInt(String(form.category_id || ''), 10);
     if (!Number.isFinite(categoryId)) {
-        throw new Error('Category is required');
+        throw new Error(tt('Category is required'));
     }
 
     const ruleExpression = String(form.rule_expression || '').trim();
     if (!ruleExpression) {
-        throw new Error('Expression is required');
+        throw new Error(tt('Expression is required'));
     }
 
     return {
@@ -659,35 +810,53 @@ async function saveRule() {
         if (editingRule.value) {
             requireApiSuccess(
                 await services.updateCategoryRule(editingRule.value.id, payload),
-                'Failed to save rule'
+                tt('Failed to save rule')
             );
-            successMsg.value = 'Rule updated';
+            showSuccessMessage('Rule updated');
         } else {
             requireApiSuccess(
                 await services.createCategoryRule(payload),
-                'Failed to save rule'
+                tt('Failed to save rule')
             );
-            successMsg.value = 'Rule created';
+            showSuccessMessage('Rule created');
         }
         showEditDialog.value = false;
         await fetchCategoryRules();
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Failed to save rule');
+        error.value = getRequestErrorMessage(e, tt('Failed to save rule'));
     } finally {
         saving.value = false;
     }
 }
 
-async function toggleEnabled(item: CategoryRuleItem) {
+function isRuleToggling(ruleId: number): boolean {
+    return togglingRuleIds.value.includes(ruleId);
+}
+
+function setRuleToggling(ruleId: number, enabled: boolean): void {
+    togglingRuleIds.value = enabled
+        ? [...new Set([...togglingRuleIds.value, ruleId])]
+        : togglingRuleIds.value.filter(item => item !== ruleId);
+}
+
+async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
+    if (isRuleToggling(item.id)) {
+        return;
+    }
+
+    const normalizedNextEnabled = !!nextEnabled;
     error.value = null;
+    setRuleToggling(item.id, true);
     try {
         requireApiSuccess(
-            await services.updateCategoryRule(item.id, { enabled: !item.enabled }),
-            'Failed to toggle rule'
+            await services.updateCategoryRule(item.id, { enabled: normalizedNextEnabled }),
+            tt('Failed to toggle rule')
         );
         await fetchCategoryRules();
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Failed to toggle rule');
+        error.value = getRequestErrorMessage(e, tt('Failed to toggle rule'));
+    } finally {
+        setRuleToggling(item.id, false);
     }
 }
 
@@ -707,13 +876,13 @@ async function doDelete() {
     try {
         requireApiSuccess(
             await services.deleteCategoryRule(deletingRule.value.id),
-            'Failed to delete rule'
+            tt('Failed to delete rule')
         );
         showDeleteDialog.value = false;
-        successMsg.value = 'Rule deleted';
+        showSuccessMessage('Rule deleted');
         await fetchCategoryRules();
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Failed to delete rule');
+        error.value = getRequestErrorMessage(e, tt('Failed to delete rule'));
     } finally {
         deleting.value = false;
     }
@@ -741,12 +910,12 @@ async function runTest() {
     try {
         const result = requireApiSuccess<CategoryRuleTestResult>(
             await services.testCategoryRule(testRuleId.value, testText.value),
-            'Test failed'
+            tt('Test failed')
         );
         testResult.value = !!result?.matched;
     } catch (e: unknown) {
         testResult.value = null;
-        error.value = getRequestErrorMessage(e, 'Test failed');
+        error.value = getRequestErrorMessage(e, tt('Test failed'));
     } finally {
         testing.value = false;
     }
@@ -763,7 +932,7 @@ async function migrateKeywords() {
         );
         const migrated = getMigrationCount(result?.migrated ?? result?.migrated_count);
         const skipped = getMigrationCount(result?.skipped ?? result?.skipped_count);
-        successMsg.value = tt('Migration completed: migrated {migrated}, skipped {skipped}', {
+        showSuccessMessage('Migration completed: migrated {migrated}, skipped {skipped}', {
             migrated,
             skipped,
         });
@@ -792,7 +961,7 @@ async function fetchCategoryRules() {
             },
         });
         if (!response.data?.success) {
-            throw new Error(response.data?.error || 'Failed to load category rules');
+            throw new Error(response.data?.error || tt('Failed to load category rules'));
         }
         const result = response.data.data ?? [];
         categoryRules.value = result.map(item => ({
@@ -801,7 +970,7 @@ async function fetchCategoryRules() {
             sub_category_name: item.sub_category_name ?? item.sub_category ?? null,
         }));
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Failed to load category rules');
+        error.value = getRequestErrorMessage(e, tt('Failed to load category rules'));
     }
 }
 
@@ -809,7 +978,7 @@ async function fetchOverview() {
     try {
         const result = requireApiSuccess<Overview>(
             await services.getRulesOverview(),
-            'Failed to load rules overview'
+            tt('Failed to load rules overview')
         );
         if (result) {
             overview.value = {
@@ -822,7 +991,7 @@ async function fetchOverview() {
             };
         }
     } catch (e: unknown) {
-        error.value = getRequestErrorMessage(e, 'Failed to load rules overview');
+        error.value = getRequestErrorMessage(e, tt('Failed to load rules overview'));
     }
 }
 
@@ -850,3 +1019,10 @@ watch(
 
 onMounted(() => fetchAll());
 </script>
+
+<style scoped>
+.rule-center-category-filter {
+    flex: 0 1 280px;
+    min-width: 220px;
+}
+</style>

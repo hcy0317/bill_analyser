@@ -135,6 +135,20 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.investment?.actions.map(action => action.labelKey)).toStrictEqual(['Accept', 'Reject']);
     });
 
+    test('keeps manual annotation out of visible signals when it is the only context', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            isManuallyAnnotated: true
+        });
+        const viewModel = buildImportPreviewSignalViewModel({
+            isManuallyAnnotated: true
+        });
+
+        expect(summary.isManuallyAnnotated).toBe(true);
+        expect(hasImportCheckMatchingContext(summary)).toBe(false);
+        expect(viewModel.isManuallyAnnotated).toBe(true);
+        expect(viewModel.hasAnySignal).toBe(false);
+    });
+
     test('keeps parser and investment signals out of the type column model', () => {
         const typeColumn = buildImportPreviewTypeColumnViewModel(5);
 

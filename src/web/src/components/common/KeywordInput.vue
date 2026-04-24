@@ -6,16 +6,6 @@
             <v-btn
                 size="small"
                 variant="text"
-                color="secondary"
-                :prepend-icon="mdiPlus"
-                @click="addRegexClause"
-                :disabled="disabled || isRawMode"
-            >
-                {{ tt('Regex Clause') }}
-            </v-btn>
-            <v-btn
-                size="small"
-                variant="text"
                 color="primary"
                 :prepend-icon="mdiPlus"
                 @click="addClause"
@@ -89,8 +79,8 @@
                     <v-combobox
                         v-model="clause.terms"
                         v-model:search="draftTerms[clause.id]"
-                        :label="clause.operator === 'REGEX' ? tt('Regex Patterns') : tt('Expression Terms')"
-                        :placeholder="clause.operator === 'REGEX' ? tt('Enter regex patterns and press Enter') : tt('Enter terms and press Enter')"
+                        :label="tt('Expression Terms')"
+                        :placeholder="tt('Enter terms and press Enter')"
                         chips
                         closable-chips
                         multiple
@@ -207,12 +197,12 @@ const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Clau
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText || (
     resolvedFormat.value === 'composite'
-        ? tt('Build a boolean rule expression with OR / AND / NOT rows. Use parentheses on any row to control precedence; each row serializes to backend-supported OR={...}+AND={...}+NOT={...} syntax.')
-        : tt('Build a rule expression with OR / AND / NOT blocks. Legacy syntax is still accepted for compatibility.')
+        ? tt('Add keyword chips, then use AND / NOT and parentheses only when needed.')
+        : tt('Add keyword chips with OR / AND / NOT blocks.')
 ));
 const resolvedExampleText = computed(() => props.exampleText || (
     resolvedFormat.value === 'composite'
-        ? tt('Example: (OR={早餐}+AND={咖啡})+NOT={退款}')
+        ? tt('Example: OR={早餐,咖啡}+NOT={退款}')
         : ''
 ));
 
@@ -227,15 +217,11 @@ const supportsCompositeGrouping = computed(() => resolvedFormat.value === 'compo
 const showGroupingControls = computed(() => supportsCompositeGrouping.value);
 const isRawMode = computed(() => rawExpression.value.length > 0);
 const types = computed(() => {
-    const base = [
+    return [
         { title: tt('Match Any (OR)'), value: 'OR' as RuleOperator },
         { title: tt('Require All (AND)'), value: 'AND' as RuleOperator },
         { title: tt('Exclude (NOT)'), value: 'NOT' as RuleOperator },
     ];
-    if (clauses.value.some(clause => clause.operator === 'REGEX')) {
-        base.push({ title: tt('Regex Clause'), value: 'REGEX' as RuleOperator });
-    }
-    return base;
 });
 
 watch(() => [props.modelValue, resolvedFormat.value] as const, ([newVal]) => {
@@ -298,14 +284,6 @@ function addClause() {
     rawExpression.value = '';
     parseErrorKey.value = '';
     clauses.value.push(createRuleClause({ operator: 'OR' }, createLocalClauseId));
-    syncDraftTerms();
-    serializeKeywords();
-}
-
-function addRegexClause() {
-    rawExpression.value = '';
-    parseErrorKey.value = '';
-    clauses.value.push(createRuleClause({ operator: 'REGEX' }, createLocalClauseId));
     syncDraftTerms();
     serializeKeywords();
 }

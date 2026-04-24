@@ -1,5 +1,5 @@
 <template>
-    <v-table v-if="pairs.length > 0" hover density="comfortable">
+    <v-table v-if="pairs.length > 0" hover density="compact">
         <thead>
             <tr>
                 <th>{{ tt('Type') }}</th>
@@ -65,7 +65,7 @@ defineProps<{
     pairs: BillMatchingPairDetail[];
     deletingPairId: number | null;
     emptyHeadline: string;
-    emptyText: string;
+    emptyText?: string;
 }>();
 
 const emit = defineEmits<{

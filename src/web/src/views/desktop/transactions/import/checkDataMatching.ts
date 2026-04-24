@@ -133,8 +133,7 @@ export function getImportCheckMatchingContextSummary(
 
 export function hasImportCheckMatchingContext(summary: ImportCheckMatchingContextSummary): boolean {
     return !!summary.parserId
-        || (summary.dedupType !== '' && summary.dedupType !== 'remaining' && summary.dedupSourceIds.length > 0)
-        || summary.isManuallyAnnotated;
+        || (summary.dedupType !== '' && summary.dedupType !== 'remaining' && summary.dedupSourceIds.length > 0);
 }
 
 export function hasImportCheckMatchingDedupContext(summary: ImportCheckMatchingContextSummary): boolean {
@@ -345,7 +344,6 @@ export function buildImportPreviewSignalViewModel(
         recurring,
         hasAnySignal: !!parser
             || !!dedup
-            || matchingSummary.isManuallyAnnotated
             || !!transferSuggestion
             || !!investment
             || !!learning

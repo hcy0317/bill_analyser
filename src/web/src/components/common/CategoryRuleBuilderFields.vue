@@ -6,20 +6,7 @@
                     <div class="text-subtitle-1 font-weight-medium">
                         {{ tt(title) }}
                     </div>
-                    <v-spacer />
-                    <v-chip color="primary" variant="tonal" size="small">
-                        {{ tt('Auto Rule Name') }} · {{ autoRuleName }}
-                    </v-chip>
                 </div>
-
-                <v-alert
-                    v-if="description"
-                    type="info"
-                    variant="tonal"
-                    density="compact"
-                >
-                    {{ tt(description) }}
-                </v-alert>
 
                 <v-row>
                     <v-col cols="12" md="4">
@@ -61,16 +48,6 @@
                     </v-col>
                 </v-row>
 
-                <v-text-field
-                    :model-value="autoRuleName"
-                    density="comfortable"
-                    variant="outlined"
-                    readonly
-                    :label="tt('Rule Name')"
-                    :hint="tt('The rule name is generated automatically from category and priority')"
-                    persistent-hint
-                />
-
                 <rule-expression-input
                     :model-value="draft.ruleExpression"
                     expression-format="composite"
@@ -78,8 +55,8 @@
                     :title="tt('Rule Expression Builder')"
                     :add-button-text="tt('Add Rule Block')"
                     :empty-state-text="tt('No rule expression defined yet')"
-                    :help-text="tt('Choose OR / AND / NOT blocks and enter only the keywords you want to match. Parentheses and separators are generated automatically when the rule is saved.')"
-                    :example-text="tt('Example: (OR={早餐,早饭}+OR={咖啡,奶茶})+NOT={退款}')"
+                    :help-text="tt('Add keyword chips. Turn on Enable Regex when these chips should be read as regex patterns.')"
+                    :example-text="tt('Example: OR={早餐,咖啡}+NOT={退款}')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
                 />
             </div>
