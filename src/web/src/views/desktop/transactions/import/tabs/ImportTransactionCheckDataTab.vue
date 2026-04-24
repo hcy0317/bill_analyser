@@ -2259,6 +2259,13 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             matchLabel: tt('Matching'),
             parserLabels: PARSER_LABELS,
             parserColors: PARSER_COLORS,
+            investmentReasonLabels: {
+                platform: tt('平台'),
+                product: tt('产品'),
+                exclude: tt('排除'),
+                negative: tt('排除项'),
+                type: tt('类型')
+            },
             sourceRowLookup
         });
     }

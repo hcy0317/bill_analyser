@@ -68,3 +68,26 @@ def test_investment_profile_does_not_expose_generic_service_fee_as_product() -> 
     profile = extract_investment_profile("基金销售平台 账户服务费")
 
     assert profile == {"platform": "基金销售平台", "product": ""}
+
+
+def test_investment_matching_is_deterministic_for_specific_profile() -> None:
+    """Repeated scoring should keep stable score/reason/profile for the same evidence."""
+    bill = {
+        "type": "支出",
+        "counterparty": "天天基金",
+        "payment_method": "银行卡",
+        "description": "买入 沪深300ETF 申购 扣款",
+        "main_category": "",
+        "sub_category": "",
+        "original_category": "基金申购",
+    }
+
+    first_candidate = score_investment_candidate(bill)
+    second_candidate = score_investment_candidate(dict(bill))
+
+    assert first_candidate == second_candidate
+    assert first_candidate is not None
+    assert first_candidate["score"] == 0.92
+    assert first_candidate["platform"] == "天天基金"
+    assert first_candidate["product"] == "沪深300ETF"
+    assert first_candidate["reason"] == "platform:天天基金, product:沪深300ETF/基金/ETF"

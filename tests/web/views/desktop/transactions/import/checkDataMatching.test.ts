@@ -3,6 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
     buildImportPreviewSignalViewModel,
     buildImportPreviewTypeColumnViewModel,
+    formatInvestmentSignalReason,
     getImportCheckMatchingContextSummary,
     getImportCheckMatchingDedupLabel,
     getImportCheckMatchingDedupTitle,
@@ -77,6 +78,23 @@ describe('checkDataMatching helpers', () => {
         })).toBe('匹配 | 银行卡 | 微信 | 支付宝');
     });
 
+    test('resolves transfer dedup parser labels from combined parser tags', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            parserSource: 'cmbc',
+            parserTags: ['parser:cmbc', 'parser:alipay'],
+            dedupType: 'transfer',
+            dedupSourceIds: [701, 702]
+        });
+
+        expect(getImportCheckMatchingDedupTitle(summary, {
+            matchLabel: '匹配',
+            parserLabels: {
+                cmbc: '民生银行',
+                alipay: '支付宝'
+            }
+        })).toBe('匹配 | 民生银行 | 支付宝');
+    });
+
     test('surfaces non-transfer dedup rows with stable labels', () => {
         const summary = getImportCheckMatchingContextSummary({
             dedupType: 'platform_bank',
@@ -135,15 +153,22 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.investment?.actions.map(action => action.labelKey)).toStrictEqual(['Accept', 'Reject']);
     });
 
-    test('keeps investment profile in hover title instead of requiring duplicate body text', () => {
+    test('keeps investment profile in hover title and maps reason keys for display', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             investmentStatus: 'pending',
             investmentTitle: 'platform:蚂蚁财富, product:黄金ETF',
             investmentProfileText: '蚂蚁财富 黄金ETF'
         });
 
-        expect(viewModel.investment?.title).toBe('platform:蚂蚁财富, product:黄金ETF | 蚂蚁财富 黄金ETF');
+        expect(viewModel.investment?.title).toBe('平台: 蚂蚁财富, 产品: 黄金ETF | 蚂蚁财富 黄金ETF');
         expect(viewModel.investment?.profileText).toBe('蚂蚁财富 黄金ETF');
+    });
+
+    test('formats investment reason keys with caller-provided labels', () => {
+        expect(formatInvestmentSignalReason('platform:蚂蚁财富, product:黄金ETF', {
+            platform: 'Platform',
+            product: 'Product'
+        })).toBe('Platform: 蚂蚁财富, Product: 黄金ETF');
     });
 
     test('keeps manual annotation out of visible signals when it is the only context', () => {

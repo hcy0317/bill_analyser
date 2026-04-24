@@ -8,6 +8,7 @@ import pytest
 
 from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.smart_dedup import DeduplicationType
+from bill_analyser.utils.constants import TransactionType
 
 
 class FakePipelineDB:
@@ -34,6 +35,32 @@ class FakeLifecycleDB(FakePipelineDB):
 
     async def close(self) -> None:
         self.close_calls += 1
+
+
+class FakeCanonicalCategoryRuleDB(FakePipelineDB):
+    """DB stub exposing canonical category_rules for import classification."""
+
+    async def get_category_rules(
+        self,
+        user_id: int = 1,
+        category_id: int | None = None,
+        enabled_only: bool = True,
+        include_category_priority: bool = False,
+    ) -> list[dict[str, Any]]:
+        _ = (user_id, category_id, enabled_only, include_category_priority)
+        return [
+            {
+                "id": 501,
+                "category_id": 88,
+                "main_category": "餐饮",
+                "sub_category": "咖啡",
+                "category_type": TransactionType.EXPENSE,
+                "category_priority": 1,
+                "priority": 1,
+                "rule_expression": "OR={新规则咖啡}",
+                "regex_enabled": 0,
+            }
+        ]
 
 
 class FakeStageImportDB(FakePipelineDB):
@@ -306,6 +333,79 @@ async def test_import_bills_preview_mode_sorts_matched_items_before_unmatched(mo
 
 
 @pytest.mark.asyncio
+async def test_import_bills_preview_reloads_canonical_category_rules_for_same_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一 BillService 实例也应在导入预览前重读 canonical category_rules。"""
+    fake_db = FakeCanonicalCategoryRuleDB()
+    service = BillService(db=cast(Any, fake_db))
+    service._initialized = True
+    service.category_engine._initialized = True  # pylint: disable=protected-access
+    service.category_engine._current_user_id = 1  # pylint: disable=protected-access
+    service.category_engine.rules = []
+
+    parsed_bills = [
+        {
+            "date": "2026-03-05 09:30:00",
+            "type": "支出",
+            "amount": -18.8,
+            "description": "新规则咖啡 自动分类",
+            "counterparty": "pytest 咖啡店",
+            "payment_method": "支付宝",
+            "main_category": "",
+            "sub_category": "",
+            "source_account_id": None,
+        }
+    ]
+
+    monkeypatch.setattr(service.parser_factory, "parse", lambda _path, _parser=None: parsed_bills)
+    monkeypatch.setattr(service.validator, "validate_bills", lambda bills: (list(bills), []))
+
+    async def fake_process_with_db(bills: list[dict[str, Any]], _db: object, _user_id: int):
+        return SimpleNamespace(
+            kept_bills=list(bills),
+            original_count=len(bills),
+            removed_count=0,
+            transfer_pairs=[],
+            split_groups=[],
+            duplicate_groups=[],
+        )
+
+    async def identity_learning(
+        bills: list[dict[str, Any]],
+        user_id: int = 1,
+        type_only: bool = False,
+        record_usage: bool = False,
+    ) -> int:
+        _ = (bills, user_id, type_only, record_usage)
+        return 0
+
+    async def identity_step(bills: list[dict[str, Any]], user_id: int = 1):
+        _ = user_id
+        return bills
+
+    async def match_accounts(bills: list[dict[str, Any]], user_id: int = 1):
+        _ = user_id
+        for bill in bills:
+            bill["source_account_id"] = 3
+        return bills
+
+    monkeypatch.setattr(service.smart_dedup_engine, "process_with_db", fake_process_with_db)
+    monkeypatch.setattr(service, "_apply_import_learning_rules", identity_learning)
+    monkeypatch.setattr(service, "_detect_investment_candidates", identity_step)
+    monkeypatch.setattr(service, "_match_accounts", match_accounts)
+    monkeypatch.setattr(service, "_detect_cash_transfers", identity_step)
+
+    result = await service.import_bills("preview.csv", parser_type="wechat", preview_only=True, user_id=1)
+
+    assert result["success"] is True
+    assert result["matched_count"] == 1
+    assert result["preview"][0]["main_category"] == "餐饮"
+    assert result["preview"][0]["sub_category"] == "咖啡"
+    assert result["preview"][0]["is_matched"] is True
+
+
+@pytest.mark.asyncio
 async def test_bill_service_lifecycle_and_import_early_return_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """初始化/上下文管理及 import_bills 的空解析、全无效和异常分支都应稳定返回。"""
     call_log: list[str] = []
@@ -440,7 +540,15 @@ async def test_import_stage2_dedup_handles_empty_templates_and_success_path(monk
 
     async def fake_process_with_db(bills: list[dict[str, Any]], _db: object, _user_id: int):
         kept_bill = dict(bills[0])
-        kept_bill.update({"main_category": "餐饮", "sub_category": "早餐", "source_account_id": 3})
+        kept_bill.update(
+            {
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+                "source_account_id": 3,
+                "_dedup_type": "transfer",
+                "_destination_parser_id": "wechat",
+            }
+        )
         return SimpleNamespace(
             kept_bills=[kept_bill],
             original_count=1,
@@ -473,6 +581,11 @@ async def test_import_stage2_dedup_handles_empty_templates_and_success_path(monk
     assert fake_db.preview_batches[0][0] == "session-stage2"
     assert fake_db.preview_batches[0][1][0]["preview_payment_method"] == "alipay"
     assert fake_db.preview_batches[0][1][0]["preview_amount"] == 18.8
+    assert fake_db.preview_batches[0][1][0]["preview_parser_tags"] == [
+        "parser:alipay",
+        "channel:wallet",
+        "parser:wechat",
+    ]
     assert fake_db.updated_template_statuses == [([11], True)]
     assert fake_db.updated_statuses[-1] == ("session-stage2", "previewing", 0)
 

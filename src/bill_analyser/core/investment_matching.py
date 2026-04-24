@@ -51,7 +51,11 @@ def _append_unique(items: list[str], value: str) -> None:
 
 def _contains_any(text_lower: str, keywords: set[str]) -> list[str]:
     """Return keywords contained in text, case-insensitively."""
-    return [keyword for keyword in keywords if keyword.lower() in text_lower]
+    return [
+        keyword
+        for keyword in sorted(keywords, key=lambda item: (-len(item), item))
+        if keyword.lower() in text_lower
+    ]
 
 
 def score_investment_candidate(

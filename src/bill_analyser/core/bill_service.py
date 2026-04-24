@@ -107,6 +107,18 @@ class BillService:
         self._initialized = True
         self.logger.info("账单服务初始化完成")
 
+    async def _reload_category_rules_for_import(self, user_id: int = 1) -> None:
+        """Reload canonical category_rules before import classification.
+
+        Category rules can be edited by another request while a long-lived
+        BillService instance keeps an initialized CategoryEngine.  Import
+        preview/confirmation must therefore read the canonical category_rules
+        source at the start of each classification pass instead of trusting an
+        already-initialized in-memory rule set.
+        """
+        await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
+        self.logger.debug("分类规则已刷新: user_id=%d, 规则数=%d", user_id, len(self.category_engine.rules))
+
     @log_method
     @log_step("导入账单文件")
     async def import_bills(
@@ -228,19 +240,9 @@ class BillService:
             # 4. 分类账单（预览和正式导入都需要）
             self.logger.info("步骤 4/5: 自动分类 (user_id=%d)", user_id)
 
-            # 检查是否需要重新加载分类规则（当user_id变化时）
-            engine_initialized = self.category_engine.is_initialized
-            engine_user_id = self.category_engine.current_user_id
-            self.logger.debug(
-                "[分类规则检查] initialized=%s, engine_user=%d, request_user=%d",
-                engine_initialized,
-                engine_user_id,
-                user_id,
-            )
-
-            if not engine_initialized or engine_user_id != user_id:
-                await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
-                self.logger.debug("分类规则加载: user_id=%d, 规则数=%d", user_id, len(self.category_engine.rules))
+            # 分类规则以 category_rules 为 canonical source；每次导入分类前刷新，
+            # 避免规则编辑后复用同一服务实例内的旧规则缓存。
+            await self._reload_category_rules_for_import(user_id=user_id)
 
             learned_seed_count = await self._apply_import_learning_rules(
                 deduplicated_bills, user_id=user_id, type_only=True, record_usage=False
@@ -2037,9 +2039,8 @@ class BillService:
 
             kept_bills = dedup_result.kept_bills
 
-            # 4. 加载分类规则
-            if not self.category_engine.is_initialized or self.category_engine.current_user_id != user_id:
-                await self.category_engine.load_rules_from_db(self.db, user_id=user_id)
+            # 4. 加载分类规则（始终刷新 canonical category_rules，避免规则编辑后预览仍用旧缓存）
+            await self._reload_category_rules_for_import(user_id=user_id)
 
             learned_seed_count = await self._apply_import_learning_rules(
                 kept_bills, user_id=user_id, type_only=True, record_usage=False
@@ -2146,6 +2147,16 @@ class BillService:
                 )
                 top_recurring_candidate = recurring_candidates[0] if recurring_candidates else None
 
+                destination_parser_id = str(bill.get("_destination_parser_id", "") or "").strip()
+                preview_parser_tags = resolve_parser_tags(
+                    [
+                        *list(bill.get("_parser_tags") or []),
+                        *([f"parser:{destination_parser_id}"] if destination_parser_id else []),
+                    ],
+                    parser_id=parser_id,
+                    payment_method=preview_payment_method,
+                )
+
                 # 构建预览数据
                 # v6.54: preview_amount 和 preview_destination_amount 使用绝对值
                 preview_data = {
@@ -2161,7 +2172,7 @@ class BillService:
                     "preview_payment_method": preview_payment_method,
                     "preview_description": bill.get("description", ""),
                     "preview_parser_id": bill.get("_parser_id", ""),
-                    "preview_parser_tags": list(bill.get("_parser_tags") or []),
+                    "preview_parser_tags": preview_parser_tags,
                     "preview_recurring_id": top_recurring_candidate.get("id") if top_recurring_candidate else None,
                     "preview_recurring_name": top_recurring_candidate.get("name", "")
                     if top_recurring_candidate

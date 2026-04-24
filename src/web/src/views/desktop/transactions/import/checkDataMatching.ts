@@ -95,6 +95,7 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
 
 export interface ImportPreviewSignalViewModelOptions extends ImportCheckMatchingDedupTitleOptions {
     parserColors?: Record<string, string>;
+    investmentReasonLabels?: Record<string, string>;
 }
 
 export interface ImportPreviewTypeColumnViewModel {
@@ -109,6 +110,14 @@ const MATCHING_DEDUP_LABEL_KEYS: Record<string, string> = {
     split: 'Split-Merge Duplicate',
     split_merge: 'Split-Merge Duplicate',
     transfer_cross_batch: 'Cross-Batch Transfer'
+};
+
+const DEFAULT_INVESTMENT_REASON_LABELS: Record<string, string> = {
+    platform: '平台',
+    product: '产品',
+    exclude: '排除',
+    negative: '排除项',
+    type: '类型'
 };
 
 function humanizeDedupType(rawType: string): string {
@@ -154,6 +163,16 @@ function getParserDisplayLabel(parserId: string, parserLabels?: Record<string, s
     return parserLabels?.[parserId] || parserId;
 }
 
+function getParserSourceFromTag(tag: string): string {
+    const normalizedTag = (tag || '').trim();
+    const parserTagPrefix = 'parser:';
+    if (!normalizedTag.toLowerCase().startsWith(parserTagPrefix)) {
+        return '';
+    }
+
+    return normalizedTag.slice(parserTagPrefix.length).trim();
+}
+
 export function resolveImportCheckMatchingTransferParserSources(
     summary: ImportCheckMatchingContextSummary,
     options: ImportCheckMatchingDedupTitleOptions = {}
@@ -181,6 +200,10 @@ export function resolveImportCheckMatchingTransferParserSources(
     };
 
     addParserSource(options.currentParserSource || summary.parserId);
+
+    for (const tag of summary.parserTags) {
+        addParserSource(getParserSourceFromTag(tag));
+    }
 
     for (const sourceId of summary.dedupSourceIds) {
         addParserSource(sourceRowLookup?.get(String(sourceId)));
@@ -216,6 +239,31 @@ export function buildImportPreviewTypeColumnViewModel(type: number): ImportPrevi
         type,
         signalKeys: []
     };
+}
+
+export function formatInvestmentSignalReason(
+    reason: string | undefined,
+    reasonLabels: Record<string, string> = DEFAULT_INVESTMENT_REASON_LABELS
+): string {
+    return (reason || '').split(',').map(part => {
+        const trimmedPart = part.trim();
+        if (!trimmedPart) {
+            return '';
+        }
+
+        const separatorIndex = trimmedPart.indexOf(':');
+        if (separatorIndex <= 0) {
+            return trimmedPart;
+        }
+
+        const rawKey = trimmedPart.slice(0, separatorIndex).trim();
+        const value = trimmedPart.slice(separatorIndex + 1).trim();
+        if (!value) {
+            return reasonLabels[rawKey] || rawKey;
+        }
+
+        return `${reasonLabels[rawKey] || rawKey}: ${value}`;
+    }).filter(part => !!part).join(', ');
 }
 
 function buildReviewView(
@@ -308,7 +356,7 @@ export function buildImportPreviewSignalViewModel(
     );
     const investment = buildReviewView(
         state.investmentStatus,
-        state.investmentTitle,
+        formatInvestmentSignalReason(state.investmentTitle, options.investmentReasonLabels),
         'Investment Signal',
         'Accepted',
         'Rejected',
