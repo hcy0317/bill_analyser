@@ -148,6 +148,7 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
                 model TEXT NOT NULL DEFAULT '',
                 api_key TEXT DEFAULT '',
                 base_url TEXT DEFAULT '',
+                advanced_settings TEXT NOT NULL DEFAULT '{}',
                 is_active INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -159,6 +160,11 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             "CREATE INDEX IF NOT EXISTS idx_llm_configs_user_active "
             "ON llm_configs(user_id, is_active)"
         )
+        async with conn.execute("PRAGMA table_info(llm_configs)") as cursor:
+            llm_config_columns = [row[1] for row in await cursor.fetchall()]
+        if "advanced_settings" not in llm_config_columns:
+            self.logger.info("添加 advanced_settings 字段到 llm_configs 表")
+            await conn.execute("ALTER TABLE llm_configs ADD COLUMN advanced_settings TEXT NOT NULL DEFAULT '{}'")
 
         await conn.execute(
             """

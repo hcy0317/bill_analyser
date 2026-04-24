@@ -1,5 +1,8 @@
 """LLM Provider abstraction layer for bill classification and rule induction."""
 
+# pylint: disable=missing-function-docstring,too-few-public-methods
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +40,7 @@ class LLMProvider(Protocol):
         system_prompt: str = "",
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        reasoning_depth: str = "",
     ) -> LLMResponse: ...
 
 
@@ -56,6 +60,7 @@ class OpenAIProvider:
         system_prompt: str = "",
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        reasoning_depth: str = "",
     ) -> LLMResponse:
         messages: list[dict[str, str]] = []
         if system_prompt:
@@ -68,6 +73,8 @@ class OpenAIProvider:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if reasoning_depth and self.provider_name in {"openai", "azure"}:
+            payload["reasoning_effort"] = reasoning_depth
 
         data = await _request_with_retries(
             url=f"{self.base_url.rstrip('/')}/chat/completions",
@@ -106,7 +113,9 @@ class ClaudeProvider:
         system_prompt: str = "",
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        reasoning_depth: str = "",
     ) -> LLMResponse:
+        _ = reasoning_depth
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -157,7 +166,9 @@ class OllamaProvider:
         system_prompt: str = "",
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        reasoning_depth: str = "",
     ) -> LLMResponse:
+        _ = reasoning_depth
         payload: dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,

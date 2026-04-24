@@ -328,7 +328,7 @@
     </v-dialog>
 
     <!-- Add Config Dialog -->
-    <v-dialog v-model="addConfigDialog" max-width="500" persistent>
+    <v-dialog v-model="addConfigDialog" max-width="640" persistent>
         <v-card>
             <v-card-title>{{ tt('Add Config') }}</v-card-title>
             <form autocomplete="off" @submit.prevent="saveNewConfig">
@@ -347,7 +347,11 @@
                            aria-hidden="true" />
                     <v-text-field v-model="newConfigForm.name" :label="tt('Name')"
                                   :name="llmConfigFieldNames.name"
+                                  :readonly="autofillFieldsLocked"
                                   autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
                                   density="compact" class="mb-3" placeholder="My OpenAI Config" />
                     <v-select v-model="newConfigForm.provider" :label="tt('Provider')"
                               :items="llmProviderOptions"
@@ -358,23 +362,95 @@
                               density="compact" class="mb-3" />
                     <v-text-field v-model="newConfigForm.model" :label="tt('Model')"
                                   :name="llmConfigFieldNames.model"
+                                  :readonly="autofillFieldsLocked"
                                   autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
                                   density="compact" class="mb-3"
                                   :placeholder="selectedLLMProviderOption.modelPlaceholder" />
                     <v-text-field v-model="newConfigForm.api_key" label="API Key"
                                   :name="llmConfigFieldNames.apiKey"
+                                  :readonly="autofillFieldsLocked"
                                   autocomplete="new-password"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
                                   density="compact" class="mb-3" type="password"
                                   :placeholder="selectedLLMProviderOption.apiKeyPlaceholder" />
                     <v-text-field v-model="newConfigForm.base_url" :label="baseUrlFieldLabel"
                                   :name="llmConfigFieldNames.baseUrl"
+                                  :readonly="autofillFieldsLocked"
                                   autocomplete="off"
+                                  data-lpignore="true"
+                                  data-1p-ignore="true"
+                                  @focus="unlockAutofillFields"
                                   density="compact"
                                   :placeholder="selectedLLMProviderOption.baseUrlPlaceholder" />
+                    <v-switch v-model="newConfigForm.advancedMode"
+                              :label="tt('Advanced Mode')"
+                              color="primary"
+                              density="compact"
+                              hide-details
+                              class="mb-2" />
+                    <v-expand-transition>
+                        <div v-if="newConfigForm.advancedMode" class="llm-config-advanced-fields">
+                            <v-select v-model="newConfigForm.reasoning_depth"
+                                      :label="tt('Reasoning Depth')"
+                                      :items="llmReasoningDepthOptions"
+                                      item-title="title"
+                                      item-value="value"
+                                      autocomplete="off"
+                                      density="compact"
+                                      class="mb-3" />
+                            <div class="d-flex flex-wrap ga-3">
+                                <v-text-field v-model="newConfigForm.temperature"
+                                              :label="tt('Temperature')"
+                                              :name="llmConfigFieldNames.temperature"
+                                              type="number"
+                                              min="0"
+                                              max="2"
+                                              step="0.1"
+                                              density="compact"
+                                              class="llm-config-number-field mb-3" />
+                                <v-text-field v-model="newConfigForm.max_tokens"
+                                              :label="tt('Max Tokens')"
+                                              :name="llmConfigFieldNames.maxTokens"
+                                              type="number"
+                                              min="1"
+                                              step="1"
+                                              density="compact"
+                                              class="llm-config-number-field mb-3" />
+                            </div>
+                            <v-textarea v-model="newConfigForm.system_prompt"
+                                        :label="tt('System Prompt')"
+                                        :name="llmConfigFieldNames.systemPrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow
+                                        class="mb-3" />
+                            <v-textarea v-model="newConfigForm.classification_prompt_template"
+                                        :label="tt('Classification Prompt Template')"
+                                        :name="llmConfigFieldNames.classificationPrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow
+                                        class="mb-3" />
+                            <v-textarea v-model="newConfigForm.rule_prompt_template"
+                                        :label="tt('Rule Prompt Template')"
+                                        :name="llmConfigFieldNames.rulePrompt"
+                                        autocomplete="off"
+                                        density="compact"
+                                        rows="2"
+                                        auto-grow />
+                        </div>
+                    </v-expand-transition>
                 </v-card-text>
                 <v-card-actions>
                     <v-spacer />
-                    <v-btn variant="text" type="button" @click="addConfigDialog = false">{{ tt('Cancel') }}</v-btn>
+                    <v-btn variant="text" type="button" @click="closeAddConfigDialog">{{ tt('Cancel') }}</v-btn>
                     <v-btn color="primary" variant="tonal" :loading="addConfigSaving"
                            type="submit">{{ tt('Save') }}</v-btn>
                 </v-card-actions>
@@ -387,7 +463,7 @@
 
 <script setup lang="ts">
 import axios from 'axios';
-import { ref, computed, watch, useTemplateRef } from 'vue';
+import { ref, computed, watch, useTemplateRef, onBeforeUnmount } from 'vue';
 
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
@@ -413,9 +489,19 @@ interface LLMConfigItem {
     provider: string;
     model: string;
     base_url?: string;
+    advanced_settings?: LLMAdvancedSettings;
     is_active?: boolean;
     created_at?: string;
     updated_at?: string;
+}
+
+interface LLMAdvancedSettings {
+    reasoning_depth?: string;
+    temperature?: number;
+    max_tokens?: number;
+    system_prompt?: string;
+    classification_prompt_template?: string;
+    rule_prompt_template?: string;
 }
 
 interface LLMConfigForm {
@@ -424,6 +510,13 @@ interface LLMConfigForm {
     model: string;
     api_key: string;
     base_url: string;
+    advancedMode: boolean;
+    reasoning_depth: string;
+    temperature: string;
+    max_tokens: string;
+    system_prompt: string;
+    classification_prompt_template: string;
+    rule_prompt_template: string;
 }
 
 interface LLMProviderOption {
@@ -539,6 +632,13 @@ const llmProviderOptions: LLMProviderOption[] = [
 ];
 
 const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
+
+const llmReasoningDepthOptions = [
+    { title: tt('Default'), value: '' },
+    { title: tt('Low'), value: 'low' },
+    { title: tt('Medium'), value: 'medium' },
+    { title: tt('High'), value: 'high' },
+];
 
 const legacyLLMProviderLabels: Record<string, string> = {
     anthropic: 'Claude (Anthropic)',
@@ -779,9 +879,24 @@ const llmStatusFilter = ref<string>('');
 const addConfigDialog = ref(false);
 const addConfigSaving = ref(false);
 const autofillNonce = ref(Date.now());
+const autofillFieldsLocked = ref(false);
+const autofillUnlockTimer = ref<number | null>(null);
 
 function createEmptyLLMConfigForm(): LLMConfigForm {
-    return { name: '', provider: 'openai', model: '', api_key: '', base_url: '' };
+    return {
+        name: '',
+        provider: 'openai',
+        model: '',
+        api_key: '',
+        base_url: '',
+        advancedMode: false,
+        reasoning_depth: '',
+        temperature: '0.3',
+        max_tokens: '4096',
+        system_prompt: '',
+        classification_prompt_template: '',
+        rule_prompt_template: '',
+    };
 }
 
 const newConfigForm = ref<LLMConfigForm>(createEmptyLLMConfigForm());
@@ -800,6 +915,11 @@ const llmConfigFieldNames = computed(() => ({
     model: `llm-config-model-${autofillNonce.value}`,
     apiKey: `llm-config-credential-${autofillNonce.value}`,
     baseUrl: `llm-config-endpoint-${autofillNonce.value}`,
+    temperature: `llm-config-temperature-${autofillNonce.value}`,
+    maxTokens: `llm-config-max-tokens-${autofillNonce.value}`,
+    systemPrompt: `llm-config-system-prompt-${autofillNonce.value}`,
+    classificationPrompt: `llm-config-classification-prompt-${autofillNonce.value}`,
+    rulePrompt: `llm-config-rule-prompt-${autofillNonce.value}`,
 }));
 
 const llmPendingCount = computed(() =>
@@ -835,6 +955,72 @@ function confidenceColor(confidence: number): string {
     return 'error';
 }
 
+function clearAutofillUnlockTimer(): void {
+    if (autofillUnlockTimer.value === null) {
+        return;
+    }
+    window.clearTimeout(autofillUnlockTimer.value);
+    autofillUnlockTimer.value = null;
+}
+
+function unlockAutofillFields(): void {
+    autofillFieldsLocked.value = false;
+    clearAutofillUnlockTimer();
+}
+
+function lockAutofillFieldsBriefly(): void {
+    clearAutofillUnlockTimer();
+    autofillFieldsLocked.value = true;
+    autofillUnlockTimer.value = window.setTimeout(() => {
+        autofillFieldsLocked.value = false;
+        autofillUnlockTimer.value = null;
+    }, 350);
+}
+
+function closeAddConfigDialog(): void {
+    clearAutofillUnlockTimer();
+    autofillFieldsLocked.value = false;
+    addConfigDialog.value = false;
+}
+
+function buildAdvancedSettingsPayload(form: LLMConfigForm): LLMAdvancedSettings {
+    if (!form.advancedMode) {
+        return {};
+    }
+
+    const settings: LLMAdvancedSettings = {};
+    if (form.reasoning_depth) {
+        settings.reasoning_depth = form.reasoning_depth;
+    }
+
+    const temperature = Number(form.temperature);
+    if (Number.isFinite(temperature)) {
+        settings.temperature = temperature;
+    }
+
+    const maxTokens = Number.parseInt(form.max_tokens, 10);
+    if (Number.isFinite(maxTokens)) {
+        settings.max_tokens = maxTokens;
+    }
+
+    const systemPrompt = form.system_prompt.trim();
+    if (systemPrompt) {
+        settings.system_prompt = systemPrompt;
+    }
+
+    const classificationPrompt = form.classification_prompt_template.trim();
+    if (classificationPrompt) {
+        settings.classification_prompt_template = classificationPrompt;
+    }
+
+    const rulePrompt = form.rule_prompt_template.trim();
+    if (rulePrompt) {
+        settings.rule_prompt_template = rulePrompt;
+    }
+
+    return settings;
+}
+
 async function loadLLMConfigs() {
     try {
         const resp = await services.getLLMConfigs();
@@ -848,6 +1034,7 @@ function openAddConfigDialog() {
     autofillNonce.value = Date.now();
     newConfigForm.value = createEmptyLLMConfigForm();
     addConfigDialog.value = true;
+    lockAutofillFieldsBriefly();
 }
 
 async function saveNewConfig() {
@@ -858,6 +1045,7 @@ async function saveNewConfig() {
         model: form.model.trim(),
         api_key: form.api_key.trim(),
         base_url: form.base_url.trim(),
+        advanced_settings: buildAdvancedSettingsPayload(form),
         is_active: llmSavedConfigs.value.length === 0,
     };
 
@@ -875,7 +1063,7 @@ async function saveNewConfig() {
     try {
         const resp = await services.createLLMConfig(payload);
         if (resp.data?.success) {
-            addConfigDialog.value = false;
+            closeAddConfigDialog();
             newConfigForm.value = createEmptyLLMConfigForm();
             await loadLLMConfigs();
         } else {
@@ -887,6 +1075,10 @@ async function saveNewConfig() {
         addConfigSaving.value = false;
     }
 }
+
+onBeforeUnmount(() => {
+    clearAutofillUnlockTimer();
+});
 
 function llmProviderLabel(provider: string): string {
     return llmProviderOptions.find(option => option.value === provider)?.title
@@ -985,6 +1177,16 @@ watch(activeTab, (tab) => {
     opacity: 0;
     pointer-events: none;
     border: 0;
+}
+
+.llm-config-advanced-fields {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+    margin-top: 8px;
+    padding-top: 12px;
+}
+
+.llm-config-number-field {
+    flex: 1 1 180px;
 }
 
 .v-table :deep(td) {

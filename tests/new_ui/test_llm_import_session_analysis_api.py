@@ -36,6 +36,31 @@ class _FakeLLMProvider:
         )
 
 
+class _CapturingLLMProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate(self, **kwargs) -> LLMResponse:  # pragma: no cover - trivial async stub
+        self.calls.append(kwargs)
+        return LLMResponse(
+            content=json.dumps(
+                [
+                    {
+                        "rule_name": "高级配置咖啡",
+                        "rule_expression": "OR={高级配置咖啡}",
+                        "confidence": 0.93,
+                        "explanation": "advanced settings applied",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            model="capture-model",
+            provider="capture-provider",
+            tokens_used=64,
+            raw_response={"stub": True},
+        )
+
+
 class _NoRuleLLMProvider:
     async def generate(self, **kwargs) -> LLMResponse:  # pragma: no cover - trivial async stub
         return LLMResponse(
@@ -69,6 +94,191 @@ def _reset_llm_rate_limit_state() -> None:
 
 class TestLLMImportSessionAnalysisAPI:
     """LLM analyze-transactions should support import-session preview inputs."""
+
+    def test_saved_llm_config_persists_advanced_settings_and_redacts_api_keys(
+        self,
+        client,
+    ):
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_config_advanced_redaction")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        config_name = f"pytest-advanced-redaction-{int(time.time() * 1000)}"
+        initial_secret = "sk-initial-secret-should-not-leak"
+        updated_secret = "sk-updated-secret-should-not-leak"
+
+        create_response = client.post(
+            "/api/llm/configs",
+            headers=auth_headers,
+            json={
+                "name": config_name,
+                "provider": "openai",
+                "model": "gpt-test",
+                "api_key": initial_secret,
+                "base_url": "https://example.test/v1",
+                "advanced_settings": {
+                    "reasoning_depth": "high",
+                    "temperature": 0.55,
+                    "max_tokens": 1234,
+                    "system_prompt": "系统提示词",
+                    "classification_prompt_template": "分类 {transactions_json}",
+                    "rule_prompt_template": "规则 {category_name} {transactions_json}",
+                },
+            },
+        )
+
+        assert create_response.status_code == 200
+        create_payload = create_response.get_json()
+        assert initial_secret not in json.dumps(create_payload, ensure_ascii=False)
+        created_config = create_payload["data"]
+        assert created_config["api_key"] == "********"
+        assert created_config["has_api_key"] is True
+        assert created_config["advanced_settings"]["reasoning_depth"] == "high"
+        assert created_config["advanced_settings"]["temperature"] == 0.55
+        assert created_config["advanced_settings"]["max_tokens"] == 1234
+        config_id = int(created_config["id"])
+
+        update_response = client.put(
+            f"/api/llm/configs/{config_id}",
+            headers=auth_headers,
+            json={
+                "api_key": updated_secret,
+                "advanced_settings": {
+                    "reasoning_depth": "low",
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                    "system_prompt": "更新后的系统提示词",
+                    "rule_prompt_template": "更新规则 {category_name}",
+                },
+            },
+        )
+
+        assert update_response.status_code == 200
+        update_payload = update_response.get_json()
+        update_payload_text = json.dumps(update_payload, ensure_ascii=False)
+        assert initial_secret not in update_payload_text
+        assert updated_secret not in update_payload_text
+        updated_config = update_payload["data"]
+        assert updated_config["api_key"] == "********"
+        assert updated_config["advanced_settings"]["reasoning_depth"] == "low"
+        assert updated_config["advanced_settings"]["temperature"] == 0.7
+        assert updated_config["advanced_settings"]["max_tokens"] == 2048
+
+        list_response = client.get("/api/llm/configs", headers=auth_headers)
+        assert list_response.status_code == 200
+        list_payload_text = json.dumps(list_response.get_json(), ensure_ascii=False)
+        assert initial_secret not in list_payload_text
+        assert updated_secret not in list_payload_text
+
+        from bill_analyser.api import app as api_app
+
+        async def _fetch_saved_config() -> dict[str, Any]:
+            configs = await api_app.db.get_llm_configs(user_id=current_user_id)
+            return next(item for item in configs if int(item["id"]) == config_id)
+
+        saved_config = asyncio.run(_fetch_saved_config())
+        assert saved_config["api_key"] == updated_secret
+        assert saved_config["advanced_settings"]["reasoning_depth"] == "low"
+        assert saved_config["advanced_settings"]["system_prompt"] == "更新后的系统提示词"
+
+    def test_active_llm_config_feeds_advanced_settings_without_prompt_secret_leak(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_config_advanced_runtime")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        session_id = f"pytest-llm-advanced-runtime-{int(time.time() * 1000)}"
+        config_name = f"pytest-advanced-runtime-{int(time.time() * 1000)}"
+        secret = "sk-runtime-secret-should-not-leak"
+        capturing_provider = _CapturingLLMProvider()
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        create_response = client.post(
+            "/api/llm/configs",
+            headers=auth_headers,
+            json={
+                "name": config_name,
+                "provider": "openai",
+                "model": "gpt-advanced-runtime",
+                "api_key": secret,
+                "base_url": "https://example.test/v1",
+                "is_active": True,
+                "advanced_settings": {
+                    "reasoning_depth": "high",
+                    "temperature": 0.72,
+                    "max_tokens": 321,
+                    "system_prompt": "自定义系统提示词",
+                    "rule_prompt_template": "自定义规则提示 {category_name} {transactions_json}",
+                },
+            },
+        )
+        assert create_response.status_code == 200
+        assert secret not in json.dumps(create_response.get_json(), ensure_ascii=False)
+        config_id = int(create_response.get_json()["data"]["id"])
+
+        activate_response = client.post(
+            f"/api/llm/configs/{config_id}/activate",
+            headers=auth_headers,
+        )
+        assert activate_response.status_code == 200
+        assert secret not in json.dumps(activate_response.get_json(), ensure_ascii=False)
+
+        monkeypatch.setattr(
+            llm_routes.ProviderFactory,
+            "create",
+            lambda *_args, **_kwargs: capturing_provider,
+        )
+
+        async def _prepare() -> int:
+            await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await api_app.db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-08-08 09:00:00",
+                    "preview_type": "支出",
+                    "preview_amount": 32.5,
+                    "preview_counterparty": "高级配置咖啡",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "门店消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_prepare())
+
+        analyze_response = client.post(
+            "/api/llm/analyze-transactions",
+            headers=auth_headers,
+            json={
+                "session_id": session_id,
+                "preview_updates": [
+                    {
+                        "id": preview_id,
+                        "preview_type": "支出",
+                        "category_id": int(category["id"]),
+                    }
+                ],
+            },
+        )
+
+        assert analyze_response.status_code == 200
+        analyze_payload_text = json.dumps(analyze_response.get_json(), ensure_ascii=False)
+        assert secret not in analyze_payload_text
+        assert len(capturing_provider.calls) == 1
+        provider_call = capturing_provider.calls[0]
+        provider_call_text = json.dumps(provider_call, ensure_ascii=False, default=str)
+        assert secret not in provider_call_text
+        assert provider_call["system_prompt"] == "自定义系统提示词"
+        assert provider_call["temperature"] == 0.72
+        assert provider_call["max_tokens"] == 321
+        assert provider_call["reasoning_depth"] == "high"
+        assert "自定义规则提示" in provider_call["prompt"]
+        assert "高级配置咖啡" in provider_call["prompt"]
 
     def test_llm_analysis_uses_import_session_preview_updates(self, client, monkeypatch):
         _reset_llm_rate_limit_state()

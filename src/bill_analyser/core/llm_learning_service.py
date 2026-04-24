@@ -10,7 +10,12 @@ from typing import Any
 import aiosqlite
 
 from ..utils.logger import get_logger
-from .llm_prompts import SYSTEM_PROMPT, build_classification_prompt, build_rule_induction_prompt
+from .llm_prompts import (
+    SYSTEM_PROMPT,
+    build_classification_prompt,
+    build_rule_induction_prompt,
+    render_prompt_template,
+)
 from .llm_provider import LLMProvider, LLMResponse
 
 logger = get_logger("LLMLearningService")
@@ -24,6 +29,8 @@ _MAX_ANALYZE_LIMIT = 20
 _MAX_SESSION_SELECTION = 20
 _MAX_SESSION_CATEGORY_GROUPS = 10
 _MAX_PREVIEW_UPDATE_BATCH = 20
+_DEFAULT_TEMPERATURE = 0.3
+_DEFAULT_MAX_TOKENS = 4096
 
 
 class LLMImportSessionAnalysisError(ValueError):
@@ -38,9 +45,57 @@ class LLMImportSessionAnalysisError(ValueError):
 class LLMLearningService:
     """Orchestrates LLM analysis of transactions and rule induction."""
 
-    def __init__(self, db: Any, provider: LLMProvider) -> None:
+    def __init__(
+        self,
+        db: Any,
+        provider: LLMProvider,
+        advanced_settings: dict[str, Any] | None = None,
+    ) -> None:
         self._db = db
         self._provider = provider
+        self._advanced_settings = advanced_settings or {}
+
+    def _system_prompt(self) -> str:
+        return str(self._advanced_settings.get("system_prompt") or SYSTEM_PROMPT)
+
+    def _temperature(self) -> float:
+        return float(self._advanced_settings.get("temperature", _DEFAULT_TEMPERATURE))
+
+    def _max_tokens(self) -> int:
+        return int(self._advanced_settings.get("max_tokens", _DEFAULT_MAX_TOKENS))
+
+    def _reasoning_depth(self) -> str:
+        return str(self._advanced_settings.get("reasoning_depth") or "")
+
+    def _build_classification_prompt(self, transactions: list[dict[str, Any]]) -> str:
+        default_prompt = build_classification_prompt(transactions)
+        return render_prompt_template(
+            str(self._advanced_settings.get("classification_prompt_template") or ""),
+            default_prompt=default_prompt,
+            transactions=transactions,
+        )
+
+    def _build_rule_induction_prompt(
+        self,
+        category_name: str,
+        transactions: list[dict[str, Any]],
+    ) -> str:
+        default_prompt = build_rule_induction_prompt(category_name, transactions)
+        return render_prompt_template(
+            str(self._advanced_settings.get("rule_prompt_template") or ""),
+            default_prompt=default_prompt,
+            transactions=transactions,
+            category_name=category_name,
+        )
+
+    async def _generate(self, prompt: str) -> LLMResponse:
+        return await self._provider.generate(
+            prompt=prompt,
+            system_prompt=self._system_prompt(),
+            temperature=self._temperature(),
+            max_tokens=self._max_tokens(),
+            reasoning_depth=self._reasoning_depth(),
+        )
 
     @staticmethod
     def _normalize_limit(limit: int) -> int:
@@ -193,15 +248,10 @@ class LLMLearningService:
             return []
 
         self._reserve_rate_limit_slots(user_id, 1)
-        prompt = build_classification_prompt(transactions)
+        prompt = self._build_classification_prompt(transactions)
 
         try:
-            response: LLMResponse = await self._provider.generate(
-                prompt=prompt,
-                system_prompt=SYSTEM_PROMPT,
-                temperature=0.3,
-                max_tokens=4096,
-            )
+            response: LLMResponse = await self._generate(prompt)
         except Exception as exc:
             logger.error("LLM classification request failed: %s", exc)
             raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -395,7 +445,7 @@ class LLMLearningService:
             category_name = "/".join(
                 [part for part in (main_category, sub_category) if part]
             )
-            prompt = build_rule_induction_prompt(
+            prompt = self._build_rule_induction_prompt(
                 category_name,
                 [
                     {
@@ -409,12 +459,7 @@ class LLMLearningService:
             )
 
             try:
-                response: LLMResponse = await self._provider.generate(
-                    prompt=prompt,
-                    system_prompt=SYSTEM_PROMPT,
-                    temperature=0.3,
-                    max_tokens=4096,
-                )
+                response: LLMResponse = await self._generate(prompt)
             except Exception as exc:
                 logger.error("LLM import-session rule induction failed: %s", exc)
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
@@ -501,15 +546,10 @@ class LLMLearningService:
             logger.info("No samples found for category %s (user %s)", category_name, user_id)
             return []
 
-        prompt = build_rule_induction_prompt(category_name, transactions)
+        prompt = self._build_rule_induction_prompt(category_name, transactions)
 
         try:
-            response: LLMResponse = await self._provider.generate(
-                prompt=prompt,
-                system_prompt=SYSTEM_PROMPT,
-                temperature=0.3,
-                max_tokens=4096,
-            )
+            response: LLMResponse = await self._generate(prompt)
         except Exception as exc:
             logger.error("LLM rule induction request failed: %s", exc)
             raise RuntimeError(f"LLM request failed: {exc}") from exc

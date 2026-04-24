@@ -276,6 +276,25 @@ interface AnalyzeLLMTransactionsRequest {
     previewUpdates?: Array<Record<string, unknown>>;
 }
 
+interface LLMAdvancedSettings {
+    reasoning_depth?: string;
+    temperature?: number;
+    max_tokens?: number;
+    system_prompt?: string;
+    classification_prompt_template?: string;
+    rule_prompt_template?: string;
+}
+
+interface CreateLLMConfigRequest {
+    name: string;
+    provider: string;
+    model: string;
+    api_key?: string;
+    base_url?: string;
+    is_active?: boolean;
+    advanced_settings?: LLMAdvancedSettings;
+}
+
 interface LLMAnalyzeTransactionCandidate {
     id: number;
     session_id?: string;
@@ -2273,7 +2292,7 @@ export default {
         });
     },
 
-    createLLMConfig: (config: { name: string; provider: string; model: string; api_key?: string; base_url?: string; is_active?: boolean }): ApiResponsePromise<any> => {
+    createLLMConfig: (config: CreateLLMConfigRequest): ApiResponsePromise<any> => {
         return axios.post('llm/configs', config).then(response => {
             return buildApiResponse(response, response.data?.data);
         });

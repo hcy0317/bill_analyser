@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 SYSTEM_PROMPT = (
@@ -45,6 +46,31 @@ def build_classification_prompt(transactions: list[dict[str, Any]]) -> str:
 
 分类应尽可能贴合中文个人财务常见分类体系（如：餐饮美食、交通出行、日用百货、住房物业、医疗健康、教育培训、休闲娱乐、人情往来、工资薪酬等）。
 只返回 JSON，不要有其他文字。"""
+
+
+def render_prompt_template(
+    template: str,
+    *,
+    default_prompt: str,
+    transactions: list[dict[str, Any]],
+    category_name: str = "",
+) -> str:
+    """Render an optional user prompt template with safe token replacement."""
+    if not template.strip():
+        return default_prompt
+
+    transactions_json = json.dumps(transactions, ensure_ascii=False, default=str)
+    transactions_text = "\n".join(
+        json.dumps(item, ensure_ascii=False, default=str) for item in transactions
+    )
+
+    return (
+        template
+        .replace("{default_prompt}", default_prompt)
+        .replace("{transactions_json}", transactions_json)
+        .replace("{transactions_text}", transactions_text)
+        .replace("{category_name}", category_name)
+    )
 
 
 def build_rule_induction_prompt(

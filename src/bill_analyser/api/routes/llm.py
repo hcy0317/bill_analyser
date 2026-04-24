@@ -16,6 +16,7 @@ from bill_analyser.core.llm_learning_service import (
     LLMImportSessionAnalysisError,
 )
 from bill_analyser.core.llm_provider import ProviderFactory
+from bill_analyser.core.db_llm_config import normalize_llm_advanced_settings
 from bill_analyser.utils.logger import get_logger, log_method
 
 logger = get_logger("LLM_API")
@@ -39,9 +40,12 @@ def _get_llm_service() -> LLMLearningService:
 
     provider_name = config.get("provider", "openai")
     provider_config = config.get("provider_config", {})
+    advanced_settings = normalize_llm_advanced_settings(
+        config.get("advanced_settings") or provider_config.get("advanced_settings") or {}
+    )
 
     provider = ProviderFactory.create(provider_name, provider_config)
-    return LLMLearningService(db=db, provider=provider)
+    return LLMLearningService(db=db, provider=provider, advanced_settings=advanced_settings)
 
 
 def _error_response(message: str, code: str, status_code: int):
@@ -52,6 +56,33 @@ def _error_response(message: str, code: str, status_code: int):
         "code": code,
         "error_code": code,
     }), status_code
+
+
+def _safe_llm_config_payload(config: dict[str, Any]) -> dict[str, Any]:
+    """Return a saved LLM config without exposing a cleartext API key."""
+    safe_config = dict(config)
+    api_key = str(safe_config.pop("api_key", "") or "")
+    safe_config["has_api_key"] = bool(api_key)
+    safe_config["api_key"] = "********" if api_key else ""
+    safe_config["advanced_settings"] = normalize_llm_advanced_settings(
+        safe_config.get("advanced_settings")
+    )
+    return safe_config
+
+
+def _sync_saved_config_to_runtime(config: dict[str, Any]) -> None:
+    """Sync a persisted active config into the in-memory provider settings."""
+    advanced_settings = normalize_llm_advanced_settings(config.get("advanced_settings"))
+    current_app.config["LLM_CONFIG"] = {
+        "enabled": True,
+        "provider": config["provider"],
+        "advanced_settings": advanced_settings,
+        "provider_config": {
+            "api_key": config.get("api_key", ""),
+            "base_url": config.get("base_url", ""),
+            "model": config.get("model", ""),
+        },
+    }
 
 
 # ------------------------------------------------------------------
@@ -283,6 +314,7 @@ def get_config():
             "enabled": config.get("enabled", False),
             "provider": config.get("provider", "openai"),
             "model": config.get("provider_config", {}).get("model", ""),
+            "advanced_settings": normalize_llm_advanced_settings(config.get("advanced_settings")),
             "available_providers": ProviderFactory.available_providers(),
         }
         return jsonify({"success": True, "data": safe_config})
@@ -312,6 +344,8 @@ def update_config():
             config["provider"] = data["provider"]
         if "provider_config" in data:
             config["provider_config"] = data["provider_config"]
+        if "advanced_settings" in data:
+            config["advanced_settings"] = normalize_llm_advanced_settings(data["advanced_settings"])
 
         current_app.config["LLM_CONFIG"] = config
 
@@ -319,6 +353,7 @@ def update_config():
             "enabled": config.get("enabled", False),
             "provider": config.get("provider", "openai"),
             "model": config.get("provider_config", {}).get("model", ""),
+            "advanced_settings": normalize_llm_advanced_settings(config.get("advanced_settings")),
         }
         return jsonify({"success": True, "data": safe_config})
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -343,11 +378,8 @@ def list_configs():
         db = _get_db()
         user_id = _get_request_user_id()
         items = _run_async(db.get_llm_configs(user_id=user_id))
-        # Mask API keys
-        for item in items:
-            if item.get("api_key"):
-                item["api_key"] = item["api_key"][:4] + "****"
-        return jsonify({"success": True, "data": items})
+        safe_items = [_safe_llm_config_payload(item) for item in items]
+        return jsonify({"success": True, "data": safe_items})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("列出 LLM 配置失败: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -374,9 +406,12 @@ def create_config():
             model=data.get("model", ""),
             api_key=data.get("api_key", ""),
             base_url=data.get("base_url", ""),
+            advanced_settings=data.get("advanced_settings"),
             is_active=bool(data.get("is_active", False)),
         ))
-        return jsonify({"success": True, "data": result})
+        if result.get("is_active"):
+            _sync_saved_config_to_runtime(result)
+        return jsonify({"success": True, "data": _safe_llm_config_payload(result)})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("创建 LLM 配置失败: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -391,11 +426,15 @@ def update_saved_config(config_id: int):
         db = _get_db()
         user_id = _get_request_user_id()
         data = request.get_json(silent=True) or {}
+        if data.get("api_key") == "********":
+            data = {key: value for key, value in data.items() if key != "api_key"}
 
         result = _run_async(db.update_llm_config(config_id, user_id=user_id, **data))
         if result is None:
             return jsonify({"success": False, "error": "config_not_found"}), 404
-        return jsonify({"success": True, "data": result})
+        if result.get("is_active"):
+            _sync_saved_config_to_runtime(result)
+        return jsonify({"success": True, "data": _safe_llm_config_payload(result)})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("更新 LLM 配置失败: id=%s, %s", config_id, exc)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -433,15 +472,7 @@ def activate_saved_config(config_id: int):
         # Sync active config to runtime
         active = _run_async(db.get_active_llm_config(user_id=user_id))
         if active:
-            current_app.config["LLM_CONFIG"] = {
-                "enabled": True,
-                "provider": active["provider"],
-                "provider_config": {
-                    "api_key": active["api_key"],
-                    "base_url": active["base_url"],
-                    "model": active["model"],
-                },
-            }
+            _sync_saved_config_to_runtime(active)
 
         return jsonify({"success": True})
     except Exception as exc:  # pylint: disable=broad-exception-caught
