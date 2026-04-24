@@ -27,6 +27,9 @@ def normalize_llm_advanced_settings(settings: Any) -> dict[str, Any]:
     else:
         loaded_settings = {}
 
+    if not isinstance(loaded_settings, dict):
+        loaded_settings = {}
+
     normalized: dict[str, Any] = {}
 
     reasoning_depth = str(loaded_settings.get("reasoning_depth") or "").strip().lower()

@@ -95,6 +95,13 @@ def _reset_llm_rate_limit_state() -> None:
 class TestLLMImportSessionAnalysisAPI:
     """LLM analyze-transactions should support import-session preview inputs."""
 
+    def test_llm_advanced_settings_normalizer_ignores_json_scalars(self):
+        from bill_analyser.core.db_llm_config import normalize_llm_advanced_settings
+
+        assert normalize_llm_advanced_settings("[]") == {}
+        assert normalize_llm_advanced_settings('"plain"') == {}
+        assert normalize_llm_advanced_settings("1") == {}
+
     def test_saved_llm_config_persists_advanced_settings_and_redacts_api_keys(
         self,
         client,

@@ -2260,11 +2260,11 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             parserLabels: PARSER_LABELS,
             parserColors: PARSER_COLORS,
             investmentReasonLabels: {
-                platform: tt('平台'),
-                product: tt('产品'),
-                exclude: tt('排除'),
-                negative: tt('排除项'),
-                type: tt('类型')
+                platform: tt('Investment Reason Platform'),
+                product: tt('Investment Reason Product'),
+                exclude: tt('Investment Reason Exclude'),
+                negative: tt('Investment Reason Negative'),
+                type: tt('Investment Reason Type')
             },
             sourceRowLookup
         });

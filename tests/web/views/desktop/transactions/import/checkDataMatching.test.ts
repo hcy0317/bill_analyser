@@ -160,7 +160,7 @@ describe('checkDataMatching helpers', () => {
             investmentProfileText: '蚂蚁财富 黄金ETF'
         });
 
-        expect(viewModel.investment?.title).toBe('平台: 蚂蚁财富, 产品: 黄金ETF | 蚂蚁财富 黄金ETF');
+        expect(viewModel.investment?.title).toBe('Platform: 蚂蚁财富, Product: 黄金ETF | 蚂蚁财富 黄金ETF');
         expect(viewModel.investment?.profileText).toBe('蚂蚁财富 黄金ETF');
     });
 

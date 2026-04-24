@@ -113,11 +113,11 @@ const MATCHING_DEDUP_LABEL_KEYS: Record<string, string> = {
 };
 
 const DEFAULT_INVESTMENT_REASON_LABELS: Record<string, string> = {
-    platform: '平台',
-    product: '产品',
-    exclude: '排除',
-    negative: '排除项',
-    type: '类型'
+    platform: 'Platform',
+    product: 'Product',
+    exclude: 'Exclude',
+    negative: 'Negative',
+    type: 'Type'
 };
 
 function humanizeDedupType(rawType: string): string {
