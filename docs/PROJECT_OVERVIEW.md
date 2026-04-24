@@ -68,7 +68,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 - `db_import_configs.py` / `db_import_sessions.py` / `db_import_preview.py` / `db_import_learning.py`：导入模板配置、三阶段会话、预览编辑/确认、长期学习规则、session-scoped dry-run learning suggestions 与复合匹配特征
 - `bill_service.py`：导入主流程编排（含 v2 三阶段导入）
 - `smart_dedup.py`：智能去重引擎（转账配对、平台银行去重、相似去重、分账去重）
-- `category_engine.py`：分类规则表达式解析与分类匹配（含类型过滤与预编译优化）；运行时仅从 `category_rules` canonical source 加载规则，不再回退到 `categories.keywords`；`rule_expression` 后端兼容旧 `OR:a|b&AND:c&NOT:d`，正式表达式语法为 `OR={a,b}` / `AND={a,b}` / `NOT={a,b}` / `REGEX={...}` 子句，子句或括号组之间用 `+` 表示 AND、用 `|` 表示表达式级 OR，括号优先级通过 AST 执行；迁移旧关键词到新表达式时会转义逗号、加号、花括号、竖线、括号与反斜杠等字面量分隔符，避免特殊字符关键词被拆成错误语义。
+- `category_engine.py`：分类规则表达式解析与分类匹配（含类型过滤与预编译优化）；运行时仅从 `category_rules` canonical source 加载规则，不再回退到 `categories.keywords`；`rule_expression` 后端兼容旧 `OR:a|b&AND:c&NOT:d`，正式表达式语法为 `OR={a,b}` / `AND={a,b}` / `NOT={a,b}` / `REGEX={...}` 子句，子句或括号组之间用 `+` 表示 AND、用 `|` 表示表达式级 OR，括号优先级通过 AST 执行；前端共享规则构建器把同一条分类规则呈现为“多个表达式（`|`）+ 表达式内多个规则块（`+`）”，因此单个分类可在一条 canonical rule 内维护多个匹配表达式；迁移旧关键词到新表达式时会转义逗号、加号、花括号、竖线、括号与反斜杠等字面量分隔符，避免特殊字符关键词被拆成错误语义。
 - `exchange_rate_providers.py`：多汇率提供者聚合
 - `budget.py`：历史预算管理兼容层，保留 `BudgetManager` 供旧 CLI / 旧测试路径复用；当前 CLI 预算报告主链直接走 `Database.get_budget_execution_details()`
 - `sync.py`：同步相关编排

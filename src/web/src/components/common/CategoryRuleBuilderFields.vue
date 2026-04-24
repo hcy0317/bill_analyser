@@ -52,11 +52,12 @@
                     :model-value="draft.ruleExpression"
                     expression-format="composite"
                     :disabled="disabled"
+                    :regex-enabled="draft.regexEnabled"
                     :title="tt('Rule Expression Builder')"
-                    :add-button-text="tt('Add Rule Block')"
+                    :add-button-text="tt('Add Expression')"
                     :empty-state-text="tt('No rule expression defined yet')"
-                    :help-text="tt('Add keyword chips. Turn on Enable Regex when these chips should be read as regex patterns.')"
-                    :example-text="tt('Example: OR={早餐,咖啡}+NOT={退款}')"
+                    :help-text="tt('Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.')"
+                    :example-text="tt('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
                 />
             </div>

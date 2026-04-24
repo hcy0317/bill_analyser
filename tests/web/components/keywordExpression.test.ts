@@ -11,8 +11,7 @@ import {
     serializeComposite,
     serializeForFormat,
     validateParentheses,
-    RULE_EXPRESSION_UNBALANCED_KEY,
-    RULE_EXPRESSION_UNPARSEABLE_KEY
+    RULE_EXPRESSION_UNBALANCED_KEY
 } from '@/components/common/keywordExpression.ts';
 
 function createIdFactory(): () => string {
@@ -86,19 +85,36 @@ describe('keywordExpression helpers', () => {
         });
     });
 
-    test('returns raw mode for unsupported expression-level OR instead of losing the original rule', () => {
+    test('parses and serializes expression-level OR groups for multiple expressions', () => {
         const expression = 'OR={早餐}|AND={咖啡}';
         const parsed = parseExpression(expression, {
             format: 'composite',
             idFactory: createIdFactory()
         });
 
-        expect(parsed).toStrictEqual({
-            clauses: [],
-            sourceFormat: 'raw',
-            rawExpression: expression,
-            errorKey: RULE_EXPRESSION_UNPARSEABLE_KEY
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['早餐'] },
+            { joiner: 'OR', operator: 'AND', terms: ['咖啡'] }
+        ]);
+        expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
+            expression
         });
+    });
+
+    test('keeps escaped pipe terms inside one expression while splitting top-level expressions', () => {
+        const expression = 'OR={A\\|B}|OR={C}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            { joiner: 'AND', operator: 'OR', terms: ['A|B'] },
+            { joiner: 'OR', operator: 'OR', terms: ['C'] }
+        ]);
+        expect(serializeComposite(parsed.clauses)).toStrictEqual({ expression });
     });
 
     test('supports Enter-style chip creation and removable chips as clause updates', () => {
@@ -110,6 +126,27 @@ describe('keywordExpression helpers', () => {
         expect(afterRemovingFirstChip.terms).toStrictEqual(['咖啡']);
         expect(serializeComposite([afterRemovingFirstChip])).toStrictEqual({
             expression: 'OR={咖啡}'
+        });
+    });
+
+    test('normalizes duplicate terms so a single Enter does not serialize duplicated chips', () => {
+        const clause = createRuleClause({ id: 'clause-1', operator: 'OR', terms: ['咖啡', '咖啡', ' 早餐 '] });
+
+        expect(clause.terms).toStrictEqual(['咖啡', '早餐']);
+        expect(serializeComposite([clause])).toStrictEqual({
+            expression: 'OR={咖啡,早餐}'
+        });
+    });
+
+    test('preserves expression OR boundary when an expression starts with an empty clause', () => {
+        const clauses = [
+            createRuleClause({ id: 'first', operator: 'OR', terms: ['早餐'] }),
+            createRuleClause({ id: 'empty-expression-head', joiner: 'OR', operator: 'OR', terms: [] }),
+            createRuleClause({ id: 'second-expression-term', joiner: 'AND', operator: 'NOT', terms: ['退款'] }),
+        ];
+
+        expect(serializeComposite(clauses)).toStrictEqual({
+            expression: 'OR={早餐}|NOT={退款}'
         });
     });
 
@@ -156,7 +193,10 @@ describe('keyword expression i18n keys', () => {
             'Remove left parenthesis',
             'Add right parenthesis',
             'Remove right parenthesis',
-            'Insert clause after this row'
+            'Insert clause after this row',
+            'Add Expression',
+            'Add one or more expressions. Each expression contains rule blocks joined by AND; expressions are joined by OR.',
+            'Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}'
         ];
         const localeFiles = ['en.json', 'zh_Hans.json', 'zh_Hant.json'];
 

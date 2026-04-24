@@ -1,8 +1,10 @@
 export type RuleOperator = 'OR' | 'AND' | 'NOT' | 'REGEX';
+export type RuleJoiner = 'AND' | 'OR';
 export type ExpressionFormat = 'legacy' | 'composite';
 
 export interface RuleClause {
     id: string;
+    joiner: RuleJoiner;
     operator: RuleOperator;
     terms: string[];
     openParens: number;
@@ -33,6 +35,7 @@ export interface RuleExpressionValidationResult {
 
 interface CreateRuleClauseInput {
     id?: string;
+    joiner?: RuleJoiner;
     operator?: RuleOperator;
     terms?: readonly string[];
     openParens?: number;
@@ -41,6 +44,7 @@ interface CreateRuleClauseInput {
 
 const ESCAPABLE_COMPOSITE_CHARS = new Set(['\\', ',', '+', '{', '}', '|', '(', ')']);
 const VALID_OPERATORS = new Set(['OR', 'AND', 'NOT', 'REGEX']);
+const VALID_JOINERS = new Set(['AND', 'OR']);
 
 let fallbackClauseId = 0;
 
@@ -50,6 +54,7 @@ export const RULE_EXPRESSION_UNPARSEABLE_KEY = 'Rule expression uses unsupported
 export function createRuleClause(input: CreateRuleClauseInput = {}, idFactory: () => string = createRuleClauseId): RuleClause {
     return {
         id: input.id ?? idFactory(),
+        joiner: normalizeJoiner(input.joiner),
         operator: input.operator ?? 'OR',
         terms: normalizeRuleTerms(input.terms ?? []),
         openParens: normalizeParenCount(input.openParens),
@@ -63,9 +68,17 @@ export function createRuleClauseId(): string {
 }
 
 export function normalizeRuleTerms(terms: readonly string[]): string[] {
-    return terms
-        .map(term => String(term).trim())
-        .filter(term => term.length > 0);
+    const seen = new Set<string>();
+    const normalizedTerms: string[] = [];
+    for (const rawTerm of terms) {
+        const term = String(rawTerm).trim();
+        if (!term || seen.has(term)) {
+            continue;
+        }
+        seen.add(term);
+        normalizedTerms.push(term);
+    }
+    return normalizedTerms;
 }
 
 export function addTermToClause(clause: RuleClause, rawTerm: string): RuleClause {
@@ -162,9 +175,7 @@ export function serializeLegacy(clauses: readonly RuleClause[]): string {
 }
 
 export function serializeComposite(clauses: readonly RuleClause[]): SerializeRuleExpressionResult {
-    const serializableClauses = clauses
-        .map(clause => createRuleClause(clause))
-        .filter(clause => clause.terms.length > 0);
+    const serializableClauses = normalizeSerializableClauses(clauses);
     const validation = validateParentheses(serializableClauses);
     if (!validation.valid) {
         return { expression: '', errorKey: validation.errorKey };
@@ -172,14 +183,41 @@ export function serializeComposite(clauses: readonly RuleClause[]): SerializeRul
 
     return {
         expression: serializableClauses
-            .map(clause => {
+            .map((clause, index) => {
+                const joiner = index === 0 ? '' : normalizeJoiner(clause.joiner) === 'OR' ? '|' : '+';
                 const open = '('.repeat(clause.openParens);
                 const close = ')'.repeat(clause.closeParens);
                 const terms = clause.terms.map(escapeCompositeTerm).join(',');
-                return `${open}${clause.operator}={${terms}}${close}`;
+                return `${joiner}${open}${clause.operator}={${terms}}${close}`;
             })
-            .join('+')
+            .join('')
     };
+}
+
+function normalizeSerializableClauses(clauses: readonly RuleClause[]): RuleClause[] {
+    const serializableClauses: RuleClause[] = [];
+    let pendingJoiner: RuleJoiner = 'AND';
+
+    for (const clause of clauses.map(item => createRuleClause(item))) {
+        if (clause.terms.length === 0) {
+            if (clause.joiner === 'OR') {
+                pendingJoiner = 'OR';
+            }
+            continue;
+        }
+
+        serializableClauses.push({
+            ...clause,
+            joiner: serializableClauses.length === 0
+                ? 'AND'
+                : pendingJoiner === 'OR' || clause.joiner === 'OR'
+                    ? 'OR'
+                    : 'AND'
+        });
+        pendingJoiner = 'AND';
+    }
+
+    return serializableClauses;
 }
 
 export function validateParentheses(clauses: readonly RuleClause[]): RuleExpressionValidationResult {
@@ -253,6 +291,8 @@ function parseCompositeExpression(expression: string, idFactory: () => string): 
     let index = 0;
     let pendingOpenParens = 0;
     let expectingClause = true;
+    let isFirstClause = true;
+    let pendingJoiner: RuleJoiner = 'AND';
 
     while (index < expression.length) {
         index = skipSpaces(expression, index);
@@ -286,20 +326,23 @@ function parseCompositeExpression(expression: string, idFactory: () => string): 
         }
 
         clauses.push(createRuleClause({
+            joiner: isFirstClause ? 'AND' : pendingJoiner,
             operator: parsedClause.operator,
             terms: parsedClause.terms,
             openParens: pendingOpenParens,
             closeParens
         }, idFactory));
+        isFirstClause = false;
         pendingOpenParens = 0;
 
         if (index >= expression.length) {
             break;
         }
 
-        if (expression[index] !== '+') {
+        if (expression[index] !== '+' && expression[index] !== '|') {
             return null;
         }
+        pendingJoiner = expression[index] === '|' ? 'OR' : 'AND';
         index += 1;
         expectingClause = true;
     }
@@ -385,6 +428,14 @@ function normalizeOperator(rawOperator: string): RuleOperator {
         return operator as RuleOperator;
     }
     return 'OR';
+}
+
+function normalizeJoiner(rawJoiner: string | undefined): RuleJoiner {
+    const joiner = String(rawJoiner ?? 'AND').trim().toUpperCase();
+    if (VALID_JOINERS.has(joiner)) {
+        return joiner as RuleJoiner;
+    }
+    return 'AND';
 }
 
 function normalizeParenCount(count: number | undefined): number {
