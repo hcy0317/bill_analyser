@@ -4,7 +4,8 @@
 """
 
 import pytest
-from src.core.category_engine import KeywordMatcher
+from bill_analyser.utils.constants import TransactionType
+from src.core.category_engine import CategoryEngine, KeywordMatcher
 
 
 class TestKeywordMatcher:
@@ -59,6 +60,70 @@ class TestKeywordMatcher:
         assert self.matcher.match_compiled("早餐咖啡退款", compiled) is False
         assert self.matcher.match_compiled("午餐套餐", compiled) is True
         assert self.matcher.match_compiled("早饭摊", compiled) is False
+
+
+class FakeCategoryRulesDb:
+    async def get_category_rules(
+        self,
+        user_id=1,  # pylint: disable=unused-argument
+        enabled_only=True,  # pylint: disable=unused-argument
+        include_category_priority=True,  # pylint: disable=unused-argument
+    ):
+        return [
+            {
+                "id": 1,
+                "category_id": None,
+                "category_type": TransactionType.TRANSFER,
+                "main_category": "转账",
+                "sub_category": "同名幽灵",
+                "category_priority": 1,
+                "priority": 1,
+                "rule_expression": "OR={转账}",
+                "regex_enabled": False,
+            },
+            {
+                "id": 2,
+                "category_id": 2,
+                "category_type": TransactionType.INVESTMENT,
+                "main_category": "投资",
+                "sub_category": "利息",
+                "category_priority": 1,
+                "priority": 1,
+                "rule_expression": "OR={结息,利息}",
+                "regex_enabled": False,
+            },
+            {
+                "id": 3,
+                "category_id": 3,
+                "category_type": TransactionType.INCOME,
+                "main_category": "收入",
+                "sub_category": "利息收入",
+                "category_priority": 2,
+                "priority": 2,
+                "rule_expression": "OR={结息,利息}",
+                "regex_enabled": False,
+            },
+        ]
+
+
+@pytest.mark.asyncio
+async def test_category_rules_fail_closed_and_bank_interest_prefers_income():
+    engine = CategoryEngine()
+    await engine.load_rules_from_db_v2(FakeCategoryRulesDb())
+
+    assert [rule["id"] for rule in engine.rules] == [2, 3]
+
+    bill = {
+        "type": "收入",
+        "amount": 1.23,
+        "counterparty": "工商银行",
+        "payment_method": "工商银行储蓄卡",
+        "description": "账户结息 利息入账",
+        "original_category": "银行结息",
+    }
+
+    assert engine.match_category(bill) == ("收入", "利息收入")
+    assert bill["type"] == "收入"
 
 
 if __name__ == '__main__':

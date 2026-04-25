@@ -105,7 +105,6 @@
                 :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
                 :has-session="!!props.sessionId"
                 @review-transfer="reviewTransferSuggestion(item, $event)"
-                @review-investment="reviewInvestmentSignal(item, $event)"
                 @review-learning="reviewLearningSuggestion(item, $event)"
                 @open-recurring="openRecurringCandidateDialog(item)"
                 @clear-recurring="clearRecurringMatch(item)"
@@ -813,9 +812,7 @@ import {
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
-    resolveImportPreviewInvestmentDecisionState,
     type ImportCheckMatchingSourceContext,
-    type ImportPreviewInvestmentDecisionResponse,
     type ImportPreviewSignalStatus,
     type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
@@ -1061,12 +1058,10 @@ const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
 const transferDecisionLoadingId = ref<number | null>(null);
-const investmentDecisionLoadingId = ref<number | null>(null);
 const learningDecisionLoadingId = ref<number | null>(null);
 const recurringDecisionLoadingId = ref<number | null>(null);
 const llmSessionAnalyzing = ref<boolean>(false);
 const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId.value !== null
-    || investmentDecisionLoadingId.value !== null
     || learningDecisionLoadingId.value !== null
     || recurringDecisionLoadingId.value !== null);
 
@@ -1676,16 +1671,6 @@ function getTransferDecisionExpectedState(item: ImportTransaction): Record<strin
     });
 }
 
-function getInvestmentDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
-    return buildImportCheckDecisionExpectedState({
-        sessionId: props.sessionId || '',
-        reviewStatus: item.getInvestmentSignalReviewStatus(),
-        type: item.type,
-        categoryId: item.categoryId,
-        recurringTemplateId: item.recurringTemplateId
-    });
-}
-
 function getLearningDecisionExpectedState(item: ImportTransaction): Record<string, string | number | null> {
     return buildImportCheckLearningDecisionExpectedState({
         sessionId: props.sessionId || '',
@@ -1841,89 +1826,6 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     syncLearningDecisionBaseline(item);
 }
 
-type ImportMatchingPayloadState = NonNullable<ImportTransaction['matching']>;
-
-function getNumericIdOrNull(value: string | number | null | undefined): number | null {
-    const numericValue = Number(value || 0);
-    return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
-}
-
-function ensureImportTransactionMatching(item: ImportTransaction): ImportMatchingPayloadState {
-    if (item.matching) {
-        return item.matching;
-    }
-
-    const matching: ImportMatchingPayloadState = {
-        transfer: {
-            candidate_type: '',
-            score: item.transferSuggestionScore || 0,
-            level: item.transferSuggestionLevel || '',
-            reason: item.transferSuggestionReason || '',
-            review_status: '',
-            reviewed_type: '',
-            suppressed: false
-        },
-        investment: {
-            score: item.investmentSignalScore || 0,
-            level: item.investmentSignalLevel || '',
-            reason: item.investmentSignalReason || '',
-            platform: item.investmentPlatform || '',
-            product: item.investmentProduct || '',
-            review_status: '',
-            suppressed: false
-        },
-        learning: {
-            rule_id: null,
-            score: item.learningRecommendationScore || 0,
-            level: item.learningRecommendationLevel || '',
-            reason: item.learningRecommendationReason || '',
-            recommended_type: item.learningRecommendationType || '',
-            summary: item.learningRecommendationSummary || '',
-            review_status: '',
-            suppressed: false
-        },
-        recurring: {
-            id: getNumericIdOrNull(item.recurringTemplateId),
-            name: item.recurringTemplateName || '',
-            candidate_count: item.recurringCandidateCount || 0,
-            match_score: item.recurringMatchScore || 0,
-            match_reasons: item.recurringMatchReasons || '',
-            matched_date: item.recurringMatchedDate || ''
-        },
-        dedup: {
-            type: item.dedupType || '',
-            source_ids: Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : []
-        },
-        parser: {
-            id: item.parserSource || '',
-            tags: Array.isArray(item.parserTags) ? item.parserTags : []
-        },
-        annotation: {
-            is_manually_annotated: !!item.isManuallyAnnotated
-        }
-    };
-    item.matching = matching;
-    return matching;
-}
-
-function applyInvestmentSignalDecisionState(
-    item: ImportTransaction,
-    decision: 'accept' | 'reject' | 'clear',
-    response: ImportPreviewInvestmentDecisionResponse
-): void {
-    const decisionState = resolveImportPreviewInvestmentDecisionState(decision, response);
-    const matching = ensureImportTransactionMatching(item);
-    item.matching = {
-        ...matching,
-        investment: {
-            ...matching.investment,
-            review_status: decisionState.reviewStatus,
-            suppressed: decisionState.suppressed
-        }
-    };
-    updateTransactionData(item);
-}
-
 function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
     if (decision === 'accept') {
         return 'Transfer Suggestion Accepted';
@@ -1946,18 +1848,6 @@ function getLearningDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'):
     }
 
     return 'Clear Learning Decision';
-}
-
-function getInvestmentDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
-    if (decision === 'accept') {
-        return 'Investment Signal Accepted';
-    }
-
-    if (decision === 'reject') {
-        return 'Investment Signal Rejected';
-    }
-
-    return 'Clear Investment Decision';
 }
 
 async function reviewTransferSuggestion(
@@ -2113,62 +2003,6 @@ async function reviewLearningSuggestion(
         snackbar.value?.showMessage(errorMessage);
     } finally {
         learningDecisionLoadingId.value = null;
-    }
-}
-
-async function reviewInvestmentSignal(
-    item: ImportTransaction,
-    decision: 'accept' | 'reject' | 'clear'
-): Promise<void> {
-    const previewId = getPreviewId(item);
-    if (!props.sessionId || !previewId) {
-        snackbar.value?.showMessage('No session ID available');
-        return;
-    }
-
-    if (isMatchingDecisionBusy.value) {
-        return;
-    }
-
-    if (hasTransferDecisionRelevantDraftChanges(item)) {
-        snackbar.value?.showMessage(tt('Please sync manual preview edits before reviewing investment signals'));
-        return;
-    }
-
-    const candidateId = `preview:${previewId}:investment`;
-    const payload: Record<string, unknown> = {
-        expectedState: getInvestmentDecisionExpectedState(item)
-    };
-
-    investmentDecisionLoadingId.value = previewId;
-
-    try {
-        const response = decision === 'accept'
-            ? await services.acceptMatchingCandidate({ candidateId, payload })
-            : decision === 'reject'
-                ? await services.rejectMatchingCandidate({ candidateId, payload })
-                : await services.clearMatchingCandidate({ candidateId, payload });
-
-        const result = response.data?.result;
-        if (!result || (result.sessionId || '') !== props.sessionId) {
-            throw new Error('Investment decision response is out of date');
-        }
-        if (Number(result.previewId || previewId) !== previewId) {
-            throw new Error('Investment decision response is out of date');
-        }
-
-        commitEditingTransactionDraft();
-        applyInvestmentSignalDecisionState(item, decision, {
-            reviewStatus: result.reviewStatus,
-            suppressed: result.suppressed
-        });
-        snackbar.value?.showMessage(tt(getInvestmentDecisionMessageKey(decision)));
-    } catch (error) {
-        const errorMessage = getActionErrorMessage(error, 'Investment decision failed');
-        logger.error(`[投资信号决策] 失败: ${errorMessage}`, error);
-        snackbar.value?.showMessage(errorMessage);
-    } finally {
-        investmentDecisionLoadingId.value = null;
     }
 }
 

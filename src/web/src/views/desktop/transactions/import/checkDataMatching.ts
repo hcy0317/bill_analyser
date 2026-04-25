@@ -340,7 +340,8 @@ function buildReviewView(
     rejectedLabelKey: string,
     pendingActions: ImportPreviewSignalDecision[],
     profileText?: string,
-    summary?: string
+    summary?: string,
+    reviewedActions: ImportPreviewSignalDecision[] = [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }]
 ): ImportPreviewSignalReviewView | null {
     if (!status) {
         return null;
@@ -372,7 +373,7 @@ function buildReviewView(
             color: 'success',
             profileText,
             summary,
-            actions: [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }]
+            actions: reviewedActions
         };
     }
 
@@ -383,7 +384,7 @@ function buildReviewView(
         color: 'error',
         profileText,
         summary,
-        actions: [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }]
+        actions: reviewedActions
     };
 }
 
@@ -426,11 +427,10 @@ export function buildImportPreviewSignalViewModel(
         'Investment Signal',
         'Accepted',
         'Rejected',
-        [
-            { decision: 'accept', labelKey: 'Accept', color: 'info' },
-            { decision: 'reject', labelKey: 'Reject', color: 'error' }
-        ],
-        state.investmentProfileText
+        [],
+        state.investmentProfileText,
+        undefined,
+        []
     );
     const learning = buildReviewView(
         state.learningStatus,

@@ -53,18 +53,6 @@
                     :title="viewModel.investment.title">
                     {{ tt(viewModel.investment.labelKey) }}
                 </v-chip>
-                <div class="investment-signal-actions" v-if="viewModel.investment.actions.length > 0">
-                    <v-btn
-                        v-for="action in viewModel.investment.actions"
-                        :key="`investment-${action.decision}`"
-                        variant="text"
-                        :color="action.color"
-                        size="x-small"
-                        :disabled="disabled"
-                        @click.stop="emit('reviewInvestment', action.decision)">
-                        {{ tt(action.labelKey) }}
-                    </v-btn>
-                </div>
             </div>
         </div>
 
@@ -166,7 +154,6 @@ defineProps<{
 
 const emit = defineEmits<{
     (e: 'reviewTransfer', decision: 'accept' | 'reject' | 'clear'): void;
-    (e: 'reviewInvestment', decision: 'accept' | 'reject' | 'clear'): void;
     (e: 'reviewLearning', decision: 'accept' | 'reject' | 'clear'): void;
     (e: 'openRecurring'): void;
     (e: 'clearRecurring'): void;
@@ -216,15 +203,4 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
     align-self: flex-start;
 }
 
-.investment-signal-actions {
-    display: flex;
-    width: 100%;
-    gap: 4px;
-}
-
-.investment-signal-actions :deep(.v-btn) {
-    min-width: 0;
-    flex: 1 1 0;
-    padding-inline: 6px;
-}
 </style>

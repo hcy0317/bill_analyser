@@ -182,7 +182,25 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
         expect(viewModel.isManuallyAnnotated).toBe(true);
         expect(viewModel.investment?.labelKey).toBe('Investment Signal');
-        expect(viewModel.investment?.actions.map(action => action.labelKey)).toStrictEqual(['Accept', 'Reject']);
+        expect(viewModel.investment?.actions).toStrictEqual([]);
+    });
+
+    test('keeps transfer and learning review actions while investment stays signal-only', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            transferStatus: 'pending',
+            investmentStatus: 'pending',
+            learningStatus: 'pending'
+        });
+
+        expect(viewModel.transferSuggestion?.actions.map(action => action.labelKey)).toStrictEqual([
+            'Apply Suggestion',
+            'Reject Transfer Suggestion'
+        ]);
+        expect(viewModel.learning?.actions.map(action => action.labelKey)).toStrictEqual([
+            'Apply Suggestion',
+            'Reject Learning Suggestion'
+        ]);
+        expect(viewModel.investment?.actions).toStrictEqual([]);
     });
 
     test('keeps investment profile in hover title and maps reason keys for display', () => {

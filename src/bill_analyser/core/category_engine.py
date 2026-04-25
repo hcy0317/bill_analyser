@@ -26,6 +26,7 @@ from typing import Any
 
 from ..utils.constants import TransactionType
 from ..utils.logger import get_logger, log_method, log_step
+from .investment_matching import is_ordinary_bank_interest_income
 
 
 _RULE_EXPRESSION_ESCAPABLE_CHARS = frozenset("\\,+{}|()/×")
@@ -38,6 +39,12 @@ _RULE_EXPRESSION_FACTOR_TERMINATORS = (
     | _RULE_EXPRESSION_OR_CONNECTORS
     | frozenset({")"})
 )
+_VALID_CATEGORY_RULE_TYPES = {
+    int(TransactionType.INCOME),
+    int(TransactionType.EXPENSE),
+    int(TransactionType.TRANSFER),
+    int(TransactionType.INVESTMENT),
+}
 
 
 def _coerce_sort_int(value: Any, default: int = 999_999) -> int:
@@ -945,8 +952,44 @@ class CategoryEngine:
                 cr_rows = []
 
             for row_index, row in enumerate(cr_rows):
-                rule_type = row.get("category_type", TransactionType.EXPENSE)
+                try:
+                    rule_type = int(row.get("category_type", TransactionType.EXPENSE))
+                except (TypeError, ValueError):
+                    self.logger.warning(
+                        "[分类规则] 跳过无效类型规则: row_id=%s category_type=%s",
+                        row.get("id"),
+                        row.get("category_type"),
+                    )
+                    continue
+                if rule_type not in _VALID_CATEGORY_RULE_TYPES:
+                    self.logger.warning(
+                        "[分类规则] 跳过未知类型规则: row_id=%s category_type=%s",
+                        row.get("id"),
+                        row.get("category_type"),
+                    )
+                    continue
+
                 if types and rule_type not in type_filter:
+                    continue
+
+                category_id = _coerce_sort_int(row.get("category_id"), 0)
+                if category_id <= 0:
+                    self.logger.warning(
+                        "[分类规则] 跳过缺失分类ID规则: row_id=%s main=%s sub=%s",
+                        row.get("id"),
+                        row.get("main_category", ""),
+                        row.get("sub_category", ""),
+                    )
+                    continue
+
+                main_category = str(row.get("main_category", "") or "").strip()
+                sub_category = str(row.get("sub_category", "") or "").strip()
+                if not main_category or not sub_category:
+                    self.logger.warning(
+                        "[分类规则] 跳过分类名称不完整规则: row_id=%s category_id=%s",
+                        row.get("id"),
+                        category_id,
+                    )
                     continue
 
                 expr = row.get("rule_expression", "")
@@ -960,9 +1003,9 @@ class CategoryEngine:
                 valid_rules.append(
                     {
                         "id": row.get("id"),
-                        "category_id": row.get("category_id"),
-                        "main": row.get("main_category", ""),
-                        "sub": row.get("sub_category", ""),
+                        "category_id": category_id,
+                        "main": main_category,
+                        "sub": sub_category,
                         "priority": row.get("category_priority", row.get("priority", 100)),
                         "category_priority": row.get(
                             "category_priority",
@@ -1058,6 +1101,9 @@ class CategoryEngine:
         amount = float(bill.get("amount", 0))
         original_type = str(bill.get("type", "")).strip()
         dedup_type = str(bill.get("_dedup_type", "")).lower()
+        suppress_investment_rules = bool(
+            bill.get("_suppress_investment_signal")
+        ) or is_ordinary_bank_interest_income(bill)
 
         self.logger.debug(
             (
@@ -1088,10 +1134,18 @@ class CategoryEngine:
                 type_str = original_type.lower()
                 if type_str in ["支出", "expense", "3"]:
                     # 支出账单：使用支出类和投资类规则
-                    type_filter = {TransactionType.EXPENSE, TransactionType.INVESTMENT}
+                    type_filter = (
+                        {TransactionType.EXPENSE}
+                        if suppress_investment_rules
+                        else {TransactionType.EXPENSE, TransactionType.INVESTMENT}
+                    )
                 elif type_str in ["收入", "income", "2"]:
                     # 收入账单：使用收入类和投资类规则
-                    type_filter = {TransactionType.INCOME, TransactionType.INVESTMENT}
+                    type_filter = (
+                        {TransactionType.INCOME}
+                        if suppress_investment_rules
+                        else {TransactionType.INCOME, TransactionType.INVESTMENT}
+                    )
                 elif type_str in ["转账", "transfer", "4"]:
                     # 转账账单：使用转账类规则
                     type_filter = {TransactionType.TRANSFER}
@@ -1100,9 +1154,17 @@ class CategoryEngine:
                     type_filter = {TransactionType.INVESTMENT}
                 elif amount < 0:
                     # 回退：type字段无效时，使用金额符号判断（兼容旧数据）
-                    type_filter = {TransactionType.EXPENSE, TransactionType.INVESTMENT}
+                    type_filter = (
+                        {TransactionType.EXPENSE}
+                        if suppress_investment_rules
+                        else {TransactionType.EXPENSE, TransactionType.INVESTMENT}
+                    )
                 elif amount > 0:
-                    type_filter = {TransactionType.INCOME, TransactionType.INVESTMENT}
+                    type_filter = (
+                        {TransactionType.INCOME}
+                        if suppress_investment_rules
+                        else {TransactionType.INCOME, TransactionType.INVESTMENT}
+                    )
                 else:
                     # 金额为0且type无效，使用所有类型
                     type_filter = {

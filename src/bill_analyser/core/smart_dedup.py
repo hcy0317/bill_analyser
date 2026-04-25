@@ -1498,6 +1498,13 @@ class SmartDeduplicationEngine:
             outgoing_bill["_destination_parser_id"] = incoming_bill.get("_parser_id", "")
             outgoing_bill["_destination_payment_method"] = incoming_bill.get("payment_method", "")
             outgoing_bill["_destination_counterparty"] = incoming_bill.get("counterparty", "")
+            outgoing_bill["_destination_account_id"] = incoming_bill.get("source_account_id")
+            outgoing_bill["_destination_account_name"] = (
+                incoming_bill.get("account_name")
+                or incoming_bill.get("source_account_name")
+                or incoming_bill.get("account")
+                or incoming_bill.get("payment_method", "")
+            )
 
             # v6.62: 合并描述信息
             outgoing_desc = outgoing_bill.get("description", "") or ""

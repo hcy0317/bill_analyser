@@ -30,6 +30,7 @@ from .investment_matching import (
     classify_investment_pnl_change,
     clean_investment_product_name,
     extract_investment_profile,
+    is_ordinary_bank_interest_income,
     score_investment_candidate,
 )
 from .investment_settings import (
@@ -278,6 +279,11 @@ class BillService:
             )
             if learned_seed_count > 0:
                 self.logger.info("[长期学习] 分类前类型预填充 %d 条", learned_seed_count)
+
+            await self._normalize_non_pair_investment_balance_changes(
+                deduplicated_bills,
+                user_id=user_id,
+            )
 
             # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型
             # - 转账配对账单：使用转账类关键词（通过 _dedup_type='transfer' 识别）
@@ -693,20 +699,33 @@ class BillService:
                     dest_parser_id = str(bill.get("_destination_parser_id", ""))
                     dest_payment_method = str(bill.get("_destination_payment_method", ""))
                     dest_counterparty = str(bill.get("_destination_counterparty", ""))
-                    combined_text = f"{dest_parser_id} {dest_payment_method} {dest_counterparty}"
+                    dest_account_name = str(bill.get("_destination_account_name", ""))
+                    combined_text = (
+                        f"{dest_parser_id} {dest_payment_method} "
+                        f"{dest_counterparty} {dest_account_name}"
+                    )
                     combined_text_lower = combined_text.lower()
 
                     dest_account_id = None
                     dest_match_source = None
+                    dest_account_hint = bill.get("_destination_account_id")
+                    if (
+                        (isinstance(dest_account_hint, int) or str(dest_account_hint).isdigit())
+                        and str(dest_account_hint) in account_by_id
+                        and str(dest_account_hint) != str(bill.get("source_account_id"))
+                    ):
+                        dest_account_id = dest_account_hint
+                        dest_match_source = "pair_source_account"
 
-                    for alias in sorted_aliases:
-                        if alias.lower() in combined_text_lower:
-                            potential_id = alias_mapping[alias]
-                            # 确保目标账户不同于源账户
-                            if str(potential_id) != str(bill.get("source_account_id")):
-                                dest_account_id = potential_id
-                                dest_match_source = alias
-                                break
+                    if not dest_account_id:
+                        for alias in sorted_aliases:
+                            if alias.lower() in combined_text_lower:
+                                potential_id = alias_mapping[alias]
+                                # 确保目标账户不同于源账户
+                                if str(potential_id) != str(bill.get("source_account_id")):
+                                    dest_account_id = potential_id
+                                    dest_match_source = alias
+                                    break
 
                     if not dest_account_id:
                         history_dest = await self.db.get_historical_destination_account_suggestion(
@@ -753,6 +772,85 @@ class BillService:
 
         return bills
 
+    @staticmethod
+    def _clear_investment_signal_fields(bill: dict[str, Any]) -> None:
+        """Remove transient investment signal fields from a bill-like object."""
+        for key in (
+            "_investment_hint",
+            "_investment_candidate_score",
+            "_investment_candidate_reason",
+            "_investment_platform",
+            "_investment_product",
+            "_investment_signal_type",
+            "_investment_pnl_direction",
+        ):
+            bill.pop(key, None)
+
+    def _apply_investment_pnl_type_override(
+        self,
+        bill: dict[str, Any],
+        pnl_signal: dict[str, Any],
+    ) -> None:
+        """Classify investment gain/loss rows as ordinary income/expense."""
+        direction = str(pnl_signal.get("direction", "") or "")
+        bill["type"] = "支出" if direction == "loss" else "收入"
+        bill["_suppress_investment_signal"] = True
+        bill.pop("destination_account_id", None)
+        bill.pop("destination_amount", None)
+        self._clear_investment_signal_fields(bill)
+
+    def _apply_ordinary_bank_interest_type_override(
+        self,
+        bill: dict[str, Any],
+        *,
+        keyword_config: dict[str, list[str]] | None = None,
+    ) -> bool:
+        """Keep ordinary bank settlement/interest rows on the income path."""
+        if not is_ordinary_bank_interest_income(bill, keyword_config=keyword_config):
+            return False
+
+        bill["type"] = "收入"
+        bill["_suppress_investment_signal"] = True
+        bill.pop("destination_account_id", None)
+        bill.pop("destination_amount", None)
+        self._clear_investment_signal_fields(bill)
+        return True
+
+    async def _normalize_non_pair_investment_balance_changes(
+        self,
+        bills: list[dict[str, Any]],
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Normalize bank-interest and investment PnL rows before category matching."""
+        if not bills:
+            return bills
+
+        keyword_config = await self._get_investment_keyword_config(user_id)
+        normalized_count = 0
+        for bill in bills:
+            if self._apply_ordinary_bank_interest_type_override(
+                bill,
+                keyword_config=keyword_config,
+            ):
+                normalized_count += 1
+                continue
+
+            pnl_signal = self._classify_investment_pnl_change(
+                bill,
+                keyword_config=keyword_config,
+            )
+            if pnl_signal:
+                self._apply_investment_pnl_type_override(bill, pnl_signal)
+                normalized_count += 1
+
+        if normalized_count:
+            self.logger.info(
+                "[投资盈亏归一] 已将 %d 条结息/盈亏流水转为普通收入/支出",
+                normalized_count,
+            )
+        return bills
+
     async def _detect_investment_candidates(
         self, bills: list[dict[str, Any]], user_id: int = 1
     ) -> list[dict[str, Any]]:
@@ -771,40 +869,36 @@ class BillService:
         detected_count = 0
 
         for bill in bills:
-            candidate = self._score_investment_candidate(bill, keyword_config=keyword_config)
+            if bill.get("_suppress_investment_signal"):
+                continue
+            if self._apply_ordinary_bank_interest_type_override(
+                bill,
+                keyword_config=keyword_config,
+            ):
+                continue
+
             pnl_signal = self._classify_investment_pnl_change(bill, keyword_config=keyword_config)
-            if not candidate and not pnl_signal:
+            if pnl_signal:
+                self._apply_investment_pnl_type_override(bill, pnl_signal)
+                continue
+
+            candidate = self._score_investment_candidate(bill, keyword_config=keyword_config)
+            if not candidate:
                 continue
 
             bill["type"] = "投资"
-            bill["_investment_hint"] = (
-                str((candidate or {}).get("hint_text") or "")
-                or str((pnl_signal or {}).get("hint_text") or "")
-            )
-            bill["_investment_candidate_score"] = max(
-                float((candidate or {}).get("score", 0.0) or 0.0),
-                float((pnl_signal or {}).get("score", 0.0) or 0.0),
-            )
+            bill["_investment_hint"] = str(candidate.get("hint_text") or "")
+            bill["_investment_candidate_score"] = float(candidate.get("score", 0.0) or 0.0)
             reason_parts = [
                 str(reason)
                 for reason in [
-                    (pnl_signal or {}).get("reason", ""),
-                    (candidate or {}).get("reason", ""),
+                    candidate.get("reason", ""),
                 ]
                 if reason
             ]
             bill["_investment_candidate_reason"] = ", ".join(dict.fromkeys(reason_parts))
-            bill["_investment_platform"] = (
-                str((candidate or {}).get("platform") or "")
-                or str((pnl_signal or {}).get("platform") or "")
-            )
-            bill["_investment_product"] = (
-                str((candidate or {}).get("product") or "")
-                or str((pnl_signal or {}).get("product") or "")
-            )
-            if pnl_signal:
-                bill["_investment_signal_type"] = pnl_signal.get("signal_type", "")
-                bill["_investment_pnl_direction"] = pnl_signal.get("direction", "")
+            bill["_investment_platform"] = str(candidate.get("platform") or "")
+            bill["_investment_product"] = str(candidate.get("product") or "")
             detected_count += 1
 
             self.logger.debug(
@@ -2119,6 +2213,11 @@ class BillService:
             if learned_seed_count > 0:
                 self.logger.info("[阶段2] 长期学习类型预填充 %d 条", learned_seed_count)
 
+            await self._normalize_non_pair_investment_balance_changes(
+                kept_bills,
+                user_id=user_id,
+            )
+
             # 5. 分类匹配
             # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型
             # - 转账配对账单：使用转账类关键词（通过 _dedup_type='transfer' 识别）
@@ -2577,6 +2676,12 @@ class BillService:
             return []
 
         keyword_config = await self._get_investment_keyword_config(user_id)
+        if (
+            is_ordinary_bank_interest_income(bill, keyword_config=keyword_config)
+            or self._classify_investment_pnl_change(bill, keyword_config=keyword_config)
+        ):
+            return []
+
         if not self._score_investment_candidate(
             bill,
             allow_existing_investment=True,
@@ -4671,19 +4776,21 @@ class BillService:
                 or preview.get("preview_main_category", "")
             ),
         }
+        if (
+            is_ordinary_bank_interest_income(bill_like, keyword_config=keyword_config)
+            or self._classify_investment_pnl_change(bill_like, keyword_config=keyword_config)
+        ):
+            return {}
+
         candidate = self._score_investment_candidate(
             bill_like,
             allow_existing_investment=True,
             keyword_config=keyword_config,
         )
-        pnl_signal = self._classify_investment_pnl_change(bill_like, keyword_config=keyword_config)
-        if not candidate and not pnl_signal:
+        if not candidate:
             return {}
 
-        score = max(
-            float((candidate or {}).get("score", 0.0) or 0.0),
-            float((pnl_signal or {}).get("score", 0.0) or 0.0),
-        )
+        score = float(candidate.get("score", 0.0) or 0.0)
         if score >= 0.8:
             level = "high"
         elif score >= 0.65:
@@ -4693,8 +4800,7 @@ class BillService:
         reason_parts = [
             str(reason)
             for reason in [
-                (pnl_signal or {}).get("reason", ""),
-                (candidate or {}).get("reason", ""),
+                candidate.get("reason", ""),
             ]
             if reason
         ]
@@ -4703,10 +4809,8 @@ class BillService:
             "score": score,
             "level": level,
             "reason": ", ".join(dict.fromkeys(reason_parts)),
-            "platform": (candidate or {}).get("platform", "")
-            or (pnl_signal or {}).get("platform", ""),
-            "product": (candidate or {}).get("product", "")
-            or (pnl_signal or {}).get("product", ""),
+            "platform": candidate.get("platform", ""),
+            "product": candidate.get("product", ""),
         }
 
     @log_method
@@ -4881,6 +4985,11 @@ class BillService:
                 sample = annotation_map.get(int(bill.get("id", 0))) if bill.get("id") else None
                 if sample and sample.get("annotated_type"):
                     bill["type"] = sample.get("annotated_type")
+
+            await self._normalize_non_pair_investment_balance_changes(
+                bills_for_category,
+                user_id=user_id,
+            )
 
             # 4. 分类匹配
             # v6.72: 简化分类逻辑 - 让 match_category() 自动根据账单金额正负选择分类类型

@@ -1,10 +1,42 @@
 from __future__ import annotations
 
+import pytest
+
+from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.investment_matching import (
     classify_investment_pnl_change,
     extract_investment_profile,
+    is_ordinary_bank_interest_income,
     score_investment_candidate,
 )
+
+
+class FakeAccountDb:
+    async def get_account_alias_mapping(self, user_id: int = 1):  # pylint: disable=unused-argument
+        return {
+            "招商银行": 1,
+            "招行": 1,
+            "建设银行": 2,
+            "建行": 2,
+        }
+
+    async def get_all_accounts(self, user_id: int = 1):  # pylint: disable=unused-argument
+        return [
+            {"id": 1, "name": "招商银行"},
+            {"id": 2, "name": "建设银行"},
+        ]
+
+    async def get_historical_source_account_suggestion(
+        self,
+        **kwargs,  # pylint: disable=unused-argument
+    ):
+        return None
+
+    async def get_historical_destination_account_suggestion(
+        self,
+        **kwargs,  # pylint: disable=unused-argument
+    ):
+        return None
 
 
 def test_investment_matching_scores_platform_product_and_summary_positive() -> None:
@@ -125,3 +157,69 @@ def test_investment_pnl_change_detects_gain_loss_and_rejects_generic_income() ->
     assert loss_signal["direction"] == "loss"
     assert "盈亏变化:亏损" in loss_signal["reason"]
     assert classify_investment_pnl_change({"type": "收入", "description": "工资收益"}) is None
+
+
+def test_bank_settlement_interest_is_income_not_investment_signal() -> None:
+    """普通银行结息/利息入账不应进入投资信号或投资盈亏识别。"""
+    bill = {
+        "type": "收入",
+        "amount": 1.23,
+        "counterparty": "工商银行",
+        "payment_method": "工商银行储蓄卡",
+        "description": "账户结息 利息入账",
+        "main_category": "",
+        "sub_category": "",
+        "original_category": "银行结息",
+    }
+
+    assert is_ordinary_bank_interest_income(bill) is True
+    assert classify_investment_pnl_change(bill) is None
+    assert score_investment_candidate(bill) is None
+
+
+def test_investment_pnl_rows_do_not_score_as_pair_candidates() -> None:
+    """投资收益/亏损流水只作为普通收入/支出处理，不再作为投资配对候选。"""
+    gain_bill = {
+        "type": "投资",
+        "counterparty": "天天基金",
+        "payment_method": "银行卡",
+        "description": "沪深300ETF 分红发放",
+        "main_category": "投资理财",
+        "sub_category": "基金",
+    }
+    loss_bill = {
+        "type": "投资",
+        "counterparty": "蚂蚁财富",
+        "payment_method": "支付宝",
+        "description": "黄金ETF 亏损调整",
+        "main_category": "投资理财",
+        "sub_category": "基金",
+    }
+
+    assert classify_investment_pnl_change(gain_bill) is not None
+    assert classify_investment_pnl_change(loss_bill) is not None
+    assert score_investment_candidate(gain_bill, allow_existing_investment=True) is None
+    assert score_investment_candidate(loss_bill, allow_existing_investment=True) is None
+
+
+@pytest.mark.asyncio
+async def test_transfer_destination_account_hint_feeds_account_matching() -> None:
+    """转账配对得到的去处账户 ID/名称应参与目标账户自动匹配。"""
+    service = BillService(db=FakeAccountDb())
+    bill = {
+        "type": "转账",
+        "source_account_id": 1,
+        "payment_method": "招商银行",
+        "counterparty": "转出",
+        "description": "转账到建行",
+        "_destination_account_id": 2,
+        "_destination_account_name": "建设银行",
+        "_destination_parser_id": "ccb",
+        "_destination_payment_method": "建设银行储蓄卡",
+        "_destination_counterparty": "本人",
+    }
+
+    matched_bills = await service._match_accounts([bill])
+
+    assert matched_bills[0]["source_account_id"] == 1
+    assert matched_bills[0]["destination_account_id"] == 2

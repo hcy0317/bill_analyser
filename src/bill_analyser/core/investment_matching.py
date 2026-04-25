@@ -40,7 +40,6 @@ INVESTMENT_PNL_GAIN_KEYWORDS = {
     "分红发放",
     "红利",
     "派息",
-    "利息",
     "盈利",
     "利润",
 }
@@ -65,6 +64,43 @@ INTRINSIC_INVESTMENT_NEGATIVE_KEYWORDS = {
 
 EXPLICIT_INVESTMENT_TYPES = {"投资", "investment", "5"}
 
+INVESTMENT_CONTEXT_KEYWORDS = {
+    "投资",
+    "基金",
+    "理财",
+    "证券",
+    "股票",
+    "债券",
+    "黄金",
+    "etf",
+    "lof",
+    "reits",
+}
+
+ORDINARY_BANK_CONTEXT_KEYWORDS = {
+    "银行",
+    "银行卡",
+    "储蓄卡",
+    "借记卡",
+    "活期",
+    "存款",
+    "账户",
+    "结算户",
+}
+
+ORDINARY_BANK_INTEREST_KEYWORDS = {
+    "结息",
+    "账户结息",
+    "银行结息",
+    "存款结息",
+    "活期结息",
+    "利息收入",
+    "利息入账",
+    "银行利息",
+    "存款利息",
+    "活期利息",
+}
+
 
 def _append_unique(items: list[str], value: str) -> None:
     """Append a non-empty value once, preserving order."""
@@ -80,6 +116,59 @@ def _contains_any(text_lower: str, keywords: set[str]) -> list[str]:
         for keyword in sorted(keywords, key=lambda item: (-len(item), item))
         if keyword.lower() in text_lower
     ]
+
+
+def is_ordinary_bank_interest_income(
+    bill: dict[str, Any],
+    *,
+    keyword_config: dict[str, list[str]] | None = None,
+) -> bool:
+    """Return True for ordinary bank interest/settlement rows, not investment PnL."""
+    current_type = str(bill.get("type", "") or "").strip().lower()
+    if current_type in ["转账", "transfer", "4"]:
+        return False
+
+    counterparty = str(bill.get("counterparty", "") or "").strip()
+    payment_method = str(bill.get("payment_method", "") or "").strip()
+    description = str(bill.get("description", "") or "").strip()
+    original_category = str(bill.get("original_category", "") or "").strip()
+    evidence_text = " ".join(
+        part for part in [counterparty, payment_method, description, original_category] if part
+    )
+    if not evidence_text:
+        return False
+
+    evidence_text_lower = evidence_text.lower()
+    has_settlement_interest = bool(
+        _contains_any(evidence_text_lower, ORDINARY_BANK_INTEREST_KEYWORDS)
+        or "结息" in evidence_text_lower
+    )
+    has_generic_interest = "利息" in evidence_text_lower
+    if not has_settlement_interest and not has_generic_interest:
+        return False
+
+    if has_generic_interest and not has_settlement_interest:
+        amount = float(bill.get("amount", 0) or 0)
+        if current_type in ["支出", "expense", "3"] or amount < 0:
+            return False
+
+    if not any(keyword.lower() in evidence_text_lower for keyword in ORDINARY_BANK_CONTEXT_KEYWORDS):
+        return False
+
+    effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+    investment_profile = extract_investment_profile(
+        evidence_text,
+        keyword_config=effective_keyword_config,
+    )
+    if investment_profile.get("platform") or investment_profile.get("product"):
+        return False
+
+    investment_keywords = [
+        *effective_keyword_config["platform_keywords"],
+        *effective_keyword_config["product_keywords"],
+        *INVESTMENT_CONTEXT_KEYWORDS,
+    ]
+    return not any(keyword.lower() in evidence_text_lower for keyword in investment_keywords)
 
 
 def score_investment_candidate(
@@ -120,6 +209,15 @@ def score_investment_candidate(
     evidence_text_lower = evidence_text.lower()
     all_text_lower = all_text.lower()
     effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+    if is_ordinary_bank_interest_income(
+        bill,
+        keyword_config=effective_keyword_config,
+    ) or classify_investment_pnl_change(
+        bill,
+        keyword_config=effective_keyword_config,
+    ):
+        return None
+
     investment_profile = extract_investment_profile(
         evidence_text,
         keyword_config=effective_keyword_config,
@@ -256,12 +354,15 @@ def classify_investment_pnl_change(
         return None
 
     all_text_lower = all_text.lower()
+    effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
+    if is_ordinary_bank_interest_income(bill, keyword_config=effective_keyword_config):
+        return None
+
     loss_matches = _contains_any(all_text_lower, INVESTMENT_PNL_LOSS_KEYWORDS)
     gain_matches = _contains_any(all_text_lower, INVESTMENT_PNL_GAIN_KEYWORDS)
     if not loss_matches and not gain_matches:
         return None
 
-    effective_keyword_config = keyword_config or build_user_investment_keyword_settings(None)
     investment_profile = extract_investment_profile(
         evidence_text,
         keyword_config=effective_keyword_config,
@@ -276,20 +377,8 @@ def classify_investment_pnl_change(
         keyword.lower() in all_text_lower
         for keyword in effective_keyword_config["product_keywords"]
     )
-    investment_context_keywords = [
-        "投资",
-        "基金",
-        "理财",
-        "证券",
-        "股票",
-        "债券",
-        "黄金",
-        "etf",
-        "lof",
-        "reits",
-    ]
     has_explicit_investment_context = current_type in EXPLICIT_INVESTMENT_TYPES or any(
-        keyword in all_text_lower for keyword in investment_context_keywords
+        keyword in all_text_lower for keyword in INVESTMENT_CONTEXT_KEYWORDS
     )
     if not (
         normalized_platform
