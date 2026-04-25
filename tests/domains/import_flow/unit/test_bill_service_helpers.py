@@ -336,13 +336,13 @@ async def test_investment_helpers_detect_profiles_candidates_and_keyword_config(
         }
     ]
     detected_pnl = await service._detect_investment_candidates(pnl_bills, user_id=1)
-    assert detected_pnl[0]["type"] == "投资"
-    assert detected_pnl[0]["_investment_signal_type"] == "pnl_change"
-    assert "盈亏变化:收益" in detected_pnl[0]["_investment_candidate_reason"]
+    assert detected_pnl[0]["type"] == "收入"
+    assert detected_pnl[0]["_suppress_investment_signal"] is True
+    assert "_investment_candidate_reason" not in detected_pnl[0]
 
     matched_pnl = await service._match_accounts(detected_pnl, user_id=1)
     assert matched_pnl[0]["source_account_id"] == 4
-    assert matched_pnl[0]["destination_account_id"] == 4
+    assert "destination_account_id" not in matched_pnl[0]
 
 
 @pytest.mark.asyncio
@@ -1342,7 +1342,7 @@ def test_transfer_and_investment_signals_cover_threshold_levels(monkeypatch: pyt
             "preview_sub_category": "基金",
         }
     )
-    assert "盈亏变化:收益" in pnl_signal["reason"]
+    assert pnl_signal == {}
 
 
 def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch: pytest.MonkeyPatch) -> None:

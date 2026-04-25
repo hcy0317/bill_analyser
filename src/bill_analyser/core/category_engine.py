@@ -45,6 +45,21 @@ _VALID_CATEGORY_RULE_TYPES = {
     int(TransactionType.TRANSFER),
     int(TransactionType.INVESTMENT),
 }
+_LEGACY_EXPENSE_CATEGORY_TYPE = 1
+
+
+def _normalize_category_rule_type(value: Any) -> int | None:
+    """Normalize stored category type values into current TransactionType ids."""
+    try:
+        raw_type = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if raw_type == _LEGACY_EXPENSE_CATEGORY_TYPE:
+        return int(TransactionType.EXPENSE)
+    if raw_type in _VALID_CATEGORY_RULE_TYPES:
+        return raw_type
+    return None
 
 
 def _coerce_sort_int(value: Any, default: int = 999_999) -> int:
@@ -952,16 +967,10 @@ class CategoryEngine:
                 cr_rows = []
 
             for row_index, row in enumerate(cr_rows):
-                try:
-                    rule_type = int(row.get("category_type", TransactionType.EXPENSE))
-                except (TypeError, ValueError):
-                    self.logger.warning(
-                        "[分类规则] 跳过无效类型规则: row_id=%s category_type=%s",
-                        row.get("id"),
-                        row.get("category_type"),
-                    )
-                    continue
-                if rule_type not in _VALID_CATEGORY_RULE_TYPES:
+                rule_type = _normalize_category_rule_type(
+                    row.get("category_type", TransactionType.EXPENSE)
+                )
+                if rule_type is None:
                     self.logger.warning(
                         "[分类规则] 跳过未知类型规则: row_id=%s category_type=%s",
                         row.get("id"),

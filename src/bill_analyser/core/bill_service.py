@@ -914,6 +914,8 @@ class BillService:
 
     async def _get_investment_keyword_config(self, user_id: int = 1) -> dict[str, list[str]]:
         """获取用户有效的投资识别关键词配置。"""
+        if not hasattr(self.db, "get_user_by_id"):
+            return build_user_investment_keyword_settings(None)
         user = await self.db.get_user_by_id(user_id)
         return build_user_investment_keyword_settings(user)
 
