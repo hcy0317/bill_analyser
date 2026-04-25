@@ -251,6 +251,10 @@ def _build_matching_candidate_action_payload(
         response_data["sessionId"] = str(result.get("session_id") or "")
     if result.get("recurring_id") not in (None, ""):
         response_data["recurringId"] = int(result.get("recurring_id") or 0)
+    if result.get("review_status") not in (None, ""):
+        response_data["reviewStatus"] = str(result.get("review_status") or "")
+    if result.get("suppressed") is not None:
+        response_data["suppressed"] = bool(result.get("suppressed"))
     if isinstance(result.get("preview"), list):
         response_data["preview"] = list(result.get("preview") or [])
     if isinstance(result.get("pair"), dict):

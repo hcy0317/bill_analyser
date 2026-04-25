@@ -675,12 +675,8 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_investm
             "success": True,
             "preview_id": preview_id,
             "session_id": "session-investment-accept",
-            "preview": [
-                {
-                    "id": preview_id,
-                    "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
-                }
-            ],
+            "review_status": "accepted",
+            "suppressed": False,
         }
 
     monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
@@ -720,12 +716,8 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_investm
         "action": "accept",
         "preview_id": 1,
         "session_id": "session-investment-accept",
-        "preview": [
-            {
-                "id": 1,
-                "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
-            }
-        ],
+        "review_status": "accepted",
+        "suppressed": False,
     }
 
 
@@ -1206,12 +1198,8 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_investm
             "success": True,
             "preview_id": preview_id,
             "session_id": "session-investment-reject",
-            "preview": [
-                {
-                    "id": preview_id,
-                    "matching": {"investment": {"review_status": "rejected", "suppressed": True}}
-                }
-            ],
+            "review_status": "rejected",
+            "suppressed": True,
         }
 
     monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
@@ -1251,12 +1239,8 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_investm
         "action": "reject",
         "preview_id": 1,
         "session_id": "session-investment-reject",
-        "preview": [
-            {
-                "id": 1,
-                "matching": {"investment": {"review_status": "rejected", "suppressed": True}}
-            }
-        ],
+        "review_status": "rejected",
+        "suppressed": True,
     }
 
 
@@ -1432,12 +1416,8 @@ async def test_bill_service_clear_matching_candidate_dispatches_preview_investme
             "success": True,
             "preview_id": preview_id,
             "session_id": "session-investment-clear",
-            "preview": [
-                {
-                    "id": preview_id,
-                    "matching": {"investment": {"review_status": "pending", "suppressed": False}}
-                }
-            ],
+            "review_status": "pending",
+            "suppressed": False,
         }
 
     monkeypatch.setattr(
@@ -1482,12 +1462,8 @@ async def test_bill_service_clear_matching_candidate_dispatches_preview_investme
         "action": "clear",
         "preview_id": 1,
         "session_id": "session-investment-clear",
-        "preview": [
-            {
-                "id": 1,
-                "matching": {"investment": {"review_status": "pending", "suppressed": False}}
-            }
-        ],
+        "review_status": "pending",
+        "suppressed": False,
     }
 
 

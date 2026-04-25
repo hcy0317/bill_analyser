@@ -253,6 +253,8 @@ interface MatchingCandidateActionResponse {
     previewId?: number;
     sessionId?: string;
     recurringId?: number;
+    reviewStatus?: string;
+    suppressed?: boolean;
     preview?: Array<Record<string, unknown>>;
     pair?: Record<string, unknown>;
     bill?: Record<string, unknown>;

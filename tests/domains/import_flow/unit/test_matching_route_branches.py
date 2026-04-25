@@ -1157,7 +1157,7 @@ def test_matching_candidate_accept_route_dispatches_preview_investment_candidate
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic accept route 应分发 preview investment candidate，并序列化 accepted preview 状态。"""
+    """generic accept route 应分发 preview investment candidate，并返回最小审查状态。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -1171,13 +1171,8 @@ def test_matching_candidate_accept_route_dispatches_preview_investment_candidate
         "action": "accept",
         "preview_id": 1,
         "session_id": "session-1",
-        "preview": [
-            {
-                "id": 1,
-                "preview_type": "投资",
-                "matching": {"investment": {"review_status": "accepted", "suppressed": False}},
-            }
-        ],
+        "review_status": "accepted",
+        "suppressed": False,
     }
 
     with matching_route_app.test_request_context(
@@ -1200,7 +1195,9 @@ def test_matching_candidate_accept_route_dispatches_preview_investment_candidate
         assert payload["data"]["action"] == "accept"
         assert payload["data"]["previewId"] == 1
         assert payload["data"]["sessionId"] == "session-1"
-        assert payload["data"]["preview"][0]["matching"]["investment"]["review_status"] == "accepted"
+        assert payload["data"]["reviewStatus"] == "accepted"
+        assert payload["data"]["suppressed"] is False
+        assert "preview" not in payload["data"]
         assert service.accept_candidate_calls == [
             (
                 "preview:1:investment",
@@ -1471,17 +1468,8 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
         "action": "reject",
         "preview_id": 1,
         "session_id": "session-1",
-        "preview": [
-            {
-                "id": 1,
-                "matching": {
-                    "investment": {
-                        "review_status": "rejected",
-                        "suppressed": True,
-                    }
-                },
-            }
-        ],
+        "review_status": "rejected",
+        "suppressed": True,
     }
     with matching_route_app.test_request_context(
         "/api/matching/candidates/preview:1:investment/reject",
@@ -1503,6 +1491,9 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
         assert payload["data"]["action"] == "reject"
         assert payload["data"]["previewId"] == 1
         assert payload["data"]["sessionId"] == "session-1"
+        assert payload["data"]["reviewStatus"] == "rejected"
+        assert payload["data"]["suppressed"] is True
+        assert "preview" not in payload["data"]
         assert service.reject_candidate_calls[-1] == (
             "preview:1:investment",
             {
@@ -1812,7 +1803,7 @@ def test_matching_candidate_clear_route_dispatches_preview_investment(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic clear route 应分发 preview investment candidate，并返回刷新后的 preview。"""
+    """generic clear route 应分发 preview investment candidate，并返回最小审查状态。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -1826,12 +1817,8 @@ def test_matching_candidate_clear_route_dispatches_preview_investment(
         "action": "clear",
         "preview_id": 1,
         "session_id": "session-1",
-        "preview": [
-            {
-                "id": 1,
-                "matching": {"investment": {"review_status": "pending", "suppressed": False}},
-            }
-        ],
+        "review_status": "pending",
+        "suppressed": False,
     }
 
     with matching_route_app.test_request_context(
@@ -1854,7 +1841,9 @@ def test_matching_candidate_clear_route_dispatches_preview_investment(
         assert payload["data"]["action"] == "clear"
         assert payload["data"]["previewId"] == 1
         assert payload["data"]["sessionId"] == "session-1"
-        assert payload["data"]["preview"][0]["matching"]["investment"]["review_status"] == "pending"
+        assert payload["data"]["reviewStatus"] == "pending"
+        assert payload["data"]["suppressed"] is False
+        assert "preview" not in payload["data"]
         assert service.clear_candidate_calls == [
             (
                 "preview:1:investment",

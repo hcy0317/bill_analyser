@@ -1766,10 +1766,9 @@ class TestMatchingAPI:
         assert accept_data["data"]["action"] == "accept"
         assert accept_data["data"]["previewId"] == preview_id
         assert accept_data["data"]["sessionId"] == session_id
-        accept_preview = next(item for item in accept_data["data"]["preview"] if int(item["id"]) == preview_id)
-        assert accept_preview["preview_type"] == "投资"
-        assert accept_preview["matching"]["investment"]["review_status"] == "accepted"
-        assert accept_preview["matching"]["investment"]["suppressed"] is False
+        assert accept_data["data"]["reviewStatus"] == "accepted"
+        assert accept_data["data"]["suppressed"] is False
+        assert "preview" not in accept_data["data"]
 
         session_follow_up_response = client.get(
             f"/api/matching/candidates?sessionId={session_id}",
@@ -2530,10 +2529,9 @@ class TestMatchingAPI:
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
         assert reject_data["data"]["sessionId"] == session_id
-        reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
-        assert reject_preview["preview_type"] == "投资"
-        assert reject_preview["matching"]["investment"]["review_status"] == "rejected"
-        assert reject_preview["matching"]["investment"]["suppressed"] is True
+        assert reject_data["data"]["reviewStatus"] == "rejected"
+        assert reject_data["data"]["suppressed"] is True
+        assert "preview" not in reject_data["data"]
 
         session_follow_up_response = client.get(
             f"/api/matching/candidates?sessionId={session_id}",
@@ -4865,10 +4863,10 @@ class TestMatchingAPI:
             headers=auth_headers,
         )
         assert accept_response.status_code == 200
-        accepted_preview = next(
-            item for item in accept_response.get_json()["data"]["preview"] if int(item["id"]) == preview_id
-        )
-        assert accepted_preview["matching"]["investment"]["review_status"] == "accepted"
+        accept_payload = accept_response.get_json()
+        assert accept_payload["data"]["reviewStatus"] == "accepted"
+        assert accept_payload["data"]["suppressed"] is False
+        assert "preview" not in accept_payload["data"]
 
         clear_response = client.post(
             f"/api/matching/candidates/{candidate_id}/clear",
@@ -4876,9 +4874,9 @@ class TestMatchingAPI:
                 "expectedState": {
                     "sessionId": session_id,
                     "reviewStatus": "accepted",
-                    "previewType": accepted_preview["preview_type"],
+                    "previewType": investment_candidate_before_accept["preview"]["preview_type"],
                     "categoryId": None,
-                    "recurringId": accepted_preview.get("preview_recurring_id"),
+                    "recurringId": investment_candidate_before_accept["preview"].get("preview_recurring_id"),
                 }
             },
             headers=auth_headers,
@@ -4889,9 +4887,9 @@ class TestMatchingAPI:
         assert payload["success"] is True
         assert payload["data"]["candidateId"] == candidate_id
         assert payload["data"]["action"] == "clear"
-        refreshed_preview = next(item for item in payload["data"]["preview"] if int(item["id"]) == preview_id)
-        assert refreshed_preview["matching"]["investment"]["review_status"] == "pending"
-        assert refreshed_preview["matching"]["investment"]["suppressed"] is False
+        assert payload["data"]["reviewStatus"] == "pending"
+        assert payload["data"]["suppressed"] is False
+        assert "preview" not in payload["data"]
 
         session_after_clear_response = client.get(
             f"/api/matching/candidates?sessionId={session_id}",

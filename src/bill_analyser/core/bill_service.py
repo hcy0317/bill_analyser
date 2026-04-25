@@ -3055,7 +3055,8 @@ class BillService:
             "action": "accept",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
+            "review_status": result.get("review_status"),
+            "suppressed": result.get("suppressed"),
         }
 
     @log_method
@@ -3224,7 +3225,8 @@ class BillService:
             "action": "reject",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
+            "review_status": result.get("review_status"),
+            "suppressed": result.get("suppressed"),
         }
 
     @log_method
@@ -3302,7 +3304,8 @@ class BillService:
             "action": "clear",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
+            "review_status": result.get("review_status"),
+            "suppressed": result.get("suppressed"),
         }
 
     @log_method
@@ -3797,7 +3800,7 @@ class BillService:
         expected_state: dict[str, Any] | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
-        """Persist a preview-scoped investment decision and return refreshed preview data."""
+        """Persist a preview-scoped investment decision and return row-level review state."""
         normalized_decision = str(decision or "").strip().lower()
         if normalized_decision not in {"accept", "reject", "clear"}:
             return {"success": False, "error": "Invalid decision", "status_code": 400}
@@ -3809,9 +3812,10 @@ class BillService:
         if not preview:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
-        current_investment_review_status = await self._get_preview_investment_review_status(
+        keyword_config = await self._get_investment_keyword_config(user_id)
+        current_investment_review_status = self._resolve_preview_investment_review_status(
             preview,
-            user_id=user_id,
+            keyword_config=keyword_config,
         )
         current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
         current_preview_recurring_id = preview.get("preview_recurring_id")
@@ -3845,7 +3849,6 @@ class BillService:
 
         has_existing_investment_review = current_investment_review_status in {"accepted", "rejected"}
         if normalized_decision != "clear" and not has_existing_investment_review:
-            keyword_config = await self._get_investment_keyword_config(user_id)
             investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
             if not investment_signal:
                 return {
@@ -3873,13 +3876,23 @@ class BillService:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
         session_id = str(updated_preview.get("session_id") or "")
-        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
+        next_review_status = self._resolve_preview_investment_review_status(
+            updated_preview,
+            keyword_config=keyword_config,
+        )
+        investment_feedback = updated_preview.get("preview_matching_feedback", {}).get("investment")
+        suppressed = (
+            bool(investment_feedback.get("suppressed"))
+            if isinstance(investment_feedback, dict)
+            else False
+        )
         return {
             "success": True,
             "preview_id": preview_id,
             "session_id": session_id,
             "decision": normalized_decision,
-            "preview": refreshed_preview,
+            "review_status": next_review_status,
+            "suppressed": suppressed,
         }
 
     async def _build_learning_recommendation_from_preview(
@@ -4258,13 +4271,24 @@ class BillService:
         preview: dict[str, Any],
         user_id: int = 1,
     ) -> str:
+        keyword_config = await self._get_investment_keyword_config(user_id)
+        return self._resolve_preview_investment_review_status(
+            preview,
+            keyword_config=keyword_config,
+        )
+
+    def _resolve_preview_investment_review_status(
+        self,
+        preview: dict[str, Any],
+        *,
+        keyword_config: dict[str, list[str]],
+    ) -> str:
         investment_feedback = preview.get("preview_matching_feedback", {}).get("investment")
         review_status = (
             str(investment_feedback.get("review_status") or "").strip().lower()
             if isinstance(investment_feedback, dict)
             else ""
         )
-        keyword_config = await self._get_investment_keyword_config(user_id)
         investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
         if not investment_signal:
             return ""

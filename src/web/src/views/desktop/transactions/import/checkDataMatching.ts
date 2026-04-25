@@ -42,6 +42,40 @@ export interface ImportPreviewSignalDecision {
     color: string;
 }
 
+export interface ImportPreviewInvestmentDecisionResponse {
+    reviewStatus?: string;
+    suppressed?: boolean;
+}
+
+export interface ImportPreviewInvestmentDecisionState {
+    reviewStatus: ImportPreviewSignalStatus;
+    suppressed: boolean;
+}
+
+export function resolveImportPreviewInvestmentDecisionState(
+    decision: ImportPreviewSignalDecision['decision'],
+    response: ImportPreviewInvestmentDecisionResponse = {}
+): ImportPreviewInvestmentDecisionState {
+    const normalizedReviewStatus = (response.reviewStatus || '').trim().toLowerCase();
+    const fallbackReviewStatus: ImportPreviewSignalStatus = decision === 'accept'
+        ? 'accepted'
+        : decision === 'reject'
+            ? 'rejected'
+            : 'pending';
+    const reviewStatus: ImportPreviewSignalStatus = normalizedReviewStatus === 'accepted'
+        || normalizedReviewStatus === 'rejected'
+        || normalizedReviewStatus === 'pending'
+        ? normalizedReviewStatus
+        : fallbackReviewStatus;
+
+    return {
+        reviewStatus,
+        suppressed: typeof response.suppressed === 'boolean'
+            ? response.suppressed
+            : decision === 'reject'
+    };
+}
+
 export interface ImportPreviewSignalParserView {
     parserId: string;
     label: string;

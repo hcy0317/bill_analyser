@@ -9,7 +9,8 @@ import {
     getImportCheckMatchingDedupTitle,
     getImportCheckMatchingParserTagsText,
     hasImportCheckMatchingDedupContext,
-    hasImportCheckMatchingContext
+    hasImportCheckMatchingContext,
+    resolveImportPreviewInvestmentDecisionState
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 describe('checkDataMatching helpers', () => {
@@ -200,6 +201,34 @@ describe('checkDataMatching helpers', () => {
             platform: 'Platform',
             product: 'Product'
         })).toBe('Platform: 蚂蚁财富, Product: 黄金ETF');
+    });
+
+    test('resolves investment decision state from minimal action payloads', () => {
+        expect(resolveImportPreviewInvestmentDecisionState('accept', {
+            reviewStatus: 'accepted',
+            suppressed: false
+        })).toStrictEqual({
+            reviewStatus: 'accepted',
+            suppressed: false
+        });
+        expect(resolveImportPreviewInvestmentDecisionState('reject', {
+            reviewStatus: 'rejected',
+            suppressed: true
+        })).toStrictEqual({
+            reviewStatus: 'rejected',
+            suppressed: true
+        });
+        expect(resolveImportPreviewInvestmentDecisionState('clear', {
+            reviewStatus: 'pending',
+            suppressed: false
+        })).toStrictEqual({
+            reviewStatus: 'pending',
+            suppressed: false
+        });
+        expect(resolveImportPreviewInvestmentDecisionState('reject')).toStrictEqual({
+            reviewStatus: 'rejected',
+            suppressed: true
+        });
     });
 
     test('keeps manual annotation out of visible signals when it is the only context', () => {

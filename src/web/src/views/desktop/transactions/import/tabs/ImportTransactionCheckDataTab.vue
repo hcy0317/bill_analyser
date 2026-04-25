@@ -813,7 +813,9 @@ import {
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
+    resolveImportPreviewInvestmentDecisionState,
     type ImportCheckMatchingSourceContext,
+    type ImportPreviewInvestmentDecisionResponse,
     type ImportPreviewSignalStatus,
     type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
@@ -1839,6 +1841,89 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     syncLearningDecisionBaseline(item);
 }
 
+type ImportMatchingPayloadState = NonNullable<ImportTransaction['matching']>;
+
+function getNumericIdOrNull(value: string | number | null | undefined): number | null {
+    const numericValue = Number(value || 0);
+    return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function ensureImportTransactionMatching(item: ImportTransaction): ImportMatchingPayloadState {
+    if (item.matching) {
+        return item.matching;
+    }
+
+    const matching: ImportMatchingPayloadState = {
+        transfer: {
+            candidate_type: '',
+            score: item.transferSuggestionScore || 0,
+            level: item.transferSuggestionLevel || '',
+            reason: item.transferSuggestionReason || '',
+            review_status: '',
+            reviewed_type: '',
+            suppressed: false
+        },
+        investment: {
+            score: item.investmentSignalScore || 0,
+            level: item.investmentSignalLevel || '',
+            reason: item.investmentSignalReason || '',
+            platform: item.investmentPlatform || '',
+            product: item.investmentProduct || '',
+            review_status: '',
+            suppressed: false
+        },
+        learning: {
+            rule_id: null,
+            score: item.learningRecommendationScore || 0,
+            level: item.learningRecommendationLevel || '',
+            reason: item.learningRecommendationReason || '',
+            recommended_type: item.learningRecommendationType || '',
+            summary: item.learningRecommendationSummary || '',
+            review_status: '',
+            suppressed: false
+        },
+        recurring: {
+            id: getNumericIdOrNull(item.recurringTemplateId),
+            name: item.recurringTemplateName || '',
+            candidate_count: item.recurringCandidateCount || 0,
+            match_score: item.recurringMatchScore || 0,
+            match_reasons: item.recurringMatchReasons || '',
+            matched_date: item.recurringMatchedDate || ''
+        },
+        dedup: {
+            type: item.dedupType || '',
+            source_ids: Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : []
+        },
+        parser: {
+            id: item.parserSource || '',
+            tags: Array.isArray(item.parserTags) ? item.parserTags : []
+        },
+        annotation: {
+            is_manually_annotated: !!item.isManuallyAnnotated
+        }
+    };
+    item.matching = matching;
+    return matching;
+}
+
+function applyInvestmentSignalDecisionState(
+    item: ImportTransaction,
+    decision: 'accept' | 'reject' | 'clear',
+    response: ImportPreviewInvestmentDecisionResponse
+): void {
+    const decisionState = resolveImportPreviewInvestmentDecisionState(decision, response);
+    const matching = ensureImportTransactionMatching(item);
+    item.matching = {
+        ...matching,
+        investment: {
+            ...matching.investment,
+            review_status: decisionState.reviewStatus,
+            suppressed: decisionState.suppressed
+        }
+    };
+    updateTransactionData(item);
+}
+
 function getTransferDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'): string {
     if (decision === 'accept') {
         return 'Transfer Suggestion Accepted';
@@ -2068,18 +2153,15 @@ async function reviewInvestmentSignal(
         if (!result || (result.sessionId || '') !== props.sessionId) {
             throw new Error('Investment decision response is out of date');
         }
-
-        commitEditingTransactionDraft();
-
-        const previewData = Array.isArray(result.preview)
-            ? result.preview as unknown as ImportPreviewRecord[]
-            : [];
-        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
-        if (!refreshedPreview) {
-            throw new Error('Investment decision response missing preview item');
+        if (Number(result.previewId || previewId) !== previewId) {
+            throw new Error('Investment decision response is out of date');
         }
 
-        syncTransactionFromPreviewDecision(item, refreshedPreview);
+        commitEditingTransactionDraft();
+        applyInvestmentSignalDecisionState(item, decision, {
+            reviewStatus: result.reviewStatus,
+            suppressed: result.suppressed
+        });
         snackbar.value?.showMessage(tt(getInvestmentDecisionMessageKey(decision)));
     } catch (error) {
         const errorMessage = getActionErrorMessage(error, 'Investment decision failed');
