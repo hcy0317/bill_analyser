@@ -85,7 +85,34 @@ export interface HistoricalPolarChartOptionArgs {
     executionRateLabel: string;
     formatAmount: (amount: number) => string;
     showPrimaryRing: boolean;
+    labelAnimationState?: HistoricalLabelAnimationState;
 }
+
+export interface HistoricalLabelAnimationSnapshot {
+    radiusValue: number;
+    polarAngleValue: number;
+    rotate: number;
+}
+
+export interface HistoricalLabelAnimationFrameInput {
+    stateKey: string;
+    dataId: string;
+    name: string;
+    text: string;
+    radiusValue: number;
+    polarAngleValue: number;
+    rotate: number;
+    color: string;
+    fontSize: number;
+    fontWeight: number;
+    width?: number;
+}
+
+export interface HistoricalLabelAnimationFrame extends HistoricalLabelAnimationFrameInput {
+    previous: HistoricalLabelAnimationSnapshot | null;
+}
+
+export type HistoricalLabelAnimationState = Map<string, HistoricalLabelAnimationSnapshot>;
 
 const {
     START_ANGLE,
@@ -181,6 +208,58 @@ function normalizeRotation(rotation: number): number {
     return ((rotation + 180) % 360 + 360) % 360 - 180;
 }
 
+export function createHistoricalLabelAnimationState(): HistoricalLabelAnimationState {
+    return new Map();
+}
+
+export function resetHistoricalLabelAnimationState(state: HistoricalLabelAnimationState): void {
+    state.clear();
+}
+
+export function resolveNearestCircularAngle(targetAngle: number, previousAngle: number): number {
+    if (!Number.isFinite(targetAngle) || !Number.isFinite(previousAngle)) {
+        return targetAngle;
+    }
+
+    return Number((previousAngle + normalizeRotation(targetAngle - previousAngle)).toFixed(4));
+}
+
+export function interpolateHistoricalPolarAngle(startAngle: number, endAngle: number, progress: number): number {
+    const clampedProgress = clamp(progress, 0, 1);
+    const unwrappedEndAngle = resolveNearestCircularAngle(endAngle, startAngle);
+
+    return Number((startAngle + ((unwrappedEndAngle - startAngle) * clampedProgress)).toFixed(4));
+}
+
+export function resolveHistoricalLabelAnimationFrames(
+    inputs: HistoricalLabelAnimationFrameInput[],
+    state?: HistoricalLabelAnimationState
+): HistoricalLabelAnimationFrame[] {
+    return inputs.map(input => {
+        const previous = state?.get(input.stateKey) ?? null;
+        const polarAngleValue = previous
+            ? resolveNearestCircularAngle(input.polarAngleValue, previous.polarAngleValue)
+            : input.polarAngleValue;
+        const rotate = previous
+            ? resolveNearestCircularAngle(input.rotate, previous.rotate)
+            : input.rotate;
+        const frame: HistoricalLabelAnimationFrame = {
+            ...input,
+            polarAngleValue,
+            rotate,
+            previous
+        };
+
+        state?.set(input.stateKey, {
+            radiusValue: frame.radiusValue,
+            polarAngleValue: frame.polarAngleValue,
+            rotate: frame.rotate
+        });
+
+        return frame;
+    });
+}
+
 export function getTangentialTextRotation(angle: number): number {
     const normalizedAngle = normalizeCircleAngle(angle);
     const baseRotation = normalizeRotation(normalizedAngle - 90);
@@ -228,6 +307,126 @@ function getSecondaryLabelValue(slot: HistoricalChartSlot, model: HistoricalPola
     const cappedValue = model.amountAxisMax * SECONDARY_LABEL_MAX_AXIS_RATIO;
 
     return Math.min(bufferedValue, cappedValue);
+}
+
+function degreesToRadians(degrees: number): number {
+    return (degrees * Math.PI) / 180;
+}
+
+function interpolateNumber(startValue: number, endValue: number, progress: number): number {
+    return startValue + ((endValue - startValue) * progress);
+}
+
+interface HistoricalLabelRenderParams {
+    dataIndex: number;
+    dataIndexInside?: number;
+}
+
+interface HistoricalLabelRenderApi {
+    coord: (value: number[]) => number[];
+}
+
+function getFrameByRenderParams(
+    frames: HistoricalLabelAnimationFrame[],
+    params: HistoricalLabelRenderParams
+): HistoricalLabelAnimationFrame {
+    return frames[params.dataIndex]
+        ?? frames[params.dataIndexInside ?? -1]
+        ?? frames[0]!;
+}
+
+function buildHistoricalLabelArcKeyframes(
+    frame: HistoricalLabelAnimationFrame,
+    api: HistoricalLabelRenderApi
+): Array<Record<string, number>> | undefined {
+    if (!frame.previous) {
+        return undefined;
+    }
+
+    return [0, 0.25, 0.5, 0.75, 1].map(percent => {
+        const radiusValue = interpolateNumber(frame.previous!.radiusValue, frame.radiusValue, percent);
+        const polarAngleValue = interpolateHistoricalPolarAngle(
+            frame.previous!.polarAngleValue,
+            frame.polarAngleValue,
+            percent
+        );
+        const rotate = interpolateHistoricalPolarAngle(frame.previous!.rotate, frame.rotate, percent);
+        const [x = 0, y = 0] = api.coord([radiusValue, polarAngleValue]);
+
+        return {
+            percent,
+            x,
+            y,
+            rotation: degreesToRadians(rotate)
+        };
+    });
+}
+
+function createHistoricalLabelRenderItem(
+    frames: HistoricalLabelAnimationFrame[]
+): (params: HistoricalLabelRenderParams, api: HistoricalLabelRenderApi) => Record<string, unknown> {
+    return (params, api) => {
+        const frame = getFrameByRenderParams(frames, params);
+        const [x = 0, y = 0] = api.coord([frame.radiusValue, frame.polarAngleValue]);
+        const keyframes = buildHistoricalLabelArcKeyframes(frame, api);
+
+        return {
+            type: 'text',
+            x,
+            y,
+            rotation: degreesToRadians(frame.rotate),
+            silent: true,
+            style: {
+                text: frame.text,
+                fill: frame.color,
+                fontSize: frame.fontSize,
+                fontWeight: frame.fontWeight,
+                width: frame.width,
+                overflow: frame.width ? 'truncate' : undefined,
+                align: 'center',
+                verticalAlign: 'middle'
+            },
+            keyframeAnimation: keyframes
+                ? {
+                    duration: 720,
+                    easing: 'cubicInOut',
+                    keyframes
+                }
+                : undefined
+        };
+    };
+}
+
+function buildHistoricalLabelCustomSeries(
+    name: string,
+    polarIndex: number,
+    z: number,
+    frames: HistoricalLabelAnimationFrame[]
+): Record<string, unknown> {
+    return {
+        name,
+        type: 'custom',
+        coordinateSystem: 'polar',
+        polarIndex,
+        z,
+        silent: true,
+        clip: false,
+        tooltip: { show: false },
+        dimensions: ['radius', 'angle', 'rotate'],
+        encode: { radius: 0, angle: 1 },
+        renderItem: createHistoricalLabelRenderItem(frames),
+        data: frames.map(frame => ({
+            id: frame.dataId,
+            name: frame.name,
+            value: [frame.radiusValue, frame.polarAngleValue, frame.rotate],
+            label: {
+                formatter: frame.text,
+                rotate: frame.rotate,
+                width: frame.width,
+                overflow: frame.width ? 'truncate' : undefined
+            }
+        }))
+    };
 }
 
 export function getHistoricalAmountAxisInterval(maxAmount: number): number {
@@ -318,13 +517,15 @@ function buildPrimaryBandsAndSlots(
 
     const totalPaddingAngle = primaryPadAngle * groups.length;
     const usableAngle = 360 - totalPaddingAngle;
-    const slotAngle = usableAngle / totalVisibleSlotCount;
+    const primaryRingSlotAngle = usableAngle / totalVisibleSlotCount;
+    const barSlotAngle = 360 / totalVisibleSlotCount;
     const primaryBands: HistoricalPrimaryBand[] = [];
     const slots: HistoricalChartSlot[] = [];
 
     let cursorAngle = START_ANGLE;
+    let visibleSlotIndex = 0;
     for (const group of groups) {
-        const spanAngle = group.items.length * slotAngle;
+        const spanAngle = group.items.length * primaryRingSlotAngle;
         const startAngle = cursorAngle;
         const endAngle = startAngle - spanAngle;
 
@@ -339,8 +540,8 @@ function buildPrimaryBandsAndSlots(
             state: group.items.length === 0 ? 'none' : 'all'
         });
 
-        for (const [index, item] of group.items.entries()) {
-            const angle = startAngle - (slotAngle * (index + 0.5));
+        for (const item of group.items) {
+            const angle = START_ANGLE - (barSlotAngle * (visibleSlotIndex + 0.5));
             slots.push({
                 key: item.secondaryKey,
                 label: item.secondaryCategory || item.category,
@@ -353,6 +554,7 @@ function buildPrimaryBandsAndSlots(
                 color: item.color,
                 angle
             });
+            visibleSlotIndex++;
         }
 
         cursorAngle = endAngle - primaryPadAngle;
@@ -587,41 +789,24 @@ export function buildHistoricalPolarChartOption(
             splitLine: { show: false }
         });
 
-        series.push({
-            name: 'primary-labels',
-            type: 'scatter',
-            coordinateSystem: 'polar',
-            polarIndex: 2,
-            symbolSize: 1,
-            z: 4,
-            silent: true,
-            animationDurationUpdate: 720,
-            animationEasingUpdate: 'cubicInOut',
-            universalTransition: { enabled: true },
-            itemStyle: {
-                color: 'rgba(0,0,0,0)'
-            },
-            tooltip: { show: false },
-            data: model.primaryLabels.map(label => ({
-                id: label.key,
+        const primaryLabelFrames = resolveHistoricalLabelAnimationFrames(
+            model.primaryLabels.map(label => ({
+                stateKey: `primary:${label.key}`,
+                dataId: `primary:${label.key}:label`,
                 name: label.label,
-                value: [label.radiusValue, getPolarAngleAxisValue(label.angle)],
-                label: {
-                    show: true,
-                    position: 'inside',
-                    distance: 0,
-                    color: label.color,
-                    fontSize: label.fontSize,
-                    fontWeight: 700,
-                    width: PRIMARY_LABEL_TRUNCATE_WIDTH,
-                    overflow: 'truncate',
-                    rotate: label.rotate,
-                    align: 'center',
-                    verticalAlign: 'middle',
-                    formatter: label.label
-                }
-            }))
-        });
+                text: label.label,
+                radiusValue: label.radiusValue,
+                polarAngleValue: getPolarAngleAxisValue(label.angle),
+                rotate: label.rotate,
+                color: label.color,
+                fontSize: label.fontSize,
+                fontWeight: 700,
+                width: PRIMARY_LABEL_TRUNCATE_WIDTH
+            })),
+            args.labelAnimationState
+        );
+
+        series.push(buildHistoricalLabelCustomSeries('primary-labels', 2, 4, primaryLabelFrames));
     }
 
     const secondaryLabelPolarIndex = polar.length;
@@ -696,37 +881,26 @@ export function buildHistoricalPolarChartOption(
                 }
             }))
         },
-        {
-            name: 'secondary-labels',
-            type: 'scatter',
-            coordinateSystem: 'polar',
-            polarIndex: secondaryLabelPolarIndex,
-            symbolSize: 1,
-            z: 4,
-            animationDurationUpdate: 720,
-            animationEasingUpdate: 'cubicInOut',
-            universalTransition: { enabled: true },
-            itemStyle: {
-                color: 'rgba(0,0,0,0)'
-            },
-            data: model.slots.map(slot => ({
-                id: `${slot.key}:label`,
-                name: slot.key,
-                value: [getSecondaryLabelValue(slot, model), getPolarAngleAxisValue(slot.angle)],
-                label: {
-                    show: true,
-                    position: 'inside',
-                    distance: 0,
+        buildHistoricalLabelCustomSeries(
+            'secondary-labels',
+            secondaryLabelPolarIndex,
+            4,
+            resolveHistoricalLabelAnimationFrames(
+                model.slots.map(slot => ({
+                    stateKey: `secondary:${slot.key}`,
+                    dataId: `${slot.key}:label`,
+                    name: slot.key,
+                    text: slot.label,
+                    radiusValue: getSecondaryLabelValue(slot, model),
+                    polarAngleValue: getPolarAngleAxisValue(slot.angle),
+                    rotate: getTangentialTextRotation(slot.angle),
                     color: args.isDarkMode ? '#e6e6e6' : '#3f3f46',
                     fontSize: 10,
-                    fontWeight: 600,
-                    rotate: getTangentialTextRotation(slot.angle),
-                    align: 'center',
-                    verticalAlign: 'middle',
-                    formatter: slot.label
-                }
-            }))
-        },
+                    fontWeight: 600
+                })),
+                args.labelAnimationState
+            )
+        ),
         {
             name: args.executionRateLabel,
             type: 'line',

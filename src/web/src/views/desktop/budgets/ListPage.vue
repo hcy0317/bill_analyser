@@ -987,6 +987,8 @@ import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
+    createHistoricalLabelAnimationState,
+    resetHistoricalLabelAnimationState,
     syncHistoricalLegendSelection,
     toggleHistoricalPrimarySelection,
     toggleHistoricalSecondarySelection,
@@ -2096,6 +2098,7 @@ watch(
 
 watch([activeBudgetType, historicalBudgetLevel], () => {
     historicalLegendSelection.value = {};
+    resetHistoricalLabelAnimationState(historicalLabelAnimationState);
 });
 
 const historicalChartModel = computed(() => {
@@ -2104,6 +2107,7 @@ const historicalChartModel = computed(() => {
         historicalLegendSelection.value
     );
 });
+const historicalLabelAnimationState = createHistoricalLabelAnimationState();
 
 const historicalLegendGroups = computed(() => historicalChartModel.value.legendGroups);
 
@@ -2120,7 +2124,8 @@ const historicalChartOptions = computed(() => {
         spentAmountLabel: tt('Spent Amount'),
         executionRateLabel: tt('Execution Rate'),
         formatAmount,
-        showPrimaryRing: historicalBudgetLevel.value === 'secondary'
+        showPrimaryRing: historicalBudgetLevel.value === 'secondary',
+        labelAnimationState: historicalLabelAnimationState
     });
 });
 

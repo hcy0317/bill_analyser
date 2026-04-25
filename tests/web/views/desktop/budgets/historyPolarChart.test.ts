@@ -2,12 +2,20 @@ import { describe, expect, test } from '@jest/globals';
 
 import { BUDGET_HISTORY_CHART_CONFIG } from '@/config/budget.ts';
 
-import type { HistoricalCategoryChartPoint, HistoricalLegendSelection } from '@/views/desktop/budgets/historyPolarChart.ts';
+import type {
+    HistoricalCategoryChartPoint,
+    HistoricalLabelAnimationFrameInput,
+    HistoricalLegendSelection
+} from '@/views/desktop/budgets/historyPolarChart.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
+    createHistoricalLabelAnimationState,
     getHistoricalAmountAxisInterval,
     getTangentialTextRotation,
+    interpolateHistoricalPolarAngle,
+    resolveHistoricalLabelAnimationFrames,
+    resolveNearestCircularAngle,
     syncHistoricalLegendSelection,
     toggleHistoricalPrimarySelection,
     toggleHistoricalSecondarySelection
@@ -64,6 +72,21 @@ function buildSelection(overrides: HistoricalLegendSelection = {}): HistoricalLe
     return syncHistoricalLegendSelection(SAMPLE_POINTS, overrides);
 }
 
+function makeLabelInput(key: string, polarAngleValue: number, rotate = 0): HistoricalLabelAnimationFrameInput {
+    return {
+        stateKey: `secondary:${key}`,
+        dataId: `${key}:label`,
+        name: key,
+        text: key,
+        radiusValue: 100,
+        polarAngleValue,
+        rotate,
+        color: '#5470c6',
+        fontSize: 10,
+        fontWeight: 600
+    };
+}
+
 describe('historyPolarChart helpers', () => {
     test('syncHistoricalLegendSelection preserves known states and defaults new items to visible', () => {
         const selection = syncHistoricalLegendSelection(SAMPLE_POINTS, {
@@ -82,6 +105,7 @@ describe('historyPolarChart helpers', () => {
         const model = buildHistoricalPolarChartModel(SAMPLE_POINTS, buildSelection());
 
         expect(model.slots).toHaveLength(4);
+        expect(model.slots.map(slot => Number(slot.angle.toFixed(2)))).toStrictEqual([45, -45, -135, -225]);
         expect(model.primaryBands).toStrictEqual([
             expect.objectContaining({ key: '餐饮', state: 'all' }),
             expect.objectContaining({ key: '交通', state: 'all' })
@@ -107,6 +131,39 @@ describe('historyPolarChart helpers', () => {
         expect(getTangentialTextRotation(340)).toBeLessThan(0);
         expect(Math.abs(getTangentialTextRotation(220))).toBeLessThan(90);
         expect(Math.abs(getTangentialTextRotation(320))).toBeLessThan(90);
+    });
+
+    test('resolveNearestCircularAngle and interpolateHistoricalPolarAngle use the shortest path across zero degrees', () => {
+        expect(resolveNearestCircularAngle(10, 350)).toBeCloseTo(370);
+        expect(resolveNearestCircularAngle(350, 10)).toBeCloseTo(-10);
+        expect(interpolateHistoricalPolarAngle(350, 10, 0.5)).toBeCloseTo(360);
+        expect(interpolateHistoricalPolarAngle(10, 350, 0.5)).toBeCloseTo(0);
+    });
+
+    test('resolveHistoricalLabelAnimationFrames keeps hidden label state for restore animation', () => {
+        const state = createHistoricalLabelAnimationState();
+
+        resolveHistoricalLabelAnimationFrames([
+            makeLabelInput('food', 350, 80),
+            makeLabelInput('coffee', 120, -20)
+        ], state);
+
+        const visibleAfterHide = resolveHistoricalLabelAnimationFrames([
+            makeLabelInput('coffee', 140, -10)
+        ], state);
+        expect(visibleAfterHide).toHaveLength(1);
+        expect(visibleAfterHide[0]?.previous?.polarAngleValue).toBeCloseTo(120);
+
+        const visibleAfterRestore = resolveHistoricalLabelAnimationFrames([
+            makeLabelInput('food', 10, 85),
+            makeLabelInput('coffee', 160, 0)
+        ], state);
+        const restoredFood = visibleAfterRestore.find(frame => frame.stateKey === 'secondary:food');
+
+        expect(restoredFood?.previous?.polarAngleValue).toBeCloseTo(350);
+        expect(restoredFood?.polarAngleValue).toBeCloseTo(370);
+        expect(Math.abs((restoredFood?.polarAngleValue ?? 0) - (restoredFood?.previous?.polarAngleValue ?? 0)))
+            .toBeLessThanOrEqual(180);
     });
 
     test('toggleHistoricalPrimarySelection cascades to all secondary categories in the group', () => {
@@ -148,6 +205,7 @@ describe('historyPolarChart helpers', () => {
         expect(model.primaryPadAngle).toBe(0);
         expect(model.legendGroups[0]?.state).toBe('none');
         expect(model.legendGroups[1]?.state).toBe('all');
+        expect(model.slots.map(slot => Number(slot.angle.toFixed(2)))).toStrictEqual([0, -180]);
     });
 
     test('buildHistoricalPolarChartModel handles empty points and blank labels safely', () => {
@@ -335,7 +393,7 @@ describe('historyPolarChart helpers', () => {
         expect(secondaryLabelSeries!.data[0]?.label?.formatter).toBe('早餐');
         expect(secondaryLabelSeries!.data[0]?.label?.rotate).toBeLessThan(0);
         expect(secondaryLabelSeries!.data[1]?.label?.formatter).toBe('午餐');
-        expect(secondaryLabelSeries!.data[1]?.label?.rotate).toBeGreaterThan(0);
+        expect(secondaryLabelSeries!.data[1]?.label?.rotate).toBeGreaterThanOrEqual(0);
         expect(secondaryLabelSeries!.data[2]?.label?.formatter).toBe('打车');
         expect(secondaryLabelSeries!.data[2]?.label?.rotate).toBeGreaterThan(0);
         expect(Math.abs(secondaryLabelSeries!.data[1]?.label?.rotate || 0)).toBeLessThan(90);
