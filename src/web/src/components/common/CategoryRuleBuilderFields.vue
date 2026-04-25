@@ -40,8 +40,8 @@
                     expression-format="composite"
                     :disabled="disabled"
                     :regex-enabled="draft.regexEnabled"
-                    :title="tt('Rule Expression Builder')"
-                    :add-button-text="tt('Add Expression')"
+                    :title="tt('Rule Matching Expression')"
+                    :add-button-text="tt('Add Rule')"
                     :empty-state-text="tt('No rule expression defined yet')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
                 />
@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<{
     title?: string;
     description?: string;
 }>(), {
-    title: 'Rule Builder',
+    title: 'Rule Matching Expression',
     description: '',
     showEnabledToggle: true,
 });

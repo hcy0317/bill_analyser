@@ -37,8 +37,15 @@ export interface RuleExpressionValidationResult {
 
 export interface RuleExpressionDisplayClause {
     label: string;
+    connector?: '' | '+' | '/' | '×';
+    connectorLabel?: string;
     operator: RuleOperator | 'RAW';
+    operatorLabel?: string;
     negated: boolean;
+    openParens?: number;
+    closeParens?: number;
+    openParenLabel?: string;
+    closeParenLabel?: string;
     terms: string[];
 }
 
@@ -188,15 +195,22 @@ export function toExpressionDisplayClause(
     const connector = options.isFirstClause
         ? ''
         : normalizedClause.negated
-            ? '× '
+            ? '×'
             : normalizedClause.joiner === 'OR'
-                ? '/ '
-                : '+ ';
+                ? '/'
+                : '+';
 
     return {
-        label: `${connector}${normalizedClause.operator}`,
+        label: normalizedClause.operator,
+        connector,
+        connectorLabel: connector,
         operator: normalizedClause.operator,
+        operatorLabel: normalizedClause.operator,
         negated: normalizedClause.negated,
+        openParens: normalizedClause.openParens,
+        closeParens: normalizedClause.closeParens,
+        openParenLabel: '('.repeat(normalizedClause.openParens),
+        closeParenLabel: ')'.repeat(normalizedClause.closeParens),
         terms: normalizedClause.terms.length > 0
             ? normalizedClause.terms
             : [options.emptyLabel ?? 'Empty'],

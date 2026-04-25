@@ -122,6 +122,53 @@ describe('keywordExpression helpers', () => {
         });
     });
 
+    test('roundtrips multi-level parentheses for the shared-bike expression', () => {
+        const expression = '(OR={共享单车,摩拜,ofo,哈啰,青桔,小蓝}/(OR={549}+NOT={大丰收的}))+OR={1123}';
+        const parsed = parseExpression(expression, {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        expect(parsed.sourceFormat).toBe('composite');
+        expect(parsed.clauses).toMatchObject([
+            {
+                joiner: 'AND',
+                operator: 'OR',
+                terms: ['共享单车', '摩拜', 'ofo', '哈啰', '青桔', '小蓝'],
+                openParens: 1,
+                closeParens: 0,
+                startsExpression: false
+            },
+            {
+                joiner: 'OR',
+                operator: 'OR',
+                terms: ['549'],
+                openParens: 1,
+                closeParens: 0,
+                startsExpression: false
+            },
+            {
+                joiner: 'AND',
+                operator: 'NOT',
+                terms: ['大丰收的'],
+                openParens: 0,
+                closeParens: 2,
+                startsExpression: false
+            },
+            {
+                joiner: 'AND',
+                operator: 'OR',
+                terms: ['1123'],
+                openParens: 0,
+                closeParens: 0,
+                startsExpression: false
+            }
+        ]);
+        expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
+            expression
+        });
+    });
+
     test('accepts visible connector aliases and preserves slash for block-level OR', () => {
         const expression = 'OR={早餐}/OR={咖啡}×NOT={退款} NOT OR={测试}';
         const parsed = parseExpression(expression, {
@@ -170,9 +217,10 @@ describe('keywordExpression helpers', () => {
         }));
 
         expect(displayClauses).toMatchObject([
-            { label: 'OR', operator: 'OR', negated: false, terms: ['早餐'] },
-            { label: '× OR', operator: 'OR', negated: true, terms: ['退款'] }
+            { label: 'OR', connector: '', operator: 'OR', operatorLabel: 'OR', negated: false, terms: ['早餐'] },
+            { label: 'OR', connector: '×', operator: 'OR', operatorLabel: 'OR', negated: true, terms: ['退款'] }
         ]);
+        expect(displayClauses.map(clause => clause.label)).not.toContain('× OR');
         expect(getRuleExpressionDisplayOperatorColor(displayClauses[1]!)).toBe('warning');
         expect(getRuleExpressionDisplayOperatorColor(
             toExpressionDisplayClause(createRuleClause({ operator: 'NOT', terms: ['撤销'] }), {
@@ -184,6 +232,28 @@ describe('keywordExpression helpers', () => {
                 isFirstClause: true
             })
         )).toBe('info');
+    });
+
+    test('keeps display connector symbols and parentheses separate from operators', () => {
+        const parsed = parseExpression('(OR={共享单车}/(OR={549}+NOT={大丰收的}))+OR={1123}', {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        const displayClauses = parsed.clauses.map((clause, index) => toExpressionDisplayClause(clause, {
+            isFirstClause: index === 0,
+            emptyLabel: 'Empty'
+        }));
+
+        expect(displayClauses).toMatchObject([
+            { label: 'OR', connector: '', openParenLabel: '(', closeParenLabel: '' },
+            { label: 'OR', connector: '/', openParenLabel: '(', closeParenLabel: '' },
+            { label: 'NOT', connector: '+', openParenLabel: '', closeParenLabel: '))' },
+            { label: 'OR', connector: '+', openParenLabel: '', closeParenLabel: '' }
+        ]);
+        expect(displayClauses.map(clause => clause.label)).not.toContain('+ OR');
+        expect(displayClauses.map(clause => clause.label)).not.toContain('+ NOT');
+        expect(displayClauses.map(clause => clause.label)).not.toContain('/ OR');
     });
 
     test('keeps block connector and inner operator independent when serializing', () => {
@@ -389,6 +459,11 @@ describe('keyword expression component copy', () => {
         expect(combinedSource).not.toContain('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}');
         expect(combinedSource).not.toContain('Rule Priority');
         expect(combinedSource).not.toContain('× NOT');
+        expect(combinedSource).not.toContain("tt('Add Expression')");
+        expect(combinedSource).toContain('incrementOpenParen');
+        expect(combinedSource).toContain('decrementOpenParen');
+        expect(combinedSource).toContain('incrementCloseParen');
+        expect(combinedSource).toContain('decrementCloseParen');
         expect(combinedSource).toContain('category-rule-builder__header');
         expect(combinedSource).toContain('v-if="clauseIndex > 0"');
     });

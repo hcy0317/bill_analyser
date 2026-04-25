@@ -61,6 +61,26 @@ class TestKeywordMatcher:
         assert self.matcher.match_compiled("午餐套餐", compiled) is True
         assert self.matcher.match_compiled("早饭摊", compiled) is False
 
+    def test_nested_shared_bike_parentheses_change_semantics(self):
+        """测试共享单车示例中多重括号会改变匹配语义"""
+        grouped_rule = (
+            "(OR={共享单车,摩拜,ofo,哈啰,青桔,小蓝}/"
+            "(OR={549}+NOT={大丰收的}))+OR={1123}"
+        )
+        ungrouped_rule = (
+            "OR={共享单车,摩拜,ofo,哈啰,青桔,小蓝}/"
+            "(OR={549}+NOT={大丰收的})+OR={1123}"
+        )
+
+        grouped = self.matcher.compile_rule_expression(grouped_rule)
+        ungrouped = self.matcher.compile_rule_expression(ungrouped_rule)
+
+        assert self.matcher.match_compiled("共享单车", grouped) is False
+        assert self.matcher.match_compiled("共享单车", ungrouped) is True
+        assert self.matcher.match_compiled("共享单车 1123", grouped) is True
+        assert self.matcher.match_compiled("549 1123", grouped) is True
+        assert self.matcher.match_compiled("549 大丰收的 1123", grouped) is False
+
 
 class FakeCategoryRulesDb:
     async def get_category_rules(

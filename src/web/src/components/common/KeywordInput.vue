@@ -77,18 +77,31 @@
                                 </div>
 
                                 <div class="rule-clause-row">
-                                    <button
+                                    <div
                                         v-if="supportsCompositeGrouping"
-                                        type="button"
-                                        class="paren-ghost paren-ghost-left"
-                                        :class="{ 'paren-ghost--active': clause.openParens > 0 }"
-                                        :disabled="disabled"
-                                        :title="tt(clause.openParens > 0 ? 'Remove left parenthesis' : 'Add left parenthesis')"
-                                        :aria-pressed="clause.openParens > 0"
-                                        @click="toggleOpenParen(clause)"
+                                        class="paren-control paren-control-left"
+                                        :class="{ 'paren-control--active': clause.openParens > 0 }"
                                     >
-                                        (
-                                    </button>
+                                        <button
+                                            type="button"
+                                            class="paren-control__step"
+                                            :disabled="disabled || clause.openParens <= 0"
+                                            :title="tt('Remove left parenthesis')"
+                                            @click="decrementOpenParen(clause)"
+                                        >
+                                            −
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="paren-control__main"
+                                            :disabled="disabled"
+                                            :title="tt('Add left parenthesis')"
+                                            :aria-pressed="clause.openParens > 0"
+                                            @click="incrementOpenParen(clause)"
+                                        >
+                                            {{ formatParenStack('(', clause.openParens) }}
+                                        </button>
+                                    </div>
 
                                     <div class="clause-operator">
                                         <v-select
@@ -120,18 +133,31 @@
                                         />
                                     </div>
 
-                                    <button
+                                    <div
                                         v-if="supportsCompositeGrouping"
-                                        type="button"
-                                        class="paren-ghost paren-ghost-right"
-                                        :class="{ 'paren-ghost--active': clause.closeParens > 0 }"
-                                        :disabled="disabled"
-                                        :title="tt(clause.closeParens > 0 ? 'Remove right parenthesis' : 'Add right parenthesis')"
-                                        :aria-pressed="clause.closeParens > 0"
-                                        @click="toggleCloseParen(clause)"
+                                        class="paren-control paren-control-right"
+                                        :class="{ 'paren-control--active': clause.closeParens > 0 }"
                                     >
-                                        )
-                                    </button>
+                                        <button
+                                            type="button"
+                                            class="paren-control__main"
+                                            :disabled="disabled"
+                                            :title="tt('Add right parenthesis')"
+                                            :aria-pressed="clause.closeParens > 0"
+                                            @click="incrementCloseParen(clause)"
+                                        >
+                                            {{ formatParenStack(')', clause.closeParens) }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="paren-control__step"
+                                            :disabled="disabled || clause.closeParens <= 0"
+                                            :title="tt('Remove right parenthesis')"
+                                            @click="decrementCloseParen(clause)"
+                                        >
+                                            −
+                                        </button>
+                                    </div>
 
                                     <div class="clause-actions">
                                         <v-btn
@@ -224,8 +250,8 @@ const emit = defineEmits<{
 }>();
 
 const resolvedFormat = computed<ExpressionFormat>(() => props.expressionFormat ?? props.format);
-const resolvedTitle = computed(() => props.title || tt('Rule Expression'));
-const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Expression'));
+const resolvedTitle = computed(() => props.title || tt('Rule Matching Expression'));
+const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Rule'));
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText ?? '');
 const resolvedExampleText = computed(() => props.exampleText ?? '');
@@ -437,20 +463,46 @@ function onTermsUpdated(clause: RuleClause) {
     serializeKeywords();
 }
 
-function toggleOpenParen(clause: RuleClause) {
+function incrementOpenParen(clause: RuleClause) {
     replaceClause({
         ...clause,
-        openParens: clause.openParens > 0 ? 0 : 1,
+        openParens: clause.openParens + 1,
     });
     serializeKeywords();
 }
 
-function toggleCloseParen(clause: RuleClause) {
+function decrementOpenParen(clause: RuleClause) {
     replaceClause({
         ...clause,
-        closeParens: clause.closeParens > 0 ? 0 : 1,
+        openParens: Math.max(0, clause.openParens - 1),
     });
     serializeKeywords();
+}
+
+function incrementCloseParen(clause: RuleClause) {
+    replaceClause({
+        ...clause,
+        closeParens: clause.closeParens + 1,
+    });
+    serializeKeywords();
+}
+
+function decrementCloseParen(clause: RuleClause) {
+    replaceClause({
+        ...clause,
+        closeParens: Math.max(0, clause.closeParens - 1),
+    });
+    serializeKeywords();
+}
+
+function formatParenStack(paren: '(' | ')', count: number): string {
+    if (count <= 0) {
+        return paren;
+    }
+    if (count <= 3) {
+        return paren.repeat(count);
+    }
+    return `${paren.repeat(3)}×${count}`;
 }
 </script>
 
@@ -533,53 +585,75 @@ function toggleCloseParen(clause: RuleClause) {
     align-items: center;
 }
 
-.paren-ghost {
+.paren-control {
     position: absolute;
     top: 2px;
-    width: 16px;
+    display: flex;
+    align-items: stretch;
+    width: 34px;
     height: 38px;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+}
+
+.paren-control-left {
+    left: 0;
+}
+
+.paren-control-right {
+    right: 0;
+}
+
+.paren-control__step,
+.paren-control__main {
     border: 0;
     padding: 0;
     background: transparent;
     color: rgba(var(--v-theme-on-surface), 0.52);
     cursor: pointer;
     font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
-    font-size: 30px;
-    line-height: 34px;
-    opacity: 0;
-    transition: opacity 0.14s ease, color 0.14s ease;
+    line-height: 1;
 }
 
-.paren-ghost:disabled {
+.paren-control__step:disabled,
+.paren-control__main:disabled {
     cursor: default;
+    opacity: 0.36;
 }
 
-.paren-ghost-left {
-    left: 0;
+.paren-control__step {
+    flex: 0 0 12px;
+    font-size: 13px;
 }
 
-.paren-ghost-right {
-    right: 0;
+.paren-control__main {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 24px;
+    font-weight: 700;
 }
 
-.rule-clause-row:hover .paren-ghost,
-.paren-ghost--active {
+.rule-clause-row:hover .paren-control,
+.paren-control--active {
     opacity: 0.38;
 }
 
-.paren-ghost--active {
+.paren-control--active {
     border-radius: 8px;
     background: rgba(var(--v-theme-primary), 0.22);
     color: rgb(var(--v-theme-primary));
     opacity: 1;
     box-shadow: inset 0 0 0 1px rgba(var(--v-theme-primary), 0.55);
-    font-weight: 700;
 }
 
-.rule-clause-row:hover .paren-ghost:hover,
-.rule-clause-row:hover .paren-ghost--active {
-    opacity: 1;
+.paren-control--active .paren-control__step,
+.paren-control--active .paren-control__main {
     color: rgb(var(--v-theme-primary));
+}
+
+.rule-clause-row:hover .paren-control:hover,
+.rule-clause-row:hover .paren-control--active {
+    opacity: 1;
 }
 
 @media (max-width: 720px) {
