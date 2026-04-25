@@ -64,6 +64,12 @@
 
                                     <v-spacer />
 
+                                    <div
+                                        v-if="showLearningHeaderActions"
+                                        :id="learningHeaderActionsTargetId"
+                                        class="rule-center-title-actions ms-3"
+                                    />
+
                                     <v-chip
                                         v-if="isPairingOverview"
                                         class="ms-2 rule-center-pair-count-chip"
@@ -124,19 +130,35 @@
                                 </template>
 
                                 <template v-else-if="activeDomain === 'learning' && activeTab === 'overview'">
-                                    <learning-center-panel key="learning-overview" init-tab="suggestions" />
+                                    <learning-center-panel
+                                        key="learning-overview"
+                                        init-tab="suggestions"
+                                        hide-section-title
+                                        :header-actions-target="learningHeaderActionsTarget" />
                                 </template>
 
                                 <template v-else-if="activeDomain === 'learning' && activeTab === 'rules'">
-                                    <learning-center-panel key="learning-rules" init-tab="rules" />
+                                    <learning-center-panel
+                                        key="learning-rules"
+                                        init-tab="rules"
+                                        hide-section-title
+                                        :header-actions-target="learningHeaderActionsTarget" />
                                 </template>
 
                                 <template v-else-if="activeDomain === 'llm' && activeTab === 'overview'">
-                                    <learning-center-panel key="llm-overview" init-tab="llm" />
+                                    <learning-center-panel
+                                        key="llm-overview"
+                                        init-tab="llm"
+                                        hide-section-title
+                                        :header-actions-target="learningHeaderActionsTarget" />
                                 </template>
 
                                 <template v-else-if="activeDomain === 'llm' && activeTab === 'config'">
-                                    <learning-center-panel key="llm-config" init-tab="llm-config" />
+                                    <learning-center-panel
+                                        key="llm-config"
+                                        init-tab="llm-config"
+                                        hide-section-title
+                                        :header-actions-target="learningHeaderActionsTarget" />
                                 </template>
                             </v-card-text>
                         </v-card>
@@ -250,6 +272,8 @@ interface RefreshablePanel {
 const categoryRulePanel = ref<RefreshablePanel | null>(null);
 const recurringRulePanel = ref<RefreshablePanel | null>(null);
 const investmentRecognitionSettings = ref<RefreshablePanel | null>(null);
+const learningHeaderActionsTargetId = 'rule-center-learning-title-actions';
+const learningHeaderActionsTarget = `#${learningHeaderActionsTargetId}`;
 
 const loading = computed(() => matchingStore.loading);
 const error = computed({
@@ -446,6 +470,9 @@ const isRecurringRecognition = computed(() =>
 );
 const isInvestmentRecognition = computed(() =>
     activeDomain.value === 'investment' && activeTab.value === 'rules'
+);
+const showLearningHeaderActions = computed(() =>
+    activeDomain.value === 'learning' || activeDomain.value === 'llm'
 );
 const currentPageTitle = computed(() => (
     isInvestmentRecognition.value
@@ -651,5 +678,13 @@ watch(
 .rule-center-pair-count-chip {
     cursor: default;
     user-select: none;
+}
+
+.rule-center-title-actions {
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
+    align-items: center;
+    justify-content: flex-end;
 }
 </style>

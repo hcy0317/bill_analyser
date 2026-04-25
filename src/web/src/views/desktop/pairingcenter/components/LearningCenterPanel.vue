@@ -11,11 +11,15 @@
 
                             <!-- ── Suggestions Tab ── -->
                             <template v-if="activeTab === 'suggestions'">
-                                <div class="learning-section-header">
-                                    <h3 class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
-                                    <div class="learning-section-actions">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn class="learning-panel-action"
                                                size="small"
+                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading"
@@ -24,6 +28,7 @@
                                         </v-btn>
                                         <v-btn class="learning-panel-action"
                                                size="small"
+                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading || selectedIds.length === 0"
@@ -50,6 +55,7 @@
                                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
+                                    </Teleport>
                                 </div>
 
                                 <v-table v-if="!loading && filteredSuggestions.length > 0" hover density="comfortable">
@@ -124,9 +130,12 @@
 
                             <!-- ── Rules Tab ── -->
                             <template v-if="activeTab === 'rules'">
-                                <div class="learning-section-header">
-                                    <h3 class="learning-section-title">{{ tt('Learning Rules') }}</h3>
-                                    <div class="learning-section-actions">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Learning Rules') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn variant="text"
                                                color="default"
                                                size="32"
@@ -138,71 +147,162 @@
                                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
+                                    </Teleport>
                                 </div>
 
-                                <v-table v-if="!loading && filteredRules.length > 0" hover density="comfortable">
+                                <v-table v-if="!loading && filteredRules.length > 0"
+                                         class="learning-rules-table"
+                                         hover
+                                         density="comfortable">
                                     <thead>
                                         <tr>
-                                            <th class="learning-filterable-header">
-                                                <div class="learning-table-header">
-                                                    <span>{{ tt('Match Pattern') }}</span>
-                                                    <v-select v-model="ruleMatchTypeFilter"
-                                                              class="learning-table-filter"
-                                                              :items="ruleMatchTypeOptions"
-                                                              item-title="title"
-                                                              item-value="value"
-                                                              density="compact"
-                                                              variant="plain"
-                                                              hide-details />
-                                                </div>
+                                            <th>
+                                                <v-menu v-model="ruleMatchTypeFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleMatchTypeFilter ? 'primary' : undefined">
+                                                            {{ tt('Match Pattern') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleMatchTypeFilter ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="180">
+                                                        <v-list-item v-for="option in ruleMatchTypeOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleMatchTypeFilter === option.value }"
+                                                                     :append-icon="ruleMatchTypeFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleMatchTypeFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
                                             </th>
-                                            <th class="learning-filterable-header">
-                                                <div class="learning-table-header">
-                                                    <span>{{ tt('Features') }}</span>
-                                                    <v-text-field v-model="ruleFeatureFilter"
-                                                                  class="learning-table-filter"
-                                                                  density="compact"
-                                                                  variant="plain"
-                                                                  hide-details
-                                                                  :placeholder="tt('Filter')" />
-                                                </div>
+                                            <th>
+                                                <v-menu v-model="ruleFeatureFilterMenu"
+                                                        :close-on-content-click="false"
+                                                        location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleFeatureFilterActive ? 'primary' : undefined">
+                                                            {{ tt('Features') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleFeatureFilterActive ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-card class="learning-header-menu" min-width="280">
+                                                        <v-card-text class="pb-2">
+                                                            <v-text-field v-model="ruleFeatureFilter"
+                                                                          density="compact"
+                                                                          variant="outlined"
+                                                                          hide-details
+                                                                          clearable
+                                                                          :label="tt('Features')"
+                                                                          :placeholder="tt('Filter')" />
+                                                        </v-card-text>
+                                                        <v-card-actions class="pt-0">
+                                                            <v-spacer />
+                                                            <v-btn variant="text" size="small" @click="clearRuleFeatureFilter">
+                                                                {{ tt('Clear') }}
+                                                            </v-btn>
+                                                        </v-card-actions>
+                                                    </v-card>
+                                                </v-menu>
                                             </th>
-                                            <th class="learning-filterable-header">
-                                                <div class="learning-table-header">
-                                                    <span>{{ tt('Learned Action') }}</span>
-                                                    <v-text-field v-model="ruleLearnedActionFilter"
-                                                                  class="learning-table-filter"
-                                                                  density="compact"
-                                                                  variant="plain"
-                                                                  hide-details
-                                                                  :placeholder="tt('Filter')" />
-                                                </div>
+                                            <th>
+                                                <v-menu v-model="ruleLearnedActionFilterMenu"
+                                                        :close-on-content-click="false"
+                                                        location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleLearnedActionFilterActive ? 'primary' : undefined">
+                                                            {{ tt('Learned Action') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleLearnedActionFilterActive ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-card class="learning-header-menu" min-width="280">
+                                                        <v-card-text class="pb-2">
+                                                            <v-text-field v-model="ruleLearnedActionFilter"
+                                                                          density="compact"
+                                                                          variant="outlined"
+                                                                          hide-details
+                                                                          clearable
+                                                                          :label="tt('Learned Action')"
+                                                                          :placeholder="tt('Filter')" />
+                                                        </v-card-text>
+                                                        <v-card-actions class="pt-0">
+                                                            <v-spacer />
+                                                            <v-btn variant="text" size="small" @click="clearRuleLearnedActionFilter">
+                                                                {{ tt('Clear') }}
+                                                            </v-btn>
+                                                        </v-card-actions>
+                                                    </v-card>
+                                                </v-menu>
                                             </th>
-                                            <th class="learning-filterable-header">
-                                                <div class="learning-table-header">
-                                                    <span>{{ tt('Enabled') }}</span>
-                                                    <v-select v-model="ruleEnabledFilter"
-                                                              class="learning-table-filter"
-                                                              :items="ruleEnabledFilterOptions"
-                                                              item-title="title"
-                                                              item-value="value"
-                                                              density="compact"
-                                                              variant="plain"
-                                                              hide-details />
-                                                </div>
+                                            <th>
+                                                <v-menu v-model="ruleEnabledFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleEnabledFilter !== 'all' ? 'primary' : undefined">
+                                                            {{ tt('Enabled') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleEnabledFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="160">
+                                                        <v-list-item v-for="option in ruleEnabledFilterOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleEnabledFilter === option.value }"
+                                                                     :append-icon="ruleEnabledFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleEnabledFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
                                             </th>
-                                            <th class="learning-filterable-header">
-                                                <div class="learning-table-header">
-                                                    <span>{{ tt('Applied') }}</span>
-                                                    <v-select v-model="ruleAppliedFilter"
-                                                              class="learning-table-filter"
-                                                              :items="ruleAppliedFilterOptions"
-                                                              item-title="title"
-                                                              item-value="value"
-                                                              density="compact"
-                                                              variant="plain"
-                                                              hide-details />
-                                                </div>
+                                            <th>
+                                                <v-menu v-model="ruleAppliedFilterMenu" location="bottom">
+                                                    <template #activator="{ props: menuProps }">
+                                                        <v-btn v-bind="menuProps"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="learning-header-button"
+                                                               :color="ruleAppliedFilter !== 'all' ? 'primary' : undefined">
+                                                            {{ tt('Applied') }}
+                                                            <v-icon end size="16"
+                                                                    :icon="ruleAppliedFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
+                                                        </v-btn>
+                                                    </template>
+                                                    <v-list class="learning-header-menu" density="compact" min-width="160">
+                                                        <v-list-item v-for="option in ruleAppliedFilterOptions"
+                                                                     :key="option.value"
+                                                                     :value="option.value"
+                                                                     :class="{ 'list-item-selected': ruleAppliedFilter === option.value }"
+                                                                     :append-icon="ruleAppliedFilter === option.value ? mdiCheck : undefined"
+                                                                     @click="setRuleAppliedFilter(option.value)">
+                                                            <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                        </v-list-item>
+                                                    </v-list>
+                                                </v-menu>
                                             </th>
                                             <th class="text-center">{{ tt('Actions') }}</th>
                                         </tr>
@@ -263,11 +363,15 @@
 
             <template v-if="activeTab === 'llm-config'">
                                 <!-- LLM 多配置管理 -->
-                                <div class="learning-section-header">
-                                    <h3 class="learning-section-title">{{ tt('LLM Config') }}</h3>
-                                    <div class="learning-section-actions">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('LLM Config') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn class="learning-panel-action"
                                                size="small"
+                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading"
@@ -285,6 +389,7 @@
                                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
+                                    </Teleport>
                                 </div>
                                 <v-card variant="outlined" class="mb-4">
                                     <v-card-text class="pt-4">
@@ -328,11 +433,15 @@
 
             <template v-if="activeTab === 'llm'">
                                 <!-- 建议规则列表 -->
-                                <div class="learning-section-header">
-                                    <h3 class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
-                                    <div class="learning-section-actions">
+                                <div class="learning-section-header"
+                                     :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
+                                    <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
+                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                    <div class="learning-section-actions"
+                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn class="learning-panel-action"
                                                size="small"
+                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading"
@@ -341,6 +450,7 @@
                                         </v-btn>
                                         <v-btn class="learning-panel-action"
                                                size="small"
+                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading || selectedLLMIds.length === 0"
@@ -373,6 +483,7 @@
                                             {{ llmPendingCount }} {{ tt('Pending') }}
                                         </v-chip>
                                     </div>
+                                    </Teleport>
                                 </div>
 
                                 <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
@@ -620,7 +731,9 @@ import {
     mdiPencil,
     mdiLightbulbOutline,
     mdiBookOpenPageVariant,
-    mdiRobotOutline
+    mdiRobotOutline,
+    mdiChevronDown,
+    mdiFilterVariant,
 } from '@mdi/js';
 
 interface LLMConfigItem {
@@ -687,7 +800,9 @@ interface SelectOption {
 }
 
 const props = defineProps<{
-    initTab?: string
+    initTab?: string;
+    hideSectionTitle?: boolean;
+    headerActionsTarget?: string;
 }>();
 
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -712,6 +827,11 @@ const ruleFeatureFilter = ref<string>('');
 const ruleLearnedActionFilter = ref<string>('');
 const ruleEnabledFilter = ref<string>('all');
 const ruleAppliedFilter = ref<string>('all');
+const ruleMatchTypeFilterMenu = ref(false);
+const ruleFeatureFilterMenu = ref(false);
+const ruleLearnedActionFilterMenu = ref(false);
+const ruleEnabledFilterMenu = ref(false);
+const ruleAppliedFilterMenu = ref(false);
 const llmLoading = ref(false);
 const llmConfigLoading = ref(false);
 const llmSavedConfigs = ref<LLMConfigItem[]>([]);
@@ -811,6 +931,9 @@ const loading = computed(() => (
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);
+const hideSectionTitle = computed(() => Boolean(props.hideSectionTitle));
+const hasHeaderActionsTarget = computed(() => Boolean(props.headerActionsTarget));
+const headerActionsTarget = computed(() => props.headerActionsTarget || 'body');
 
 const suggestionStatusOptions = computed<SelectOption[]>(() => [
     { title: `${tt('All')} (${suggestionsTotal.value})`, value: '' },
@@ -849,6 +972,32 @@ const ruleAppliedFilterOptions = computed<SelectOption[]>(() => [
     { title: tt('Applied'), value: 'applied' },
     { title: tt('Not Applied'), value: 'not-applied' },
 ]);
+
+const ruleFeatureFilterActive = computed(() => ruleFeatureFilter.value.trim().length > 0);
+const ruleLearnedActionFilterActive = computed(() => ruleLearnedActionFilter.value.trim().length > 0);
+
+function setRuleMatchTypeFilter(value: string): void {
+    ruleMatchTypeFilter.value = value;
+    ruleMatchTypeFilterMenu.value = false;
+}
+
+function clearRuleFeatureFilter(): void {
+    ruleFeatureFilter.value = '';
+}
+
+function clearRuleLearnedActionFilter(): void {
+    ruleLearnedActionFilter.value = '';
+}
+
+function setRuleEnabledFilter(value: string): void {
+    ruleEnabledFilter.value = value;
+    ruleEnabledFilterMenu.value = false;
+}
+
+function setRuleAppliedFilter(value: string): void {
+    ruleAppliedFilter.value = value;
+    ruleAppliedFilterMenu.value = false;
+}
 
 function containsText(source: string, query: string): boolean {
     const normalizedQuery = query.trim().toLowerCase();
@@ -1482,6 +1631,11 @@ watch(activeTab, (tab) => {
     margin-bottom: 12px;
 }
 
+.learning-section-header--empty {
+    min-height: 0;
+    margin-bottom: 0;
+}
+
 .learning-section-title {
     margin: 0;
     font-size: 1rem;
@@ -1498,7 +1652,14 @@ watch(activeTab, (tab) => {
     gap: 8px;
 }
 
+.learning-section-actions--external {
+    min-width: 0;
+    width: 100%;
+}
+
 .learning-panel-action {
+    height: 32px;
+    min-height: 32px;
     min-width: 152px;
 }
 
@@ -1506,22 +1667,34 @@ watch(activeTab, (tab) => {
     flex: 0 0 168px;
 }
 
-.learning-filterable-header {
-    min-width: 150px;
-    vertical-align: top;
+.learning-status-select :deep(.v-field) {
+    min-height: 32px;
+    height: 32px;
 }
 
-.learning-table-header {
-    display: flex;
-    flex-direction: column;
+.learning-status-select :deep(.v-field__input) {
+    min-height: 32px;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.learning-rules-table :deep(th) {
+    padding-block: 8px;
+}
+
+.learning-header-button {
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding-block: 4px;
+    justify-content: center;
+    min-height: 32px;
+    width: 100%;
+    padding-inline: 4px;
+    text-transform: none;
+    letter-spacing: normal;
 }
 
-.learning-table-filter {
-    width: 100%;
-    min-width: 132px;
+.learning-header-menu {
+    max-width: min(360px, 90vw);
 }
 
 .llm-config-autofill-decoy {
