@@ -35,6 +35,18 @@ export interface RuleExpressionValidationResult {
     errorKey?: string;
 }
 
+export interface RuleExpressionDisplayClause {
+    label: string;
+    operator: RuleOperator | 'RAW';
+    negated: boolean;
+    terms: string[];
+}
+
+export interface ToExpressionDisplayClauseOptions {
+    isFirstClause?: boolean;
+    emptyLabel?: string;
+}
+
 interface CreateRuleClauseInput {
     id?: string;
     joiner?: RuleJoiner;
@@ -166,6 +178,41 @@ export function serializeForFormat(clauses: readonly RuleClause[], format: Expre
     }
 
     return serializeComposite(clauses);
+}
+
+export function toExpressionDisplayClause(
+    clause: RuleClause,
+    options: ToExpressionDisplayClauseOptions = {}
+): RuleExpressionDisplayClause {
+    const normalizedClause = createRuleClause(clause);
+    const connector = options.isFirstClause
+        ? ''
+        : normalizedClause.negated
+            ? '× '
+            : normalizedClause.joiner === 'OR'
+                ? '/ '
+                : '+ ';
+
+    return {
+        label: `${connector}${normalizedClause.operator}`,
+        operator: normalizedClause.operator,
+        negated: normalizedClause.negated,
+        terms: normalizedClause.terms.length > 0
+            ? normalizedClause.terms
+            : [options.emptyLabel ?? 'Empty'],
+    };
+}
+
+export function getRuleExpressionDisplayOperatorColor(
+    clause: Pick<RuleExpressionDisplayClause, 'negated' | 'operator'>
+): 'warning' | 'info' | 'primary' {
+    if (clause.negated || clause.operator === 'NOT') {
+        return 'warning';
+    }
+    if (clause.operator === 'REGEX') {
+        return 'info';
+    }
+    return 'primary';
 }
 
 export function serializeLegacy(clauses: readonly RuleClause[]): string {

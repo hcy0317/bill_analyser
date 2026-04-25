@@ -122,18 +122,18 @@ class RuleExpressionNode:
 
     Grammar supported by ``compile_rule_expression``:
     ``expression := and_expr (('|' | '/') and_expr)*``
-    ``and_expr := factor (('+' factor) | ('×' factor))*``
+    ``and_expr := factor (('+' factor) | (('×' | 'NOT') factor))*``
     ``factor := clause | '(' expression ')'``
     ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
     ``term`` may escape delimiters with ``\\`` (for example ``\\,`` or ``\\{``).
 
     ``OR={a,b}`` means any term matches; ``AND={a,b}`` means all terms match;
     ``NOT={a,b}`` means no term may match. ``+`` combines clauses/groups with
-    logical AND, ``×`` is the visible block-level NOT connector (AND NOT the
-    following clause/group), ``/`` is the visible OR connector, and ``|`` is the
-    canonical separator between top-level expression groups. Both OR connectors
-    parse to logical OR; parentheses preserve the intended grouping. Legacy
-    ``OR:a|b&AND:c&NOT:d`` is still compiled by ``compile_rule``.
+    logical AND, ``×`` and bare ``NOT`` are visible block-level NOT connectors
+    (AND NOT the following clause/group), ``/`` is the visible OR connector,
+    and ``|`` is the canonical separator between top-level expression groups.
+    Both OR connectors parse to logical OR; parentheses preserve the intended
+    grouping. Legacy ``OR:a|b&AND:c&NOT:d`` is still compiled by ``compile_rule``.
     """
 
     kind: str
@@ -398,19 +398,19 @@ class KeywordMatcher:
 
         Composite grammar:
         ``expression := and_expr (('|' | '/') and_expr)*``
-        ``and_expr := factor (('+' factor) | ('×' factor))*``
+        ``and_expr := factor (('+' factor) | (('×' | 'NOT') factor))*``
         ``factor := clause | '(' expression ')'``
         ``clause := OR={terms} | AND={terms} | NOT={terms} | REGEX={patterns}``
         ``term`` may escape delimiters with ``\\`` (for example ``\\,``).
 
         ``+`` keeps the existing no-parentheses syntax as a conjunction:
         ``OR={k1,k2}+AND={k3}+NOT={k4}`` means
-        ``(k1 or k2) and k3 and not k4``. ``×`` is accepted as the visible
-        block-level NOT connector (for example ``×OR={k4}`` means AND NOT the
-        next block), ``/`` is accepted as the visible OR connector inside an
-        expression, and ``|`` is the canonical separator between top-level
-        expression groups. Both OR connectors parse to logical OR; parentheses
-        preserve the intended grouping. Old
+        ``(k1 or k2) and k3 and not k4``. ``×`` and bare ``NOT`` are accepted
+        as visible block-level NOT connectors (for example ``×OR={k4}`` or
+        ``NOT OR={k4}`` means AND NOT the next block), ``/`` is accepted as the
+        visible OR connector inside an expression, and ``|`` is the canonical
+        separator between top-level expression groups. Both OR connectors parse
+        to logical OR; parentheses preserve the intended grouping. Old
         ``OR:k1|k2&AND:k3&NOT:k4`` strings still fall back to ``compile_rule``.
         """
         if not expr:
@@ -488,7 +488,7 @@ class KeywordMatcher:
         index: int,
         regex_enabled: bool,
     ) -> tuple[RuleExpressionNode | None, int]:
-        """Parse ``+``-joined chains and ``×`` block-level negation."""
+        """Parse ``+``-joined chains and visible block-level negation."""
         children: list[RuleExpressionNode] = []
         pending_negated_connector = False
 
@@ -500,13 +500,14 @@ class KeywordMatcher:
                 or expr[index] in _RULE_EXPRESSION_OR_CONNECTORS
             ):
                 break
-            if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
-                pending_negated_connector = False
-                index += 1
-                continue
-            if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
-                pending_negated_connector = True
-                index += 1
+
+            connector = self._read_rule_and_connector(
+                expr,
+                index,
+                allow_word_not=bool(children),
+            )
+            if connector is not None:
+                pending_negated_connector, index = connector
                 continue
 
             child, index = self._parse_rule_factor(expr, index, regex_enabled)
@@ -523,13 +524,9 @@ class KeywordMatcher:
                 or expr[index] in _RULE_EXPRESSION_OR_CONNECTORS
             ):
                 break
-            if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
-                pending_negated_connector = False
-                index += 1
-                continue
-            if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
-                pending_negated_connector = True
-                index += 1
+            connector = self._read_rule_and_connector(expr, index)
+            if connector is not None:
+                pending_negated_connector, index = connector
                 continue
             raise ValueError(f"expected AND/OR connector at offset {index}")
 
@@ -541,7 +538,7 @@ class KeywordMatcher:
 
     @staticmethod
     def _apply_not_connector(child: RuleExpressionNode) -> RuleExpressionNode:
-        """Apply the visible ``×`` connector without mutating clause operators.
+        """Apply a visible NOT connector without mutating clause operators.
 
         Older UI states could serialize the same intent as ``×NOT={term}``;
         keep that accepted spelling as a single NOT clause instead of turning
@@ -585,8 +582,11 @@ class KeywordMatcher:
                 brace_depth += 1
             elif char == "}" and brace_depth:
                 brace_depth -= 1
-            elif brace_depth == 0 and char in _RULE_EXPRESSION_FACTOR_TERMINATORS:
-                break
+            elif brace_depth == 0:
+                if char in _RULE_EXPRESSION_FACTOR_TERMINATORS:
+                    break
+                if index > start and self._read_rule_not_connector(expr, index) is not None:
+                    break
             index += 1
 
         block = expr[start:index].strip()
@@ -637,6 +637,41 @@ class KeywordMatcher:
         while index < len(expr) and expr[index].isspace():
             index += 1
         return index
+
+    def _read_rule_and_connector(
+        self,
+        expr: str,
+        index: int,
+        allow_word_not: bool = True,
+    ) -> tuple[bool, int] | None:
+        """Read an AND or visible NOT connector from an AND-expression."""
+        if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
+            return False, index + 1
+        if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
+            return True, index + 1
+        if allow_word_not:
+            not_connector_index = self._read_rule_not_connector(expr, index)
+            if not_connector_index is not None:
+                return True, not_connector_index
+        return None
+
+    @staticmethod
+    def _read_rule_not_connector(expr: str, index: int) -> int | None:
+        """Return the offset after a bare ``NOT`` connector, if present."""
+        if expr[index : index + 3].upper() != "NOT":
+            return None
+
+        before = expr[index - 1] if index > 0 else ""
+        after = expr[index + 3] if index + 3 < len(expr) else ""
+        if before and (before.isalnum() or before == "_"):
+            return None
+        if after == "=" or (after and (after.isalnum() or after == "_")):
+            return None
+
+        next_index = index + 3
+        while next_index < len(expr) and expr[next_index].isspace():
+            next_index += 1
+        return next_index
 
     def _collect_legacy_compiled_fields(
         self,

@@ -364,7 +364,7 @@
                                                             size="x-small"
                                                             label
                                                             variant="tonal"
-                                                            :color="clause.operator === 'NOT' ? 'warning' : clause.operator === 'REGEX' ? 'info' : 'primary'"
+                                                            :color="getRuleExpressionDisplayOperatorColor(clause)"
                                                         >
                                                             {{ clause.label }}
                                                         </v-chip>
@@ -668,8 +668,12 @@ import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { CategoryType } from '@/core/category.ts';
-import { parseExpression } from '@/components/common/keywordExpression.ts';
-import type { RuleClause, RuleOperator } from '@/components/common/keywordExpression.ts';
+import {
+    getRuleExpressionDisplayOperatorColor,
+    parseExpression,
+    toExpressionDisplayClause,
+} from '@/components/common/keywordExpression.ts';
+import type { RuleExpressionDisplayClause } from '@/components/common/keywordExpression.ts';
 import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
@@ -836,12 +840,6 @@ interface CategoryKeywordMigrationResult {
     migrated_count?: number | string | null;
     skipped?: number | string | null;
     skipped_count?: number | string | null;
-}
-
-interface RuleExpressionDisplayClause {
-    label: string;
-    operator: RuleOperator | 'RAW';
-    terms: string[];
 }
 
 interface RuleExpressionDisplayGroup {
@@ -1369,6 +1367,7 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
             clauses: [{
                 label: parsedExpression.sourceFormat === 'empty' ? tt('Empty') : tt('Raw'),
                 operator: 'RAW',
+                negated: false,
                 terms: [parsedExpression.rawExpression || expression || tt('Empty')],
             }],
         }];
@@ -1384,7 +1383,10 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
             currentClauses = [];
         }
 
-        currentClauses.push(toExpressionDisplayClause(clause, currentClauses.length === 0));
+        currentClauses.push(toExpressionDisplayClause(clause, {
+            isFirstClause: currentClauses.length === 0,
+            emptyLabel: tt('Empty'),
+        }));
         parenthesisDepth = Math.max(0, parenthesisDepth + clause.openParens - clause.closeParens);
     });
 
@@ -1393,15 +1395,6 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
     }
 
     return groups;
-}
-
-function toExpressionDisplayClause(clause: RuleClause, isFirstClause: boolean): RuleExpressionDisplayClause {
-    const connector = isFirstClause ? '' : clause.joiner === 'OR' ? '/ ' : '+ ';
-    return {
-        label: `${connector}${clause.operator}`,
-        operator: clause.operator,
-        terms: clause.terms.length > 0 ? clause.terms : [tt('Empty')],
-    };
 }
 
 function makeExpressionClauseKey(ruleId: number, expressionIndex: number, clauseIndex: number): string {

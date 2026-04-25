@@ -5,11 +5,13 @@ import path from 'node:path';
 import {
     addTermToClause,
     createRuleClause,
+    getRuleExpressionDisplayOperatorColor,
     insertClauseAfter,
     parseExpression,
     removeTermFromClause,
     serializeComposite,
     serializeForFormat,
+    toExpressionDisplayClause,
     validateParentheses,
     RULE_EXPRESSION_UNBALANCED_KEY
 } from '@/components/common/keywordExpression.ts';
@@ -154,6 +156,34 @@ describe('keywordExpression helpers', () => {
         expect(serializeForFormat(parsed.clauses, 'composite')).toStrictEqual({
             expression
         });
+    });
+
+    test('exposes negated connector state for rule center display chips', () => {
+        const parsed = parseExpression('OR={早餐}×OR={退款}', {
+            format: 'composite',
+            idFactory: createIdFactory()
+        });
+
+        const displayClauses = parsed.clauses.map((clause, index) => toExpressionDisplayClause(clause, {
+            isFirstClause: index === 0,
+            emptyLabel: 'Empty'
+        }));
+
+        expect(displayClauses).toMatchObject([
+            { label: 'OR', operator: 'OR', negated: false, terms: ['早餐'] },
+            { label: '× OR', operator: 'OR', negated: true, terms: ['退款'] }
+        ]);
+        expect(getRuleExpressionDisplayOperatorColor(displayClauses[1]!)).toBe('warning');
+        expect(getRuleExpressionDisplayOperatorColor(
+            toExpressionDisplayClause(createRuleClause({ operator: 'NOT', terms: ['撤销'] }), {
+                isFirstClause: true
+            })
+        )).toBe('warning');
+        expect(getRuleExpressionDisplayOperatorColor(
+            toExpressionDisplayClause(createRuleClause({ operator: 'REGEX', terms: ['^refund'] }), {
+                isFirstClause: true
+            })
+        )).toBe('info');
     });
 
     test('keeps block connector and inner operator independent when serializing', () => {
