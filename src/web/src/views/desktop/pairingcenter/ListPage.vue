@@ -46,8 +46,7 @@
 
                                     <span>{{ currentPageTitle }}</span>
 
-                                    <v-spacer />
-                                    <v-btn v-if="canRefreshActiveView"
+                                    <v-btn v-if="showHeaderRefresh"
                                            color="default"
                                            variant="text"
                                            density="compact"
@@ -62,6 +61,8 @@
                                         <v-icon :icon="mdiRefresh" size="24" />
                                         <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                     </v-btn>
+
+                                    <v-spacer />
 
                                     <v-chip
                                         v-if="isPairingOverview"
@@ -459,6 +460,9 @@ const canRefreshActiveView = computed(() => (
         || isCategoryRecognition.value
         || isRecurringRecognition.value
         || isInvestmentRecognition.value
+));
+const showHeaderRefresh = computed(() => (
+    canRefreshActiveView.value && !isCategoryRecognition.value
 ));
 const activeToolbarRefreshing = computed(() => (
     isPairingOverview.value

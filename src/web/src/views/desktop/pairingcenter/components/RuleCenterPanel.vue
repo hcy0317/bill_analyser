@@ -18,7 +18,7 @@
                     {{ error }}
                 </v-alert>
 
-                <v-tabs v-model="activeTab" class="px-4">
+                <v-tabs v-if="showTabSwitcher" v-model="activeTab" class="px-4">
                     <v-tab v-if="hasTab('rules')" value="rules">
                         <v-icon start :icon="mdiBookCogOutline" />
                         {{ tt('Category Rules') }} ({{ categoryRules.length }})
@@ -36,37 +36,15 @@
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
                     <v-tabs-window-item v-if="hasTab('rules')" value="rules">
-                        <div class="rule-center-table-toolbar d-flex flex-column flex-xl-row align-xl-center pa-4 ga-3">
-                            <div class="rule-center-filter-toolbar d-flex align-center flex-wrap ga-2">
-                                <v-chip size="small" variant="tonal">
-                                    {{ rulePaginationLabel }}
-                                </v-chip>
-                                <v-btn
-                                    :variant="bulkMode ? 'tonal' : 'outlined'"
-                                    :color="bulkMode ? 'primary' : undefined"
-                                    :prepend-icon="mdiCheckboxMultipleMarkedOutline"
-                                    :disabled="bulkOperating"
-                                    size="small"
-                                    @click="toggleBulkMode"
-                                >
-                                    {{ tt('Batch Manage') }}
-                                </v-btn>
-                                <div class="rule-center-page-size">
-                                    <v-select
-                                        v-model="ruleItemsPerPage"
-                                        :items="rulePageSizeOptions"
-                                        density="compact"
-                                        variant="outlined"
-                                        hide-details
-                                        :label="tt('Rows')"
-                                    />
+                        <div class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center pa-4 ga-3">
+                            <div class="rule-center-section-actions d-flex align-center flex-wrap ga-2">
+                                <div class="rule-center-section-title d-flex align-center ga-2">
+                                    <span class="font-weight-medium">{{ tt('Category Rules') }}</span>
+                                    <v-chip size="x-small" variant="tonal">{{ categoryRules.length }}</v-chip>
                                 </div>
-                            </div>
-                            <v-spacer />
-                            <div class="rule-center-primary-actions d-flex align-center flex-wrap ga-2">
                                 <v-menu
                                     open-on-hover
-                                    :open-delay="3000"
+                                    :open-delay="1500"
                                     location="bottom end"
                                 >
                                     <template #activator="{ props: menuProps }">
@@ -78,7 +56,6 @@
                                         >
                                             <v-icon start :icon="mdiPlus" />
                                             {{ tt('Add Rule') }}
-                                            <v-icon end :icon="mdiChevronDown" />
                                         </v-btn>
                                     </template>
                                     <v-list density="compact" min-width="260">
@@ -95,12 +72,28 @@
                                         </v-list-item>
                                     </v-list>
                                 </v-menu>
+                                <v-btn
+                                    color="default"
+                                    variant="text"
+                                    density="compact"
+                                    size="24"
+                                    :icon="true"
+                                    :loading="loading"
+                                    :disabled="loading"
+                                    @click="fetchAll"
+                                >
+                                    <template #loader>
+                                        <v-progress-circular indeterminate size="20" />
+                                    </template>
+                                    <v-icon :icon="mdiRefresh" size="24" />
+                                    <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                </v-btn>
                             </div>
                         </div>
                         <v-table class="rule-center-rules-table" density="compact" hover>
                             <thead>
                             <tr>
-                                <th v-if="bulkMode" class="rule-center-column-select text-no-wrap">
+                                <th class="rule-center-column-select text-no-wrap">
                                     <div class="rule-center-header-cell">
                                         <v-checkbox-btn
                                             :model-value="allVisibleRulesSelected"
@@ -111,7 +104,7 @@
                                     </div>
                                 </th>
                                 <th class="rule-center-column-category">
-                                    <v-menu v-model="categoryFilterMenu" :close-on-content-click="false" location="bottom">
+                                    <v-menu v-model="categoryFilterMenu" location="bottom">
                                         <template #activator="{ props: menuProps }">
                                             <v-btn
                                                 v-bind="menuProps"
@@ -125,26 +118,40 @@
                                                 <v-icon end size="16" :icon="rulePrimaryCategoryFilterKey ? mdiFilterVariant : mdiChevronDown" />
                                             </v-btn>
                                         </template>
-                                        <v-card class="rule-center-header-menu" min-width="280">
-                                            <v-card-text class="pb-2">
-                                                <v-select
-                                                    v-model="rulePrimaryCategoryFilterKey"
-                                                    :items="primaryCategoryFilterOptions"
-                                                    item-title="title"
-                                                    item-value="value"
-                                                    density="compact"
-                                                    variant="outlined"
-                                                    hide-details
-                                                    :label="tt('Primary Category')"
-                                                />
-                                            </v-card-text>
-                                            <v-card-actions class="pt-0">
-                                                <v-spacer />
-                                                <v-btn variant="text" size="small" @click="clearPrimaryCategoryFilter">
-                                                    {{ tt('Clear') }}
-                                                </v-btn>
-                                            </v-card-actions>
-                                        </v-card>
+                                        <v-list class="rule-center-header-menu" density="compact" min-width="260">
+                                            <v-list-item
+                                                value=""
+                                                :class="{ 'list-item-selected': !rulePrimaryCategoryFilterKey }"
+                                                :append-icon="!rulePrimaryCategoryFilterKey ? mdiCheckCircle : undefined"
+                                                @click="setPrimaryCategoryFilter('')"
+                                            >
+                                                <template #prepend>
+                                                    <v-icon :icon="mdiViewGridOutline" />
+                                                </template>
+                                                <v-list-item-title>{{ tt('All') }}</v-list-item-title>
+                                            </v-list-item>
+                                            <v-divider v-if="primaryCategoryFilterOptions.length > 0" />
+                                            <v-list-item
+                                                v-for="option in primaryCategoryFilterOptions"
+                                                :key="option.value"
+                                                :value="option.value"
+                                                :class="{ 'list-item-selected': rulePrimaryCategoryFilterKey === option.value }"
+                                                :append-icon="rulePrimaryCategoryFilterKey === option.value ? mdiCheckCircle : undefined"
+                                                @click="setPrimaryCategoryFilter(option.value)"
+                                            >
+                                                <template #prepend>
+                                                    <ItemIcon
+                                                        v-if="option.icon && option.color"
+                                                        icon-type="category"
+                                                        size="24px"
+                                                        :icon-id="option.icon"
+                                                        :color="option.color"
+                                                    />
+                                                    <v-icon v-else :icon="mdiCloseCircle" color="grey" />
+                                                </template>
+                                                <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                            </v-list-item>
+                                        </v-list>
                                     </v-menu>
                                 </th>
                                 <th class="rule-center-column-expression">
@@ -192,7 +199,7 @@
                                     </v-menu>
                                 </th>
                                 <th class="rule-center-column-regex text-no-wrap">
-                                    <v-menu v-model="regexFilterMenu" :close-on-content-click="false" location="bottom">
+                                    <v-menu v-model="regexFilterMenu" location="bottom">
                                         <template #activator="{ props: menuProps }">
                                             <v-btn
                                                 v-bind="menuProps"
@@ -206,24 +213,22 @@
                                                 <v-icon end size="16" :icon="ruleRegexFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
                                             </v-btn>
                                         </template>
-                                        <v-card class="rule-center-header-menu" min-width="220">
-                                            <v-card-text>
-                                                <v-select
-                                                    v-model="ruleRegexFilter"
-                                                    :items="ruleBooleanFilterOptions"
-                                                    item-title="title"
-                                                    item-value="value"
-                                                    density="compact"
-                                                    variant="outlined"
-                                                    hide-details
-                                                    :label="tt('Use Regex')"
-                                                />
-                                            </v-card-text>
-                                        </v-card>
+                                        <v-list class="rule-center-header-menu" density="compact" min-width="160">
+                                            <v-list-item
+                                                v-for="option in ruleBooleanFilterOptions"
+                                                :key="option.value"
+                                                :value="option.value"
+                                                :class="{ 'list-item-selected': ruleRegexFilter === option.value }"
+                                                :append-icon="ruleRegexFilter === option.value ? mdiCheckCircle : undefined"
+                                                @click="setRegexFilter(option.value)"
+                                            >
+                                                <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                            </v-list-item>
+                                        </v-list>
                                     </v-menu>
                                 </th>
                                 <th class="rule-center-column-enabled text-no-wrap">
-                                    <v-menu v-model="enabledFilterMenu" :close-on-content-click="false" location="bottom">
+                                    <v-menu v-model="enabledFilterMenu" location="bottom">
                                         <template #activator="{ props: menuProps }">
                                             <v-btn
                                                 v-bind="menuProps"
@@ -237,20 +242,18 @@
                                                 <v-icon end size="16" :icon="ruleEnabledFilter !== 'all' ? mdiFilterVariant : mdiChevronDown" />
                                             </v-btn>
                                         </template>
-                                        <v-card class="rule-center-header-menu" min-width="220">
-                                            <v-card-text>
-                                                <v-select
-                                                    v-model="ruleEnabledFilter"
-                                                    :items="ruleEnabledFilterOptions"
-                                                    item-title="title"
-                                                    item-value="value"
-                                                    density="compact"
-                                                    variant="outlined"
-                                                    hide-details
-                                                    :label="tt('Enabled')"
-                                                />
-                                            </v-card-text>
-                                        </v-card>
+                                        <v-list class="rule-center-header-menu" density="compact" min-width="160">
+                                            <v-list-item
+                                                v-for="option in ruleBooleanFilterOptions"
+                                                :key="option.value"
+                                                :value="option.value"
+                                                :class="{ 'list-item-selected': ruleEnabledFilter === option.value }"
+                                                :append-icon="ruleEnabledFilter === option.value ? mdiCheckCircle : undefined"
+                                                @click="setEnabledFilter(option.value)"
+                                            >
+                                                <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                            </v-list-item>
+                                        </v-list>
                                     </v-menu>
                                 </th>
                                 <th class="rule-center-column-applied text-no-wrap">
@@ -258,7 +261,7 @@
                                 </th>
                                 <th class="rule-center-column-actions text-no-wrap">
                                     <div class="rule-center-header-cell">
-                                        <v-menu v-if="bulkMode" location="bottom end">
+                                        <v-menu location="bottom end">
                                             <template #activator="{ props: menuProps }">
                                                 <v-btn
                                                     v-bind="menuProps"
@@ -292,7 +295,6 @@
                                                 </v-list-item>
                                             </v-list>
                                         </v-menu>
-                                        <span v-else>{{ tt('Actions') }}</span>
                                     </div>
                                 </th>
                             </tr>
@@ -328,7 +330,7 @@
                                 </tr>
                                 <template v-if="!isCategoryGroupCollapsed(group.key)">
                                     <tr v-for="item in group.items" :key="item.id">
-                                        <td v-if="bulkMode" class="rule-center-column-select">
+                                        <td class="rule-center-column-select">
                                             <v-checkbox-btn
                                                 :model-value="isRuleSelected(item.id)"
                                                 :disabled="bulkOperating"
@@ -472,10 +474,20 @@
                         </v-table>
                         <div
                             v-if="filteredDisplayCategoryRules.length > 0"
-                            class="rule-center-pagination d-flex flex-column flex-sm-row align-sm-center justify-space-between ga-3 px-4 py-3"
+                            class="rule-center-pagination d-flex flex-column flex-sm-row align-sm-center justify-end ga-3 px-4 py-3"
                         >
                             <div class="text-caption text-medium-emphasis">
-                                {{ rulePaginationLabel }}
+                                {{ tt('Rule range', { range: rulePaginationLabel }) }}
+                            </div>
+                            <div class="rule-center-page-size">
+                                <v-select
+                                    v-model="ruleItemsPerPage"
+                                    :items="rulePageSizeOptions"
+                                    density="compact"
+                                    variant="outlined"
+                                    hide-details
+                                    :label="tt('Rows per page')"
+                                />
                             </div>
                             <v-pagination
                                 v-model="rulePage"
@@ -661,7 +673,7 @@ import {
     mdiBookCogOutline, mdiRefresh, mdiBrain, mdiCalendarSync,
     mdiCheckCircle, mdiCloseCircle, mdiPlus, mdiPencilOutline, mdiDeleteOutline,
     mdiTestTube, mdiDatabaseImportOutline, mdiCalendarSearch, mdiTextBoxEditOutline,
-    mdiChevronDown, mdiChevronRight, mdiFilterVariant, mdiCheckboxMultipleMarkedOutline,
+    mdiChevronDown, mdiChevronRight, mdiFilterVariant, mdiViewGridOutline,
 } from '@mdi/js';
 import type { ApiResponse, ErrorResponse } from '@/core/api.ts';
 import services from '@/lib/services.ts';
@@ -684,11 +696,15 @@ const { tt } = useI18n();
 type SnackBarType = InstanceType<typeof SnackBar>;
 type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
 type RuleBooleanFilter = 'all' | 'yes' | 'no';
-type RuleEnabledFilter = 'all' | 'enabled' | 'disabled';
 
 interface RuleFilterOption<T extends string> {
     title: string;
     value: T;
+}
+
+interface PrimaryCategoryFilterOption extends RuleFilterOption<string> {
+    icon: string;
+    color: string;
 }
 
 const props = defineProps<{
@@ -708,6 +724,7 @@ const visibleTabs = computed<RuleCenterPanelTab[]>(() => props.tabs && props.tab
     ? props.tabs
     : ['rules', 'learning', 'recurring']
 );
+const showTabSwitcher = computed(() => visibleTabs.value.length > 1);
 const title = computed(() => props.title);
 
 function hasTab(tab: RuleCenterPanelTab): boolean {
@@ -863,15 +880,14 @@ const rulePrimaryCategoryFilterKey = ref<string>('');
 const ruleExpressionFilterQuery = ref('');
 const ruleExpressionFilterUseRegex = ref(false);
 const ruleRegexFilter = ref<RuleBooleanFilter>('all');
-const ruleEnabledFilter = ref<RuleEnabledFilter>('all');
-const bulkMode = ref(false);
+const ruleEnabledFilter = ref<RuleBooleanFilter>('all');
 const bulkOperating = ref(false);
 const selectedRuleIds = ref<number[]>([]);
 const maxCollapsedExpressionTerms = 4;
 const rulePageSizeOptions = [10, 20, 50, 100];
 const ruleItemsPerPage = ref<number>(20);
 const rulePage = ref(1);
-const ruleTableColumnCount = computed(() => bulkMode.value ? 7 : 6);
+const ruleTableColumnCount = 7;
 const selectedRuleIdSet = computed(() => new Set(selectedRuleIds.value));
 const selectedRuleCount = computed(() => selectedRuleIds.value.length);
 const ruleExpressionFilterActive = computed(() => (
@@ -883,12 +899,6 @@ const ruleBooleanFilterOptions = computed<RuleFilterOption<RuleBooleanFilter>[]>
     { title: tt('Yes'), value: 'yes' },
     { title: tt('No'), value: 'no' },
 ]);
-const ruleEnabledFilterOptions = computed<RuleFilterOption<RuleEnabledFilter>[]>(() => [
-    { title: tt('All'), value: 'all' },
-    { title: tt('Enabled'), value: 'enabled' },
-    { title: tt('Disabled'), value: 'disabled' },
-]);
-
 const learningHeaders = computed(() => [
     { title: tt('Match Type'), key: 'matchType' },
     { title: tt('Match Value'), key: 'matchValue' },
@@ -979,13 +989,14 @@ const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
     })));
 });
 
-const primaryCategoryFilterOptions = computed<RuleFilterOption<string>[]>(() => [
-    { title: tt('All Primary Categories'), value: '' },
-    ...categoryPickerItems.value.map(primaryCategory => ({
+const primaryCategoryFilterOptions = computed<PrimaryCategoryFilterOption[]>(() => (
+    categoryPickerItems.value.map(primaryCategory => ({
         title: primaryCategory.name,
         value: makePrimaryCategoryGroupKey(primaryCategory.id, primaryCategory.name),
-    })),
-]);
+        icon: primaryCategory.icon,
+        color: primaryCategory.color,
+    }))
+));
 
 function resolveRuleCategorySelection(categoryId: string): ResolvedRuleCategorySelection {
     const normalizedCategoryId = String(categoryId || '');
@@ -1301,11 +1312,11 @@ const filteredDisplayCategoryRules = computed<DisplayCategoryRuleItem[]>(() => {
             return false;
         }
 
-        if (ruleEnabledFilter.value === 'enabled' && !item.enabled) {
+        if (ruleEnabledFilter.value === 'yes' && !item.enabled) {
             return false;
         }
 
-        if (ruleEnabledFilter.value === 'disabled' && item.enabled) {
+        if (ruleEnabledFilter.value === 'no' && item.enabled) {
             return false;
         }
 
@@ -1349,8 +1360,19 @@ const someVisibleRulesSelected = computed(() => (
     visibleRuleIds.value.some(ruleId => selectedRuleIdSet.value.has(ruleId))
 ));
 
-function clearPrimaryCategoryFilter(): void {
-    rulePrimaryCategoryFilterKey.value = '';
+function setPrimaryCategoryFilter(value: string): void {
+    rulePrimaryCategoryFilterKey.value = value;
+    categoryFilterMenu.value = false;
+}
+
+function setRegexFilter(value: RuleBooleanFilter): void {
+    ruleRegexFilter.value = value;
+    regexFilterMenu.value = false;
+}
+
+function setEnabledFilter(value: RuleBooleanFilter): void {
+    ruleEnabledFilter.value = value;
+    enabledFilterMenu.value = false;
 }
 
 function clearExpressionFilter(): void {
@@ -1621,13 +1643,6 @@ async function toggleEnabled(item: CategoryRuleItem, nextEnabled: unknown) {
         error.value = getRequestErrorMessage(e, tt('Failed to toggle rule'));
     } finally {
         setRuleToggling(item.id, false);
-    }
-}
-
-function toggleBulkMode(): void {
-    bulkMode.value = !bulkMode.value;
-    if (!bulkMode.value) {
-        selectedRuleIds.value = [];
     }
 }
 
@@ -1946,17 +1961,16 @@ defineExpose({
 </script>
 
 <style scoped>
-.rule-center-primary-actions {
+.rule-center-section-actions {
     flex: 0 0 auto;
 }
 
-.rule-center-filter-toolbar {
-    flex: 1 1 420px;
-    justify-content: flex-start;
+.rule-center-section-title {
+    min-height: 36px;
 }
 
 .rule-center-page-size {
-    flex: 0 0 112px;
+    flex: 0 0 144px;
 }
 
 .rule-center-rules-table {
@@ -2098,11 +2112,6 @@ defineExpose({
 }
 
 @media (max-width: 960px) {
-    .rule-center-filter-toolbar {
-        justify-content: flex-start;
-        flex-basis: auto;
-    }
-
     .rule-center-rules-table {
         table-layout: auto;
     }

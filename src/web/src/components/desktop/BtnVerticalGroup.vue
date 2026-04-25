@@ -5,7 +5,7 @@
                :variant="value === button.value ? 'tonal' : 'outlined'" :disabled="disabled"
                v-for="(button, idx) in buttons"
                @click="value = button.value">
-            {{ button.name }}
+            {{ button.name ?? button.label }}
         </v-btn>
     </div>
 </template>
@@ -14,7 +14,8 @@
 import { computed } from 'vue';
 
 interface Button {
-    name: string;
+    name?: string;
+    label?: string;
     value: unknown;
 }
 

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import {
     buildRuleCenterQuery,
     normalizeRuleCenterSelection,
@@ -70,5 +73,47 @@ describe('rule center navigation mapping', () => {
             domain: 'llm',
             tab: 'config',
         });
+    });
+});
+
+describe('rule center UX source guards', () => {
+    const readSource = (relativePath: string) => fs.readFileSync(
+        path.resolve(process.cwd(), relativePath),
+        'utf-8'
+    );
+
+    test('primary navigation buttons render label-only options', () => {
+        const source = readSource('src/components/desktop/BtnVerticalGroup.vue');
+
+        expect(source).toContain('button.name ?? button.label');
+        expect(source).toContain('label?: string');
+    });
+
+    test('category recognition table keeps selection/filter/pagination controls stable', () => {
+        const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+
+        expect(source).toContain('v-if="showTabSwitcher"');
+        expect(source).toContain(':open-delay="1500"');
+        expect(source).toContain("tt('Rows per page')");
+        expect(source).toContain("tt('Rule range'");
+        expect(source).toContain('const ruleTableColumnCount = 7');
+        expect(source).not.toContain("tt('Batch Manage')");
+        expect(source).not.toContain('v-if="bulkMode"');
+        expect(source).not.toContain('v-model="rulePrimaryCategoryFilterKey"');
+        expect(source).not.toContain('v-model="ruleRegexFilter"');
+        expect(source).not.toContain('v-model="ruleEnabledFilter"');
+    });
+
+    test('pairing overview refresh stays beside the page title before the count chip', () => {
+        const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
+        const titleIndex = source.indexOf('<span>{{ currentPageTitle }}</span>');
+        const refreshIndex = source.indexOf('v-if="showHeaderRefresh"');
+        const spacerIndex = source.indexOf('<v-spacer />', refreshIndex);
+        const chipIndex = source.indexOf('rule-center-pair-count-chip');
+
+        expect(titleIndex).toBeGreaterThanOrEqual(0);
+        expect(refreshIndex).toBeGreaterThan(titleIndex);
+        expect(spacerIndex).toBeGreaterThan(refreshIndex);
+        expect(chipIndex).toBeGreaterThan(spacerIndex);
     });
 });
