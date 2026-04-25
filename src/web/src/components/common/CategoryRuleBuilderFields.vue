@@ -41,7 +41,7 @@
                     :disabled="disabled"
                     :regex-enabled="draft.regexEnabled"
                     :title="tt('Rule Matching Expression')"
-                    :add-button-text="tt('Add Rule')"
+                    :add-button-text="tt('Add Expression')"
                     :empty-state-text="tt('No rule expression defined yet')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
                 />

@@ -251,7 +251,7 @@ const emit = defineEmits<{
 
 const resolvedFormat = computed<ExpressionFormat>(() => props.expressionFormat ?? props.format);
 const resolvedTitle = computed(() => props.title || tt('Rule Matching Expression'));
-const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Rule'));
+const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Expression'));
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText ?? '');
 const resolvedExampleText = computed(() => props.exampleText ?? '');

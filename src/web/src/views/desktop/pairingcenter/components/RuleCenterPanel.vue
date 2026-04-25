@@ -1400,7 +1400,12 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
     let parenthesisDepth = 0;
 
     parsedExpression.clauses.forEach((clause, index) => {
-        if (index > 0 && clause.joiner === 'OR' && parenthesisDepth === 0 && currentClauses.length > 0) {
+        if (
+            index > 0
+            && clause.startsExpression
+            && parenthesisDepth === 0
+            && currentClauses.length > 0
+        ) {
             groups.push({ clauses: currentClauses });
             currentClauses = [];
         }

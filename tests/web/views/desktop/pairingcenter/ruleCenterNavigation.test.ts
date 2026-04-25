@@ -104,6 +104,14 @@ describe('rule center UX source guards', () => {
         expect(source).not.toContain('v-model="ruleEnabledFilter"');
     });
 
+    test('rule expression display keeps slash OR in the same expression group', () => {
+        const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+
+        expect(source).toContain('clause.startsExpression');
+        expect(source).toContain('parenthesisDepth === 0');
+        expect(source).not.toContain("clause.joiner === 'OR' && parenthesisDepth === 0");
+    });
+
     test('pairing overview refresh stays beside the page title before the count chip', () => {
         const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
         const titleIndex = source.indexOf('<span>{{ currentPageTitle }}</span>');
