@@ -232,6 +232,54 @@ describe('historyPolarChart helpers', () => {
         expect(emptyModel.amountAxisInterval).toBe(25);
     });
 
+    test('buildHistoricalPolarChartModel sanitizes anomalous point values before building axes', () => {
+        const model = buildHistoricalPolarChartModel([
+            {
+                category: '异常项',
+                primaryCategory: '异常项',
+                secondaryCategory: '',
+                budgetAmount: Number.POSITIVE_INFINITY,
+                spentAmount: Number.NaN,
+                executionRate: Number.NaN,
+                color: undefined,
+                groupOrder: Number.NaN,
+                itemOrder: Number.NaN
+            } as unknown as HistoricalCategoryChartPoint
+        ]);
+        const option = buildHistoricalPolarChartOption(model, {
+            isDarkMode: false,
+            accentColor: '#5c6bc0',
+            budgetAmountLabel: '预算金额',
+            spentAmountLabel: '已花费',
+            executionRateLabel: '执行度',
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: false
+        }) as {
+            radiusAxis: Array<{ max?: number; interval?: number }>;
+            series: Array<Record<string, unknown>>;
+        };
+        const budgetSeries = option.series.find(item => item['name'] === '预算金额') as {
+            data: Array<{ value: number; itemStyle: { color: string } }>;
+        } | undefined;
+        const lineSeries = option.series.find(item => item['name'] === '执行度') as {
+            data: Array<{ value: number }>;
+        } | undefined;
+
+        expect(model.slots[0]).toMatchObject({
+            budgetAmount: 0,
+            spentAmount: 0,
+            executionRate: 0,
+            color: '#5470c6'
+        });
+        expect(Number.isFinite(model.amountAxisMax)).toBe(true);
+        expect(Number.isFinite(model.amountAxisInterval)).toBe(true);
+        expect(Number.isFinite(option.radiusAxis[0]?.max)).toBe(true);
+        expect(Number.isFinite(option.radiusAxis[0]?.interval)).toBe(true);
+        expect(budgetSeries?.data[0]?.value).toBe(0);
+        expect(budgetSeries?.data[0]?.itemStyle.color).toBe('rgba(84,112,198,0.28)');
+        expect(lineSeries?.data[0]?.value).toBe(0);
+    });
+
     test('buildHistoricalPolarChartModel sorts ties by primary category and fallback category label', () => {
         const model = buildHistoricalPolarChartModel([
             {
@@ -398,6 +446,50 @@ describe('historyPolarChart helpers', () => {
         expect(secondaryLabelSeries!.data[2]?.label?.rotate).toBeGreaterThan(0);
         expect(Math.abs(secondaryLabelSeries!.data[1]?.label?.rotate || 0)).toBeLessThan(90);
         expect(lineSeries!.data[2]?.value).toBeCloseTo(117.1, 1);
+    });
+
+    test('buildHistoricalPolarChartOption keeps empty and stale custom-render paths safe', () => {
+        const emptyOption = buildHistoricalPolarChartOption(buildHistoricalPolarChartModel([]), {
+            isDarkMode: false,
+            accentColor: '#5c6bc0',
+            budgetAmountLabel: '预算金额',
+            spentAmountLabel: '已花费',
+            executionRateLabel: '执行度',
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: true
+        }) as {
+            tooltip: { show?: boolean };
+            series: Array<Record<string, unknown>>;
+        };
+        const populatedOption = buildHistoricalPolarChartOption(buildHistoricalPolarChartModel(SAMPLE_POINTS), {
+            isDarkMode: false,
+            accentColor: '#5c6bc0',
+            budgetAmountLabel: '预算金额',
+            spentAmountLabel: '已花费',
+            executionRateLabel: '执行度',
+            formatAmount: (amount: number) => `¥${amount.toFixed(2)}`,
+            showPrimaryRing: true
+        }) as {
+            series: Array<{
+                name?: string;
+                renderItem?: (
+                    params: { dataIndex: number },
+                    api: { coord: (value: number[]) => number[] }
+                ) => Record<string, unknown>;
+            }>;
+        };
+        const secondaryLabelSeries = populatedOption.series.find(item => item.name === 'secondary-labels');
+
+        expect(emptyOption.tooltip.show).toBe(false);
+        expect(emptyOption.series).toStrictEqual([]);
+        expect(secondaryLabelSeries?.renderItem?.({ dataIndex: 999 }, { coord: () => [10, 20] })).toMatchObject({
+            type: 'group',
+            children: []
+        });
+        expect(secondaryLabelSeries?.renderItem?.({ dataIndex: 0 }, { coord: () => [Number.NaN, 20] })).toMatchObject({
+            type: 'group',
+            children: []
+        });
     });
 
     test('buildHistoricalPolarChartOption omits the primary ring when showPrimaryRing is false', () => {

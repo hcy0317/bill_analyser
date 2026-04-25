@@ -183,8 +183,39 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
 }
 
+function toFiniteNumber(value: number, fallback = 0): number {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : fallback;
+}
+
+function toNonNegativeFiniteNumber(value: number): number {
+    return Math.max(0, toFiniteNumber(value));
+}
+
+function toSortOrder(value: number): number {
+    return toFiniteNumber(value, Number.MAX_SAFE_INTEGER);
+}
+
+function normalizeText(value: string): string {
+    return String(value ?? '').trim();
+}
+
+function normalizeHistoricalChartPoint(point: HistoricalCategoryChartPoint): HistoricalCategoryChartPoint {
+    return {
+        category: normalizeText(point.category),
+        primaryCategory: normalizeText(point.primaryCategory),
+        secondaryCategory: normalizeText(point.secondaryCategory),
+        budgetAmount: toNonNegativeFiniteNumber(point.budgetAmount),
+        spentAmount: toNonNegativeFiniteNumber(point.spentAmount),
+        executionRate: toNonNegativeFiniteNumber(point.executionRate),
+        color: normalizeText(point.color) || '#5470c6',
+        groupOrder: toSortOrder(point.groupOrder),
+        itemOrder: toSortOrder(point.itemOrder)
+    };
+}
+
 function withAlpha(color: string, alpha: number): string {
-    const normalizedColor = color.replace('#', '').trim();
+    const normalizedColor = normalizeText(color).replace('#', '');
     if (!/^[0-9a-fA-F]{6}$/.test(normalizedColor)) {
         return `rgba(0,0,0,${alpha})`;
     }
@@ -195,6 +226,10 @@ function withAlpha(color: string, alpha: number): string {
 }
 
 function normalizeCircleAngle(angle: number): number {
+    if (!Number.isFinite(angle)) {
+        return 0;
+    }
+
     return ((angle % 360) + 360) % 360;
 }
 
@@ -218,7 +253,7 @@ export function resetHistoricalLabelAnimationState(state: HistoricalLabelAnimati
 
 export function resolveNearestCircularAngle(targetAngle: number, previousAngle: number): number {
     if (!Number.isFinite(targetAngle) || !Number.isFinite(previousAngle)) {
-        return targetAngle;
+        return Number.isFinite(targetAngle) ? targetAngle : 0;
     }
 
     return Number((previousAngle + normalizeRotation(targetAngle - previousAngle)).toFixed(4));
@@ -237,14 +272,18 @@ export function resolveHistoricalLabelAnimationFrames(
 ): HistoricalLabelAnimationFrame[] {
     return inputs.map(input => {
         const previous = state?.get(input.stateKey) ?? null;
+        const radiusValue = toNonNegativeFiniteNumber(input.radiusValue);
+        const inputPolarAngle = normalizeCircleAngle(input.polarAngleValue);
+        const inputRotate = toFiniteNumber(input.rotate);
         const polarAngleValue = previous
-            ? resolveNearestCircularAngle(input.polarAngleValue, previous.polarAngleValue)
-            : input.polarAngleValue;
+            ? resolveNearestCircularAngle(inputPolarAngle, previous.polarAngleValue)
+            : inputPolarAngle;
         const rotate = previous
-            ? resolveNearestCircularAngle(input.rotate, previous.rotate)
-            : input.rotate;
+            ? resolveNearestCircularAngle(inputRotate, previous.rotate)
+            : inputRotate;
         const frame: HistoricalLabelAnimationFrame = {
             ...input,
+            radiusValue,
             polarAngleValue,
             rotate,
             previous
@@ -326,24 +365,44 @@ interface HistoricalLabelRenderApi {
     coord: (value: number[]) => number[];
 }
 
+interface HistoricalLabelKeyframe {
+    percent: number;
+    x: number;
+    y: number;
+    rotation: number;
+}
+
 function getFrameByRenderParams(
     frames: HistoricalLabelAnimationFrame[],
     params: HistoricalLabelRenderParams
-): HistoricalLabelAnimationFrame {
+): HistoricalLabelAnimationFrame | null {
     return frames[params.dataIndex]
         ?? frames[params.dataIndexInside ?? -1]
-        ?? frames[0]!;
+        ?? null;
+}
+
+function getSafeRenderCoord(api: HistoricalLabelRenderApi, value: number[]): [number, number] | null {
+    try {
+        const [x = 0, y = 0] = api.coord(value);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return null;
+        }
+
+        return [x, y];
+    } catch {
+        return null;
+    }
 }
 
 function buildHistoricalLabelArcKeyframes(
     frame: HistoricalLabelAnimationFrame,
     api: HistoricalLabelRenderApi
-): Array<Record<string, number>> | undefined {
+): HistoricalLabelKeyframe[] | undefined {
     if (!frame.previous) {
         return undefined;
     }
 
-    return [0, 0.25, 0.5, 0.75, 1].map(percent => {
+    const keyframes = [0, 0.25, 0.5, 0.75, 1].map(percent => {
         const radiusValue = interpolateNumber(frame.previous!.radiusValue, frame.radiusValue, percent);
         const polarAngleValue = interpolateHistoricalPolarAngle(
             frame.previous!.polarAngleValue,
@@ -351,7 +410,13 @@ function buildHistoricalLabelArcKeyframes(
             percent
         );
         const rotate = interpolateHistoricalPolarAngle(frame.previous!.rotate, frame.rotate, percent);
-        const [x = 0, y = 0] = api.coord([radiusValue, polarAngleValue]);
+        const coord = getSafeRenderCoord(api, [radiusValue, polarAngleValue]);
+
+        if (!coord) {
+            return null;
+        }
+
+        const [x, y] = coord;
 
         return {
             percent,
@@ -359,7 +424,9 @@ function buildHistoricalLabelArcKeyframes(
             y,
             rotation: degreesToRadians(rotate)
         };
-    });
+    }).filter((frame): frame is HistoricalLabelKeyframe => frame !== null);
+
+    return keyframes.length ? keyframes : undefined;
 }
 
 function createHistoricalLabelRenderItem(
@@ -367,7 +434,24 @@ function createHistoricalLabelRenderItem(
 ): (params: HistoricalLabelRenderParams, api: HistoricalLabelRenderApi) => Record<string, unknown> {
     return (params, api) => {
         const frame = getFrameByRenderParams(frames, params);
-        const [x = 0, y = 0] = api.coord([frame.radiusValue, frame.polarAngleValue]);
+        if (!frame) {
+            return {
+                type: 'group',
+                silent: true,
+                children: []
+            };
+        }
+
+        const coord = getSafeRenderCoord(api, [frame.radiusValue, frame.polarAngleValue]);
+        if (!coord) {
+            return {
+                type: 'group',
+                silent: true,
+                children: []
+            };
+        }
+
+        const [x, y] = coord;
         const keyframes = buildHistoricalLabelArcKeyframes(frame, api);
 
         return {
@@ -470,7 +554,10 @@ function buildInternalPrimaryGroups(
     selection: HistoricalLegendSelection
 ): InternalPrimaryGroup[] {
     const grouped = new Map<string, InternalPrimaryGroup>();
-    const sortedPoints = [...points].sort(comparePoints);
+    const sortedPoints = points
+        .map(normalizeHistoricalChartPoint)
+        .filter(point => point.primaryCategory || point.secondaryCategory || point.category)
+        .sort(comparePoints);
 
     for (const point of sortedPoints) {
         const primaryKey = point.primaryCategory;
@@ -662,6 +749,17 @@ export function buildHistoricalPolarChartOption(
     model: HistoricalPolarChartModel,
     args: HistoricalPolarChartOptionArgs
 ): Record<string, unknown> {
+    if (!model.slots.length || !model.primaryBands.length) {
+        return {
+            animation: false,
+            tooltip: { show: false },
+            polar: [],
+            angleAxis: [],
+            radiusAxis: [],
+            series: []
+        };
+    }
+
     const slotLabels = model.slots.map(slot => slot.key);
     const series: Array<Record<string, unknown>> = [];
     const polar: Array<Record<string, unknown>> = [
@@ -934,7 +1032,8 @@ export function buildHistoricalPolarChartOption(
             borderColor: args.isDarkMode ? '#333' : '#fff',
             textStyle: { color: args.isDarkMode ? '#eee' : '#333' },
             formatter: (params: { dataIndex?: number }) => {
-                const slot = model.slots[params.dataIndex || 0];
+                const dataIndex = Number.isInteger(params.dataIndex) ? params.dataIndex! : -1;
+                const slot = model.slots[dataIndex];
                 if (!slot) {
                     return '';
                 }

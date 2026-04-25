@@ -1709,6 +1709,11 @@ function parseDateOnly(text: string): Date | null {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function normalizeHistoryAmountCents(value: number): number {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? Math.max(0, amount) : 0;
+}
+
 function addMonths(sourceDate: Date, months: number): Date {
     return new Date(sourceDate.getFullYear(), sourceDate.getMonth() + months, 1);
 }
@@ -1718,12 +1723,54 @@ const historicalAggregationLabel = computed(() => {
     return matched?.name || tt('Monthly');
 });
 
+function isValidHistoricalUnixTime(value: number): boolean {
+    return Number.isFinite(value) && value > 0;
+}
+
+function getDefaultHistoricalDateRange(): { dateType: number; minTime: number; maxTime: number } | null {
+    return getDateRangeByDateType(
+        historicalDateType.value,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value
+    ) ?? getDateRangeByDateType(
+        DateRange.RecentTwelveMonths.type,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value
+    );
+}
+
+function getHistoricalDateRangeSnapshot(): { dateType: number; minTime: number; maxTime: number } {
+    if (
+        isValidHistoricalUnixTime(historicalMinDatetime.value)
+        && isValidHistoricalUnixTime(historicalMaxDatetime.value)
+        && historicalMinDatetime.value <= historicalMaxDatetime.value
+    ) {
+        return {
+            dateType: historicalDateType.value,
+            minTime: historicalMinDatetime.value,
+            maxTime: historicalMaxDatetime.value
+        };
+    }
+
+    const fallbackRange = getDefaultHistoricalDateRange();
+    if (fallbackRange) {
+        return fallbackRange;
+    }
+
+    const now = getCurrentUnixTime();
+    return {
+        dateType: DateRange.RecentTwelveMonths.type,
+        minTime: now,
+        maxTime: now
+    };
+}
+
 function getHistoricalBudgetQueryRange(): { startDate: string; endDate: string } {
-    ensureHistoricalDateRangeInitialized();
+    const range = getHistoricalDateRangeSnapshot();
 
     return {
-        startDate: formatDateOnly(new Date(historicalMinDatetime.value * 1000)),
-        endDate: formatDateOnly(new Date(historicalMaxDatetime.value * 1000))
+        startDate: formatDateOnly(new Date(range.minTime * 1000)),
+        endDate: formatDateOnly(new Date(range.maxTime * 1000))
     };
 }
 
@@ -1941,8 +1988,10 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
         const resolvedPeriod = resolveHistoricalPeriodByDate(historicalAggregationType.value, itemDate);
         if (!periodMap.has(resolvedPeriod.key)) continue;
 
-        const primaryCategory = item.category || tt('Uncategorized');
-        const secondaryCategory = item.subCategory || '';
+        const primaryCategory = String(item.category || '').trim() || tt('Uncategorized');
+        const secondaryCategory = String(item.subCategory || '').trim();
+        const budgetAmount = normalizeHistoryAmountCents(item.budgetAmount);
+        const spentAmount = normalizeHistoryAmountCents(item.spentAmount);
         const periodPrimaryKey = `${resolvedPeriod.key}::${primaryCategory}`;
 
         if (!groupedByPeriodAndPrimary.has(periodPrimaryKey)) {
@@ -1960,8 +2009,8 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
         const summary = groupedByPeriodAndPrimary.get(periodPrimaryKey)!;
 
         if (!secondaryCategory) {
-            summary.primaryBudgetAmount += item.budgetAmount || 0;
-            summary.primarySpentAmount += item.spentAmount || 0;
+            summary.primaryBudgetAmount += budgetAmount;
+            summary.primarySpentAmount += spentAmount;
             continue;
         }
 
@@ -1977,10 +2026,10 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
         }
 
         const secondarySummary = summary.secondaryItems.get(secondaryKey)!;
-        secondarySummary.budgetAmount += item.budgetAmount || 0;
-        secondarySummary.spentAmount += item.spentAmount || 0;
-        summary.secondaryBudgetAmount += item.budgetAmount || 0;
-        summary.secondarySpentAmount += item.spentAmount || 0;
+        secondarySummary.budgetAmount += budgetAmount;
+        secondarySummary.spentAmount += spentAmount;
+        summary.secondaryBudgetAmount += budgetAmount;
+        summary.secondarySpentAmount += spentAmount;
     }
 
     const grouped = new Map<string, {
@@ -1996,7 +2045,7 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
     for (const summary of groupedByPeriodAndPrimary.values()) {
         if (historicalBudgetLevel.value === 'primary') {
             const groupKey = summary.primaryCategory;
-            const hasPrimaryBudget = summary.primaryBudgetAmount > 0;
+            const hasPrimaryBudget = summary.primaryBudgetAmount > 0 || summary.primarySpentAmount > 0;
             const budgetAmount = hasPrimaryBudget ? summary.primaryBudgetAmount : summary.secondaryBudgetAmount;
             const spentAmount = hasPrimaryBudget
                 ? (summary.primarySpentAmount > 0 ? summary.primarySpentAmount : summary.secondarySpentAmount)
@@ -2020,7 +2069,32 @@ const historicalCategoryChartData = computed<{ categories: string[]; points: His
             continue;
         }
 
-        for (const [secondaryKey, secondarySummary] of summary.secondaryItems) {
+        const visibleSecondaryEntries = Array.from(summary.secondaryItems.entries())
+            .filter(([, secondarySummary]) => secondarySummary.budgetAmount > 0 || secondarySummary.spentAmount > 0);
+        const secondaryEntries: Array<[string, {
+            displayCategory: string;
+            secondaryCategory: string;
+            budgetAmount: number;
+            spentAmount: number;
+            itemOrder: number;
+        }]> = visibleSecondaryEntries.length > 0
+            ? visibleSecondaryEntries
+            : [[
+                `${summary.primaryCategory}::${summary.primaryCategory}`,
+                {
+                    displayCategory: summary.primaryCategory,
+                    secondaryCategory: summary.primaryCategory,
+                    budgetAmount: summary.primaryBudgetAmount,
+                    spentAmount: summary.primarySpentAmount,
+                    itemOrder: 0
+                }
+            ]];
+
+        for (const [secondaryKey, secondarySummary] of secondaryEntries) {
+            if (secondarySummary.budgetAmount <= 0 && secondarySummary.spentAmount <= 0) {
+                continue;
+            }
+
             if (!grouped.has(secondaryKey)) {
                 grouped.set(secondaryKey, {
                     displayCategory: secondarySummary.displayCategory,
@@ -2145,15 +2219,15 @@ function toggleHistoricalSecondaryLegend(secondaryKey: string): void {
 }
 
 function ensureHistoricalDateRangeInitialized(): void {
-    if (historicalMinDatetime.value && historicalMaxDatetime.value) {
+    if (
+        isValidHistoricalUnixTime(historicalMinDatetime.value)
+        && isValidHistoricalUnixTime(historicalMaxDatetime.value)
+        && historicalMinDatetime.value <= historicalMaxDatetime.value
+    ) {
         return;
     }
 
-    const range = getDateRangeByDateType(
-        historicalDateType.value,
-        firstDayOfWeek.value,
-        fiscalYearStartValue.value
-    );
+    const range = getDefaultHistoricalDateRange();
 
     if (!range) {
         return;
