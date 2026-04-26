@@ -415,11 +415,11 @@ def test_matching_route_returns_candidates_404_and_500(
         assert response.get_json()["error"] == "Internal Server Error"
 
 
-def test_matching_investment_settings_route_covers_get_put_and_validation(
+def test_matching_investment_settings_route_is_retired(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """pairing investment settings route 应覆盖 GET/PUT 成功、404、校验与异常分支。"""
+    """旧 investment-settings API 应明确退役，避免隐藏写入旧关键词配置。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -430,16 +430,11 @@ def test_matching_investment_settings_route_covers_get_put_and_validation(
 
     with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
         _set_request_user_id(9)
-        payload = route().get_json() or {}
-        assert payload == {
-            "success": True,
-            "data": {
-                "importLearningEnabled": True,
-                "investmentPlatformKeywords": ["蚂蚁财富"],
-                "investmentProductKeywords": ["基金"],
-                "investmentExcludeKeywords": ["还款"],
-            },
-        }
+        response, status = _unwrap_response(route())
+        assert status == 410
+        payload = response.get_json() or {}
+        assert payload["success"] is False
+        assert payload["error"] == "Investment recognition settings are managed by category rules"
 
     with matching_route_app.test_request_context(
         "/api/matching/investment-settings",
@@ -452,61 +447,10 @@ def test_matching_investment_settings_route_covers_get_put_and_validation(
         },
     ):
         _set_request_user_id(9)
-        payload = route().get_json() or {}
-        assert payload == {
-            "success": True,
-            "data": {
-                "importLearningEnabled": False,
-                "investmentPlatformKeywords": ["京东金融"],
-                "investmentProductKeywords": ["ETF"],
-                "investmentExcludeKeywords": ["账单"],
-            },
-        }
-        assert db.update_pairing_investment_settings_calls[-1] == {
-            "user_id": 9,
-            "import_learning_enabled": False,
-            "investment_platform_keywords": ["京东金融"],
-            "investment_product_keywords": ["ETF"],
-            "investment_exclude_keywords": ["账单"],
-        }
-
-    with matching_route_app.test_request_context(
-        "/api/matching/investment-settings",
-        method="PUT",
-        json={"importLearningEnabled": "yes"},
-    ):
-        _set_request_user_id(9)
         response, status = _unwrap_response(route())
-        assert status == 400
-        assert response.get_json()["error"] == "Invalid request"
-
-    with matching_route_app.test_request_context(
-        "/api/matching/investment-settings",
-        method="PUT",
-        json=["invalid"],
-    ):
-        _set_request_user_id(9)
-        response, status = _unwrap_response(route())
-        assert status == 400
-        assert response.get_json()["error"] == "Invalid request"
-
-    db.pairing_investment_settings_result = None
-    with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
-        _set_request_user_id(9)
-        response, status = _unwrap_response(route())
-        assert status == 404
-        assert response.get_json()["error"] == "User not found"
-
-    async def raise_matching_settings_error(user_id: int = 1) -> dict[str, Any]:
-        _ = user_id
-        raise RuntimeError("matching settings boom")
-
-    monkeypatch.setattr(db, "get_pairing_investment_settings", raise_matching_settings_error)
-    with matching_route_app.test_request_context("/api/matching/investment-settings", method="GET"):
-        _set_request_user_id(9)
-        response, status = _unwrap_response(route())
-        assert status == 500
-        assert response.get_json()["error"] == "Internal Server Error"
+        assert status == 410
+        assert response.get_json()["error"] == "Investment recognition settings are managed by category rules"
+        assert db.update_pairing_investment_settings_calls == []
 
 
 def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(

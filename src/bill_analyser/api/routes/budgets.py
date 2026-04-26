@@ -326,17 +326,26 @@ def get_budgets():
             filters["enabled"] = enabled_arg.lower() == "true"
         if request.args.get("category"):
             filters["category"] = request.args.get("category")
+        budget_type = _get_optional_int(request.args.get("budget_type"), "budget_type")
 
         logger.info("[get_budgets] 筛选条件: %s", filters)
 
         db = get_app_context()
         user_id = _get_request_user_id()
-        budgets = _run_async(db.get_budgets(filters, user_id=user_id))
+        budgets = _run_async(
+            db.get_budgets_for_listing(
+                filters,
+                budget_type=budget_type,
+                user_id=user_id,
+            )
+        )
 
         logger.info("[get_budgets] 返回%s条预算", len(budgets))
 
         return jsonify({"success": True, "result": budgets})
 
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取预算列表失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": str(exc)}), 500

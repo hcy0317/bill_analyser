@@ -36,9 +36,16 @@
                 <v-tabs-window v-model="activeTab">
                     <!-- Category Rules -->
                     <v-tabs-window-item v-if="hasTab('rules')" value="rules">
-                        <div class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center pa-4 ga-3">
+                        <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                        <div
+                            class="rule-center-table-toolbar d-flex flex-column flex-lg-row align-lg-center ga-3"
+                            :class="{
+                                'rule-center-table-toolbar--local pa-4': !hasHeaderActionsTarget,
+                                'rule-center-table-toolbar--external': hasHeaderActionsTarget,
+                            }"
+                        >
                             <div class="rule-center-section-actions d-flex align-center flex-wrap ga-2">
-                                <div class="rule-center-section-title d-flex align-center ga-2">
+                                <div v-if="!hasHeaderActionsTarget" class="rule-center-section-title d-flex align-center ga-2">
                                     <span class="font-weight-medium">{{ tt('Category Rules') }}</span>
                                     <v-chip size="x-small" variant="tonal">{{ categoryRules.length }}</v-chip>
                                 </div>
@@ -90,6 +97,7 @@
                                 </v-btn>
                             </div>
                         </div>
+                        </Teleport>
                         <v-table class="rule-center-rules-table" density="compact" hover>
                             <thead>
                             <tr>
@@ -99,6 +107,8 @@
                                             :model-value="allVisibleRulesSelected"
                                             :indeterminate="someVisibleRulesSelected && !allVisibleRulesSelected"
                                             :disabled="paginatedDisplayCategoryRules.length === 0 || bulkOperating"
+                                            density="compact"
+                                            hide-details
                                             @update:model-value="setVisibleRulesSelected"
                                         />
                                     </div>
@@ -118,7 +128,11 @@
                                                 <v-icon end size="16" :icon="rulePrimaryCategoryFilterKey ? mdiFilterVariant : mdiChevronDown" />
                                             </v-btn>
                                         </template>
-                                        <v-list class="rule-center-header-menu" density="compact" min-width="260">
+                                        <v-list
+                                            class="rule-center-header-menu rule-center-category-filter-menu"
+                                            density="compact"
+                                            min-width="260"
+                                        >
                                             <v-list-item
                                                 value=""
                                                 :class="{ 'list-item-selected': !rulePrimaryCategoryFilterKey }"
@@ -130,27 +144,35 @@
                                                 </template>
                                                 <v-list-item-title>{{ tt('All') }}</v-list-item-title>
                                             </v-list-item>
-                                            <v-divider v-if="primaryCategoryFilterOptions.length > 0" />
-                                            <v-list-item
-                                                v-for="option in primaryCategoryFilterOptions"
-                                                :key="option.value"
-                                                :value="option.value"
-                                                :class="{ 'list-item-selected': rulePrimaryCategoryFilterKey === option.value }"
-                                                :append-icon="rulePrimaryCategoryFilterKey === option.value ? mdiCheckCircle : undefined"
-                                                @click="setPrimaryCategoryFilter(option.value)"
+                                            <template
+                                                v-for="group in primaryCategoryFilterGroups"
+                                                :key="group.type"
                                             >
-                                                <template #prepend>
-                                                    <ItemIcon
-                                                        v-if="option.icon && option.color"
-                                                        icon-type="category"
-                                                        size="24px"
-                                                        :icon-id="option.icon"
-                                                        :color="option.color"
-                                                    />
-                                                    <v-icon v-else :icon="mdiCloseCircle" color="grey" />
-                                                </template>
-                                                <v-list-item-title>{{ option.title }}</v-list-item-title>
-                                            </v-list-item>
+                                                <v-divider />
+                                                <v-list-subheader class="rule-center-category-filter-group">
+                                                    {{ group.title }}
+                                                </v-list-subheader>
+                                                <v-list-item
+                                                    v-for="option in group.options"
+                                                    :key="option.value"
+                                                    :value="option.value"
+                                                    :class="{ 'list-item-selected': rulePrimaryCategoryFilterKey === option.value }"
+                                                    :append-icon="rulePrimaryCategoryFilterKey === option.value ? mdiCheckCircle : undefined"
+                                                    @click="setPrimaryCategoryFilter(option.value)"
+                                                >
+                                                    <template #prepend>
+                                                        <ItemIcon
+                                                            v-if="option.icon && option.color"
+                                                            icon-type="category"
+                                                            size="24px"
+                                                            :icon-id="option.icon"
+                                                            :color="option.color"
+                                                        />
+                                                        <v-icon v-else :icon="mdiCloseCircle" color="grey" />
+                                                    </template>
+                                                    <v-list-item-title>{{ option.title }}</v-list-item-title>
+                                                </v-list-item>
+                                            </template>
                                         </v-list>
                                     </v-menu>
                                 </th>
@@ -178,7 +200,7 @@
                                                     hide-details
                                                     clearable
                                                     :label="tt('Rule Matching Expression')"
-                                                    placeholder="!temp_file (work|summary) !zip"
+                                                    placeholder="!key1 (key2|key3) !key4"
                                                 />
                                                 <v-switch
                                                     v-model="ruleExpressionFilterUseRegex"
@@ -334,6 +356,8 @@
                                             <v-checkbox-btn
                                                 :model-value="isRuleSelected(item.id)"
                                                 :disabled="bulkOperating"
+                                                density="compact"
+                                                hide-details
                                                 @update:model-value="setRuleSelected(item.id, $event)"
                                             />
                                         </td>
@@ -361,6 +385,18 @@
                                                         v-for="(clause, clauseIndex) in expressionGroup.clauses"
                                                         :key="`${item.id}-${expressionIndex}-${clauseIndex}`"
                                                     >
+                                                        <span
+                                                            v-if="clause.connectorLabel"
+                                                            class="rule-expression-connector"
+                                                        >
+                                                            {{ clause.connectorLabel }}
+                                                        </span>
+                                                        <span
+                                                            v-if="clause.openParenLabel"
+                                                            class="rule-expression-paren rule-expression-paren--open"
+                                                        >
+                                                            {{ clause.openParenLabel }}
+                                                        </span>
                                                         <v-chip
                                                             class="rule-expression-operator"
                                                             size="x-small"
@@ -391,6 +427,12 @@
                                                         >
                                                             +{{ getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) }}
                                                         </v-chip>
+                                                        <span
+                                                            v-if="clause.closeParenLabel"
+                                                            class="rule-expression-paren rule-expression-paren--close"
+                                                        >
+                                                            {{ clause.closeParenLabel }}
+                                                        </span>
                                                     </template>
                                                 </div>
                                             </div>
@@ -692,7 +734,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 
 const categoryStore = useTransactionCategoriesStore();
-const { tt } = useI18n();
+const { tt, getAllTransactionDefaultCategories, getCurrentLanguageTag } = useI18n();
 type SnackBarType = InstanceType<typeof SnackBar>;
 type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
 type RuleBooleanFilter = 'all' | 'yes' | 'no';
@@ -707,11 +749,25 @@ interface PrimaryCategoryFilterOption extends RuleFilterOption<string> {
     color: string;
 }
 
+interface PrimaryCategoryFilterGroup {
+    type: CategoryType;
+    title: string;
+    options: PrimaryCategoryFilterOption[];
+}
+
+interface PrimaryCategoryDisplayInfo {
+    id?: string;
+    name: string;
+    icon: string;
+    color: string;
+}
+
 const props = defineProps<{
     initTab?: string;
     tabs?: RuleCenterPanelTab[];
     title?: string;
     hideHeader?: boolean;
+    headerActionsTarget?: string;
 }>();
 
 const loading = ref(false);
@@ -726,6 +782,8 @@ const visibleTabs = computed<RuleCenterPanelTab[]>(() => props.tabs && props.tab
 );
 const showTabSwitcher = computed(() => visibleTabs.value.length > 1);
 const title = computed(() => props.title);
+const hasHeaderActionsTarget = computed(() => Boolean(props.headerActionsTarget));
+const headerActionsTarget = computed(() => props.headerActionsTarget || 'body');
 
 function hasTab(tab: RuleCenterPanelTab): boolean {
     return visibleTabs.value.includes(tab);
@@ -838,6 +896,7 @@ interface CategoryPickerPrimaryItem extends Record<string, unknown> {
     icon: string;
     color: string;
     hidden: boolean;
+    type: CategoryType;
     typeLabel: string;
     subCategories: CategoryPickerSecondaryItem[];
 }
@@ -978,6 +1037,7 @@ const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
         icon: primaryCategory.icon,
         color: primaryCategory.color,
         hidden: primaryCategory.hidden,
+        type: Number(primaryCategory.type) as CategoryType,
         typeLabel: getCategoryTypeLabel(primaryCategory.type),
         subCategories: (primaryCategory.subCategories || []).map(subCategory => ({
             id: String(subCategory.id),
@@ -989,13 +1049,50 @@ const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
     })));
 });
 
-const primaryCategoryFilterOptions = computed<PrimaryCategoryFilterOption[]>(() => (
-    categoryPickerItems.value.map(primaryCategory => ({
-        title: primaryCategory.name,
-        value: makePrimaryCategoryGroupKey(primaryCategory.id, primaryCategory.name),
-        icon: primaryCategory.icon,
-        color: primaryCategory.color,
-    }))
+const localizedPresetPrimaryCategoryMap = computed<Map<string, PrimaryCategoryDisplayInfo>>(() => {
+    const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'en']));
+    const metadataByName = new Map<string, PrimaryCategoryDisplayInfo>();
+
+    for (const locale of localizedCategoryLocales) {
+        const localizedCategories = getAllTransactionDefaultCategories(0, locale);
+        for (const categories of Object.values(localizedCategories)) {
+            for (const category of categories ?? []) {
+                const categoryNameKey = normalizeCategoryNameKey(category.name);
+                if (!categoryNameKey || metadataByName.has(categoryNameKey)) {
+                    continue;
+                }
+                metadataByName.set(categoryNameKey, {
+                    name: category.name,
+                    icon: category.icon,
+                    color: String(category.color),
+                });
+            }
+        }
+    }
+
+    return metadataByName;
+});
+
+const primaryCategoryFilterTypeOrder: CategoryType[] = [
+    CategoryType.Income,
+    CategoryType.Expense,
+    CategoryType.Transfer,
+    CategoryType.Investment,
+];
+
+const primaryCategoryFilterGroups = computed<PrimaryCategoryFilterGroup[]>(() => (
+    primaryCategoryFilterTypeOrder.map(type => ({
+        type,
+        title: getCategoryTypeLabel(type),
+        options: categoryPickerItems.value
+            .filter(primaryCategory => primaryCategory.type === type)
+            .map(primaryCategory => ({
+                title: primaryCategory.name,
+                value: makePrimaryCategoryGroupKey(primaryCategory.id, primaryCategory.name),
+                icon: primaryCategory.icon,
+                color: primaryCategory.color,
+            })),
+    })).filter(group => group.options.length > 0)
 ));
 
 function resolveRuleCategorySelection(categoryId: string): ResolvedRuleCategorySelection {
@@ -1042,15 +1139,20 @@ function makePrimaryCategoryGroupKey(categoryId: string | number | null | undefi
     return normalizedName ? `category-name:${normalizedName}` : 'unassigned';
 }
 
-function findPrimaryCategoryByName(name: string | null | undefined): CategoryPickerPrimaryItem | null {
+function findPrimaryCategoryByName(name: string | null | undefined): PrimaryCategoryDisplayInfo | null {
     const normalizedName = normalizeCategoryNameKey(name);
     if (!normalizedName) {
         return null;
     }
 
-    return categoryPickerItems.value.find(primaryCategory => (
+    const storedCategory = categoryPickerItems.value.find(primaryCategory => (
         normalizeCategoryNameKey(primaryCategory.name) === normalizedName
-    )) ?? null;
+    ));
+    if (storedCategory) {
+        return storedCategory;
+    }
+
+    return localizedPresetPrimaryCategoryMap.value.get(normalizedName) ?? null;
 }
 
 function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullName: string; icon: string; color: string } {
@@ -1072,12 +1174,14 @@ function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullNam
         };
     }
 
+    const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name);
+
     if (item.sub_category_name) {
         return {
             name: item.sub_category_name,
             fullName,
-            icon: '',
-            color: '',
+            icon: fallbackPrimaryCategory?.icon ?? '',
+            color: fallbackPrimaryCategory?.color ?? '',
         };
     }
 
@@ -1085,8 +1189,8 @@ function resolveCategoryDisplay(item: CategoryRuleItem): { name: string; fullNam
         return {
             name: item.category_name,
             fullName,
-            icon: '',
-            color: '',
+            icon: fallbackPrimaryCategory?.icon ?? '',
+            color: fallbackPrimaryCategory?.color ?? '',
         };
     }
 
@@ -1970,8 +2074,16 @@ defineExpose({
     flex: 0 0 auto;
 }
 
+.rule-center-table-toolbar--external {
+    padding: 0;
+}
+
+.rule-center-table-toolbar--external .rule-center-section-actions {
+    min-height: 32px;
+}
+
 .rule-center-section-title {
-    min-height: 36px;
+    min-height: 38px;
 }
 
 .rule-center-page-size {
@@ -2016,6 +2128,42 @@ defineExpose({
     width: 100%;
 }
 
+.rule-center-header-cell :deep(.v-selection-control),
+.rule-center-column-select :deep(.v-selection-control),
+.rule-center-column-select :deep(.v-checkbox-btn) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    height: 24px;
+}
+
+.rule-center-header-cell :deep(.v-checkbox-btn),
+.rule-center-column-select :deep(.v-checkbox-btn) {
+    --v-selection-control-size: 24px;
+    width: 24px;
+    min-width: 24px;
+    margin-inline: auto;
+}
+
+.rule-center-header-cell :deep(.v-selection-control__input),
+.rule-center-column-select :deep(.v-selection-control__input) {
+    width: 24px;
+    height: 24px;
+    margin: 0;
+}
+
+.rule-center-header-cell :deep(.v-icon),
+.rule-center-column-select :deep(.v-icon) {
+    width: 22px;
+    height: 22px;
+    font-size: 22px;
+}
+
+.rule-center-column-select :deep(.v-selection-control__wrapper) {
+    margin-inline: auto;
+}
+
 .rule-center-header-button {
     padding-inline: 4px;
     text-transform: none;
@@ -2024,6 +2172,18 @@ defineExpose({
 
 .rule-center-header-menu {
     max-width: min(360px, 90vw);
+}
+
+.rule-center-category-filter-menu {
+    max-height: min(500px, calc(100vh - 160px));
+    overflow-y: auto;
+}
+
+.rule-center-category-filter-group {
+    min-height: 28px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: rgb(var(--v-theme-on-surface-variant));
 }
 
 .rule-center-column-select {
@@ -2089,6 +2249,25 @@ defineExpose({
     border-radius: 8px;
     background: rgba(var(--v-theme-surface), 1);
     overflow: hidden;
+}
+
+.rule-expression-connector,
+.rule-expression-paren {
+    flex: 0 0 auto;
+    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(var(--v-theme-primary), 0.86);
+}
+
+.rule-expression-connector {
+    min-width: 12px;
+    text-align: center;
+}
+
+.rule-expression-paren {
+    letter-spacing: 1px;
 }
 
 .rule-expression-operator {

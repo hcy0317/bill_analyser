@@ -46,6 +46,18 @@
 
                                     <span>{{ currentPageTitle }}</span>
 
+                                    <div
+                                        v-if="showRuleHeaderActions"
+                                        :id="ruleHeaderActionsTargetId"
+                                        class="rule-center-title-actions rule-center-title-actions--compact ms-3"
+                                    />
+
+                                    <div
+                                        v-if="showLearningHeaderActions"
+                                        :id="learningHeaderActionsTargetId"
+                                        class="rule-center-title-actions rule-center-title-actions--wide ms-3"
+                                    />
+
                                     <v-btn v-if="showHeaderRefresh"
                                            color="default"
                                            variant="text"
@@ -62,13 +74,7 @@
                                         <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                     </v-btn>
 
-                                    <v-spacer />
-
-                                    <div
-                                        v-if="showLearningHeaderActions"
-                                        :id="learningHeaderActionsTargetId"
-                                        class="rule-center-title-actions ms-3"
-                                    />
+                                    <v-spacer v-if="!showLearningHeaderActions" />
 
                                     <v-chip
                                         v-if="isPairingOverview"
@@ -108,6 +114,7 @@
                                                            ref="categoryRulePanel"
                                                            :tabs="['rules']"
                                                            :title="tt('Category Recognition')"
+                                                           :header-actions-target="ruleHeaderActionsTarget"
                                                            hide-header />
                                     </div>
                                 </template>
@@ -118,15 +125,9 @@
                                                            ref="recurringRulePanel"
                                                            :tabs="['recurring']"
                                                            :title="tt('Recurring Recognition')"
+                                                           :header-actions-target="ruleHeaderActionsTarget"
                                                            hide-header />
                                     </div>
-                                </template>
-
-                                <template v-else-if="activeDomain === 'investment' && activeTab === 'rules'">
-                                    <investment-recognition-settings-card
-                                        ref="investmentRecognitionSettings"
-                                        hide-header
-                                    />
                                 </template>
 
                                 <template v-else-if="activeDomain === 'learning' && activeTab === 'overview'">
@@ -197,7 +198,6 @@ import {
 import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
 import { useMatchingStore } from '@/stores/matching.ts';
 import { useI18n } from '@/locales/helpers.ts';
-import InvestmentRecognitionSettingsCard from '@/views/desktop/pairingcenter/components/InvestmentRecognitionSettingsCard.vue';
 import LearningCenterPanel from '@/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
 import PairsOverviewTable from '@/views/desktop/pairingcenter/components/PairsOverviewTable.vue';
 import RuleCenterPanel from '@/views/desktop/pairingcenter/components/RuleCenterPanel.vue';
@@ -216,7 +216,6 @@ type SecondaryNavValue =
     | 'transfer-overview'
     | 'investment-overview'
     | 'category-recognition'
-    | 'investment-recognition'
     | 'recurring-recognition'
     | 'learning-overview'
     | 'learning-rules'
@@ -263,7 +262,6 @@ const showDeleteDialog = ref(false);
 const pairToDelete = ref<BillMatchingPairDetail | null>(null);
 const deleting = ref<number | null>(null);
 const rulePanelRefreshing = ref(false);
-const investmentSettingsRefreshing = ref(false);
 
 interface RefreshablePanel {
     refresh: () => Promise<void>;
@@ -271,7 +269,8 @@ interface RefreshablePanel {
 
 const categoryRulePanel = ref<RefreshablePanel | null>(null);
 const recurringRulePanel = ref<RefreshablePanel | null>(null);
-const investmentRecognitionSettings = ref<RefreshablePanel | null>(null);
+const ruleHeaderActionsTargetId = 'rule-center-rule-title-actions';
+const ruleHeaderActionsTarget = `#${ruleHeaderActionsTargetId}`;
 const learningHeaderActionsTargetId = 'rule-center-learning-title-actions';
 const learningHeaderActionsTarget = `#${learningHeaderActionsTargetId}`;
 
@@ -319,10 +318,6 @@ const activePrimary = computed<PrimaryNavValue>(() => {
 const activeSecondary = computed<SecondaryNavValue>(() => {
     if (activeDomain.value === 'investment' && activeTab.value === 'overview') {
         return 'investment-overview';
-    }
-
-    if (activeDomain.value === 'investment' && activeTab.value === 'rules') {
-        return 'investment-recognition';
     }
 
     if (activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring') {
@@ -383,15 +378,6 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
                 label: tt('Category Recognition'),
                 selection: {
                     domain: 'transfer',
-                    tab: 'rules',
-                    legacyRuleTab: 'rules',
-                },
-            },
-            {
-                value: 'investment-recognition',
-                label: tt('Investment Recognition'),
-                selection: {
-                    domain: 'investment',
                     tab: 'rules',
                     legacyRuleTab: 'rules',
                 },
@@ -468,17 +454,13 @@ const isCategoryRecognition = computed(() =>
 const isRecurringRecognition = computed(() =>
     activeDomain.value === 'transfer' && activeTab.value === 'rules' && activeLegacyRuleTab.value === 'recurring'
 );
-const isInvestmentRecognition = computed(() =>
-    activeDomain.value === 'investment' && activeTab.value === 'rules'
-);
 const showLearningHeaderActions = computed(() =>
     activeDomain.value === 'learning' || activeDomain.value === 'llm'
 );
-const currentPageTitle = computed(() => (
-    isInvestmentRecognition.value
-        ? tt('Investment Recognition Settings')
-        : currentTabOption.value.label
-));
+const showRuleHeaderActions = computed(() =>
+    isCategoryRecognition.value || isRecurringRecognition.value
+);
+const currentPageTitle = computed(() => currentTabOption.value.label);
 const filteredPairs = computed(() => matchingStore.pairs.filter(pair => pair.pairType === activeDomain.value));
 const showPairsLoading = computed(() => isPairingOverview.value && loading.value);
 const showPairsError = computed(() => isPairingOverview.value && !!error.value);
@@ -486,7 +468,6 @@ const canRefreshActiveView = computed(() => (
     isPairingOverview.value
         || isCategoryRecognition.value
         || isRecurringRecognition.value
-        || isInvestmentRecognition.value
 ));
 const showHeaderRefresh = computed(() => (
     canRefreshActiveView.value && !isCategoryRecognition.value
@@ -494,9 +475,7 @@ const showHeaderRefresh = computed(() => (
 const activeToolbarRefreshing = computed(() => (
     isPairingOverview.value
         ? loading.value
-        : isInvestmentRecognition.value
-            ? investmentSettingsRefreshing.value
-            : rulePanelRefreshing.value
+        : rulePanelRefreshing.value
 ));
 
 function collapseNavOnMobile(): void {
@@ -554,16 +533,6 @@ function selectSecondaryNav(value: unknown): void {
 async function refreshActiveView(): Promise<void> {
     if (isPairingOverview.value) {
         await matchingStore.loadPairs();
-        return;
-    }
-
-    if (isInvestmentRecognition.value) {
-        investmentSettingsRefreshing.value = true;
-        try {
-            await investmentRecognitionSettings.value?.refresh();
-        } finally {
-            investmentSettingsRefreshing.value = false;
-        }
         return;
     }
 
@@ -682,9 +651,17 @@ watch(
 
 .rule-center-title-actions {
     display: flex;
-    flex: 0 1 auto;
     min-width: 0;
     align-items: center;
-    justify-content: flex-end;
+}
+
+.rule-center-title-actions--compact {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+}
+
+.rule-center-title-actions--wide {
+    flex: 1 1 auto;
+    justify-content: stretch;
 }
 </style>

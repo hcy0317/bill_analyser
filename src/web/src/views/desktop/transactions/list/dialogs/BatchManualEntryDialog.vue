@@ -1077,7 +1077,7 @@ defineExpose({
 }
 
 .batch-manual-entry-cell {
-    min-height: 36px;
+    min-height: 38px;
     padding: 2px 8px;
     background-color: rgb(var(--v-theme-surface));
 }

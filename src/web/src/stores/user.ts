@@ -17,10 +17,6 @@ import {
     normalizeUserBasicInfo
 } from '@/models/user.ts';
 import type {
-    PairingCenterInvestmentSettings
-} from '@/models/pairing_center.ts';
-
-import type {
     ExportTransactionDataRequest,
     DataStatisticsResponse
 } from '@/models/data_management.ts';
@@ -197,71 +193,6 @@ export const useUserStore = defineStore('user', () => {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
                     reject({ message: 'Unable to retrieve user profile' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function mergeInvestmentRecognitionSettings(settings: PairingCenterInvestmentSettings): void {
-        const normalizedUserInfo = normalizeUserBasicInfo({
-            ...(currentUserBasicInfo.value || EMPTY_USER_BASIC_INFO),
-            importLearningEnabled: settings.importLearningEnabled,
-            investmentPlatformKeywords: [...settings.investmentPlatformKeywords],
-            investmentProductKeywords: [...settings.investmentProductKeywords],
-            investmentExcludeKeywords: [...settings.investmentExcludeKeywords],
-        });
-        storeUserBasicInfo(normalizedUserInfo);
-    }
-
-    function getPairingInvestmentSettings(): Promise<PairingCenterInvestmentSettings> {
-        return new Promise((resolve, reject) => {
-            services.getPairingInvestmentSettings().then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to retrieve investment recognition settings' });
-                    return;
-                }
-
-                mergeInvestmentRecognitionSettings(data.result);
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to retrieve investment recognition settings', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to retrieve investment recognition settings' });
-                } else {
-                    reject(error);
-                }
-            });
-        });
-    }
-
-    function updatePairingInvestmentSettings(
-        settings: PairingCenterInvestmentSettings
-    ): Promise<PairingCenterInvestmentSettings> {
-        return new Promise((resolve, reject) => {
-            services.updatePairingInvestmentSettings(settings).then(response => {
-                const data = response.data;
-
-                if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to update investment recognition settings' });
-                    return;
-                }
-
-                mergeInvestmentRecognitionSettings(data.result);
-                resolve(data.result);
-            }).catch(error => {
-                logger.error('failed to update investment recognition settings', error);
-
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to update investment recognition settings' });
                 } else {
                     reject(error);
                 }
@@ -560,8 +491,6 @@ export const useUserStore = defineStore('user', () => {
         storeUserBasicInfo,
         resetUserBasicInfo,
         getCurrentUserProfile,
-        getPairingInvestmentSettings,
-        updatePairingInvestmentSettings,
         updateUserTransactionEditScope,
         updateUserAvatar,
         removeUserAvatar,

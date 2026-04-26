@@ -251,11 +251,11 @@ const emit = defineEmits<{
 
 const resolvedFormat = computed<ExpressionFormat>(() => props.expressionFormat ?? props.format);
 const resolvedTitle = computed(() => props.title || tt('Rule Matching Expression'));
-const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Expression'));
+const resolvedAddButtonText = computed(() => props.addButtonText || tt('Add Matching Expression'));
 const resolvedEmptyStateText = computed(() => props.emptyStateText || tt('No rule clauses yet'));
 const resolvedHelpText = computed(() => props.helpText ?? '');
 const resolvedExampleText = computed(() => props.exampleText ?? '');
-const termsLabel = computed(() => props.regexEnabled ? tt('Regex Patterns') : tt('Expression Terms'));
+const termsLabel = computed(() => props.regexEnabled ? tt('Regex Patterns') : tt('Matching Expression Terms'));
 const termsPlaceholder = computed(() => props.regexEnabled
     ? tt('Enter regex patterns and press Enter')
     : tt('Enter terms and press Enter'));
@@ -502,7 +502,10 @@ function formatParenStack(paren: '(' | ')', count: number): string {
     if (count <= 3) {
         return paren.repeat(count);
     }
-    return `${paren.repeat(3)}×${count}`;
+    if (count <= 6) {
+        return paren.repeat(count);
+    }
+    return `${paren.repeat(6)}×${count}`;
 }
 </script>
 
@@ -561,12 +564,10 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .rule-clause-row {
-    position: relative;
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
-    padding-inline: 18px;
 }
 
 .clause-operator {
@@ -586,22 +587,23 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .paren-control {
-    position: absolute;
-    top: 2px;
     display: flex;
     align-items: stretch;
-    width: 34px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 48px;
     height: 38px;
-    opacity: 0;
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.14);
+    border-radius: 10px;
+    background: rgba(var(--v-theme-surface), 0.78);
+    opacity: 0.36;
+    overflow: hidden;
     transition: opacity 0.14s ease;
 }
 
-.paren-control-left {
-    left: 0;
-}
-
+.paren-control-left,
 .paren-control-right {
-    right: 0;
+    margin-top: 0;
 }
 
 .paren-control__step,
@@ -622,20 +624,23 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .paren-control__step {
-    flex: 0 0 12px;
+    flex: 0 0 20px;
     font-size: 13px;
 }
 
 .paren-control__main {
     flex: 1 1 auto;
-    min-width: 0;
-    font-size: 24px;
+    min-width: 28px;
+    padding-inline: 4px;
+    font-size: 22px;
     font-weight: 700;
+    letter-spacing: 1px;
+    white-space: nowrap;
 }
 
 .rule-clause-row:hover .paren-control,
 .paren-control--active {
-    opacity: 0.38;
+    opacity: 0.82;
 }
 
 .paren-control--active {

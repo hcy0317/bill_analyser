@@ -109,6 +109,26 @@ function buildRuleCenterRedirect(route: RouteLocation, domain: 'learning' | 'llm
     };
 }
 
+function buildLegacyRulesCenterRedirect(route: RouteLocation) {
+    const query: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(route.query)) {
+        if (typeof value === 'string') {
+            query[key] = value;
+        }
+    }
+
+    if (!query['domain'] && !query['view']) {
+        query['view'] = 'rule-center';
+    }
+
+    return {
+        path: '/pairing/list',
+        query,
+        replace: true
+    };
+}
+
 const router = createRouter({
     history: createWebHashHistory(),
     routes: [
@@ -230,7 +250,7 @@ const router = createRouter({
 
                 {
                     path: '/rules/center',
-                    redirect: route => buildRuleCenterRedirect(route, 'learning')
+                    redirect: route => buildLegacyRulesCenterRedirect(route)
                 },
                 {
                     path: '/insights',

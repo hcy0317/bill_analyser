@@ -62,13 +62,13 @@ def _get_current_user_id(client, auth_headers):
     return asyncio.run(_find_user_id())
 
 
-def _create_budget_support_category(user_id, main_category, sub_category):
+def _create_budget_support_category(user_id, main_category, sub_category, category_type=3):
     """为预算测试创建主/子分类。"""
     from bill_analyser.api.app import db
 
     async def _create():
         parent_category_id = await db.create_category({
-            "type": 3,
+            "type": category_type,
             "main_category": main_category,
             "sub_category": "",
             "description": main_category,
@@ -83,7 +83,7 @@ def _create_budget_support_category(user_id, main_category, sub_category):
             return int(parent_category_id)
 
         sub_category_id = await db.create_category({
-            "type": 3,
+            "type": category_type,
             "main_category": main_category,
             "sub_category": sub_category,
             "description": sub_category,
@@ -99,13 +99,13 @@ def _create_budget_support_category(user_id, main_category, sub_category):
     return asyncio.run(_create())
 
 
-def _create_budget_support_sub_category(user_id, main_category, sub_category):
+def _create_budget_support_sub_category(user_id, main_category, sub_category, category_type=3):
     """为预算测试创建额外子分类，避免重复创建父分类。"""
     from bill_analyser.api.app import db
 
     async def _create():
         sub_category_id = await db.create_category({
-            "type": 3,
+            "type": category_type,
             "main_category": main_category,
             "sub_category": sub_category,
             "description": sub_category,
@@ -119,6 +119,69 @@ def _create_budget_support_sub_category(user_id, main_category, sub_category):
         return int(sub_category_id)
 
     return asyncio.run(_create())
+
+
+def test_budget_execution_includes_legacy_expense_category_type(client, auth_headers):
+    """预算执行应把历史 categories.type=1 分类识别为当前支出预算类型。"""
+    category_name = f"旧支出预算分类-{int(time.time())}"
+    user_id = _get_current_user_id(client, auth_headers)
+    _create_budget_support_category(
+        user_id,
+        category_name,
+        "旧支出子类",
+        category_type=1,
+    )
+
+    create_response = client.post(
+        "/api/budgets/",
+        json={
+            "name": "旧分类支出预算",
+            "category": category_name,
+            "sub_category": "旧支出子类",
+            "period_type": "monthly",
+            "amount": 120.0,
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-31",
+            "alert_threshold": 80,
+            "enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201
+
+    list_response = client.get(
+        "/api/budgets/?budget_type=3&period_type=monthly",
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    list_items = list_response.get_json()["result"]
+    list_matched = [
+        item for item in list_items
+        if item["category"] == category_name
+    ]
+    assert list_matched
+    assert any(item["sub_category"] == "旧支出子类" for item in list_matched)
+    assert all(item["type"] == 3 for item in list_matched)
+    assert all(item["category_id"] for item in list_matched)
+
+    execution_response = client.get(
+        (
+            "/api/budgets/execution?budget_type=3&period_type=monthly"
+            "&start_date=2026-03-01&end_date=2026-03-31"
+        ),
+        headers=auth_headers,
+    )
+    assert execution_response.status_code == 200
+    execution_data = execution_response.get_json()
+    assert execution_data["success"] is True
+    matched = [
+        item for item in execution_data["result"]["items"]
+        if item["category"] == category_name
+    ]
+    assert matched
+    assert any(item["sub_category"] == "旧支出子类" for item in matched)
+    assert all(item["type"] == 3 for item in matched)
+    assert all(item["category_id"] for item in matched)
 
 
 def _create_budget_support_tag(user_id, name):

@@ -15,26 +15,37 @@
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Auto Suggestions') }}</h3>
                                     <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
-                                    <div class="learning-section-actions"
-                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
-                                        <v-btn class="learning-panel-action"
-                                               size="small"
-                                               density="compact"
-                                               variant="outlined"
-                                               color="default"
-                                               :disabled="loading"
-                                               @click="handleGenerate">
-                                            {{ tt('Generate Suggestions') }}
-                                        </v-btn>
-                                        <v-btn class="learning-panel-action"
-                                               size="small"
-                                               density="compact"
-                                               variant="outlined"
-                                               color="default"
-                                               :disabled="loading || selectedIds.length === 0"
-                                               @click="handleBatchAccept">
-                                            {{ tt('Batch Accept') }} ({{ selectedIds.length }})
-                                        </v-btn>
+                                     <div class="learning-section-actions"
+                                          :class="{
+                                              'learning-section-actions--external': hasHeaderActionsTarget,
+                                              'learning-section-actions--split': true,
+                                          }">
+                                        <div class="learning-section-actions__primary">
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading"
+                                                   @click="handleGenerate">
+                                                {{ tt('Generate Suggestions') }}
+                                            </v-btn>
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading || selectedIds.length === 0"
+                                                   @click="handleBatchAccept">
+                                                {{ tt('Batch Accept') }} ({{ selectedIds.length }})
+                                            </v-btn>
+                                            <v-btn class="learning-panel-refresh"
+                                                   variant="text"
+                                                   color="default"
+                                                   :icon="true"
+                                                   :loading="loading"
+                                                   @click="refreshCurrentTab">
+                                                <v-icon :icon="mdiRefresh" />
+                                                <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                            </v-btn>
+                                        </div>
+                                        <div class="learning-section-actions__spacer" />
                                         <v-select v-model="statusFilter"
                                                   class="learning-status-select"
                                                   :items="suggestionStatusOptions"
@@ -44,16 +55,6 @@
                                                   variant="outlined"
                                                   hide-details
                                                   :aria-label="tt('Status')" />
-                                        <v-btn variant="text"
-                                               color="default"
-                                               size="32"
-                                               density="compact"
-                                               :icon="true"
-                                               :loading="loading"
-                                               @click="refreshCurrentTab">
-                                            <v-icon :icon="mdiRefresh" size="20" />
-                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                                        </v-btn>
                                     </div>
                                     </Teleport>
                                 </div>
@@ -61,7 +62,7 @@
                                 <v-table v-if="!loading && filteredSuggestions.length > 0" hover density="comfortable">
                                     <thead>
                                         <tr>
-                                            <th style="width:40px">
+                                            <th style="width:38px">
                                                 <v-checkbox-btn v-model="selectAll" :indeterminate="indeterminate"
                                                                 density="compact" hide-details />
                                             </th>
@@ -137,13 +138,12 @@
                                     <div class="learning-section-actions"
                                          :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn variant="text"
+                                               class="learning-panel-refresh"
                                                color="default"
-                                               size="32"
-                                               density="compact"
                                                :icon="true"
                                                :loading="loading"
                                                @click="refreshCurrentTab">
-                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-icon :icon="mdiRefresh" />
                                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
@@ -314,8 +314,8 @@
                                                     {{ translateMatchType(rule.matchType) }}
                                                 </v-chip>
                                             </td>
-                                            <td>
-                                                <div class="d-flex flex-wrap ga-1 align-center">
+                                            <td class="text-center">
+                                                <div class="learning-rules-feature-cell d-flex flex-wrap ga-1 align-center justify-center">
                                                     <v-chip v-if="rule.matchValue"
                                                             size="x-small"
                                                             variant="outlined"
@@ -328,7 +328,7 @@
                                                     </v-chip>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td class="text-center">
                                                 <div class="text-body-2">{{ rule.learnedType }}</div>
                                             </td>
                                             <td class="text-center">
@@ -340,16 +340,18 @@
                                                 <v-chip size="x-small" color="info" variant="tonal">{{ rule.appliedCount }}</v-chip>
                                             </td>
                                             <td class="text-center">
-                                                <v-btn size="small" variant="text" color="primary"
-                                                       :icon="true" @click="openEditRuleDialog(rule)">
-                                                    <v-icon :icon="mdiPencil" />
-                                                    <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
-                                                </v-btn>
-                                                <v-btn size="small" variant="text" color="error"
-                                                       :icon="true" @click="handleDeleteRule(rule.id)">
-                                                    <v-icon :icon="mdiDelete" />
-                                                    <v-tooltip activator="parent">{{ tt('Delete') }}</v-tooltip>
-                                                </v-btn>
+                                                <div class="learning-rules-actions">
+                                                    <v-btn size="small" variant="text" color="primary"
+                                                           :icon="true" @click="openEditRuleDialog(rule)">
+                                                        <v-icon :icon="mdiPencil" />
+                                                        <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
+                                                    </v-btn>
+                                                    <v-btn size="small" variant="text" color="error"
+                                                           :icon="true" @click="handleDeleteRule(rule.id)">
+                                                        <v-icon :icon="mdiDelete" />
+                                                        <v-tooltip activator="parent">{{ tt('Delete') }}</v-tooltip>
+                                                    </v-btn>
+                                                </div>
                                             </td>
                                         </tr>
                                     </tbody>
@@ -370,22 +372,19 @@
                                     <div class="learning-section-actions"
                                          :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
                                         <v-btn class="learning-panel-action"
-                                               size="small"
-                                               density="compact"
                                                variant="outlined"
                                                color="default"
                                                :disabled="loading"
                                                @click="openAddConfigDialog">
                                             {{ tt('Add Config') }}
                                         </v-btn>
-                                        <v-btn variant="text"
+                                        <v-btn class="learning-panel-refresh"
+                                               variant="text"
                                                color="default"
-                                               size="32"
-                                               density="compact"
                                                :icon="true"
                                                :loading="loading"
                                                @click="refreshCurrentTab">
-                                            <v-icon :icon="mdiRefresh" size="20" />
+                                            <v-icon :icon="mdiRefresh" />
                                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
@@ -436,27 +435,44 @@
                                 <div class="learning-section-header"
                                      :class="{ 'learning-section-header--empty': hideSectionTitle && hasHeaderActionsTarget }">
                                     <h3 v-if="!hideSectionTitle" class="learning-section-title">{{ tt('Suggested Rules') }}</h3>
-                                    <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
-                                    <div class="learning-section-actions"
-                                         :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
-                                        <v-btn class="learning-panel-action"
-                                               size="small"
-                                               density="compact"
-                                               variant="outlined"
-                                               color="default"
-                                               :disabled="loading"
-                                               @click="handleLLMGenerate">
-                                            {{ tt('Generate Suggestions') }}
-                                        </v-btn>
-                                        <v-btn class="learning-panel-action"
-                                               size="small"
-                                               density="compact"
-                                               variant="outlined"
-                                               color="default"
-                                               :disabled="loading || selectedLLMIds.length === 0"
-                                               @click="handleLLMBatchAccept">
-                                            {{ tt('Batch Accept') }} ({{ selectedLLMIds.length }})
-                                        </v-btn>
+                                     <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
+                                     <div class="learning-section-actions"
+                                          :class="{
+                                              'learning-section-actions--external': hasHeaderActionsTarget,
+                                              'learning-section-actions--split': true,
+                                          }">
+                                        <div class="learning-section-actions__primary">
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading"
+                                                   @click="handleLLMGenerate">
+                                                {{ tt('Generate Suggestions') }}
+                                            </v-btn>
+                                            <v-btn class="learning-panel-action"
+                                                   variant="outlined"
+                                                   color="default"
+                                                   :disabled="loading || selectedLLMIds.length === 0"
+                                                   @click="handleLLMBatchAccept">
+                                                {{ tt('Batch Accept') }} ({{ selectedLLMIds.length }})
+                                            </v-btn>
+                                            <v-btn class="learning-panel-refresh"
+                                                   variant="text"
+                                                   color="default"
+                                                   :icon="true"
+                                                   :loading="loading"
+                                                   @click="refreshCurrentTab">
+                                                <v-icon :icon="mdiRefresh" />
+                                                <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                            </v-btn>
+                                            <v-chip v-if="llmPendingCount > 0"
+                                                    size="small"
+                                                    color="warning"
+                                                    variant="tonal">
+                                                {{ llmPendingCount }} {{ tt('Pending') }}
+                                            </v-chip>
+                                        </div>
+                                        <div class="learning-section-actions__spacer" />
                                         <v-select v-model="llmStatusFilter"
                                                   class="learning-status-select"
                                                   :items="llmStatusOptions"
@@ -466,22 +482,6 @@
                                                   variant="outlined"
                                                   hide-details
                                                   :aria-label="tt('Status')" />
-                                        <v-btn variant="text"
-                                               color="default"
-                                               size="32"
-                                               density="compact"
-                                               :icon="true"
-                                               :loading="loading"
-                                               @click="refreshCurrentTab">
-                                            <v-icon :icon="mdiRefresh" size="20" />
-                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
-                                        </v-btn>
-                                        <v-chip v-if="llmPendingCount > 0"
-                                                size="small"
-                                                color="warning"
-                                                variant="tonal">
-                                            {{ llmPendingCount }} {{ tt('Pending') }}
-                                        </v-chip>
                                     </div>
                                     </Teleport>
                                 </div>
@@ -489,7 +489,7 @@
                                 <v-table v-if="filteredLLMCandidates.length > 0" hover density="comfortable">
                                     <thead>
                                         <tr>
-                                            <th style="width:40px">
+                                            <th style="width:38px">
                                                 <v-checkbox-btn v-model="selectAllLLM"
                                                                 :indeterminate="llmIndeterminate"
                                                                 density="compact"
@@ -1627,7 +1627,7 @@ watch(activeTab, (tab) => {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 36px;
+    min-height: 38px;
     margin-bottom: 12px;
 }
 
@@ -1648,7 +1648,7 @@ watch(activeTab, (tab) => {
     flex: 1 1 auto;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
 }
 
@@ -1657,29 +1657,96 @@ watch(activeTab, (tab) => {
     width: 100%;
 }
 
+.learning-section-actions--split {
+    flex-wrap: nowrap;
+}
+
+.learning-section-actions__primary {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.learning-section-actions__spacer {
+    flex: 1 1 auto;
+    min-width: 16px;
+}
+
 .learning-panel-action {
-    height: 32px;
-    min-height: 32px;
-    min-width: 152px;
+    height: 38px;
+    min-height: 38px;
+    min-width: 136px;
+    padding-inline: 18px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.learning-panel-refresh {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+}
+
+.learning-panel-refresh :deep(.v-icon) {
+    font-size: 22px;
+    width: 22px;
+    height: 22px;
 }
 
 .learning-status-select {
-    flex: 0 0 168px;
+    flex: 0 0 200px;
+    max-width: 210px;
 }
 
 .learning-status-select :deep(.v-field) {
-    min-height: 32px;
-    height: 32px;
+    min-height: 38px;
+    height: 38px;
 }
 
 .learning-status-select :deep(.v-field__input) {
-    min-height: 32px;
+    min-height: 38px;
     padding-top: 0;
     padding-bottom: 0;
+    text-align: center;
+    justify-content: center;
+}
+
+.learning-status-select :deep(.v-select__selection) {
+    justify-content: center;
+    width: 100%;
+}
+
+.learning-status-select :deep(.v-select__selection-text) {
+    width: 100%;
+    text-align: center;
 }
 
 .learning-rules-table :deep(th) {
     padding-block: 8px;
+}
+
+.learning-rules-table :deep(td) {
+    text-align: center;
+}
+
+.learning-rules-feature-cell {
+    margin-inline: auto;
+}
+
+.learning-rules-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+}
+
+.learning-rules-table :deep(.v-switch) {
+    display: inline-flex;
+    justify-content: center;
 }
 
 .learning-header-button {

@@ -179,13 +179,16 @@ def _list_bill_pair_feedback_via_db(*, user_id: int, candidate_id: str | None = 
 class TestMatchingAPI:
     """matching API 回归。"""
 
-    def test_matching_investment_settings_endpoint_persists_pairing_center_settings(self, client):
-        """Pairing Center 应通过 matching 域 canonical endpoint 持久化投资识别设置。"""
+    def test_matching_investment_settings_endpoint_is_retired(self, client):
+        """投资识别设置 API 已退役，关键词主链应迁入分类规则。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_investment_settings")
 
         get_before = client.get("/api/matching/investment-settings", headers=auth_headers)
-        assert get_before.status_code == 200
-        assert get_before.get_json()["success"] is True
+        assert get_before.status_code == 410
+        assert get_before.get_json() == {
+            "success": False,
+            "error": "Investment recognition settings are managed by category rules",
+        }
 
         update_payload = {
             "importLearningEnabled": False,
@@ -199,26 +202,11 @@ class TestMatchingAPI:
             json=update_payload,
             headers=auth_headers,
         )
-        assert update_response.status_code == 200, update_response.get_data(as_text=True)
+        assert update_response.status_code == 410, update_response.get_data(as_text=True)
         assert update_response.get_json() == {
-            "success": True,
-            "data": update_payload,
+            "success": False,
+            "error": "Investment recognition settings are managed by category rules",
         }
-
-        get_after = client.get("/api/matching/investment-settings", headers=auth_headers)
-        assert get_after.status_code == 200
-        assert get_after.get_json() == {
-            "success": True,
-            "data": update_payload,
-        }
-
-        profile_response = client.get("/api/profile", headers=auth_headers)
-        assert profile_response.status_code == 200
-        profile = (profile_response.get_json() or {}).get("result") or {}
-        assert profile.get("importLearningEnabled") is False
-        assert profile.get("investmentPlatformKeywords") == update_payload["investmentPlatformKeywords"]
-        assert profile.get("investmentProductKeywords") == update_payload["investmentProductKeywords"]
-        assert profile.get("investmentExcludeKeywords") == update_payload["investmentExcludeKeywords"]
 
     def test_matching_session_candidates_returns_projected_candidates(self, client):
         """应返回由 preview[].matching 投影得到的显式 candidate 列表。"""

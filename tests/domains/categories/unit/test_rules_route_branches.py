@@ -462,3 +462,82 @@ def test_category_rules_migrate_route_is_authenticated_idempotent_and_user_scope
             "amount": -29.0,
         }
     ) == (f"特殊字符迁移测试{suffix}", "完整字面量")
+
+
+def test_category_rules_migrate_route_imports_investment_settings_as_rule_expression(
+    client: Any,
+    auth_context: dict[str, Any],
+    db_instance: Any,
+) -> None:
+    """Investment recognition settings should migrate into canonical category rules."""
+    suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    user_id = int(auth_context["user"]["id"])
+    headers = auth_context["headers"]
+
+    investment_category_id = _run(
+        db_instance.create_category(
+            {
+                "main_category": f"投资理财{suffix}",
+                "sub_category": "基金",
+                "type": 5,
+                "priority": 8,
+                "keywords": "",
+            },
+            user_id=user_id,
+        )
+    )
+    assert investment_category_id is not None
+
+    updated_settings = _run(
+        db_instance.update_pairing_investment_settings(
+            user_id=user_id,
+            investment_platform_keywords=["蚂蚁财富", "天天基金", "蚂蚁财富"],
+            investment_product_keywords=["基金", "ETF"],
+            investment_exclude_keywords=["还款", "账单"],
+        )
+    )
+    assert updated_settings is not None
+
+    response = client.post("/api/category-rules/migrate", headers=headers)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json() or {}
+    assert payload["success"] is True
+    assert payload["data"] == {"migrated": 1, "skipped": 0}
+
+    investment_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=investment_category_id,
+            enabled_only=False,
+        )
+    )
+    assert [rule["name"] for rule in investment_rules] == [
+        "migrated:investment-recognition",
+    ]
+    assert [rule["rule_expression"] for rule in investment_rules] == [
+        "OR={蚂蚁财富,天天基金}+OR={基金,ETF}+NOT={还款,账单}",
+    ]
+
+    engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    assert engine.match_category(
+        {
+            "counterparty": "蚂蚁财富",
+            "description": "沪深300ETF 买入",
+            "type": "支出",
+            "amount": -100.0,
+        }
+    ) == (f"投资理财{suffix}", "基金")
+    assert engine.match_category(
+        {
+            "counterparty": "蚂蚁财富",
+            "description": "信用卡账单 ETF",
+            "type": "支出",
+            "amount": -100.0,
+        }
+    ) == (None, None)
+
+    repeat_response = client.post("/api/category-rules/migrate", headers=headers)
+    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
+    repeat_payload = repeat_response.get_json() or {}
+    assert repeat_payload["success"] is True
+    assert repeat_payload["data"] == {"migrated": 0, "skipped": 1}

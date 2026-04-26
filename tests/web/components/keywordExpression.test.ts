@@ -459,7 +459,8 @@ describe('keyword expression component copy', () => {
         expect(combinedSource).not.toContain('Example: OR={早餐,咖啡}+NOT={退款}|OR={午餐}');
         expect(combinedSource).not.toContain('Rule Priority');
         expect(combinedSource).not.toContain('× NOT');
-        expect(combinedSource).toContain("tt('Add Expression')");
+        expect(combinedSource).toContain("tt('Add Matching Expression')");
+        expect(combinedSource).toContain("tt('Matching Expression Terms')");
         expect(combinedSource).toContain('incrementOpenParen');
         expect(combinedSource).toContain('decrementOpenParen');
         expect(combinedSource).toContain('incrementCloseParen');

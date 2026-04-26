@@ -24,14 +24,18 @@
                         </div>
                         <template v-if="activeViewMode === 'history'">
                             <v-divider class="mt-4" />
-                            <div class="mx-6 my-4">
-                                <btn-vertical-group
-                                    class="budget-nav-buttons"
+                            <v-tabs show-arrows
+                                    class="my-4 budget-level-tabs"
+                                    direction="vertical"
                                     :disabled="loading"
-                                    :buttons="historicalLevelButtons"
-                                    v-model="historicalBudgetLevel"
-                                />
-                            </div>
+                                    v-model="historicalBudgetLevel">
+                                <v-tab class="tab-text-truncate"
+                                       v-for="level in historicalLevelButtons"
+                                       :key="level.value"
+                                       :value="level.value">
+                                    <span class="text-truncate">{{ level.name }}</span>
+                                </v-tab>
+                            </v-tabs>
                         </template>
                         <template v-else>
                             <v-divider class="mt-4" />
@@ -86,7 +90,8 @@
                                     </v-btn>
 
                                     <!-- 刷新按钮 -->
-                                    <v-btn density="compact" color="default" variant="text" size="24"
+                                    <v-btn v-if="activeViewMode === 'budget'"
+                                           density="compact" color="default" variant="text" size="24"
                                            class="ms-2" :icon="true" :loading="loading || updating" @click="reload(true)">
                                         <template #loader>
                                             <v-progress-circular indeterminate size="20"/>
@@ -146,39 +151,18 @@
                                         </v-list>
                                     </v-menu>
 
-                                    <div v-if="activeViewMode === 'forecast'" class="budget-forecast-controls ms-3">
-                                        <v-select class="budget-forecast-control"
-                                                  density="compact"
-                                                  hide-details
-                                                  variant="outlined"
-                                                  :disabled="loading || forecastLoading"
-                                                  :aria-label="tt('Forecast Strategy')"
-                                                  :items="forecastStrategies"
-                                                  item-title="name"
-                                                  item-value="value"
-                                                  v-model="forecastStrategy" />
+                                    <v-btn v-if="activeViewMode === 'history'"
+                                           density="compact" color="default" variant="text" size="32"
+                                           class="ms-2" :icon="true" :loading="loading || updating" @click="reload(true)">
+                                        <template #loader>
+                                            <v-progress-circular indeterminate size="20"/>
+                                        </template>
+                                        <v-icon :icon="mdiRefresh" size="24" />
+                                        <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
+                                    </v-btn>
 
-                                        <v-select class="budget-forecast-control"
-                                                  density="compact"
-                                                  hide-details
-                                                  variant="outlined"
-                                                  :disabled="loading || forecastLoading"
-                                                  :aria-label="tt('History Periods')"
-                                                  :items="historyPeriodOptions"
-                                                  v-model="forecastMonthsHistory" />
-
-                                        <v-select class="budget-forecast-control"
-                                                  density="compact"
-                                                  hide-details
-                                                  variant="outlined"
-                                                  :disabled="loading || forecastLoading"
-                                                  :aria-label="tt('Forecast Sort')"
-                                                  :items="forecastSortOptions"
-                                                  item-title="name"
-                                                  item-value="value"
-                                                  v-model="forecastSortBy" />
-
-                                        <v-btn class="budget-forecast-filter-button"
+                                    <div v-if="activeViewMode === 'forecast'" class="budget-forecast-title-actions d-flex align-center ga-2 ms-4">
+                                        <v-btn class="budget-forecast-title-button"
                                                density="compact"
                                                :color="forecastOnlyLowConfidence ? 'warning' : 'default'"
                                                :variant="forecastOnlyLowConfidence ? 'flat' : 'outlined'"
@@ -187,7 +171,7 @@
                                             {{ tt('Low Confidence Only') }}
                                         </v-btn>
 
-                                        <v-btn class="budget-forecast-filter-button"
+                                        <v-btn class="budget-forecast-title-button"
                                                density="compact"
                                                :color="forecastOnlyOverBudget ? 'error' : 'default'"
                                                :variant="forecastOnlyOverBudget ? 'flat' : 'outlined'"
@@ -196,37 +180,52 @@
                                             {{ tt('Over Budget Only') }}
                                         </v-btn>
 
-                                        <v-btn v-if="forecastOnlyLowConfidence || forecastOnlyOverBudget"
-                                               class="budget-forecast-clear-button"
+                                        <v-btn class="budget-forecast-title-button"
+                                               color="default"
+                                               variant="outlined"
                                                density="compact"
+                                               :disabled="loading || forecastLoading"
+                                               @click="showForecastSettingsDialog = true">
+                                            {{ tt('Forecast Settings') }}
+                                        </v-btn>
+
+                                        <v-btn density="compact"
                                                color="default"
                                                variant="text"
-                                               :disabled="loading || forecastLoading"
-                                               @click="clearForecastQuickFilters">
-                                            {{ tt('Clear Forecast Filters') }}
+                                               size="24"
+                                               :icon="true"
+                                               :loading="loading || forecastLoading"
+                                               @click="reload(true)">
+                                            <template #loader>
+                                                <v-progress-circular indeterminate size="20"/>
+                                            </template>
+                                            <v-icon :icon="mdiRefresh" size="24" />
+                                            <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                                         </v-btn>
                                     </div>
 
-                                    <v-spacer v-if="activeViewMode !== 'forecast'"/>
+                                    <v-spacer />
 
-                                    <!-- 搜索框 -->
-                                    <div class="budget-keyword-filter ms-2" v-if="activeViewMode !== 'history'">
-                                        <v-text-field density="compact" :disabled="loading"
-                                                      :prepend-inner-icon="mdiMagnify"
-                                                      :append-inner-icon="filterKeyword !== searchKeyword ? mdiCheck : undefined"
-                                                      :placeholder="tt('Filter budget description')"
-                                                      v-model="filterKeyword"
-                                                      @click:append-inner="setKeywordFilter(filterKeyword)"
-                                                      @keyup.enter="setKeywordFilter(filterKeyword)"
-                                        />
-                                    </div>
+                                    <div class="budget-right-tools d-flex align-center">
+                                        <!-- 搜索框 -->
+                                        <div class="budget-keyword-filter" v-if="activeViewMode !== 'history'">
+                                            <v-text-field density="compact" :disabled="loading"
+                                                          :prepend-inner-icon="mdiMagnify"
+                                                          :append-inner-icon="filterKeyword !== searchKeyword ? mdiCheck : undefined"
+                                                          :placeholder="tt('Filter budget description')"
+                                                          hide-details
+                                                          v-model="filterKeyword"
+                                                          @click:append-inner="setKeywordFilter(filterKeyword)"
+                                                          @keyup.enter="setKeywordFilter(filterKeyword)"
+                                            />
+                                        </div>
 
-                                    <!-- 更多选项菜单（包含所有筛选功能） -->
-                                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
-                                           :disabled="loading" :icon="true">
-                                        <v-icon :icon="mdiDotsVertical" />
-                                        <v-menu activator="parent" :close-on-content-click="false" width="320">
-                                            <v-list density="compact" class="budget-filter-menu">
+                                        <!-- 更多选项菜单（包含所有筛选功能） -->
+                                        <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                                               :disabled="loading" :icon="true">
+                                            <v-icon :icon="mdiDotsVertical" />
+                                            <v-menu activator="parent" :close-on-content-click="false" width="320">
+                                                <v-list density="compact" class="budget-filter-menu">
                                                 <!-- 分类筛选 -->
                                                 <v-list-item :disabled="loading"
                                                              :prepend-icon="mdiShapeOutline"
@@ -426,9 +425,10 @@
                                                         <v-list-item-title class="text-body-2">{{ tt('No saved presets') }}</v-list-item-title>
                                                     </v-list-item>
                                                 </v-list-group>
-                                            </v-list>
-                                        </v-menu>
-                                    </v-btn>
+                                                </v-list>
+                                            </v-menu>
+                                        </v-btn>
+                                    </div>
                                 </div>
                             </template>
 
@@ -690,35 +690,29 @@
 
                     <v-window-item value="history">
                         <v-card-text class="pt-4">
-                            <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
-                                <div>
-                                    <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budget Execution') }}</div>
-                                    <div class="text-caption text-medium-emphasis">
-                                        {{ historicalLevelDescription }}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div v-if="loading" class="py-10">
+                            <div v-if="loading && (!isHistoricalHistoryReady || historicalLegendGroups.length === 0)" class="py-10">
                                 <v-skeleton-loader type="heading" class="mb-4" :loading="true"></v-skeleton-loader>
                                 <v-skeleton-loader type="image" class="mb-4" :loading="true" height="400"></v-skeleton-loader>
                                 <v-skeleton-loader type="chip@6" :loading="true"></v-skeleton-loader>
                             </div>
 
                             <div v-else-if="historicalLegendGroups.length > 0" class="budget-history-panel">
-                                <v-card variant="outlined" rounded="lg" class="budget-history-chart-shell pa-4">
+                                <div class="budget-history-chart-shell">
                                     <v-chart
                                         v-if="historicalChartModel.primaryBands.length > 0"
+                                        :key="historicalChartRenderKey"
+                                        ref="historicalChartRef"
                                         autoresize
                                         class="budget-history-chart"
                                         :option="historicalChartOptions"
+                                        :update-options="historicalChartUpdateOptions"
                                     />
 
                                     <div v-else class="d-flex align-center justify-center budget-history-chart budget-history-empty-state">
                                         <span class="text-medium-emphasis">{{ tt('All categories hidden') }}</span>
                                     </div>
 
-                                </v-card>
+                                </div>
 
                                 <div v-if="historicalLegendGroups.length > 0" class="budget-history-legend">
                                     <div v-for="group in historicalLegendGroups" :key="group.primaryKey" class="budget-history-legend-group">
@@ -852,40 +846,27 @@
 
                         <!-- 周期信息 -->
                         <v-card-text v-if="currentForecast" class="border-t">
-                            <div class="d-flex align-center flex-wrap ga-2 mb-3" v-if="forecastRiskSummary.totalCount > 0">
-                                <v-chip color="warning" size="small" variant="tonal">
-                                    {{ tt('Low Confidence Count', { count: forecastRiskSummary.lowConfidenceCount }) }}
-                                </v-chip>
-                                <v-chip color="error" size="small" variant="tonal">
-                                    {{ tt('Over Budget Count', { count: forecastRiskSummary.overBudgetCount }) }}
-                                </v-chip>
-                                <v-chip color="info" size="small" variant="tonal" v-if="forecastRiskSummary.filteredCount !== forecastRiskSummary.totalCount">
-                                    {{ tt('Filtered Forecast Count', { visible: forecastRiskSummary.filteredCount, total: forecastRiskSummary.totalCount }) }}
-                                </v-chip>
-                            </div>
-                            <div class="d-flex justify-space-between align-center flex-wrap ga-3">
+                            <div class="budget-forecast-summary-row d-flex align-center flex-wrap ga-6 text-subtitle-2">
                                 <div>
-                                    <span class="text-subtitle-2">{{ tt('Period') }}: </span>
+                                    <span>{{ tt('Period') }}: </span>
                                     <span>{{ currentForecast.periodStart }} - {{ currentForecast.periodEnd }}</span>
                                 </div>
                                 <div>
-                                    <span class="text-subtitle-2">{{ tt('Days Elapsed') }}: </span>
-                                    <span>{{ currentForecast.daysElapsed }}</span>
-                                </div>
-                                <div>
-                                    <span class="text-subtitle-2">{{ tt('Days Remaining') }}: </span>
-                                    <span>{{ currentForecast.daysRemaining }}</span>
-                                </div>
-                                <div>
-                                    <span class="text-subtitle-2">{{ tt('Forecast Strategy') }}: </span>
+                                    <span>{{ tt('Forecast Strategy') }}: </span>
                                     <span>{{ tt(currentForecast.forecastStrategy === 'moving_average' ? 'Moving Average Strategy' : 'Historical Average Strategy') }}</span>
                                 </div>
                                 <div>
-                                    <span class="text-subtitle-2">{{ tt('History Periods') }}: </span>
+                                    <span>{{ tt('History Periods') }}: </span>
                                     <span>{{ currentForecast.historyPeriods || forecastMonthsHistory }}</span>
                                 </div>
+                                <div>
+                                    <span>{{ tt('Low Confidence Count', { count: forecastRiskSummary.lowConfidenceCount }) }}</span>
+                                </div>
+                                <div>
+                                    <span>{{ tt('Over Budget Count', { count: forecastRiskSummary.overBudgetCount }) }}</span>
+                                </div>
                                 <div v-if="currentForecast.avgBacktestMape !== null && currentForecast.avgBacktestMape !== undefined">
-                                    <span class="text-subtitle-2">{{ tt('Average Backtest MAPE') }}: </span>
+                                    <span>{{ tt('Average Backtest MAPE') }}: </span>
                                     <span>{{ currentForecast.avgBacktestMape.toFixed(2) }}%</span>
                                     <v-icon class="ms-1" :icon="mdiInformationOutline" size="14" />
                                     <v-tooltip activator="parent" location="top">
@@ -968,6 +949,51 @@
             </v-card-actions>
         </v-card>
     </v-dialog>
+
+    <v-dialog v-model="showForecastSettingsDialog" max-width="460">
+        <v-card>
+            <v-card-title>{{ tt('Forecast Settings') }}</v-card-title>
+            <v-card-text class="budget-forecast-settings-content">
+                <v-select class="budget-forecast-setting-control"
+                          density="compact"
+                          hide-details
+                          variant="outlined"
+                          :disabled="loading || forecastLoading"
+                          :label="tt('Forecast Sort')"
+                          :aria-label="tt('Forecast Sort')"
+                          :items="forecastSortOptions"
+                          item-title="name"
+                          item-value="value"
+                          v-model="forecastSortBy" />
+
+                <v-select class="budget-forecast-setting-control"
+                          density="compact"
+                          hide-details
+                          variant="outlined"
+                          :disabled="loading || forecastLoading"
+                          :label="tt('Forecast Strategy')"
+                          :aria-label="tt('Forecast Strategy')"
+                          :items="forecastStrategies"
+                          item-title="name"
+                          item-value="value"
+                          v-model="forecastStrategy" />
+
+                <v-select class="budget-forecast-setting-control"
+                          density="compact"
+                          hide-details
+                          variant="outlined"
+                          :disabled="loading || forecastLoading"
+                          :label="tt('History Periods')"
+                          :aria-label="tt('History Periods')"
+                          :items="historyPeriodOptions"
+                          v-model="forecastMonthsHistory" />
+            </v-card-text>
+            <v-card-actions>
+                <v-spacer />
+                <v-btn @click="showForecastSettingsDialog = false">{{ tt('Close') }}</v-btn>
+            </v-card-actions>
+        </v-card>
+    </v-dialog>
 </template>
 
 <script setup lang="ts">
@@ -988,6 +1014,7 @@ import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
     createHistoricalLabelAnimationState,
+    resetHistoricalCategoryAnimationState,
     resetHistoricalLabelAnimationState,
     syncHistoricalLegendSelection,
     toggleHistoricalPrimarySelection,
@@ -996,7 +1023,7 @@ import {
     type HistoricalLegendSelection
 } from './historyPolarChart.ts';
 
-import { ref, computed, useTemplateRef, watch, onMounted } from 'vue';
+import { ref, computed, useTemplateRef, watch, onMounted, nextTick } from 'vue';
 import { useDisplay, useTheme } from 'vuetify';
 import { useRouter } from 'vue-router';
 
@@ -1078,6 +1105,12 @@ import {
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 type EditDialogType = InstanceType<typeof EditDialog>;
+interface ResizableChartComponent {
+    resize?: () => void;
+    chart?: {
+        resize?: () => void;
+    };
+}
 
 interface PeriodFilter {
     name: string;
@@ -1142,6 +1175,7 @@ const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editDialog = useTemplateRef<EditDialogType>('editDialog');
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
+const historicalChartRef = useTemplateRef<ResizableChartComponent>('historicalChartRef');
 
 // ============================================================================
 // 响应式状态
@@ -1195,6 +1229,7 @@ const budgetAmountFilter = ref<string>('');  // 格式: 'filterType:value1:value
 const showFilterAccountDialog = ref<boolean>(false);
 const showFilterTagDialog = ref<boolean>(false);
 const showFilterCategoryDialog = ref<boolean>(false);
+const showForecastSettingsDialog = ref<boolean>(false);
 
 // 筛选预设
 const showSavePresetDialog = ref<boolean>(false);
@@ -1585,6 +1620,7 @@ const hasActiveFilters = computed<boolean>(() => {
 const currentExecution = computed<BudgetExecutionResponse | null>(() => budgetStore.currentExecution);
 const currentForecast = computed<BudgetForecastResponse | null>(() => budgetStore.currentForecast);
 const currentHistory = computed<BudgetHistoryResponse | null>(() => budgetStore.currentHistory);
+const currentHistoryRequestSignature = computed<string>(() => budgetStore.currentHistoryRequestSignature);
 const forecastLoading = computed<boolean>(() => budgetStore.forecastLoading);
 const firstDayOfWeek = computed(() => userStore.currentUserFirstDayOfWeek);
 const viewModeButtons = computed(() => [
@@ -1605,11 +1641,6 @@ const historicalLevelButtons = computed(() => [
     { name: tt('Primary Category Budget'), value: 'primary' },
     { name: tt('Secondary Category Budget'), value: 'secondary' }
 ]);
-const historicalLevelDescription = computed(() => {
-    return historicalBudgetLevel.value === 'primary'
-        ? tt('Primary Category Budget')
-        : tt('Secondary Category Budget');
-});
 const allHistoricalDateRanges = computed(() => getAllDateRanges(DateRangeScene.AssetTrends, true, false));
 const historicalDateRangeName = computed(() => {
     if (!historicalMinDatetime.value || !historicalMaxDatetime.value) {
@@ -1774,6 +1805,40 @@ function getHistoricalBudgetQueryRange(): { startDate: string; endDate: string }
     };
 }
 
+function buildBudgetHistoryRequestSignature(req: BudgetHistoryRequest): string {
+    return JSON.stringify({
+        type: req.type ?? null,
+        periodType: req.periodType ?? null,
+        year: req.year ?? null,
+        month: req.month ?? null,
+        quarter: req.quarter ?? null,
+        startDate: req.startDate ?? null,
+        endDate: req.endDate ?? null,
+        categoryId: req.categoryId ?? null,
+        accountIds: req.accountIds ?? [],
+        tagIds: req.tagIds ?? []
+    });
+}
+
+const activeHistoricalHistoryRequestSignature = computed<string>(() => {
+    const historyRange = getHistoricalBudgetQueryRange();
+
+    return buildBudgetHistoryRequestSignature({
+        type: activeBudgetType.value,
+        periodType: BudgetPeriodType.Monthly,
+        startDate: historyRange.startDate,
+        endDate: historyRange.endDate,
+        categoryId: categoryFilter.value || undefined,
+        accountIds: accountFilter.value.length ? [...accountFilter.value] : undefined,
+        tagIds: tagFilter.value.length ? [...tagFilter.value] : undefined
+    });
+});
+
+const isHistoricalHistoryReady = computed<boolean>(() => (
+    !!currentHistory.value
+    && currentHistoryRequestSignature.value === activeHistoricalHistoryRequestSignature.value
+));
+
 function buildFiscalYearPeriod(targetDate: Date): HistoricalPeriodRange {
     const fiscalStart = fiscalYearStartInfo.value;
     const currentYearFiscalStart = new Date(targetDate.getFullYear(), fiscalStart.month - 1, fiscalStart.day);
@@ -1903,7 +1968,7 @@ function resolveHistoricalPeriodByDate(
 }
 
 const filteredHistoricalItems = computed<BudgetHistoryItem[]>(() => {
-    if (!currentHistory.value?.items?.length) {
+    if (!isHistoricalHistoryReady.value || !currentHistory.value?.items?.length) {
         return [];
     }
 
@@ -2166,13 +2231,27 @@ watch(
             historicalCategoryChartData.value.points,
             historicalLegendSelection.value
         );
+        if (activeViewMode.value === 'history') {
+            scheduleHistoricalChartResize();
+        }
     },
     { immediate: true }
 );
 
-watch([activeBudgetType, historicalBudgetLevel], () => {
+watch(activeBudgetType, () => {
     historicalLegendSelection.value = {};
     resetHistoricalLabelAnimationState(historicalLabelAnimationState);
+    if (activeViewMode.value === 'history') {
+        scheduleHistoricalChartResize();
+    }
+});
+
+watch(historicalBudgetLevel, () => {
+    historicalLegendSelection.value = {};
+    resetHistoricalCategoryAnimationState(historicalLabelAnimationState);
+    if (activeViewMode.value === 'history') {
+        scheduleHistoricalChartResize();
+    }
 });
 
 const historicalChartModel = computed(() => {
@@ -2184,6 +2263,15 @@ const historicalChartModel = computed(() => {
 const historicalLabelAnimationState = createHistoricalLabelAnimationState();
 
 const historicalLegendGroups = computed(() => historicalChartModel.value.legendGroups);
+const historicalChartUpdateOptions = {
+    notMerge: false,
+    lazyUpdate: false,
+    replaceMerge: ['series']
+};
+// Bump this when the historical chart's graphic/custom transition contract changes.
+// It forces one component remount so old ECharts instances cannot keep stale leaveTo internals.
+const HISTORICAL_CHART_RENDER_REVISION = 'history-animation-restore-v6';
+const historicalChartRenderKey = computed(() => `${HISTORICAL_CHART_RENDER_REVISION}:${activeBudgetType.value}`);
 
 const historicalChartOptions = computed(() => {
     if (!historicalChartModel.value.primaryBands.length) {
@@ -2191,6 +2279,7 @@ const historicalChartOptions = computed(() => {
     }
 
     const accentColor = activeBudgetType.value === BudgetType.Investment ? '#ffb300' : '#5c6bc0';
+    const animationScope = `${activeBudgetType.value}-${historicalBudgetLevel.value}`;
     return buildHistoricalPolarChartOption(historicalChartModel.value, {
         isDarkMode: isDarkMode.value,
         accentColor,
@@ -2199,9 +2288,37 @@ const historicalChartOptions = computed(() => {
         executionRateLabel: tt('Execution Rate'),
         formatAmount,
         showPrimaryRing: historicalBudgetLevel.value === 'secondary',
+        categoryAnimationScope: animationScope,
+        amountAxisRenderScope: animationScope,
         labelAnimationState: historicalLabelAnimationState
     });
 });
+
+watch(activeViewMode, (mode) => {
+    if (mode === 'history') {
+        scheduleHistoricalChartResize();
+    }
+}, { flush: 'post' });
+
+watch(historicalChartOptions, () => {
+    if (activeViewMode.value === 'history') {
+        scheduleHistoricalChartResize();
+    }
+}, { flush: 'post' });
+
+function scheduleHistoricalChartResize(): void {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    void nextTick(() => {
+        window.requestAnimationFrame(() => {
+            const chartComponent = historicalChartRef.value;
+            chartComponent?.resize?.();
+            chartComponent?.chart?.resize?.();
+        });
+    });
+}
 
 function toggleHistoricalPrimaryLegend(primaryKey: string): void {
     historicalLegendSelection.value = toggleHistoricalPrimarySelection(
@@ -2320,6 +2437,9 @@ async function loadHistoricalBudgetView(requestId: number): Promise<void> {
     }
 
     await budgetStore.loadBudgetHistory(historyRequest);
+    if (activeViewMode.value === 'history') {
+        scheduleHistoricalChartResize();
+    }
 }
 
 async function loadBudgetHistoryForExpired(requestId: number): Promise<void> {
@@ -3047,6 +3167,9 @@ function switchViewMode(mode: unknown): void {
         loadForecast();
     } else {
         reload(false);
+        if (mode === 'history') {
+            scheduleHistoricalChartResize();
+        }
     }
 }
 
@@ -3149,22 +3272,20 @@ async function reload(force: boolean): Promise<void> {
 
         const periodRequest = getCurrentPeriodRequest();
 
-        await Promise.all([
-            budgetStore.loadAllBudgets({
-                force,
-                type: activeBudgetType.value,
-                periodType: periodRequest.periodType
-            }),
-            budgetStore.loadBudgetExecution({
-                type: activeBudgetType.value,
-                periodType: periodRequest.periodType,
-                year: periodRequest.year,
-                month: periodRequest.month,
-                quarter: periodRequest.quarter,
-                startDate: periodRequest.startDate,
-                endDate: periodRequest.endDate
-            })
-        ]);
+        await budgetStore.loadAllBudgets({
+            force,
+            type: activeBudgetType.value,
+            periodType: periodRequest.periodType
+        });
+        await budgetStore.loadBudgetExecution({
+            type: activeBudgetType.value,
+            periodType: periodRequest.periodType,
+            year: periodRequest.year,
+            month: periodRequest.month,
+            quarter: periodRequest.quarter,
+            startDate: periodRequest.startDate,
+            endDate: periodRequest.endDate
+        });
 
         if (requestId !== reloadRequestId.value) {
             return;
@@ -3210,14 +3331,6 @@ async function loadForecast(): Promise<void> {
         const err = error as { message?: string };
         snackbar.value?.showError(err.message || tt('Failed to load forecast'));
     }
-}
-
-/**
- * 清空预算预测快速筛选
- */
-function clearForecastQuickFilters(): void {
-    forecastOnlyLowConfidence.value = false;
-    forecastOnlyOverBudget.value = false;
 }
 
 /**
@@ -3414,48 +3527,47 @@ watch(filterKeyword, (newVal) => {
 .budget-keyword-filter {
     min-width: 200px;
     max-width: 300px;
+    flex: 0 1 300px;
 }
 
-.budget-forecast-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
+.budget-right-tools {
+    flex: 0 0 auto;
+    margin-left: auto;
 }
 
-.budget-forecast-control {
-    flex: 0 0 172px;
-    width: 172px;
-    max-width: 172px;
+.budget-forecast-title-actions {
+    flex: 0 0 auto;
 }
 
-.budget-forecast-control :deep(.v-field) {
-    min-height: 40px;
-}
-
-.budget-forecast-control :deep(.v-field__input) {
-    min-width: 0;
-}
-
-.budget-forecast-control :deep(.v-select__selection-text) {
-    overflow: hidden;
-    text-overflow: ellipsis;
+.budget-forecast-title-button {
+    flex: 0 0 112px;
+    width: 112px;
+    max-width: 112px;
+    height: 38px;
+    min-height: 38px;
+    padding-inline: 10px;
+    text-transform: none;
+    letter-spacing: normal;
     white-space: nowrap;
 }
 
-.budget-forecast-filter-button {
-    flex: 0 0 152px;
-    width: 152px;
-    max-width: 152px;
-    height: 40px;
-    min-height: 40px;
+.budget-forecast-settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 
-.budget-forecast-clear-button {
-    flex: 0 0 auto;
-    height: 40px;
-    min-height: 40px;
-    padding-inline: 10px;
+.budget-forecast-setting-control {
+    width: 100%;
+}
+
+.budget-forecast-setting-control :deep(.v-field) {
+    min-height: 48px;
+}
+
+.budget-forecast-summary-row {
+    column-gap: 28px;
+    row-gap: 8px;
 }
 
 .tab-text-truncate {
@@ -3489,6 +3601,10 @@ watch(filterKeyword, (newVal) => {
 /* 使用深层穿透选择器作用到子组件 */
 .budget-nav-buttons:deep(.v-btn) {
     width: 100%;
+}
+
+.budget-level-tabs :deep(.v-tab) {
+    justify-content: flex-start;
 }
 
 /* 水平按钮组样式 - 总宽度100%，每个按钮各占一半 */
@@ -3631,36 +3747,38 @@ watch(filterKeyword, (newVal) => {
 .budget-history-legend {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 16px 20px;
-    margin-top: 12px;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
 }
 
 .budget-history-legend-group {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 180px;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .budget-history-legend-secondary-list {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding-left: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 3px;
 }
 
 .budget-history-legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
     border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
     border-radius: 999px;
-    background-color: rgba(var(--v-theme-surface), 0.92);
+    background-color: rgba(var(--v-theme-surface), 0.82);
     color: rgba(var(--v-theme-on-surface), 0.88);
     cursor: pointer;
-    padding: 6px 12px;
+    padding: 3px 8px;
+    font-size: 0.78rem;
+    line-height: 1.1;
     transition: all 0.18s ease;
 }
 
@@ -3672,6 +3790,13 @@ watch(filterKeyword, (newVal) => {
 .budget-history-legend-item--primary {
     align-self: flex-start;
     font-weight: 600;
+    background-color: rgba(var(--v-theme-primary), 0.07);
+}
+
+.budget-history-legend-item--secondary {
+    padding: 2px 7px;
+    font-size: 0.74rem;
+    border-color: rgba(var(--v-theme-on-surface), 0.09);
 }
 
 .budget-history-legend-item--primary.is-partial {
@@ -3683,8 +3808,8 @@ watch(filterKeyword, (newVal) => {
 }
 
 .budget-history-legend-swatch {
-    width: 10px;
-    height: 10px;
+    width: 7px;
+    height: 7px;
     border-radius: 999px;
     flex-shrink: 0;
 }
@@ -3704,10 +3829,7 @@ watch(filterKeyword, (newVal) => {
 }
 
 .budget-history-panel {
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-    border-radius: 16px;
-    padding: 16px;
-    background-color: rgb(var(--v-theme-surface));
+    background-color: transparent;
 }
 
 .budget-history-aggregation-select {
@@ -3732,4 +3854,3 @@ watch(filterKeyword, (newVal) => {
     color: rgb(226, 182, 10) !important;
 }
 </style>
-

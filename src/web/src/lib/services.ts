@@ -183,10 +183,6 @@ import type {
     OAuth2CallbackLoginRequest
 } from '@/models/oauth2.ts';
 import type {
-    PairingCenterInvestmentSettings,
-    PairingCenterInvestmentSettingsUpdateRequest
-} from '@/models/pairing_center.ts';
-import type {
     UserApplicationCloudSettingsUpdateRequest
 } from '@/models/user_app_cloud_setting.ts';
 import type {
@@ -358,7 +354,7 @@ function mapRestBudgetToFrontend(item: any, fallbackType = BudgetType.Expense): 
         name: item?.name || '',
         category: item?.category || '',
         subCategory: item?.subCategory || item?.sub_category || '',
-        categoryId: String(item?.categoryId || categoryInfo?.id || ''),
+        categoryId: String(item?.categoryId || item?.category_id || categoryInfo?.id || ''),
         periodType: item?.periodType || item?.period_type || BudgetPeriodType.Monthly,
         amount: toBudgetAmountInCents(item?.amount ?? item?.budget_amount ?? 0),
         startDate: item?.startDate || item?.start_date || '',
@@ -408,6 +404,30 @@ function buildBudgetExecutionQuery(req?: {
     }
     if (req?.endDate) {
         queryParams.push(`end_date=${encodeURIComponent(req.endDate)}`);
+    }
+
+    return queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
+}
+
+function buildBudgetListQuery(req?: {
+    type?: number,
+    periodType?: string,
+    enabled?: boolean,
+    category?: string
+}): string {
+    const queryParams: string[] = [];
+
+    if (req?.type !== undefined) {
+        queryParams.push(`budget_type=${req.type}`);
+    }
+    if (req?.periodType) {
+        queryParams.push(`period_type=${req.periodType}`);
+    }
+    if (req?.enabled !== undefined) {
+        queryParams.push(`enabled=${req.enabled ? 'true' : 'false'}`);
+    }
+    if (req?.category) {
+        queryParams.push(`category=${encodeURIComponent(req.category)}`);
     }
 
     return queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
@@ -463,19 +483,6 @@ function buildBudgetHistoryQuery(req?: {
     }
 
     return queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
-}
-
-function mapRestExecutionToBudgetList(restResult: any, fallbackType = BudgetType.Expense): any {
-    const items = Array.isArray(restResult?.items) ? restResult.items : [];
-    const summary = restResult?.summary || {};
-
-    return {
-        items: items.map((item: any) => mapRestBudgetToFrontend(item, fallbackType)),
-        totalBudget: toBudgetAmountInCents(summary?.total_budget ?? 0),
-        totalSpent: toBudgetAmountInCents(summary?.total_spent ?? 0),
-        totalRemaining: toBudgetAmountInCents(summary?.total_remaining ?? 0),
-        count: summary?.count ?? items.length
-    };
 }
 
 function mapRestExecutionToFrontend(restResult: any): any {
@@ -1500,16 +1507,6 @@ export default {
             return buildApiResponse(response, response.data?.data);
         });
     },
-    getPairingInvestmentSettings: (): ApiResponsePromise<PairingCenterInvestmentSettings> => {
-        return axios.get<ApiDataResponse<PairingCenterInvestmentSettings>>('matching/investment-settings').then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
-    updatePairingInvestmentSettings: (payload: PairingCenterInvestmentSettingsUpdateRequest): ApiResponsePromise<PairingCenterInvestmentSettings> => {
-        return axios.put<ApiDataResponse<PairingCenterInvestmentSettings>>('matching/investment-settings', payload).then(response => {
-            return buildApiResponse(response, response.data?.data);
-        });
-    },
     reconcileMatchingHistory: ({
         billIds,
         families
@@ -1840,14 +1837,27 @@ export default {
      * 获取预算列表
      * @param req 筛选条件
      */
-    getAllBudgets: (req?: { type?: number, periodType?: string, enabled?: boolean, category?: string, keyword?: string }): ApiResponsePromise<any[]> => {
-        const queryString = buildBudgetExecutionQuery({
+    getAllBudgets: (req?: { type?: number, periodType?: string, enabled?: boolean, category?: string, keyword?: string }): ApiResponsePromise<any> => {
+        const queryString = buildBudgetListQuery({
             type: req?.type,
-            periodType: req?.periodType
+            periodType: req?.periodType,
+            enabled: req?.enabled,
+            category: req?.category
         });
 
-        return axios.get<ApiResponse<any>>('budgets/execution' + queryString).then(response => {
-            return buildApiResponse(response, mapRestExecutionToBudgetList(response.data?.result, req?.type));
+        return axios.get<ApiResponse<any>>('budgets/' + queryString).then(response => {
+            const rawResult = response.data?.result;
+            const rawItems = Array.isArray(rawResult)
+                ? rawResult
+                : Array.isArray(rawResult?.items)
+                    ? rawResult.items
+                    : [];
+            const items = rawItems.map((item: any) => mapRestBudgetToFrontend(item, req?.type));
+
+            return buildApiResponse(response, {
+                items,
+                count: rawResult?.count ?? items.length
+            });
         });
     },
 

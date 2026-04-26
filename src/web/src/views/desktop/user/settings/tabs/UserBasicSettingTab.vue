@@ -35,7 +35,7 @@
                             <v-skeleton-loader class="skeleton-no-margin" type="text" style="width: 100px" :loading="true" v-if="loading"></v-skeleton-loader>
                             <span v-if="!loading">{{ oldProfile.username }}</span>
                         </div>
-                        <div class="d-flex text-body-1 align-center" style="height: 40px;">
+                        <div class="d-flex text-body-1 align-center" style="height: 38px;">
                             <span v-if="!loading && emailVerified">{{ tt('Email address is verified') }}</span>
                             <span v-if="!loading && !emailVerified">{{ tt('Email address is not verified') }}</span>
                             <v-btn class="ms-2 px-2" size="small" variant="text" :disabled="loading || resending"

@@ -38,6 +38,9 @@ export const useBudgetStore = defineStore('budget', () => {
     /** 预算列表状态是否无效（需要重新加载） */
     const budgetListStateInvalid = ref<boolean>(true);
 
+    /** 最近一次预算列表加载请求签名 */
+    const budgetListRequestSignature = ref<string>('');
+
     /** 当前执行详情 */
     const currentExecution = ref<BudgetExecutionResponse | null>(null);
 
@@ -47,6 +50,9 @@ export const useBudgetStore = defineStore('budget', () => {
     /** 当前预算历史 */
     const currentHistory = ref<BudgetHistoryResponse | null>(null);
 
+    /** 当前预算历史对应的请求签名 */
+    const currentHistoryRequestSignature = ref<string>('');
+
     /** 执行详情加载状态 */
     const executionLoading = ref<boolean>(false);
 
@@ -55,6 +61,9 @@ export const useBudgetStore = defineStore('budget', () => {
 
     /** 历史加载状态 */
     const historyLoading = ref<boolean>(false);
+
+    /** 最近一次预算历史加载序号，用于丢弃过期响应 */
+    let budgetHistoryRequestSeq = 0;
 
     // ============================================================================
     // 计算属性
@@ -107,6 +116,31 @@ export const useBudgetStore = defineStore('budget', () => {
         allBudgetsMap.value = budgetsMap;
 
         budgetListStateInvalid.value = false;
+    }
+
+    function buildBudgetListRequestSignature(req: {
+        type?: BudgetType,
+        periodType?: BudgetPeriodType
+    }): string {
+        return JSON.stringify({
+            type: req.type ?? null,
+            periodType: req.periodType ?? null
+        });
+    }
+
+    function buildBudgetHistoryRequestSignature(req: BudgetHistoryRequest): string {
+        return JSON.stringify({
+            type: req.type ?? null,
+            periodType: req.periodType ?? null,
+            year: req.year ?? null,
+            month: req.month ?? null,
+            quarter: req.quarter ?? null,
+            startDate: req.startDate ?? null,
+            endDate: req.endDate ?? null,
+            categoryId: req.categoryId ?? null,
+            accountIds: req.accountIds ?? [],
+            tagIds: req.tagIds ?? []
+        });
     }
 
     /**
@@ -187,17 +221,18 @@ export const useBudgetStore = defineStore('budget', () => {
         periodType?: BudgetPeriodType
     } = {}): Promise<Budget[]> {
         return new Promise((resolve, reject) => {
-            if (!force && !budgetListStateInvalid.value) {
-                resolve(allBudgets.value);
-                return;
-            }
-
             const req: any = {};
             if (type !== undefined) {
                 req.type = type;
             }
             if (periodType !== undefined) {
                 req.periodType = periodType;
+            }
+            const requestSignature = buildBudgetListRequestSignature(req);
+
+            if (!force && !budgetListStateInvalid.value && budgetListRequestSignature.value === requestSignature) {
+                resolve(allBudgets.value);
+                return;
             }
 
             services.getAllBudgets(req).then(response => {
@@ -208,18 +243,21 @@ export const useBudgetStore = defineStore('budget', () => {
                     return;
                 }
 
-                // 后端返回 { items: [...], totalBudget, ... }，需要使用 items 数组
+                // 服务层统一包装为 { items: [...] }，需要使用 items 数组
                 // 使用类型断言避免TypeScript错误
                 const result = data.result as unknown as { items?: BudgetInfoResponse[], [key: string]: unknown };
                 const budgetItems = (result.items || []) as BudgetInfoResponse[];
                 const budgets = Budget.ofMulti(budgetItems);
 
                 if (force && isEquals(allBudgets.value, budgets)) {
-                    reject({ message: 'Budget list is up to date', isUpToDate: true });
+                    budgetListStateInvalid.value = false;
+                    budgetListRequestSignature.value = requestSignature;
+                    resolve(allBudgets.value);
                     return;
                 }
 
                 setBudgets(budgets);
+                budgetListRequestSignature.value = requestSignature;
                 logger.info(`[BudgetStore] Loaded ${budgets.length} budgets`);
                 resolve(budgets);
             }).catch(error => {
@@ -303,24 +341,37 @@ export const useBudgetStore = defineStore('budget', () => {
      */
     function loadBudgetHistory(req: BudgetHistoryRequest = {}): Promise<BudgetHistoryResponse> {
         return new Promise((resolve, reject) => {
+            const requestSeq = ++budgetHistoryRequestSeq;
+            const requestSignature = buildBudgetHistoryRequestSignature(req);
+
             historyLoading.value = true;
 
             services.getBudgetHistory(req).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
-                    historyLoading.value = false;
+                    if (requestSeq === budgetHistoryRequestSeq) {
+                        historyLoading.value = false;
+                    }
                     reject({ message: 'Unable to get budget history' });
                     return;
                 }
 
+                if (requestSeq !== budgetHistoryRequestSeq) {
+                    resolve(data.result);
+                    return;
+                }
+
                 currentHistory.value = data.result;
+                currentHistoryRequestSignature.value = requestSignature;
                 historyLoading.value = false;
 
                 logger.info(`[BudgetStore] Loaded history: ${data.result.items?.length || 0} items`);
                 resolve(data.result);
             }).catch(error => {
-                historyLoading.value = false;
+                if (requestSeq === budgetHistoryRequestSeq) {
+                    historyLoading.value = false;
+                }
                 logger.error('[BudgetStore] Failed to load history', error);
                 reject(error);
             });
@@ -508,6 +559,7 @@ export const useBudgetStore = defineStore('budget', () => {
      */
     function invalidateBudgetList(): void {
         budgetListStateInvalid.value = true;
+        budgetListRequestSignature.value = '';
     }
 
     /**
@@ -517,9 +569,12 @@ export const useBudgetStore = defineStore('budget', () => {
         allBudgets.value = [];
         allBudgetsMap.value = {};
         budgetListStateInvalid.value = true;
+        budgetListRequestSignature.value = '';
         currentExecution.value = null;
         currentForecast.value = null;
         currentHistory.value = null;
+        currentHistoryRequestSignature.value = '';
+        budgetHistoryRequestSeq += 1;
         executionLoading.value = false;
         forecastLoading.value = false;
         historyLoading.value = false;
@@ -537,6 +592,7 @@ export const useBudgetStore = defineStore('budget', () => {
         currentExecution,
         currentForecast,
         currentHistory,
+        currentHistoryRequestSignature,
         executionLoading,
         forecastLoading,
         historyLoading,

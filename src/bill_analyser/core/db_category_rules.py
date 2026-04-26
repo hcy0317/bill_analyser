@@ -7,10 +7,12 @@ from typing import Any
 
 import aiosqlite
 
+from ..utils.constants import TransactionType
 from ..utils.logger import log_method
 from .category_engine import escape_rule_expression_term
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+from .investment_settings import build_user_investment_keyword_settings
 
 
 _LEGACY_RULE_PREFIXES = ("OR:", "AND:", "NOT:", "REGEX:")
@@ -19,6 +21,15 @@ _LEGACY_RULE_OPERATORS = (
     ("AND:", "AND", "|"),
     ("NOT:", "NOT", "|"),
     ("REGEX:", "REGEX", None),
+)
+_MIGRATED_INVESTMENT_RULE_NAME = "migrated:investment-recognition"
+_INVESTMENT_CATEGORY_PREFERENCE_TOKENS = (
+    "基金",
+    "fund",
+    "投资理财",
+    "投资本金",
+    "investment principal",
+    "investment",
 )
 
 
@@ -348,6 +359,14 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
                 self.logger.warning("迁移分类 %s 的关键词失败: %s", cat_id, exc)
                 skipped += 1
 
+        investment_result = await self._migrate_investment_settings_to_rules(
+            conn,
+            user_id=user_id,
+            now=now,
+        )
+        migrated += investment_result["migrated"]
+        skipped += investment_result["skipped"]
+
         await conn.commit()
         self.logger.info(
             "关键词迁移完成: migrated=%d, skipped=%d (user_id=%s)",
@@ -356,6 +375,129 @@ class DatabaseCategoryRulesMixin(DatabaseFacadeBase):
             user_id,
         )
         return {"migrated": migrated, "skipped": skipped}
+
+    async def _migrate_investment_settings_to_rules(
+        self,
+        conn: aiosqlite.Connection,
+        *,
+        user_id: int,
+        now: str,
+    ) -> dict[str, int]:
+        """Convert legacy investment recognition keywords into a category rule."""
+        async with conn.execute(
+            (
+                "SELECT id, import_learning_enabled, "
+                "investment_platform_keywords, investment_product_keywords, "
+                "investment_exclude_keywords "
+                "FROM users WHERE id = ? LIMIT 1"
+            ),
+            (user_id,),
+        ) as cursor:
+            user_row = await cursor.fetchone()
+        if not user_row:
+            return {"migrated": 0, "skipped": 0}
+
+        async with conn.execute(
+            (
+                "SELECT id, main_category, sub_category, priority "
+                "FROM categories "
+                "WHERE user_id = ? AND type = ? "
+                "ORDER BY priority ASC, id ASC"
+            ),
+            (user_id, int(TransactionType.INVESTMENT)),
+        ) as cursor:
+            investment_categories = [dict(row) for row in await cursor.fetchall()]
+        if not investment_categories:
+            return {"migrated": 0, "skipped": 0}
+
+        target_category = self._select_investment_rule_category(investment_categories)
+        rule_expression = self._convert_investment_settings_to_rule_expression(
+            build_user_investment_keyword_settings(dict(user_row)),
+        )
+        if not rule_expression:
+            return {"migrated": 0, "skipped": 1}
+
+        async with conn.execute(
+            (
+                "SELECT 1 FROM category_rules "
+                "WHERE user_id = ? AND category_id = ? "
+                "AND rule_expression = ? AND regex_enabled = 0 "
+                "LIMIT 1"
+            ),
+            (user_id, target_category["id"], rule_expression),
+        ) as duplicate_cursor:
+            if await duplicate_cursor.fetchone() is not None:
+                return {"migrated": 0, "skipped": 1}
+
+        await conn.execute(
+            (
+                "INSERT INTO category_rules "
+                "(user_id, category_id, name, priority, rule_expression, "
+                "regex_enabled, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)"
+            ),
+            (
+                user_id,
+                target_category["id"],
+                _MIGRATED_INVESTMENT_RULE_NAME,
+                target_category.get("priority", 100),
+                rule_expression,
+                now,
+                now,
+            ),
+        )
+        return {"migrated": 1, "skipped": 0}
+
+    @staticmethod
+    def _select_investment_rule_category(
+        categories: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Pick the most specific investment category for imported keyword rules."""
+
+        def preference_score(category: dict[str, Any]) -> tuple[int, int]:
+            text = (
+                f"{category.get('main_category', '')} "
+                f"{category.get('sub_category', '')}"
+            ).strip().lower()
+            token_score = next(
+                (
+                    token_index
+                    for token_index, token in enumerate(_INVESTMENT_CATEGORY_PREFERENCE_TOKENS)
+                    if token in text
+                ),
+                len(_INVESTMENT_CATEGORY_PREFERENCE_TOKENS),
+            )
+            return token_score, int(category.get("priority") or 0)
+
+        return min(categories, key=preference_score)
+
+    @staticmethod
+    def _convert_investment_settings_to_rule_expression(
+        keyword_config: dict[str, list[str]],
+    ) -> str:
+        """Serialize platform/product/exclude investment settings as rule expression."""
+        platform_clause = _format_rule_clause(
+            "OR",
+            keyword_config.get("platform_keywords", []),
+        )
+        product_clause = _format_rule_clause(
+            "OR",
+            keyword_config.get("product_keywords", []),
+        )
+        exclude_clause = _format_rule_clause(
+            "NOT",
+            keyword_config.get("exclude_keywords", []),
+        )
+        positive_clauses = [
+            clause for clause in (platform_clause, product_clause) if clause
+        ]
+        if not positive_clauses:
+            return ""
+
+        blocks = ["+".join(positive_clauses)]
+        if exclude_clause:
+            blocks.append(exclude_clause)
+        return "+".join(blocks)
 
     @staticmethod
     def _convert_old_keyword_syntax(old_kw: str) -> str:

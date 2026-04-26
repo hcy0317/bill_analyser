@@ -1917,7 +1917,7 @@ init(props);
 }
 
 .v-table.transaction-table .transaction-list-row-date > td {
-    height: 40px !important;
+    height: 38px !important;
 }
 
 .transaction-table .transaction-table-column-time {

@@ -8,11 +8,18 @@ import {
 
 describe('rule center navigation mapping', () => {
     test('keeps canonical domain and tab query params', () => {
-        expect(normalizeRuleCenterSelection({ domain: 'investment', tab: 'rules' })).toEqual({
+        expect(normalizeRuleCenterSelection({ domain: 'investment', tab: 'overview' })).toEqual({
             domain: 'investment',
-            tab: 'rules',
+            tab: 'overview',
             legacyRuleTab: 'rules',
             shouldRewriteQuery: false,
+        });
+
+        expect(normalizeRuleCenterSelection({ domain: 'investment', tab: 'rules' })).toEqual({
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'rules',
+            shouldRewriteQuery: true,
         });
 
         expect(normalizeRuleCenterSelection({ domain: 'llm', tab: 'config' })).toMatchObject({
@@ -30,7 +37,7 @@ describe('rule center navigation mapping', () => {
         });
 
         expect(normalizeRuleCenterSelection({ view: 'investment-settings' })).toMatchObject({
-            domain: 'investment',
+            domain: 'transfer',
             tab: 'rules',
             shouldRewriteQuery: true,
         });
@@ -56,7 +63,7 @@ describe('rule center navigation mapping', () => {
         });
 
         expect(normalizeRuleCenterSelection({ view: 'rule-center', tab: 'investment' })).toMatchObject({
-            domain: 'investment',
+            domain: 'transfer',
             tab: 'rules',
             legacyRuleTab: 'rules',
             shouldRewriteQuery: true,
@@ -97,11 +104,47 @@ describe('rule center UX source guards', () => {
         expect(source).toContain("tt('Rows per page')");
         expect(source).toContain("tt('Rule range'");
         expect(source).toContain('const ruleTableColumnCount = 7');
+        expect(source).toContain('rule-center-category-filter-menu');
+        expect(source).toContain('max-height: min(500px, calc(100vh - 160px))');
+        expect(source).toContain('const primaryCategoryFilterTypeOrder');
+        const filterOrder = source.slice(
+            source.indexOf('const primaryCategoryFilterTypeOrder'),
+            source.indexOf('const primaryCategoryFilterGroups')
+        );
+        expect(filterOrder.indexOf('CategoryType.Income')).toBeLessThan(filterOrder.indexOf('CategoryType.Expense'));
+        expect(filterOrder.indexOf('CategoryType.Expense')).toBeLessThan(filterOrder.indexOf('CategoryType.Transfer'));
+        expect(filterOrder.indexOf('CategoryType.Transfer')).toBeLessThan(filterOrder.indexOf('CategoryType.Investment'));
+        expect(source).toContain('const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name)');
         expect(source).not.toContain("tt('Batch Manage')");
         expect(source).not.toContain('v-if="bulkMode"');
         expect(source).not.toContain('v-model="rulePrimaryCategoryFilterKey"');
         expect(source).not.toContain('v-model="ruleRegexFilter"');
         expect(source).not.toContain('v-model="ruleEnabledFilter"');
+    });
+
+    test('investment recognition settings page is removed from rule configuration', () => {
+        const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
+
+        expect(source).not.toContain('InvestmentRecognitionSettingsCard');
+        expect(source).not.toContain('investment-recognition-settings-card');
+        expect(source).not.toContain("'investment-recognition'");
+        expect(source).not.toContain("tt('Investment Recognition Settings')");
+    });
+
+    test('legacy rule center routes preserve investment settings deep links for normalization', () => {
+        const source = readSource('src/router/desktop.ts');
+
+        expect(source).toContain('function buildLegacyRulesCenterRedirect');
+        expect(source).toContain("query['view'] = 'rule-center'");
+        expect(source).toContain("path: '/rules/center'");
+        expect(source).toContain('redirect: route => buildLegacyRulesCenterRedirect(route)');
+    });
+
+    test('transaction category header names investment groups explicitly', () => {
+        const source = readSource('src/views/base/transactions/TransactionListPageBase.ts');
+
+        expect(source).toContain('case TransactionType.Investment:');
+        expect(source).toContain("return tt('Investment');");
     });
 
     test('rule expression display keeps slash OR in the same expression group', () => {
@@ -116,7 +159,7 @@ describe('rule center UX source guards', () => {
         const source = readSource('src/views/desktop/pairingcenter/ListPage.vue');
         const titleIndex = source.indexOf('<span>{{ currentPageTitle }}</span>');
         const refreshIndex = source.indexOf('v-if="showHeaderRefresh"');
-        const spacerIndex = source.indexOf('<v-spacer />', refreshIndex);
+        const spacerIndex = source.indexOf('<v-spacer v-if="!showLearningHeaderActions" />', refreshIndex);
         const chipIndex = source.indexOf('rule-center-pair-count-chip');
 
         expect(titleIndex).toBeGreaterThanOrEqual(0);

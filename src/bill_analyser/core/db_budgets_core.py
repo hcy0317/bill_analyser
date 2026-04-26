@@ -10,9 +10,19 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite
 
+from ..utils.constants import TransactionType
 from ..utils.logger import log_method
 from .db_shared import BudgetGroupKey, DatabaseFacadeBase
 from .db_time import utc_now
+
+
+_LEGACY_EXPENSE_CATEGORY_TYPE = 1
+_VALID_BUDGET_CATEGORY_TYPES = {
+    int(TransactionType.INCOME),
+    int(TransactionType.EXPENSE),
+    int(TransactionType.TRANSFER),
+    int(TransactionType.INVESTMENT),
+}
 
 
 class DatabaseBudgetsCoreMixin(DatabaseFacadeBase):
@@ -41,6 +51,51 @@ class DatabaseBudgetsCoreMixin(DatabaseFacadeBase):
         return [dict(row) for row in rows]
 
     @log_method
+    async def get_budgets_for_listing(
+        self,
+        filters: dict[str, Any] | None = None,
+        budget_type: int | None = None,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return budget list rows enriched with resolved category/type metadata."""
+        budgets = await self.get_budgets(filters, user_id=user_id)
+        categories = await self.get_all_categories(user_id=user_id)
+        category_context = self._build_budget_category_context(categories)
+
+        enriched_budgets: list[dict[str, Any]] = []
+        for budget in budgets:
+            resolved_budget_type = self._resolve_budget_category_type(
+                budget.get("category"),
+                budget.get("sub_category"),
+                category_context,
+                preferred_type=budget_type,
+            )
+            if budget_type is not None and resolved_budget_type != budget_type:
+                continue
+
+            item = dict(budget)
+            if resolved_budget_type is None:
+                item["category_info"] = None
+                item["category_id"] = ""
+                enriched_budgets.append(item)
+                continue
+
+            category_info = self._resolve_budget_category_info(
+                budget.get("category"),
+                budget.get("sub_category"),
+                category_context,
+                resolved_budget_type,
+            )
+            item["type"] = resolved_budget_type
+            item["category_info"] = category_info
+            item["category_id"] = (
+                str(category_info.get("id") or "") if category_info else ""
+            )
+            enriched_budgets.append(item)
+
+        return enriched_budgets
+
+    @log_method
     async def get_budget_by_id(self, budget_id: int, user_id: int = 1) -> dict[str, Any] | None:
         conn = await self._get_connection()
         async with conn.execute("SELECT * FROM budgets WHERE id = ? AND user_id = ?", (budget_id, user_id)) as cursor:
@@ -58,24 +113,26 @@ class DatabaseBudgetsCoreMixin(DatabaseFacadeBase):
             if not main_category:
                 continue
 
-            category_type = int(category.get("type") or 0)
-            if category_type <= 0:
+            category_type = self._normalize_budget_category_type(category.get("type"))
+            if category_type is None:
                 continue
 
+            category_entry = dict(category)
+            category_entry["type"] = category_type
             normalized_sub_category = self._normalize_budget_sub_category(category.get("sub_category"))
             types_by_name.setdefault(main_category, set()).add(category_type)
 
             if not normalized_sub_category:
-                primary_by_key[(category_type, main_category)] = category
+                primary_by_key[(category_type, main_category)] = category_entry
                 continue
 
             fallback_key = (category_type, main_category)
-            sub_by_key[(category_type, main_category, normalized_sub_category)] = category
+            sub_by_key[(category_type, main_category, normalized_sub_category)] = category_entry
             existing_fallback = fallback_by_key.get(fallback_key)
             if existing_fallback is None or (
-                not existing_fallback.get("icon") and category.get("icon")
+                not existing_fallback.get("icon") and category_entry.get("icon")
             ):
-                fallback_by_key[fallback_key] = category
+                fallback_by_key[fallback_key] = category_entry
 
         return {
             "primary_by_key": primary_by_key,
@@ -117,6 +174,19 @@ class DatabaseBudgetsCoreMixin(DatabaseFacadeBase):
                 candidate_type,
             ):
                 return candidate_type
+        return None
+
+    @staticmethod
+    def _normalize_budget_category_type(category_type: Any) -> int | None:
+        try:
+            raw_type = int(category_type)
+        except (TypeError, ValueError):
+            return None
+
+        if raw_type == _LEGACY_EXPENSE_CATEGORY_TYPE:
+            return int(TransactionType.EXPENSE)
+        if raw_type in _VALID_BUDGET_CATEGORY_TYPES:
+            return raw_type
         return None
 
     @staticmethod

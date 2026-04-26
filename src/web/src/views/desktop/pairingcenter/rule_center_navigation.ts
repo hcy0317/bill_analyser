@@ -29,6 +29,10 @@ export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): 
         return 'rules';
     }
 
+    if (domain === 'investment') {
+        return 'overview';
+    }
+
     return tab === 'rules' ? 'rules' : 'overview';
 }
 
@@ -50,6 +54,15 @@ export function normalizeRuleCenterSelection(input: {
     const tab = firstString(input.tab);
     const view = firstString(input.view);
     const pairType = firstString(input.pairType);
+
+    if (domain === 'investment' && tab === 'rules') {
+        return {
+            domain: 'transfer',
+            tab: 'rules',
+            legacyRuleTab: 'rules',
+            shouldRewriteQuery: true,
+        };
+    }
 
     if (isRuleCenterDomain(domain)) {
         return {
@@ -80,7 +93,7 @@ export function normalizeRuleCenterSelection(input: {
 
     if (view === 'investment-settings') {
         return {
-            domain: 'investment',
+            domain: 'transfer',
             tab: 'rules',
             legacyRuleTab: 'rules',
             shouldRewriteQuery: true,
@@ -108,7 +121,7 @@ export function normalizeRuleCenterSelection(input: {
     if (view === 'rules' || view === 'rule-center') {
         if (tab === 'investment') {
             return {
-                domain: 'investment',
+                domain: 'transfer',
                 tab: 'rules',
                 legacyRuleTab: 'rules',
                 shouldRewriteQuery: true,

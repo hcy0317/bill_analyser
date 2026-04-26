@@ -281,16 +281,6 @@ def _build_matching_reconcile_history_payload(result: dict[str, Any]) -> dict[st
     }
 
 
-def _serialize_pairing_investment_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
-    payload = dict(settings or {}) if isinstance(settings, dict) else {}
-    return {
-        "importLearningEnabled": bool(payload.get("import_learning_enabled", True)),
-        "investmentPlatformKeywords": list(payload.get("investment_platform_keywords") or []),
-        "investmentProductKeywords": list(payload.get("investment_product_keywords") or []),
-        "investmentExcludeKeywords": list(payload.get("investment_exclude_keywords") or []),
-    }
-
-
 @bp.route("/sessions/<session_id>/candidates", methods=["GET"])
 @log_method
 @require_auth
@@ -653,48 +643,21 @@ def delete_manual_pair(pair_id: int):
 @log_method
 @require_auth
 def manage_matching_investment_settings():
-    """Pairing-center canonical investment-settings read/write endpoint."""
-    try:
-        db, _ = get_app_context()
-        user_id = _get_request_user_id()
+    """Retired investment-settings endpoint.
 
-        settings_reader = getattr(db, "get_pairing_investment_settings", None)
-        settings_updater = getattr(db, "update_pairing_investment_settings", None)
-        unset_value = getattr(db, "_UNSET", None)
-
-        if request.method == "GET":
-            if not callable(settings_reader):
-                raise AttributeError("Pairing investment settings reader not available")
-
-            settings = _run_async(settings_reader(user_id=user_id))
-            if not settings:
-                return jsonify({"success": False, "error": "User not found"}), 404
-
-            return jsonify({"success": True, "data": _serialize_pairing_investment_settings(settings)})
-
-        data = request.get_json(silent=True)
-        if data is None or not isinstance(data, dict):
-            return jsonify({"success": False, "error": "Invalid request"}), 400
-
-        if "importLearningEnabled" in data and not isinstance(data["importLearningEnabled"], bool):
-            return jsonify({"success": False, "error": "Invalid request"}), 400
-
-        if not callable(settings_updater) or unset_value is None:
-            raise AttributeError("Pairing investment settings updater not available")
-
-        settings = _run_async(
-            settings_updater(
-                user_id=user_id,
-                import_learning_enabled=data.get("importLearningEnabled", unset_value),
-                investment_platform_keywords=data.get("investmentPlatformKeywords", unset_value),
-                investment_product_keywords=data.get("investmentProductKeywords", unset_value),
-                investment_exclude_keywords=data.get("investmentExcludeKeywords", unset_value),
-            )
-        )
-        if not settings:
-            return jsonify({"success": False, "error": "User not found"}), 404
-
-        return jsonify({"success": True, "data": _serialize_pairing_investment_settings(settings)})
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.error("读取或更新 pairing investment settings 失败: %s", exc, exc_info=True)
-        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+    Investment recognition keywords are migrated into ``category_rules`` and are
+    edited through the category-rule system.  Keep a deterministic 410 response
+    instead of a hidden writable settings path so old clients fail explicitly.
+    """
+    _get_request_user_id()
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": (
+                    "Investment recognition settings are managed by category rules"
+                ),
+            }
+        ),
+        410,
+    )
