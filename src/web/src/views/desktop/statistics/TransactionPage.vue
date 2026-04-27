@@ -844,6 +844,9 @@ function init(initProps: TransactionStatisticsProps): void {
         return;
     }
 
+    loading.value = true;
+    initing.value = true;
+
     Promise.all([
         accountsStore.loadAllAccounts({force: false}),
         transactionCategoriesStore.loadAllCategories({force: false})

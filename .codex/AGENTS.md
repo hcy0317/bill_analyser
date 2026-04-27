@@ -36,3 +36,9 @@ Keep the repo copy minimal; do not mirror the full user-level harness back into 
 
 - Prefer the user-level Codex custom agents for read-only exploration, review, planning, ultrawork orchestration, and other generic harness roles.
 - If the repository ever needs a truly Bill Analyser-specific Codex agent again, add only that delta instead of mirroring the whole user-level harness back into `.codex/`.
+
+## Cross-Platform Agent/Skill Sync
+
+- 跨平台 skill 兼容约定：`~/.agents/skills/cross-platform-skill-sync/SKILL.md`（用户级 definitive）
+- OpenCode ↔ Codex agent 映射表：`~/.config/opencode/harness/agent-manifest.json`
+- 修改 Codex agents (`~/.codex/agents/*.toml`) 或 OpenCode skills (`.opencode/skills/*/SKILL.md`) 时，必须同步更新映射。

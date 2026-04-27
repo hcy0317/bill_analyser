@@ -140,8 +140,16 @@ npm run lint
 - Copilot instructions, agents, prompts, and hooks: `.github/`
 - Claude-specific runtime assets: `.claude/`
 - Codex runtime assets: `.codex/`
+- OpenCode runtime assets: `opencode.json`, `.opencode/`
 - Shared skills: `.agents/skills/`
 - Shared hook scripts: `scripts/hooks/`
+
+### Cross-platform skill sync convention
+
+- 任一平台（Claude Code / OpenCode / GitHub Copilot / Codex）修改 skills（用户级或项目级）后，必须确保全平台兼容。
+- 约定详见：`~/.agents/skills/cross-platform-skill-sync/SKILL.md`（用户级 definitive 版本）
+- OpenCode 与 Codex 的 agent 映射表：`~/.config/opencode/harness/agent-manifest.json`
+- 共享 skill 优先放在 `.agents/skills/`（项目级）或 `~/.agents/skills/`（用户级），平台本地目录只做薄适配器。
 
 ## Session completion
 
