@@ -40,7 +40,7 @@
                     expression-format="composite"
                     :disabled="disabled"
                     :regex-enabled="draft.regexEnabled"
-                    :title="tt('Assignment Matching')"
+                    :title="nestedExpressionTitle"
                     :add-button-text="tt('Add Matching Expression')"
                     :empty-state-text="tt('No rule expression defined yet')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
@@ -82,6 +82,8 @@ const emit = defineEmits<{
 const { tt } = useI18n();
 
 const draft = computed(() => props.modelValue);
+// KeywordInput keeps its add button in a title row; keep the visible title in this wrapper header only.
+const nestedExpressionTitle = ' ';
 
 function updateField<K extends keyof CategoryRuleBuilderModel>(key: K, value: CategoryRuleBuilderModel[K]): void {
     emit('update:modelValue', {

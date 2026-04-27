@@ -2161,6 +2161,7 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             parserColors: PARSER_COLORS,
             dedupLabels: {
                 'Transfer Match': tt('Transfer Match'),
+                'Platform Duplicate': tt('Platform Duplicate'),
                 'Platform-Bank Duplicate': tt('Platform-Bank Duplicate'),
                 'Similar Duplicate': tt('Similar Duplicate'),
                 'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
