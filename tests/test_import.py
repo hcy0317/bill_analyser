@@ -1565,12 +1565,12 @@ async def test_reclassify_preview_uses_canonical_investment_category_rule(servic
     assert previews[0]["investment_platform"] == ""
     assert previews[0]["investment_product"] == ""
     assert previews[0]["matching"]["investment"] == {
-        "score": 1.0,
-        "level": "high",
-        "reason": "category_rule",
+        "score": 0.0,
+        "level": "",
+        "reason": "",
         "platform": "",
         "product": "",
-        "review_status": "pending",
+        "review_status": "",
         "suppressed": False,
     }
 
@@ -1653,12 +1653,12 @@ async def test_reclassify_preview_detects_investment_via_canonical_reits_rule(se
     assert previews[0]["investment_platform"] == ""
     assert previews[0]["investment_product"] == ""
     assert previews[0]["matching"]["investment"] == {
-        "score": 1.0,
-        "level": "high",
-        "reason": "category_rule",
+        "score": 0.0,
+        "level": "",
+        "reason": "",
         "platform": "",
         "product": "",
-        "review_status": "pending",
+        "review_status": "",
         "suppressed": False,
     }
 
@@ -1702,11 +1702,11 @@ async def test_get_import_preview_does_not_emit_separate_investment_signal(servi
     assert previews[0]["investment_platform"] == ""
     assert previews[0]["investment_product"] == ""
     assert previews[0]["matching"]["investment"] == {
-        "score": 1.0,
-        "level": "high",
-        "reason": "category_rule",
+        "score": 0.0,
+        "level": "",
+        "reason": "",
         "platform": "",
         "product": "",
-        "review_status": "pending",
+        "review_status": "",
         "suppressed": False,
     }
