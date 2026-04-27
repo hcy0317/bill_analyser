@@ -10,7 +10,8 @@ import {
     getImportCheckMatchingParserTagsText,
     hasImportCheckMatchingDedupContext,
     hasImportCheckMatchingContext,
-    resolveImportPreviewInvestmentDecisionState
+    resolveImportPreviewInvestmentDecisionState,
+    shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
 
 describe('checkDataMatching helpers', () => {
@@ -127,13 +128,14 @@ describe('checkDataMatching helpers', () => {
 
         expect(hasImportCheckMatchingDedupContext(summary)).toBe(true);
         expect(hasImportCheckMatchingContext(summary)).toBe(true);
-        expect(getImportCheckMatchingDedupLabel(summary)).toBe('Platform-Bank Duplicate');
+        expect(getImportCheckMatchingDedupLabel(summary)).toBe('Platform Duplicate');
         const title = getImportCheckMatchingDedupTitle(summary, {
             dedupLabels: {
-                'Platform-Bank Duplicate': '平台-银行重复'
+                'Platform Duplicate': '平台重复'
             }
         });
-        expect(title).toBe('平台-银行重复 · 2');
+        expect(title).toBe('平台重复');
+        expect(shouldShowImportCheckMatchingDedupSourceCount(summary.dedupType)).toBe(false);
         expect(title).not.toContain('platform_bank');
         expect(title).not.toContain('301');
         expect(title).not.toContain('302');
@@ -198,7 +200,8 @@ describe('checkDataMatching helpers', () => {
         ]);
         expect(viewModel.learning?.actions.map(action => action.labelKey)).toStrictEqual([
             'Apply Suggestion',
-            'Reject Learning Suggestion'
+            'Reject Learning Suggestion',
+            'Clear Learning Decision'
         ]);
         expect(viewModel.investment?.actions).toStrictEqual([]);
     });

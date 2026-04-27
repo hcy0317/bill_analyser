@@ -690,10 +690,9 @@
 
                     <v-window-item value="history">
                         <v-card-text class="pt-4">
-                            <div v-if="loading && (!isHistoricalHistoryReady || historicalLegendGroups.length === 0)" class="py-10">
-                                <v-skeleton-loader type="heading" class="mb-4" :loading="true"></v-skeleton-loader>
-                                <v-skeleton-loader type="image" class="mb-4" :loading="true" height="400"></v-skeleton-loader>
-                                <v-skeleton-loader type="chip@6" :loading="true"></v-skeleton-loader>
+                            <div v-if="loading && (!isHistoricalHistoryReady || historicalLegendGroups.length === 0)" class="py-10 d-flex flex-column align-center justify-center budget-history-loading-placeholder">
+                                <v-progress-linear indeterminate color="primary" class="budget-history-loading-bar mb-2" />
+                                <span class="text-caption text-medium-emphasis">{{ tt('Loading') }}...</span>
                             </div>
 
                             <div v-else-if="historicalLegendGroups.length > 0" class="budget-history-panel">
@@ -950,43 +949,61 @@
         </v-card>
     </v-dialog>
 
-    <v-dialog v-model="showForecastSettingsDialog" max-width="460">
-        <v-card>
-            <v-card-title>{{ tt('Forecast Settings') }}</v-card-title>
-            <v-card-text class="budget-forecast-settings-content">
-                <v-select class="budget-forecast-setting-control"
-                          density="compact"
-                          hide-details
-                          variant="outlined"
-                          :disabled="loading || forecastLoading"
-                          :label="tt('Forecast Sort')"
-                          :aria-label="tt('Forecast Sort')"
-                          :items="forecastSortOptions"
-                          item-title="name"
-                          item-value="value"
-                          v-model="forecastSortBy" />
+    <v-dialog v-model="showForecastSettingsDialog" max-width="640">
+        <v-card class="pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex align-center justify-center">
+                    <div class="d-flex w-100 align-center justify-center">
+                        <h4 class="text-h4">{{ tt('Forecast Settings') }}</h4>
+                    </div>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" @click="showForecastSettingsDialog = false">
+                        <v-icon :icon="mdiClose" size="24" />
+                    </v-btn>
+                </div>
+            </template>
+            <v-card-text class="mt-md-4 pt-0">
+                <v-row>
+                    <v-col cols="12">
+                        <v-select class="budget-forecast-setting-control"
+                                  density="compact"
+                                  hide-details
+                                  variant="outlined"
+                                  :disabled="loading || forecastLoading"
+                                  :label="tt('Forecast Sort')"
+                                  :aria-label="tt('Forecast Sort')"
+                                  :items="forecastSortOptions"
+                                  item-title="name"
+                                  item-value="value"
+                                  v-model="forecastSortBy" />
+                    </v-col>
 
-                <v-select class="budget-forecast-setting-control"
-                          density="compact"
-                          hide-details
-                          variant="outlined"
-                          :disabled="loading || forecastLoading"
-                          :label="tt('Forecast Strategy')"
-                          :aria-label="tt('Forecast Strategy')"
-                          :items="forecastStrategies"
-                          item-title="name"
-                          item-value="value"
-                          v-model="forecastStrategy" />
+                    <v-col cols="12">
+                        <v-select class="budget-forecast-setting-control"
+                                  density="compact"
+                                  hide-details
+                                  variant="outlined"
+                                  :disabled="loading || forecastLoading"
+                                  :label="tt('Forecast Strategy')"
+                                  :aria-label="tt('Forecast Strategy')"
+                                  :items="forecastStrategies"
+                                  item-title="name"
+                                  item-value="value"
+                                  v-model="forecastStrategy" />
+                    </v-col>
 
-                <v-select class="budget-forecast-setting-control"
-                          density="compact"
-                          hide-details
-                          variant="outlined"
-                          :disabled="loading || forecastLoading"
-                          :label="tt('History Periods')"
-                          :aria-label="tt('History Periods')"
-                          :items="historyPeriodOptions"
-                          v-model="forecastMonthsHistory" />
+                    <v-col cols="12">
+                        <v-select class="budget-forecast-setting-control"
+                                  density="compact"
+                                  hide-details
+                                  variant="outlined"
+                                  :disabled="loading || forecastLoading"
+                                  :label="tt('History Periods')"
+                                  :aria-label="tt('History Periods')"
+                                  :items="historyPeriodOptions"
+                                  v-model="forecastMonthsHistory" />
+                    </v-col>
+                </v-row>
             </v-card-text>
             <v-card-actions>
                 <v-spacer />
@@ -3821,6 +3838,14 @@ watch(filterKeyword, (newVal) => {
 .budget-history-legend-count {
     color: rgba(var(--v-theme-on-surface), 0.6);
     font-size: 0.75rem;
+}
+
+.budget-history-loading-placeholder {
+    min-height: 440px;
+}
+
+.budget-history-loading-bar {
+    max-width: 480px;
 }
 
 .budget-history-detail-chart {

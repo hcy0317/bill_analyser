@@ -560,10 +560,20 @@
     </v-card>
 
     <!-- Edit Rule Dialog -->
-    <v-dialog v-model="editRuleDialog" max-width="500" persistent>
-        <v-card>
-            <v-card-title>{{ tt('Edit Rule') }}</v-card-title>
-            <v-card-text>
+    <v-dialog v-model="editRuleDialog" max-width="640" persistent>
+        <v-card class="pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex align-center justify-center">
+                    <div class="d-flex w-100 align-center justify-center">
+                        <h4 class="text-h4">{{ tt('Edit Rule') }}</h4>
+                    </div>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" @click="editRuleDialog = false">
+                        <v-icon :icon="mdiClose" size="24" />
+                    </v-btn>
+                </div>
+            </template>
+            <v-card-text class="mt-md-4 pt-0">
                 <v-text-field v-model="editRuleForm.matchValue" :label="tt('Match Value')"
                               density="compact" class="mb-3" />
                 <v-text-field v-model="editRuleForm.learnedType" :label="tt('Learned Type')"
@@ -579,11 +589,21 @@
     </v-dialog>
 
     <!-- Add Config Dialog -->
-    <v-dialog v-model="addConfigDialog" max-width="640" persistent>
-        <v-card>
-            <v-card-title>{{ tt('Add Config') }}</v-card-title>
+    <v-dialog v-model="addConfigDialog" max-width="800" persistent>
+        <v-card class="pa-2 pa-sm-4 pa-md-8">
+            <template #title>
+                <div class="d-flex align-center justify-center">
+                    <div class="d-flex w-100 align-center justify-center">
+                        <h4 class="text-h4">{{ tt('Add Config') }}</h4>
+                    </div>
+                    <v-btn density="comfortable" color="default" variant="text" class="ms-2"
+                           :icon="true" @click="closeAddConfigDialog">
+                        <v-icon :icon="mdiClose" size="24" />
+                    </v-btn>
+                </div>
+            </template>
             <form autocomplete="off" @submit.prevent="saveNewConfig">
-                <v-card-text>
+                <v-card-text class="mt-md-4 pt-0">
                     <input class="llm-config-autofill-decoy"
                            type="text"
                            name="username"

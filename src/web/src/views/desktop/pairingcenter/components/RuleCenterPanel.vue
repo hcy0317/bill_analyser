@@ -2181,9 +2181,9 @@ defineExpose({
 
 .rule-center-category-filter-group {
     min-height: 28px;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 600;
-    color: rgb(var(--v-theme-on-surface-variant));
+    color: rgb(var(--v-theme-on-surface));
 }
 
 .rule-center-column-select {

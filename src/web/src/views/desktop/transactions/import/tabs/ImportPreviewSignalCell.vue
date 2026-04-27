@@ -15,7 +15,10 @@
                 variant="outlined"
                 size="x-small"
                 :title="viewModel.dedup.title">
-                {{ tt(viewModel.dedup.labelKey) }} · {{ viewModel.dedup.sourceCount }}
+                {{ tt(viewModel.dedup.labelKey) }}
+                <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
+                    · {{ viewModel.dedup.sourceCount }}
+                </template>
             </v-chip>
         </div>
 
@@ -57,14 +60,38 @@
         </div>
 
         <div class="signal-group" v-if="viewModel.learning">
-            <v-chip
-                :color="viewModel.learning.color"
-                variant="tonal"
-                size="x-small"
-                :prepend-icon="getLearningIcon(viewModel.learning.status)"
-                :title="viewModel.learning.title">
-                {{ tt(viewModel.learning.labelKey) }}
-            </v-chip>
+            <div class="learning-hover-wrapper">
+                <v-hover v-slot="{ isHovering, props }">
+                    <v-chip
+                        v-bind="props"
+                        :color="viewModel.learning.color"
+                        variant="tonal"
+                        size="x-small"
+                        :prepend-icon="getLearningIcon(viewModel.learning.status)"
+                        :title="viewModel.learning.title">
+                        {{ tt(viewModel.learning.labelKey) }}
+                    </v-chip>
+                    <v-fade-transition>
+                        <v-card
+                            v-if="isHovering && (viewModel.learning.summary || viewModel.learning.title)"
+                            class="learning-hover-card">
+                            <v-card-text class="pa-2">
+                                <div v-if="viewModel.learning.title" class="text-caption font-weight-bold mb-1">
+                                    {{ viewModel.learning.title }}
+                                </div>
+                                <div v-if="viewModel.learning.summary" class="learning-hover-card__details">
+                                    <div
+                                        v-for="line in getLearningHoverDetailLines(viewModel.learning.summary)"
+                                        :key="line"
+                                        class="text-caption">
+                                        {{ line }}
+                                    </div>
+                                </div>
+                            </v-card-text>
+                        </v-card>
+                    </v-fade-transition>
+                </v-hover>
+            </div>
             <div class="d-inline-flex flex-wrap ga-1 ms-1">
                 <v-btn
                     v-for="action in viewModel.learning.actions"
@@ -76,9 +103,6 @@
                     @click.stop="emit('reviewLearning', action.decision)">
                     {{ tt(action.labelKey) }}
                 </v-btn>
-            </div>
-            <div class="text-caption text-medium-emphasis ms-1" v-if="viewModel.learning.summary">
-                {{ viewModel.learning.summary }}
             </div>
         </div>
 
@@ -133,9 +157,10 @@
 
 <script setup lang="ts">
 import { useI18n } from '@/locales/helpers.ts';
-import type {
-    ImportPreviewSignalStatus,
-    ImportPreviewSignalViewModel
+import {
+    shouldShowImportCheckMatchingDedupSourceCount,
+    type ImportPreviewSignalStatus,
+    type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
 import {
     mdiAlertOutline,
@@ -160,6 +185,13 @@ const emit = defineEmits<{
 }>();
 
 const { tt } = useI18n();
+
+function getLearningHoverDetailLines(summary: string | undefined): string[] {
+    return (summary || '')
+        .split(/\s*[|；;]\s*/)
+        .map(part => part.trim())
+        .filter(part => !!part);
+}
 
 function getStatusIcon(status: ImportPreviewSignalStatus): string {
     if (status === 'accepted') {
@@ -203,4 +235,26 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
     align-self: flex-start;
 }
 
+.learning-hover-wrapper {
+    position: relative;
+    display: inline-flex;
+}
+
+.learning-hover-card {
+    position: absolute;
+    z-index: 1000;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 220px;
+    max-width: 280px;
+    pointer-events: none;
+    background: rgb(var(--v-theme-surface));
+    color: rgb(var(--v-theme-on-surface));
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+}
+
+.learning-hover-card__details {
+    display: grid;
+    gap: 2px;
+}
 </style>

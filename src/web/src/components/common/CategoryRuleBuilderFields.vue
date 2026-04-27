@@ -40,7 +40,7 @@
                     expression-format="composite"
                     :disabled="disabled"
                     :regex-enabled="draft.regexEnabled"
-                    :title="tt('Rule Matching Expression')"
+                    :title="tt('Assignment Matching')"
                     :add-button-text="tt('Add Matching Expression')"
                     :empty-state-text="tt('No rule expression defined yet')"
                     @update:model-value="updateTextField('ruleExpression', $event)"
@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<{
     title?: string;
     description?: string;
 }>(), {
-    title: 'Rule Matching Expression',
+    title: 'Assignment Matching',
     description: '',
     showEnabledToggle: true,
 });

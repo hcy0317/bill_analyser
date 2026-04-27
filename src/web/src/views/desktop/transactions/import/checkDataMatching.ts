@@ -146,7 +146,7 @@ export interface ImportPreviewTypeColumnViewModel {
 
 const MATCHING_DEDUP_LABEL_KEYS: Record<string, string> = {
     transfer: 'Transfer Match',
-    platform_bank: 'Platform-Bank Duplicate',
+    platform_bank: 'Platform Duplicate',
     similar: 'Similar Duplicate',
     split: 'Split-Merge Duplicate',
     split_merge: 'Split-Merge Duplicate',
@@ -198,6 +198,10 @@ export function getImportCheckMatchingDedupLabel(summary: ImportCheckMatchingCon
     }
 
     return MATCHING_DEDUP_LABEL_KEYS[normalizedDedupType] || humanizeDedupType(normalizedDedupType);
+}
+
+export function shouldShowImportCheckMatchingDedupSourceCount(dedupType: string | undefined): boolean {
+    return (dedupType || '').trim().toLowerCase() !== 'platform_bank';
 }
 
 function getParserDisplayLabel(parserId: string, parserLabels?: Record<string, string>): string {
@@ -289,6 +293,10 @@ export function getImportCheckMatchingDedupTitle(
     const dedupLabel = options.dedupLabels?.[labelKey] || labelKey;
     if (!dedupLabel) {
         return '';
+    }
+
+    if (!shouldShowImportCheckMatchingDedupSourceCount(summary.dedupType)) {
+        return dedupLabel;
     }
 
     return summary.dedupSourceIds.length > 0
@@ -440,7 +448,8 @@ export function buildImportPreviewSignalViewModel(
         'Learning Suggestion Rejected',
         [
             { decision: 'accept', labelKey: 'Apply Suggestion', color: 'secondary' },
-            { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
+            { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' },
+            { decision: 'clear', labelKey: 'Clear Learning Decision', color: 'warning' }
         ],
         undefined,
         state.learningSummary
