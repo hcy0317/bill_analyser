@@ -1,7 +1,17 @@
 import type { ImportMatchingPayload } from '@/models/import_matching.ts';
 
+export interface ImportPreviewCategoryLike {
+    id?: string;
+    name: string;
+    parentId?: string | null;
+}
+
+export type ImportPreviewCategoryMap = Record<string, ImportPreviewCategoryLike | undefined>;
+
 export interface ImportPreviewRecord {
     id: number;
+    category_id?: number | string | null;
+    categoryId?: number | string | null;
     preview_type?: string;
     suggested_preview_type?: string;
     preview_date?: string;
@@ -39,4 +49,57 @@ export interface ImportPreviewRecord {
     preview_parser_tags?: string[];
     matching?: ImportMatchingPayload;
     preview_is_manually_annotated?: boolean;
+}
+
+function normalizePreviewCategoryId(rawCategoryId: number | string | null | undefined): string {
+    if (typeof rawCategoryId === 'number' && Number.isFinite(rawCategoryId) && rawCategoryId > 0) {
+        return String(rawCategoryId);
+    }
+
+    if (typeof rawCategoryId === 'string') {
+        const normalizedCategoryId = rawCategoryId.trim();
+        return normalizedCategoryId && normalizedCategoryId !== '0' ? normalizedCategoryId : '';
+    }
+
+    return '';
+}
+
+export function resolveImportPreviewCategoryId(
+    previewData: ImportPreviewRecord,
+    categoriesById: ImportPreviewCategoryMap
+): string {
+    const persistedCategoryId = normalizePreviewCategoryId(previewData.category_id ?? previewData.categoryId);
+    if (persistedCategoryId && categoriesById[persistedCategoryId]) {
+        return persistedCategoryId;
+    }
+
+    const mainCategory = previewData.preview_main_category || '';
+    const subCategory = previewData.preview_sub_category || '';
+    if (!mainCategory && !subCategory) {
+        return '';
+    }
+
+    for (const [categoryId, category] of Object.entries(categoriesById)) {
+        if (!category) {
+            continue;
+        }
+
+        if (subCategory) {
+            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
+                continue;
+            }
+
+            const parentCategory = categoriesById[category.parentId];
+            if (parentCategory?.name === mainCategory) {
+                return categoryId;
+            }
+            continue;
+        }
+
+        if (mainCategory && category.name === mainCategory && (!category.parentId || category.parentId === '0')) {
+            return categoryId;
+        }
+    }
+
+    return '';
 }

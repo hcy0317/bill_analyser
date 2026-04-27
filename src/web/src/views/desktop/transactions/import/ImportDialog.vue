@@ -399,7 +399,10 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
-import type { ImportPreviewRecord } from './importPreview.ts';
+import {
+    resolveImportPreviewCategoryId,
+    type ImportPreviewRecord
+} from './importPreview.ts';
 
 import { ref, computed, nextTick, useTemplateRef, watch } from 'vue';
 
@@ -717,33 +720,6 @@ function getPreviewTransactionType(previewType?: string): number | undefined {
     }
 
     return PREVIEW_TRANSACTION_TYPE_MAP[previewType];
-}
-
-function resolvePreviewCategoryId(mainCategory: string, subCategory: string): string {
-    if (!mainCategory && !subCategory) {
-        return '';
-    }
-
-    const categoriesMap = transactionCategoriesStore.allTransactionCategoriesMap;
-    for (const [categoryId, category] of Object.entries(categoriesMap)) {
-        if (subCategory) {
-            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
-                continue;
-            }
-
-            const parentCategory = categoriesMap[category.parentId];
-            if (parentCategory?.name === mainCategory) {
-                return categoryId;
-            }
-            continue;
-        }
-
-        if (category.name === mainCategory && (!category.parentId || category.parentId === '0')) {
-            return categoryId;
-        }
-    }
-
-    return '';
 }
 
 function isActiveCheckDataFilterGroup(summary?: string): boolean {
@@ -1365,10 +1341,13 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     const amountInCents = Math.round(Math.abs(item.preview_amount || 0) * 100);
     const destAmountInCents = Math.round(Math.abs(item.preview_destination_amount || 0) * 100);
 
-    // 根据分类名称查找分类 ID
+    // Prefer the persisted preview category id, then verify any name fallback against real categories.
     const mainCat = item.preview_main_category || '';
     const subCat = item.preview_sub_category || '';
-    const categoryId = resolvePreviewCategoryId(mainCat, subCat);
+    const categoryId = resolveImportPreviewCategoryId(
+        item,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
 
     // 账户ID
     const sourceAccountId = item.preview_source_account_id ? String(item.preview_source_account_id) : '';

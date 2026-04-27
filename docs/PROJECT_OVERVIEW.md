@@ -167,7 +167,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
 
 ### 5.2.1 导入预览校验交互
 - 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，按日期、类型、分类、账户、标签、人工标注状态与备注等维度组织筛选项。
-- `/api/bills/parse_import` 返回的导入预览项当前会同时携带 `parserSource` 与 `parserTags`；`BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 预览数据会返回 `preview_parser_id` 与 `preview_parser_tags`，而 `/api/bills/import/v2/preview/<session_id>` 的简化结果也会附带 `parserSource` 与 `parserTags` 供前端保留与消费解析器元信息。
+- `/api/bills/parse_import` 返回的导入预览项当前会同时携带 `parserSource` 与 `parserTags`；`BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 预览数据会返回 `preview_parser_id`、`preview_parser_tags` 与解析到的 `category_id`，而 `/api/bills/import/v2/preview/<session_id>` 的简化结果也会附带 `parserSource` 与 `parserTags` 供前端保留与消费解析器元信息。
 - `BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 当前还会为每条预览账单附带嵌套 `matching` 结构，按 `transfer / investment / learning / recurring / dedup / parser / annotation` 分组镜像现有平铺推荐字段；前端导入模型会保留该结构，现有平铺字段语义保持不变。
 - 分类规则的 create/update/delete/reorder/migrate 会刷新规则中心使用的全局 `CategoryEngine`，并同步刷新 `BillService` 导入预览所用分类引擎，确保导入预览分类匹配读取当前 `category_rules` canonical 规则而不是旧实例缓存。
 - 导入预览来自 `SmartDeduplicationEngine` 的 `dedup_type` 与 `dedup_source_ids`：批次内平台-银行去重在转账配对之前执行，只有明确转账意图或缺少平台-银行重复文本证据的异号候选才会进入转账配对；`dedup_type=transfer` 的预览信号 tooltip 会从当前预览行的 `parserSource/parserTags` 与 `dedup_source_ids` 指向的来源行收集解析器标签，展示成类似“匹配 | 民生银行 | 支付宝”的来源链，而不是只显示去重类型名称。

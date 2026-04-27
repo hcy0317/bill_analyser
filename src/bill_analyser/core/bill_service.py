@@ -2555,6 +2555,7 @@ class BillService:
                 "preview_type": preview.get("preview_type", ""),
                 "preview_amount": preview.get("preview_amount", 0),
                 "preview_destination_amount": preview.get("preview_destination_amount", 0),
+                "category_id": preview.get("category_id"),
                 "preview_main_category": preview.get("preview_main_category", ""),
                 "preview_sub_category": preview.get("preview_sub_category", ""),
                 "preview_source_account_id": preview.get("preview_source_account_id"),

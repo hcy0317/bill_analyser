@@ -798,7 +798,10 @@ import BatchReplaceDialog, { type BatchReplaceDialogDataType } from '../dialogs/
 import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vue';
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
 import ImportLearningSuggestionDialog from '../dialogs/ImportLearningSuggestionDialog.vue';
-import type { ImportPreviewRecord } from '../importPreview.ts';
+import {
+    resolveImportPreviewCategoryId,
+    type ImportPreviewRecord
+} from '../importPreview.ts';
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
@@ -1749,32 +1752,7 @@ function getLLMAnalysisErrorMessageKey(details: LLMAnalysisErrorDetails): string
 }
 
 function resolvePreviewCategoryId(previewData: ImportPreviewRecord): string {
-    const mainCategory = previewData.preview_main_category || '';
-    const subCategory = previewData.preview_sub_category || '';
-
-    if (!mainCategory && !subCategory) {
-        return '';
-    }
-
-    for (const [categoryId, category] of Object.entries(allCategoriesMap.value)) {
-        if (subCategory) {
-            if (category.name !== subCategory || !category.parentId || category.parentId === '0') {
-                continue;
-            }
-
-            const parentCategory = allCategoriesMap.value[category.parentId];
-            if (parentCategory?.name === mainCategory) {
-                return categoryId;
-            }
-            continue;
-        }
-
-        if (!subCategory && mainCategory && category.name === mainCategory && !category.parentId) {
-            return categoryId;
-        }
-    }
-
-    return '';
+    return resolveImportPreviewCategoryId(previewData, allCategoriesMap.value);
 }
 
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {

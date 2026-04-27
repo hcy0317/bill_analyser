@@ -2145,6 +2145,104 @@ class TestMatchingAPI:
         assert accept_preview["preview_source_account_id"] == initial_source_account_id
         assert accept_preview["preview_destination_account_id"] in (None, "", 0)
 
+    def test_matching_candidate_accept_ignores_stale_learning_rule_category_id(self, client):
+        """preview learning accept 遇到已失效分类 ID 时，不应按同名文本绑定任意分类。"""
+        auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_preview_learning_stale_category")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        session_id = f"pytest-matching-learning-stale-category-{int(time.time() * 1000)}"
+
+        from src.api.app import db
+
+        asyncio.run(
+            db.create_category(
+                {
+                    "type": 1,
+                    "main_category": "餐饮",
+                    "sub_category": "咖啡",
+                    "description": "",
+                    "priority": 0,
+                    "keywords": "",
+                    "hidden": False,
+                    "icon": "",
+                    "color": "",
+                },
+                user_id=current_user_id,
+            )
+        )
+
+        rule_id = _create_composite_learning_rule_via_db(
+            current_user_id,
+            parser_id="alipay",
+            counterparty="星巴克咖啡",
+            description="门店消费",
+            payment_method="支付宝",
+            learned_type="收入",
+        )
+
+        async def _prepare_rule_and_preview() -> int:
+            conn = await db._get_connection()  # pylint: disable=protected-access
+            await conn.execute(
+                """
+                UPDATE import_learning_rules
+                SET learned_category_id = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    999999,
+                    rule_id,
+                    current_user_id,
+                ),
+            )
+            await conn.commit()
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-07-24 11:10:00",
+                    "preview_type": "支出",
+                    "preview_amount": 28.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_source_account_id": None,
+                    "preview_destination_account_id": None,
+                    "preview_counterparty": "星巴克",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "咖啡消费",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_prepare_rule_and_preview())
+        candidate_id = f"preview:{preview_id}:learning"
+
+        accept_response = client.post(
+            f"/api/matching/candidates/{candidate_id}/accept",
+            json={
+                "ruleId": rule_id,
+                "expectedState": {
+                    "sessionId": session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "支出",
+                    "categoryId": None,
+                    "recurringId": None,
+                    "sourceAccountId": None,
+                    "destinationAccountId": None,
+                },
+            },
+            headers=auth_headers,
+        )
+
+        assert accept_response.status_code == 200
+        accept_preview = next(
+            item for item in accept_response.get_json()["data"]["preview"] if int(item["id"]) == preview_id
+        )
+        assert accept_preview["preview_type"] == "收入"
+        assert accept_preview["preview_main_category"] == ""
+        assert accept_preview["preview_sub_category"] == ""
+        assert accept_preview["category_id"] in (None, "", 0)
+
     def test_matching_candidate_accept_accepts_historical_transfer_candidate(self, client):
         """generic accept 第一刀应复用历史 formal-bill transfer 的手工配对写路径。"""
         auth_headers = _build_isolated_auth_headers(client, "test_matching_candidate_accept_bill")
