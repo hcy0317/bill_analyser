@@ -481,6 +481,7 @@ static/
 
 #hcy0317 Ignore 
 .tmp/
+.sisyphus/
 bills/*
 .VSCodeCounter/
 output/*
