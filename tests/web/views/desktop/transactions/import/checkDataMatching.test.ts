@@ -157,9 +157,7 @@ describe('checkDataMatching helpers', () => {
             parserTags: ['parser:alipay', 'channel:wallet'],
             dedupType: 'transfer',
             dedupSourceIds: [9],
-            isManuallyAnnotated: true,
-            investmentStatus: 'pending',
-            investmentTitle: 'investment candidate'
+            isManuallyAnnotated: true
         }, {
             matchLabel: '匹配',
             parserLabels: {
@@ -190,14 +188,12 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
         expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
         expect(viewModel.isManuallyAnnotated).toBe(true);
-        expect(viewModel.investment?.labelKey).toBe('Investment Signal');
-        expect(viewModel.investment?.actions).toStrictEqual([]);
+        expect(viewModel.investment).toBeNull();
     });
 
-    test('keeps transfer and learning review actions while investment stays signal-only', () => {
+    test('keeps transfer and learning review actions without rendering investment signal chips', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             transferStatus: 'pending',
-            investmentStatus: 'pending',
             learningStatus: 'pending'
         });
 
@@ -209,7 +205,7 @@ describe('checkDataMatching helpers', () => {
             'Apply Suggestion',
             'Reject Learning Suggestion'
         ]);
-        expect(viewModel.investment?.actions).toStrictEqual([]);
+        expect(viewModel.investment).toBeNull();
     });
 
     test('formats transfer details from structured source metadata and hides redundant parser chip', () => {
@@ -303,17 +299,6 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.dedup?.detailLines).toStrictEqual([
             '重复来源：支付宝 · 民生银行'
         ]);
-    });
-
-    test('keeps investment profile in hover title and maps reason keys for display', () => {
-        const viewModel = buildImportPreviewSignalViewModel({
-            investmentStatus: 'pending',
-            investmentTitle: 'platform:蚂蚁财富, product:黄金ETF',
-            investmentProfileText: '蚂蚁财富 黄金ETF'
-        });
-
-        expect(viewModel.investment?.title).toBe('Platform: 蚂蚁财富, Product: 黄金ETF | 蚂蚁财富 黄金ETF');
-        expect(viewModel.investment?.profileText).toBe('蚂蚁财富 黄金ETF');
     });
 
     test('formats learning detail lines with the user-facing recommended-category summary', () => {

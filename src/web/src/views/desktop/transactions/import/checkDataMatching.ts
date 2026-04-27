@@ -683,23 +683,6 @@ export function buildImportPreviewSignalViewModel(
         [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }],
         transferDetailLines
     );
-    const investmentTitle = formatInvestmentSignalReason(state.investmentTitle, options.investmentReasonLabels);
-    const investmentDetailLines = dedupeTextItems([
-        investmentTitle,
-        state.investmentProfileText || ''
-    ]);
-    const investment = buildReviewView(
-        state.investmentStatus,
-        investmentTitle,
-        'Investment Signal',
-        'Accepted',
-        'Rejected',
-        [],
-        state.investmentProfileText,
-        undefined,
-        [],
-        investmentDetailLines
-    );
     const learningDetailLines = buildLearningDetailLines(state, options);
     const learning = buildReviewView(
         state.learningStatus,
@@ -730,13 +713,12 @@ export function buildImportPreviewSignalViewModel(
         dedup,
         isManuallyAnnotated: matchingSummary.isManuallyAnnotated,
         transferSuggestion,
-        investment,
+        investment: null,
         learning,
         recurring,
         hasAnySignal: !!parser
             || !!dedup
             || !!transferSuggestion
-            || !!investment
             || !!learning
             || !!recurring
     };

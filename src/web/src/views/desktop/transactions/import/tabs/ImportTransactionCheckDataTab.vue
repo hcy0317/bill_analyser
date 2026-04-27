@@ -2103,22 +2103,6 @@ function getTransferSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
     return null;
 }
 
-function getInvestmentSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
-    if (item.hasPendingInvestmentSignal()) {
-        return 'pending';
-    }
-
-    if (item.isInvestmentSignalAccepted()) {
-        return 'accepted';
-    }
-
-    if (item.isInvestmentSignalRejected()) {
-        return 'rejected';
-    }
-
-    return null;
-}
-
 function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
     if (item.hasPendingLearningRecommendation()) {
         return 'pending';
@@ -2173,9 +2157,6 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             transferTitle: item.transferSuggestionReason,
             transferPairOrder: item.matching?.transfer.pair_order,
             transferSourceChain: item.matching?.transfer.source_chain,
-            investmentStatus: getInvestmentSignalStatus(item),
-            investmentTitle: item.investmentSignalReason,
-            investmentProfileText: item.getInvestmentProfileText(),
             learningStatus: getLearningSignalStatus(item),
             learningTitle: item.learningRecommendationReason,
             learningSummary: item.learningRecommendationSummary,

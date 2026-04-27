@@ -66,7 +66,6 @@ def test_build_matching_session_candidates_projects_transfer_recurring_and_conte
         "candidate_count": 2,
         "counts_by_kind": {
             "transfer": 1,
-            "investment": 0,
             "learning": 0,
             "recurring": 1,
         },
@@ -177,8 +176,8 @@ def test_build_matching_session_candidates_keeps_reviewed_transfer_without_live_
     assert result["candidates"][0]["details"]["reviewed_type"] == "转账"
 
 
-def test_build_matching_session_candidates_projects_rejected_investment_candidate_status() -> None:
-    """investment candidate 在 preview feedback reject 后仍应保留并投影为 rejected。"""
+def test_build_matching_session_candidates_ignores_preview_investment_matching_payload() -> None:
+    """preview investment matching payload 不应再投影成 session candidate。"""
     result = build_matching_session_candidates(
         "session-reviewed-investment",
         [
@@ -217,11 +216,9 @@ def test_build_matching_session_candidates_projects_rejected_investment_candidat
         ],
     )
 
-    assert result["summary"]["candidate_count"] == 1
-    assert result["summary"]["counts_by_kind"]["investment"] == 1
-    assert result["candidates"][0]["kind"] == "investment"
-    assert result["candidates"][0]["status"] == "rejected"
-    assert result["candidates"][0]["details"]["suppressed"] is True
+    assert result["summary"]["candidate_count"] == 0
+    assert "investment" not in result["summary"]["counts_by_kind"]
+    assert result["candidates"] == []
 
 
 def test_build_matching_session_candidates_projects_rejected_learning_candidate_status() -> None:
@@ -656,68 +653,20 @@ async def test_bill_service_accept_matching_candidate_dispatches_preview_recurri
 
 
 @pytest.mark.asyncio
-async def test_bill_service_accept_matching_candidate_dispatches_preview_investment_to_feedback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """BillService generic accept 应把 preview investment 分发到 preview-scoped feedback 写路径。"""
+async def test_bill_service_accept_matching_candidate_rejects_preview_investment_candidate_family() -> None:
+    """preview investment candidate family 已退役，不应再被 generic accept 分发。"""
     service = BillService(db=None)
-    calls: list[tuple[int, str, dict[str, object], int]] = []
 
-    async def fake_apply_preview_investment_decision(
-        preview_id: int,
-        decision: str,
-        *,
-        expected_state: dict[str, object] | None = None,
-        user_id: int = 1,
-    ) -> dict[str, object]:
-        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
-        return {
-            "success": True,
-            "preview_id": preview_id,
-            "session_id": "session-investment-accept",
-            "review_status": "accepted",
-            "suppressed": False,
-        }
-
-    monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
-
-    payload = {
-        "expectedState": {
-            "sessionId": "session-investment-accept",
-            "reviewStatus": "pending",
-            "previewType": "投资",
-            "categoryId": 10,
-            "recurringId": None,
-        }
-    }
     result = await service._accept_matching_candidate(  # pylint: disable=protected-access
         "preview:1:investment",
-        payload,
+        {"expectedState": {"sessionId": "session-investment-accept"}},
         user_id=7,
     )
 
-    assert calls == [
-        (
-            1,
-            "accept",
-            {
-                "sessionId": "session-investment-accept",
-                "reviewStatus": "pending",
-                "previewType": "投资",
-                "categoryId": 10,
-                "recurringId": None,
-            },
-            7,
-        )
-    ]
     assert result == {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "accept",
-        "preview_id": 1,
-        "session_id": "session-investment-accept",
-        "review_status": "accepted",
-        "suppressed": False,
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
     }
 
 
@@ -1179,68 +1128,20 @@ async def test_bill_service_reject_matching_candidate_dispatches_preview_recurri
 
 
 @pytest.mark.asyncio
-async def test_bill_service_reject_matching_candidate_dispatches_preview_investment_to_feedback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """generic reject 的 preview investment 分支应复用 preview-scoped feedback 写路径。"""
+async def test_bill_service_reject_matching_candidate_rejects_preview_investment_family() -> None:
+    """preview investment family 已退役，不应再被 generic reject 分发。"""
     service = BillService(db=None)
-    calls: list[tuple[int, str, dict[str, object], int]] = []
 
-    async def fake_apply_preview_investment_decision(
-        preview_id: int,
-        decision: str,
-        *,
-        expected_state: dict[str, object] | None = None,
-        user_id: int = 1,
-    ) -> dict[str, object]:
-        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
-        return {
-            "success": True,
-            "preview_id": preview_id,
-            "session_id": "session-investment-reject",
-            "review_status": "rejected",
-            "suppressed": True,
-        }
-
-    monkeypatch.setattr(service, "apply_preview_investment_decision", fake_apply_preview_investment_decision)
-
-    payload = {
-        "expectedState": {
-            "sessionId": "session-investment-reject",
-            "reviewStatus": "pending",
-            "previewType": "投资",
-            "categoryId": 10,
-            "recurringId": None,
-        }
-    }
     result = await service._reject_matching_candidate(
         "preview:1:investment",
-        payload,
+        {"expectedState": {"sessionId": "session-investment-reject"}},
         user_id=7,
     )
 
-    assert calls == [
-        (
-            1,
-            "reject",
-            {
-                "sessionId": "session-investment-reject",
-                "reviewStatus": "pending",
-                "previewType": "投资",
-                "categoryId": 10,
-                "recurringId": None,
-            },
-            7,
-        )
-    ]
     assert result == {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "reject",
-        "preview_id": 1,
-        "session_id": "session-investment-reject",
-        "review_status": "rejected",
-        "suppressed": True,
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
     }
 
 
@@ -1397,73 +1298,20 @@ async def test_bill_service_clear_matching_candidate_dispatches_preview_learning
 
 
 @pytest.mark.asyncio
-async def test_bill_service_clear_matching_candidate_dispatches_preview_investment_to_feedback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """generic clear 的 preview investment 分支应复用 preview-scoped feedback clear 写路径。"""
+async def test_bill_service_clear_matching_candidate_rejects_preview_investment_family() -> None:
+    """preview investment family 已退役，不应再被 generic clear 分发。"""
     service = BillService(db=None)
-    calls: list[tuple[int, str, dict[str, object], int]] = []
 
-    async def fake_apply_preview_investment_decision(
-        preview_id: int,
-        decision: str,
-        *,
-        expected_state: dict[str, object] | None = None,
-        user_id: int = 1,
-    ) -> dict[str, object]:
-        calls.append((preview_id, decision, dict(expected_state or {}), user_id))
-        return {
-            "success": True,
-            "preview_id": preview_id,
-            "session_id": "session-investment-clear",
-            "review_status": "pending",
-            "suppressed": False,
-        }
-
-    monkeypatch.setattr(
-        service,
-        "apply_preview_investment_decision",
-        fake_apply_preview_investment_decision,
-        raising=False,
-    )
-
-    payload = {
-        "expectedState": {
-            "sessionId": "session-investment-clear",
-            "reviewStatus": "accepted",
-            "previewType": "投资",
-            "categoryId": None,
-            "recurringId": None,
-        }
-    }
     result = await service._clear_matching_candidate(  # pylint: disable=protected-access
         "preview:1:investment",
-        payload,
+        {"expectedState": {"sessionId": "session-investment-clear"}},
         user_id=7,
     )
 
-    assert calls == [
-        (
-            1,
-            "clear",
-            {
-                "sessionId": "session-investment-clear",
-                "reviewStatus": "accepted",
-                "previewType": "投资",
-                "categoryId": None,
-                "recurringId": None,
-            },
-            7,
-        )
-    ]
     assert result == {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "clear",
-        "preview_id": 1,
-        "session_id": "session-investment-clear",
-        "review_status": "pending",
-        "suppressed": False,
+        "success": False,
+        "error": "Candidate family not supported",
+        "status_code": 400,
     }
 
 
@@ -1486,8 +1334,8 @@ async def test_bill_service_clear_matching_candidate_requires_preview_learning_e
 
 
 @pytest.mark.asyncio
-async def test_bill_service_clear_matching_candidate_requires_preview_investment_expected_state() -> None:
-    """preview investment clear 缺少 expectedState 时应直接返回 Invalid request。"""
+async def test_bill_service_clear_matching_candidate_rejects_preview_investment_without_expected_state() -> None:
+    """preview investment family 已退役，缺少 expectedState 时也应统一返回 unsupported。"""
     service = BillService(db=None)
 
     result = await service._clear_matching_candidate(  # pylint: disable=protected-access
@@ -1498,7 +1346,7 @@ async def test_bill_service_clear_matching_candidate_requires_preview_investment
 
     assert result == {
         "success": False,
-        "error": "Invalid request",
+        "error": "Candidate family not supported",
         "status_code": 400,
     }
 

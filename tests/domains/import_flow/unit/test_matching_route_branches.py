@@ -1097,68 +1097,6 @@ def test_matching_candidate_accept_route_dispatches_preview_recurring_candidate(
         ]
 
 
-def test_matching_candidate_accept_route_dispatches_preview_investment_candidate(
-    matching_route_app: Flask,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """generic accept route 应分发 preview investment candidate，并返回最小审查状态。"""
-    db = FakeMatchingDB()
-    service = FakeMatchingService()
-    loop = FakeLoop()
-    _install_fake_loop(monkeypatch, loop)
-    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
-
-    route = _unwrap_all(matching_module.accept_matching_candidate)
-    service.accept_candidate_result = {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "accept",
-        "preview_id": 1,
-        "session_id": "session-1",
-        "review_status": "accepted",
-        "suppressed": False,
-    }
-
-    with matching_route_app.test_request_context(
-        "/api/matching/candidates/preview:1:investment/accept",
-        method="POST",
-        json={
-            "expectedState": {
-                "sessionId": "session-1",
-                "reviewStatus": "pending",
-                "previewType": "投资",
-                "categoryId": 10,
-                "recurringId": None,
-            },
-        },
-    ):
-        _set_request_user_id(9)
-        payload = route("preview:1:investment").get_json() or {}
-        assert payload["success"] is True
-        assert payload["data"]["candidateId"] == "preview:1:investment"
-        assert payload["data"]["action"] == "accept"
-        assert payload["data"]["previewId"] == 1
-        assert payload["data"]["sessionId"] == "session-1"
-        assert payload["data"]["reviewStatus"] == "accepted"
-        assert payload["data"]["suppressed"] is False
-        assert "preview" not in payload["data"]
-        assert service.accept_candidate_calls == [
-            (
-                "preview:1:investment",
-                {
-                    "expectedState": {
-                        "sessionId": "session-1",
-                        "reviewStatus": "pending",
-                        "previewType": "投资",
-                        "categoryId": 10,
-                        "recurringId": None,
-                    },
-                },
-                9,
-            )
-        ]
-
-
 def test_matching_candidate_accept_route_dispatches_preview_learning_with_rule_id(
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -1377,7 +1315,7 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
     matching_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """generic reject route 应分发 preview transfer / investment / learning / recurring / historical transfer，并保留其他 family 边界。"""
+    """generic reject route 应分发 preview transfer / learning / recurring / historical transfer，并保留其他 family 边界。"""
     db = FakeMatchingDB()
     service = FakeMatchingService()
     loop = FakeLoop()
@@ -1405,52 +1343,6 @@ def test_matching_candidate_reject_route_dispatches_supported_candidates_and_pre
                 9,
             )
         ]
-
-    service.reject_candidate_result = {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "reject",
-        "preview_id": 1,
-        "session_id": "session-1",
-        "review_status": "rejected",
-        "suppressed": True,
-    }
-    with matching_route_app.test_request_context(
-        "/api/matching/candidates/preview:1:investment/reject",
-        method="POST",
-        json={
-            "expectedState": {
-                "sessionId": "session-1",
-                "reviewStatus": "pending",
-                "previewType": "投资",
-                "categoryId": 10,
-                "recurringId": None,
-            }
-        },
-    ):
-        _set_request_user_id(9)
-        payload = route("preview:1:investment").get_json() or {}
-        assert payload["success"] is True
-        assert payload["data"]["candidateId"] == "preview:1:investment"
-        assert payload["data"]["action"] == "reject"
-        assert payload["data"]["previewId"] == 1
-        assert payload["data"]["sessionId"] == "session-1"
-        assert payload["data"]["reviewStatus"] == "rejected"
-        assert payload["data"]["suppressed"] is True
-        assert "preview" not in payload["data"]
-        assert service.reject_candidate_calls[-1] == (
-            "preview:1:investment",
-            {
-                "expectedState": {
-                    "sessionId": "session-1",
-                    "reviewStatus": "pending",
-                    "previewType": "投资",
-                    "categoryId": 10,
-                    "recurringId": None,
-                }
-            },
-            9,
-        )
 
     service.reject_candidate_result = {
         "success": True,
@@ -1736,68 +1628,6 @@ def test_matching_candidate_clear_route_dispatches_preview_learning(
                         "recurringId": None,
                         "sourceAccountId": 12,
                         "destinationAccountId": 18,
-                    }
-                },
-                9,
-            )
-        ]
-
-
-def test_matching_candidate_clear_route_dispatches_preview_investment(
-    matching_route_app: Flask,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """generic clear route 应分发 preview investment candidate，并返回最小审查状态。"""
-    db = FakeMatchingDB()
-    service = FakeMatchingService()
-    loop = FakeLoop()
-    _install_fake_loop(monkeypatch, loop)
-    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
-
-    route = _unwrap_all(matching_module.clear_matching_candidate)
-    service.clear_candidate_result = {
-        "success": True,
-        "candidate_id": "preview:1:investment",
-        "action": "clear",
-        "preview_id": 1,
-        "session_id": "session-1",
-        "review_status": "pending",
-        "suppressed": False,
-    }
-
-    with matching_route_app.test_request_context(
-        "/api/matching/candidates/preview:1:investment/clear",
-        method="POST",
-        json={
-            "expectedState": {
-                "sessionId": "session-1",
-                "reviewStatus": "accepted",
-                "previewType": "投资",
-                "categoryId": None,
-                "recurringId": None,
-            }
-        },
-    ):
-        _set_request_user_id(9)
-        payload = route("preview:1:investment").get_json() or {}
-        assert payload["success"] is True
-        assert payload["data"]["candidateId"] == "preview:1:investment"
-        assert payload["data"]["action"] == "clear"
-        assert payload["data"]["previewId"] == 1
-        assert payload["data"]["sessionId"] == "session-1"
-        assert payload["data"]["reviewStatus"] == "pending"
-        assert payload["data"]["suppressed"] is False
-        assert "preview" not in payload["data"]
-        assert service.clear_candidate_calls == [
-            (
-                "preview:1:investment",
-                {
-                    "expectedState": {
-                        "sessionId": "session-1",
-                        "reviewStatus": "accepted",
-                        "previewType": "投资",
-                        "categoryId": None,
-                        "recurringId": None,
                     }
                 },
                 9,

@@ -807,12 +807,12 @@ async def test_import_preview_selection_updates_and_cancel_session_helpers() -> 
     assert preview_items[1]["investment_platform"] == ""
     assert preview_items[1]["investment_product"] == ""
     assert preview_items[1]["matching"]["investment"] == {
-        "score": 1.0,
-        "level": "high",
-        "reason": "category_rule",
+        "score": 0.0,
+        "level": "",
+        "reason": "",
         "platform": "",
         "product": "",
-        "review_status": "pending",
+        "review_status": "",
         "suppressed": False,
     }
     assert [item["id"] for item in selected_items] == [1]
@@ -1068,12 +1068,12 @@ async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_le
 
     assert preview_item["investment_signal_score"] == 0.0
     assert matching["investment"] == {
-        "score": 1.0,
-        "level": "high",
-        "reason": "category_rule",
+        "score": 0.0,
+        "level": "",
+        "reason": "",
         "platform": "",
         "product": "",
-        "review_status": "pending",
+        "review_status": "",
         "suppressed": False,
     }
     assert preview_item["learning_recommendation_rule_id"] == 42

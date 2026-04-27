@@ -2590,7 +2590,6 @@ class BillService:
         result = []
         for preview in previews:
             transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
-            investment_signal = self._build_investment_signal_from_preview(preview)
             learning_recommendation = self._build_learning_similarity_signal_from_preview(
                 preview,
                 composite_learning_rules,
@@ -2642,7 +2641,6 @@ class BillService:
                 "matching": build_preview_matching_payload(
                     preview,
                     transfer_suggestion=transfer_suggestion,
-                    investment_signal=investment_signal,
                     learning_recommendation=learning_recommendation,
                     matching_feedback=preview.get("preview_matching_feedback"),
                     is_manually_annotated=int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
@@ -3621,14 +3619,6 @@ class BillService:
                 user_id=user_id,
             )
 
-        if candidate_scope == "preview" and candidate_kind == "investment":
-            return await self._accept_preview_investment_candidate(
-                candidate_id,
-                parsed_candidate_id,
-                payload,
-                user_id=user_id,
-            )
-
         if candidate_scope == "preview" and candidate_kind == "learning":
             return await self._accept_preview_learning_candidate(
                 candidate_id,
@@ -3684,14 +3674,6 @@ class BillService:
 
         if candidate_scope == "preview" and candidate_kind == "transfer":
             return await self._reject_preview_transfer_candidate(
-                candidate_id,
-                parsed_candidate_id,
-                payload,
-                user_id=user_id,
-            )
-
-        if candidate_scope == "preview" and candidate_kind == "investment":
-            return await self._reject_preview_investment_candidate(
                 candidate_id,
                 parsed_candidate_id,
                 payload,
@@ -3758,16 +3740,6 @@ class BillService:
 
         candidate_scope = str(parsed_candidate_id.get("scope") or "")
         candidate_kind = str(parsed_candidate_id.get("kind") or "")
-
-        if candidate_scope == "preview" and candidate_kind == "investment":
-            if not isinstance(payload.get("expectedState"), dict):
-                return {"success": False, "error": "Invalid request", "status_code": 400}
-            return await self._clear_preview_investment_candidate(
-                candidate_id,
-                parsed_candidate_id,
-                payload,
-                user_id=user_id,
-            )
 
         if candidate_scope == "preview" and candidate_kind == "learning":
             if not isinstance(payload.get("expectedState"), dict):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_CANDIDATE_KIND_ORDER = ("transfer", "investment", "learning", "recurring")
+_CANDIDATE_KIND_ORDER = ("transfer", "learning", "recurring")
 
 
 def _normalize_dict(raw_value: Any) -> dict[str, Any]:
@@ -46,15 +46,6 @@ def _has_transfer_candidate(details: dict[str, Any]) -> bool:
     }
 
 
-def _has_investment_candidate(details: dict[str, Any]) -> bool:
-    review_status = str(details.get("review_status") or "").strip().lower()
-    has_signal = _coerce_float(details.get("score")) > 0 or any(
-        str(details.get(field) or "").strip()
-        for field in ("level", "reason", "platform", "product")
-    )
-    return has_signal or review_status in {"accepted", "rejected"}
-
-
 def _has_learning_candidate(details: dict[str, Any]) -> bool:
     review_status = str(details.get("review_status") or "").strip().lower()
     return (
@@ -83,8 +74,6 @@ def _has_recurring_candidate(details: dict[str, Any]) -> bool:
 def _should_include_candidate(kind: str, details: dict[str, Any]) -> bool:
     if kind == "transfer":
         return _has_transfer_candidate(details)
-    if kind == "investment":
-        return _has_investment_candidate(details)
     if kind == "learning":
         return _has_learning_candidate(details)
     if kind == "recurring":
@@ -151,17 +140,6 @@ def _build_candidate_details(kind: str, details: dict[str, Any]) -> dict[str, An
             "suppressed": bool(details.get("suppressed")),
         }
 
-    if kind == "investment":
-        return {
-            "score": _coerce_float(details.get("score")),
-            "level": str(details.get("level") or ""),
-            "reason": str(details.get("reason") or ""),
-            "platform": str(details.get("platform") or ""),
-            "product": str(details.get("product") or ""),
-            "review_status": str(details.get("review_status") or ""),
-            "suppressed": bool(details.get("suppressed")),
-        }
-
     return {
         "rule_id": details.get("rule_id"),
         "score": _coerce_float(details.get("score")),
@@ -189,11 +167,6 @@ def _build_candidate(
         level = _derive_level_from_score(score)
         reason = str(normalized_details.get("match_reasons") or "")
         status = "confirmed" if normalized_details.get("id") not in (None, "") else "pending"
-    elif kind == "investment":
-        score = _coerce_float(normalized_details.get("score"))
-        level = str(normalized_details.get("level") or "")
-        reason = str(normalized_details.get("reason") or "")
-        status = str(normalized_details.get("review_status") or "") or "pending"
     elif kind == "learning":
         score = _coerce_float(normalized_details.get("score"))
         level = str(normalized_details.get("level") or "")
