@@ -188,20 +188,27 @@
                                     </v-card-text>
 
                                     <v-table class="transaction-table" :hover="!loading">
-                                        <thead>
+                                        <thead class="transaction-table-header">
                                         <tr>
                                             <th class="transaction-table-column-time text-no-wrap">
                                                 <v-menu ref="timeFilterMenu" class="transaction-time-menu"
                                                         eager location="bottom" max-height="500"
                                                         @update:model-value="scrollTimeMenuToSelectedItem">
                                                     <template #activator="{ props }">
-                                                        <div class="d-flex align-center cursor-pointer"
-                                                             :class="{ 'readonly': loading, 'text-primary': query.dateType !== DateRange.ThisMonth.type }" v-bind="props">
-                                                            <span>{{ tt('Time') }}</span>
+                                                        <v-btn v-bind="props"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="transaction-table-header-button"
+                                                               :disabled="loading"
+                                                               :color="query.dateType !== DateRange.ThisMonth.type ? 'primary' : undefined">
+                                                            <span class="transaction-table-header-label">{{ tt('Time') }}</span>
                                                             <v-icon :icon="mdiMenuDown" />
-                                                        </div>
+                                                        </v-btn>
                                                     </template>
-                                                    <v-list :selected="[query.dateType]">
+                                                    <v-list class="transaction-table-header-menu"
+                                                            density="compact"
+                                                            :selected="[query.dateType]">
                                                         <v-list-item class="text-sm" density="compact"
                                                                      :key="dateRange.type" :value="dateRange.type"
                                                                      :class="{ 'list-item-selected': query.dateType === dateRange.type }"
@@ -231,13 +238,20 @@
                                                         v-model="categoryMenuState"
                                                         @update:model-value="scrollCategoryMenuToSelectedItem">
                                                     <template #activator="{ props }">
-                                                        <div class="d-flex align-center"
-                                                            :class="{ 'readonly': loading, 'cursor-pointer': query.type !== 1, 'text-primary': query.categoryIds }" v-bind="props">
-                                                            <span>{{ queryCategoryName }}</span>
+                                                        <v-btn v-bind="props"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="transaction-table-header-button"
+                                                               :disabled="loading || query.type === 1"
+                                                               :color="query.categoryIds ? 'primary' : undefined">
+                                                            <span class="transaction-table-header-label">{{ queryCategoryName }}</span>
                                                             <v-icon :icon="mdiMenuDown" v-show="query.type !== 1" />
-                                                        </div>
+                                                        </v-btn>
                                                     </template>
-                                                    <v-list :selected="[queryAllSelectedFilterCategoryIds]">
+                                                    <v-list class="transaction-table-header-menu"
+                                                            density="compact"
+                                                            :selected="[queryAllSelectedFilterCategoryIds]">
                                                         <v-list-item key="" value="" class="text-sm" density="compact"
                                                                      :class="{ 'list-item-selected': !query.categoryIds }"
                                                                      :append-icon="(!query.categoryIds ? mdiCheck : undefined)">
@@ -328,13 +342,20 @@
                                                         v-model="amountMenuState"
                                                         @update:model-value="scrollAmountMenuToSelectedItem">
                                                     <template #activator="{ props }">
-                                                        <div class="d-flex align-center cursor-pointer"
-                                                             :class="{ 'readonly': loading, 'text-primary': query.amountFilter }" v-bind="props">
-                                                            <span>{{ tt('Amount') }}</span>
+                                                        <v-btn v-bind="props"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="transaction-table-header-button"
+                                                               :disabled="loading"
+                                                               :color="query.amountFilter ? 'primary' : undefined">
+                                                            <span class="transaction-table-header-label">{{ tt('Amount') }}</span>
                                                             <v-icon :icon="mdiMenuDown" />
-                                                        </div>
+                                                        </v-btn>
                                                     </template>
-                                                    <v-list :selected="[query.amountFilter.split(':')[0]]">
+                                                    <v-list class="transaction-table-header-menu"
+                                                            density="compact"
+                                                            :selected="[query.amountFilter.split(':')[0]]">
                                                         <v-list-item key="" value="" class="text-sm" density="compact"
                                                                      :class="{ 'list-item-selected': !query.amountFilter }"
                                                                      :append-icon="(!query.amountFilter && !currentAmountFilterType ? mdiCheck : undefined)">
@@ -380,13 +401,20 @@
                                                         eager location="bottom" max-height="500"
                                                         @update:model-value="scrollAccountMenuToSelectedItem">
                                                     <template #activator="{ props }">
-                                                        <div class="d-flex align-center cursor-pointer"
-                                                             :class="{ 'readonly': loading, 'text-primary': query.accountIds }" v-bind="props">
-                                                            <span>{{ queryAccountName }}</span>
+                                                        <v-btn v-bind="props"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="transaction-table-header-button"
+                                                               :disabled="loading"
+                                                               :color="query.accountIds ? 'primary' : undefined">
+                                                            <span class="transaction-table-header-label">{{ queryAccountName }}</span>
                                                             <v-icon :icon="mdiMenuDown" />
-                                                        </div>
+                                                        </v-btn>
                                                     </template>
-                                                    <v-list :selected="[queryAllSelectedFilterAccountIds]">
+                                                    <v-list class="transaction-table-header-menu"
+                                                            density="compact"
+                                                            :selected="[queryAllSelectedFilterAccountIds]">
                                                         <v-list-item key="" value="" class="text-sm" density="compact"
                                                                      :class="{ 'list-item-selected': !query.accountIds }"
                                                                      :append-icon="(!query.accountIds ? mdiCheck : undefined)">
@@ -435,13 +463,20 @@
                                                         eager location="bottom" max-height="500"
                                                         @update:model-value="scrollTagMenuToSelectedItem">
                                                     <template #activator="{ props }">
-                                                        <div class="d-flex align-center cursor-pointer"
-                                                             :class="{ 'readonly': loading, 'text-primary': query.tagIds }" v-bind="props">
-                                                            <span>{{ queryTagName }}</span>
+                                                        <v-btn v-bind="props"
+                                                               variant="text"
+                                                               density="compact"
+                                                               size="small"
+                                                               class="transaction-table-header-button"
+                                                               :disabled="loading"
+                                                               :color="query.tagIds ? 'primary' : undefined">
+                                                            <span class="transaction-table-header-label">{{ queryTagName }}</span>
                                                             <v-icon :icon="mdiMenuDown" />
-                                                        </div>
+                                                        </v-btn>
                                                     </template>
-                                                    <v-list :selected="[queryAllSelectedFilterTagIds]">
+                                                    <v-list class="transaction-table-header-menu"
+                                                            density="compact"
+                                                            :selected="[queryAllSelectedFilterTagIds]">
                                                         <v-list-item key="" value="" class="text-sm" density="compact"
                                                                      :class="{ 'list-item-selected': !query.tagIds }"
                                                                      :append-icon="(!query.tagIds ? mdiCheck : undefined)">
@@ -515,7 +550,9 @@
                                                     </v-list>
                                                 </v-menu>
                                             </th>
-                                            <th class="transaction-table-column-description text-no-wrap">{{ tt('Description') }}</th>
+                                            <th class="transaction-table-column-description text-no-wrap">
+                                                <div class="transaction-table-header-cell">{{ tt('Description') }}</div>
+                                            </th>
                                         </tr>
                                         </thead>
 
@@ -1918,6 +1955,53 @@ init(props);
 
 .v-table.transaction-table .transaction-list-row-date > td {
     height: 38px !important;
+}
+
+.transaction-table .transaction-table-header th {
+    color: rgba(var(--v-theme-on-surface), var(--v-high-emphasis-opacity));
+    font-weight: 600;
+}
+
+.transaction-table-header-cell,
+.transaction-table-header-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 32px;
+    width: 100%;
+}
+
+.transaction-table-header-cell {
+    padding-inline: 4px;
+}
+
+.transaction-table-header-button {
+    padding-inline: 4px;
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: 600;
+}
+
+.transaction-table-header-button .v-btn__content {
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+}
+
+.transaction-table-header-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.transaction-table-header-button .v-icon {
+    flex: 0 0 auto;
+    margin-inline-start: 2px;
+}
+
+.transaction-table-header-menu {
+    max-width: min(360px, 90vw);
 }
 
 .transaction-table .transaction-table-column-time {
