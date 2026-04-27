@@ -306,10 +306,6 @@ class BillService:
             # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
             categorized_bills = await self.category_engine.batch_match_categories(deduplicated_bills, types=None)
 
-            # 4.2 投资账单专门识别链路（平台/产品关键词）
-            self.logger.info("步骤 4.2/5: 投资候选识别")
-            categorized_bills = await self._detect_investment_candidates(categorized_bills, user_id=user_id)
-
             # 5. 账户匹配（基于账户名称）
             self.logger.info("步骤 4.5/5: 自动匹配账户")
             matched_bills = await self._match_accounts(categorized_bills, user_id)
@@ -940,60 +936,34 @@ class BillService:
     ) -> list[dict[str, Any]]:
         """基于平台/产品关键词识别投资账单。
 
-        这是 M2 的轻量增强切片：
-        - 不依赖用户预先配置投资关键词规则
-        - 优先识别常见投资平台、基金/理财产品与投资动作词
-        - 命中后仅提升账单类型为“投资”，再交由现有双账户匹配链路处理资金流向
+        导入预览运行态的投资分类已收口到 canonical category_rules。
+        保留这个 helper 仅作为兼容层，避免旧调用方继续在分类后触发
+        关键字投资检测链路。
         """
         _ = user_id
         if not bills:
             return bills
 
-        keyword_config = await self._get_investment_keyword_config(user_id)
-        detected_count = 0
-
+        cleaned_count = 0
         for bill in bills:
-            if bill.get("_suppress_investment_signal"):
-                continue
-            if self._apply_ordinary_bank_interest_type_override(
-                bill,
-                keyword_config=keyword_config,
+            removed_any = False
+            for field in (
+                "_investment_hint",
+                "_investment_candidate_score",
+                "_investment_candidate_reason",
+                "_investment_platform",
+                "_investment_product",
             ):
-                continue
+                if field in bill:
+                    bill.pop(field, None)
+                    removed_any = True
+            if removed_any:
+                cleaned_count += 1
 
-            pnl_signal = self._classify_investment_pnl_change(bill, keyword_config=keyword_config)
-            if pnl_signal:
-                self._apply_investment_pnl_type_override(bill, pnl_signal)
-                continue
-
-            candidate = self._score_investment_candidate(bill, keyword_config=keyword_config)
-            if not candidate:
-                continue
-
-            bill["type"] = "投资"
-            bill["_investment_hint"] = str(candidate.get("hint_text") or "")
-            bill["_investment_candidate_score"] = float(candidate.get("score", 0.0) or 0.0)
-            reason_parts = [
-                str(reason)
-                for reason in [
-                    candidate.get("reason", ""),
-                ]
-                if reason
-            ]
-            bill["_investment_candidate_reason"] = ", ".join(dict.fromkeys(reason_parts))
-            bill["_investment_platform"] = str(candidate.get("platform") or "")
-            bill["_investment_product"] = str(candidate.get("product") or "")
-            detected_count += 1
-
-            self.logger.debug(
-                "[投资候选识别] 命中: date=%s, score=%.2f, reason=%s, hint=%s",
-                str(bill.get("date", ""))[:19],
-                bill.get("_investment_candidate_score", 0.0),
-                bill.get("_investment_candidate_reason", ""),
-                bill.get("_investment_hint", ""),
-            )
-
-        self.logger.info("[投资候选识别] 完成: 命中 %d/%d 条", detected_count, len(bills))
+        self.logger.info(
+            "[投资分类收口] 已跳过旧 preview 投资检测，清理 %d 条兼容字段",
+            cleaned_count,
+        )
         return bills
 
     async def _get_investment_keyword_config(self, user_id: int = 1) -> dict[str, list[str]]:
@@ -2314,10 +2284,6 @@ class BillService:
             # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
             categorized_bills = await self.category_engine.batch_match_categories(kept_bills, types=None)
 
-            # 5.5 投资账单专门识别链路（平台/产品关键词）
-            self.logger.info("[阶段2] 投资候选识别...")
-            categorized_bills = await self._detect_investment_candidates(categorized_bills, user_id=user_id)
-
             # 6. 账户匹配
             self.logger.info("[阶段2] 执行账户匹配...")
             matched_bills = await self._match_accounts(categorized_bills, user_id)
@@ -2600,7 +2566,6 @@ class BillService:
         manually_annotated_preview_ids = {
             int(sample["preview_id"]) for sample in annotation_samples if sample.get("preview_id")
         }
-        keyword_config = await self._get_investment_keyword_config(int(preview_user_id or 1))
         learning_rules = (
             await self.db.get_import_learning_rules(user_id=preview_user_id, enabled_only=True, limit=1000)
             if preview_user_id > 0
@@ -2625,7 +2590,7 @@ class BillService:
         result = []
         for preview in previews:
             transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
-            investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
+            investment_signal = self._build_investment_signal_from_preview(preview)
             learning_recommendation = self._build_learning_similarity_signal_from_preview(
                 preview,
                 composite_learning_rules,
@@ -2663,11 +2628,11 @@ class BillService:
                 "transfer_suggestion_score": transfer_suggestion.get("score", 0.0),
                 "transfer_suggestion_level": transfer_suggestion.get("level", ""),
                 "transfer_suggestion_reason": transfer_suggestion.get("reason", ""),
-                "investment_signal_score": investment_signal.get("score", 0.0),
-                "investment_signal_level": investment_signal.get("level", ""),
-                "investment_signal_reason": investment_signal.get("reason", ""),
-                "investment_platform": investment_signal.get("platform", ""),
-                "investment_product": investment_signal.get("product", ""),
+                "investment_signal_score": 0.0,
+                "investment_signal_level": "",
+                "investment_signal_reason": "",
+                "investment_platform": "",
+                "investment_product": "",
                 "learning_recommendation_rule_id": learning_recommendation.get("rule_id"),
                 "learning_recommendation_score": learning_recommendation.get("score", 0.0),
                 "learning_recommendation_level": learning_recommendation.get("level", ""),
@@ -4004,11 +3969,7 @@ class BillService:
         if not preview:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
-        keyword_config = await self._get_investment_keyword_config(user_id)
-        current_investment_review_status = self._resolve_preview_investment_review_status(
-            preview,
-            keyword_config=keyword_config,
-        )
+        current_investment_review_status = self._resolve_preview_investment_review_status(preview)
         current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
         current_preview_recurring_id = preview.get("preview_recurring_id")
         current_preview_recurring_id = (
@@ -4041,7 +4002,7 @@ class BillService:
 
         has_existing_investment_review = current_investment_review_status in {"accepted", "rejected"}
         if normalized_decision != "clear" and not has_existing_investment_review:
-            investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
+            investment_signal = self._build_investment_signal_from_preview(preview)
             if not investment_signal:
                 return {
                     "success": False,
@@ -4068,10 +4029,7 @@ class BillService:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
         session_id = str(updated_preview.get("session_id") or "")
-        next_review_status = self._resolve_preview_investment_review_status(
-            updated_preview,
-            keyword_config=keyword_config,
-        )
+        next_review_status = self._resolve_preview_investment_review_status(updated_preview)
         investment_feedback = updated_preview.get("preview_matching_feedback", {}).get("investment")
         suppressed = (
             bool(investment_feedback.get("suppressed"))
@@ -4463,17 +4421,12 @@ class BillService:
         preview: dict[str, Any],
         user_id: int = 1,
     ) -> str:
-        keyword_config = await self._get_investment_keyword_config(user_id)
-        return self._resolve_preview_investment_review_status(
-            preview,
-            keyword_config=keyword_config,
-        )
+        _ = user_id
+        return self._resolve_preview_investment_review_status(preview)
 
     def _resolve_preview_investment_review_status(
         self,
         preview: dict[str, Any],
-        *,
-        keyword_config: dict[str, list[str]],
     ) -> str:
         investment_feedback = preview.get("preview_matching_feedback", {}).get("investment")
         review_status = (
@@ -4481,7 +4434,7 @@ class BillService:
             if isinstance(investment_feedback, dict)
             else ""
         )
-        investment_signal = self._build_investment_signal_from_preview(preview, keyword_config=keyword_config)
+        investment_signal = self._build_investment_signal_from_preview(preview)
         if not investment_signal:
             return ""
 
@@ -4846,58 +4799,18 @@ class BillService:
     def _build_investment_signal_from_preview(
         self, preview: dict[str, Any], keyword_config: dict[str, list[str]] | None = None
     ) -> dict[str, Any]:
-        """为投资类型预览账单生成可解释信号。"""
+        """Project canonical preview investment classification into matching state."""
+        _ = keyword_config
         preview_type = str(preview.get("preview_type", "") or "").strip().lower()
         if preview_type not in ["投资", "investment", "5"]:
             return {}
 
-        bill_like = {
-            "type": preview.get("preview_type", ""),
-            "counterparty": preview.get("preview_counterparty", ""),
-            "payment_method": preview.get("preview_payment_method", ""),
-            "description": preview.get("preview_description", ""),
-            "main_category": preview.get("preview_main_category", ""),
-            "sub_category": preview.get("preview_sub_category", ""),
-            "original_category": (
-                preview.get("preview_sub_category", "")
-                or preview.get("preview_main_category", "")
-            ),
-        }
-        if (
-            is_ordinary_bank_interest_income(bill_like, keyword_config=keyword_config)
-            or self._classify_investment_pnl_change(bill_like, keyword_config=keyword_config)
-        ):
-            return {}
-
-        candidate = self._score_investment_candidate(
-            bill_like,
-            allow_existing_investment=True,
-            keyword_config=keyword_config,
-        )
-        if not candidate:
-            return {}
-
-        score = float(candidate.get("score", 0.0) or 0.0)
-        if score >= 0.8:
-            level = "high"
-        elif score >= 0.65:
-            level = "medium"
-        else:
-            level = "low"
-        reason_parts = [
-            str(reason)
-            for reason in [
-                candidate.get("reason", ""),
-            ]
-            if reason
-        ]
-
         return {
-            "score": score,
-            "level": level,
-            "reason": ", ".join(dict.fromkeys(reason_parts)),
-            "platform": candidate.get("platform", ""),
-            "product": candidate.get("product", ""),
+            "score": 1.0,
+            "level": "high",
+            "reason": "category_rule",
+            "platform": "",
+            "product": "",
         }
 
     @log_method
@@ -5087,10 +5000,6 @@ class BillService:
 
             # 批量分类 - 不传递 types 参数，让 match_category() 自动根据账单特征选择
             categorized_bills = await self.category_engine.batch_match_categories(bills_for_category, types=None)
-
-            # 4.5 投资账单专门识别链路（平台/产品关键词）
-            self.logger.info("[重新分类] 步骤3.5: 投资候选识别")
-            categorized_bills = await self._detect_investment_candidates(categorized_bills, user_id=user_id)
 
             # 5. 账户匹配
             self.logger.info("[重新分类] 步骤4: 账户匹配")

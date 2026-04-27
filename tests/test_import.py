@@ -27,6 +27,52 @@ async def service():
         await svc.close()
 
 
+async def _create_investment_category_rule(
+    service: BillService,
+    *,
+    user_id: int,
+    rule_expression: str,
+    sub_category: str = "基金",
+) -> int:
+    parent_id = await service.db.create_category({
+        "type": 5,
+        "main_category": "投资",
+        "sub_category": "",
+        "description": "",
+        "priority": 0,
+        "keywords": "",
+        "hidden": False,
+        "icon": "",
+        "color": "",
+    }, user_id=user_id)
+    assert parent_id is not None
+
+    category_id = await service.db.create_category({
+        "type": 5,
+        "main_category": "投资",
+        "sub_category": sub_category,
+        "description": "",
+        "priority": 0,
+        "keywords": "",
+        "hidden": False,
+        "icon": "",
+        "color": "",
+    }, user_id=user_id)
+    assert category_id is not None
+
+    rule_id = await service.db.create_category_rule({
+        "category_id": category_id,
+        "name": f"investment-{sub_category}",
+        "priority": 1,
+        "rule_expression": rule_expression,
+        "regex_enabled": False,
+        "enabled": True,
+    }, user_id=user_id)
+    assert rule_id is not None
+
+    return category_id
+
+
 def test_parser_factory():
     """测试解析器工厂"""
     from src.parsers.factory import ParserFactory
@@ -1312,13 +1358,18 @@ async def test_get_import_preview_skips_learning_similarity_when_exact_rule_matc
 
 @pytest.mark.asyncio
 async def test_reclassify_preview_detects_investment_by_platform_and_product(service):
-    """测试预览重新分类可基于投资平台/产品关键词自动识别投资类型并匹配目标账户。"""
+    """测试预览重新分类会通过 canonical category rule 识别投资并匹配目标账户。"""
     user_id = await service.db.create_user({
         "username": "investment_detect_user",
         "email": "investment_detect_user@example.com",
         "password_hash": "hash",
         "nickname": "investment_detect_user"
     })
+    await _create_investment_category_rule(
+        service,
+        user_id=user_id,
+        rule_expression="OR={蚂蚁财富,余额宝,基金买入}",
+    )
 
     source_account_id = await service.db.create_account({
         "name": "农业银行储蓄卡",
@@ -1382,7 +1433,7 @@ async def test_reclassify_preview_detects_investment_by_platform_and_product(ser
 
 @pytest.mark.asyncio
 async def test_reclassify_preview_does_not_misclassify_repayment_as_investment(service):
-    """测试包含投资平台字样但明确为还款语义时，不应被误识别为投资。"""
+    """测试没有 investment category rule 命中时，不会靠旧关键词旁路误判成投资。"""
     user_id = await service.db.create_user({
         "username": "investment_exclude_user",
         "email": "investment_exclude_user@example.com",
@@ -1437,20 +1488,20 @@ async def test_reclassify_preview_does_not_misclassify_repayment_as_investment(s
 
 
 @pytest.mark.asyncio
-async def test_reclassify_preview_uses_user_configured_investment_keywords(service):
-    """测试用户可通过设置自定义投资平台/产品/排除关键词。"""
+async def test_reclassify_preview_uses_canonical_investment_category_rule(service):
+    """测试投资识别通过 canonical category rule 生效，而不是用户关键词设置。"""
     user_id = await service.db.create_user({
         "username": "investment_custom_keyword_user",
         "email": "investment_custom_keyword_user@example.com",
         "password_hash": "hash",
         "nickname": "investment_custom_keyword_user"
     })
-
-    await service.db.update_user(user_id, {
-        "investment_platform_keywords": '["星河财富"]',
-        "investment_product_keywords": '["量化组合"]',
-        "investment_exclude_keywords": '["生活缴费"]'
-    })
+    await _create_investment_category_rule(
+        service,
+        user_id=user_id,
+        rule_expression="OR={星河财富,量化组合}",
+        sub_category="组合投资",
+    )
 
     source_account_id = await service.db.create_account({
         "name": "招商银行储蓄卡",
@@ -1510,19 +1561,35 @@ async def test_reclassify_preview_uses_user_configured_investment_keywords(servi
     assert previews[0]["preview_type"] == "投资"
     assert previews[0]["preview_source_account_id"] == source_account_id
     assert previews[0]["preview_destination_account_id"] == destination_account_id
-    assert previews[0]["investment_platform"] == "星河财富"
-    assert previews[0]["investment_product"] == "量化组合"
+    assert previews[0]["investment_signal_score"] == 0.0
+    assert previews[0]["investment_platform"] == ""
+    assert previews[0]["investment_product"] == ""
+    assert previews[0]["matching"]["investment"] == {
+        "score": 1.0,
+        "level": "high",
+        "reason": "category_rule",
+        "platform": "",
+        "product": "",
+        "review_status": "pending",
+        "suppressed": False,
+    }
 
 
 @pytest.mark.asyncio
-async def test_reclassify_preview_detects_expanded_platform_and_reits_rules(service):
-    """测试扩展后的平台词与 REITs 产品抽取规则可命中投资识别。"""
+async def test_reclassify_preview_detects_investment_via_canonical_reits_rule(service):
+    """测试 investment category rule 表达式可覆盖 REITs 场景。"""
     user_id = await service.db.create_user({
         "username": "investment_reits_user",
         "email": "investment_reits_user@example.com",
         "password_hash": "hash",
         "nickname": "investment_reits_user"
     })
+    await _create_investment_category_rule(
+        service,
+        user_id=user_id,
+        rule_expression="OR={京东金融,肯特瑞,REIT,REITs,华夏华润商业REIT}",
+        sub_category="REITs",
+    )
 
     source_account_id = await service.db.create_account({
         "name": "建设银行储蓄卡",
@@ -1582,13 +1649,23 @@ async def test_reclassify_preview_detects_expanded_platform_and_reits_rules(serv
     assert previews[0]["preview_type"] == "投资"
     assert previews[0]["preview_source_account_id"] == source_account_id
     assert previews[0]["preview_destination_account_id"] == destination_account_id
-    assert previews[0]["investment_platform"] == "京东金融"
-    assert previews[0]["investment_product"] in {"REITs", "华夏华润商业REIT"}
+    assert previews[0]["investment_signal_score"] == 0.0
+    assert previews[0]["investment_platform"] == ""
+    assert previews[0]["investment_product"] == ""
+    assert previews[0]["matching"]["investment"] == {
+        "score": 1.0,
+        "level": "high",
+        "reason": "category_rule",
+        "platform": "",
+        "product": "",
+        "review_status": "pending",
+        "suppressed": False,
+    }
 
 
 @pytest.mark.asyncio
-async def test_get_import_preview_returns_investment_signal_for_investment_preview(service):
-    """测试投资类型预览账单会返回可解释的投资信号信息。"""
+async def test_get_import_preview_does_not_emit_separate_investment_signal(service):
+    """测试投资类型预览账单不再返回独立 investment signal 字段。"""
     user_id = await service.db.create_user({
         "username": "investment_signal_user",
         "email": "investment_signal_user@example.com",
@@ -1619,8 +1696,17 @@ async def test_get_import_preview_returns_investment_signal_for_investment_previ
 
     previews = await service.get_import_preview(session_id)
     assert len(previews) == 1
-    assert previews[0]["investment_signal_score"] >= 0.55
-    assert previews[0]["investment_signal_level"] in {"high", "medium", "low"}
-    assert "platform:" in previews[0]["investment_signal_reason"]
-    assert previews[0]["investment_platform"] == "蚂蚁财富"
-    assert previews[0]["investment_product"] in {"指数基金", "基金"}
+    assert previews[0]["investment_signal_score"] == 0.0
+    assert previews[0]["investment_signal_level"] == ""
+    assert previews[0]["investment_signal_reason"] == ""
+    assert previews[0]["investment_platform"] == ""
+    assert previews[0]["investment_product"] == ""
+    assert previews[0]["matching"]["investment"] == {
+        "score": 1.0,
+        "level": "high",
+        "reason": "category_rule",
+        "platform": "",
+        "product": "",
+        "review_status": "pending",
+        "suppressed": False,
+    }

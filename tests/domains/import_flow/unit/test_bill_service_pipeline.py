@@ -250,10 +250,6 @@ async def test_import_bills_runs_core_pipeline_in_expected_order(monkeypatch: py
         call_log.append(f"learning:{type_only}:{record_usage}:{user_id}")
         return 1
 
-    async def fake_detect_investment_candidates(bills: list[dict[str, Any]], user_id: int = 1):
-        call_log.append(f"investment:{user_id}")
-        return bills
-
     async def fake_match_accounts(bills: list[dict[str, Any]], user_id: int = 1):
         call_log.append(f"accounts:{user_id}")
         return bills
@@ -264,7 +260,6 @@ async def test_import_bills_runs_core_pipeline_in_expected_order(monkeypatch: py
 
     monkeypatch.setattr(service.smart_dedup_engine, "process_with_db", fake_process_with_db)
     monkeypatch.setattr(service, "_apply_import_learning_rules", fake_apply_learning)
-    monkeypatch.setattr(service, "_detect_investment_candidates", fake_detect_investment_candidates)
     monkeypatch.setattr(service, "_match_accounts", fake_match_accounts)
     monkeypatch.setattr(service, "_detect_cash_transfers", fake_detect_cash_transfers)
 
@@ -286,7 +281,6 @@ async def test_import_bills_runs_core_pipeline_in_expected_order(monkeypatch: py
         "load_rules",
         "learning:True:False:7",
         "categorize",
-        "investment:7",
         "accounts:7",
         "cash:7",
         "learning:False:True:7",

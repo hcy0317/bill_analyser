@@ -337,7 +337,12 @@ async def test_investment_helpers_detect_profiles_candidates_and_keyword_config(
             "sub_category": "基金",
         }
     ]
-    detected_pnl = await service._detect_investment_candidates(pnl_bills, user_id=1)
+    normalized_pnl = await service._normalize_non_pair_investment_balance_changes(pnl_bills, user_id=1)
+    assert normalized_pnl[0]["type"] == "收入"
+    assert normalized_pnl[0]["_suppress_investment_signal"] is True
+    assert "_investment_candidate_reason" not in normalized_pnl[0]
+
+    detected_pnl = await service._detect_investment_candidates(normalized_pnl, user_id=1)
     assert detected_pnl[0]["type"] == "收入"
     assert detected_pnl[0]["_suppress_investment_signal"] is True
     assert "_investment_candidate_reason" not in detected_pnl[0]
@@ -796,9 +801,20 @@ async def test_import_preview_selection_updates_and_cancel_session_helpers() -> 
     assert preview_items[0]["preview_is_manually_annotated"] is True
     assert preview_items[0]["suggested_preview_type"] == "转账"
     assert preview_items[0]["transfer_suggestion_score"] >= 0.55
-    assert preview_items[1]["investment_signal_score"] >= 0.55
-    assert preview_items[1]["investment_platform"]
-    assert preview_items[1]["investment_product"]
+    assert preview_items[1]["investment_signal_score"] == 0.0
+    assert preview_items[1]["investment_signal_level"] == ""
+    assert preview_items[1]["investment_signal_reason"] == ""
+    assert preview_items[1]["investment_platform"] == ""
+    assert preview_items[1]["investment_product"] == ""
+    assert preview_items[1]["matching"]["investment"] == {
+        "score": 1.0,
+        "level": "high",
+        "reason": "category_rule",
+        "platform": "",
+        "product": "",
+        "review_status": "pending",
+        "suppressed": False,
+    }
     assert [item["id"] for item in selected_items] == [1]
     assert updated_count == 2
     assert fake_db.preview_selection_updates == [([1], True), ([2], False)]
@@ -995,10 +1011,10 @@ async def test_get_import_preview_adds_platform_duplicate_source_metadata() -> N
 
 
 @pytest.mark.asyncio
-async def test_get_import_preview_adds_matching_investment_learning_and_recurring_groups(
+async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_learning_and_recurring_groups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """matching 应镜像投资、长期学习和周期候选字段，而不是替换原有平铺字段。"""
+    """preview matching 应保留空 investment 槽位，并继续镜像 learning/recurring 字段。"""
     fake_db = FakeBillServiceDB()
     fake_db.preview_rows = [
         {
@@ -1033,17 +1049,6 @@ async def test_get_import_preview_adds_matching_investment_learning_and_recurrin
 
     monkeypatch.setattr(
         service,
-        "_build_investment_signal_from_preview",
-        lambda *_args, **_kwargs: {
-            "score": 0.81,
-            "level": "high",
-            "reason": "investment_keyword",
-            "platform": "蚂蚁财富",
-            "product": "黄金ETF",
-        },
-    )
-    monkeypatch.setattr(
-        service,
         "_build_learning_similarity_signal_from_preview",
         lambda *_args, **_kwargs: {
             "rule_id": 42,
@@ -1061,13 +1066,13 @@ async def test_get_import_preview_adds_matching_investment_learning_and_recurrin
     preview_item = preview_items[0]
     matching = preview_item["matching"]
 
-    assert preview_item["investment_signal_score"] == 0.81
+    assert preview_item["investment_signal_score"] == 0.0
     assert matching["investment"] == {
-        "score": 0.81,
+        "score": 1.0,
         "level": "high",
-        "reason": "investment_keyword",
-        "platform": "蚂蚁财富",
-        "product": "黄金ETF",
+        "reason": "category_rule",
+        "platform": "",
+        "product": "",
         "review_status": "pending",
         "suppressed": False,
     }
@@ -1428,8 +1433,8 @@ def test_learning_similarity_helpers_cover_deserialize_scoring_summary_and_signa
     ) == {}
 
 
-def test_transfer_and_investment_signals_cover_threshold_levels(monkeypatch: pytest.MonkeyPatch) -> None:
-    """转账/投资信号应覆盖空结果、low、medium、high 三档阈值。"""
+def test_transfer_signals_cover_threshold_levels() -> None:
+    """转账信号应覆盖空结果、low、medium、high 三档阈值。"""
     service = _make_service()
 
     assert service._build_transfer_suggestion_from_preview({"preview_type": "转账"}) == {}
@@ -1481,37 +1486,6 @@ def test_transfer_and_investment_signals_cover_threshold_levels(monkeypatch: pyt
         }
     )
     assert high_signal["level"] == "high"
-
-    assert service._build_investment_signal_from_preview({"preview_type": "支出"}) == {}
-
-    monkeypatch.setattr(service, "_score_investment_candidate", lambda *_args, **_kwargs: None)
-    assert service._build_investment_signal_from_preview({"preview_type": "投资"}) == {}
-
-    monkeypatch.setattr(
-        service,
-        "_score_investment_candidate",
-        lambda *_args, **_kwargs: {"score": 0.66, "reason": "candidate", "platform": "蚂蚁财富", "product": "黄金ETF"},
-    )
-    assert service._build_investment_signal_from_preview({"preview_type": "investment"})["level"] == "medium"
-
-    monkeypatch.setattr(
-        service,
-        "_score_investment_candidate",
-        lambda *_args, **_kwargs: {"score": 0.81, "reason": "candidate", "platform": "蚂蚁财富", "product": "黄金ETF"},
-    )
-    assert service._build_investment_signal_from_preview({"preview_type": "5"})["level"] == "high"
-
-    pnl_signal = service._build_investment_signal_from_preview(
-        {
-            "preview_type": "投资",
-            "preview_counterparty": "天天基金",
-            "preview_payment_method": "银行卡",
-            "preview_description": "沪深300ETF 分红发放",
-            "preview_main_category": "投资理财",
-            "preview_sub_category": "基金",
-        }
-    )
-    assert pnl_signal == {}
 
 
 def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
