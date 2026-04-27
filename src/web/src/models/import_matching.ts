@@ -1,8 +1,21 @@
+export interface ImportMatchingSourcePayload {
+    position?: number;
+    role?: string;
+    parser_id?: string;
+    parser_label?: string;
+    label?: string;
+    channel?: string;
+    tags?: string[];
+    account_id?: number | null;
+}
+
 export interface ImportMatchingTransferPayload {
     candidate_type: string;
     score: number;
     level: string;
     reason: string;
+    pair_order?: string;
+    source_chain?: ImportMatchingSourcePayload[];
     review_status?: string;
     reviewed_type?: string;
     suppressed?: boolean;
@@ -41,11 +54,15 @@ export interface ImportMatchingRecurringPayload {
 export interface ImportMatchingDedupPayload {
     type: string;
     source_ids: Array<number | string>;
+    source_count?: number;
+    source_labels?: string[];
+    sources?: ImportMatchingSourcePayload[];
 }
 
 export interface ImportMatchingParserPayload {
     id: string;
     tags: string[];
+    source_chain?: ImportMatchingSourcePayload[];
 }
 
 export interface ImportMatchingAnnotationPayload {

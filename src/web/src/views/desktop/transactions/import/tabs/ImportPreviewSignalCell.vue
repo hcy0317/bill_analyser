@@ -1,53 +1,177 @@
 <template>
     <div class="import-preview-signal-cell d-flex flex-column ga-1" v-if="viewModel?.hasAnySignal">
         <div class="d-flex flex-wrap align-center ga-1">
-            <v-chip
-                v-if="viewModel.parser"
-                size="x-small"
-                variant="outlined"
-                :color="viewModel.parser.color"
-                :title="viewModel.parser.title">
-                {{ viewModel.parser.label }}
-            </v-chip>
-            <v-chip
-                v-if="viewModel.dedup"
-                :color="viewModel.dedup.color"
-                variant="outlined"
-                size="x-small"
-                :title="viewModel.dedup.title">
-                {{ tt(viewModel.dedup.labelKey) }}
-                <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
-                    · {{ viewModel.dedup.sourceCount }}
-                </template>
-            </v-chip>
+            <template v-if="viewModel.parser">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.parser.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            size="x-small"
+                            variant="outlined"
+                            :color="viewModel.parser.color"
+                            :title="viewModel.parser.title">
+                            {{ viewModel.parser.label }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.parser.detailLines"
+                                :key="`parser-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    size="x-small"
+                    variant="outlined"
+                    :color="viewModel.parser.color"
+                    :title="viewModel.parser.title">
+                    {{ viewModel.parser.label }}
+                </v-chip>
+            </template>
+            <template v-if="viewModel.dedup">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.dedup.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            :color="viewModel.dedup.color"
+                            variant="outlined"
+                            size="x-small"
+                            :title="viewModel.dedup.title">
+                            {{ viewModel.dedup.label }}
+                            <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
+                                · {{ viewModel.dedup.sourceCount }}
+                            </template>
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.dedup.detailLines"
+                                :key="`dedup-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    :color="viewModel.dedup.color"
+                    variant="outlined"
+                    size="x-small"
+                    :title="viewModel.dedup.title">
+                    {{ viewModel.dedup.label }}
+                    <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
+                        · {{ viewModel.dedup.sourceCount }}
+                    </template>
+                </v-chip>
+            </template>
         </div>
 
         <div class="signal-group" v-if="viewModel.transferSuggestion">
-            <v-chip
-                :color="viewModel.transferSuggestion.color"
-                variant="tonal"
-                size="x-small"
-                :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)"
-                :title="viewModel.transferSuggestion.title">
-                {{ tt(viewModel.transferSuggestion.labelKey) }}
-            </v-chip>
-            <div class="d-inline-flex flex-wrap ga-1 ms-1">
-                <v-btn
-                    v-for="action in viewModel.transferSuggestion.actions"
-                    :key="`transfer-${action.decision}`"
-                    variant="text"
-                    :color="action.color"
+            <div class="signal-stack">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.transferSuggestion.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            class="signal-chip"
+                            :color="viewModel.transferSuggestion.color"
+                            variant="tonal"
+                            size="x-small"
+                            :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)"
+                            :title="viewModel.transferSuggestion.title">
+                            {{ tt(viewModel.transferSuggestion.labelKey) }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.transferSuggestion.detailLines"
+                                :key="`transfer-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    class="signal-chip"
+                    :color="viewModel.transferSuggestion.color"
+                    variant="tonal"
                     size="x-small"
-                    :disabled="disabled"
-                    @click.stop="emit('reviewTransfer', action.decision)">
-                    {{ tt(action.labelKey) }}
-                </v-btn>
+                    :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)"
+                    :title="viewModel.transferSuggestion.title">
+                    {{ tt(viewModel.transferSuggestion.labelKey) }}
+                </v-chip>
+                <div
+                    v-if="viewModel.transferSuggestion.actions.length > 0"
+                    :class="getActionRowClass(viewModel.transferSuggestion.actions.length)">
+                    <v-btn
+                        v-for="action in viewModel.transferSuggestion.actions"
+                        :key="`transfer-${action.decision}`"
+                        class="signal-action-btn"
+                        variant="text"
+                        :color="action.color"
+                        size="x-small"
+                        :loading="transferBusy"
+                        :disabled="disabled || rowBusy"
+                        @click.stop="emit('reviewTransfer', action.decision)">
+                        {{ tt(action.labelKey) }}
+                    </v-btn>
+                </div>
             </div>
         </div>
 
         <div class="signal-group investment-signal-group" v-if="viewModel.investment">
             <div class="investment-signal-stack">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.investment.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            class="investment-signal-chip"
+                            :color="viewModel.investment.color"
+                            variant="tonal"
+                            size="x-small"
+                            :prepend-icon="getInvestmentIcon(viewModel.investment.status)"
+                            :title="viewModel.investment.title">
+                            {{ tt(viewModel.investment.labelKey) }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.investment.detailLines"
+                                :key="`investment-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
                 <v-chip
+                    v-else
                     class="investment-signal-chip"
                     :color="viewModel.investment.color"
                     variant="tonal"
@@ -60,49 +184,61 @@
         </div>
 
         <div class="signal-group" v-if="viewModel.learning">
-            <div class="learning-hover-wrapper">
-                <v-hover v-slot="{ isHovering, props }">
-                    <v-chip
-                        v-bind="props"
-                        :color="viewModel.learning.color"
-                        variant="tonal"
-                        size="x-small"
-                        :prepend-icon="getLearningIcon(viewModel.learning.status)"
-                        :title="viewModel.learning.title">
-                        {{ tt(viewModel.learning.labelKey) }}
-                    </v-chip>
-                    <v-fade-transition>
-                        <v-card
-                            v-if="isHovering && (viewModel.learning.summary || viewModel.learning.title)"
-                            class="learning-hover-card">
-                            <v-card-text class="pa-2">
-                                <div v-if="viewModel.learning.title" class="text-caption font-weight-bold mb-1">
-                                    {{ viewModel.learning.title }}
-                                </div>
-                                <div v-if="viewModel.learning.summary" class="learning-hover-card__details">
-                                    <div
-                                        v-for="line in getLearningHoverDetailLines(viewModel.learning.summary)"
-                                        :key="line"
-                                        class="text-caption">
-                                        {{ line }}
-                                    </div>
-                                </div>
-                            </v-card-text>
-                        </v-card>
-                    </v-fade-transition>
-                </v-hover>
-            </div>
-            <div class="d-inline-flex flex-wrap ga-1 ms-1">
-                <v-btn
-                    v-for="action in viewModel.learning.actions"
-                    :key="`learning-${action.decision}`"
-                    variant="text"
-                    :color="action.color"
+            <div class="signal-stack signal-stack--learning">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.learning.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            class="signal-chip"
+                            :color="viewModel.learning.color"
+                            variant="tonal"
+                            size="x-small"
+                            :prepend-icon="getLearningIcon(viewModel.learning.status)"
+                            :title="viewModel.learning.title">
+                            {{ tt(viewModel.learning.labelKey) }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.learning.detailLines"
+                                :key="`learning-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    class="signal-chip"
+                    :color="viewModel.learning.color"
+                    variant="tonal"
                     size="x-small"
-                    :disabled="disabled"
-                    @click.stop="emit('reviewLearning', action.decision)">
-                    {{ tt(action.labelKey) }}
-                </v-btn>
+                    :prepend-icon="getLearningIcon(viewModel.learning.status)"
+                    :title="viewModel.learning.title">
+                    {{ tt(viewModel.learning.labelKey) }}
+                </v-chip>
+                <div
+                    v-if="viewModel.learning.actions.length > 0"
+                    :class="getActionRowClass(viewModel.learning.actions.length)">
+                    <v-btn
+                        v-for="action in viewModel.learning.actions"
+                        :key="`learning-${action.decision}`"
+                        class="signal-action-btn"
+                        variant="text"
+                        :color="action.color"
+                        size="x-small"
+                        :loading="learningBusy"
+                        :disabled="disabled || rowBusy"
+                        @click.stop="emit('reviewLearning', action.decision)">
+                        {{ tt(action.labelKey) }}
+                    </v-btn>
+                </div>
             </div>
         </div>
 
@@ -137,7 +273,7 @@
                 variant="text"
                 color="success"
                 size="x-small"
-                :disabled="disabled || !hasSession"
+                :disabled="disabled || rowBusy || !hasSession"
                 @click.stop="emit('openRecurring')">
                 {{ tt('Choose Scheduled Match') }}
             </v-btn>
@@ -147,7 +283,7 @@
                 variant="text"
                 color="warning"
                 size="x-small"
-                :disabled="disabled || !hasSession"
+                :disabled="disabled || rowBusy || !hasSession"
                 @click.stop="emit('clearRecurring')">
                 {{ tt('Clear') }}
             </v-btn>
@@ -175,6 +311,9 @@ defineProps<{
     viewModel?: ImportPreviewSignalViewModel;
     disabled?: boolean;
     hasSession?: boolean;
+    rowBusy?: boolean;
+    transferBusy?: boolean;
+    learningBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -186,11 +325,15 @@ const emit = defineEmits<{
 
 const { tt } = useI18n();
 
-function getLearningHoverDetailLines(summary: string | undefined): string[] {
-    return (summary || '')
-        .split(/\s*[|；;]\s*/)
-        .map(part => part.trim())
-        .filter(part => !!part);
+function hasSignalDetails(detailLines: string[] | undefined): boolean {
+    return (detailLines || []).length > 0;
+}
+
+function getActionRowClass(actionCount: number): string[] {
+    return [
+        'signal-action-row',
+        actionCount <= 1 ? 'signal-action-row--single' : 'signal-action-row--split'
+    ];
 }
 
 function getStatusIcon(status: ImportPreviewSignalStatus): string {
@@ -235,26 +378,44 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
     align-self: flex-start;
 }
 
-.learning-hover-wrapper {
-    position: relative;
+.signal-stack {
     display: inline-flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    max-width: 100%;
 }
 
-.learning-hover-card {
-    position: absolute;
-    z-index: 1000;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 220px;
-    max-width: 280px;
-    pointer-events: none;
-    background: rgb(var(--v-theme-surface));
-    color: rgb(var(--v-theme-on-surface));
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+.signal-stack--learning {
+    width: fit-content;
 }
 
-.learning-hover-card__details {
+.signal-chip {
+    align-self: flex-start;
+    max-width: 100%;
+}
+
+.signal-action-row {
     display: grid;
-    gap: 2px;
+    gap: 4px;
+    width: 100%;
+}
+
+.signal-action-row--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.signal-action-row--split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.signal-action-btn {
+    min-width: 0;
+    padding-inline: 8px;
+}
+
+.signal-detail-card {
+    min-width: 220px;
+    max-width: 320px;
 }
 </style>

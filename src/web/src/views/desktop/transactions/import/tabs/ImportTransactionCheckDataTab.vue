@@ -102,8 +102,11 @@
         <template #item.parserSource="{ item }">
             <import-preview-signal-cell
                 :view-model="importPreviewSignalViewModels[item.index]"
-                :disabled="!!disabled || isEditing || isMatchingDecisionBusy"
+                :disabled="!!disabled || isEditing"
                 :has-session="!!props.sessionId"
+                :row-busy="isPreviewMatchingDecisionBusy(getPreviewId(item))"
+                :transfer-busy="isTransferDecisionBusy(item)"
+                :learning-busy="isLearningDecisionBusy(item)"
                 @review-transfer="reviewTransferSuggestion(item, $event)"
                 @review-learning="reviewLearningSuggestion(item, $event)"
                 @open-recurring="openRecurringCandidateDialog(item)"
@@ -1237,7 +1240,7 @@ async function updatePreviewRecurringMatch(
     recurringId: string | number | null
 ): Promise<boolean> {
     const previewId = getPreviewId(item);
-    if (!props.sessionId || !previewId) {
+    if (!props.sessionId || previewId === null) {
         snackbar.value?.showMessage('No session ID available');
         return false;
     }
@@ -1247,7 +1250,7 @@ async function updatePreviewRecurringMatch(
         return false;
     }
 
-    if (isMatchingDecisionBusy.value) {
+    if (isPreviewMatchingDecisionBusy(previewId)) {
         return false;
     }
 
@@ -1645,6 +1648,26 @@ function getPreviewId(item: ImportTransaction): number | null {
     return typeof previewId === 'number' ? previewId : null;
 }
 
+function isPreviewMatchingDecisionBusy(previewId: number | null): boolean {
+    if (previewId === null) {
+        return false;
+    }
+
+    return transferDecisionLoadingId.value === previewId
+        || learningDecisionLoadingId.value === previewId
+        || recurringDecisionLoadingId.value === previewId;
+}
+
+function isTransferDecisionBusy(item: ImportTransaction): boolean {
+    const previewId = getPreviewId(item);
+    return previewId !== null && transferDecisionLoadingId.value === previewId;
+}
+
+function isLearningDecisionBusy(item: ImportTransaction): boolean {
+    const previewId = getPreviewId(item);
+    return previewId !== null && learningDecisionLoadingId.value === previewId;
+}
+
 function getPreviewTransactionTypeNumber(previewType?: string): number | undefined {
     const normalizedPreviewType = (previewType || '').trim();
 
@@ -1833,12 +1856,12 @@ async function reviewTransferSuggestion(
     decision: 'accept' | 'reject' | 'clear'
 ): Promise<void> {
     const previewId = getPreviewId(item);
-    if (!props.sessionId || !previewId) {
+    if (!props.sessionId || previewId === null) {
         snackbar.value?.showMessage('No session ID available');
         return;
     }
 
-    if (isMatchingDecisionBusy.value) {
+    if (isPreviewMatchingDecisionBusy(previewId)) {
         return;
     }
 
@@ -1907,12 +1930,12 @@ async function reviewLearningSuggestion(
     decision: 'accept' | 'reject' | 'clear'
 ): Promise<void> {
     const previewId = getPreviewId(item);
-    if (!props.sessionId || !previewId) {
+    if (!props.sessionId || previewId === null) {
         snackbar.value?.showMessage('No session ID available');
         return;
     }
 
-    if (isMatchingDecisionBusy.value) {
+    if (isPreviewMatchingDecisionBusy(previewId)) {
         return;
     }
 
@@ -2141,9 +2164,15 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
             parserTags: item.parserTags,
             dedupType: item.dedupType,
             dedupSourceIds: item.dedupSourceIds,
+            dedupSourceCount: item.matching?.dedup.source_count,
+            dedupSourceLabels: item.matching?.dedup.source_labels,
+            dedupSources: item.matching?.dedup.sources,
+            parserSourceChain: item.matching?.parser.source_chain,
             isManuallyAnnotated: item.isManuallyAnnotated,
             transferStatus: getTransferSignalStatus(item),
             transferTitle: item.transferSuggestionReason,
+            transferPairOrder: item.matching?.transfer.pair_order,
+            transferSourceChain: item.matching?.transfer.source_chain,
             investmentStatus: getInvestmentSignalStatus(item),
             investmentTitle: item.investmentSignalReason,
             investmentProfileText: item.getInvestmentProfileText(),
@@ -2173,6 +2202,18 @@ const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSigna
                 exclude: tt('Investment Reason Exclude'),
                 negative: tt('Investment Reason Negative'),
                 type: tt('Investment Reason Type')
+            },
+            sourceRoleLabels: {
+                outgoing: tt('Outgoing'),
+                incoming: tt('Incoming'),
+                debit: tt('Outgoing'),
+                credit: tt('Incoming')
+            },
+            infoLabels: {
+                sourceLabel: tt('Source'),
+                duplicateSourcesLabel: tt('Duplicate Sources'),
+                recommendedCategoryLabel: tt('Recommended Category'),
+                accountRouteLabel: tt('Account Route')
             },
             sourceRowLookup
         });

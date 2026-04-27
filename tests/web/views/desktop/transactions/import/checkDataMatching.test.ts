@@ -169,6 +169,12 @@ describe('checkDataMatching helpers', () => {
             parserColors: {
                 alipay: 'blue'
             },
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            },
             sourceRows: [
                 { id: 9, parserSource: 'wechat' }
             ]
@@ -178,7 +184,8 @@ describe('checkDataMatching helpers', () => {
             parserId: 'alipay',
             label: '支付宝',
             color: 'blue',
-            title: 'parser:alipay · channel:wallet'
+            title: '来源：支付宝',
+            detailLines: ['来源：支付宝']
         });
         expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
         expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
@@ -200,10 +207,102 @@ describe('checkDataMatching helpers', () => {
         ]);
         expect(viewModel.learning?.actions.map(action => action.labelKey)).toStrictEqual([
             'Apply Suggestion',
-            'Reject Learning Suggestion',
-            'Clear Learning Decision'
+            'Reject Learning Suggestion'
         ]);
         expect(viewModel.investment?.actions).toStrictEqual([]);
+    });
+
+    test('formats transfer details from structured source metadata and hides redundant parser chip', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'cmbc',
+            parserTags: ['parser:cmbc', 'parser:wechat'],
+            parserSourceChain: [
+                {
+                    position: 0,
+                    role: 'outgoing',
+                    parser_id: 'cmbc',
+                    parser_label: '民生银行',
+                    label: '民生银行卡'
+                },
+                {
+                    position: 1,
+                    role: 'incoming',
+                    parser_id: 'wechat',
+                    parser_label: '微信',
+                    label: '微信'
+                }
+            ],
+            transferStatus: 'pending',
+            transferPairOrder: 'outgoing_first',
+            transferSourceChain: [
+                {
+                    position: 1,
+                    role: 'incoming',
+                    parser_id: 'wechat',
+                    parser_label: '微信',
+                    label: '微信'
+                },
+                {
+                    position: 0,
+                    role: 'outgoing',
+                    parser_id: 'cmbc',
+                    parser_label: '民生银行',
+                    label: '民生银行卡'
+                }
+            ]
+        }, {
+            sourceRoleLabels: {
+                outgoing: '转出',
+                incoming: '转入'
+            }
+        });
+
+        expect(viewModel.parser).toBeNull();
+        expect(viewModel.transferSuggestion?.detailLines).toStrictEqual([
+            '转出：民生银行卡',
+            '转入：微信'
+        ]);
+        expect(viewModel.transferSuggestion?.title).toBe('转出：民生银行卡 | 转入：微信');
+    });
+
+    test('formats platform duplicate label and localized duplicate-source detail from structured metadata', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'platform_bank',
+            dedupSourceIds: [301, 302],
+            dedupSourceCount: 2,
+            dedupSourceLabels: ['支付宝', '民生银行'],
+            dedupSources: [
+                {
+                    position: 0,
+                    role: 'kept',
+                    parser_id: 'alipay',
+                    parser_label: '支付宝',
+                    label: '支付宝'
+                },
+                {
+                    position: 1,
+                    role: 'duplicate',
+                    parser_id: 'cmbc',
+                    parser_label: '民生银行',
+                    label: '民生银行'
+                }
+            ]
+        }, {
+            dedupLabels: {
+                'Platform Duplicate': '平台重复'
+            },
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.dedup?.label).toBe('平台重复·2');
+        expect(viewModel.dedup?.detailLines).toStrictEqual([
+            '重复来源：支付宝 · 民生银行'
+        ]);
     });
 
     test('keeps investment profile in hover title and maps reason keys for display', () => {
@@ -215,6 +314,46 @@ describe('checkDataMatching helpers', () => {
 
         expect(viewModel.investment?.title).toBe('Platform: 蚂蚁财富, Product: 黄金ETF | 蚂蚁财富 黄金ETF');
         expect(viewModel.investment?.profileText).toBe('蚂蚁财富 黄金ETF');
+    });
+
+    test('formats learning detail lines with the user-facing recommended-category summary', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningTitle: 'parser_id:exact',
+            learningSummary: '支出 | 餐饮/咖啡 | 招商银行卡 → 支付宝'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.learning?.detailLines).toStrictEqual([
+            '推荐分类：支出 / 餐饮/咖啡',
+            '账户链路：招商银行卡 → 支付宝'
+        ]);
+        expect(viewModel.learning?.title).toBe('推荐分类：支出 / 餐饮/咖啡 | 账户链路：招商银行卡 → 支付宝');
+    });
+
+    test('removes learning clear actions after review states', () => {
+        const acceptedViewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'accepted',
+            learningSummary: '支出 | 餐饮/咖啡'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(acceptedViewModel.learning?.actions).toStrictEqual([]);
+        expect(acceptedViewModel.learning?.detailLines).toStrictEqual([
+            '推荐分类：支出 / 餐饮/咖啡'
+        ]);
     });
 
     test('formats investment reason keys with caller-provided labels', () => {
