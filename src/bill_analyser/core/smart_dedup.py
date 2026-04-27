@@ -708,6 +708,43 @@ class SmartDeduplicationEngine:
 
         return " | ".join(unique_parts)
 
+    def _merge_parser_tags(self, *bills: dict[str, Any]) -> list[str]:
+        """Merge parser tags from multiple bills while preserving order."""
+        merged_tags: list[str] = []
+        for bill in bills:
+            raw_tags = bill.get("_parser_tags") or []
+            if isinstance(raw_tags, (list, tuple, set)):
+                normalized_tags = [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
+            elif raw_tags:
+                normalized_tags = [str(raw_tags).strip().lower()]
+            else:
+                source_type = self._get_source_type(bill)
+                normalized_tags = [f"parser:{source_type}"] if source_type else []
+
+            for tag in normalized_tags:
+                if tag and tag not in merged_tags:
+                    merged_tags.append(tag)
+
+        return merged_tags
+
+    def _build_transfer_source_snapshot(self, bill: dict[str, Any], *, role: str) -> dict[str, Any]:
+        """Capture explicit transfer-side source metadata for downstream matching."""
+        parser_id = str(bill.get("_parser_id", "") or "").strip()
+        return {
+            "role": role,
+            "parser_id": parser_id,
+            "payment_method": str(bill.get("payment_method", "") or "").strip(),
+            "counterparty": str(bill.get("counterparty", "") or "").strip(),
+            "source_account_id": bill.get("source_account_id"),
+            "account_name": (
+                bill.get("account_name")
+                or bill.get("source_account_name")
+                or bill.get("account")
+                or bill.get("payment_method", "")
+            ),
+            "tags": self._merge_parser_tags(bill),
+        }
+
     # ==================== 去重方法1：完全重复 ====================
 
     def _find_exact_duplicates(self, bills: list[dict[str, Any]]) -> list[DuplicateGroup]:
@@ -982,6 +1019,7 @@ class SmartDeduplicationEngine:
 
             # v6.48修复: 设置去重类型和合并的模板ID列表
             p_bill["_dedup_type"] = "platform_bank"
+            p_bill["_parser_tags"] = self._merge_parser_tags(p_bill, b_bill)
             merged_ids = []
             if b_bill.get("_template_id"):
                 merged_ids.append(b_bill.get("_template_id"))
@@ -1495,6 +1533,11 @@ class SmartDeduplicationEngine:
             # v6.62: 记录转入账单的解析器信息，用于账户匹配阶段设置目标账户
             # 因为账户匹配是在去重之后执行，此时 source_account_id 可能为空
             # 所以记录 parser_id 和 payment_method，让账户匹配阶段能够找到正确的目标账户
+            outgoing_bill["_transfer_pair_order"] = "outgoing_first"
+            outgoing_bill["_transfer_pair_sources"] = [
+                self._build_transfer_source_snapshot(outgoing_bill, role="outgoing"),
+                self._build_transfer_source_snapshot(incoming_bill, role="incoming"),
+            ]
             outgoing_bill["_destination_parser_id"] = incoming_bill.get("_parser_id", "")
             outgoing_bill["_destination_payment_method"] = incoming_bill.get("payment_method", "")
             outgoing_bill["_destination_counterparty"] = incoming_bill.get("counterparty", "")

@@ -31,6 +31,7 @@ class FakeBillServiceDB:
             "支付宝": 4,
             "理财账户": 5,
             "转入账户": 6,
+            "微信": 7,
         }
         self.accounts = [
             {"id": 1, "name": "默认账户"},
@@ -39,6 +40,7 @@ class FakeBillServiceDB:
             {"id": 4, "name": "支付宝"},
             {"id": 5, "name": "理财账户"},
             {"id": 6, "name": "转入账户"},
+            {"id": 7, "name": "微信"},
         ]
         self.history_source: dict[str, Any] | None = None
         self.history_destination: dict[str, Any] | None = None
@@ -423,6 +425,33 @@ async def test_match_accounts_uses_multiple_matching_paths_and_destination_rules
             "_destination_payment_method": "",
             "_destination_counterparty": "",
         },
+        {
+            "type": "转账",
+            "source_account_id": 2,
+            "payment_method": "",
+            "description": "转账",
+            "counterparty": "",
+            "_transfer_pair_sources": [
+                {
+                    "role": "outgoing",
+                    "parser_id": "cmbc",
+                    "payment_method": "招商银行卡",
+                    "counterparty": "",
+                    "source_account_id": 2,
+                    "account_name": "招商银行卡",
+                    "tags": ["parser:cmbc", "channel:bank"],
+                },
+                {
+                    "role": "incoming",
+                    "parser_id": "wechat",
+                    "payment_method": "",
+                    "counterparty": "",
+                    "source_account_id": None,
+                    "account_name": "",
+                    "tags": ["parser:wechat", "channel:wallet"],
+                },
+            ],
+        },
         {"type": "支出", "source_account_id": "unknown", "payment_method": "", "description": "", "counterparty": "", "_parser_id": "", "main_category": ""},
     ]
 
@@ -440,7 +469,8 @@ async def test_match_accounts_uses_multiple_matching_paths_and_destination_rules
     assert matched[4]["account_name"] == "支付宝"
     assert matched[5]["destination_account_id"] == 5
     assert matched[6]["destination_account_id"] == 6
-    assert matched[7]["source_account_id"] is None
+    assert matched[7]["destination_account_id"] == 7
+    assert matched[8]["source_account_id"] is None
 
 
 @pytest.mark.asyncio
@@ -799,7 +829,7 @@ async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_g
             "preview_payment_method": "民生银行卡",
             "preview_description": "转账到现金",
             "preview_parser_id": "cmbc",
-            "preview_parser_tags": ["parser:cmbc", "channel:bank"],
+            "preview_parser_tags": ["parser:cmbc", "channel:bank", "parser:wechat"],
             "preview_selected": 1,
             "dedup_type": "transfer",
             "dedup_source_ids": [101, 102],
@@ -820,9 +850,148 @@ async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_g
     assert matching["transfer"]["score"] == preview_item["transfer_suggestion_score"]
     assert matching["transfer"]["level"] == preview_item["transfer_suggestion_level"]
     assert matching["transfer"]["reason"] == preview_item["transfer_suggestion_reason"]
-    assert matching["dedup"] == {"type": "transfer", "source_ids": [101, 102]}
-    assert matching["parser"] == {"id": "cmbc", "tags": ["parser:cmbc", "channel:bank"]}
+    assert matching["transfer"]["pair_order"] == "outgoing_first"
+    assert matching["transfer"]["source_chain"] == [
+        {
+            "position": 0,
+            "role": "outgoing",
+            "parser_id": "cmbc",
+            "parser_label": "民生银行",
+            "label": "民生银行卡",
+            "channel": "bank",
+            "tags": ["parser:cmbc", "channel:bank"],
+            "account_id": 2,
+        },
+        {
+            "position": 1,
+            "role": "incoming",
+            "parser_id": "wechat",
+            "parser_label": "微信",
+            "label": "微信",
+            "channel": "",
+            "tags": ["parser:wechat"],
+            "account_id": 3,
+        },
+    ]
+    assert matching["dedup"] == {
+        "type": "transfer",
+        "source_ids": [101, 102],
+        "source_count": 2,
+        "source_labels": ["民生银行卡", "微信"],
+        "sources": [
+            {
+                "position": 0,
+                "role": "outgoing",
+                "parser_id": "cmbc",
+                "parser_label": "民生银行",
+                "label": "民生银行卡",
+                "channel": "bank",
+                "tags": ["parser:cmbc", "channel:bank"],
+                "account_id": 2,
+            },
+            {
+                "position": 1,
+                "role": "incoming",
+                "parser_id": "wechat",
+                "parser_label": "微信",
+                "label": "微信",
+                "channel": "",
+                "tags": ["parser:wechat"],
+                "account_id": 3,
+            },
+        ],
+    }
+    assert matching["parser"] == {
+        "id": "cmbc",
+        "tags": ["parser:cmbc", "channel:bank", "parser:wechat"],
+        "source_chain": [
+            {
+                "position": 0,
+                "role": "outgoing",
+                "parser_id": "cmbc",
+                "parser_label": "民生银行",
+                "label": "民生银行卡",
+                "channel": "bank",
+                "tags": ["parser:cmbc", "channel:bank"],
+                "account_id": 2,
+            },
+            {
+                "position": 1,
+                "role": "incoming",
+                "parser_id": "wechat",
+                "parser_label": "微信",
+                "label": "微信",
+                "channel": "",
+                "tags": ["parser:wechat"],
+                "account_id": 3,
+            },
+        ],
+    }
     assert matching["annotation"] == {"is_manually_annotated": True}
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_adds_platform_duplicate_source_metadata() -> None:
+    """平台-银行重复应返回稳定来源标签与计数，不依赖 preview 行反查。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 3,
+            "session_id": "session-matching-platform-bank",
+            "user_id": 1,
+            "preview_date": "2025-01-05 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 66.0,
+            "preview_destination_amount": 0.0,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_source_account_id": 4,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "测试商户",
+            "preview_payment_method": "支付宝",
+            "preview_description": "平台银行重复",
+            "preview_parser_id": "alipay",
+            "preview_parser_tags": ["parser:alipay", "channel:wallet", "parser:cmbc", "channel:bank"],
+            "preview_selected": 1,
+            "dedup_type": "platform_bank",
+            "dedup_source_ids": [301, 302],
+        }
+    ]
+    service = _make_service(fake_db)
+
+    preview_items = await service.get_import_preview("session-matching-platform-bank", selected_only=False)
+
+    assert len(preview_items) == 1
+    matching = preview_items[0]["matching"]
+    assert matching["dedup"] == {
+        "type": "platform_bank",
+        "source_ids": [301, 302],
+        "source_count": 2,
+        "source_labels": ["支付宝", "民生银行"],
+        "sources": [
+            {
+                "position": 0,
+                "role": "kept",
+                "parser_id": "alipay",
+                "parser_label": "支付宝",
+                "label": "支付宝",
+                "channel": "wallet",
+                "tags": ["parser:alipay", "channel:wallet"],
+                "account_id": 4,
+            },
+            {
+                "position": 1,
+                "role": "duplicate",
+                "parser_id": "cmbc",
+                "parser_label": "民生银行",
+                "label": "民生银行",
+                "channel": "bank",
+                "tags": ["parser:cmbc", "channel:bank"],
+                "account_id": None,
+            },
+        ],
+    }
+    assert matching["parser"]["source_chain"] == matching["dedup"]["sources"]
 
 
 @pytest.mark.asyncio

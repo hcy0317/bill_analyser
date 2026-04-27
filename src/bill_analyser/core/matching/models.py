@@ -17,6 +17,8 @@ class TransferMatchingPayload:
     review_status: str = ""
     reviewed_type: str = ""
     suppressed: bool = False
+    pair_order: str = ""
+    source_chain: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,9 @@ class DedupMatchingPayload:
 
     type: str = ""
     source_ids: Any = field(default_factory=list)
+    source_count: int = 0
+    source_labels: list[str] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,7 @@ class ParserMatchingPayload:
 
     id: str = ""
     tags: list[str] = field(default_factory=list)
+    source_chain: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

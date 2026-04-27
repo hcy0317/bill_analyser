@@ -778,7 +778,76 @@ async def test_get_import_preview_matching_normalizes_dedup_source_ids_after_db_
     assert preview_items[0]["matching"]["dedup"] == {
         "type": "transfer",
         "source_ids": [301, 302],
+        "source_count": 2,
+        "source_labels": [],
+        "sources": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_returns_structured_platform_duplicate_source_metadata(service):
+    """真实 preview 表回读后应返回平台重复来源标签与计数。"""
+    session_id = "session-preview-platform-duplicate-metadata"
+    await service.db.create_import_session(session_id, user_id=1, file_count=1)
+
+    inserted = await service.db.insert_preview_bills_batch(
+        session_id,
+        [
+            {
+                "preview_data": {
+                    "preview_date": "2026-03-10 09:30:00",
+                    "preview_type": "支出",
+                    "preview_amount": 88.0,
+                    "preview_destination_amount": 0.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_source_account_id": None,
+                    "preview_destination_account_id": None,
+                    "preview_counterparty": "测试商户",
+                    "preview_payment_method": "支付宝",
+                    "preview_description": "平台重复来源元数据",
+                    "preview_parser_id": "alipay",
+                    "preview_parser_tags": ["parser:alipay", "channel:wallet", "parser:cmbc", "channel:bank"],
+                },
+                "dedup_type": "platform_bank",
+                "dedup_source_ids": [401, 402],
+            }
+        ],
+        user_id=1,
+    )
+    assert inserted == 1
+
+    preview_items = await service.get_import_preview(session_id, user_id=1)
+    assert len(preview_items) == 1
+    assert preview_items[0]["matching"]["dedup"] == {
+        "type": "platform_bank",
+        "source_ids": [401, 402],
+        "source_count": 2,
+        "source_labels": ["支付宝", "民生银行"],
+        "sources": [
+            {
+                "position": 0,
+                "role": "kept",
+                "parser_id": "alipay",
+                "parser_label": "支付宝",
+                "label": "支付宝",
+                "channel": "wallet",
+                "tags": ["parser:alipay", "channel:wallet"],
+                "account_id": None,
+            },
+            {
+                "position": 1,
+                "role": "duplicate",
+                "parser_id": "cmbc",
+                "parser_label": "民生银行",
+                "label": "民生银行",
+                "channel": "bank",
+                "tags": ["parser:cmbc", "channel:bank"],
+                "account_id": None,
+            },
+        ],
+    }
+    assert preview_items[0]["matching"]["parser"]["source_chain"] == preview_items[0]["matching"]["dedup"]["sources"]
 
 
 @pytest.mark.asyncio

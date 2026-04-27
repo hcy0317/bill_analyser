@@ -56,6 +56,16 @@ class BillService:
     - 批量文件导入
     """
 
+    _PARSER_SOURCE_LABELS = {
+        "wechat": "微信",
+        "alipay": "支付宝",
+        "abc": "农业银行",
+        "ccb": "建设银行",
+        "cmbc": "民生银行",
+        "icbc": "工商银行",
+        "generic": "通用来源",
+    }
+
     def __init__(
         self,
         db: Database | None = None,
@@ -450,6 +460,74 @@ class BillService:
         )
         return bill_copy
 
+    @classmethod
+    def _get_parser_source_label(cls, parser_id: Any) -> str:
+        """Translate normalized parser IDs into human-readable source labels."""
+        normalized_parser_id = str(parser_id or "").strip().lower()
+        if not normalized_parser_id:
+            return ""
+        return cls._PARSER_SOURCE_LABELS.get(normalized_parser_id, normalized_parser_id)
+
+    @classmethod
+    def _build_account_match_text_candidates(
+        cls,
+        *,
+        parser_id: Any = "",
+        payment_method: Any = "",
+        counterparty: Any = "",
+        account_name: Any = "",
+        tags: Any = None,
+    ) -> list[str]:
+        """Collect stable text hints for alias-based account matching."""
+        text_candidates: list[str] = []
+        for value in (payment_method, counterparty, account_name, parser_id):
+            normalized_value = str(value or "").strip()
+            if normalized_value and normalized_value not in text_candidates:
+                text_candidates.append(normalized_value)
+
+        parser_label = cls._get_parser_source_label(parser_id)
+        if parser_label and parser_label not in text_candidates:
+            text_candidates.append(parser_label)
+
+        for tag in list(tags or []):
+            normalized_tag = str(tag or "").strip().lower()
+            if not normalized_tag.startswith("parser:"):
+                continue
+            related_parser_id = normalized_tag.split(":", 1)[1].strip()
+            related_label = cls._get_parser_source_label(related_parser_id)
+            if related_label and related_label not in text_candidates:
+                text_candidates.append(related_label)
+
+        return text_candidates
+
+    @staticmethod
+    def _extract_transfer_destination_hints(bill: dict[str, Any]) -> dict[str, Any]:
+        """Read the stable transfer contract emitted by smart dedup, with legacy fallback."""
+        transfer_sources = bill.get("_transfer_pair_sources")
+        if isinstance(transfer_sources, list):
+            for source in transfer_sources:
+                if not isinstance(source, dict):
+                    continue
+                if str(source.get("role") or "").strip().lower() != "incoming":
+                    continue
+                return {
+                    "parser_id": str(source.get("parser_id", "") or "").strip(),
+                    "payment_method": str(source.get("payment_method", "") or "").strip(),
+                    "counterparty": str(source.get("counterparty", "") or "").strip(),
+                    "account_name": str(source.get("account_name", "") or "").strip(),
+                    "account_id": source.get("source_account_id"),
+                    "tags": list(source.get("tags") or []),
+                }
+
+        return {
+            "parser_id": str(bill.get("_destination_parser_id", "") or "").strip(),
+            "payment_method": str(bill.get("_destination_payment_method", "") or "").strip(),
+            "counterparty": str(bill.get("_destination_counterparty", "") or "").strip(),
+            "account_name": str(bill.get("_destination_account_name", "") or "").strip(),
+            "account_id": bill.get("_destination_account_id"),
+            "tags": [],
+        }
+
     @log_method
     async def _match_accounts(self, bills: list[dict[str, Any]], user_id: int = 1) -> list[dict[str, Any]]:
         """
@@ -696,19 +774,25 @@ class BillService:
 
                 if not is_valid_dest or str(current_dest_id) not in account_by_id:
                     # 使用转账配对时记录的转入账单信息来匹配目标账户
-                    dest_parser_id = str(bill.get("_destination_parser_id", ""))
-                    dest_payment_method = str(bill.get("_destination_payment_method", ""))
-                    dest_counterparty = str(bill.get("_destination_counterparty", ""))
-                    dest_account_name = str(bill.get("_destination_account_name", ""))
-                    combined_text = (
-                        f"{dest_parser_id} {dest_payment_method} "
-                        f"{dest_counterparty} {dest_account_name}"
+                    destination_hints = self._extract_transfer_destination_hints(bill)
+                    dest_parser_id = str(destination_hints.get("parser_id", "") or "")
+                    dest_payment_method = str(destination_hints.get("payment_method", "") or "")
+                    dest_counterparty = str(destination_hints.get("counterparty", "") or "")
+                    dest_account_name = str(destination_hints.get("account_name", "") or "")
+                    combined_text = " ".join(
+                        self._build_account_match_text_candidates(
+                            parser_id=dest_parser_id,
+                            payment_method=dest_payment_method,
+                            counterparty=dest_counterparty,
+                            account_name=dest_account_name,
+                            tags=destination_hints.get("tags"),
+                        )
                     )
                     combined_text_lower = combined_text.lower()
 
                     dest_account_id = None
                     dest_match_source = None
-                    dest_account_hint = bill.get("_destination_account_id")
+                    dest_account_hint = destination_hints.get("account_id")
                     if (
                         (isinstance(dest_account_hint, int) or str(dest_account_hint).isdigit())
                         and str(dest_account_hint) in account_by_id
@@ -732,7 +816,7 @@ class BillService:
                             user_id=user_id,
                             payment_method=dest_payment_method,
                             counterparty=dest_counterparty,
-                            description="",
+                            description=dest_account_name,
                             bill_type=str(bill.get("type", "")),
                             source_account_id=(
                                 int(bill.get("source_account_id"))

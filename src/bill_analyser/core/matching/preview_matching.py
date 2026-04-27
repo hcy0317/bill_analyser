@@ -63,6 +63,165 @@ def _normalize_int_or_none(raw_value: Any) -> int | None:
         return None
 
 
+_PARSER_DISPLAY_LABELS = {
+    "wechat": "微信",
+    "alipay": "支付宝",
+    "abc": "农业银行",
+    "ccb": "建设银行",
+    "cmbc": "民生银行",
+    "icbc": "工商银行",
+    "generic": "通用来源",
+}
+
+
+def _parser_display_label(parser_id: Any) -> str:
+    """Convert normalized parser IDs into user-facing source labels."""
+    normalized_parser_id = str(parser_id or "").strip().lower()
+    if not normalized_parser_id:
+        return ""
+    return _PARSER_DISPLAY_LABELS.get(normalized_parser_id, normalized_parser_id)
+
+
+def _build_parser_tag_groups(raw_tags: Any, *, primary_parser_id: str = "") -> list[dict[str, Any]]:
+    """Group parser tags by parser occurrence while preserving tag order."""
+    tags = [str(tag).strip() for tag in _normalize_list_value(raw_tags) if str(tag).strip()]
+    groups: list[dict[str, Any]] = []
+    leading_tags: list[str] = []
+
+    for tag in tags:
+        if tag.startswith("parser:"):
+            parser_id = tag.split(":", 1)[1].strip().lower()
+            if groups and groups[-1]["parser_id"] == parser_id:
+                if tag not in groups[-1]["tags"]:
+                    groups[-1]["tags"].append(tag)
+                continue
+
+            group_tags = [*leading_tags, tag] if leading_tags else [tag]
+            groups.append({"parser_id": parser_id, "tags": group_tags})
+            leading_tags = []
+            continue
+
+        if groups:
+            if tag not in groups[-1]["tags"]:
+                groups[-1]["tags"].append(tag)
+        elif tag not in leading_tags:
+            leading_tags.append(tag)
+
+    normalized_primary_parser_id = str(primary_parser_id or "").strip().lower()
+    if not normalized_primary_parser_id:
+        return groups
+
+    primary_group_index = next(
+        (
+            index
+            for index, group in enumerate(groups)
+            if str(group.get("parser_id") or "").strip().lower() == normalized_primary_parser_id
+        ),
+        None,
+    )
+    if primary_group_index is None:
+        return [
+            {"parser_id": normalized_primary_parser_id, "tags": [f"parser:{normalized_primary_parser_id}"]},
+            *groups,
+        ]
+
+    if primary_group_index == 0:
+        return groups
+
+    primary_group = groups.pop(primary_group_index)
+    return [primary_group, *groups]
+
+
+def _extract_channel_value(tags: list[str]) -> str:
+    """Return the first normalized channel tag value from a grouped tag list."""
+    for tag in tags:
+        if tag.startswith("channel:"):
+            return tag.split(":", 1)[1].strip().lower()
+    return ""
+
+
+def _select_source_label(parser_id: str, payment_method: Any = "") -> str:
+    """Prefer human-facing payment labels, then parser display labels."""
+    normalized_payment_method = str(payment_method or "").strip()
+    if normalized_payment_method and normalized_payment_method.lower() != parser_id.lower():
+        return normalized_payment_method
+
+    parser_label = _parser_display_label(parser_id)
+    return parser_label or normalized_payment_method
+
+
+def _build_preview_source_chain(preview: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive stable source-chain metadata from persisted parser tags."""
+    primary_parser_id = str(preview.get("preview_parser_id") or "").strip().lower()
+    tag_groups = _build_parser_tag_groups(
+        preview.get("preview_parser_tags"),
+        primary_parser_id=primary_parser_id,
+    )
+    dedup_type = str(preview.get("dedup_type") or "").strip().lower()
+    is_transfer_pair = dedup_type == "transfer" and len(tag_groups) >= 2
+    is_platform_duplicate = dedup_type == "platform_bank" and len(tag_groups) >= 2
+
+    source_chain: list[dict[str, Any]] = []
+    for index, group in enumerate(tag_groups):
+        parser_id = str(group.get("parser_id") or "").strip().lower()
+        if not parser_id:
+            continue
+
+        if is_transfer_pair:
+            role = "outgoing" if index == 0 else "incoming"
+        elif is_platform_duplicate:
+            role = "kept" if index == 0 else "duplicate"
+        else:
+            role = "primary" if index == 0 else "related"
+
+        payment_method = preview.get("preview_payment_method", "") if index == 0 else ""
+        parser_label = _parser_display_label(parser_id)
+        label = _select_source_label(parser_id, payment_method)
+        account_id = None
+        if role in {"outgoing", "primary", "kept"}:
+            account_id = _normalize_int_or_none(preview.get("preview_source_account_id"))
+        elif role == "incoming":
+            account_id = _normalize_int_or_none(preview.get("preview_destination_account_id"))
+
+        source_chain.append(
+            {
+                "position": index,
+                "role": role,
+                "parser_id": parser_id,
+                "parser_label": parser_label,
+                "label": label or parser_label or parser_id,
+                "channel": _extract_channel_value(list(group.get("tags") or [])),
+                "tags": [str(tag) for tag in list(group.get("tags") or []) if str(tag).strip()],
+                "account_id": account_id,
+            }
+        )
+
+    return source_chain
+
+
+def _build_dedup_source_metadata(
+    preview: dict[str, Any],
+    source_chain: list[dict[str, Any]],
+) -> tuple[int, list[str], list[dict[str, Any]]]:
+    """Project persisted dedup hints into stable source metadata."""
+    dedup_type = str(preview.get("dedup_type") or "").strip().lower()
+    dedup_source_ids = _normalize_source_ids_value(preview.get("dedup_source_ids"))
+
+    if dedup_type in {"transfer", "platform_bank"} and len(source_chain) >= 2:
+        relevant_sources = [dict(source) for source in source_chain]
+    else:
+        relevant_sources = []
+
+    source_labels = [
+        str(source.get("label") or source.get("parser_label") or source.get("parser_id") or "").strip()
+        for source in relevant_sources
+        if str(source.get("label") or source.get("parser_label") or source.get("parser_id") or "").strip()
+    ]
+    source_count = max(len(dedup_source_ids), len(relevant_sources))
+
+    return source_count, source_labels, relevant_sources
+
+
 def build_preview_matching_payload(
     preview: dict[str, Any],
     *,
@@ -153,6 +312,14 @@ def build_preview_matching_payload(
         has_learning_signal or learning_review_status in {"accepted", "rejected"}
     )
 
+    parser_source_chain = _build_preview_source_chain(preview)
+    dedup_source_count, dedup_source_labels, dedup_sources = _build_dedup_source_metadata(
+        preview,
+        parser_source_chain,
+    )
+    transfer_source_chain = [dict(source) for source in parser_source_chain if source.get("role") in {"outgoing", "incoming"}]
+    transfer_pair_order = "outgoing_first" if len(transfer_source_chain) >= 2 else ""
+
     payload = PreviewMatchingPayload(
         transfer=TransferMatchingPayload(
             candidate_type=str(transfer_suggestion.get("suggested_preview_type") or ""),
@@ -162,6 +329,8 @@ def build_preview_matching_payload(
             review_status=review_status,
             reviewed_type=reviewed_type,
             suppressed=suppressed,
+            pair_order=transfer_pair_order,
+            source_chain=transfer_source_chain,
         ),
         investment=InvestmentMatchingPayload(
             score=float(investment_signal.get("score", 0.0) or 0.0),
@@ -195,6 +364,9 @@ def build_preview_matching_payload(
         dedup=DedupMatchingPayload(
             type=str(preview.get("dedup_type") or ""),
             source_ids=_normalize_source_ids_value(preview.get("dedup_source_ids")),
+            source_count=dedup_source_count,
+            source_labels=dedup_source_labels,
+            sources=dedup_sources,
         ),
         parser=ParserMatchingPayload(
             id=str(preview.get("preview_parser_id") or ""),
@@ -203,6 +375,7 @@ def build_preview_matching_payload(
                 for tag in _normalize_list_value(preview.get("preview_parser_tags"))
                 if str(tag)
             ],
+            source_chain=parser_source_chain,
         ),
         annotation=AnnotationMatchingPayload(
             is_manually_annotated=bool(is_manually_annotated),
