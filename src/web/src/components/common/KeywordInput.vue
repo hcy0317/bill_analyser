@@ -1,6 +1,6 @@
 <template>
     <div class="rule-expression-input">
-        <div class="d-flex align-center mb-2">
+        <div v-if="showHeader" class="rule-expression-input__header">
             <span class="text-subtitle-2">{{ resolvedTitle }}</span>
             <v-spacer />
             <v-btn
@@ -54,26 +54,19 @@
                                     v-if="clauseIndex > 0"
                                     class="clause-connector-row"
                                 >
-                                    <v-btn-toggle
-                                        :model-value="getClauseConnector(clause)"
-                                        class="clause-connector-toggle"
-                                        density="compact"
-                                        variant="outlined"
-                                        divided
-                                        mandatory
-                                        :disabled="disabled"
-                                        @update:model-value="updateClauseConnector(clause, $event)"
-                                    >
-                                        <v-btn
+                                    <div class="clause-connector-inline">
+                                        <button
                                             v-for="item in connectorItems"
                                             :key="item.value"
-                                            :value="item.value"
-                                            size="small"
+                                            type="button"
+                                            class="clause-connector-button"
+                                            :class="{ 'clause-connector-button--active': getClauseConnector(clause) === item.value }"
                                             :disabled="disabled"
+                                            @click="updateClauseConnector(clause, item.value)"
                                         >
                                             {{ item.title }}
-                                        </v-btn>
-                                    </v-btn-toggle>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div class="rule-clause-row">
@@ -160,23 +153,25 @@
                                     </div>
 
                                     <div class="clause-actions">
-                                        <v-btn
-                                            :icon="mdiPlus"
-                                            size="small"
-                                            variant="text"
-                                            color="primary"
+                                        <button
+                                            type="button"
+                                            class="clause-action-button"
                                             :title="tt('Insert clause after this row')"
                                             :disabled="disabled"
                                             @click="insertClauseAfterRow(clause)"
-                                        />
-                                        <v-btn
-                                            :icon="mdiDelete"
-                                            size="small"
-                                            variant="text"
-                                            color="error"
+                                        >
+                                            +
+                                        </button>
+                                        <span class="clause-actions__divider" aria-hidden="true"></span>
+                                        <button
+                                            type="button"
+                                            class="clause-action-button clause-action-button--danger"
+                                            :title="tt('Remove clause')"
                                             :disabled="disabled"
                                             @click="removeClause(clause.id)"
-                                        />
+                                        >
+                                            ×
+                                        </button>
                                     </div>
                                 </div>
                             </template>
@@ -220,7 +215,7 @@ import {
     type RuleOperator
 } from '@/components/common/keywordExpression.ts';
 
-import { mdiPlus, mdiDelete } from '@mdi/js';
+import { mdiPlus } from '@mdi/js';
 
 const { tt } = useI18n();
 
@@ -240,9 +235,11 @@ const props = withDefaults(defineProps<{
     helpText?: string;
     exampleText?: string;
     addButtonText?: string;
+    showHeader?: boolean;
 }>(), {
     format: 'legacy',
     regexEnabled: false,
+    showHeader: true,
 });
 
 const emit = defineEmits<{
@@ -507,11 +504,26 @@ function formatParenStack(paren: '(' | ')', count: number): string {
     }
     return `${paren.repeat(6)}×${count}`;
 }
+
+function canAddExpression(): boolean {
+    return !isRawMode.value;
+}
+
+defineExpose({
+    addExpression,
+    canAddExpression,
+});
 </script>
 
 <style scoped>
 .rule-expression-input {
     width: 100%;
+}
+
+.rule-expression-input__header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
 }
 
 .rule-expression-groups {
@@ -542,10 +554,9 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .expression-group {
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-    border-radius: 12px;
-    padding: 10px;
-    background: rgba(var(--v-theme-surface), 0.72);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .expression-clause-list {
@@ -559,8 +570,47 @@ function formatParenStack(paren: '(' | ')', count: number): string {
     margin-block: -1px;
 }
 
-.clause-connector-toggle {
-    background: rgba(var(--v-theme-surface), 1);
+.clause-connector-inline {
+    display: inline-flex;
+    align-items: center;
+    color: rgba(var(--v-theme-on-surface), 0.56);
+    font-size: 14px;
+}
+
+.clause-connector-button {
+    position: relative;
+    border: 0;
+    background: transparent;
+    padding: 0 2px;
+    color: inherit;
+    cursor: pointer;
+    font-size: inherit;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.clause-connector-button:disabled {
+    cursor: default;
+    opacity: 0.36;
+}
+
+.clause-connector-button + .clause-connector-button {
+    margin-left: 10px;
+    padding-left: 10px;
+}
+
+.clause-connector-button + .clause-connector-button::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 14px;
+    border-left: 1px solid rgba(var(--v-theme-on-surface), 0.16);
+    transform: translateY(-50%);
+}
+
+.clause-connector-button--active {
+    color: rgb(var(--v-theme-primary));
 }
 
 .rule-clause-row {
@@ -584,21 +634,46 @@ function formatParenStack(paren: '(' | ')', count: number): string {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
+    color: rgba(var(--v-theme-on-surface), 0.54);
+}
+
+.clause-actions__divider {
+    width: 1px;
+    height: 16px;
+    margin-inline: 6px;
+    background: rgba(var(--v-theme-on-surface), 0.16);
+}
+
+.clause-action-button {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.clause-action-button:disabled {
+    cursor: default;
+    opacity: 0.36;
+}
+
+.clause-action-button--danger {
+    color: rgba(var(--v-theme-error), 0.9);
 }
 
 .paren-control {
     display: flex;
-    align-items: stretch;
+    align-items: center;
+    gap: 2px;
     flex: 0 0 auto;
-    width: auto;
-    min-width: 48px;
+    min-width: 0;
     height: 38px;
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.14);
-    border-radius: 10px;
-    background: rgba(var(--v-theme-surface), 0.78);
-    opacity: 0.36;
-    overflow: hidden;
-    transition: opacity 0.14s ease;
+    color: rgba(var(--v-theme-on-surface), 0.48);
+    opacity: 0.54;
+    transition: opacity 0.14s ease, color 0.14s ease;
 }
 
 .paren-control-left,
@@ -609,9 +684,9 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 .paren-control__step,
 .paren-control__main {
     border: 0;
-    padding: 0;
+    padding: 0 2px;
     background: transparent;
-    color: rgba(var(--v-theme-on-surface), 0.52);
+    color: inherit;
     cursor: pointer;
     font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
     line-height: 1;
@@ -624,14 +699,13 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .paren-control__step {
-    flex: 0 0 20px;
+    flex: 0 0 auto;
     font-size: 13px;
 }
 
 .paren-control__main {
-    flex: 1 1 auto;
-    min-width: 28px;
-    padding-inline: 4px;
+    flex: 0 0 auto;
+    min-width: 0;
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 1px;
@@ -644,16 +718,8 @@ function formatParenStack(paren: '(' | ')', count: number): string {
 }
 
 .paren-control--active {
-    border-radius: 8px;
-    background: rgba(var(--v-theme-primary), 0.22);
     color: rgb(var(--v-theme-primary));
     opacity: 1;
-    box-shadow: inset 0 0 0 1px rgba(var(--v-theme-primary), 0.55);
-}
-
-.paren-control--active .paren-control__step,
-.paren-control--active .paren-control__main {
-    color: rgb(var(--v-theme-primary));
 }
 
 .rule-clause-row:hover .paren-control:hover,

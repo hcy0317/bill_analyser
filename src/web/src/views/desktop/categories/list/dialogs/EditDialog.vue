@@ -75,7 +75,7 @@
                                 v-model="categoryRuleBuilderModel"
                                 :auto-rule-name="autoPrimaryRuleName"
                                 :disabled="loading || submitting || ruleLoading"
-                                :title="tt('Assignment Matching')"
+                                :title="tt('Category Matching')"
                             />
                         </v-col>
                         <v-col cols="12" md="12">
