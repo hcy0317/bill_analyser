@@ -231,12 +231,10 @@
                                     </v-card-text>
 
                                     <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && queryChartDataType === ChartDataType.Overview.type">
-                                        <account-and-category-sankey-chart
-                                            :items="[]"
-                                            :sorting-type="querySortingType"
-                                            :skeleton="true"
-                                            v-if="initing"
-                                        />
+                                        <div v-if="initing" class="d-flex flex-column align-center justify-center" style="height: 600px">
+                                            <v-skeleton-loader type="heading" width="240px" class="mb-8" />
+                                            <v-skeleton-loader type="image" width="85%" height="460px" />
+                                        </div>
                                         <account-and-category-sankey-chart
                                             :items="categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length ? categoricalOverviewAnalysisData.items : []"
                                             :enable-click-item="true"
@@ -247,19 +245,10 @@
                                     </v-card-text>
 
                                     <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && query.categoricalChartType === CategoricalChartType.Pie.type">
-                                        <pie-chart
-                                            :items="[
-                                                {id: '1', name: '---', value: 60, color: '7c7c7f'},
-                                                {id: '2', name: '---', value: 20, color: 'a5a5aa'},
-                                                {id: '3', name: '---', value: 20, color: 'c5c5c9'}
-                                            ]"
-                                            :skeleton="true"
-                                            id-field="id"
-                                            name-field="name"
-                                            value-field="value"
-                                            color-field="color"
-                                            v-if="initing"
-                                        />
+                                        <div v-if="initing" class="d-flex flex-column align-center justify-center py-12">
+                                            <v-skeleton-loader type="heading" width="200px" class="mb-8" />
+                                            <v-skeleton-loader type="image" width="460px" height="460px" />
+                                        </div>
                                         <pie-chart
                                             :items="categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length ? categoricalAnalysisData.items : []"
                                             :min-valid-percent="0.0001"
@@ -333,20 +322,10 @@
                                     </v-card-text>
 
                                     <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && query.categoricalChartType === CategoricalChartType.Radar.type">
-                                        <radar-chart
-                                            :items="[
-                                                {name: '---', value: 10},
-                                                {name: '---', value: 10},
-                                                {name: '---', value: 10},
-                                                {name: '---', value: 10},
-                                                {name: '---', value: 10},
-                                                {name: '---', value: 10}
-                                            ]"
-                                            :skeleton="true"
-                                            name-field="name"
-                                            value-field="value"
-                                            v-if="initing"
-                                        />
+                                        <div v-if="initing" class="d-flex flex-column align-center justify-center py-12">
+                                            <v-skeleton-loader type="heading" width="200px" class="mb-8" />
+                                            <v-skeleton-loader type="image" width="460px" height="460px" />
+                                        </div>
                                         <radar-chart
                                             :items="categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length ? categoricalAnalysisData.items : []"
                                             :min-valid-percent="0.0001"
@@ -362,25 +341,10 @@
                                     </v-card-text>
 
                                     <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.TrendAnalysis">
-                                        <trends-chart
-                                            chart-mode="monthly"
-                                            :type="queryChartType"
-                                            :start-time="undefined"
-                                            :end-time="undefined"
-                                            :start-year-month="query.trendChartStartYearMonth"
-                                            :end-year-month="query.trendChartEndYearMonth"
-                                            :sorting-type="querySortingType"
-                                            :data-aggregation-type="ChartDataAggregationType.Sum"
-                                            :date-aggregation-type="trendDateAggregationType"
-                                            :fiscal-year-start="fiscalYearStart"
-                                            :items="[]"
-                                            :skeleton="true"
-                                            id-field="id"
-                                            name-field="name"
-                                            value-field="value"
-                                            color-field="color"
-                                            v-if="initing"
-                                        />
+                                        <div v-if="initing" class="d-flex flex-column pa-4" style="height: 790px">
+                                            <v-skeleton-loader type="heading" width="260px" class="mb-6" />
+                                            <v-skeleton-loader type="image" width="100%" height="670px" />
+                                        </div>
                                         <trends-chart
                                             chart-mode="monthly"
                                             :type="queryChartType"
@@ -411,25 +375,10 @@
                                     </v-card-text>
 
                                     <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.AssetTrends">
-                                        <trends-chart
-                                            chart-mode="daily"
-                                            :type="queryChartType"
-                                            :start-time="query.assetTrendsChartStartTime"
-                                            :end-time="query.assetTrendsChartEndTime"
-                                            :start-year-month="undefined"
-                                            :end-year-month="undefined"
-                                            :sorting-type="querySortingType"
-                                            :data-aggregation-type="ChartDataAggregationType.Last"
-                                            :date-aggregation-type="assetTrendsDateAggregationType"
-                                            :fiscal-year-start="fiscalYearStart"
-                                            :items="[]"
-                                            :skeleton="true"
-                                            id-field="id"
-                                            name-field="name"
-                                            value-field="value"
-                                            color-field="color"
-                                            v-if="initing"
-                                        />
+                                        <div v-if="initing" class="d-flex flex-column pa-4" style="height: 790px">
+                                            <v-skeleton-loader type="heading" width="260px" class="mb-6" />
+                                            <v-skeleton-loader type="image" width="100%" height="670px" />
+                                        </div>
                                         <trends-chart
                                             chart-mode="daily"
                                             :type="queryChartType"

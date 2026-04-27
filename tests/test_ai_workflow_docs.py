@@ -60,3 +60,20 @@ def test_ai_workflow_doc_lists_parser_standard_flow_in_entry_table() -> None:
     assert "新增解析器" in row or "新增 parser" in row
     assert "不要拿它代替" in row
     assert "API/DB" in row or "通用导入调试" in row
+
+
+def test_ai_workflow_doc_lists_ui_style_reference_skill_in_entry_table() -> None:
+    doc_text = (REPO_ROOT / "docs" / "AI_WORKFLOW.md").read_text(encoding="utf-8")
+    matching_rows = [
+        line.strip()
+        for line in doc_text.splitlines()
+        if line.strip().startswith("|") and "`bill-analyser-ui-style-reference` skill" in line
+    ]
+
+    assert matching_rows, "AI_WORKFLOW must list bill-analyser-ui-style-reference in the entry table"
+    row = matching_rows[0]
+    assert "页面布局" in row
+    assert "按钮" in row
+    assert "颜色" in row
+    assert "Vuetify" in row
+    assert "Framework7" in row

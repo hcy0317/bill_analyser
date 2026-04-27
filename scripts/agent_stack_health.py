@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -45,6 +46,8 @@ TASK_STATE_READER_PATH = "scripts/hooks/task_state_reader.py"
 PARSER_STANDARD_FLOW_SKILL = "add-parser-standard-flow"
 PARSER_STANDARD_FLOW_SKILL_PATH = f".agents/skills/{PARSER_STANDARD_FLOW_SKILL}/SKILL.md"
 PARSER_STANDARD_FLOW_DOC_PATH = "docs/parsers/add-parser-standard-flow.md"
+UI_STYLE_REFERENCE_SKILL = "bill-analyser-ui-style-reference"
+UI_STYLE_REFERENCE_SKILL_PATH = f".agents/skills/{UI_STYLE_REFERENCE_SKILL}/SKILL.md"
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,31 @@ def _find_markdown_table_row(text: str, first_cell_fragment: str) -> str | None:
             return stripped_line
 
     return None
+
+
+def _extract_markdown_section(text: str, heading: str) -> str | None:
+    lines = text.splitlines()
+    start_index = None
+
+    for index, raw_line in enumerate(lines):
+        if raw_line.strip() == heading:
+            start_index = index + 1
+            break
+
+    if start_index is None:
+        return None
+
+    collected: list[str] = []
+    for raw_line in lines[start_index:]:
+        if raw_line.startswith("## "):
+            break
+        collected.append(raw_line)
+
+    return "\n".join(collected)
+
+
+def _extract_markdown_code_paths(text: str) -> list[str]:
+    return re.findall(r"`([^`]+)`", text)
 
 
 def _missing_requirement_labels(text: str, requirements: dict[str, tuple[str, ...]]) -> list[str]:
@@ -578,6 +606,145 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                     [
                         *parser_standard_flow_paths.keys(),
                         "contract=ParserFactory/StandardBill/tests/test_parser_base_factory.py/tests/new_ui/test_import_parser_alignment.py",
+                    ],
+                )
+            )
+
+    ui_style_skill_paths = {
+        UI_STYLE_REFERENCE_SKILL_PATH: repo_root / UI_STYLE_REFERENCE_SKILL_PATH,
+        "AGENTS.md": repo_root / "AGENTS.md",
+        AI_WORKFLOW_DOC_PATH: repo_root / AI_WORKFLOW_DOC_PATH,
+    }
+    missing_ui_style_assets = [
+        relative_path for relative_path, path in ui_style_skill_paths.items() if not path.exists()
+    ]
+    if missing_ui_style_assets:
+        checks.append(
+            _result(
+                "repo.ui-style-skill",
+                "repo",
+                "fail",
+                "共享 UI 风格参考资产不完整，repo doctor 无法稳定发现这条 workflow。",
+                missing_ui_style_assets,
+                "补齐共享 skill、AGENTS 默认入口与 AI workflow 表格入口，再重新运行 repo doctor。",
+            )
+        )
+    else:
+        ui_style_skill_text = _read_text(ui_style_skill_paths[UI_STYLE_REFERENCE_SKILL_PATH])
+        ui_style_agents_text = _read_text(ui_style_skill_paths["AGENTS.md"])
+        ui_style_ai_workflow_text = _read_text(ui_style_skill_paths[AI_WORKFLOW_DOC_PATH])
+        ui_style_issues: list[str] = []
+
+        source_of_truth_section = _extract_markdown_section(ui_style_skill_text, "## Source-of-Truth Map")
+        if source_of_truth_section is None:
+            ui_style_issues.append(
+                f"{UI_STYLE_REFERENCE_SKILL_PATH}: missing ## Source-of-Truth Map section"
+            )
+            declared_ui_source_paths: list[str] = []
+        else:
+            declared_ui_source_paths = [
+                path
+                for path in _extract_markdown_code_paths(source_of_truth_section)
+                if path.startswith("src/web/src/")
+            ]
+
+        minimum_ui_source_paths = (
+            "src/web/src/desktop-main.ts",
+            "src/web/src/MobileApp.vue",
+            "src/web/src/views/desktop/MainLayout.vue",
+            "src/web/src/components/desktop/ConfirmDialog.vue",
+        )
+        missing_skill_markers = [marker for marker in minimum_ui_source_paths if marker not in declared_ui_source_paths]
+        if missing_skill_markers:
+            ui_style_issues.append(
+                f"{UI_STYLE_REFERENCE_SKILL_PATH}: missing={missing_skill_markers}"
+            )
+        missing_source_paths = [
+            relative_path
+            for relative_path in declared_ui_source_paths
+            if not (repo_root / Path(relative_path)).exists()
+        ]
+        if missing_source_paths:
+            ui_style_issues.append(
+                f"{UI_STYLE_REFERENCE_SKILL_PATH}: missing_source_paths={missing_source_paths}"
+            )
+
+        default_ai_workflow_section = _extract_markdown_section(ui_style_agents_text, "## Default AI workflow")
+        if default_ai_workflow_section is None:
+            ui_style_issues.append(
+                "AGENTS.md: missing ## Default AI workflow section"
+            )
+        else:
+            workflow_bullets = [
+                line.strip()
+                for line in default_ai_workflow_section.splitlines()
+                if line.lstrip().startswith("-")
+            ]
+            matching_workflow_bullets = [
+                line
+                for line in workflow_bullets
+                if "页面布局、按钮样式、颜色、弹窗、表格或整体视觉一致性" in line
+            ]
+            if not matching_workflow_bullets:
+                ui_style_issues.append(
+                    "AGENTS.md: missing Default AI workflow UI style entry"
+                )
+            elif not any(UI_STYLE_REFERENCE_SKILL_PATH in line for line in matching_workflow_bullets):
+                ui_style_issues.append(
+                    f"AGENTS.md: Default AI workflow UI style entry missing {UI_STYLE_REFERENCE_SKILL_PATH}"
+                )
+
+        ui_style_entry_row = _find_markdown_table_row(
+            ui_style_ai_workflow_text,
+            f"{UI_STYLE_REFERENCE_SKILL} skill",
+        )
+        if ui_style_entry_row is None:
+            ui_style_issues.append(
+                f"{AI_WORKFLOW_DOC_PATH}: missing ui-style-reference entry table row"
+            )
+        else:
+            normalized_entry_row = _normalize_markdown_table_match_text(ui_style_entry_row)
+            required_entry_fragments = (
+                (("页面布局",), "页面布局"),
+                (("按钮",), "按钮"),
+                (("颜色",), "颜色"),
+                (("Vuetify",), "Vuetify"),
+                (("Framework7",), "Framework7"),
+            )
+            missing_entry_fragments = [
+                label
+                for candidates, label in required_entry_fragments
+                if not any(
+                    _normalize_markdown_table_match_text(candidate) in normalized_entry_row
+                    for candidate in candidates
+                )
+            ]
+            if missing_entry_fragments:
+                ui_style_issues.append(
+                    f"{AI_WORKFLOW_DOC_PATH}: ui-style-reference entry row malformed, missing={missing_entry_fragments}"
+                )
+
+        if ui_style_issues:
+            checks.append(
+                _result(
+                    "repo.ui-style-skill",
+                    "repo",
+                    "fail",
+                    "共享 UI 风格参考资产已存在，但还没有形成 skill + AGENTS + AI workflow 的入口闭环。",
+                    ui_style_issues,
+                    "让 shared skill、AGENTS 入口和 AI workflow 表格同时绑定桌面/移动端 UI 风格参考触点。",
+                )
+            )
+        else:
+            checks.append(
+                _result(
+                    "repo.ui-style-skill",
+                    "repo",
+                    "pass",
+                    "共享 UI 风格参考已形成 skill + AGENTS + AI workflow 入口闭环。",
+                    [
+                        *ui_style_skill_paths.keys(),
+                        "contract=desktop-main.ts/MobileApp.vue/global.scss/amount-color.scss/core/color.ts/index.html/PinCodeInput.vue/_button.scss/_field.scss/_table.scss/_dialog.scss/MainLayout.vue/ConfirmDialog.vue",
                     ],
                 )
             )
@@ -1133,6 +1300,19 @@ def render_doctor(payload: dict) -> str:
             f"- [{parser_standard_flow_check['status'].upper()}] {parser_standard_flow_check['id']} — {parser_standard_flow_check['summary']}"
         )
         for evidence in parser_standard_flow_check["evidence"][:4]:
+            lines.append(f"  - {evidence}")
+        lines.append("")
+
+    ui_style_skill_check = next(
+        (check for check in payload["checks"] if check["id"] == "repo.ui-style-skill"),
+        None,
+    )
+    if ui_style_skill_check is not None:
+        lines.extend(["UI style workflow 基线", "--------------------"])
+        lines.append(
+            f"- [{ui_style_skill_check['status'].upper()}] {ui_style_skill_check['id']} — {ui_style_skill_check['summary']}"
+        )
+        for evidence in ui_style_skill_check["evidence"][:4]:
             lines.append(f"  - {evidence}")
         lines.append("")
 

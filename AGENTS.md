@@ -114,6 +114,7 @@ npm run lint
 ## Default AI workflow
 
 - 默认先读取 `AGENTS.md` 与 `docs/PROJECT_OVERVIEW.md`，再加载共享 skill `.agents/skills/bill-analyser-conventions/SKILL.md`。
+- 如果任务主要在做页面布局、按钮样式、颜色、弹窗、表格或整体视觉一致性，再补读 `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`。
 - `prompts` 是快捷入口，`agents` 是专项能力；不要把它们当成第二套仓库级规则来源。
 - 普通任务优先保持单 agent、小步修改、就地验证；只有在架构设计、显式代码评审、安全审查、构建故障、关键 E2E 等场景才升级为专项 agent。
 - 按改动路径选择验证动作：
@@ -142,6 +143,7 @@ npm run lint
 - Codex runtime assets: `.codex/`
 - OpenCode runtime assets: `opencode.json`, `.opencode/`
 - Shared skills: `.agents/skills/`
+- Project UI style reference skill: `.agents/skills/bill-analyser-ui-style-reference/`
 - Shared hook scripts: `scripts/hooks/`
 
 ### Cross-platform skill sync convention
@@ -161,6 +163,7 @@ npm run lint
 
 - 详细架构与模块地图见 `docs/PROJECT_OVERVIEW.md`
 - 人类可读的 AI 工作流说明见 `docs/AI_WORKFLOW.md`
+- 页面布局、按钮、颜色与视觉一致性参考见 `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`
 - Copilot / VS Code 自定义入口见 `.github/`
 - Claude Code 入口见 `CLAUDE.md` 与 `.claude/`
 - Codex 入口见 `.codex/`

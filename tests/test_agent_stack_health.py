@@ -115,6 +115,54 @@ def _build_minimal_parser_standard_flow_fake_repo(
     _write_text(repo_root / "docs" / "AI_WORKFLOW.md", ai_workflow_text)
 
 
+def _build_minimal_ui_style_reference_fake_repo(
+    repo_root: Path,
+    *,
+    ai_workflow_text: str,
+    include_agents_reference: bool = True,
+    missing_source_paths: tuple[str, ...] = (),
+) -> None:
+    _write_text(repo_root / "AGENTS.md", (
+        "## Default AI workflow\n"
+        "- 如果任务主要在做页面布局、按钮样式、颜色、弹窗、表格或整体视觉一致性，再补读 "
+        "`.agents/skills/bill-analyser-ui-style-reference/SKILL.md`。\n"
+        if include_agents_reference
+        else "Legacy `.cursor/` compatibility mirrors were intentionally removed\n"
+    ))
+    _write_text(repo_root / ".github" / "copilot-instructions.md", "")
+    _write_text(repo_root / ".codex" / "AGENTS.md", "")
+    _write_text(repo_root / ".codex" / "config.toml", 'model = "gpt-5.4"\n')
+    _write_text(repo_root / ".agents" / "skills" / "bill-analyser-conventions" / "SKILL.md", "")
+    _write_text(repo_root / ".claude" / "skills" / "bill-analyser" / "SKILL.md", "")
+    source_paths = (
+        "src/web/src/desktop-main.ts",
+        "src/web/src/MobileApp.vue",
+        "src/web/src/styles/desktop/global.scss",
+        "src/web/src/styles/mobile/global.scss",
+        "src/web/src/styles/desktop/amount-color.scss",
+        "src/web/src/styles/mobile/amount-color.scss",
+        "src/web/src/core/color.ts",
+        "src/web/src/index.html",
+        "src/web/src/components/common/PinCodeInput.vue",
+        "src/web/src/styles/desktop/template/vuetify/components/_button.scss",
+        "src/web/src/styles/desktop/template/vuetify/components/_field.scss",
+        "src/web/src/styles/desktop/template/vuetify/components/_table.scss",
+        "src/web/src/styles/desktop/template/vuetify/components/_dialog.scss",
+        "src/web/src/views/desktop/MainLayout.vue",
+        "src/web/src/components/desktop/ConfirmDialog.vue",
+    )
+    _write_text(
+        repo_root / ".agents" / "skills" / "bill-analyser-ui-style-reference" / "SKILL.md",
+        "## Source-of-Truth Map\n\n"
+        + "\n".join(f"- `{path}`" for path in source_paths),
+    )
+    for relative_path in source_paths:
+        if relative_path in missing_source_paths:
+            continue
+        _write_text(repo_root / Path(relative_path), "")
+    _write_text(repo_root / "docs" / "AI_WORKFLOW.md", ai_workflow_text)
+
+
 def _scan_repo_check(repo_root: Path, check_id: str):
     agent_stack_health = importlib.import_module("scripts.agent_stack_health")
     checks = {check.id: check for check in agent_stack_health.scan_repo(repo_root)}
@@ -134,6 +182,7 @@ def test_repo_scan_reports_expected_contracts() -> None:
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
     assert checks["repo.session-resume-skill"]["status"] == "pass"
     assert checks["repo.workflow-entrypoints"]["status"] == "pass"
+    assert checks["repo.ui-style-skill"]["status"] == "pass"
     assert checks["repo.task-state-support"]["status"] == "pass"
     assert checks["repo.codex-baseline"]["status"] == "pass"
 
@@ -403,3 +452,116 @@ def test_repo_parser_standard_flow_check_fails_when_ai_workflow_entry_row_is_mal
     assert parser_check.status == "fail"
     assert "契约闭环" in parser_check.summary
     assert any(item.startswith("docs/AI_WORKFLOW.md:") for item in parser_check.evidence)
+
+
+def test_repo_ui_style_skill_check_is_exposed_in_payload_text_and_doctor() -> None:
+    json_result = _run_agent_stack_health("--mode", "repo", "--format", "json")
+    text_result = _run_agent_stack_health("--mode", "repo", "--format", "text")
+    doctor_result = _run_agent_stack_health("--mode", "repo", "--format", "doctor")
+
+    assert json_result.returncode == 0, json_result.stderr or json_result.stdout
+    assert text_result.returncode == 0, text_result.stderr or text_result.stdout
+    assert doctor_result.returncode == 0, doctor_result.stderr or doctor_result.stdout
+
+    payload = json.loads(json_result.stdout)
+    checks = _checks_by_id(payload)
+    ui_style_check = checks["repo.ui-style-skill"]
+
+    assert ui_style_check["status"] == "pass"
+    assert "UI 风格参考" in ui_style_check["summary"]
+    assert ".agents/skills/bill-analyser-ui-style-reference/SKILL.md" in ui_style_check["evidence"]
+    assert "AGENTS.md" in ui_style_check["evidence"]
+    assert "docs/AI_WORKFLOW.md" in ui_style_check["evidence"]
+    assert any("desktop-main.ts" in item and "MobileApp.vue" in item for item in ui_style_check["evidence"])
+
+    assert "repo.ui-style-skill" in text_result.stdout
+    assert "UI 风格参考" in text_result.stdout
+    assert "UI style workflow 基线" in doctor_result.stdout
+    assert "repo.ui-style-skill" in doctor_result.stdout
+    assert "UI 风格参考" in doctor_result.stdout
+
+
+def test_repo_ui_style_skill_check_fails_when_ai_workflow_entry_row_is_malformed(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_ui_style_reference_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `bill-analyser-ui-style-reference` skill | UI skill | 提一嘴样式 | 普通说明 |\n"
+        ),
+    )
+
+    ui_style_check = _scan_repo_check(fake_repo, "repo.ui-style-skill")
+
+    assert ui_style_check.status == "fail"
+    assert "入口闭环" in ui_style_check.summary
+    assert any(item.startswith("docs/AI_WORKFLOW.md:") for item in ui_style_check.evidence)
+
+
+def test_repo_ui_style_skill_check_fails_when_agents_default_workflow_entry_is_missing(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_ui_style_reference_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `bill-analyser-ui-style-reference` skill | 仓库专属 UI 风格参考 | 改页面布局、按钮、颜色、表格、弹窗、响应式一致性时 | 不替代 Vuetify / Framework7 官方文档 |\n"
+        ),
+        include_agents_reference=False,
+    )
+
+    ui_style_check = _scan_repo_check(fake_repo, "repo.ui-style-skill")
+
+    assert ui_style_check.status == "fail"
+    assert "入口闭环" in ui_style_check.summary
+    assert any(item.startswith("AGENTS.md:") for item in ui_style_check.evidence)
+
+
+def test_repo_ui_style_skill_check_fails_when_agents_workflow_entry_loses_skill_path(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_ui_style_reference_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `bill-analyser-ui-style-reference` skill | 仓库专属 UI 风格参考 | 改页面布局、按钮、颜色、表格、弹窗、响应式一致性时 | 不替代 Vuetify / Framework7 官方文档 |\n"
+        ),
+    )
+    _write_text(
+        fake_repo / "AGENTS.md",
+        "\n".join(
+            (
+                "## Default AI workflow",
+                "- 如果任务主要在做页面布局、按钮样式、颜色、弹窗、表格或整体视觉一致性，再补读。",
+                "",
+                "## Reference docs",
+                "- `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`",
+            )
+        ),
+    )
+
+    ui_style_check = _scan_repo_check(fake_repo, "repo.ui-style-skill")
+
+    assert ui_style_check.status == "fail"
+    assert "入口闭环" in ui_style_check.summary
+    assert any("Default AI workflow UI style entry missing" in item for item in ui_style_check.evidence)
+
+
+def test_repo_ui_style_skill_check_fails_when_source_of_truth_path_is_missing(tmp_path: Path) -> None:
+    fake_repo = tmp_path / "repo"
+    _build_minimal_ui_style_reference_fake_repo(
+        fake_repo,
+        ai_workflow_text=(
+            "| 入口 | 默认用途 | 什么时候用 | 什么时候别用 |\n"
+            "|---|---|---|---|\n"
+            "| `bill-analyser-ui-style-reference` skill | 仓库专属 UI 风格参考 | 改页面布局、按钮、颜色、表格、弹窗、响应式一致性时 | 不替代 Vuetify / Framework7 官方文档 |\n"
+        ),
+        missing_source_paths=("src/web/src/MobileApp.vue",),
+    )
+
+    ui_style_check = _scan_repo_check(fake_repo, "repo.ui-style-skill")
+
+    assert ui_style_check.status == "fail"
+    assert "入口闭环" in ui_style_check.summary
+    assert any("missing_source_paths" in item for item in ui_style_check.evidence)

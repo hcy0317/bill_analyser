@@ -16,11 +16,16 @@
 2. `docs/PROJECT_OVERVIEW.md`
 3. `.agents/skills/bill-analyser-conventions/SKILL.md`
 
+如果任务主要在做页面布局、按钮、颜色、弹窗、表格或视觉一致性，再补看：
+
+4. `.agents/skills/bill-analyser-ui-style-reference/SKILL.md`
+
 它们分别负责：
 
 - `AGENTS.md`：仓库级总规则
 - `docs/PROJECT_OVERVIEW.md`：系统当前如何工作
 - `bill-analyser-conventions`：仓库专属工作流与验证基线
+- `bill-analyser-ui-style-reference`：仓库专属 UI 风格参考
 
 如果不是复杂架构问题，不要一上来就在 prompts / agents 列表里乱翻。
 
@@ -31,6 +36,7 @@
 | `AGENTS.md` | 仓库总规则 | 每次开始任务前 | 不要把它当变更日志 |
 | `docs/PROJECT_OVERVIEW.md` | 架构/领域事实 | 改 API、导入、预算、统计、账户、分类时 | 不写会话流水账 |
 | `bill-analyser-conventions` skill | 仓库专属 workflow | 全栈、导入、统计、金额、契约变更 | 不替代项目总规则 |
+| `bill-analyser-ui-style-reference` skill | 仓库专属 UI 风格参考 | 改页面布局、按钮、颜色、表格、弹窗、响应式一致性时 | 不替代 Vuetify / Framework7 官方文档 |
 | `add-parser-standard-flow` skill | 新增 parser workflow | 新增解析器、收紧 `ParserFactory` 检测、补 parser 对齐回归时 | 不要拿它代替通用导入调试或 API/DB 变更流程 |
 | `/plan` | 复杂任务规划 | 跨模块功能、重构、需求不清 | 小改动别过度启动 |
 | `/start-work` | 从已批准计划直接执行 | `/plan` 之后、已有 checklist 之后、恢复已确认方案时 | 没有批准计划时不要假装进入执行 |
