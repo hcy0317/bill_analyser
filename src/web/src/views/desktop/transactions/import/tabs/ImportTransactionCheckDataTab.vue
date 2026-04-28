@@ -4825,6 +4825,9 @@ function reset(): void {
     filters.value.description = null;
     currentPage.value = 1;
     countPerPage.value = 10;
+    tableSortBy.value = [];
+    currentSortKey.value = '';
+    currentSortDirection.value = 'asc';
 }
 
 function setCountPerPage(count: number): void {

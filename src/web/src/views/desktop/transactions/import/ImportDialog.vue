@@ -562,7 +562,12 @@ const previewTotalCount = ref<number>(0);
 const serverPagedPreviewMode = ref<boolean>(false);
 const previewPageSortBy = ref<string>('');
 const previewPageSortDirection = ref<'asc' | 'desc'>('asc');
-const pendingInitialCheckDataPageRequest = ref<{ page: number; pageSize: number } | null>(null);
+const pendingInitialCheckDataPageRequest = ref<{
+    page: number;
+    pageSize: number;
+    sortBy: string;
+    sortDirection: 'asc' | 'desc';
+} | null>(null);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
@@ -1286,16 +1291,25 @@ async function onCheckDataPageRequested(
 ): Promise<void> {
     const normalizedPage = Math.max(page || 1, 1);
     const normalizedPageSize = Math.max(pageSize || 10, 1);
+    const normalizedSortBy = normalizePreviewPageSortBy(sortOptions?.sortBy ?? previewPageSortBy.value);
+    const normalizedSortDirection = normalizePreviewPageSortDirection(
+        sortOptions?.sortDirection ?? previewPageSortDirection.value
+    );
     const pendingRequest = pendingInitialCheckDataPageRequest.value;
 
     if (pendingRequest
         && pendingRequest.page === normalizedPage
-        && pendingRequest.pageSize === normalizedPageSize) {
+        && pendingRequest.pageSize === normalizedPageSize
+        && pendingRequest.sortBy === normalizedSortBy
+        && pendingRequest.sortDirection === normalizedSortDirection) {
         pendingInitialCheckDataPageRequest.value = null;
         return;
     }
 
-    await fetchPreviewPage(normalizedPage, normalizedPageSize, sortOptions);
+    await fetchPreviewPage(normalizedPage, normalizedPageSize, {
+        sortBy: normalizedSortBy,
+        sortDirection: normalizedSortDirection
+    });
 }
 
 async function executeStage2Dedup(): Promise<void> {
@@ -1335,8 +1349,23 @@ async function executeStage2Dedup(): Promise<void> {
     previewPageSortBy.value = '';
     previewPageSortDirection.value = 'asc';
     importTransactions.value = [];
-    await fetchPreviewPage(1, 10);
-    pendingInitialCheckDataPageRequest.value = { page: 1, pageSize: 10 };
+    pendingInitialCheckDataPageRequest.value = {
+        page: 1,
+        pageSize: 10,
+        sortBy: previewPageSortBy.value,
+        sortDirection: previewPageSortDirection.value
+    };
+
+    try {
+        await fetchPreviewPage(1, 10, {
+            sortBy: pendingInitialCheckDataPageRequest.value.sortBy,
+            sortDirection: pendingInitialCheckDataPageRequest.value.sortDirection
+        });
+    } catch (error) {
+        pendingInitialCheckDataPageRequest.value = null;
+        throw error;
+    }
+
     currentStep.value = 'checkData';
     importProcess.value = 100;
 }
