@@ -2648,13 +2648,13 @@ class BillService:
         preview_user_id = int(preview.get("user_id") or user_id or 1)
         session_id = str(preview.get("session_id") or "")
         context = projection_context
-        if (
-            not isinstance(context, dict)
-            or str(context.get("session_id") or "") != session_id
-            or int(context.get("user_id") or 0) != preview_user_id
-        ):
+        context_session_id = str(context.get("session_id") or "") if isinstance(context, dict) else ""
+        should_reload_context = not isinstance(context, dict) or int(context.get("user_id") or 0) != preview_user_id
+        if not should_reload_context and session_id:
+            should_reload_context = context_session_id != session_id
+        if should_reload_context:
             context = await self._load_import_preview_projection_context(
-                session_id,
+                session_id or context_session_id,
                 user_id=preview_user_id,
             )
 
