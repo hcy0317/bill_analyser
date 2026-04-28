@@ -166,7 +166,7 @@ Bill Analyser 是一个“多来源账单导入 + 智能去重 + 自动分类 + 
   - `v1/transactions/parse_import.json` rewrite 已移除，当前应返回 404
 
 ### 5.2.1 导入预览校验交互
-- 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，按日期、类型、分类、账户、标签、人工标注状态与备注等维度组织筛选项。
+- 导入弹窗 `Check Data` 步骤的右上角筛选入口使用分组下拉菜单，当前顺序与表头/行首状态保持一致：先给出 `人工标注`、`信号`，再给出 `时间范围`、`类型`、`分类`、`账户`、`标签`、`备注/描述`。其中 `时间范围` 预设包含 `全部`、`本周`、`本月`、`本年` 与 `自定义`，仍在当前已加载预览页内做本地筛选。
 - `/api/bills/parse_import` 返回的导入预览项当前会同时携带 `parserSource` 与 `parserTags`；`BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 预览数据会返回 `preview_parser_id`、`preview_parser_tags` 与解析到的 `category_id`，而 `/api/bills/import/v2/preview/<session_id>` 的简化结果也会附带 `parserSource` 与 `parserTags` 供前端保留与消费解析器元信息。
 - `BillService.get_import_preview()` / `/api/bills/import/v2/dedup` 当前会为每条预览账单附带嵌套 `matching` 结构；运行态 preview family 仍包含 `transfer / investment / learning / recurring / dedup / parser / annotation`。其中 `investment` 不再来自分类后的第二套关键词 detector，而是直接根据当前 preview 已落定的 canonical `preview_type="投资"` / 分类结果投影为 matching 状态；旧平铺 `investment_signal_*` 与 `investment_platform/product` 字段仅保留兼容空值，不再承载运行时识别信号。
 - 分类规则的 create/update/delete/reorder/migrate 会刷新规则中心使用的全局 `CategoryEngine`，并同步刷新 `BillService` 导入预览所用分类引擎，确保导入预览分类匹配读取当前 `category_rules` canonical 规则而不是旧实例缓存。

@@ -9,9 +9,7 @@
         :class="{ 'import-transaction-table': true, 'disabled': !!disabled }"
         :height="importTransactionsTableHeight"
         :headers="importTransactionHeaders"
-        :items="importTransactions"
-        :search="JSON.stringify(filters)"
-        :custom-filter="importTransactionsFilter"
+        :items="tableTransactions"
         :no-data-text="tt('No data to import')"
         v-model:items-per-page="tableItemsPerPage"
         v-model:page="tablePage"
@@ -813,18 +811,22 @@ import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import {
-    matchesImportCheckAnnotationFilter,
     type ImportCheckAnnotationFilterValue
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
-    matchesImportPreviewSignalFilter,
     type ImportCheckMatchingSourceContext,
     type ImportPreviewSignalStatus,
     type ImportPreviewVisibleSignalFilterValue,
     type ImportPreviewSignalViewModel,
     type ImportPreviewSignalViewModelOptions
 } from '../checkDataMatching.ts';
+import {
+    getImportCheckVisibleTransactions,
+    matchesImportTransactionCheckDataFilters,
+    resolveImportCheckDatePresetRange,
+    resolveImportCheckDatePresetType
+} from '../checkDataFilters.ts';
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
     convertImportPreviewAmountToCents,
@@ -844,6 +846,7 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
 
 import { type NameValue, type NameNumeralValue, itemAndIndex, reversed, keys } from '@/core/base.ts';
+import { DateRange } from '@/core/datetime.ts';
 import { type NumeralSystem } from '@/core/numeral.ts';
 import { CategoryType } from '@/core/category.ts';
 import { TransactionType } from '@/core/transaction.ts';
@@ -856,7 +859,6 @@ import { ImportTransaction } from '@/models/imported_transaction.ts';
 
 import {
     isString,
-    isNumber,
     objectFieldToArrayItem
 } from '@/lib/common.ts';
 import {
@@ -1094,7 +1096,7 @@ const tablePage = computed<number>({
     }
 });
 const tableItemsPerPage = computed<number>({
-    get: () => serverPagedMode.value ? Math.max(importTransactions.value.length, 1) : countPerPage.value,
+    get: () => serverPagedMode.value ? Math.max(tableTransactions.value.length, 1) : countPerPage.value,
     set: value => {
         if (!serverPagedMode.value) {
             countPerPage.value = value;
@@ -1112,6 +1114,8 @@ const batchAccountId = ref<string>('');
 const numeralSystem = computed<NumeralSystem>(() => getCurrentNumeralSystemType());
 const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
 const currentTimezoneOffsetMinutes = computed<number>(() => getTimezoneOffsetMinutes(settingsStore.appSettings.timeZone));
+const firstDayOfWeek = computed(() => userStore.currentUserFirstDayOfWeek);
+const fiscalYearStartValue = computed<number>(() => userStore.currentUserFiscalYearStart);
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
 const coordinateDisplayType = computed<number>(() => userStore.currentUserCoordinateDisplayType);
@@ -3143,9 +3147,32 @@ watch(
 );
 
 function getDateFilterSummary(): string {
-    return filters.value.minDatetime !== null && filters.value.maxDatetime !== null
-        ? displayFilterCustomDateRange.value || tt('Custom')
-        : tt('All');
+    switch (currentDateFilterType.value) {
+        case DateRange.ThisWeek.type:
+            return tt('This week');
+        case DateRange.ThisMonth.type:
+            return tt('This month');
+        case DateRange.ThisYear.type:
+            return tt('This year');
+        case DateRange.Custom.type:
+            return displayFilterCustomDateRange.value || tt('Custom');
+        default:
+            return tt('All');
+    }
+}
+
+function isCurrentDateFilterPreset(dateType: number): boolean {
+    return currentDateFilterType.value === dateType;
+}
+
+function applyDateFilterPreset(dateType: number): void {
+    const range = resolveImportCheckDatePresetRange(
+        dateType,
+        firstDayOfWeek.value,
+        fiscalYearStartValue.value
+    );
+    filters.value.minDatetime = range.minDatetime;
+    filters.value.maxDatetime = range.maxDatetime;
 }
 
 function getTypeFilterSummary(): string {
@@ -3220,21 +3247,85 @@ function getDescriptionFilterSummary(): string {
 
 const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
     {
+        title: getAnnotationFilterTitle(),
+        summary: getAnnotationFilterSummary(),
+        items: [
+            {
+                title: tt('All'),
+                appendIcon: filters.value.annotation === null ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = null
+            },
+            {
+                title: getNeedsReviewOrAnnotatedText(),
+                appendIcon: filters.value.annotation === 'needs-review' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'needs-review'
+            },
+            {
+                title: getNoAnnotationIssuesText(),
+                appendIcon: filters.value.annotation === 'no-issues' ? mdiCheck : undefined,
+                onClick: () => filters.value.annotation = 'no-issues'
+            }
+        ]
+    },
+    {
+        title: tt('Signals'),
+        summary: getSignalFilterSummary(),
+        items: [
+            {
+                title: tt('All'),
+                appendIcon: filters.value.signal === null ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = null
+            },
+            {
+                title: tt('Parser'),
+                appendIcon: filters.value.signal === 'parser' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'parser'
+            },
+            {
+                title: tt('Platform Duplicate'),
+                appendIcon: filters.value.signal === 'platform_duplicate' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'platform_duplicate'
+            },
+            {
+                title: tt('Transfer Match'),
+                appendIcon: filters.value.signal === 'transfer' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'transfer'
+            },
+            {
+                title: tt('Learning Suggestion'),
+                appendIcon: filters.value.signal === 'learning' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'learning'
+            }
+        ]
+    },
+    {
         title: tt('Date Range'),
         summary: getDateFilterSummary(),
         items: [
             {
                 title: tt('All'),
-                appendIcon: filters.value.minDatetime === null || filters.value.maxDatetime === null ? mdiCheck : undefined,
-                onClick: () => {
-                    filters.value.minDatetime = null;
-                    filters.value.maxDatetime = null;
-                }
+                appendIcon: isCurrentDateFilterPreset(DateRange.All.type) ? mdiCheck : undefined,
+                onClick: () => applyDateFilterPreset(DateRange.All.type)
+            },
+            {
+                title: tt('This week'),
+                appendIcon: isCurrentDateFilterPreset(DateRange.ThisWeek.type) ? mdiCheck : undefined,
+                onClick: () => applyDateFilterPreset(DateRange.ThisWeek.type)
+            },
+            {
+                title: tt('This month'),
+                appendIcon: isCurrentDateFilterPreset(DateRange.ThisMonth.type) ? mdiCheck : undefined,
+                onClick: () => applyDateFilterPreset(DateRange.ThisMonth.type)
+            },
+            {
+                title: tt('This year'),
+                appendIcon: isCurrentDateFilterPreset(DateRange.ThisYear.type) ? mdiCheck : undefined,
+                onClick: () => applyDateFilterPreset(DateRange.ThisYear.type)
             },
             {
                 title: tt('Custom'),
-                subTitle: displayFilterCustomDateRange.value,
-                appendIcon: filters.value.minDatetime !== null && filters.value.maxDatetime !== null ? mdiCheck : undefined,
+                subTitle: currentDateFilterType.value === DateRange.Custom.type ? displayFilterCustomDateRange.value : undefined,
+                appendIcon: isCurrentDateFilterPreset(DateRange.Custom.type) ? mdiCheck : undefined,
                 onClick: () => showCustomDateRangeDialog.value = true
             }
         ]
@@ -3346,58 +3437,6 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 appendIcon: filters.value.tag === name ? mdiCheck : undefined,
                 onClick: () => filters.value.tag = name
             }))
-        ]
-    },
-    {
-        title: getAnnotationFilterTitle(),
-        summary: getAnnotationFilterSummary(),
-        items: [
-            {
-                title: tt('All'),
-                appendIcon: filters.value.annotation === null ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = null
-            },
-            {
-                title: getNeedsReviewOrAnnotatedText(),
-                appendIcon: filters.value.annotation === 'needs-review' ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = 'needs-review'
-            },
-            {
-                title: getNoAnnotationIssuesText(),
-                appendIcon: filters.value.annotation === 'no-issues' ? mdiCheck : undefined,
-                onClick: () => filters.value.annotation = 'no-issues'
-            }
-        ]
-    },
-    {
-        title: tt('Signals'),
-        summary: getSignalFilterSummary(),
-        items: [
-            {
-                title: tt('All'),
-                appendIcon: filters.value.signal === null ? mdiCheck : undefined,
-                onClick: () => filters.value.signal = null
-            },
-            {
-                title: tt('Parser'),
-                appendIcon: filters.value.signal === 'parser' ? mdiCheck : undefined,
-                onClick: () => filters.value.signal = 'parser'
-            },
-            {
-                title: tt('Platform Duplicate'),
-                appendIcon: filters.value.signal === 'platform_duplicate' ? mdiCheck : undefined,
-                onClick: () => filters.value.signal = 'platform_duplicate'
-            },
-            {
-                title: tt('Transfer Match'),
-                appendIcon: filters.value.signal === 'transfer' ? mdiCheck : undefined,
-                onClick: () => filters.value.signal = 'transfer'
-            },
-            {
-                title: tt('Learning Suggestion'),
-                appendIcon: filters.value.signal === 'learning' ? mdiCheck : undefined,
-                onClick: () => filters.value.signal = 'learning'
-            }
         ]
     },
     {
@@ -3580,7 +3619,7 @@ const toolMenus = computed<ImportTransactionCheckDataMenu[]>(() => [
 ]);
 
 const importTransactionsTableHeight = computed<number | undefined>(() => {
-    if (countPerPage.value <= 10 || importTransactions.value.length <= 10) {
+    if (countPerPage.value <= 10 || tableTransactions.value.length <= 10) {
         return undefined;
     } else {
         return 400;
@@ -3616,52 +3655,24 @@ const totalPageCount = computed<number>(() => {
         return Math.max(Math.ceil(totalImportTransactionCount.value / countPerPage.value), 1);
     }
 
-    let count = 0;
-
-    for (const importTransaction of importTransactions.value) {
-        if (isTransactionDisplayed(importTransaction)) {
-            count++;
-        }
-    }
-
-    return Math.ceil(count / countPerPage.value);
+    return Math.ceil(filteredImportTransactions.value.length / countPerPage.value);
 });
 
-const currentPageTransactions = computed<ImportTransaction[]>(() => {
-    const ret: ImportTransaction[] = [];
+const filteredImportTransactions = computed<ImportTransaction[]>(() => importTransactions.value.filter(importTransaction => isTransactionDisplayed(importTransaction)));
 
-    if (importTransactions.value.length < 1) {
-        return ret;
+const currentPageTransactions = computed<ImportTransaction[]>(() => getImportCheckVisibleTransactions(
+    filteredImportTransactions.value,
+    () => true,
+    {
+        serverPaged: serverPagedMode.value,
+        currentPage: currentPage.value,
+        countPerPage: countPerPage.value
     }
+));
 
-    if (serverPagedMode.value) {
-        for (const importTransaction of importTransactions.value) {
-            if (isTransactionDisplayed(importTransaction)) {
-                ret.push(importTransaction);
-            }
-        }
-        return ret;
-    }
-
-    const previousCount = Math.max(0, (currentPage.value - 1) * countPerPage.value);
-    let count = 0;
-
-    for (const importTransaction of importTransactions.value) {
-        if (ret.length >= countPerPage.value) {
-            break;
-        }
-
-        if (isTransactionDisplayed(importTransaction)) {
-            if (count >= previousCount) {
-                ret.push(importTransaction);
-            }
-
-            count++;
-        }
-    }
-
-    return ret;
-});
+const tableTransactions = computed<ImportTransaction[]>(() => serverPagedMode.value
+    ? currentPageTransactions.value
+    : filteredImportTransactions.value);
 
 const selectedImportTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedCount);
 const selectedExpenseTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedExpenseCount);
@@ -3748,6 +3759,12 @@ const allInvalidTransferCategoryNames = computed<NameValue[]>(() => getCurrentIn
 const allInvalidAccountNames = computed<NameValue[]>(() => getCurrentInvalidAccountNames());
 const allInvalidTransactionTagNames = computed<NameValue[]>(() => getCurrentInvalidTagNames());
 const allOriginalTransactionTagNames = computed<NameValue[]>(() => getAllOriginalTagNames());
+const currentDateFilterType = computed<number>(() => resolveImportCheckDatePresetType(
+    filters.value.minDatetime,
+    filters.value.maxDatetime,
+    firstDayOfWeek.value,
+    fiscalYearStartValue.value
+));
 
 const displayFilterCustomDateRange = computed<string>(() => {
     if (filters.value.minDatetime === null || filters.value.maxDatetime === null) {
@@ -3788,108 +3805,12 @@ function getTablePageOptions(linesCount?: number): NameNumeralValue[] {
 }
 
 function isTransactionDisplayed(transaction: ImportTransaction): boolean {
-    if (isNumber(filters.value.minDatetime) && isNumber(filters.value.maxDatetime) && (transaction.time < filters.value.minDatetime || transaction.time > filters.value.maxDatetime)) {
-        return false;
-    }
-
-    if (isNumber(filters.value.transactionType) && transaction.type !== filters.value.transactionType) {
-        return false;
-    }
-
-    if (isString(filters.value.category)) {
-        if (filters.value.category === '' && transaction.actualCategoryName !== '') {
-            return false;
-        } else if (filters.value.category !== '' && transaction.actualCategoryName !== filters.value.category) {
-            return false;
-        }
-    } else if (filters.value.category === undefined) {
-        if (transaction.type !== TransactionType.ModifyBalance && transaction.categoryId && transaction.categoryId !== '0') {
-            return false;
-        }
-    }
-
-    if (isString(filters.value.account)) {
-        if (filters.value.account === '' && (transaction.actualSourceAccountName !== '' || transaction.actualDestinationAccountName !== '')) {
-            return false;
-        } else if (filters.value.account !== '' && transaction.actualSourceAccountName !== filters.value.account && transaction.actualDestinationAccountName !== filters.value.account) {
-            return false;
-        }
-    } else if (filters.value.account === undefined) {
-        if (transaction.type !== TransactionType.Transfer && transaction.sourceAccountId && transaction.sourceAccountId !== '0') {
-            return false;
-        } else if (transaction.type === TransactionType.Transfer && transaction.sourceAccountId && transaction.sourceAccountId !== '0' && transaction.destinationAccountId && transaction.destinationAccountId !== '0') {
-            return false;
-        }
-    }
-
-    if (isString(filters.value.tag)) {
-        if (filters.value.tag === '' && transaction.tagIds && transaction.tagIds.length) {
-            return false;
-        } else if (filters.value.tag !== '') {
-            let hasTagName = false;
-
-            if (transaction.tagIds && transaction.tagIds.length) {
-                for (const [tagId, tagIndex] of itemAndIndex(transaction.tagIds)) {
-                    let tagName: string = transaction.originalTagNames ? (transaction.originalTagNames[tagIndex] ?? '') : '';
-
-                    if (tagId && tagId !== '0' && allTagsMap.value[tagId] && allTagsMap.value[tagId].name) {
-                        tagName = allTagsMap.value[tagId].name;
-                    }
-
-                    if (tagName === filters.value.tag) {
-                        hasTagName = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!hasTagName) {
-                return false;
-            }
-        }
-    } else if (filters.value.tag === undefined) {
-        if (transaction.tagIds && transaction.tagIds.length) {
-            let hasInvalidTag = false;
-
-            for (const tagId of transaction.tagIds) {
-                if (!tagId || tagId === '0') {
-                    hasInvalidTag = true;
-                    break;
-                }
-            }
-
-            if (!hasInvalidTag) {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-
-    if (!matchesImportCheckAnnotationFilter(filters.value.annotation, {
-        hasAnnotationIssues: needsAnnotation(transaction),
-        isManuallyAnnotated: transaction.isManuallyAnnotated,
-        isEditing: editingTransaction.value === transaction
-    })) {
-        return false;
-    }
-
-    if (!matchesImportPreviewSignalFilter(
-        getImportPreviewSignalViewModel(transaction),
-        filters.value.signal
-    )) {
-        return false;
-    }
-
-    if (isString(filters.value.description)) {
-        if (filters.value.description === '' && transaction.comment !== '') {
-            return false;
-        } else if (filters.value.description !== '' && transaction.comment.indexOf(filters.value.description) < 0) {
-            return false;
-        }
-    }
-
-    return true;
+    return matchesImportTransactionCheckDataFilters(transaction, filters.value, {
+        tagNameById: allTagsMap.value,
+        hasAnnotationIssues: candidate => needsAnnotation(candidate),
+        isEditing: candidate => editingTransaction.value === candidate,
+        signalViewModelFor: candidate => getImportPreviewSignalViewModel(candidate)
+    });
 }
 
 function isTagValid(tagIds: string[], tagIndex: number): boolean {
@@ -4079,14 +4000,6 @@ function getAllOriginalTagNames(): NameValue[] {
     }
 
     return allOriginalTags;
-}
-
-function importTransactionsFilter(value: string, query: string, item?: { value: unknown, raw: ImportTransaction }): boolean {
-    if (!item || !item.raw) {
-        return false;
-    }
-
-    return isTransactionDisplayed(item.raw);
 }
 
 function selectAllValid(): void {
