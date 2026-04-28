@@ -122,6 +122,9 @@
                         :loading="transferBusy"
                         :disabled="disabled || rowBusy"
                         @click.stop="emit('reviewTransfer', action.decision)">
+                        <template #loader>
+                            <v-progress-circular indeterminate :size="12" :width="2" class="signal-action-loader" />
+                        </template>
                         {{ tt(action.labelKey) }}
                     </v-btn>
                 </div>
@@ -220,6 +223,9 @@
                         :loading="learningBusy"
                         :disabled="disabled || rowBusy"
                         @click.stop="emit('reviewLearning', action.decision)">
+                        <template #loader>
+                            <v-progress-circular indeterminate :size="12" :width="2" class="signal-action-loader" />
+                        </template>
                         {{ tt(action.labelKey) }}
                     </v-btn>
                 </div>
@@ -394,6 +400,10 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
 .signal-action-btn {
     min-width: 0;
     padding-inline: 8px;
+}
+
+.signal-action-loader {
+    opacity: 0.9;
 }
 
 .signal-detail-card {

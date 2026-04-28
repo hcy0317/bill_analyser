@@ -356,6 +356,42 @@ def test_preview_helpers_and_learning_text_normalization() -> None:
     assert BillService._normalize_learning_text(None) == ""
 
 
+def test_learning_rule_result_summary_uses_single_or_multi_account_formats() -> None:
+    """学习推荐摘要应按交易类型区分单账户与多账户格式。"""
+    categories_by_id = {
+        77: {"main_category": "其他收入", "sub_category": "原路退款"},
+        88: {"main_category": "资金管理", "sub_category": "账户互转"},
+    }
+    accounts_by_id = {
+        4: {"name": "民生银行"},
+        5: {"name": "支付宝"},
+    }
+
+    income_summary = BillService._build_learning_rule_result_summary(
+        {
+            "learned_type": "收入",
+            "learned_category_id": 77,
+            "learned_source_account_id": 4,
+            "learned_destination_account_id": 5,
+        },
+        categories_by_id,
+        accounts_by_id,
+    )
+    transfer_summary = BillService._build_learning_rule_result_summary(
+        {
+            "learned_type": "转账",
+            "learned_category_id": 88,
+            "learned_source_account_id": 4,
+            "learned_destination_account_id": 5,
+        },
+        categories_by_id,
+        accounts_by_id,
+    )
+
+    assert income_summary == "收入 | 其他收入/原路退款 | 民生银行"
+    assert transfer_summary == "转账 | 资金管理/账户互转 | 民生银行 → 支付宝"
+
+
 @pytest.mark.asyncio
 async def test_investment_helpers_detect_profiles_candidates_and_keyword_config() -> None:
     """投资 helper 应识别平台/产品、过滤转账，并读取用户关键词配置。"""
@@ -1134,6 +1170,13 @@ async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_le
     matching = preview_item["matching"]
 
     assert preview_item["investment_signal_score"] == 0.0
+    assert matching["dedup"] == {
+        "type": "remaining",
+        "source_ids": [201],
+        "source_count": 0,
+        "source_labels": [],
+        "sources": [],
+    }
     assert matching["investment"] == {
         "score": 0.0,
         "level": "",
@@ -1164,6 +1207,88 @@ async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_le
     }
     assert preview_item["preview_recurring_id"] == 9
     assert preview_item["preview_recurring_match_score"] == 0.91
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_learning_decision_reuses_learning_recommendation_before_preview_item_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """preview-item 学习决策应复用同一次 learning recommendation 计算，避免重复热路径。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.import_rules = [
+        {
+            "id": 42,
+            "match_type": "composite",
+            "match_features_json": "{\"parser_id\": \"alipay\"}",
+            "learned_type": "收入",
+        }
+    ]
+    fake_db.preview_rows = [
+        {
+            "id": 9,
+            "session_id": "session-learning-preview-item",
+            "user_id": 1,
+            "preview_date": "2026-07-24 09:40:00",
+            "preview_type": "支出",
+            "preview_amount": 38.0,
+            "preview_destination_amount": 0.0,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_source_account_id": 4,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "星巴克",
+            "preview_payment_method": "支付宝",
+            "preview_description": "咖啡消费",
+            "preview_parser_id": "alipay",
+            "preview_parser_tags": ["parser:alipay", "channel:wallet"],
+            "preview_selected": 1,
+            "dedup_type": "remaining",
+            "dedup_source_ids": [901],
+            "preview_matching_feedback": {},
+            "preview_matching_feedback_json": "{}",
+        }
+    ]
+    service = _make_service(fake_db)
+
+    call_count = {"value": 0}
+
+    def _fake_build_learning_similarity_signal_from_preview(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        call_count["value"] += 1
+        return {
+            "rule_id": 42,
+            "score": 0.88,
+            "level": "high",
+            "reason": "parser_id:exact",
+            "recommended_type": "收入",
+            "summary": "收入 | 其他收入/原路退款 | 民生银行",
+        }
+
+    monkeypatch.setattr(
+        service,
+        "_build_learning_similarity_signal_from_preview",
+        _fake_build_learning_similarity_signal_from_preview,
+    )
+
+    result = await service.apply_preview_learning_decision(
+        9,
+        "reject",
+        expected_state={
+            "sessionId": "session-learning-preview-item",
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+            "sourceAccountId": 4,
+            "destinationAccountId": None,
+        },
+        response_mode="preview-item",
+        user_id=1,
+    )
+
+    assert result["success"] is True
+    assert result["preview_id"] == 9
+    assert "preview_item" in result
+    assert call_count["value"] == 2
 
 
 @pytest.mark.asyncio
@@ -1456,7 +1581,7 @@ def test_learning_similarity_helpers_cover_deserialize_scoring_summary_and_signa
         {77: {"main_category": "餐饮", "sub_category": "早餐"}},
         {2: {"name": "招商银行卡"}, 4: {"name": "支付宝"}},
     )
-    assert summary == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+    assert summary == "支出 | 餐饮/早餐 | 招商银行卡"
 
     preview = {
         "id": 11,
@@ -1484,7 +1609,7 @@ def test_learning_similarity_helpers_cover_deserialize_scoring_summary_and_signa
     assert signal["rule_id"] == 1
     assert signal["level"] == "high"
     assert signal["recommended_type"] == "支出"
-    assert signal["summary"] == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+    assert signal["summary"] == "支出 | 餐饮/早餐 | 招商银行卡"
 
     learning_rule["composite_match_hash"] = fake_db.build_composite_match_hash(
         parser_id="wechat",
@@ -1659,7 +1784,7 @@ async def test_preview_learning_row_only_decision_reuses_projection_context() ->
     assert result["success"] is True
     assert result["preview_item"]["matching"]["learning"]["rule_id"] == 42
     assert result["preview_item"]["matching"]["learning"]["review_status"] == "rejected"
-    assert result["preview_item"]["learning_recommendation_summary"] == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+    assert result["preview_item"]["learning_recommendation_summary"] == "支出 | 餐饮/早餐 | 招商银行卡"
     assert fake_db.preview_bill_query_calls == [(11, 1)]
     assert fake_db.preview_learning_decision_calls == [
         (

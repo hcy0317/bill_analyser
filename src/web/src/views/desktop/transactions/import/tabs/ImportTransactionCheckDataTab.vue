@@ -818,8 +818,10 @@ import {
 } from '../checkDataAnnotation.ts';
 import {
     buildImportPreviewSignalViewModel,
+    matchesImportPreviewSignalFilter,
     type ImportCheckMatchingSourceContext,
     type ImportPreviewSignalStatus,
+    type ImportPreviewVisibleSignalFilterValue,
     type ImportPreviewSignalViewModel,
     type ImportPreviewSignalViewModelOptions
 } from '../checkDataMatching.ts';
@@ -915,6 +917,7 @@ interface ImportTransactionCheckDataFilter {
     category: string | null | undefined; // null for 'All Category', undefined for 'Invalid Category'
     account: string | null | undefined; // null for 'All Account', undefined for 'Invalid Account'
     tag: string | null | undefined; // null for 'All Tag', undefined for 'Invalid Tag'
+    signal: ImportPreviewVisibleSignalFilterValue | null; // null for 'All Signals'
     annotation: ImportCheckAnnotationFilterValue; // null=all, 'needs-review'=needs annotation or manually annotated, 'no-issues'=no issues
     description: string | null; // null for 'All Description'
 }
@@ -1050,6 +1053,7 @@ const filters = ref<ImportTransactionCheckDataFilter>({
     category: null,
     account: null,
     tag: null,
+    signal: null,
     annotation: null,
     description: null
 });
@@ -1065,13 +1069,13 @@ const recurringCandidateLoading = ref<boolean>(false);
 const recurringCandidateTarget = ref<ImportTransaction | null>(null);
 const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
-const transferDecisionLoadingId = ref<number | null>(null);
-const learningDecisionLoadingId = ref<number | null>(null);
-const recurringDecisionLoadingId = ref<number | null>(null);
+const transferDecisionLoadingIds = ref<number[]>([]);
+const learningDecisionLoadingIds = ref<number[]>([]);
+const recurringDecisionLoadingIds = ref<number[]>([]);
 const llmSessionAnalyzing = ref<boolean>(false);
-const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId.value !== null
-    || learningDecisionLoadingId.value !== null
-    || recurringDecisionLoadingId.value !== null);
+const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingIds.value.length > 0
+    || learningDecisionLoadingIds.value.length > 0
+    || recurringDecisionLoadingIds.value.length > 0);
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -1256,7 +1260,7 @@ async function updatePreviewRecurringMatch(
         return false;
     }
 
-    recurringDecisionLoadingId.value = previewId;
+    addDecisionLoadingId(recurringDecisionLoadingIds, previewId);
 
     try {
         const token = getCurrentToken();
@@ -1326,7 +1330,7 @@ async function updatePreviewRecurringMatch(
         snackbar.value?.showMessage(error instanceof Error ? error.message : 'Recurring match failed');
         return false;
     } finally {
-        recurringDecisionLoadingId.value = null;
+        removeDecisionLoadingId(recurringDecisionLoadingIds, previewId);
     }
 }
 
@@ -1656,24 +1660,40 @@ function getPreviewId(item: ImportTransaction): number | null {
     return typeof previewId === 'number' ? previewId : null;
 }
 
+function hasDecisionLoadingId(loadingIds: number[], previewId: number): boolean {
+    return loadingIds.includes(previewId);
+}
+
+function addDecisionLoadingId(target: typeof transferDecisionLoadingIds, previewId: number): void {
+    if (!hasDecisionLoadingId(target.value, previewId)) {
+        target.value = [...target.value, previewId];
+    }
+}
+
+function removeDecisionLoadingId(target: typeof transferDecisionLoadingIds, previewId: number): void {
+    if (hasDecisionLoadingId(target.value, previewId)) {
+        target.value = target.value.filter(id => id !== previewId);
+    }
+}
+
 function isPreviewMatchingDecisionBusy(previewId: number | null): boolean {
     if (previewId === null) {
         return false;
     }
 
-    return transferDecisionLoadingId.value === previewId
-        || learningDecisionLoadingId.value === previewId
-        || recurringDecisionLoadingId.value === previewId;
+    return hasDecisionLoadingId(transferDecisionLoadingIds.value, previewId)
+        || hasDecisionLoadingId(learningDecisionLoadingIds.value, previewId)
+        || hasDecisionLoadingId(recurringDecisionLoadingIds.value, previewId);
 }
 
 function isTransferDecisionBusy(item: ImportTransaction): boolean {
     const previewId = getPreviewId(item);
-    return previewId !== null && transferDecisionLoadingId.value === previewId;
+    return previewId !== null && hasDecisionLoadingId(transferDecisionLoadingIds.value, previewId);
 }
 
 function isLearningDecisionBusy(item: ImportTransaction): boolean {
     const previewId = getPreviewId(item);
-    return previewId !== null && learningDecisionLoadingId.value === previewId;
+    return previewId !== null && hasDecisionLoadingId(learningDecisionLoadingIds.value, previewId);
 }
 
 function getPreviewTransactionTypeNumber(previewType?: string): number | undefined {
@@ -1908,7 +1928,7 @@ async function reviewTransferSuggestion(
         return;
     }
 
-    transferDecisionLoadingId.value = previewId;
+    addDecisionLoadingId(transferDecisionLoadingIds, previewId);
 
     try {
         const token = getCurrentToken();
@@ -1957,7 +1977,7 @@ async function reviewTransferSuggestion(
         logger.error(`[转账建议决策] 失败: ${error}`);
         snackbar.value?.showMessage(`Transfer decision failed: ${error}`);
     } finally {
-        transferDecisionLoadingId.value = null;
+        removeDecisionLoadingId(transferDecisionLoadingIds, previewId);
     }
 }
 
@@ -1981,18 +2001,18 @@ async function reviewLearningSuggestion(
 
     const candidateId = `preview:${previewId}:learning`;
 
-    learningDecisionLoadingId.value = previewId;
+    addDecisionLoadingId(learningDecisionLoadingIds, previewId);
 
     if (shouldBlockLearningDecisionOnSync(item)) {
         snackbar.value?.showMessage(tt('Please sync manual preview edits before reviewing learning suggestions'));
-        learningDecisionLoadingId.value = null;
+        removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
         return;
     }
 
     if (hasLearningDecisionTextDraftChanges(item)) {
         const synced = await syncLearningDecisionDraftToPreview(item, candidateId);
         if (!synced) {
-            learningDecisionLoadingId.value = null;
+            removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
             return;
         }
     }
@@ -2006,7 +2026,7 @@ async function reviewLearningSuggestion(
         const ruleId = item.matching?.learning.rule_id;
         if (typeof ruleId !== 'number' || ruleId <= 0) {
             snackbar.value?.showMessage('Learning candidate not available');
-            learningDecisionLoadingId.value = null;
+            removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
             return;
         }
 
@@ -2044,7 +2064,7 @@ async function reviewLearningSuggestion(
         logger.error(`[学习建议决策] 失败: ${errorMessage}`, error);
         snackbar.value?.showMessage(errorMessage);
     } finally {
-        learningDecisionLoadingId.value = null;
+        removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
     }
 }
 
@@ -3040,6 +3060,21 @@ function getAnnotationFilterSummary(): string {
     return tt('All');
 }
 
+function getSignalFilterSummary(): string {
+    switch (filters.value.signal) {
+        case 'parser':
+            return tt('Parser');
+        case 'platform_duplicate':
+            return tt('Platform Duplicate');
+        case 'transfer':
+            return tt('Transfer Match');
+        case 'learning':
+            return tt('Learning Suggestion');
+        default:
+            return tt('All');
+    }
+}
+
 function getDescriptionFilterSummary(): string {
     if (filters.value.description === null) {
         return tt('All');
@@ -3200,6 +3235,37 @@ const filterMenus = computed<ImportTransactionCheckDataMenuGroup[]>(() => [
                 title: getNoAnnotationIssuesText(),
                 appendIcon: filters.value.annotation === 'no-issues' ? mdiCheck : undefined,
                 onClick: () => filters.value.annotation = 'no-issues'
+            }
+        ]
+    },
+    {
+        title: tt('Signals'),
+        summary: getSignalFilterSummary(),
+        items: [
+            {
+                title: tt('All'),
+                appendIcon: filters.value.signal === null ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = null
+            },
+            {
+                title: tt('Parser'),
+                appendIcon: filters.value.signal === 'parser' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'parser'
+            },
+            {
+                title: tt('Platform Duplicate'),
+                appendIcon: filters.value.signal === 'platform_duplicate' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'platform_duplicate'
+            },
+            {
+                title: tt('Transfer Match'),
+                appendIcon: filters.value.signal === 'transfer' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'transfer'
+            },
+            {
+                title: tt('Learning Suggestion'),
+                appendIcon: filters.value.signal === 'learning' ? mdiCheck : undefined,
+                onClick: () => filters.value.signal = 'learning'
             }
         ]
     },
@@ -3656,6 +3722,13 @@ function isTransactionDisplayed(transaction: ImportTransaction): boolean {
         isManuallyAnnotated: transaction.isManuallyAnnotated,
         isEditing: editingTransaction.value === transaction
     })) {
+        return false;
+    }
+
+    if (!matchesImportPreviewSignalFilter(
+        getImportPreviewSignalViewModel(transaction),
+        filters.value.signal
+    )) {
         return false;
     }
 
@@ -4519,6 +4592,7 @@ function reset(): void {
     filters.value.category = null;
     filters.value.account = null;
     filters.value.tag = null;
+    filters.value.signal = null;
     filters.value.annotation = null;
     filters.value.description = null;
     currentPage.value = 1;

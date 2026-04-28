@@ -10,6 +10,7 @@ import {
     getImportCheckMatchingParserTagsText,
     hasImportCheckMatchingDedupContext,
     hasImportCheckMatchingContext,
+    matchesImportPreviewSignalFilter,
     resolveImportPreviewInvestmentDecisionState,
     shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
@@ -179,13 +180,7 @@ describe('checkDataMatching helpers', () => {
             ]
         });
 
-        expect(viewModel.parser).toStrictEqual({
-            parserId: 'alipay',
-            label: '支付宝',
-            color: 'blue',
-            title: '来源：支付宝',
-            detailLines: ['来源：支付宝']
-        });
+        expect(viewModel.parser).toBeNull();
         expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
         expect(viewModel.dedup?.title).toBe('匹配 | 支付宝 | 微信');
         expect(viewModel.isManuallyAnnotated).toBe(true);
@@ -283,6 +278,36 @@ describe('checkDataMatching helpers', () => {
 
         expect(viewModel.parser).toBeNull();
         expect(viewModel.dedup?.label).toBe('平台重复');
+    });
+
+    test('hides parser chip when transfer match dedup is present', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'cmbc',
+            parserTags: ['parser:cmbc'],
+            dedupType: 'transfer',
+            dedupSourceIds: [11, 12]
+        }, {
+            parserLabels: {
+                cmbc: '民生银行'
+            }
+        });
+
+        expect(viewModel.parser).toBeNull();
+        expect(viewModel.dedup?.labelKey).toBe('Transfer Match');
+
+        const crossBatchViewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'cmbc',
+            parserTags: ['parser:cmbc'],
+            dedupType: 'transfer_cross_batch',
+            dedupSourceIds: [21, 22]
+        }, {
+            parserLabels: {
+                cmbc: '民生银行'
+            }
+        });
+
+        expect(crossBatchViewModel.parser).toBeNull();
+        expect(crossBatchViewModel.dedup?.labelKey).toBe('Cross-Batch Transfer');
     });
 
     test('formats platform duplicate label and localized duplicate-source detail from structured metadata', () => {
@@ -477,6 +502,51 @@ describe('checkDataMatching helpers', () => {
         expect(hasImportCheckMatchingContext(summary)).toBe(false);
         expect(viewModel.isManuallyAnnotated).toBe(true);
         expect(viewModel.hasAnySignal).toBe(false);
+    });
+
+    test('does not expose remaining dedup metadata as a visible empty signal', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'remaining',
+            dedupSourceIds: [201],
+            dedupSourceCount: 1
+        });
+
+        expect(viewModel.dedup).toBeNull();
+        expect(viewModel.hasAnySignal).toBe(false);
+    });
+
+    test('filters rows by visible signal family rather than raw backend fields', () => {
+        const parserViewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'alipay'
+        });
+        const platformDuplicateViewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'alipay',
+            dedupType: 'platform_bank',
+            dedupSourceIds: [301, 302],
+            dedupSourceLabels: ['支付宝', '民生银行']
+        });
+        const transferViewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'transfer',
+            dedupSourceIds: [401, 402]
+        });
+        const learningViewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningSummary: '收入 | 其他收入/原路退款 | 民生银行'
+        });
+
+        expect(matchesImportPreviewSignalFilter(parserViewModel, 'parser')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(platformDuplicateViewModel, 'parser')).toBe(false);
+        expect(matchesImportPreviewSignalFilter(platformDuplicateViewModel, 'platform_duplicate')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(transferViewModel, 'transfer')).toBe(true);
+
+        const crossBatchTransferViewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'transfer_cross_batch',
+            dedupSourceIds: [501, 502]
+        });
+        expect(matchesImportPreviewSignalFilter(crossBatchTransferViewModel, 'transfer')).toBe(true);
+
+        expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);
+        expect(matchesImportPreviewSignalFilter(learningViewModel, null)).toBe(true);
     });
 
     test('keeps parser and investment signals out of the type column model', () => {

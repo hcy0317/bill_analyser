@@ -82,6 +82,36 @@ def _parser_display_label(parser_id: Any) -> str:
     return _PARSER_DISPLAY_LABELS.get(normalized_parser_id, normalized_parser_id)
 
 
+def _dedupe_text_items(items: list[str]) -> list[str]:
+    """Deduplicate user-facing text fragments while preserving order."""
+    deduped: list[str] = []
+    for item in items:
+        normalized_item = str(item or "").strip()
+        if normalized_item and normalized_item not in deduped:
+            deduped.append(normalized_item)
+    return deduped
+
+
+def _infer_source_labels_from_preview_text(preview: dict[str, Any]) -> list[str]:
+    """Best-effort display fallback when structured dedup source metadata is incomplete."""
+    combined_text = " ".join(
+        str(preview.get(field) or "").strip()
+        for field in ("preview_payment_method", "preview_counterparty", "preview_description")
+    ).lower()
+    if not combined_text:
+        return []
+
+    inferred_labels: list[str] = []
+    for parser_id, display_label in _PARSER_DISPLAY_LABELS.items():
+        normalized_parser_id = str(parser_id or "").strip().lower()
+        normalized_display_label = str(display_label or "").strip()
+        if not normalized_display_label:
+            continue
+        if normalized_display_label.lower() in combined_text or normalized_parser_id in combined_text:
+            inferred_labels.append(normalized_display_label)
+    return _dedupe_text_items(inferred_labels)
+
+
 def _build_parser_tag_groups(raw_tags: Any, *, primary_parser_id: str = "") -> list[dict[str, Any]]:
     """Group parser tags by parser occurrence while preserving tag order."""
     tags = [str(tag).strip() for tag in _normalize_list_value(raw_tags) if str(tag).strip()]
@@ -206,18 +236,29 @@ def _build_dedup_source_metadata(
     """Project persisted dedup hints into stable source metadata."""
     dedup_type = str(preview.get("dedup_type") or "").strip().lower()
     dedup_source_ids = _normalize_source_ids_value(preview.get("dedup_source_ids"))
+    has_meaningful_dedup = dedup_type not in {"", "remaining"}
 
     if dedup_type in {"transfer", "platform_bank"} and len(source_chain) >= 2:
         relevant_sources = [dict(source) for source in source_chain]
     else:
         relevant_sources = []
 
-    source_labels = [
+    source_labels = _dedupe_text_items(
+        [
         str(source.get("label") or source.get("parser_label") or source.get("parser_id") or "").strip()
         for source in relevant_sources
         if str(source.get("label") or source.get("parser_label") or source.get("parser_id") or "").strip()
-    ]
-    source_count = max(len(dedup_source_ids), len(relevant_sources))
+        ]
+    )
+    if dedup_type == "platform_bank" and len(source_labels) < 2:
+        source_labels = _dedupe_text_items([
+            *source_labels,
+            *_infer_source_labels_from_preview_text(preview),
+        ])
+
+    source_count = 0
+    if has_meaningful_dedup:
+        source_count = max(len(dedup_source_ids), len(relevant_sources), len(source_labels))
 
     return source_count, source_labels, relevant_sources
 

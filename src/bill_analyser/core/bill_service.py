@@ -4262,10 +4262,16 @@ class BillService:
             str(preview.get("session_id") or ""),
             user_id=preview_user_id,
         )
+        learning_recommendation = await self._build_learning_recommendation_from_preview(
+            preview,
+            user_id=preview_user_id,
+            projection_context=projection_context,
+        )
         current_learning_review_status = await self._get_preview_learning_review_status(
             preview,
             user_id=preview_user_id,
             projection_context=projection_context,
+            learning_recommendation=learning_recommendation,
         )
         current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
         current_preview_recurring_id = preview.get("preview_recurring_id")
@@ -4325,11 +4331,6 @@ class BillService:
         ):
             return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
 
-        learning_recommendation = await self._build_learning_recommendation_from_preview(
-            preview,
-            user_id=preview_user_id,
-            projection_context=projection_context,
-        )
         learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         has_existing_learning_review = current_learning_review_status in {"accepted", "rejected"}
         retained_learning_rule_id = None
@@ -4590,6 +4591,7 @@ class BillService:
         preview: dict[str, Any],
         user_id: int = 1,
         projection_context: dict[str, Any] | None = None,
+        learning_recommendation: dict[str, Any] | None = None,
     ) -> str:
         learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         review_status = (
@@ -4597,10 +4599,14 @@ class BillService:
             if isinstance(learning_feedback, dict)
             else ""
         )
-        learning_recommendation = await self._build_learning_recommendation_from_preview(
-            preview,
-            user_id=user_id,
-            projection_context=projection_context,
+        resolved_learning_recommendation = (
+            dict(learning_recommendation)
+            if isinstance(learning_recommendation, dict)
+            else await self._build_learning_recommendation_from_preview(
+                preview,
+                user_id=user_id,
+                projection_context=projection_context,
+            )
         )
         feedback_rule_id = None
         if isinstance(learning_feedback, dict) and learning_feedback.get("rule_id") not in (None, ""):
@@ -4609,14 +4615,14 @@ class BillService:
             except ValueError:
                 feedback_rule_id = None
 
-        live_rule_id = int(learning_recommendation.get("rule_id") or 0)
+        live_rule_id = int(resolved_learning_recommendation.get("rule_id") or 0)
         if review_status in {"accepted", "rejected"}:
             if live_rule_id == 0:
                 return review_status
             if feedback_rule_id in (None, live_rule_id):
                 return review_status
 
-        if not learning_recommendation:
+        if not resolved_learning_recommendation:
             return ""
 
         return "pending"
@@ -4743,11 +4749,19 @@ class BillService:
         destination_account = (
             accounts_by_id.get(int(learned_destination_account_id)) if learned_destination_account_id else None
         )
-        if source_account or destination_account:
-            parts.append(
-                f"{source_account.get('name', '-') if source_account else '-'} → "
-                f"{destination_account.get('name', '-') if destination_account else '-'}"
-            )
+        source_account_name = str(source_account.get("name") or "").strip() if source_account else ""
+        destination_account_name = (
+            str(destination_account.get("name") or "").strip() if destination_account else ""
+        )
+        learned_type_key = learned_type.lower()
+        if source_account_name or destination_account_name:
+            if learned_type_key in {"转账", "投资", "transfer", "investment"}:
+                if source_account_name and destination_account_name:
+                    parts.append(f"{source_account_name} → {destination_account_name}")
+                else:
+                    parts.append(source_account_name or destination_account_name)
+            else:
+                parts.append(source_account_name or destination_account_name)
 
         return " | ".join(parts)
 

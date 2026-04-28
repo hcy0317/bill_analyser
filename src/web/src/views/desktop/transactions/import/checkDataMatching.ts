@@ -127,6 +127,8 @@ export interface ImportPreviewSignalViewModel {
     hasAnySignal: boolean;
 }
 
+export type ImportPreviewVisibleSignalFilterValue = 'parser' | 'platform_duplicate' | 'transfer' | 'learning';
+
 export interface ImportPreviewSignalState extends ImportCheckMatchingContextState {
     transferStatus?: ImportPreviewSignalStatus | null;
     transferTitle?: string;
@@ -204,6 +206,15 @@ function humanizeDedupType(rawType: string): string {
         .join(' ');
 }
 
+function normalizeDedupType(rawType: string | undefined): string {
+    return (rawType || '').trim().toLowerCase();
+}
+
+function isTransferLikeDedupType(rawType: string | undefined): boolean {
+    const normalizedDedupType = normalizeDedupType(rawType);
+    return normalizedDedupType === 'transfer' || normalizedDedupType === 'transfer_cross_batch';
+}
+
 export function getImportCheckMatchingContextSummary(
     state: ImportCheckMatchingContextState
 ): ImportCheckMatchingContextSummary {
@@ -226,7 +237,7 @@ export function hasImportCheckMatchingDedupContext(summary: ImportCheckMatchingC
 }
 
 export function getImportCheckMatchingDedupLabel(summary: ImportCheckMatchingContextSummary): string {
-    const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
+    const normalizedDedupType = normalizeDedupType(summary.dedupType);
 
     if (!normalizedDedupType || normalizedDedupType === 'remaining') {
         return '';
@@ -533,9 +544,7 @@ export function resolveImportCheckMatchingTransferParserSources(
     options: ImportCheckMatchingDedupTitleOptions = {}
 ): string[] {
     const sourceRowLookup = buildSourceRowLookup(options);
-    const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
-
-    if (normalizedDedupType !== 'transfer') {
+    if (!isTransferLikeDedupType(summary.dedupType)) {
         return [];
     }
 
@@ -694,8 +703,10 @@ export function buildImportPreviewSignalViewModel(
     const matchingSummary = getImportCheckMatchingContextSummary(state);
     const parserDetailLines = buildParserDetailLines(matchingSummary, state, options);
     const transferDetailLines = buildTransferDetailLines(state, options);
-    const normalizedDedupType = (matchingSummary.dedupType || '').trim().toLowerCase();
-    const shouldHideParser = normalizedDedupType === 'platform_bank' || !!state.transferStatus;
+    const normalizedDedupType = normalizeDedupType(matchingSummary.dedupType);
+    const shouldHideParser = normalizedDedupType === 'platform_bank'
+        || isTransferLikeDedupType(normalizedDedupType)
+        || !!state.transferStatus;
     const parser = matchingSummary.parserId && !shouldHideParser
         ? {
             parserId: matchingSummary.parserId,
@@ -705,11 +716,16 @@ export function buildImportPreviewSignalViewModel(
             detailLines: parserDetailLines
         }
         : null;
-    const dedupSourceCount = state.dedupSourceCount || matchingSummary.dedupSourceIds.length;
-    const dedupVisible = hasImportCheckMatchingDedupContext(matchingSummary)
+    const hasMeaningfulDedup = normalizedDedupType !== '' && normalizedDedupType !== 'remaining';
+    const dedupSourceCount = hasMeaningfulDedup
+        ? (state.dedupSourceCount || matchingSummary.dedupSourceIds.length)
+        : 0;
+    const dedupVisible = hasMeaningfulDedup && (
+        hasImportCheckMatchingDedupContext(matchingSummary)
         || ((state.dedupSourceLabels || []).length > 0)
         || ((state.dedupSources || []).length > 0)
-        || dedupSourceCount > 0;
+        || dedupSourceCount > 0
+    );
     const dedupDetailLines = buildDedupDetailLines(matchingSummary, state, options);
     const dedup = dedupVisible
         ? {
@@ -717,7 +733,7 @@ export function buildImportPreviewSignalViewModel(
             labelKey: getImportCheckMatchingDedupLabel(matchingSummary),
             label: buildDedupLabel(matchingSummary, options),
             title: buildSignalTitle(dedupDetailLines, getImportCheckMatchingDedupTitle(matchingSummary, options)),
-            color: (matchingSummary.dedupType || '').trim().toLowerCase() === 'transfer' ? 'primary' : 'secondary',
+            color: isTransferLikeDedupType(matchingSummary.dedupType) ? 'primary' : 'secondary',
             sourceCount: dedupSourceCount,
             detailLines: dedupDetailLines
         }
@@ -776,4 +792,32 @@ export function buildImportPreviewSignalViewModel(
             || !!learning
             || !!recurring
     };
+}
+
+export function matchesImportPreviewSignalFilter(
+    viewModel: ImportPreviewSignalViewModel,
+    filter: ImportPreviewVisibleSignalFilterValue | null
+): boolean {
+    if (filter === null) {
+        return true;
+    }
+
+    if (filter === 'parser') {
+        return !!viewModel.parser;
+    }
+
+    const normalizedDedupType = normalizeDedupType(viewModel.dedup?.dedupType);
+    if (filter === 'platform_duplicate') {
+        return normalizedDedupType === 'platform_bank';
+    }
+
+    if (filter === 'transfer') {
+        return isTransferLikeDedupType(normalizedDedupType) || !!viewModel.transferSuggestion;
+    }
+
+    if (filter === 'learning') {
+        return !!viewModel.learning;
+    }
+
+    return true;
 }
