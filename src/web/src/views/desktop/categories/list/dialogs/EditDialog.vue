@@ -197,6 +197,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const showState = ref<boolean>(false);
 const ruleLoading = ref<boolean>(false);
+const ruleLoadFailed = ref<boolean>(false);
 const primaryCategoryRuleId = ref<number | null>(null);
 const additionalCategoryRulesCount = ref<number>(0);
 const categoryRuleDraft = ref<CategoryRuleBuilderModel>(createEmptyCategoryRuleDraft());
@@ -247,6 +248,7 @@ function normalizeCategoryRuleDraft(value?: Partial<CategoryRuleBuilderModel> | 
 
 function resetCategoryRuleEditor(): void {
     ruleLoading.value = false;
+    ruleLoadFailed.value = false;
     primaryCategoryRuleId.value = null;
     additionalCategoryRulesCount.value = 0;
     categoryRuleDraft.value = createEmptyCategoryRuleDraft();
@@ -346,6 +348,7 @@ async function loadPrimaryCategoryRule(
     }
 
     ruleLoading.value = true;
+    ruleLoadFailed.value = false;
 
     try {
         const response = await axios.get<{
@@ -374,6 +377,15 @@ async function loadPrimaryCategoryRule(
             regexEnabled: primaryRule.regex_enabled,
             enabled: primaryRule.enabled
         }) : createEmptyCategoryRuleDraft();
+        // Migrate-only / legacy keywords: runtime matching uses category_rules only. If rows are missing but
+        // keywords still exist on the category row (e.g. not migrated yet), seed the editor so save + sync persist canonical rules.
+        const legacyKeywords = (category.value.ruleExpression ?? '').trim();
+        if (!primaryRule && legacyKeywords.length > 0) {
+            categoryRuleDraft.value = normalizeCategoryRuleDraft({
+                ...categoryRuleDraft.value,
+                ruleExpression: legacyKeywords
+            });
+        }
         category.value.categoryRules = rules.map(rule => ({
             id: rule.id,
             name: rule.name,
@@ -384,6 +396,7 @@ async function loadPrimaryCategoryRule(
         }));
     } catch (error) {
         resetCategoryRuleEditor();
+        ruleLoadFailed.value = true;
         if (options.showError !== false) {
             showDialogError(error, 'Failed to load canonical category rule');
         }
@@ -393,14 +406,6 @@ async function loadPrimaryCategoryRule(
     } finally {
         ruleLoading.value = false;
     }
-}
-
-function shouldSyncLegacyRuleMirror(): boolean {
-    return primaryCategoryRuleId.value !== null || categoryRuleDraft.value.ruleExpression.trim().length > 0;
-}
-
-function hasCanonicalRuleState(): boolean {
-    return primaryCategoryRuleId.value !== null || additionalCategoryRulesCount.value > 0;
 }
 
 function getPrimaryRuleExpressionFromEditorState(): string {
@@ -552,13 +557,15 @@ async function save(): Promise<void> {
     submitting.value = true;
 
     const wasEdit = !!editCategoryId.value;
-    const shouldManageCanonicalRule = isSecondaryCategory.value
-        && (hasCanonicalRuleState() || shouldSyncLegacyRuleMirror());
     const syncedRuleExpression = getPrimaryRuleExpressionFromEditorState();
+    const canSyncSecondaryRule = isSecondaryCategory.value && !ruleLoadFailed.value;
     let savedCategory: TransactionCategory | null = null;
 
     try {
-        if (shouldManageCanonicalRule) {
+        // Secondary categories: always persist the matching expression from the rule builder into keywords
+        // on the category row before modify, then sync canonical category_rules. Do not gate on whether a
+        // rule row existed at open time — otherwise legacy-only edits never reach the PUT or category_rules APIs.
+        if (canSyncSecondaryRule) {
             category.value.ruleExpression = syncedRuleExpression;
         }
 
@@ -571,27 +578,25 @@ async function save(): Promise<void> {
         category.value.fillFrom(savedCategory);
         editCategoryId.value = savedCategory.id;
 
-        if (isSecondaryCategory.value && savedCategory.id) {
+        if (canSyncSecondaryRule && savedCategory.id) {
             await syncPrimaryCategoryRule(savedCategory.id);
             await loadPrimaryCategoryRule(savedCategory.id, {
                 rethrowOnError: true,
                 showError: false
             });
 
-            if (shouldManageCanonicalRule) {
-                const persistedLegacyMirror = (savedCategory.ruleExpression || '').trim();
-                const currentPrimaryRuleExpression = getPrimaryRuleExpressionFromEditorState();
+            const persistedLegacyMirror = (savedCategory.ruleExpression || '').trim();
+            const currentPrimaryRuleExpression = getPrimaryRuleExpressionFromEditorState();
 
-                savedCategory.ruleExpression = currentPrimaryRuleExpression;
-                category.value.ruleExpression = currentPrimaryRuleExpression;
+            savedCategory.ruleExpression = currentPrimaryRuleExpression;
+            category.value.ruleExpression = currentPrimaryRuleExpression;
 
-                if (persistedLegacyMirror !== currentPrimaryRuleExpression) {
-                    await transactionCategoriesStore.saveCategory({
-                        category: savedCategory,
-                        isEdit: true,
-                        clientSessionId: clientSessionId.value
-                    });
-                }
+            if (persistedLegacyMirror !== currentPrimaryRuleExpression) {
+                await transactionCategoriesStore.saveCategory({
+                    category: savedCategory,
+                    isEdit: true,
+                    clientSessionId: clientSessionId.value
+                });
             }
         }
 
