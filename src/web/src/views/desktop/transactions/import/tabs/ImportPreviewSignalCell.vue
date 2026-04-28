@@ -237,8 +237,7 @@
                 v-if="viewModel.recurring.hasMatch"
                 color="success"
                 variant="tonal"
-                size="x-small"
-                :title="viewModel.recurring.title">
+                size="x-small">
                 {{ tt('Scheduled Match') }}
             </v-chip>
             <v-chip

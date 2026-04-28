@@ -5098,14 +5098,18 @@ def update_preview_transfer_decision(preview_id: int):
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        transfer_kwargs = {
+            "expected_state": expected_state,
+            "user_id": request.user_id,
+        }
+        if "responseMode" in data:
+            transfer_kwargs["response_mode"] = response_mode
         try:
             result = loop.run_until_complete(
                 bill_service.apply_preview_transfer_decision(
                     preview_id,
                     decision,
-                    expected_state=expected_state,
-                    response_mode=response_mode,
-                    user_id=request.user_id,
+                    **transfer_kwargs,
                 )
             )
         finally:
