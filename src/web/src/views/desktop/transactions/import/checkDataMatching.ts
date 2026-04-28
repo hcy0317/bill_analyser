@@ -236,7 +236,8 @@ export function getImportCheckMatchingDedupLabel(summary: ImportCheckMatchingCon
 }
 
 export function shouldShowImportCheckMatchingDedupSourceCount(dedupType: string | undefined): boolean {
-    return (dedupType || '').trim().toLowerCase() !== 'platform_bank';
+    void dedupType;
+    return false;
 }
 
 function getParserDisplayLabel(parserId: string, parserLabels?: Record<string, string>): string {
@@ -270,6 +271,25 @@ function getSignalInfoLabels(
         ...DEFAULT_SIGNAL_INFO_LABELS,
         ...(options.infoLabels || {})
     };
+}
+
+function buildSourceRowLookup(
+    options: ImportCheckMatchingDedupTitleOptions
+): ReadonlyMap<string, string | ImportCheckMatchingSourceContext> | null {
+    const sourceRows = options.sourceRows || [];
+    return options.sourceRowLookup || (sourceRows.length > 0
+        ? new Map(
+            sourceRows
+                .map(sourceRow => [
+                    String(sourceRow.id),
+                    {
+                        parserSource: (sourceRow.parserSource || '').trim(),
+                        parserTags: sourceRow.parserTags || []
+                    }
+                ] as const)
+                .filter(([, sourceContext]) => !!sourceContext.parserSource || sourceContext.parserTags.length > 0)
+        )
+        : null);
 }
 
 function getSourceDisplayLabel(
@@ -322,8 +342,23 @@ function normalizeLearningCategoryPath(categoryPath: string): string {
     return categoryPath.trim().replace(/\s*\/\s*/g, '-');
 }
 
+function isPlaceholderLearningAccount(account: string): boolean {
+    return account.trim() === '' || account.trim() === '-';
+}
+
 function normalizeLearningAccountRoute(accountRoute: string): string {
-    return accountRoute.trim().replace(/\s*→\s*/g, '→');
+    const normalizedRoute = accountRoute.trim().replace(/\s*→\s*/g, '→');
+    if (!normalizedRoute.includes('→')) {
+        return normalizedRoute;
+    }
+
+    const routeParts = normalizedRoute.split('→').map(part => part.trim());
+    const visibleRouteParts = routeParts.filter(part => !isPlaceholderLearningAccount(part));
+    if (visibleRouteParts.length === 1) {
+        return visibleRouteParts[0] || '';
+    }
+
+    return routeParts.map(part => (isPlaceholderLearningAccount(part) ? '-' : part)).join('→');
 }
 
 function sortSourceChain(
@@ -365,6 +400,16 @@ function getSourceChainDisplayLabels(
     return dedupeTextItems(
         sortSourceChain(sources, pairOrder).map(source => getSourceDisplayLabel(source, options.parserLabels))
     );
+}
+
+function getParserContextDisplayLabels(
+    context: ImportCheckMatchingSourceContext,
+    options: ImportCheckMatchingDedupTitleOptions
+): string[] {
+    return dedupeTextItems([
+        context.parserSource || '',
+        ...(context.parserTags || []).map(tag => getParserSourceFromTag(tag))
+    ].map(parserSource => getParserDisplayLabel(parserSource, options.parserLabels)));
 }
 
 function buildParserDetailLines(
@@ -421,9 +466,16 @@ function buildDedupDetailLines(
     const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
     if (normalizedDedupType === 'platform_bank') {
         const infoLabels = getSignalInfoLabels(options);
+        const sourceRowLookup = buildSourceRowLookup(options);
         const sourceLabels = dedupeTextItems([
+            ...getSourceChainDisplayLabels(state.parserSourceChain, options),
+            ...getParserContextDisplayLabels({ parserSource: summary.parserId, parserTags: summary.parserTags }, options),
             ...(state.dedupSourceLabels || []),
-            ...getSourceChainDisplayLabels(state.dedupSources, options)
+            ...getSourceChainDisplayLabels(state.dedupSources, options),
+            ...summary.dedupSourceIds.flatMap(sourceId => getParserContextDisplayLabels(
+                getSourceContextFromLookupValue(sourceRowLookup?.get(String(sourceId))),
+                options
+            ))
         ]);
 
         if (sourceLabels.length > 0) {
@@ -454,7 +506,7 @@ function buildLearningDetailLines(
                 return normalizeLearningAccountRoute(part);
             }
             return part;
-        });
+        }).filter(part => !!part);
         const recommendationLabel = normalizeLearningRecommendationLabel(infoLabels.recommendedCategoryLabel)
             || infoLabels.recommendedCategoryLabel;
         return [formatInfoLine(recommendationLabel, normalizedSummaryParts.join('|'))];
@@ -480,20 +532,7 @@ export function resolveImportCheckMatchingTransferParserSources(
     summary: ImportCheckMatchingContextSummary,
     options: ImportCheckMatchingDedupTitleOptions = {}
 ): string[] {
-    const sourceRows = options.sourceRows || [];
-    const sourceRowLookup = options.sourceRowLookup || (sourceRows.length > 0
-        ? new Map(
-            sourceRows
-                .map(sourceRow => [
-                    String(sourceRow.id),
-                    {
-                        parserSource: (sourceRow.parserSource || '').trim(),
-                        parserTags: sourceRow.parserTags || []
-                    }
-                ] as const)
-                .filter(([, sourceContext]) => !!sourceContext.parserSource || sourceContext.parserTags.length > 0)
-        )
-        : null);
+    const sourceRowLookup = buildSourceRowLookup(options);
     const normalizedDedupType = (summary.dedupType || '').trim().toLowerCase();
 
     if (normalizedDedupType !== 'transfer') {

@@ -136,6 +136,7 @@ describe('checkDataMatching helpers', () => {
         });
         expect(title).toBe('平台重复');
         expect(shouldShowImportCheckMatchingDedupSourceCount(summary.dedupType)).toBe(false);
+        expect(shouldShowImportCheckMatchingDedupSourceCount('transfer')).toBe(false);
         expect(title).not.toContain('platform_bank');
         expect(title).not.toContain('301');
         expect(title).not.toContain('302');
@@ -324,6 +325,38 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
+    test('formats platform duplicate sources from current row and source lookup fallback', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'alipay',
+            dedupType: 'platform_bank',
+            dedupSourceIds: [301, 'preview:302']
+        }, {
+            parserLabels: {
+                alipay: '支付宝',
+                icbc: '工商银行',
+                cmbc: '民生银行',
+                wechat: '微信'
+            },
+            dedupLabels: {
+                'Platform Duplicate': '平台重复'
+            },
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            },
+            sourceRowLookup: new Map<string, string | { parserSource: string; parserTags: string[] }>([
+                ['301', 'icbc'],
+                ['preview:302', { parserSource: 'cmbc', parserTags: ['parser:wechat'] }]
+            ])
+        });
+
+        expect(viewModel.dedup?.detailLines).toStrictEqual([
+            '重复来源：支付宝|工商银行|民生银行|微信'
+        ]);
+    });
+
     test('formats learning detail lines with the user-facing recommended-category summary', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
@@ -347,7 +380,7 @@ describe('checkDataMatching helpers', () => {
     test('keeps single-account learning summaries as one recommended line', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             learningStatus: 'pending',
-            learningSummary: '收入 | 投资收入/利息收入 | 工商银行'
+            learningSummary: '收入 | 投资收入/利息收入 | 工商银行 → -'
         }, {
             infoLabels: {
                 sourceLabel: '来源',
@@ -358,6 +391,22 @@ describe('checkDataMatching helpers', () => {
         });
 
         expect(viewModel.learning?.detailLines).toStrictEqual([
+            '推荐：收入|投资收入-利息收入|工商银行'
+        ]);
+
+        const reverseViewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningSummary: '收入 | 投资收入/利息收入 | - → 工商银行'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(reverseViewModel.learning?.detailLines).toStrictEqual([
             '推荐：收入|投资收入-利息收入|工商银行'
         ]);
     });

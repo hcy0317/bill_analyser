@@ -48,9 +48,6 @@
                             variant="outlined"
                             size="x-small">
                             {{ viewModel.dedup.label }}
-                            <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
-                                · {{ viewModel.dedup.sourceCount }}
-                            </template>
                         </v-chip>
                     </template>
                     <v-card class="signal-detail-card" variant="outlined">
@@ -70,9 +67,6 @@
                     variant="outlined"
                     size="x-small">
                     {{ viewModel.dedup.label }}
-                    <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
-                        · {{ viewModel.dedup.sourceCount }}
-                    </template>
                 </v-chip>
             </template>
         </div>
@@ -283,7 +277,6 @@
 <script setup lang="ts">
 import { useI18n } from '@/locales/helpers.ts';
 import {
-    shouldShowImportCheckMatchingDedupSourceCount,
     type ImportPreviewSignalStatus,
     type ImportPreviewSignalViewModel
 } from '../checkDataMatching.ts';
