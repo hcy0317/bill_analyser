@@ -1501,13 +1501,11 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
 
     const groups: RuleExpressionDisplayGroup[] = [];
     let currentClauses: RuleExpressionDisplayClause[] = [];
-    let parenthesisDepth = 0;
 
     parsedExpression.clauses.forEach((clause, index) => {
         if (
             index > 0
             && clause.startsExpression
-            && parenthesisDepth === 0
             && currentClauses.length > 0
         ) {
             groups.push({ clauses: currentClauses });
@@ -1518,7 +1516,6 @@ function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayG
             isFirstClause: currentClauses.length === 0,
             emptyLabel: tt('Empty'),
         }));
-        parenthesisDepth = Math.max(0, parenthesisDepth + clause.openParens - clause.closeParens);
     });
 
     if (currentClauses.length > 0) {

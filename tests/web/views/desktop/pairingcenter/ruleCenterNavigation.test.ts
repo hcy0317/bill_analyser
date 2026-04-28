@@ -147,11 +147,11 @@ describe('rule center UX source guards', () => {
         expect(source).toContain("return tt('Investment');");
     });
 
-    test('rule expression display keeps slash OR in the same expression group', () => {
+    test('rule expression display splits pairing groups on startsExpression only', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
 
         expect(source).toContain('clause.startsExpression');
-        expect(source).toContain('parenthesisDepth === 0');
+        expect(source).not.toContain('parenthesisDepth');
         expect(source).not.toContain("clause.joiner === 'OR' && parenthesisDepth === 0");
     });
 

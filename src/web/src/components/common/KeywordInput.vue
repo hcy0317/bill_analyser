@@ -282,10 +282,11 @@ const types = computed(() => {
 const expressionGroups = computed<RuleExpressionGroup[]>(() => {
     const groups: RuleExpressionGroup[] = [];
     let currentGroup: RuleExpressionGroup | null = null;
-    let balance = 0;
 
     for (const clause of clauses.value) {
-        const startsNewGroup = !currentGroup || (clause.startsExpression && balance === 0);
+        // Always start a new UI group at a new "matching expression" boundary. Do not gate on
+        // parenthesis depth: unclosed '(' from a previous row must not absorb the next '|' expression.
+        const startsNewGroup = !currentGroup || clause.startsExpression;
         if (startsNewGroup) {
             currentGroup = {
                 id: `expression-${clause.id}`,
@@ -294,10 +295,6 @@ const expressionGroups = computed<RuleExpressionGroup[]>(() => {
             groups.push(currentGroup);
         }
         currentGroup!.clauses.push(clause);
-        balance += Math.max(0, clause.openParens) - Math.max(0, clause.closeParens);
-        if (balance < 0) {
-            balance = 0;
-        }
     }
 
     return groups;
@@ -615,7 +612,7 @@ defineExpose({
 
 .rule-clause-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     min-width: 0;
 }
@@ -634,12 +631,14 @@ defineExpose({
     display: flex;
     flex: 0 0 auto;
     align-items: center;
+    align-self: center;
+    min-height: 38px;
     color: rgba(var(--v-theme-on-surface), 0.54);
 }
 
 .clause-actions__divider {
     width: 1px;
-    height: 16px;
+    height: 22px;
     margin-inline: 6px;
     background: rgba(var(--v-theme-on-surface), 0.16);
 }
@@ -650,8 +649,9 @@ defineExpose({
     padding: 0;
     color: inherit;
     cursor: pointer;
-    font-size: 18px;
-    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
     line-height: 1;
 }
 
