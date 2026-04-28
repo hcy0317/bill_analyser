@@ -261,6 +261,29 @@ describe('checkDataMatching helpers', () => {
         expect(viewModel.transferSuggestion?.title).toBe('转出：民生银行卡 | 转入：微信');
     });
 
+    test('hides parser chip when platform duplicate is present', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            parserSource: 'alipay',
+            parserTags: ['parser:alipay'],
+            dedupType: 'platform_bank',
+            dedupSourceIds: [301],
+            dedupSourceLabels: ['支付宝']
+        }, {
+            dedupLabels: {
+                'Platform Duplicate': '平台重复'
+            },
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.parser).toBeNull();
+        expect(viewModel.dedup?.label).toBe('平台重复');
+    });
+
     test('formats platform duplicate label and localized duplicate-source detail from structured metadata', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             dedupType: 'platform_bank',
@@ -295,9 +318,9 @@ describe('checkDataMatching helpers', () => {
             }
         });
 
-        expect(viewModel.dedup?.label).toBe('平台重复·2');
+        expect(viewModel.dedup?.label).toBe('平台重复');
         expect(viewModel.dedup?.detailLines).toStrictEqual([
-            '重复来源：支付宝 · 民生银行'
+            '重复来源：支付宝|民生银行'
         ]);
     });
 
@@ -316,10 +339,27 @@ describe('checkDataMatching helpers', () => {
         });
 
         expect(viewModel.learning?.detailLines).toStrictEqual([
-            '推荐分类：支出 / 餐饮/咖啡',
-            '账户链路：招商银行卡 → 支付宝'
+            '推荐：支出|餐饮-咖啡|招商银行卡→支付宝'
         ]);
-        expect(viewModel.learning?.title).toBe('推荐分类：支出 / 餐饮/咖啡 | 账户链路：招商银行卡 → 支付宝');
+        expect(viewModel.learning?.title).toBe('推荐：支出|餐饮-咖啡|招商银行卡→支付宝');
+    });
+
+    test('keeps single-account learning summaries as one recommended line', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningSummary: '收入 | 投资收入/利息收入 | 工商银行'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.learning?.detailLines).toStrictEqual([
+            '推荐：收入|投资收入-利息收入|工商银行'
+        ]);
     });
 
     test('removes learning clear actions after review states', () => {
@@ -337,7 +377,7 @@ describe('checkDataMatching helpers', () => {
 
         expect(acceptedViewModel.learning?.actions).toStrictEqual([]);
         expect(acceptedViewModel.learning?.detailLines).toStrictEqual([
-            '推荐分类：支出 / 餐饮/咖啡'
+            '推荐：支出|餐饮-咖啡'
         ]);
     });
 

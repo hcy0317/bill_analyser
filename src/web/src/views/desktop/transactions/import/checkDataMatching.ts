@@ -307,6 +307,25 @@ function formatInfoLine(label: string, value: string): string {
     return `${normalizedLabel}${separator}${value}`;
 }
 
+function normalizeLearningRecommendationLabel(label: string): string {
+    const normalizedLabel = label.trim();
+    if (!normalizedLabel) {
+        return '';
+    }
+
+    return normalizedLabel
+        .replace(/\s+Category$/i, '')
+        .replace(/分类$/, '');
+}
+
+function normalizeLearningCategoryPath(categoryPath: string): string {
+    return categoryPath.trim().replace(/\s*\/\s*/g, '-');
+}
+
+function normalizeLearningAccountRoute(accountRoute: string): string {
+    return accountRoute.trim().replace(/\s*→\s*/g, '→');
+}
+
 function sortSourceChain(
     sources: ImportMatchingSourcePayload[] | undefined,
     pairOrder: string | undefined
@@ -408,7 +427,7 @@ function buildDedupDetailLines(
         ]);
 
         if (sourceLabels.length > 0) {
-            return [formatInfoLine(infoLabels.duplicateSourcesLabel, sourceLabels.join(' · '))];
+            return [formatInfoLine(infoLabels.duplicateSourcesLabel, sourceLabels.join('|'))];
         }
     }
 
@@ -426,18 +445,19 @@ function buildLearningDetailLines(
         .map(part => part.trim())
         .filter(part => !!part);
 
-    if (summaryParts.length >= 2) {
-        const recommendedType = summaryParts[0] || '';
-        const recommendedCategory = summaryParts[1] || '';
-        const detailLines = [formatInfoLine(infoLabels.recommendedCategoryLabel, `${recommendedType} / ${recommendedCategory}`)];
-        if (summaryParts.length > 2) {
-            detailLines.push(formatInfoLine(infoLabels.accountRouteLabel, summaryParts.slice(2).join(' / ')));
-        }
-        return detailLines;
-    }
-
-    if (summaryParts.length === 1) {
-        return [formatInfoLine(infoLabels.recommendedCategoryLabel, summaryParts[0] || '')];
+    if (summaryParts.length > 0) {
+        const normalizedSummaryParts = summaryParts.map((part, index) => {
+            if (index === 1) {
+                return normalizeLearningCategoryPath(part);
+            }
+            if (index >= 2) {
+                return normalizeLearningAccountRoute(part);
+            }
+            return part;
+        });
+        const recommendationLabel = normalizeLearningRecommendationLabel(infoLabels.recommendedCategoryLabel)
+            || infoLabels.recommendedCategoryLabel;
+        return [formatInfoLine(recommendationLabel, normalizedSummaryParts.join('|'))];
     }
 
     return state.learningTitle ? [state.learningTitle] : [];
@@ -449,15 +469,10 @@ function buildSignalTitle(detailLines: string[], fallbackTitle: string | undefin
 
 function buildDedupLabel(
     summary: ImportCheckMatchingContextSummary,
-    sourceCount: number,
     options: ImportCheckMatchingDedupTitleOptions
 ): string {
     const labelKey = getImportCheckMatchingDedupLabel(summary);
     const dedupLabel = options.dedupLabels?.[labelKey] || labelKey;
-    if ((summary.dedupType || '').trim().toLowerCase() === 'platform_bank' && sourceCount > 0) {
-        return `${dedupLabel}·${sourceCount}`;
-    }
-
     return dedupLabel;
 }
 
@@ -640,8 +655,8 @@ export function buildImportPreviewSignalViewModel(
     const matchingSummary = getImportCheckMatchingContextSummary(state);
     const parserDetailLines = buildParserDetailLines(matchingSummary, state, options);
     const transferDetailLines = buildTransferDetailLines(state, options);
-    const transferSourceLabelCount = getSourceChainDisplayLabels(state.transferSourceChain, options, state.transferPairOrder).length;
-    const shouldHideParser = !!state.transferStatus && transferSourceLabelCount >= 2;
+    const normalizedDedupType = (matchingSummary.dedupType || '').trim().toLowerCase();
+    const shouldHideParser = normalizedDedupType === 'platform_bank' || !!state.transferStatus;
     const parser = matchingSummary.parserId && !shouldHideParser
         ? {
             parserId: matchingSummary.parserId,
@@ -661,7 +676,7 @@ export function buildImportPreviewSignalViewModel(
         ? {
             dedupType: matchingSummary.dedupType,
             labelKey: getImportCheckMatchingDedupLabel(matchingSummary),
-            label: buildDedupLabel(matchingSummary, dedupSourceCount, options),
+            label: buildDedupLabel(matchingSummary, options),
             title: buildSignalTitle(dedupDetailLines, getImportCheckMatchingDedupTitle(matchingSummary, options)),
             color: (matchingSummary.dedupType || '').trim().toLowerCase() === 'transfer' ? 'primary' : 'secondary',
             sourceCount: dedupSourceCount,

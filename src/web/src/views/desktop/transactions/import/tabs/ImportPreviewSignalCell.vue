@@ -12,8 +12,7 @@
                             v-bind="menuProps"
                             size="x-small"
                             variant="outlined"
-                            :color="viewModel.parser.color"
-                            :title="viewModel.parser.title">
+                            :color="viewModel.parser.color">
                             {{ viewModel.parser.label }}
                         </v-chip>
                     </template>
@@ -32,8 +31,7 @@
                     v-else
                     size="x-small"
                     variant="outlined"
-                    :color="viewModel.parser.color"
-                    :title="viewModel.parser.title">
+                    :color="viewModel.parser.color">
                     {{ viewModel.parser.label }}
                 </v-chip>
             </template>
@@ -48,8 +46,7 @@
                             v-bind="menuProps"
                             :color="viewModel.dedup.color"
                             variant="outlined"
-                            size="x-small"
-                            :title="viewModel.dedup.title">
+                            size="x-small">
                             {{ viewModel.dedup.label }}
                             <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
                                 · {{ viewModel.dedup.sourceCount }}
@@ -71,8 +68,7 @@
                     v-else
                     :color="viewModel.dedup.color"
                     variant="outlined"
-                    size="x-small"
-                    :title="viewModel.dedup.title">
+                    size="x-small">
                     {{ viewModel.dedup.label }}
                     <template v-if="shouldShowImportCheckMatchingDedupSourceCount(viewModel.dedup.dedupType)">
                         · {{ viewModel.dedup.sourceCount }}
@@ -95,8 +91,7 @@
                             :color="viewModel.transferSuggestion.color"
                             variant="tonal"
                             size="x-small"
-                            :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)"
-                            :title="viewModel.transferSuggestion.title">
+                            :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)">
                             {{ tt(viewModel.transferSuggestion.labelKey) }}
                         </v-chip>
                     </template>
@@ -117,8 +112,7 @@
                     :color="viewModel.transferSuggestion.color"
                     variant="tonal"
                     size="x-small"
-                    :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)"
-                    :title="viewModel.transferSuggestion.title">
+                    :prepend-icon="getStatusIcon(viewModel.transferSuggestion.status)">
                     {{ tt(viewModel.transferSuggestion.labelKey) }}
                 </v-chip>
                 <div
@@ -154,8 +148,7 @@
                             :color="viewModel.investment.color"
                             variant="tonal"
                             size="x-small"
-                            :prepend-icon="getInvestmentIcon(viewModel.investment.status)"
-                            :title="viewModel.investment.title">
+                            :prepend-icon="getInvestmentIcon(viewModel.investment.status)">
                             {{ tt(viewModel.investment.labelKey) }}
                         </v-chip>
                     </template>
@@ -176,8 +169,7 @@
                     :color="viewModel.investment.color"
                     variant="tonal"
                     size="x-small"
-                    :prepend-icon="getInvestmentIcon(viewModel.investment.status)"
-                    :title="viewModel.investment.title">
+                    :prepend-icon="getInvestmentIcon(viewModel.investment.status)">
                     {{ tt(viewModel.investment.labelKey) }}
                 </v-chip>
             </div>
@@ -197,8 +189,7 @@
                             :color="viewModel.learning.color"
                             variant="tonal"
                             size="x-small"
-                            :prepend-icon="getLearningIcon(viewModel.learning.status)"
-                            :title="viewModel.learning.title">
+                            :prepend-icon="getLearningIcon(viewModel.learning.status)">
                             {{ tt(viewModel.learning.labelKey) }}
                         </v-chip>
                     </template>
@@ -219,8 +210,7 @@
                     :color="viewModel.learning.color"
                     variant="tonal"
                     size="x-small"
-                    :prepend-icon="getLearningIcon(viewModel.learning.status)"
-                    :title="viewModel.learning.title">
+                    :prepend-icon="getLearningIcon(viewModel.learning.status)">
                     {{ tt(viewModel.learning.labelKey) }}
                 </v-chip>
                 <div
@@ -415,7 +405,7 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
 }
 
 .signal-detail-card {
-    min-width: 220px;
-    max-width: 320px;
+    width: max-content;
+    max-width: min(480px, calc(100vw - 32px));
 }
 </style>
