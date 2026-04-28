@@ -11,8 +11,8 @@
         :headers="importTransactionHeaders"
         :items="tableTransactions"
         :no-data-text="tt('No data to import')"
-        v-model:items-per-page="tableItemsPerPage"
-        v-model:page="tablePage"
+        :items-per-page="tableItemsPerPage"
+        :page="tablePage"
     >
         <template #header.data-table-select>
             <v-checkbox readonly class="always-cursor-pointer"
@@ -429,13 +429,15 @@
                               item-value="value"
                               :disabled="!!disabled"
                               :items="importTransactionsTablePageOptions"
-                              v-model="countPerPage"
+                              :model-value="countPerPage"
+                              @update:model-value="updatePreviewTablePageSize"
                               v-if="totalImportTransactionCount > 10"
                     />
                     <pagination-buttons density="compact"
                                         :disabled="!!disabled"
                                         :totalPageCount="totalPageCount"
-                                        v-model="currentPage"
+                                        :model-value="currentPage"
+                                        @update:model-value="updatePreviewTablePage"
                                         v-if="totalImportTransactionCount > 10"></pagination-buttons>
                 </div>
             </div>
@@ -1087,22 +1089,10 @@ const importTransactions = computed<ImportTransaction[]>(() => props.importTrans
 const totalImportTransactionCount = computed<number>(() => serverPagedMode.value
     ? Math.max(props.totalImportTransactionCount || 0, 0)
     : importTransactions.value.length);
-const tablePage = computed<number>({
-    get: () => serverPagedMode.value ? 1 : currentPage.value,
-    set: value => {
-        if (!serverPagedMode.value) {
-            currentPage.value = value;
-        }
-    }
-});
-const tableItemsPerPage = computed<number>({
-    get: () => serverPagedMode.value ? Math.max(tableTransactions.value.length, 1) : countPerPage.value,
-    set: value => {
-        if (!serverPagedMode.value) {
-            countPerPage.value = value;
-        }
-    }
-});
+const tablePage = computed<number>(() => serverPagedMode.value ? 1 : currentPage.value);
+const tableItemsPerPage = computed<number>(() => serverPagedMode.value
+    ? Math.max(countPerPage.value || 1, 1)
+    : countPerPage.value);
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -3104,6 +3094,77 @@ function getTrackedTransactionsForSelection(): ImportTransaction[] {
     return Array.from(trackedTransactions.values());
 }
 
+function normalizePreviewPage(value: number | string | null | undefined): number {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 1) {
+        return 1;
+    }
+
+    return Math.floor(normalizedValue);
+}
+
+function normalizePreviewPageSize(value: number | string | null | undefined): number {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue)) {
+        return 10;
+    }
+
+    if (!serverPagedMode.value && normalizedValue === -1) {
+        return -1;
+    }
+
+    return Math.max(Math.floor(normalizedValue), 1);
+}
+
+function emitServerPagedRequest(
+    page: number,
+    pageSize: number,
+    options: {
+        cacheDrafts?: boolean;
+        force?: boolean;
+    } = {}
+): void {
+    const normalizedPage = normalizePreviewPage(page);
+    const normalizedPageSize = normalizePreviewPageSize(pageSize);
+    const pageChanged = currentPage.value !== normalizedPage;
+    const pageSizeChanged = countPerPage.value !== normalizedPageSize;
+
+    if (!pageChanged && !pageSizeChanged && !options.force) {
+        return;
+    }
+
+    if (options.cacheDrafts !== false) {
+        cacheCurrentPageDrafts();
+    }
+
+    currentPage.value = normalizedPage;
+    countPerPage.value = normalizedPageSize;
+    emit('requestPage', normalizedPage, normalizedPageSize);
+}
+
+function updatePreviewTablePage(page: number): void {
+    const normalizedPage = normalizePreviewPage(page);
+
+    if (serverPagedMode.value) {
+        emitServerPagedRequest(normalizedPage, countPerPage.value);
+        return;
+    }
+
+    currentPage.value = normalizedPage;
+}
+
+function updatePreviewTablePageSize(pageSize: number): void {
+    const normalizedPageSize = normalizePreviewPageSize(pageSize);
+
+    if (serverPagedMode.value) {
+        emitServerPagedRequest(1, normalizedPageSize);
+        return;
+    }
+
+    countPerPage.value = normalizedPageSize;
+    currentPage.value = 1;
+}
+
 watch(
     () => props.importTransactions,
     transactions => {
@@ -3121,29 +3182,12 @@ watch(
             return;
         }
 
-        currentPage.value = 1;
-        countPerPage.value = countPerPage.value > 0 ? countPerPage.value : 10;
-        emit('requestPage', currentPage.value, countPerPage.value);
+        emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
+            cacheDrafts: false,
+            force: true
+        });
     },
     { immediate: true }
-);
-
-watch(
-    () => [currentPage.value, countPerPage.value] as const,
-    ([page, pageSize], previous) => {
-        if (!serverPagedMode.value) {
-            return;
-        }
-
-        const previousPage = previous?.[0];
-        const previousPageSize = previous?.[1];
-        if (previousPage === page && previousPageSize === pageSize) {
-            return;
-        }
-
-        cacheCurrentPageDrafts();
-        emit('requestPage', page, pageSize);
-    }
 );
 
 function getDateFilterSummary(): string {
@@ -4663,7 +4707,7 @@ function reset(): void {
 }
 
 function setCountPerPage(count: number): void {
-    countPerPage.value = count;
+    updatePreviewTablePageSize(count);
 }
 
 function getSelectedPreviewUpdates(): Record<string, unknown>[] {

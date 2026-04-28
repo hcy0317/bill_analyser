@@ -99,6 +99,26 @@ describe('checkDataFilters helpers', () => {
         expect(visibleRows.map(row => row.id)).toStrictEqual([1, 2]);
     });
 
+    test('treats server-paged currentPage and countPerPage as request state instead of re-slicing fetched rows', () => {
+        const rows: TestRow[] = [
+            { id: 1, time: 100, type: 5, comment: 'row-1' },
+            { id: 2, time: 200, type: 5, comment: 'row-2' },
+            { id: 3, time: 300, type: 5, comment: 'row-3' }
+        ];
+
+        const visibleRows = getImportCheckVisibleTransactions(
+            rows,
+            row => matches(row),
+            {
+                serverPaged: true,
+                currentPage: 4,
+                countPerPage: 50
+            }
+        );
+
+        expect(visibleRows.map(row => row.id)).toStrictEqual([1, 2, 3]);
+    });
+
     test('applies existing annotation, signal, and date filters to visible-row calculation', () => {
         const rows: TestRow[] = [
             { id: 1, time: 100, type: 5, comment: 'parser-row', signalState: { parserSource: 'alipay' } },
