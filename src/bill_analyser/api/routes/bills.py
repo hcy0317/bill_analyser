@@ -4568,6 +4568,7 @@ def import_stage2_dedup():
     Request:
         JSON:
             - session_id: 导入会话ID
+            - include_preview: 可选，是否在响应中携带整批预览（默认 true，前端 OOM 修复路径会传 false）
 
     Response:
         {
@@ -4595,6 +4596,7 @@ def import_stage2_dedup():
             return jsonify({"success": False, "error": "Missing session_id"}), 400
 
         session_id = data["session_id"]
+        include_preview = bool(data.get("include_preview", True))
 
         # 获取服务实例
         _, bill_service, _ = get_app_context()
@@ -4609,7 +4611,7 @@ def import_stage2_dedup():
 
             # 获取预览数据返回给前端
             preview_data = []
-            if result.get("success"):
+            if result.get("success") and include_preview:
                 preview_method_params = inspect.signature(bill_service.get_import_preview).parameters
                 if "user_id" in preview_method_params:
                     preview_data = loop.run_until_complete(
@@ -4634,6 +4636,7 @@ def import_stage2_dedup():
                     "data": {
                         "session_id": session_id,
                         "preview": preview_data,
+                        "preview_included": include_preview,
                         "total": result.get("template_count", 0),
                         "after_dedup": result.get("preview_count", 0),
                         "dedup_stats": result.get("dedup_stats", {}),
@@ -4848,51 +4851,36 @@ def get_import_preview(session_id: str):
         }
     """
     try:
-        page = request.args.get("page", 1, type=int)
-        page_size = request.args.get("page_size", 50, type=int)
+        page = max(request.args.get("page", 1, type=int) or 1, 1)
+        page_size = request.args.get("page_size", 50, type=int) or 50
+        page_size = max(min(page_size, 200), 1)
 
-        db, _, _ = get_app_context()
+        _, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         try:
-            # 获取预览数据
-            previews = loop.run_until_complete(db.get_preview_by_session(session_id, user_id))
-
-            # 分页
-            total = len(previews)
-            start = (page - 1) * page_size
-            end = start + page_size
-            page_data = previews[start:end]
-
-            # 转换为前端格式
-            result = []
-            for preview in page_data:
-                result.append(
-                    {
-                        "id": preview["id"],
-                        "time": preview["preview_date"],
-                        "type": preview["preview_type"],
-                        "amount": yuan_to_cents(preview["preview_amount"]),
-                        "destinationAmount": yuan_to_cents(preview.get("preview_destination_amount", 0)),
-                        "categoryId": str(preview.get("category_id", "")),
-                        "mainCategory": preview.get("preview_main_category", ""),
-                        "subCategory": preview.get("preview_sub_category", ""),
-                        "sourceAccountId": str(preview.get("preview_source_account_id", "")),
-                        "destinationAccountId": str(preview.get("preview_destination_account_id", "")),
-                        "counterparty": preview.get("preview_counterparty", ""),
-                        "paymentMethod": preview.get("preview_payment_method", ""),
-                        "description": preview.get("preview_description", ""),
-                        "parserSource": preview.get("preview_parser_id", ""),
-                        "parserTags": preview.get("preview_parser_tags", []),
-                        "isSelected": preview.get("is_selected", 1) == 1,
-                    }
+            result = loop.run_until_complete(
+                bill_service.get_import_preview_page(
+                    session_id,
+                    page=page,
+                    page_size=page_size,
+                    user_id=user_id,
                 )
+            )
 
             return jsonify(
-                {"success": True, "data": {"preview": result, "total": total, "page": page, "page_size": page_size}}
+                {
+                    "success": True,
+                    "data": {
+                        "preview": result.get("preview", []),
+                        "total": int(result.get("total", 0) or 0),
+                        "page": int(result.get("page", page) or page),
+                        "page_size": int(result.get("page_size", page_size) or page_size),
+                    },
+                }
             )
 
         finally:

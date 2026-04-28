@@ -550,6 +550,26 @@ class FakeBillsService:
         self.preview_calls.append(session_id)
         return [dict(item) for item in self.preview_result]
 
+    async def get_import_preview_page(
+        self,
+        session_id: str,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        selected_only: bool = False,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        _ = (selected_only, user_id)
+        self.preview_calls.append((session_id, page, page_size))
+        start = max(page - 1, 0) * page_size
+        end = start + page_size
+        return {
+            "preview": [dict(item) for item in self.preview_result[start:end]],
+            "total": len(self.preview_result),
+            "page": page,
+            "page_size": page_size,
+        }
+
     async def promote_session_annotations_to_learning(
         self,
         session_id: str,
@@ -2686,6 +2706,10 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         assert response.get_json()["error"] == "clear session boom"
 
     monkeypatch.setattr(db, "clear_session_data", FakeBillsDB().clear_session_data)
+    service.preview_result = [
+        {"id": 1, "preview_amount": 66.0, "preview_selected": True},
+        {"id": 2, "preview_amount": 88.0, "preview_selected": False},
+    ]
     with bills_route_app.test_request_context("/api/bills/import/v2/preview/sess-7?page=2&page_size=1", method="GET"):
         _set_request_user_id(5)
         payload = preview_route("sess-7").get_json() or {}
@@ -2694,20 +2718,20 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         assert payload["data"]["page"] == 2
         assert payload["data"]["page_size"] == 1
         assert payload["data"]["preview"][0]["id"] == 2
-        assert payload["data"]["preview"][0]["amount"] == 8800
-        assert payload["data"]["preview"][0]["isSelected"] is False
+        assert payload["data"]["preview"][0]["preview_amount"] == 88.0
+        assert payload["data"]["preview"][0]["preview_selected"] is False
 
-    async def _raise_preview_list_error(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+    async def _raise_preview_list_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("preview list boom")
 
-    monkeypatch.setattr(db, "get_preview_by_session", _raise_preview_list_error)
+    monkeypatch.setattr(service, "get_import_preview_page", _raise_preview_list_error)
     with bills_route_app.test_request_context("/api/bills/import/v2/preview/sess-8", method="GET"):
         _set_request_user_id()
         response, status = _unwrap_response(preview_route("sess-8"))
         assert status == 500
         assert response.get_json()["error"] == "preview list boom"
 
-    monkeypatch.setattr(db, "get_preview_by_session", FakeBillsDB().get_preview_by_session)
+    monkeypatch.setattr(service, "get_import_preview_page", FakeBillsService().get_import_preview_page)
     db.preview_recurring_result = {"preview": {"id": 1}, "linked_recurring_id": 9, "candidates": [{"id": 9}]}
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/preview-item/1/recurring-candidates?toleranceDays=99",

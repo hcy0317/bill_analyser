@@ -423,6 +423,72 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         return previews
 
     @log_method
+    async def count_preview_by_session(
+        self,
+        session_id: str,
+        user_id: int = 1,
+        selected_only: bool = False,
+    ) -> int:
+        conn = await self._get_connection()
+        query = "SELECT COUNT(*) AS total FROM bills_preview WHERE session_id = ? AND user_id = ?"
+        params: list[Any] = [session_id, user_id]
+        if selected_only:
+            query += " AND preview_selected = 1"
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            row = await cursor.fetchone()
+
+        return int((dict(row).get("total") if row else 0) or 0)
+
+    @log_method
+    async def get_preview_page_by_session(
+        self,
+        session_id: str,
+        *,
+        user_id: int = 1,
+        page: int = 1,
+        page_size: int = 50,
+        selected_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        normalized_page = max(int(page or 1), 1)
+        normalized_page_size = max(int(page_size or 50), 1)
+        offset = (normalized_page - 1) * normalized_page_size
+
+        total = await self.count_preview_by_session(
+            session_id,
+            user_id=user_id,
+            selected_only=selected_only,
+        )
+
+        conn = await self._get_connection()
+        query = "SELECT * FROM bills_preview WHERE session_id = ? AND user_id = ?"
+        params: list[Any] = [session_id, user_id]
+        if selected_only:
+            query += " AND preview_selected = 1"
+        query += " ORDER BY preview_date ASC LIMIT ? OFFSET ?"
+        params.extend([normalized_page_size, offset])
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+
+        categories = await self.get_all_categories(user_id=user_id)
+        category_id_map = {
+            (category.get("main_category", ""), category.get("sub_category", "")): category.get("id")
+            for category in categories
+        }
+
+        previews: list[dict[str, Any]] = []
+        for row in rows:
+            preview = self._normalize_preview_row(dict(row))
+            preview["is_selected"] = preview.get("preview_selected", 1)
+            preview["category_id"] = category_id_map.get(
+                (preview.get("preview_main_category", ""), preview.get("preview_sub_category", ""))
+            )
+            previews.append(preview)
+
+        return previews, total
+
+    @log_method
     async def get_preview_bill_by_id(self, preview_id: int, user_id: int = 1) -> dict[str, Any] | None:
         conn = await self._get_connection()
         async with conn.execute(

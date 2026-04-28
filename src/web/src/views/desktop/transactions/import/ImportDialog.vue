@@ -214,9 +214,12 @@
                     <import-transaction-check-data-tab
                         ref="importTransactionCheckDataTab"
                         :import-transactions="importTransactions"
+                        :server-paged="serverPagedPreviewMode"
+                        :total-import-transaction-count="previewTotalCount"
                         :disabled="loading || submitting"
                         :session-id="serverSessionId"
                         @reclassified="onReclassified"
+                        @request-page="fetchPreviewPage"
                     />
                 </v-window-item>
                 <v-window-item value="finalResult">
@@ -555,6 +558,8 @@ const importFiles = ref<File[]>([]);
 const importData = ref<string>('');
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
+const previewTotalCount = ref<number>(0);
+const serverPagedPreviewMode = ref<boolean>(false);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
@@ -811,6 +816,8 @@ function open(): Promise<void> {
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
+    previewTotalCount.value = 0;
+    serverPagedPreviewMode.value = false;
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
     const promises = [
@@ -1184,6 +1191,43 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
 /**
  * v7: 执行阶段2去重并显示预览
  */
+async function fetchPreviewPage(page: number = 1, pageSize: number = 10): Promise<void> {
+    if (!serverSessionId.value) {
+        return;
+    }
+
+    const normalizedPage = Math.max(page || 1, 1);
+    const normalizedPageSize = Math.max(pageSize || 10, 1);
+    const token = getCurrentToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(
+        `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?page=${normalizedPage}&page_size=${normalizedPageSize}`,
+        {
+            method: 'GET',
+            headers,
+        }
+    );
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`获取预览分页失败: ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.error || '获取预览分页失败');
+    }
+
+    const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
+    importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
+    previewTotalCount.value = Number(result.data?.total || 0);
+    logger.info(`[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, rows=${previewData.length}, total=${previewTotalCount.value}`);
+}
+
 async function executeStage2Dedup(): Promise<void> {
     importProcess.value = 60;
     logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
@@ -1197,7 +1241,10 @@ async function executeStage2Dedup(): Promise<void> {
     const stage2Response = await fetch('/api/bills/import/v2/dedup', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ session_id: serverSessionId.value })
+        body: JSON.stringify({
+            session_id: serverSessionId.value,
+            include_preview: false
+        })
     });
 
     if (!stage2Response.ok) {
@@ -1213,15 +1260,9 @@ async function executeStage2Dedup(): Promise<void> {
     }
 
     logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
-
-    const previewData = stage2Result.data?.preview || [];
-    const transactions = previewData.map((item: ImportPreviewRecord, idx: number) => {
-        return convertPreviewToImportTransaction(item, idx);
-    });
-
-    logger.info(`[三阶段导入-阶段2] 转换完成: ${transactions.length} 条交易`);
-
-    importTransactions.value = transactions;
+    previewTotalCount.value = Number(stage2Result.data?.after_dedup || stage2Result.data?.preview_count || 0);
+    serverPagedPreviewMode.value = true;
+    importTransactions.value = [];
     currentStep.value = 'checkData';
     importProcess.value = 100;
 }
@@ -1404,7 +1445,8 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
     };
 
     // 添加预览表ID和解析器来源，用于阶段3确认导入
-    const transaction = ImportTransaction.of(responseItem, index);
+    const previewIndex = typeof item.id === 'number' ? item.id : index;
+    const transaction = ImportTransaction.of(responseItem, previewIndex);
     const previewTransaction = transaction as ImportTransactionWithPreviewId;
     previewTransaction._previewId = item.id;  // 保存预览表记录ID
     transaction.parserSource = item.preview_parser_id || transaction.parserSource || '';
@@ -1419,6 +1461,13 @@ function convertPreviewToImportTransaction(item: ImportPreviewRecord, index: num
  * @param previewData 后端返回的原始预览数据数组（使用 preview_* 字段）
  */
 function onReclassified(previewData: ImportPreviewRecord[]): void {
+    if (serverPagedPreviewMode.value) {
+        const page = importTransactionCheckDataTab.value?.getCurrentPreviewPage?.() || 1;
+        const pageSize = importTransactionCheckDataTab.value?.getCurrentPreviewPageSize?.() || 10;
+        void fetchPreviewPage(page, pageSize);
+        return;
+    }
+
     if (!previewData || previewData.length === 0) {
         return;
     }
@@ -1468,8 +1517,13 @@ function submit(): void {
 
     // 收集用户选中的交易
     const selectedTransactions: ImportTransaction[] = [];
+    let selectedPreviewUpdates: Record<string, unknown>[] = [];
+    let selectedCount = 0;
 
-    if (importTransactions.value) {
+    if (serverSessionId.value && serverPagedPreviewMode.value) {
+        selectedPreviewUpdates = importTransactionCheckDataTab.value?.getSelectedPreviewUpdates?.() || [];
+        selectedCount = importTransactionCheckDataTab.value?.getSelectedPreviewCount?.() || selectedPreviewUpdates.length;
+    } else if (importTransactions.value) {
         for (const importTransaction of importTransactions.value) {
             if (importTransaction.valid && importTransaction.selected) {
                 selectedTransactions.push(importTransaction);
@@ -1478,15 +1532,16 @@ function submit(): void {
                 return;
             }
         }
+        selectedCount = selectedTransactions.length;
     }
 
-    if (selectedTransactions.length < 1) {
+    if (selectedCount < 1) {
         snackbar.value?.showError('No data to import');
         return;
     }
 
     confirmDialog.value?.open('format.misc.confirmImportTransactions', {
-        count: getDisplayCount(selectedTransactions.length)
+        count: getDisplayCount(selectedCount)
     }).then(async () => {
         submitting.value = true;
         importProcess.value = 0;
@@ -1538,7 +1593,9 @@ function submit(): void {
             logger.info(`[三阶段导入-阶段3] 开始确认导入, session_id=${serverSessionId.value}`);
 
             // 收集用户编辑后的数据
-            const previewUpdates = selectedTransactions.map(t => {
+            const previewUpdates = serverPagedPreviewMode.value
+                ? selectedPreviewUpdates
+                : selectedTransactions.map(t => {
                 // 类型反向映射
                 const typeReverseMap: Record<number, string> = {
                     2: '收入',
@@ -1595,13 +1652,15 @@ function submit(): void {
                 throw new Error(result.error || '确认导入失败');
             }
 
-            importedCount.value = result.data?.imported_count || selectedTransactions.length;
+            importedCount.value = result.data?.imported_count || selectedCount;
             currentStep.value = 'finalResult';
 
             // v6.61: 清理服务器会话（虽然后端 import_stage3_confirm 已经清理了临时表，
             // 但为了健壮性，在成功时也显式调用清理以确保数据被删除）
             await cleanupServerSession();
             serverSessionId.value = '';
+            serverPagedPreviewMode.value = false;
+            previewTotalCount.value = 0;
 
             // 刷新相关状态仓库
             accountsStore.updateAccountListInvalidState(true);
@@ -1633,6 +1692,9 @@ function close(completed: boolean): void {
         }
     }
 
+    importTransactions.value = undefined;
+    previewTotalCount.value = 0;
+    serverPagedPreviewMode.value = false;
     showState.value = false;
 }
 

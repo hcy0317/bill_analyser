@@ -2724,6 +2724,70 @@ class BillService:
         }
 
     @log_method
+    async def get_import_preview_page(
+        self,
+        session_id: str,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        selected_only: bool = False,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        normalized_page = max(int(page or 1), 1)
+        normalized_page_size = max(min(int(page_size or 50), 200), 1)
+
+        if hasattr(self.db, "get_preview_page_by_session"):
+            previews, total = await self.db.get_preview_page_by_session(
+                session_id,
+                user_id=user_id,
+                page=normalized_page,
+                page_size=normalized_page_size,
+                selected_only=selected_only,
+            )
+        else:
+            previews = await self.get_import_preview(session_id, selected_only=selected_only, user_id=user_id)
+            total = len(previews)
+            start = (normalized_page - 1) * normalized_page_size
+            end = start + normalized_page_size
+            return {
+                "preview": previews[start:end],
+                "total": total,
+                "page": normalized_page,
+                "page_size": normalized_page_size,
+            }
+
+        if not previews:
+            return {
+                "preview": [],
+                "total": total,
+                "page": normalized_page,
+                "page_size": normalized_page_size,
+            }
+
+        preview_user_id = int(previews[0].get("user_id") or user_id or 1)
+        projection_context = await self._load_import_preview_projection_context(
+            session_id,
+            user_id=preview_user_id,
+        )
+
+        preview_items: list[dict[str, Any]] = []
+        for preview in previews:
+            preview_items.append(
+                await self._build_import_preview_item(
+                    preview,
+                    user_id=int(preview.get("user_id") or preview_user_id),
+                    projection_context=projection_context,
+                )
+            )
+
+        return {
+            "preview": preview_items,
+            "total": total,
+            "page": normalized_page,
+            "page_size": normalized_page_size,
+        }
+
+    @log_method
     async def get_matching_session_candidates(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
         """Project import-preview matching payloads into a session-scoped candidate list."""
         preview_items = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)

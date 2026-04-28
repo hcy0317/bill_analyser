@@ -1574,6 +1574,75 @@ class TestBillsAPI:
         assert recurring_two_after_clear is not None
         assert str(recurring_two_after_clear["next_date"]) == recurring_two_next_date_before
 
+    def test_import_stage2_dedup_supports_lightweight_response_and_preview_page(self, client):
+        """阶段2应支持不回整批 preview，并通过分页接口拉取富预览数据。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_import_stage2_lightweight_preview")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        session_id = f"pytest-import-lightweight-preview-{int(time.time() * 1000)}"
+
+        parser_bills = [
+            {
+                "date": "2026-08-01 10:00:00",
+                "amount": -18.5,
+                "type": "支出",
+                "description": "pytest import page one",
+                "counterparty": "早餐铺一号",
+                "payment_method": "支付宝",
+                "source_account_id": 0,
+            },
+            {
+                "date": "2026-08-02 10:00:00",
+                "amount": -28.5,
+                "type": "支出",
+                "description": "pytest import page two",
+                "counterparty": "早餐铺二号",
+                "payment_method": "微信支付",
+                "source_account_id": 0,
+            },
+        ]
+        _create_test_import_session(session_id, parser_bills, parser_id="alipay", user_id=current_user_id)
+
+        dedup_response = client.post(
+            "/api/bills/import/v2/dedup",
+            data=json.dumps({"session_id": session_id, "include_preview": False}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert dedup_response.status_code == 200
+        dedup_data = dedup_response.get_json()
+        assert dedup_data["success"] is True
+        assert dedup_data["data"]["preview"] == []
+        assert dedup_data["data"]["preview_included"] is False
+        assert dedup_data["data"]["after_dedup"] >= 2
+
+        preview_page_response = client.get(
+            f"/api/bills/import/v2/preview/{session_id}?page=1&page_size=1",
+            headers=isolated_auth_headers,
+        )
+        assert preview_page_response.status_code == 200
+        preview_page_data = preview_page_response.get_json()
+        assert preview_page_data["success"] is True
+        assert preview_page_data["data"]["page"] == 1
+        assert preview_page_data["data"]["page_size"] == 1
+        assert preview_page_data["data"]["total"] >= 2
+        assert len(preview_page_data["data"]["preview"]) == 1
+        first_preview = preview_page_data["data"]["preview"][0]
+        assert "matching" in first_preview
+        assert "preview_parser_id" in first_preview
+        assert "preview_parser_tags" in first_preview
+        assert "dedup_source_ids" in first_preview
+
+        second_preview_response = client.get(
+            f"/api/bills/import/v2/preview/{session_id}?page=2&page_size=1",
+            headers=isolated_auth_headers,
+        )
+        assert second_preview_response.status_code == 200
+        second_preview_data = second_preview_response.get_json()
+        assert second_preview_data["success"] is True
+        assert second_preview_data["data"]["page"] == 2
+        assert len(second_preview_data["data"]["preview"]) == 1
+        assert second_preview_data["data"]["preview"][0]["id"] != first_preview["id"]
+
     def test_import_preview_recurring_match_rejects_stale_transfer_review_state(self, client):
         """transfer review 变化后，preview recurring bind 应拒绝旧 reviewStatus 快照。"""
         isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_recurring_transfer_stale")

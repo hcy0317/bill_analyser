@@ -13,8 +13,8 @@
         :search="JSON.stringify(filters)"
         :custom-filter="importTransactionsFilter"
         :no-data-text="tt('No data to import')"
-        v-model:items-per-page="countPerPage"
-        v-model:page="currentPage"
+        v-model:items-per-page="tableItemsPerPage"
+        v-model:page="tablePage"
     >
         <template #header.data-table-select>
             <v-checkbox readonly class="always-cursor-pointer"
@@ -27,28 +27,28 @@
                     <v-list>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All Valid Items')"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectAllValid"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All Invalid Items')"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectAllInvalid"></v-list-item>
                         <v-list-item :prepend-icon="mdiMessageAlertOutline"
                                      :title="getSelectAllAnnotationText()"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectAllNeedsAnnotation"></v-list-item>
                         <v-divider class="my-2"/>
                         <v-list-item :prepend-icon="mdiSelectAll"
                                      :title="tt('Select All')"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectAll"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelect"
                                      :title="tt('Select None')"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectNone"></v-list-item>
                         <v-list-item :prepend-icon="mdiSelectInverse"
                                      :title="tt('Invert Selection')"
-                                     :disabled="!!disabled"
+                                     :disabled="!!disabled || serverPagedMode"
                                      @click="selectInvert"></v-list-item>
                         <v-divider class="my-2"/>
                         <v-list-item :prepend-icon="mdiSelectAll"
@@ -366,7 +366,7 @@
             <div v-if="importTransactions">
                 <div class="title-and-toolbar d-flex align-center text-no-wrap mt-2">
                     <span :class="{ 'text-error': selectedInvalidTransactionCount > 0 }">
-                        {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(importTransactions.length) }) }}
+                        {{ tt('format.misc.selectedCount', { count: getDisplayCount(selectedImportTransactionCount), totalCount: getDisplayCount(totalImportTransactionCount) }) }}
                     </span>
                     <v-chip class="ms-3"
                             color="warning"
@@ -424,21 +424,21 @@
                         {{ tt('Manage Accounts') }}
                     </v-btn>
 
-                    <v-spacer v-if="importTransactions.length > 10"/>
-                    <span v-if="importTransactions.length > 10">{{ tt('Transactions Per Page') }}</span>
+                    <v-spacer v-if="totalImportTransactionCount > 10"/>
+                    <span v-if="totalImportTransactionCount > 10">{{ tt('Transactions Per Page') }}</span>
                     <v-select class="ms-2" density="compact" max-width="100"
                               item-title="name"
                               item-value="value"
                               :disabled="!!disabled"
                               :items="importTransactionsTablePageOptions"
                               v-model="countPerPage"
-                              v-if="importTransactions.length > 10"
+                              v-if="totalImportTransactionCount > 10"
                     />
                     <pagination-buttons density="compact"
                                         :disabled="!!disabled"
                                         :totalPageCount="totalPageCount"
                                         v-model="currentPage"
-                                        v-if="importTransactions.length > 10"></pagination-buttons>
+                                        v-if="totalImportTransactionCount > 10"></pagination-buttons>
                 </div>
             </div>
         </template>
@@ -452,7 +452,7 @@
             </v-card-title>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: importTransactions?.length || 0 }) }}
+                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: totalImportTransactionCount }) }}
                 </p>
                 <!-- 分类类型选择 -->
                 <v-select
@@ -507,7 +507,7 @@
             </v-card-title>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: importTransactions?.length || 0 }) }}
+                    {{ tt('format.misc.selectedCount', { count: selectedImportTransactionCount, totalCount: totalImportTransactionCount }) }}
                 </p>
                 <!-- 账户选择器 -->
                 <icon-select
@@ -1005,11 +1005,14 @@ const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
     sessionId?: string;  // v6.55: 导入会话ID，用于调用重新分类API
+    serverPaged?: boolean;
+    totalImportTransactionCount?: number;
 }>();
 
 // v6.55: 定义事件，用于通知父组件数据刷新
 const emit = defineEmits<{
     (e: 'reclassified', data: ImportPreviewRecord[]): void;
+    (e: 'requestPage', page: number, pageSize: number): void;
 }>();
 
 const {
@@ -1060,6 +1063,7 @@ const filters = ref<ImportTransactionCheckDataFilter>({
 
 const currentPage = ref<number>(1);
 const countPerPage = ref<number>(10);
+const serverPagedDrafts = ref<Map<number, ImportTransaction>>(new Map());
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
@@ -1076,6 +1080,27 @@ const llmSessionAnalyzing = ref<boolean>(false);
 const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingIds.value.length > 0
     || learningDecisionLoadingIds.value.length > 0
     || recurringDecisionLoadingIds.value.length > 0);
+const serverPagedMode = computed<boolean>(() => !!props.serverPaged && !!props.sessionId);
+const importTransactions = computed<ImportTransaction[]>(() => props.importTransactions || []);
+const totalImportTransactionCount = computed<number>(() => serverPagedMode.value
+    ? Math.max(props.totalImportTransactionCount || 0, 0)
+    : importTransactions.value.length);
+const tablePage = computed<number>({
+    get: () => serverPagedMode.value ? 1 : currentPage.value,
+    set: value => {
+        if (!serverPagedMode.value) {
+            currentPage.value = value;
+        }
+    }
+});
+const tableItemsPerPage = computed<number>({
+    get: () => serverPagedMode.value ? Math.max(importTransactions.value.length, 1) : countPerPage.value,
+    set: value => {
+        if (!serverPagedMode.value) {
+            countPerPage.value = value;
+        }
+    }
+});
 
 // 批量编辑对话框状态和数据
 const showBatchCategoryDialog = ref<boolean>(false);
@@ -2199,7 +2224,7 @@ const importPreviewSignalSourceContext = computed<{
     const sourceRowLookup = new Map<string, ImportCheckMatchingSourceContext>();
     const versionParts: string[] = [];
 
-    for (const item of props.importTransactions || []) {
+    for (const item of importTransactions.value) {
         const parserSource = (item.parserSource || '').trim();
         const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
         if (!parserSource && parserTags.length < 1) {
@@ -2435,7 +2460,7 @@ const importTransactionSelectionSummary = computed<ImportTransactionSelectionSum
     let annotationCount = 0;
     let selectedAnnotationCount = 0;
 
-    for (const transaction of props.importTransactions || []) {
+    for (const transaction of getTrackedTransactionsForSelection()) {
         const annotationIssues = collectAnnotationIssues(transaction);
         annotationIssuesByIndex[transaction.index] = annotationIssues;
         const hasAnnotationIssues = annotationIssues.length > 0;
@@ -2607,7 +2632,8 @@ async function reclassifySelected(): Promise<void> {
 }
 
 function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
-    const selectedTransactions = (props.importTransactions || []).filter(transaction => transaction.selected);
+    cacheCurrentPageDrafts();
+    const selectedTransactions = getTrackedTransactionsForSelection().filter(transaction => transaction.selected);
     const typeReverseMap: Record<number, string> = {
         2: '收入',
         3: '支出',
@@ -2932,11 +2958,11 @@ function openSelectedAccountEditDialog(): void {
 
 // 应用批量分类修改
 function applyBatchCategory(): void {
-    if (!props.importTransactions || !batchCategoryId.value) return;
+    if (!importTransactions.value.length || !batchCategoryId.value) return;
 
     let updatedCount = 0;
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.selected) continue;
 
         // 更新交易类型和分类ID
@@ -2968,11 +2994,11 @@ function applyBatchCategory(): void {
 
 // 应用批量账户修改
 function applyBatchAccount(): void {
-    if (!props.importTransactions || !batchAccountId.value) return;
+    if (!importTransactions.value.length || !batchAccountId.value) return;
 
     let updatedCount = 0;
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.selected) continue;
 
         // 更新账户ID
@@ -3003,12 +3029,117 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
+function cloneImportTransaction(transaction: ImportTransaction): ImportTransaction {
+    const clonedTransaction = Object.assign(
+        Object.create(Object.getPrototypeOf(transaction)),
+        transaction
+    ) as ImportTransaction;
+    clonedTransaction.tagIds = [...(transaction.tagIds || [])];
+    clonedTransaction.originalTagNames = [...(transaction.originalTagNames || [])];
+    clonedTransaction.parserTags = [...(transaction.parserTags || [])];
+    clonedTransaction.dedupSourceIds = [...(transaction.dedupSourceIds || [])];
+    if (transaction.matching) {
+        clonedTransaction.matching = structuredClone(transaction.matching);
+    }
+    return clonedTransaction;
+}
+
+function cacheCurrentPageDrafts(): void {
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    const nextDrafts = new Map(serverPagedDrafts.value);
+    for (const transaction of importTransactions.value) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+        nextDrafts.set(previewId, cloneImportTransaction(transaction));
+    }
+    serverPagedDrafts.value = nextDrafts;
+}
+
+function rehydrateCurrentPageDrafts(): void {
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    for (const transaction of importTransactions.value) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+        const draft = serverPagedDrafts.value.get(previewId);
+        if (!draft) {
+            continue;
+        }
+
+        Object.assign(transaction, cloneImportTransaction(draft));
+        updateTransactionData(transaction);
+        syncTransferDecisionDraftState(transaction);
+    }
+}
+
+function getTrackedTransactionsForSelection(): ImportTransaction[] {
+    if (!serverPagedMode.value) {
+        return importTransactions.value;
+    }
+
+    const trackedTransactions = new Map<number, ImportTransaction>();
+    for (const [previewId, transaction] of serverPagedDrafts.value.entries()) {
+        trackedTransactions.set(previewId, cloneImportTransaction(transaction));
+    }
+    for (const transaction of importTransactions.value) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+        trackedTransactions.set(previewId, cloneImportTransaction(transaction));
+    }
+    return Array.from(trackedTransactions.values());
+}
+
 watch(
     () => props.importTransactions,
     transactions => {
         (transactions || []).forEach(transaction => syncTransferDecisionBaseline(transaction));
+        rehydrateCurrentPageDrafts();
     },
     { immediate: true }
+);
+
+watch(
+    () => [serverPagedMode.value, props.sessionId] as const,
+    ([isServerPaged]) => {
+        if (!isServerPaged) {
+            serverPagedDrafts.value = new Map();
+            return;
+        }
+
+        currentPage.value = 1;
+        countPerPage.value = countPerPage.value > 0 ? countPerPage.value : 10;
+        emit('requestPage', currentPage.value, countPerPage.value);
+    },
+    { immediate: true }
+);
+
+watch(
+    () => [currentPage.value, countPerPage.value] as const,
+    ([page, pageSize], previous) => {
+        if (!serverPagedMode.value) {
+            return;
+        }
+
+        const previousPage = previous?.[0];
+        const previousPageSize = previous?.[1];
+        if (previousPage === page && previousPageSize === pageSize) {
+            return;
+        }
+
+        cacheCurrentPageDrafts();
+        emit('requestPage', page, pageSize);
+    }
 );
 
 function getDateFilterSummary(): string {
@@ -3449,7 +3580,7 @@ const toolMenus = computed<ImportTransactionCheckDataMenu[]>(() => [
 ]);
 
 const importTransactionsTableHeight = computed<number | undefined>(() => {
-    if (countPerPage.value <= 10 || !props.importTransactions || props.importTransactions.length <= 10) {
+    if (countPerPage.value <= 10 || importTransactions.value.length <= 10) {
         return undefined;
     } else {
         return 400;
@@ -3474,16 +3605,20 @@ const importTransactionHeaders = computed<object[]>(() => {
     ];
 });
 
-const importTransactionsTablePageOptions = computed<NameNumeralValue[]>(() => getTablePageOptions(props.importTransactions?.length));
+const importTransactionsTablePageOptions = computed<NameNumeralValue[]>(() => getTablePageOptions(totalImportTransactionCount.value));
 
 const totalPageCount = computed<number>(() => {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (totalImportTransactionCount.value < 1) {
         return 1;
+    }
+
+    if (serverPagedMode.value) {
+        return Math.max(Math.ceil(totalImportTransactionCount.value / countPerPage.value), 1);
     }
 
     let count = 0;
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (isTransactionDisplayed(importTransaction)) {
             count++;
         }
@@ -3495,14 +3630,23 @@ const totalPageCount = computed<number>(() => {
 const currentPageTransactions = computed<ImportTransaction[]>(() => {
     const ret: ImportTransaction[] = [];
 
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
+        return ret;
+    }
+
+    if (serverPagedMode.value) {
+        for (const importTransaction of importTransactions.value) {
+            if (isTransactionDisplayed(importTransaction)) {
+                ret.push(importTransaction);
+            }
+        }
         return ret;
     }
 
     const previousCount = Math.max(0, (currentPage.value - 1) * countPerPage.value);
     let count = 0;
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (ret.length >= countPerPage.value) {
             break;
         }
@@ -3530,17 +3674,20 @@ const selectedAnnotationTransactionCount = computed<number>(() => importTransact
 const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => importTransactionSelectionSummary.value.selectedAnnotationTransactions);
 const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => importTransactionSelectionSummary.value.annotationReasonSummaries);
 
-const anyButNotAllTransactionSelected = computed<boolean>(() => !!props.importTransactions && selectedImportTransactionCount.value > 0 && selectedImportTransactionCount.value !== props.importTransactions.length);
-const allTransactionSelected = computed<boolean>(() => !!props.importTransactions && selectedImportTransactionCount.value === props.importTransactions.length);
+const anyButNotAllTransactionSelected = computed<boolean>(() => currentPageTransactions.value.length > 0
+    && currentPageTransactions.value.some(transaction => transaction.selected)
+    && currentPageTransactions.value.some(transaction => !transaction.selected));
+const allTransactionSelected = computed<boolean>(() => currentPageTransactions.value.length > 0
+    && currentPageTransactions.value.every(transaction => transaction.selected));
 
 const allUsedCategoryNames = computed<string[]>(() => {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return [];
     }
 
     const categoryNames: Record<string, boolean> = {};
 
-    for (const transaction of props.importTransactions) {
+    for (const transaction of importTransactions.value) {
         if (transaction.actualCategoryName && transaction.actualCategoryName !== '') {
             categoryNames[transaction.actualCategoryName] = true;
         }
@@ -3550,13 +3697,13 @@ const allUsedCategoryNames = computed<string[]>(() => {
 });
 
 const allUsedAccountNames = computed<string[]>(() => {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return [];
     }
 
     const accountNames: Record<string, boolean> = {};
 
-    for (const transaction of props.importTransactions) {
+    for (const transaction of importTransactions.value) {
         if (transaction.actualSourceAccountName && transaction.actualSourceAccountName !== '') {
             accountNames[transaction.actualSourceAccountName] = true;
         }
@@ -3570,13 +3717,13 @@ const allUsedAccountNames = computed<string[]>(() => {
 });
 
 const allUsedTagNames = computed<string[]>(() => {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return [];
     }
 
     const tagNames: Record<string, boolean> = {};
 
-    for (const transaction of props.importTransactions) {
+    for (const transaction of importTransactions.value) {
         if (!transaction.tagIds || !transaction.originalTagNames) {
             continue;
         }
@@ -3621,11 +3768,11 @@ function getTablePageOptions(linesCount?: number): NameNumeralValue[] {
     const pageOptions: NameNumeralValue[] = [];
 
     if (!linesCount || linesCount < 1) {
-        pageOptions.push({ value: -1, name: tt('All') });
+        pageOptions.push({ value: 10, name: getDisplayCount(10) });
         return pageOptions;
     }
 
-    for (const count of [ 5, 10, 15, 20, 25, 30, 50 ]) {
+    for (const count of serverPagedMode.value ? [10, 20, 50, 100] : [ 5, 10, 15, 20, 25, 30, 50 ]) {
         if (linesCount < count) {
             break;
         }
@@ -3633,7 +3780,9 @@ function getTablePageOptions(linesCount?: number): NameNumeralValue[] {
         pageOptions.push({ value: count, name: getDisplayCount(count) });
     }
 
-    pageOptions.push({ value: -1, name: tt('All') });
+    if (!serverPagedMode.value) {
+        pageOptions.push({ value: -1, name: tt('All') });
+    }
 
     return pageOptions;
 }
@@ -3815,11 +3964,11 @@ function getCurrentInvalidCategoryNames(transactionType: TransactionType): NameV
     const invalidCategoryNames: Record<string, boolean> = {};
     const invalidCategories: NameValue[] = [];
 
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return invalidCategories;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         const categoryId = importTransaction.categoryId;
 
         if (importTransaction.type === transactionType && (!categoryId || categoryId === '0' || !allCategoriesMap.value[categoryId])) {
@@ -3841,11 +3990,11 @@ function getCurrentInvalidAccountNames(): NameValue[] {
     const invalidAccountNames: Record<string, boolean> = {};
     const invalidAccounts: NameValue[] = [];
 
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return invalidAccounts;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         const sourceAccountId = importTransaction.sourceAccountId;
         const destinationAccountId = importTransaction.destinationAccountId;
 
@@ -3872,11 +4021,11 @@ function getCurrentInvalidTagNames(): NameValue[] {
     const invalidTagNames: Record<string, boolean> = {};
     const invalidTags: NameValue[] = [];
 
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return invalidTags;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.tagIds || !importTransaction.originalTagNames) {
             continue;
         }
@@ -3908,11 +4057,11 @@ function getAllOriginalTagNames(): NameValue[] {
     const allOriginalTagNames: Record<string, boolean> = {};
     const allOriginalTags: NameValue[] = [];
 
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return allOriginalTags;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.originalTagNames) {
             continue;
         }
@@ -3941,11 +4090,11 @@ function importTransactionsFilter(value: string, query: string, item?: { value: 
 }
 
 function selectAllValid(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (importTransaction.valid && isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = true;
         }
@@ -3953,11 +4102,11 @@ function selectAllValid(): void {
 }
 
 function selectAllInvalid(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.valid && isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = true;
         }
@@ -3965,11 +4114,11 @@ function selectAllInvalid(): void {
 }
 
 function selectAllNeedsAnnotation(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (needsAnnotation(importTransaction) && isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = true;
         }
@@ -3977,11 +4126,11 @@ function selectAllNeedsAnnotation(): void {
 }
 
 function selectAll(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = true;
         }
@@ -3989,11 +4138,11 @@ function selectAll(): void {
 }
 
 function selectNone(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = false;
         }
@@ -4001,11 +4150,11 @@ function selectNone(): void {
 }
 
 function selectInvert(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (importTransactions.value.length < 1) {
         return;
     }
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (isTransactionDisplayed(importTransaction)) {
             importTransaction.selected = !importTransaction.selected;
         }
@@ -4115,8 +4264,8 @@ function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagIt
 
         let updatedCount = 0;
 
-        if (props.importTransactions) {
-            for (const importTransaction of props.importTransactions) {
+        if (importTransactions.value.length) {
+            for (const importTransaction of importTransactions.value) {
                 if (!importTransaction.selected) {
                     continue;
                 }
@@ -4203,8 +4352,8 @@ function showBatchAddDialog(type: BatchReplaceDialogDataType): void {
 
         let updatedCount = 0;
 
-        if (props.importTransactions) {
-            for (const importTransaction of props.importTransactions) {
+        if (importTransactions.value.length) {
+            for (const importTransaction of importTransactions.value) {
                 if (!importTransaction.selected) {
                     continue;
                 }
@@ -4274,8 +4423,8 @@ function showReplaceInvalidItemDialog(type: BatchReplaceDialogDataType, invalidI
 
         let updatedCount = 0;
 
-        if (props.importTransactions) {
-            for (const importTransaction of props.importTransactions) {
+        if (importTransactions.value.length) {
+            for (const importTransaction of importTransactions.value) {
                 if (importTransaction.valid) {
                     continue;
                 }
@@ -4374,8 +4523,8 @@ function showReplaceAllTypesDialog(): void {
 
         let updatedCount = 0;
 
-        if (props.importTransactions) {
-            for (const importTransaction of props.importTransactions) {
+        if (importTransactions.value.length) {
+            for (const importTransaction of importTransactions.value) {
                 let updated = false;
 
                 for (const rule of result.rules) {
@@ -4450,10 +4599,10 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
 
         let updatedCount = 0;
 
-        if (props.importTransactions) {
+        if (importTransactions.value.length) {
             const sourceTargetMap: Record<string, string> = result.sourceTargetMap;
 
-            for (const importTransaction of props.importTransactions) {
+            for (const importTransaction of importTransactions.value) {
                 if (importTransaction.valid) {
                     continue;
                 }
@@ -4510,7 +4659,7 @@ function showBatchCreateInvalidItemDialog(type: BatchCreateDialogDataType, inval
 }
 
 function convertTransactionType(fromType: TransactionType, toType: TransactionType): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return;
     }
 
@@ -4522,7 +4671,7 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
 
     const categoryMapByName: Record<string, TransactionCategory> = getSecondaryTransactionMapByName(allCategories.value[categoryType]);
 
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.selected || importTransaction.type !== fromType) {
             continue;
         }
@@ -4550,12 +4699,12 @@ function convertTransactionType(fromType: TransactionType, toType: TransactionTy
 }
 
 function clearSelectedRecurringMatches(): void {
-    if (!props.importTransactions || props.importTransactions.length < 1) {
+    if (!importTransactions.value.length) {
         return;
     }
 
     let updatedCount = 0;
-    for (const importTransaction of props.importTransactions) {
+    for (const importTransaction of importTransactions.value) {
         if (!importTransaction.selected || !importTransaction.hasRecurringMatch()) {
             continue;
         }
@@ -4584,6 +4733,7 @@ function onShowDateRangeError(message: string): void {
 }
 
 function reset(): void {
+    serverPagedDrafts.value = new Map();
     editingTransaction.value = null;
     editingTags.value = [];
     filters.value.minDatetime = null;
@@ -4603,13 +4753,33 @@ function setCountPerPage(count: number): void {
     countPerPage.value = count;
 }
 
+function getSelectedPreviewUpdates(): Record<string, unknown>[] {
+    return buildSelectedPreviewUpdates();
+}
+
+function getSelectedPreviewCount(): number {
+    return selectedImportTransactionCount.value;
+}
+
+function getCurrentPreviewPage(): number {
+    return currentPage.value;
+}
+
+function getCurrentPreviewPageSize(): number {
+    return countPerPage.value;
+}
+
 defineExpose({
     filterMenus,
     toolMenus,
     isEditing,
     canImport,
     reset,
-    setCountPerPage
+    setCountPerPage,
+    getSelectedPreviewUpdates,
+    getSelectedPreviewCount,
+    getCurrentPreviewPage,
+    getCurrentPreviewPageSize
 });
 </script>
 
