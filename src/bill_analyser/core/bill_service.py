@@ -2558,17 +2558,60 @@ class BillService:
             return []
 
         preview_user_id = int(previews[0].get("user_id") or 0)
+        projection_context = await self._load_import_preview_projection_context(
+            session_id,
+            user_id=preview_user_id,
+        )
+        result: list[dict[str, Any]] = []
+        for preview in previews:
+            result.append(
+                await self._build_import_preview_item(
+                    preview,
+                    user_id=preview_user_id,
+                    projection_context=projection_context,
+                )
+            )
+
+        return result
+
+    async def get_import_preview_item(
+        self,
+        preview_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any] | None:
+        """Return one import-preview row projected into the frontend preview-item contract."""
+        preview = await self.db.get_preview_bill_by_id(preview_id, user_id=user_id)
+        if not preview:
+            return None
+
+        preview_user_id = int(preview.get("user_id") or user_id or 1)
+        projection_context = await self._load_import_preview_projection_context(
+            str(preview.get("session_id") or ""),
+            user_id=preview_user_id,
+        )
+        return await self._build_import_preview_item(
+            preview,
+            user_id=preview_user_id,
+            projection_context=projection_context,
+        )
+
+    async def _load_import_preview_projection_context(
+        self,
+        session_id: str,
+        *,
+        user_id: int,
+    ) -> dict[str, Any]:
         annotation_samples = (
-            await self.db.get_import_annotation_samples(session_id, user_id=preview_user_id)
-            if preview_user_id > 0
+            await self.db.get_import_annotation_samples(session_id, user_id=user_id)
+            if session_id and user_id > 0
             else []
         )
         manually_annotated_preview_ids = {
             int(sample["preview_id"]) for sample in annotation_samples if sample.get("preview_id")
         }
         learning_rules = (
-            await self.db.get_import_learning_rules(user_id=preview_user_id, enabled_only=True, limit=1000)
-            if preview_user_id > 0
+            await self.db.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=1000)
+            if user_id > 0
             else []
         )
         composite_learning_rules = [
@@ -2576,9 +2619,9 @@ class BillService:
         ]
         learning_categories_by_id: dict[int, dict[str, Any]] = {}
         learning_accounts_by_id: dict[int, dict[str, Any]] = {}
-        if composite_learning_rules and preview_user_id > 0:
-            learning_categories = await self.db.get_all_categories(user_id=preview_user_id)
-            learning_accounts = await self.db.get_all_accounts(user_id=preview_user_id)
+        if composite_learning_rules and user_id > 0:
+            learning_categories = await self.db.get_all_categories(user_id=user_id)
+            learning_accounts = await self.db.get_all_accounts(user_id=user_id)
             learning_categories_by_id = {
                 int(category["id"]): category for category in learning_categories if category.get("id") is not None
             }
@@ -2586,69 +2629,97 @@ class BillService:
                 int(account["id"]): account for account in learning_accounts if account.get("id") is not None
             }
 
-        # 转换为前端期望的格式 (v6.51: 保持preview_前缀与前端字段名匹配)
-        result = []
-        for preview in previews:
-            transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
-            learning_recommendation = self._build_learning_similarity_signal_from_preview(
-                preview,
-                composite_learning_rules,
-                categories_by_id=learning_categories_by_id,
-                accounts_by_id=learning_accounts_by_id,
-            )
-            item = {
-                "id": preview.get("id"),
-                # v6.51: 前端 convertPreviewToImportTransaction 期望 preview_date/preview_amount 等字段
-                "preview_date": preview.get("preview_date", ""),
-                "preview_type": preview.get("preview_type", ""),
-                "preview_amount": preview.get("preview_amount", 0),
-                "preview_destination_amount": preview.get("preview_destination_amount", 0),
-                "category_id": preview.get("category_id"),
-                "preview_main_category": preview.get("preview_main_category", ""),
-                "preview_sub_category": preview.get("preview_sub_category", ""),
-                "preview_source_account_id": preview.get("preview_source_account_id"),
-                "preview_destination_account_id": preview.get("preview_destination_account_id"),
-                "preview_counterparty": preview.get("preview_counterparty", ""),
-                "preview_payment_method": preview.get("preview_payment_method", ""),
-                "preview_description": preview.get("preview_description", ""),
-                "preview_parser_id": preview.get("preview_parser_id", ""),
-                "preview_parser_tags": list(preview.get("preview_parser_tags") or []),
-                "preview_recurring_id": preview.get("preview_recurring_id"),
-                "preview_recurring_name": preview.get("preview_recurring_name", ""),
-                "preview_recurring_candidate_count": preview.get("preview_recurring_candidate_count", 0),
-                "preview_recurring_match_score": preview.get("preview_recurring_match_score", 0),
-                "preview_recurring_match_reasons": preview.get("preview_recurring_match_reasons", ""),
-                "preview_recurring_matched_date": preview.get("preview_recurring_matched_date", ""),
-                "preview_selected": bool(preview.get("preview_selected", 1)),
-                "preview_is_manually_annotated": int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
-                "dedup_type": preview.get("dedup_type", ""),
-                "dedup_source_ids": preview.get("dedup_source_ids", ""),
-                "suggested_preview_type": transfer_suggestion.get("suggested_preview_type", ""),
-                "transfer_suggestion_score": transfer_suggestion.get("score", 0.0),
-                "transfer_suggestion_level": transfer_suggestion.get("level", ""),
-                "transfer_suggestion_reason": transfer_suggestion.get("reason", ""),
-                "investment_signal_score": 0.0,
-                "investment_signal_level": "",
-                "investment_signal_reason": "",
-                "investment_platform": "",
-                "investment_product": "",
-                "learning_recommendation_rule_id": learning_recommendation.get("rule_id"),
-                "learning_recommendation_score": learning_recommendation.get("score", 0.0),
-                "learning_recommendation_level": learning_recommendation.get("level", ""),
-                "learning_recommendation_reason": learning_recommendation.get("reason", ""),
-                "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
-                "learning_recommendation_summary": learning_recommendation.get("summary", ""),
-                "matching": build_preview_matching_payload(
-                    preview,
-                    transfer_suggestion=transfer_suggestion,
-                    learning_recommendation=learning_recommendation,
-                    matching_feedback=preview.get("preview_matching_feedback"),
-                    is_manually_annotated=int(preview.get("id", 0) or 0) in manually_annotated_preview_ids,
-                ),
-            }
-            result.append(item)
+        return {
+            "session_id": session_id,
+            "user_id": user_id,
+            "manually_annotated_preview_ids": manually_annotated_preview_ids,
+            "composite_learning_rules": composite_learning_rules,
+            "learning_categories_by_id": learning_categories_by_id,
+            "learning_accounts_by_id": learning_accounts_by_id,
+        }
 
-        return result
+    async def _build_import_preview_item(
+        self,
+        preview: dict[str, Any],
+        *,
+        user_id: int,
+        projection_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        preview_user_id = int(preview.get("user_id") or user_id or 1)
+        session_id = str(preview.get("session_id") or "")
+        context = projection_context
+        if (
+            not isinstance(context, dict)
+            or str(context.get("session_id") or "") != session_id
+            or int(context.get("user_id") or 0) != preview_user_id
+        ):
+            context = await self._load_import_preview_projection_context(
+                session_id,
+                user_id=preview_user_id,
+            )
+
+        transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
+        learning_recommendation = self._build_learning_similarity_signal_from_preview(
+            preview,
+            list(context.get("composite_learning_rules") or []),
+            categories_by_id=dict(context.get("learning_categories_by_id") or {}),
+            accounts_by_id=dict(context.get("learning_accounts_by_id") or {}),
+        )
+        category_id = preview.get("category_id")
+        if category_id in (None, "", 0, "0"):
+            category_id = await self._get_preview_category_id(preview, user_id=preview_user_id)
+
+        preview_id = int(preview.get("id", 0) or 0)
+        is_manually_annotated = preview_id in set(context.get("manually_annotated_preview_ids") or set())
+        return {
+            "id": preview.get("id"),
+            "preview_date": preview.get("preview_date", ""),
+            "preview_type": preview.get("preview_type", ""),
+            "preview_amount": preview.get("preview_amount", 0),
+            "preview_destination_amount": preview.get("preview_destination_amount", 0),
+            "category_id": category_id,
+            "preview_main_category": preview.get("preview_main_category", ""),
+            "preview_sub_category": preview.get("preview_sub_category", ""),
+            "preview_source_account_id": preview.get("preview_source_account_id"),
+            "preview_destination_account_id": preview.get("preview_destination_account_id"),
+            "preview_counterparty": preview.get("preview_counterparty", ""),
+            "preview_payment_method": preview.get("preview_payment_method", ""),
+            "preview_description": preview.get("preview_description", ""),
+            "preview_parser_id": preview.get("preview_parser_id", ""),
+            "preview_parser_tags": list(preview.get("preview_parser_tags") or []),
+            "preview_recurring_id": preview.get("preview_recurring_id"),
+            "preview_recurring_name": preview.get("preview_recurring_name", ""),
+            "preview_recurring_candidate_count": preview.get("preview_recurring_candidate_count", 0),
+            "preview_recurring_match_score": preview.get("preview_recurring_match_score", 0),
+            "preview_recurring_match_reasons": preview.get("preview_recurring_match_reasons", ""),
+            "preview_recurring_matched_date": preview.get("preview_recurring_matched_date", ""),
+            "preview_selected": bool(preview.get("preview_selected", 1)),
+            "preview_is_manually_annotated": is_manually_annotated,
+            "dedup_type": preview.get("dedup_type", ""),
+            "dedup_source_ids": preview.get("dedup_source_ids", ""),
+            "suggested_preview_type": transfer_suggestion.get("suggested_preview_type", ""),
+            "transfer_suggestion_score": transfer_suggestion.get("score", 0.0),
+            "transfer_suggestion_level": transfer_suggestion.get("level", ""),
+            "transfer_suggestion_reason": transfer_suggestion.get("reason", ""),
+            "investment_signal_score": 0.0,
+            "investment_signal_level": "",
+            "investment_signal_reason": "",
+            "investment_platform": "",
+            "investment_product": "",
+            "learning_recommendation_rule_id": learning_recommendation.get("rule_id"),
+            "learning_recommendation_score": learning_recommendation.get("score", 0.0),
+            "learning_recommendation_level": learning_recommendation.get("level", ""),
+            "learning_recommendation_reason": learning_recommendation.get("reason", ""),
+            "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
+            "learning_recommendation_summary": learning_recommendation.get("summary", ""),
+            "matching": build_preview_matching_payload(
+                preview,
+                transfer_suggestion=transfer_suggestion,
+                learning_recommendation=learning_recommendation,
+                matching_feedback=preview.get("preview_matching_feedback"),
+                is_manually_annotated=is_manually_annotated,
+            ),
+        }
 
     @log_method
     async def get_matching_session_candidates(self, session_id: str, user_id: int = 1) -> dict[str, Any]:
@@ -3072,22 +3143,31 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
+        transfer_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            transfer_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_transfer_decision(
             int(parsed_candidate_id["preview_id"]),
             "accept",
-            expected_state=payload.get("expectedState"),
-            user_id=user_id,
+            **transfer_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "accept",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @staticmethod
     def _normalize_preview_recurring_id(raw_recurring_id: Any) -> int:
@@ -3169,23 +3249,32 @@ class BillService:
         except ValueError:
             return {"success": False, "error": "Invalid request", "status_code": 400}
 
+        recurring_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            recurring_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.update_preview_recurring_match(
             int(parsed_candidate_id["preview_id"]),
             recurring_id,
-            expected_state=payload.get("expectedState"),
-            user_id=user_id,
+            **recurring_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "accept",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
             "recurring_id": result.get("recurring_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @log_method
     async def _accept_preview_investment_candidate(
@@ -3223,23 +3312,32 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
+        learning_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "rule_id": payload.get("ruleId"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
             int(parsed_candidate_id["preview_id"]),
             "accept",
-            expected_state=payload.get("expectedState"),
-            rule_id=payload.get("ruleId"),
-            user_id=user_id,
+            **learning_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "accept",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @log_method
     async def _accept_bill_transfer_candidate(
@@ -3340,22 +3438,31 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
+        transfer_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            transfer_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_transfer_decision(
             int(parsed_candidate_id["preview_id"]),
             "reject",
-            expected_state=payload.get("expectedState"),
-            user_id=user_id,
+            **transfer_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "reject",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @log_method
     async def _reject_preview_investment_candidate(
@@ -3393,22 +3500,31 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
+        learning_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
             int(parsed_candidate_id["preview_id"]),
             "reject",
-            expected_state=payload.get("expectedState"),
-            user_id=user_id,
+            **learning_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "reject",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @log_method
     async def _clear_preview_learning_candidate(
@@ -3419,22 +3535,31 @@ class BillService:
         *,
         user_id: int = 1,
     ) -> dict[str, Any]:
+        learning_kwargs: dict[str, Any] = {
+            "expected_state": payload.get("expectedState"),
+            "user_id": user_id,
+        }
+        if payload.get("responseMode") is not None:
+            learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
             int(parsed_candidate_id["preview_id"]),
             "clear",
-            expected_state=payload.get("expectedState"),
-            user_id=user_id,
+            **learning_kwargs,
         )
         if not result.get("success"):
             return result
-        return {
+        action_result = {
             "success": True,
             "candidate_id": str(candidate_id),
             "action": "clear",
             "preview_id": result.get("preview_id"),
             "session_id": result.get("session_id"),
-            "preview": result.get("preview", []),
         }
+        if isinstance(result.get("preview"), list):
+            action_result["preview"] = list(result.get("preview") or [])
+        if isinstance(result.get("preview_item"), dict):
+            action_result["preview_item"] = dict(result.get("preview_item") or {})
+        return action_result
 
     @log_method
     async def _clear_preview_investment_candidate(
@@ -3839,6 +3964,7 @@ class BillService:
         preview_id: int,
         decision: str,
         expected_state: dict[str, Any] | None = None,
+        response_mode: str | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """Persist a preview-scoped transfer suggestion decision and return refreshed preview data."""
@@ -3893,7 +4019,7 @@ class BillService:
             if not transfer_suggestion:
                 return {"success": False, "error": "Transfer suggestion not available", "status_code": 400}
 
-        preview = await self.db.update_preview_transfer_decision(
+        updated_preview = await self.db.update_preview_transfer_decision(
             preview_id,
             normalized_decision,
             user_id=user_id,
@@ -3906,12 +4032,24 @@ class BillService:
                 "preview_matching_feedback_json": str(preview.get("preview_matching_feedback_json") or ""),
             },
         )
-        if preview and preview.get("_state_conflict"):
+        if updated_preview and updated_preview.get("_state_conflict"):
             return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
-        if not preview:
+        if not updated_preview:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
-        session_id = str(preview.get("session_id") or "")
+        session_id = str(updated_preview.get("session_id") or "")
+        if str(response_mode or "").strip().lower() == "preview-item":
+            return {
+                "success": True,
+                "preview_id": preview_id,
+                "session_id": session_id,
+                "decision": normalized_decision,
+                "preview_item": await self._build_import_preview_item(
+                    updated_preview,
+                    user_id=int(updated_preview.get("user_id") or user_id or 1),
+                ),
+            }
+
         refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
         return {
             "success": True,
@@ -4104,6 +4242,7 @@ class BillService:
         preview_id: int,
         decision: str,
         expected_state: dict[str, Any] | None = None,
+        response_mode: str | None = None,
         rule_id: Any | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
@@ -4272,6 +4411,18 @@ class BillService:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
         session_id = str(updated_preview.get("session_id") or "")
+        if str(response_mode or "").strip().lower() == "preview-item":
+            return {
+                "success": True,
+                "preview_id": preview_id,
+                "session_id": session_id,
+                "decision": normalized_decision,
+                "preview_item": await self._build_import_preview_item(
+                    updated_preview,
+                    user_id=int(updated_preview.get("user_id") or user_id or 1),
+                ),
+            }
+
         refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
         return {
             "success": True,
@@ -4288,6 +4439,7 @@ class BillService:
         recurring_id: int | None,
         *,
         expected_state: dict[str, Any] | None = None,
+        response_mode: str | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """Persist a preview-scoped recurring choice and return refreshed preview data."""
@@ -4353,8 +4505,20 @@ class BillService:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
         session_id = str(updated_preview.get("session_id") or "")
-        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
         normalized_recurring_id = None if recurring_id in (None, "") else int(recurring_id)
+        if str(response_mode or "").strip().lower() == "preview-item":
+            return {
+                "success": True,
+                "preview_id": preview_id,
+                "session_id": session_id,
+                "recurring_id": normalized_recurring_id,
+                "preview_item": await self._build_import_preview_item(
+                    updated_preview,
+                    user_id=int(updated_preview.get("user_id") or user_id or 1),
+                ),
+            }
+
+        refreshed_preview = await self.get_import_preview(session_id, selected_only=False, user_id=user_id)
         return {
             "success": True,
             "preview_id": preview_id,

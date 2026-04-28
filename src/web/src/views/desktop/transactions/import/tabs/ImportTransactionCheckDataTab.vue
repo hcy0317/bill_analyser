@@ -1275,10 +1275,14 @@ async function updatePreviewRecurringMatch(
             headers: headers,
             body: JSON.stringify(
                 normalizedRecurringId === null
-                    ? { expectedState: getTransferDecisionExpectedState(item) }
+                    ? {
+                        expectedState: getTransferDecisionExpectedState(item),
+                        responseMode: 'preview-item'
+                    }
                     : {
                         recurringId: normalizedRecurringId,
-                        expectedState: getTransferDecisionExpectedState(item)
+                        expectedState: getTransferDecisionExpectedState(item),
+                        responseMode: 'preview-item'
                     }
             )
         });
@@ -1309,10 +1313,7 @@ async function updatePreviewRecurringMatch(
             throw new Error('Recurring match response is out of date');
         }
 
-        const previewData = Array.isArray(result.data?.preview)
-            ? result.data.preview as ImportPreviewRecord[]
-            : [];
-        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        const refreshedPreview = resolvePreviewDecisionItem(result.data, previewId);
         if (!refreshedPreview) {
             throw new Error('Recurring match response missing preview item');
         }
@@ -1785,6 +1786,23 @@ function resolvePreviewCategoryId(previewData: ImportPreviewRecord): string {
     return resolveImportPreviewCategoryId(previewData, allCategoriesMap.value);
 }
 
+function resolvePreviewDecisionItem(
+    payload: { previewItem?: unknown, preview?: unknown } | null | undefined,
+    previewId: number
+): ImportPreviewRecord | null {
+    if (payload && typeof payload.previewItem === 'object' && payload.previewItem !== null) {
+        const previewItem = payload.previewItem as ImportPreviewRecord;
+        if (Number(previewItem.id) === previewId) {
+            return previewItem;
+        }
+    }
+
+    const previewData = Array.isArray(payload?.preview)
+        ? payload.preview as ImportPreviewRecord[]
+        : [];
+    return previewData.find(preview => Number(preview.id) === previewId) || null;
+}
+
 function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData: ImportPreviewRecord): void {
     const nextType = getPreviewTransactionTypeNumber(previewData.preview_type);
     if (nextType !== undefined) {
@@ -1906,7 +1924,8 @@ async function reviewTransferSuggestion(
             headers: headers,
             body: JSON.stringify({
                 decision,
-                expectedState: getTransferDecisionExpectedState(item)
+                expectedState: getTransferDecisionExpectedState(item),
+                responseMode: 'preview-item'
             })
         });
 
@@ -1926,10 +1945,7 @@ async function reviewTransferSuggestion(
 
         commitEditingTransactionDraft();
 
-        const previewData = Array.isArray(result.data?.preview)
-            ? result.data.preview as ImportPreviewRecord[]
-            : [];
-        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        const refreshedPreview = resolvePreviewDecisionItem(result.data, previewId);
         if (!refreshedPreview) {
             throw new Error('Transfer decision response missing preview item');
         }
@@ -1982,7 +1998,8 @@ async function reviewLearningSuggestion(
     }
 
     const payload: Record<string, unknown> = {
-        expectedState: getLearningDecisionExpectedState(item)
+        expectedState: getLearningDecisionExpectedState(item),
+        responseMode: 'preview-item'
     };
 
     if (decision === 'accept') {
@@ -2012,10 +2029,10 @@ async function reviewLearningSuggestion(
 
         commitEditingTransactionDraft();
 
-        const previewData = Array.isArray(result.preview)
-            ? result.preview as unknown as ImportPreviewRecord[]
-            : [];
-        const refreshedPreview = previewData.find(preview => Number(preview.id) === previewId);
+        const refreshedPreview = resolvePreviewDecisionItem(
+            result as { previewItem?: unknown, preview?: unknown },
+            previewId
+        );
         if (!refreshedPreview) {
             throw new Error('Learning decision response missing preview item');
         }
@@ -2067,11 +2084,23 @@ async function syncLearningDecisionDraftToPreview(item: ImportTransaction, candi
     try {
         const response = await services.updateImportPreviewItem({
             sessionId: props.sessionId,
-            payload
+            payload: {
+                ...payload,
+                responseMode: 'preview-item'
+            }
         });
 
-        if (!response.data?.result) {
+        if (!response.data?.result?.updated) {
             throw new Error('Preview text sync failed');
+        }
+
+        const refreshedPreview = resolvePreviewDecisionItem(
+            { previewItem: response.data.result.previewItem },
+            previewId
+        );
+        if (refreshedPreview) {
+            syncTransactionFromPreviewDecision(item, refreshedPreview);
+            return true;
         }
 
         const refreshedCandidate = await fetchMatchingSessionCandidate(candidateId);

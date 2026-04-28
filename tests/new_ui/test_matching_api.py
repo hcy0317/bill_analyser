@@ -2634,7 +2634,10 @@ class TestMatchingAPI:
 
         reject_response = client.post(
             f"/api/matching/candidates/{candidate_id}/reject",
-            json={"expectedState": expected_state},
+            json={
+                "expectedState": expected_state,
+                "responseMode": "preview-item",
+            },
             headers=auth_headers,
         )
 
@@ -2645,7 +2648,9 @@ class TestMatchingAPI:
         assert reject_data["data"]["action"] == "reject"
         assert reject_data["data"]["previewId"] == preview_id
         assert reject_data["data"]["sessionId"] == session_id
-        reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
+        assert "preview" not in reject_data["data"]
+        reject_preview = reject_data["data"]["previewItem"]
+        assert int(reject_preview["id"]) == preview_id
         assert reject_preview["preview_type"] == "支出"
         assert reject_preview["matching"]["learning"]["review_status"] == "rejected"
         assert reject_preview["matching"]["learning"]["suppressed"] is True

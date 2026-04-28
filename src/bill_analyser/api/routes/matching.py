@@ -255,6 +255,8 @@ def _build_matching_candidate_action_payload(
         response_data["reviewStatus"] = str(result.get("review_status") or "")
     if result.get("suppressed") is not None:
         response_data["suppressed"] = bool(result.get("suppressed"))
+    if isinstance(result.get("preview_item"), dict):
+        response_data["previewItem"] = dict(result.get("preview_item") or {})
     if isinstance(result.get("preview"), list):
         response_data["preview"] = list(result.get("preview") or [])
     if isinstance(result.get("pair"), dict):

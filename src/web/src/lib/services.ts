@@ -251,6 +251,7 @@ interface MatchingCandidateActionResponse {
     recurringId?: number;
     reviewStatus?: string;
     suppressed?: boolean;
+    previewItem?: Record<string, unknown>;
     preview?: Array<Record<string, unknown>>;
     pair?: Record<string, unknown>;
     bill?: Record<string, unknown>;
@@ -324,6 +325,12 @@ interface UpdateImportPreviewItemPayload {
     paymentMethod?: string;
     description?: string;
     isSelected?: boolean;
+    responseMode?: string;
+}
+
+interface UpdateImportPreviewItemResponse {
+    updated: boolean;
+    previewItem?: Record<string, unknown>;
 }
 
 function buildApiResponse<T>(response: AxiosResponse<any>, result: T): AxiosResponse<ApiResponse<T>> {
@@ -1422,9 +1429,12 @@ export default {
     }: {
         sessionId: string,
         payload: UpdateImportPreviewItemPayload
-    }): ApiResponsePromise<boolean> => {
-        return axios.put<{ success?: boolean }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
-            return buildApiResponse(response, !!response.data?.success);
+    }): ApiResponsePromise<UpdateImportPreviewItemResponse> => {
+        return axios.put<{ success?: boolean, data?: { updated?: boolean, previewItem?: Record<string, unknown> } }>(`bills/import/v2/preview/${encodeURIComponent(sessionId)}/update`, payload).then(response => {
+            return buildApiResponse(response, {
+                updated: !!(response.data?.data?.updated ?? response.data?.success),
+                previewItem: response.data?.data?.previewItem
+            });
         });
     },
     getMatchingSessionCandidates: ({

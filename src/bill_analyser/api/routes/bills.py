@@ -4971,6 +4971,7 @@ def bind_preview_recurring_match(preview_id: int):
         expected_state = data.get("expectedState")
         if not isinstance(expected_state, dict):
             return jsonify({"success": False, "error": "Invalid request"}), 400
+        response_mode = data.get("responseMode")
 
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
@@ -4981,6 +4982,7 @@ def bind_preview_recurring_match(preview_id: int):
                     preview_id,
                     normalized_recurring_id,
                     expected_state=expected_state,
+                    response_mode=response_mode,
                     user_id=request.user_id,
                 )
             )
@@ -4999,6 +5001,7 @@ def bind_preview_recurring_match(preview_id: int):
                     "previewId": result.get("preview_id", preview_id),
                     "sessionId": result.get("session_id", ""),
                     "recurringId": result.get("recurring_id"),
+                    "previewItem": result.get("preview_item"),
                     "preview": result.get("preview", []),
                 },
             }
@@ -5023,6 +5026,7 @@ def clear_preview_recurring_match(preview_id: int):
         expected_state = data.get("expectedState")
         if not isinstance(expected_state, dict):
             return jsonify({"success": False, "error": "Invalid request"}), 400
+        response_mode = data.get("responseMode")
 
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
@@ -5033,6 +5037,7 @@ def clear_preview_recurring_match(preview_id: int):
                     preview_id,
                     None,
                     expected_state=expected_state,
+                    response_mode=response_mode,
                     user_id=request.user_id,
                 )
             )
@@ -5051,6 +5056,7 @@ def clear_preview_recurring_match(preview_id: int):
                     "previewId": result.get("preview_id", preview_id),
                     "sessionId": result.get("session_id", ""),
                     "recurringId": result.get("recurring_id"),
+                    "previewItem": result.get("preview_item"),
                     "preview": result.get("preview", []),
                 },
             }
@@ -5079,6 +5085,7 @@ def update_preview_transfer_decision(preview_id: int):
         expected_state = data.get("expectedState")
         if not isinstance(expected_state, dict):
             return jsonify({"success": False, "error": "Invalid request"}), 400
+        response_mode = data.get("responseMode")
 
         _, bill_service, _ = get_app_context()
         loop = asyncio.new_event_loop()
@@ -5089,6 +5096,7 @@ def update_preview_transfer_decision(preview_id: int):
                     preview_id,
                     decision,
                     expected_state=expected_state,
+                    response_mode=response_mode,
                     user_id=request.user_id,
                 )
             )
@@ -5107,6 +5115,7 @@ def update_preview_transfer_decision(preview_id: int):
                     "previewId": result.get("preview_id", preview_id),
                     "sessionId": result.get("session_id", ""),
                     "decision": result.get("decision", decision),
+                    "previewItem": result.get("preview_item"),
                     "preview": result.get("preview", []),
                 },
             }
@@ -5133,8 +5142,9 @@ def update_preview_bill(session_id: str):
         if not data or "id" not in data:
             return jsonify({"success": False, "error": "Missing bill id"}), 400
 
-        db, _, _ = get_app_context()
+        db, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
+        response_mode = data.get("responseMode")
 
         preview_id = data["id"]
 
@@ -5162,6 +5172,23 @@ def update_preview_bill(session_id: str):
 
         try:
             success = loop.run_until_complete(db.update_preview_bill(preview_id, updates, user_id))
+            if (
+                success
+                and isinstance(response_mode, str)
+                and response_mode.strip().lower() == "preview-item"
+            ):
+                preview_item = loop.run_until_complete(
+                    bill_service.get_import_preview_item(int(preview_id), user_id=user_id)
+                )
+                return jsonify(
+                    {
+                        "success": True,
+                        "data": {
+                            "updated": True,
+                            "previewItem": preview_item,
+                        },
+                    }
+                )
 
             return jsonify({"success": success})
 

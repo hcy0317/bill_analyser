@@ -300,6 +300,71 @@ def _create_import_learning_rule(user_id, match_type, match_value, *, learned_ty
     return asyncio.run(_create())
 
 
+def _create_composite_import_learning_rule(
+    user_id,
+    *,
+    parser_id,
+    counterparty,
+    description,
+    payment_method,
+    learned_type,
+    learned_category_id=None,
+    learned_source_account_id=None,
+    learned_destination_account_id=None
+):
+    """创建 composite 导入长期学习规则。"""
+    from bill_analyser.api.app import db
+
+    async def _create():
+        conn = await db._get_connection()  # pylint: disable=protected-access
+        now = datetime.now().isoformat()
+        rule_hash = db.build_composite_match_hash(  # pylint: disable=protected-access
+            parser_id=parser_id,
+            counterparty=counterparty,
+            description=description,
+            payment_method=payment_method,
+        )
+        assert rule_hash is not None
+        cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_rules (
+                user_id, match_type, match_value, normalized_match_value,
+                learned_type, learned_category_id, learned_source_account_id, learned_destination_account_id,
+                enabled, parser_id, composite_match_hash,
+                match_features_json, applied_count, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                "composite",
+                rule_hash,
+                rule_hash,
+                learned_type,
+                learned_category_id,
+                learned_source_account_id,
+                learned_destination_account_id,
+                parser_id,
+                rule_hash,
+                json.dumps(
+                    {
+                        "counterparty": counterparty,
+                        "description": description,
+                        "parser_id": parser_id,
+                        "payment_method": payment_method,
+                    },
+                    ensure_ascii=False,
+                ),
+                6,
+                now,
+                now,
+            )
+        )
+        await conn.commit()
+        return int(cursor.lastrowid)
+
+    return asyncio.run(_create())
+
+
 @pytest.fixture(name="auth_headers")
 def _auth_headers_fixture(client):
     """获取认证请求头"""
@@ -1662,6 +1727,7 @@ class TestBillsAPI:
             data=json.dumps(
                 {
                     "decision": "accept",
+                    "responseMode": "preview-item",
                     "expectedState": _build_expected_state(
                         review_status="pending",
                         preview_type="支出",
@@ -1676,9 +1742,9 @@ class TestBillsAPI:
         assert accept_response.status_code == 200
         accept_data = accept_response.get_json()
         assert accept_data["success"] is True
-        accept_preview = next(
-            item for item in accept_data["data"]["preview"] if int(item["id"]) == int(preview_id)
-        )
+        assert accept_data["data"]["preview"] == []
+        accept_preview = accept_data["data"]["previewItem"]
+        assert int(accept_preview["id"]) == int(preview_id)
         assert accept_preview["preview_type"] == "转账"
         assert accept_preview["preview_main_category"] == ""
         assert accept_preview["matching"]["transfer"]["review_status"] == "accepted"
@@ -1800,6 +1866,67 @@ class TestBillsAPI:
         missing_expected_state_data = missing_expected_state_response.get_json()
         assert missing_expected_state_data["success"] is False
         assert missing_expected_state_data["error"] == "Invalid request"
+
+    def test_import_preview_update_row_only_returns_preview_item_with_refreshed_learning_signal(self, client):
+        """预览单条更新在 row-only 模式下应直接返回刷新后的 preview item。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_update_row_only")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        session_id = f"pytest-import-preview-update-row-only-{int(time.time() * 1000)}"
+
+        rule_id = _create_composite_import_learning_rule(
+            current_user_id,
+            parser_id="alipay",
+            counterparty="星巴克咖啡",
+            description="门店消费",
+            payment_method="支付宝",
+            learned_type="支出",
+        )
+
+        from bill_analyser.api.app import db
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                session_id,
+                {
+                    "preview_date": "2026-06-07 10:30:00",
+                    "preview_type": "支出",
+                    "preview_amount": 28.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_counterparty": "无关商户",
+                    "preview_payment_method": "现金",
+                    "preview_description": "无关备注",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+
+        update_response = client.put(
+            f"/api/bills/import/v2/preview/{session_id}/update",
+            json={
+                "id": preview_id,
+                "counterparty": "星巴克",
+                "paymentMethod": "支付宝",
+                "description": "咖啡消费",
+                "responseMode": "preview-item",
+            },
+            headers=isolated_auth_headers,
+        )
+        assert update_response.status_code == 200
+        update_data = update_response.get_json()
+        assert update_data["success"] is True
+        assert update_data["data"]["updated"] is True
+        preview_item = update_data["data"]["previewItem"]
+        assert int(preview_item["id"]) == preview_id
+        assert preview_item["preview_counterparty"] == "星巴克"
+        assert preview_item["preview_payment_method"] == "支付宝"
+        assert preview_item["preview_description"] == "咖啡消费"
+        assert preview_item["matching"]["learning"]["rule_id"] == rule_id
+        assert preview_item["matching"]["learning"]["review_status"] == "pending"
 
     def test_delete_bill(self, client, auth_headers):
         """测试删除账单"""
