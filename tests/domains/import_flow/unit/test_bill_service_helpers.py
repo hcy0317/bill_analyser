@@ -55,6 +55,12 @@ class FakeBillServiceDB:
         self.cleared_sessions: list[str] = []
         self.cleared_session_calls: list[tuple[str, int]] = []
         self.preview_query_calls: list[tuple[str, int, bool]] = []
+        self.preview_bill_query_calls: list[tuple[int, int]] = []
+        self.preview_learning_decision_calls: list[tuple[int, str, dict[str, Any] | None, int]] = []
+        self.annotation_query_count = 0
+        self.learning_rule_query_count = 0
+        self.category_list_query_count = 0
+        self.account_list_query_count = 0
         self.session_status_updates: list[tuple[str, str]] = []
         self.preview_classification_updates: list[list[dict[str, Any]]] = []
         self.category_by_name: dict[tuple[str, str], dict[str, Any]] = {
@@ -89,7 +95,17 @@ class FakeBillServiceDB:
 
     async def get_all_accounts(self, user_id: int | None = None) -> list[dict[str, Any]]:
         _ = user_id
+        self.account_list_query_count += 1
         return self.accounts
+
+    async def get_all_categories(self, user_id: int | None = None) -> list[dict[str, Any]]:
+        _ = user_id
+        self.category_list_query_count += 1
+        return [
+            {"id": category_id, **category}
+            for category_id, category in self.category_by_id.items()
+            if category is not None
+        ]
 
     async def get_account_by_id(self, account_id: int, user_id: int = 1) -> dict[str, Any] | None:
         _ = user_id
@@ -138,6 +154,7 @@ class FakeBillServiceDB:
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         _ = (user_id, enabled_only, limit)
+        self.learning_rule_query_count += 1
         return list(self.import_rules)
 
     async def increment_import_learning_rule_usage(self, rule_ids: list[int], user_id: int = 1) -> None:
@@ -178,9 +195,59 @@ class FakeBillServiceDB:
             return list(previews)
         return [preview for preview in previews if bool(preview.get("preview_selected", 1))]
 
+    async def get_preview_bill_by_id(self, preview_id: int, user_id: int = 1) -> dict[str, Any] | None:
+        self.preview_bill_query_calls.append((preview_id, user_id))
+        for preview in self.preview_rows:
+            if int(preview.get("id") or 0) == preview_id and int(preview.get("user_id") or user_id) == user_id:
+                return dict(preview)
+        return None
+
     async def get_import_annotation_samples(self, _session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         _ = user_id
+        self.annotation_query_count += 1
         return list(self.annotation_samples)
+
+    async def update_preview_learning_decision(
+        self,
+        preview_id: int,
+        decision: str,
+        *,
+        user_id: int = 1,
+        expected_state: dict[str, Any] | None = None,
+        applied_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        self.preview_learning_decision_calls.append((preview_id, decision, expected_state, user_id))
+        for preview in self.preview_rows:
+            if int(preview.get("id") or 0) != preview_id or int(preview.get("user_id") or user_id) != user_id:
+                continue
+
+            updated_preview = dict(preview)
+            if applied_result:
+                updated_preview.update(
+                    {key: value for key, value in applied_result.items() if key != "rule_id" and value not in (None, "")}
+                )
+            feedback = dict(updated_preview.get("preview_matching_feedback") or {})
+            if decision == "reject":
+                feedback["learning"] = {
+                    "rule_id": (applied_result or {}).get("rule_id"),
+                    "review_status": "rejected",
+                    "suppressed": True,
+                }
+            elif decision == "accept":
+                feedback["learning"] = {
+                    "rule_id": (applied_result or {}).get("rule_id"),
+                    "review_status": "accepted",
+                    "suppressed": False,
+                }
+            else:
+                feedback.pop("learning", None)
+
+            updated_preview["preview_matching_feedback"] = feedback
+            updated_preview["preview_matching_feedback_json"] = json.dumps(feedback, ensure_ascii=False)
+            preview.update(updated_preview)
+            return dict(updated_preview)
+
+        return None
 
     async def update_preview_selection(self, preview_ids: list[int], selected: bool) -> int:
         self.preview_selection_updates.append((list(preview_ids), selected))
@@ -1528,3 +1595,90 @@ def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch:
         categories_by_id={},
         accounts_by_id={},
     ) == {}
+
+
+@pytest.mark.asyncio
+async def test_preview_learning_row_only_decision_reuses_projection_context() -> None:
+    """learning preview-item 决策应只加载一次投影上下文，避免 row-only 路径重复查库。"""
+    fake_db = FakeBillServiceDB()
+    parsed_features = {
+        "parser_id": "wechat",
+        "counterparty": "早餐铺",
+        "description": "共同描述",
+        "payment_method": "微信支付",
+    }
+    fake_db.import_rules = [
+        {
+            "id": 42,
+            "match_type": "composite",
+            "match_features_json": json.dumps(parsed_features, ensure_ascii=False),
+            "composite_match_hash": "different-hash",
+            "learned_type": "支出",
+            "learned_category_id": 77,
+            "learned_source_account_id": 2,
+            "learned_destination_account_id": 4,
+            "applied_count": 5,
+        }
+    ]
+    fake_db.preview_rows = [
+        {
+            "id": 11,
+            "session_id": "session-row-only-learning",
+            "user_id": 1,
+            "category_id": 77,
+            "preview_type": "支出",
+            "preview_amount": 18.8,
+            "preview_main_category": "餐饮",
+            "preview_sub_category": "早餐",
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+            "preview_parser_id": "wechat",
+            "preview_counterparty": "早餐铺",
+            "preview_description": "共同描述",
+            "preview_payment_method": "微信支付",
+            "preview_matching_feedback": {},
+            "preview_matching_feedback_json": "",
+        }
+    ]
+    service = _make_service(fake_db)
+
+    result = await service.apply_preview_learning_decision(
+        11,
+        "reject",
+        expected_state={
+            "sessionId": "session-row-only-learning",
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": 77,
+            "recurringId": None,
+        },
+        response_mode="preview-item",
+        user_id=1,
+    )
+
+    assert result["success"] is True
+    assert result["preview_item"]["matching"]["learning"]["rule_id"] == 42
+    assert result["preview_item"]["matching"]["learning"]["review_status"] == "rejected"
+    assert result["preview_item"]["learning_recommendation_summary"] == "支出 | 餐饮/早餐 | 招商银行卡 → 支付宝"
+    assert fake_db.preview_bill_query_calls == [(11, 1)]
+    assert fake_db.preview_learning_decision_calls == [
+        (
+            11,
+            "reject",
+            {
+                "session_id": "session-row-only-learning",
+                "preview_type": "支出",
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "早餐",
+                "preview_recurring_id": None,
+                "preview_source_account_id": None,
+                "preview_destination_account_id": None,
+                "preview_matching_feedback_json": "",
+            },
+            1,
+        )
+    ]
+    assert fake_db.annotation_query_count == 1
+    assert fake_db.learning_rule_query_count == 1
+    assert fake_db.category_list_query_count == 1
+    assert fake_db.account_list_query_count == 1

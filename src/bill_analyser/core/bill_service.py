@@ -2648,7 +2648,9 @@ class BillService:
         preview_user_id = int(preview.get("user_id") or user_id or 1)
         session_id = str(preview.get("session_id") or "")
         context = projection_context
-        context_session_id = str(context.get("session_id") or "") if isinstance(context, dict) else ""
+        context_session_id = (
+            str(context.get("session_id") or "") if isinstance(context, dict) else ""
+        )
         should_reload_context = not isinstance(context, dict) or int(context.get("user_id") or 0) != preview_user_id
         if not should_reload_context and session_id:
             should_reload_context = context_session_id != session_id
@@ -4160,36 +4162,33 @@ class BillService:
         preview: dict[str, Any],
         *,
         user_id: int = 1,
+        projection_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         preview_user_id = int(preview.get("user_id") or user_id or 1)
         if preview_user_id <= 0:
             return {}
 
-        learning_rules = await self.db.get_import_learning_rules(
-            user_id=preview_user_id,
-            enabled_only=True,
-            limit=1000,
+        session_id = str(preview.get("session_id") or "")
+        context = projection_context
+        context_session_id = (
+            str(context.get("session_id") or "") if isinstance(context, dict) else ""
         )
-        composite_learning_rules = [
-            rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")
-        ]
-        if not composite_learning_rules:
-            return {}
+        context_user_id = int(context.get("user_id") or 0) if isinstance(context, dict) else 0
+        if not isinstance(context, dict) or context_user_id != preview_user_id or (
+            session_id and context_session_id != session_id
+        ):
+            context = await self._load_import_preview_projection_context(
+                session_id,
+                user_id=preview_user_id,
+            )
 
-        learning_categories = await self.db.get_all_categories(user_id=preview_user_id)
-        learning_accounts = await self.db.get_all_accounts(user_id=preview_user_id)
-        learning_categories_by_id = {
-            int(category["id"]): category for category in learning_categories if category.get("id") is not None
-        }
-        learning_accounts_by_id = {
-            int(account["id"]): account for account in learning_accounts if account.get("id") is not None
-        }
+        composite_learning_rules = list(context.get("composite_learning_rules") or [])
 
         return self._build_learning_similarity_signal_from_preview(
             preview,
             composite_learning_rules,
-            categories_by_id=learning_categories_by_id,
-            accounts_by_id=learning_accounts_by_id,
+            categories_by_id=dict(context.get("learning_categories_by_id") or {}),
+            accounts_by_id=dict(context.get("learning_accounts_by_id") or {}),
         )
 
     async def _build_preview_learning_apply_payload(
@@ -4258,9 +4257,15 @@ class BillService:
         if not preview:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
+        preview_user_id = int(preview.get("user_id") or user_id or 1)
+        projection_context = await self._load_import_preview_projection_context(
+            str(preview.get("session_id") or ""),
+            user_id=preview_user_id,
+        )
         current_learning_review_status = await self._get_preview_learning_review_status(
             preview,
-            user_id=user_id,
+            user_id=preview_user_id,
+            projection_context=projection_context,
         )
         current_preview_category_id = await self._get_preview_category_id(preview, user_id=user_id)
         current_preview_recurring_id = preview.get("preview_recurring_id")
@@ -4322,7 +4327,8 @@ class BillService:
 
         learning_recommendation = await self._build_learning_recommendation_from_preview(
             preview,
-            user_id=user_id,
+            user_id=preview_user_id,
+            projection_context=projection_context,
         )
         learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         has_existing_learning_review = current_learning_review_status in {"accepted", "rejected"}
@@ -4420,6 +4426,7 @@ class BillService:
                 "preview_item": await self._build_import_preview_item(
                     updated_preview,
                     user_id=int(updated_preview.get("user_id") or user_id or 1),
+                    projection_context=projection_context,
                 ),
             }
 
@@ -4582,6 +4589,7 @@ class BillService:
         self,
         preview: dict[str, Any],
         user_id: int = 1,
+        projection_context: dict[str, Any] | None = None,
     ) -> str:
         learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         review_status = (
@@ -4592,6 +4600,7 @@ class BillService:
         learning_recommendation = await self._build_learning_recommendation_from_preview(
             preview,
             user_id=user_id,
+            projection_context=projection_context,
         )
         feedback_rule_id = None
         if isinstance(learning_feedback, dict) and learning_feedback.get("rule_id") not in (None, ""):
