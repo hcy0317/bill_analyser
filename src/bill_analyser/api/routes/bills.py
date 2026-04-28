@@ -5183,6 +5183,10 @@ def update_preview_bill(session_id: str):
         asyncio.set_event_loop(loop)
 
         try:
+            preview_row = loop.run_until_complete(db.get_preview_bill_by_id(preview_id, user_id=user_id))
+            if not preview_row or str(preview_row.get("session_id") or "") != str(session_id):
+                return jsonify({"success": False, "error": "Preview bill not found"}), 404
+
             success = loop.run_until_complete(db.update_preview_bill(preview_id, updates, user_id))
             if (
                 success

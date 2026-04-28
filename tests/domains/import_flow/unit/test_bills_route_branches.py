@@ -382,6 +382,13 @@ class FakeBillsDB:
         _ = (preview_id, updates, user_id)
         return self.update_preview_result
 
+    async def get_preview_bill_by_id(self, preview_id: int, user_id: int = 1) -> dict[str, Any] | None:
+        _ = user_id
+        for row in self.preview_rows:
+            if int(row.get("id") or 0) == int(preview_id):
+                return dict(row)
+        return None
+
 
 class FakeBillsCategoryEngine:
     """Category-engine stub for bills route branch tests."""
@@ -2766,6 +2773,7 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         },
     ):
         _set_request_user_id(8)
+        db.preview_rows[0]["session_id"] = "sess-10"
         payload = update_preview_route("sess-10").get_json() or {}
         assert payload == {"success": True}
 
@@ -2776,6 +2784,7 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         json={"id": 1},
     ):
         _set_request_user_id()
+        db.preview_rows[0]["session_id"] = "sess-11"
         payload = update_preview_route("sess-11").get_json() or {}
         assert payload == {"success": False}
 
@@ -2789,9 +2798,22 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         json={"id": 1},
     ):
         _set_request_user_id()
+        db.preview_rows[0]["session_id"] = "sess-12"
         response, status = _unwrap_response(update_preview_route("sess-12"))
         assert status == 500
         assert response.get_json()["error"] == "update preview boom"
+
+    monkeypatch.setattr(db, "update_preview_bill", FakeBillsDB().update_preview_bill)
+    db.preview_rows[0]["session_id"] = "sess-other"
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview/sess-13/update",
+        method="PUT",
+        json={"id": 1},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(update_preview_route("sess-13"))
+        assert status == 404
+        assert response.get_json()["error"] == "Preview bill not found"
 
 
 def test_bills_preview_recurring_match_routes_cover_put_delete_and_conflicts(

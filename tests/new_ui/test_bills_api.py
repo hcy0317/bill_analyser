@@ -1928,6 +1928,56 @@ class TestBillsAPI:
         assert preview_item["matching"]["learning"]["rule_id"] == rule_id
         assert preview_item["matching"]["learning"]["review_status"] == "pending"
 
+    def test_import_preview_update_rejects_preview_id_from_another_session(self, client):
+        """session-scoped 预览更新不应接受同用户下其他 session 的 preview id。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_update_session_guard")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        source_session_id = f"pytest-import-preview-update-source-{int(time.time() * 1000)}"
+        other_session_id = f"pytest-import-preview-update-other-{int(time.time() * 1000)}"
+
+        from bill_analyser.api.app import db
+
+        async def _create_preview_item() -> int:
+            await db.create_import_session(source_session_id, user_id=current_user_id, file_count=1)
+            await db.create_import_session(other_session_id, user_id=current_user_id, file_count=1)
+            preview_id = await db.insert_preview_bill(
+                source_session_id,
+                {
+                    "preview_date": "2026-06-08 10:30:00",
+                    "preview_type": "支出",
+                    "preview_amount": 18.0,
+                    "preview_main_category": "",
+                    "preview_sub_category": "",
+                    "preview_counterparty": "原始商户",
+                    "preview_payment_method": "现金",
+                    "preview_description": "原始备注",
+                    "preview_parser_id": "alipay",
+                },
+                user_id=current_user_id,
+            )
+            return int(preview_id)
+
+        preview_id = asyncio.run(_create_preview_item())
+
+        update_response = client.put(
+            f"/api/bills/import/v2/preview/{other_session_id}/update",
+            json={
+                "id": preview_id,
+                "counterparty": "错误会话商户",
+                "responseMode": "preview-item",
+            },
+            headers=isolated_auth_headers,
+        )
+        assert update_response.status_code == 404
+        update_data = update_response.get_json()
+        assert update_data["success"] is False
+        assert update_data["error"] == "Preview bill not found"
+
+        persisted_preview = asyncio.run(db.get_preview_bill_by_id(preview_id, user_id=current_user_id))
+        assert persisted_preview is not None
+        assert persisted_preview["session_id"] == source_session_id
+        assert persisted_preview["preview_counterparty"] == "原始商户"
+
     def test_delete_bill(self, client, auth_headers):
         """测试删除账单"""
         # 先获取账单总数
