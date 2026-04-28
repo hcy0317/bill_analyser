@@ -94,7 +94,13 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
         for index in range(0, len(bills), self.batch_size):
             batch = bills[index : index + self.batch_size]
             for bill in batch:
-                parser_date = normalize_bill_date_text(bill.get("date", ""))
+                parser_date = normalize_bill_date_text(
+                    bill.get("date")
+                    or bill.get("trade_time")
+                    or bill.get("time")
+                    or bill.get("timeText")
+                    or ""
+                )
                 try:
                     amount = float(bill.get("amount", 0))
                     if bill.get("type"):
@@ -123,19 +129,26 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
                             parser_date,
                             amount,
                             bill_type,
-                            bill.get("description", ""),
+                            (
+                                bill.get("description")
+                                or bill.get("comment")
+                                or bill.get("remark")
+                                or ""
+                            ),
                             parser_id,
                             serialize_parser_tags(
-                                bill.get("parser_tags"),
+                                bill.get("parser_tags")
+                                or bill.get("_parser_tags")
+                                or bill.get("parserTags"),
                                 parser_id=parser_id,
-                                payment_method=bill.get("payment_method", ""),
+                                payment_method=bill.get("payment_method") or bill.get("account") or "",
                                 channel=str(bill.get("channel", "")),
                             ),
                             bill.get("counterparty", ""),
-                            bill.get("payment_method", ""),
+                            bill.get("payment_method") or bill.get("account") or "",
                             bill.get("original_type", ""),
                             bill.get("original_category", ""),
-                            bill.get("account_id", ""),
+                            bill.get("account_id") or bill.get("source_account_id") or "",
                             "0",
                             now,
                         ),

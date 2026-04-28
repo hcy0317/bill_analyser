@@ -72,6 +72,7 @@ except ImportError:  # pragma: no cover - 依赖在运行环境通常存在
 from bill_analyser.api.adapters.transaction_adapter import TransactionAdapter
 from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.constants import UPLOADS_DIR
+from bill_analyser.core.bill_date_utils import parse_bill_datetime
 from bill_analyser.parsers.parser_tags import resolve_parser_tags
 from bill_analyser.utils.constants import BACKEND_TO_FRONTEND_TYPE
 from bill_analyser.utils.currency import yuan_to_cents  # 金额单位转换工具
@@ -565,52 +566,75 @@ def _load_generic_import_rows(
     raise ValueError(f"Unsupported file format for generic import: {suffix}")
 
 
-def _parse_generic_import_time(raw_value: Any, time_format: str = "") -> int:
-    """解析导入时间并返回 Unix 秒时间戳。"""
-    if raw_value in (None, ""):
-        return int(datetime.now().timestamp())
+def _parse_generic_import_datetime(raw_value: Any, time_format: str = "") -> datetime | None:
+    """严格解析导入时间，无法解析时返回 None，不把坏数据伪装成当前时间。"""
+    parsed_datetime: datetime | None = None
+    value = ""
 
     if isinstance(raw_value, datetime):
-        return int(raw_value.timestamp())
+        parsed_datetime = raw_value.replace(microsecond=0)
+    elif raw_value not in (None, ""):
+        value = re.sub(r"\s+", " ", str(raw_value).replace("\t", " ")).strip()
 
-    value = re.sub(r"\s+", " ", str(raw_value).replace("\t", " ")).strip()
-    if not value:
-        return int(datetime.now().timestamp())
+    if parsed_datetime is None and value:
+        candidate_formats = []
+        if time_format:
+            candidate_formats.append(time_format)
+        candidate_formats.extend(
+            [
+                "%Y-%m-%d %H:%M:%S",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M",
+                "%Y-%m-%d",
+                "%Y/%m/%d",
+                "%Y%m%d %H:%M:%S",
+                "%Y%m%d %H:%M",
+                "%Y%m%d",
+                "%Y.%m.%d %H:%M:%S",
+                "%Y.%m.%d",
+                "%Y年%m月%d日 %H:%M:%S",
+                "%Y年%m月%d日 %H:%M",
+                "%Y年%m月%d日",
+                "%d/%m/%Y %H:%M:%S",
+                "%d/%m/%Y",
+                "%m/%d/%Y %H:%M:%S",
+                "%m/%d/%Y",
+            ]
+        )
 
-    candidate_formats = []
-    if time_format:
-        candidate_formats.append(time_format)
-    candidate_formats.extend(
-        [
-            "%Y-%m-%d %H:%M:%S",
-            "%Y/%m/%d %H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y/%m/%d %H:%M",
-            "%Y-%m-%d",
-            "%Y/%m/%d",
-            "%Y%m%d %H:%M:%S",
-            "%Y%m%d %H:%M",
-            "%Y%m%d",
-            "%Y.%m.%d %H:%M:%S",
-            "%Y.%m.%d",
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y",
-            "%m/%d/%Y %H:%M:%S",
-            "%m/%d/%Y",
-        ]
-    )
+        for fmt in candidate_formats:
+            try:
+                parsed_datetime = datetime.strptime(value, fmt).replace(microsecond=0)
+                break
+            except ValueError:
+                continue
 
-    for fmt in candidate_formats:
+    if parsed_datetime is None and value:
         try:
-            return int(datetime.strptime(value, fmt).timestamp())
+            parsed_datetime = datetime.fromisoformat(value.replace("Z", "+00:00")).replace(
+                microsecond=0
+            )
         except ValueError:
-            continue
+            parsed = parse_bill_datetime(value)
+            if parsed is not None:
+                parsed_datetime = parsed.replace(microsecond=0)
 
-    try:
-        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
-    except ValueError:
-        logger.debug("[通用导入] 无法解析时间，使用当前时间: %s", value)
+    if parsed_datetime is None and value:
+        logger.debug("[通用导入] 无法解析时间: %s", value)
+    return parsed_datetime
+
+
+def _parse_generic_import_time(raw_value: Any, time_format: str = "") -> int:
+    """解析导入时间并返回 Unix 秒时间戳。
+
+    兼容旧调用：旧导入预览工具函数在无法解析时仍返回当前时间戳；
+    新的列映射入库路径必须使用 _parse_generic_import_datetime 做严格校验。
+    """
+    parsed_datetime = _parse_generic_import_datetime(raw_value, time_format)
+    if parsed_datetime is None:
         return int(datetime.now().timestamp())
+    return int(parsed_datetime.timestamp())
 
 
 def _parse_generic_import_amount(
@@ -1369,17 +1393,26 @@ def _parse_import_file_with_column_mapping(
             original_tag_names = []
             if raw_tags:
                 separator = tag_separator or ";"
-                original_tag_names = [item.strip() for item in raw_tags.split(separator) if item.strip()]
+                original_tag_names = [
+                    item.strip() for item in raw_tags.split(separator) if item.strip()
+                ]
+
+            trade_time_text = _build_generic_import_trade_time(
+                row, headers, column_mapping, date_value
+            )
+            parsed_trade_datetime = _parse_generic_import_datetime(trade_time_text, time_format)
+            if parsed_trade_datetime is None:
+                logger.warning(
+                    "[通用导入] 跳过无法解析交易时间的第 %s 行: %s",
+                    row_index,
+                    trade_time_text,
+                )
+                continue
+            normalized_trade_time = parsed_trade_datetime.strftime("%Y-%m-%d %H:%M:%S")
 
             normalized_bill = {
-                "trade_time": datetime.fromtimestamp(
-                    _parse_generic_import_time(
-                        _build_generic_import_trade_time(row, headers, column_mapping, date_value),
-                        time_format,
-                    )
-                ).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "date": normalized_trade_time,
+                "trade_time": normalized_trade_time,
                 "type": type_name,
                 "amount": amount,
                 "destination_amount": related_amount or amount,
@@ -4532,12 +4565,17 @@ def import_parse_generic_into_session():
         asyncio.set_event_loop(loop)
         try:
             # 验证
+            for bill in bills:
+                if not bill.get("date") and bill.get("trade_time"):
+                    bill["date"] = bill["trade_time"]
             valid_bills, _invalid_bills = bill_service.validator.validate_bills(bills)
             # 写入 bills_parser_template
             inserted = 0
             if valid_bills:
                 inserted = loop.run_until_complete(
-                    bill_service.db.insert_parser_templates(session_id, valid_bills, "generic", user_id)
+                    bill_service.db.insert_parser_templates(
+                        session_id, valid_bills, "generic", user_id
+                    )
                 )
             logger.info("[阶段1-通用解析] session=%s, 写入 %d 条通用解析模板", session_id, inserted)
 

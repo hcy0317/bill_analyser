@@ -188,6 +188,44 @@ async def test_insert_parser_templates_normalizes_supported_date_formats(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_insert_parser_templates_accepts_generic_trade_time_staging_fields(tmp_path: Path) -> None:
+    """通用列映射追加到三阶段会话时，应保留 trade_time、账户提示与 parser tags。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "import_session_generic_trade_time")
+        session_id = "import-session-generic-trade-time"
+
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        inserted = await db.insert_parser_templates(
+            session_id,
+            [
+                {
+                    "trade_time": "2026/07/12 09:15:00",
+                    "amount": 25.5,
+                    "type": "支出",
+                    "description": "通用列映射早餐",
+                    "counterparty": "测试早餐铺",
+                    "account": "支付宝",
+                    "parser_tags": ["parser:generic", "channel:manual"],
+                }
+            ],
+            parser_id="generic",
+            user_id=user_id,
+        )
+
+        assert inserted == 1
+        templates = await db.get_parser_templates_by_session(session_id)
+        assert len(templates) == 1
+        assert templates[0]["parser_date"] == "2026-07-12 09:15:00"
+        assert templates[0]["parser_amount"] == 25.5
+        assert templates[0]["parser_description"] == "通用列映射早餐"
+        assert templates[0]["parser_payment_method"] == "支付宝"
+        assert templates[0]["parser_tags"] == ["parser:generic", "channel:manual"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_insert_parser_templates_skips_invalid_rows_without_crashing_batch(tmp_path: Path) -> None:
     """单条坏 parser row 不应让整批模板写入崩掉。"""
     db = await _create_database(tmp_path)

@@ -935,10 +935,10 @@ def test_prepare_import_review_bills_restores_explicit_values_and_builds_mapping
     assert category_mapping["name_to_id"] == {("餐饮", "早餐"): 10, ("学习", "课本"): 11}
 
 
-def test_parse_import_file_with_column_mapping_skips_repeated_headers_and_handles_row_errors(
+def test_parse_import_file_with_column_mapping_skips_repeated_headers_and_invalid_dates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """列映射解析应跳过重复表头，并在单行异常时继续处理。"""
+    """列映射解析应跳过重复表头与坏日期，且输出可直接入 staging 的 date 字段。"""
     monkeypatch.setattr(
         bills_module,
         "_load_generic_import_rows",
@@ -948,20 +948,12 @@ def test_parse_import_file_with_column_mapping_skips_repeated_headers_and_handle
                 ["交易时间", "交易类型", "金额", "对方金额", "账户", "标签", "备注"],
                 ["", "", "", "", "", "", ""],
                 ["2026-03-01 08:30:00", "支出", "12.34", "0", "支付宝", "早餐|午餐", "正常行"],
-                ["2026-03-02 09:00:00", "支出", "11.00", "0", "支付宝", "午餐", "异常行"],
+                ["不是日期", "支出", "11.00", "0", "支付宝", "午餐", "坏日期行"],
             ],
             "utf-8",
             ",",
         ),
     )
-    original_parse_time = bills_module._parse_generic_import_time
-
-    def _fake_parse_time(value: Any, time_format: str = "") -> int:
-        if "2026-03-02" in str(value):
-            raise ValueError("boom")
-        return original_parse_time(value, time_format)
-
-    monkeypatch.setattr(bills_module, "_parse_generic_import_time", _fake_parse_time)
 
     items, actual_encoding, actual_delimiter = bills_module._parse_import_file_with_column_mapping(
         Path("dummy.csv"),
@@ -979,6 +971,8 @@ def test_parse_import_file_with_column_mapping_skips_repeated_headers_and_handle
     assert actual_encoding == "utf-8"
     assert actual_delimiter == ","
     assert len(items) == 1
+    assert items[0]["date"] == "2026-03-01 08:30:00"
+    assert items[0]["trade_time"] == "2026-03-01 08:30:00"
     assert items[0]["description"] == "正常行"
     assert items[0]["original_tag_names"] == ["早餐", "午餐"]
 
