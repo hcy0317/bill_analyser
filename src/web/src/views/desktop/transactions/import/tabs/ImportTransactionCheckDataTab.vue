@@ -3,7 +3,7 @@
         fixed-header
         fixed-footer
         show-select
-        multi-sort
+        :multi-sort="!serverPagedMode"
         density="compact"
         :item-value="getImportTransactionRowKey"
         :class="{ 'import-transaction-table': true, 'disabled': !!disabled }"
@@ -13,6 +13,8 @@
         :no-data-text="tt('No data to import')"
         :items-per-page="tableItemsPerPage"
         :page="tablePage"
+        :sort-by="tableSortBy"
+        @update:sort-by="updatePreviewTableSort"
     >
         <template #header.data-table-select>
             <v-checkbox readonly class="always-cursor-pointer"
@@ -1005,6 +1007,28 @@ type ImportTransactionWithPreviewState = ImportTransaction & {
     _learningDecisionBaseline?: ImportCheckLearningDecisionBaseline;
 };
 
+type PreviewTableSortDirection = 'asc' | 'desc';
+
+interface PreviewTableSortInputItem {
+    key?: string;
+    value?: string;
+    order?: PreviewTableSortDirection | boolean | string | null;
+}
+
+interface PreviewTableSortItem {
+    key: string;
+    order?: PreviewTableSortDirection | boolean;
+}
+
+const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([
+    'time',
+    'type',
+    'sourceAmount',
+    'counterparty',
+    'paymentMethod',
+    'comment'
+]);
+
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
     disabled?: boolean;
@@ -1016,7 +1040,15 @@ const props = defineProps<{
 // v6.55: 定义事件，用于通知父组件数据刷新
 const emit = defineEmits<{
     (e: 'reclassified', data: ImportPreviewRecord[]): void;
-    (e: 'requestPage', page: number, pageSize: number): void;
+    (
+        e: 'requestPage',
+        page: number,
+        pageSize: number,
+        sortOptions?: {
+            sortBy?: string | null;
+            sortDirection?: PreviewTableSortDirection | null;
+        }
+    ): void;
 }>();
 
 const {
@@ -1067,6 +1099,9 @@ const filters = ref<ImportTransactionCheckDataFilter>({
 
 const currentPage = ref<number>(1);
 const countPerPage = ref<number>(10);
+const tableSortBy = ref<PreviewTableSortItem[]>([]);
+const currentSortKey = ref<string>('');
+const currentSortDirection = ref<PreviewTableSortDirection>('asc');
 const serverPagedDrafts = ref<Map<number, ImportTransaction>>(new Map());
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
@@ -3116,20 +3151,77 @@ function normalizePreviewPageSize(value: number | string | null | undefined): nu
     return Math.max(Math.floor(normalizedValue), 1);
 }
 
+function normalizePreviewTableSortDirection(
+    value: string | boolean | null | undefined
+): PreviewTableSortDirection {
+    return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
+}
+
+function normalizeServerPagedSortKey(value: string | null | undefined): string {
+    const normalizedValue = String(value || '').trim();
+    return SERVER_PAGED_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
+}
+
+function normalizePreviewTableSortItems(sortBy: PreviewTableSortInputItem[] | null | undefined): PreviewTableSortItem[] {
+    if (!Array.isArray(sortBy) || sortBy.length < 1) {
+        return [];
+    }
+
+    const normalizedItems: PreviewTableSortItem[] = [];
+    for (const item of sortBy) {
+        const rawKey = item?.key ?? item?.value;
+        const key = String(rawKey || '').trim();
+
+        if (!key) {
+            continue;
+        }
+
+        normalizedItems.push({
+            key,
+            order: normalizePreviewTableSortDirection(item?.order)
+        });
+    }
+
+    if (!serverPagedMode.value) {
+        return normalizedItems;
+    }
+
+    const primarySortableItem = normalizedItems.find(item => normalizeServerPagedSortKey(item.key));
+    return primarySortableItem ? [primarySortableItem] : [];
+}
+
+function getCurrentServerPagedSortRequest(): {
+    sortBy: string | null;
+    sortDirection: PreviewTableSortDirection | null;
+} {
+    return {
+        sortBy: currentSortKey.value || null,
+        sortDirection: currentSortKey.value ? currentSortDirection.value : null
+    };
+}
+
 function emitServerPagedRequest(
     page: number,
     pageSize: number,
     options: {
         cacheDrafts?: boolean;
         force?: boolean;
+        sortKey?: string | null;
+        sortDirection?: PreviewTableSortDirection | null;
     } = {}
 ): void {
     const normalizedPage = normalizePreviewPage(page);
     const normalizedPageSize = normalizePreviewPageSize(pageSize);
+    const normalizedSortKey = normalizeServerPagedSortKey(options.sortKey ?? currentSortKey.value);
+    const normalizedSortDirection = normalizePreviewTableSortDirection(
+        options.sortDirection ?? currentSortDirection.value
+    );
     const pageChanged = currentPage.value !== normalizedPage;
     const pageSizeChanged = countPerPage.value !== normalizedPageSize;
+    const sortChanged = currentSortKey.value !== normalizedSortKey
+        || currentSortDirection.value !== normalizedSortDirection;
 
-    if (!pageChanged && !pageSizeChanged && !options.force) {
+    if (!pageChanged && !pageSizeChanged && !sortChanged && !options.force) {
         return;
     }
 
@@ -3139,7 +3231,9 @@ function emitServerPagedRequest(
 
     currentPage.value = normalizedPage;
     countPerPage.value = normalizedPageSize;
-    emit('requestPage', normalizedPage, normalizedPageSize);
+    currentSortKey.value = normalizedSortKey;
+    currentSortDirection.value = normalizedSortDirection;
+    emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedSortRequest());
 }
 
 function updatePreviewTablePage(page: number): void {
@@ -3165,6 +3259,23 @@ function updatePreviewTablePageSize(pageSize: number): void {
     currentPage.value = 1;
 }
 
+function updatePreviewTableSort(sortBy: PreviewTableSortInputItem[] = []): void {
+    tableSortBy.value = normalizePreviewTableSortItems(sortBy);
+
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    const primarySort = tableSortBy.value[0];
+    const nextSortKey = normalizeServerPagedSortKey(primarySort?.key ?? '');
+    const nextSortDirection = normalizePreviewTableSortDirection(primarySort?.order);
+
+    emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
+        sortKey: nextSortKey,
+        sortDirection: nextSortDirection
+    });
+}
+
 watch(
     () => props.importTransactions,
     transactions => {
@@ -3179,9 +3290,15 @@ watch(
     ([isServerPaged]) => {
         if (!isServerPaged) {
             serverPagedDrafts.value = new Map();
+            currentSortKey.value = '';
+            currentSortDirection.value = 'asc';
             return;
         }
 
+        tableSortBy.value = normalizePreviewTableSortItems(tableSortBy.value);
+        const activeSort = tableSortBy.value[0];
+        currentSortKey.value = normalizeServerPagedSortKey(activeSort?.key ?? '');
+        currentSortDirection.value = normalizePreviewTableSortDirection(activeSort?.order);
         emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
             cacheDrafts: false,
             force: true
@@ -3670,21 +3787,25 @@ const importTransactionsTableHeight = computed<number | undefined>(() => {
     }
 });
 
+function isImportTransactionColumnSortable(columnKey: string): boolean {
+    return !serverPagedMode.value || SERVER_PAGED_SORTABLE_COLUMNS.has(columnKey);
+}
+
 const importTransactionHeaders = computed<object[]>(() => {
     return [
-        { value: 'valid', sortable: true, nowrap: true, width: 35 },
-        { value: 'time', title: tt('Transaction Time'), sortable: true, nowrap: true, maxWidth: 280 },
-        { value: 'parserSource', title: tt('Signals'), sortable: true, nowrap: true, maxWidth: 260 },
-        { value: 'type', title: tt('Type'), sortable: true, nowrap: true, maxWidth: 140 },
-        { value: 'actualCategoryName', title: tt('Category'), sortable: true, nowrap: true },
-        { value: 'sourceAmount', title: tt('Amount'), sortable: true, nowrap: true },
-        { value: 'actualSourceAccountName', title: tt('Account'), sortable: true, nowrap: true },
-        { value: 'geoLocation', title: tt('Geographic Location'), sortable: true, nowrap: true },
-        { value: 'tagIds', title: tt('Tags'), sortable: true, nowrap: true },
+        { value: 'valid', sortable: isImportTransactionColumnSortable('valid'), nowrap: true, width: 35 },
+        { value: 'time', title: tt('Transaction Time'), sortable: isImportTransactionColumnSortable('time'), nowrap: true, maxWidth: 280 },
+        { value: 'parserSource', title: tt('Signals'), sortable: isImportTransactionColumnSortable('parserSource'), nowrap: true, maxWidth: 260 },
+        { value: 'type', title: tt('Type'), sortable: isImportTransactionColumnSortable('type'), nowrap: true, maxWidth: 140 },
+        { value: 'actualCategoryName', title: tt('Category'), sortable: isImportTransactionColumnSortable('actualCategoryName'), nowrap: true },
+        { value: 'sourceAmount', title: tt('Amount'), sortable: isImportTransactionColumnSortable('sourceAmount'), nowrap: true },
+        { value: 'actualSourceAccountName', title: tt('Account'), sortable: isImportTransactionColumnSortable('actualSourceAccountName'), nowrap: true },
+        { value: 'geoLocation', title: tt('Geographic Location'), sortable: isImportTransactionColumnSortable('geoLocation'), nowrap: true },
+        { value: 'tagIds', title: tt('Tags'), sortable: isImportTransactionColumnSortable('tagIds'), nowrap: true },
         // v6.33: 交易对方和支付方式列移到标签列之后
-        { value: 'counterparty', title: tt('Counterparty'), sortable: true, nowrap: true },
-        { value: 'paymentMethod', title: tt('Payment Method'), sortable: true, nowrap: true },
-        { value: 'comment', title: tt('Description'), sortable: true, nowrap: true },
+        { value: 'counterparty', title: tt('Counterparty'), sortable: isImportTransactionColumnSortable('counterparty'), nowrap: true },
+        { value: 'paymentMethod', title: tt('Payment Method'), sortable: isImportTransactionColumnSortable('paymentMethod'), nowrap: true },
+        { value: 'comment', title: tt('Description'), sortable: isImportTransactionColumnSortable('comment'), nowrap: true },
     ];
 });
 

@@ -560,9 +560,20 @@ const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
 const previewTotalCount = ref<number>(0);
 const serverPagedPreviewMode = ref<boolean>(false);
+const previewPageSortBy = ref<string>('');
+const previewPageSortDirection = ref<'asc' | 'desc'>('asc');
 const pendingInitialCheckDataPageRequest = ref<{ page: number; pageSize: number } | null>(null);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
+
+const SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS = new Set<string>([
+    'time',
+    'type',
+    'sourceAmount',
+    'counterparty',
+    'paymentMethod',
+    'comment'
+]);
 
 // v7: 未匹配文件的逐文件列映射队列
 interface UnmatchedFileInfo {
@@ -819,6 +830,8 @@ function open(): Promise<void> {
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
     serverPagedPreviewMode.value = false;
+    previewPageSortBy.value = '';
+    previewPageSortDirection.value = 'asc';
     pendingInitialCheckDataPageRequest.value = null;
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
@@ -1193,21 +1206,55 @@ async function prepareColumnMappingForUnmatchedFile(fileInfo: UnmatchedFileInfo)
 /**
  * v7: 执行阶段2去重并显示预览
  */
-async function fetchPreviewPage(page: number = 1, pageSize: number = 10): Promise<void> {
+function normalizePreviewPageSortBy(value: string | null | undefined): string {
+    const normalizedValue = String(value || '').trim();
+    return SERVER_PAGED_PREVIEW_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
+}
+
+function normalizePreviewPageSortDirection(value: string | null | undefined): 'asc' | 'desc' {
+    return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
+}
+
+type PreviewPageRequestOptions = {
+    sortBy?: string | null;
+    sortDirection?: 'asc' | 'desc' | null;
+};
+
+async function fetchPreviewPage(
+    page: number = 1,
+    pageSize: number = 10,
+    sortOptions: PreviewPageRequestOptions = {}
+): Promise<void> {
     if (!serverSessionId.value) {
         return;
     }
 
     const normalizedPage = Math.max(page || 1, 1);
     const normalizedPageSize = Math.max(pageSize || 10, 1);
+    const normalizedSortBy = normalizePreviewPageSortBy(sortOptions.sortBy ?? previewPageSortBy.value);
+    const normalizedSortDirection = normalizePreviewPageSortDirection(
+        sortOptions.sortDirection ?? previewPageSortDirection.value
+    );
     const token = getCurrentToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
+    previewPageSortBy.value = normalizedSortBy;
+    previewPageSortDirection.value = normalizedSortDirection;
+
+    const searchParams = new URLSearchParams({
+        page: String(normalizedPage),
+        page_size: String(normalizedPageSize)
+    });
+    if (normalizedSortBy) {
+        searchParams.set('sort_by', normalizedSortBy);
+        searchParams.set('sort_direction', normalizedSortDirection);
+    }
+
     const response = await fetch(
-        `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?page=${normalizedPage}&page_size=${normalizedPageSize}`,
+        `/api/bills/import/v2/preview/${encodeURIComponent(serverSessionId.value)}?${searchParams.toString()}`,
         {
             method: 'GET',
             headers,
@@ -1227,10 +1274,16 @@ async function fetchPreviewPage(page: number = 1, pageSize: number = 10): Promis
     const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
     importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
     previewTotalCount.value = Number(result.data?.total || 0);
-    logger.info(`[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, rows=${previewData.length}, total=${previewTotalCount.value}`);
+    logger.info(
+        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, rows=${previewData.length}, total=${previewTotalCount.value}`
+    );
 }
 
-async function onCheckDataPageRequested(page: number = 1, pageSize: number = 10): Promise<void> {
+async function onCheckDataPageRequested(
+    page: number = 1,
+    pageSize: number = 10,
+    sortOptions?: PreviewPageRequestOptions
+): Promise<void> {
     const normalizedPage = Math.max(page || 1, 1);
     const normalizedPageSize = Math.max(pageSize || 10, 1);
     const pendingRequest = pendingInitialCheckDataPageRequest.value;
@@ -1242,7 +1295,7 @@ async function onCheckDataPageRequested(page: number = 1, pageSize: number = 10)
         return;
     }
 
-    await fetchPreviewPage(normalizedPage, normalizedPageSize);
+    await fetchPreviewPage(normalizedPage, normalizedPageSize, sortOptions);
 }
 
 async function executeStage2Dedup(): Promise<void> {
@@ -1279,6 +1332,8 @@ async function executeStage2Dedup(): Promise<void> {
     logger.info(`[三阶段导入-阶段2] 去重统计: ${JSON.stringify(stage2Result.data?.dedup_stats || {})}`);
     previewTotalCount.value = Number(stage2Result.data?.after_dedup || stage2Result.data?.preview_count || 0);
     serverPagedPreviewMode.value = true;
+    previewPageSortBy.value = '';
+    previewPageSortDirection.value = 'asc';
     importTransactions.value = [];
     await fetchPreviewPage(1, 10);
     pendingInitialCheckDataPageRequest.value = { page: 1, pageSize: 10 };
@@ -1680,6 +1735,8 @@ function submit(): void {
             serverSessionId.value = '';
             serverPagedPreviewMode.value = false;
             previewTotalCount.value = 0;
+            previewPageSortBy.value = '';
+            previewPageSortDirection.value = 'asc';
 
             // 刷新相关状态仓库
             accountsStore.updateAccountListInvalidState(true);
@@ -1714,6 +1771,8 @@ function close(completed: boolean): void {
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
     serverPagedPreviewMode.value = false;
+    previewPageSortBy.value = '';
+    previewPageSortDirection.value = 'asc';
     pendingInitialCheckDataPageRequest.value = null;
     showState.value = false;
 }

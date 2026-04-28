@@ -2723,6 +2723,60 @@ class BillService:
             ),
         }
 
+    @staticmethod
+    def _normalize_import_preview_page_sort_direction(sort_direction: str | None) -> str:
+        return "desc" if str(sort_direction or "").strip().lower() == "desc" else "asc"
+
+    @staticmethod
+    def _normalize_import_preview_page_sort_key(sort_by: str | None) -> str:
+        normalized_sort_by = str(sort_by or "").strip()
+        if normalized_sort_by in {"time", "type", "sourceAmount", "counterparty", "paymentMethod", "comment"}:
+            return normalized_sort_by
+        return ""
+
+    @classmethod
+    def _sort_import_preview_page_items(
+        cls,
+        items: list[dict[str, Any]],
+        *,
+        sort_by: str | None,
+        sort_direction: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_sort_by = cls._normalize_import_preview_page_sort_key(sort_by)
+        if not normalized_sort_by:
+            return list(items)
+
+        normalized_sort_direction = cls._normalize_import_preview_page_sort_direction(sort_direction)
+        sort_field_mapping = {
+            "time": "preview_date",
+            "type": "preview_type",
+            "sourceAmount": "preview_amount",
+            "counterparty": "preview_counterparty",
+            "paymentMethod": "preview_payment_method",
+            "comment": "preview_description",
+        }
+        sort_field = sort_field_mapping[normalized_sort_by]
+        stabilized_items = sorted(items, key=lambda item: int(item.get("id") or 0))
+
+        if sort_field == "preview_amount":
+            def amount_key(item: dict[str, Any]) -> float:
+                try:
+                    return float(item.get(sort_field) or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            return sorted(
+                stabilized_items,
+                key=amount_key,
+                reverse=normalized_sort_direction == "desc",
+            )
+
+        return sorted(
+            stabilized_items,
+            key=lambda item: str(item.get(sort_field) or "").casefold(),
+            reverse=normalized_sort_direction == "desc",
+        )
+
     @log_method
     async def get_import_preview_page(
         self,
@@ -2730,11 +2784,15 @@ class BillService:
         *,
         page: int = 1,
         page_size: int = 50,
+        sort_by: str | None = None,
+        sort_direction: str | None = None,
         selected_only: bool = False,
         user_id: int = 1,
     ) -> dict[str, Any]:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = max(min(int(page_size or 50), 200), 1)
+        normalized_sort_by = self._normalize_import_preview_page_sort_key(sort_by)
+        normalized_sort_direction = self._normalize_import_preview_page_sort_direction(sort_direction)
 
         if hasattr(self.db, "get_preview_page_by_session"):
             previews, total = await self.db.get_preview_page_by_session(
@@ -2742,10 +2800,17 @@ class BillService:
                 user_id=user_id,
                 page=normalized_page,
                 page_size=normalized_page_size,
+                sort_by=normalized_sort_by,
+                sort_direction=normalized_sort_direction,
                 selected_only=selected_only,
             )
         else:
             previews = await self.get_import_preview(session_id, selected_only=selected_only, user_id=user_id)
+            previews = self._sort_import_preview_page_items(
+                previews,
+                sort_by=normalized_sort_by,
+                sort_direction=normalized_sort_direction,
+            )
             total = len(previews)
             start = (normalized_page - 1) * normalized_page_size
             end = start + normalized_page_size

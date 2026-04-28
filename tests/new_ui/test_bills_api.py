@@ -1643,6 +1643,82 @@ class TestBillsAPI:
         assert len(second_preview_data["data"]["preview"]) == 1
         assert second_preview_data["data"]["preview"][0]["id"] != first_preview["id"]
 
+    def test_import_preview_page_supports_server_paged_sort_contract(self, client):
+        """server-paged preview route 应支持受支持列的真实后端排序契约。"""
+        isolated_auth_headers = _build_isolated_auth_headers(client, "test_import_preview_page_sort_contract")
+        current_user_id = _get_current_user_id(client, isolated_auth_headers)
+        session_id = f"pytest-import-preview-sort-{int(time.time() * 1000)}"
+
+        parser_bills = [
+            {
+                "date": "2026-08-03 10:00:00",
+                "amount": -18.5,
+                "type": "支出",
+                "description": "gamma row",
+                "counterparty": "Charlie Shop",
+                "payment_method": "WeChat",
+                "source_account_id": 0,
+            },
+            {
+                "date": "2026-08-01 09:00:00",
+                "amount": -8.5,
+                "type": "收入",
+                "description": "alpha row",
+                "counterparty": "Alpha Cafe",
+                "payment_method": "Bank Card",
+                "source_account_id": 0,
+            },
+            {
+                "date": "2026-08-02 08:00:00",
+                "amount": -12.5,
+                "type": "转账",
+                "description": "beta row",
+                "counterparty": "Bravo Market",
+                "payment_method": "Alipay",
+                "source_account_id": 0,
+            },
+        ]
+        _create_test_import_session(session_id, parser_bills, parser_id="alipay", user_id=current_user_id)
+
+        dedup_response = client.post(
+            "/api/bills/import/v2/dedup",
+            data=json.dumps({"session_id": session_id, "include_preview": False}),
+            content_type="application/json",
+            headers=isolated_auth_headers,
+        )
+        assert dedup_response.status_code == 200
+        assert dedup_response.get_json()["success"] is True
+
+        sort_cases = [
+            ("time", "desc", "preview_date"),
+            ("sourceAmount", "asc", "preview_amount"),
+            ("counterparty", "asc", "preview_counterparty"),
+            ("paymentMethod", "asc", "preview_payment_method"),
+            ("comment", "asc", "preview_description"),
+            ("type", "asc", "preview_type"),
+        ]
+
+        for sort_by, sort_direction, response_field in sort_cases:
+            preview_page_response = client.get(
+                (
+                    f"/api/bills/import/v2/preview/{session_id}"
+                    f"?page=1&page_size=10&sort_by={sort_by}&sort_direction={sort_direction}"
+                ),
+                headers=isolated_auth_headers,
+            )
+            assert preview_page_response.status_code == 200
+            payload = preview_page_response.get_json()
+            assert payload["success"] is True
+            preview_rows = payload["data"]["preview"]
+            actual_values = [row[response_field] for row in preview_rows]
+
+            if response_field == "preview_amount":
+                expected_values = sorted(actual_values, reverse=sort_direction == "desc")
+            else:
+                expected_values = sorted(actual_values, key=lambda value: str(value or "").casefold(), reverse=sort_direction == "desc")
+
+            assert actual_values == expected_values
+
     def test_import_preview_recurring_match_rejects_stale_transfer_review_state(self, client):
         """transfer review 变化后，preview recurring bind 应拒绝旧 reviewStatus 快照。"""
         isolated_auth_headers = _build_isolated_auth_headers(client, "test_bills_api_preview_recurring_transfer_stale")

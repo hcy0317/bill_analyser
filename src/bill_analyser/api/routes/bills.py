@@ -4892,6 +4892,8 @@ def get_import_preview(session_id: str):
         page = max(request.args.get("page", 1, type=int) or 1, 1)
         page_size = request.args.get("page_size", 50, type=int) or 50
         page_size = max(min(page_size, 200), 1)
+        sort_by = request.args.get("sort_by", default="", type=str) or ""
+        sort_direction = request.args.get("sort_direction", default="asc", type=str) or "asc"
 
         _, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
@@ -4905,6 +4907,8 @@ def get_import_preview(session_id: str):
                     session_id,
                     page=page,
                     page_size=page_size,
+                    sort_by=sort_by,
+                    sort_direction=sort_direction,
                     user_id=user_id,
                 )
             )

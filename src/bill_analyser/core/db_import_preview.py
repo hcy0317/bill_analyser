@@ -21,6 +21,14 @@ from .db_time import utc_now, utc_now_iso
 class DatabaseImportPreviewMixin(DatabaseFacadeBase):
     """Preview editing, recurring matching, confirmation, and temp-data cleanup helpers."""
 
+    _SERVER_PAGED_PREVIEW_SORT_FIELDS: dict[str, str] = {
+        "time": "preview_date",
+        "type": "preview_type",
+        "sourceAmount": "preview_amount",
+        "counterparty": "preview_counterparty",
+        "paymentMethod": "preview_payment_method",
+        "comment": "preview_description",
+    }
     _TRANSFER_PREVIEW_SNAPSHOT_FIELDS: tuple[tuple[str, Any], ...] = (
         ("preview_type", ""),
         ("preview_main_category", ""),
@@ -448,6 +456,8 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         user_id: int = 1,
         page: int = 1,
         page_size: int = 50,
+        sort_by: str | None = None,
+        sort_direction: str | None = None,
         selected_only: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         normalized_page = max(int(page or 1), 1)
@@ -465,7 +475,22 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         params: list[Any] = [session_id, user_id]
         if selected_only:
             query += " AND preview_selected = 1"
-        query += " ORDER BY preview_date ASC LIMIT ? OFFSET ?"
+
+        normalized_sort_by = str(sort_by or "").strip()
+        normalized_sort_direction = "DESC" if str(sort_direction or "").strip().lower() == "desc" else "ASC"
+        sort_field = self._SERVER_PAGED_PREVIEW_SORT_FIELDS.get(normalized_sort_by)
+
+        if sort_field == "preview_amount":
+            query += f" ORDER BY COALESCE({sort_field}, 0) {normalized_sort_direction}, id ASC"
+        elif sort_field:
+            sort_expression = f"COALESCE({sort_field}, '')"
+            if normalized_sort_by in {"type", "counterparty", "paymentMethod", "comment"}:
+                sort_expression += " COLLATE NOCASE"
+            query += f" ORDER BY {sort_expression} {normalized_sort_direction}, id ASC"
+        else:
+            query += " ORDER BY preview_date ASC, id ASC"
+
+        query += " LIMIT ? OFFSET ?"
         params.extend([normalized_page_size, offset])
 
         async with conn.execute(query, tuple(params)) as cursor:

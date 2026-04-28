@@ -450,7 +450,7 @@ class FakeBillsService:
         self.keyword_calls: list[tuple[str, str | None, str, int]] = []
         self.refresh_calls: list[tuple[Any, int]] = []
         self.reclassify_calls: list[tuple[str, list[dict[str, Any]], int]] = []
-        self.preview_calls: list[str] = []
+        self.preview_calls: list[Any] = []
         self.promote_calls: list[tuple[str, list[dict[str, Any]], int]] = []
         self.preview_recurring_match_calls: list[tuple[int, int | None, dict[str, Any], int]] = []
         self.confirm_result: dict[str, Any] = {"success": True, "inserted": 2}
@@ -556,16 +556,43 @@ class FakeBillsService:
         *,
         page: int = 1,
         page_size: int = 50,
+        sort_by: str | None = None,
+        sort_direction: str | None = None,
         selected_only: bool = False,
         user_id: int = 1,
     ) -> dict[str, Any]:
         _ = (selected_only, user_id)
-        self.preview_calls.append((session_id, page, page_size))
+        normalized_sort_direction = "desc" if str(sort_direction or "").lower() == "desc" else "asc"
+        self.preview_calls.append((session_id, page, page_size, sort_by, normalized_sort_direction))
+        preview_rows = [dict(item) for item in self.preview_result]
+        sort_field_mapping = {
+            "time": "preview_date",
+            "type": "preview_type",
+            "sourceAmount": "preview_amount",
+            "counterparty": "preview_counterparty",
+            "paymentMethod": "preview_payment_method",
+            "comment": "preview_description",
+        }
+        sort_field = sort_field_mapping.get(str(sort_by or ""))
+        if sort_field:
+            preview_rows = sorted(preview_rows, key=lambda item: int(item.get("id") or 0))
+            if sort_field == "preview_amount":
+                preview_rows = sorted(
+                    preview_rows,
+                    key=lambda item: float(item.get(sort_field) or 0),
+                    reverse=normalized_sort_direction == "desc",
+                )
+            else:
+                preview_rows = sorted(
+                    preview_rows,
+                    key=lambda item: str(item.get(sort_field) or "").casefold(),
+                    reverse=normalized_sort_direction == "desc",
+                )
         start = max(page - 1, 0) * page_size
         end = start + page_size
         return {
-            "preview": [dict(item) for item in self.preview_result[start:end]],
-            "total": len(self.preview_result),
+            "preview": preview_rows[start:end],
+            "total": len(preview_rows),
             "page": page,
             "page_size": page_size,
         }
@@ -2720,6 +2747,36 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         assert payload["data"]["preview"][0]["id"] == 2
         assert payload["data"]["preview"][0]["preview_amount"] == 88.0
         assert payload["data"]["preview"][0]["preview_selected"] is False
+
+    service.preview_result = [
+        {
+            "id": 1,
+            "preview_date": "2026-08-01 10:00:00",
+            "preview_amount": 66.0,
+            "preview_counterparty": "Bravo",
+            "preview_payment_method": "WeChat",
+            "preview_description": "beta",
+            "preview_type": "支出",
+        },
+        {
+            "id": 2,
+            "preview_date": "2026-08-02 10:00:00",
+            "preview_amount": 88.0,
+            "preview_counterparty": "Alpha",
+            "preview_payment_method": "Alipay",
+            "preview_description": "alpha",
+            "preview_type": "收入",
+        },
+    ]
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview/sess-sort?page=1&page_size=10&sort_by=counterparty&sort_direction=asc",
+        method="GET",
+    ):
+        _set_request_user_id(5)
+        payload = preview_route("sess-sort").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["preview"][0]["preview_counterparty"] == "Alpha"
+        assert service.preview_calls[-1] == ("sess-sort", 1, 10, "counterparty", "asc")
 
     async def _raise_preview_list_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("preview list boom")
