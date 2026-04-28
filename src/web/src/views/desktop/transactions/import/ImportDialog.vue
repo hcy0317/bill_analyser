@@ -219,7 +219,7 @@
                         :disabled="loading || submitting"
                         :session-id="serverSessionId"
                         @reclassified="onReclassified"
-                        @request-page="fetchPreviewPage"
+                        @request-page="onCheckDataPageRequested"
                     />
                 </v-window-item>
                 <v-window-item value="finalResult">
@@ -560,6 +560,7 @@ const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
 const previewTotalCount = ref<number>(0);
 const serverPagedPreviewMode = ref<boolean>(false);
+const pendingInitialCheckDataPageRequest = ref<{ page: number; pageSize: number } | null>(null);
 const parsedFileDelimiter = ref<string>('');
 const matchedImportConfig = ref<ImportConfigMatchResult | null>(null);
 
@@ -818,6 +819,7 @@ function open(): Promise<void> {
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
     serverPagedPreviewMode.value = false;
+    pendingInitialCheckDataPageRequest.value = null;
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
     const promises = [
@@ -1228,6 +1230,21 @@ async function fetchPreviewPage(page: number = 1, pageSize: number = 10): Promis
     logger.info(`[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, rows=${previewData.length}, total=${previewTotalCount.value}`);
 }
 
+async function onCheckDataPageRequested(page: number = 1, pageSize: number = 10): Promise<void> {
+    const normalizedPage = Math.max(page || 1, 1);
+    const normalizedPageSize = Math.max(pageSize || 10, 1);
+    const pendingRequest = pendingInitialCheckDataPageRequest.value;
+
+    if (pendingRequest
+        && pendingRequest.page === normalizedPage
+        && pendingRequest.pageSize === normalizedPageSize) {
+        pendingInitialCheckDataPageRequest.value = null;
+        return;
+    }
+
+    await fetchPreviewPage(normalizedPage, normalizedPageSize);
+}
+
 async function executeStage2Dedup(): Promise<void> {
     importProcess.value = 60;
     logger.info(`[三阶段导入-阶段2] 开始去重处理, session_id=${serverSessionId.value}`);
@@ -1263,6 +1280,8 @@ async function executeStage2Dedup(): Promise<void> {
     previewTotalCount.value = Number(stage2Result.data?.after_dedup || stage2Result.data?.preview_count || 0);
     serverPagedPreviewMode.value = true;
     importTransactions.value = [];
+    await fetchPreviewPage(1, 10);
+    pendingInitialCheckDataPageRequest.value = { page: 1, pageSize: 10 };
     currentStep.value = 'checkData';
     importProcess.value = 100;
 }
@@ -1695,6 +1714,7 @@ function close(completed: boolean): void {
     importTransactions.value = undefined;
     previewTotalCount.value = 0;
     serverPagedPreviewMode.value = false;
+    pendingInitialCheckDataPageRequest.value = null;
     showState.value = false;
 }
 
