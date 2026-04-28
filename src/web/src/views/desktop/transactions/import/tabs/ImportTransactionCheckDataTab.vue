@@ -101,8 +101,8 @@
         </template>
         <template #item.parserSource="{ item }">
             <import-preview-signal-cell
-                :view-model="importPreviewSignalViewModels[item.index]"
-                :disabled="!!disabled || isEditing"
+                :view-model="getImportPreviewSignalViewModel(item)"
+                :disabled="!!disabled"
                 :has-session="!!props.sessionId"
                 :row-busy="isPreviewMatchingDecisionBusy(getPreviewId(item))"
                 :transfer-busy="isTransferDecisionBusy(item)"
@@ -820,7 +820,8 @@ import {
     buildImportPreviewSignalViewModel,
     type ImportCheckMatchingSourceContext,
     type ImportPreviewSignalStatus,
-    type ImportPreviewSignalViewModel
+    type ImportPreviewSignalViewModel,
+    type ImportPreviewSignalViewModelOptions
 } from '../checkDataMatching.ts';
 import {
     buildImportCheckLearningPreviewTextSyncPayload,
@@ -846,6 +847,7 @@ import { CategoryType } from '@/core/category.ts';
 import { TransactionType } from '@/core/transaction.ts';
 
 import { Account, type CategorizedAccountWithDisplayBalance } from '@/models/account.ts';
+import type { ImportMatchingSourcePayload } from '@/models/import_matching.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
 import type { TransactionTag } from '@/models/transaction_tag.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
@@ -1351,6 +1353,11 @@ async function openRecurringCandidateDialog(item: ImportTransaction): Promise<vo
         return;
     }
 
+    if (isEditing.value) {
+        snackbar.value?.showMessage('Please sync manual preview edits before updating scheduled matches');
+        return;
+    }
+
     recurringCandidateTarget.value = item;
     recurringCandidates.value = [];
     selectedRecurringCandidateId.value = item.recurringTemplateId || '';
@@ -1851,6 +1858,15 @@ function getLearningDecisionMessageKey(decision: 'accept' | 'reject' | 'clear'):
     return 'Clear Learning Decision';
 }
 
+function shouldBlockSignalActionWhileEditing(message: string): boolean {
+    if (!isEditing.value) {
+        return false;
+    }
+
+    snackbar.value?.showMessage(message);
+    return true;
+}
+
 async function reviewTransferSuggestion(
     item: ImportTransaction,
     decision: 'accept' | 'reject' | 'clear'
@@ -1858,6 +1874,10 @@ async function reviewTransferSuggestion(
     const previewId = getPreviewId(item);
     if (!props.sessionId || previewId === null) {
         snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (shouldBlockSignalActionWhileEditing('Please sync manual preview edits before reviewing transfer suggestions')) {
         return;
     }
 
@@ -1932,6 +1952,10 @@ async function reviewLearningSuggestion(
     const previewId = getPreviewId(item);
     if (!props.sessionId || previewId === null) {
         snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (shouldBlockSignalActionWhileEditing(tt('Please sync manual preview edits before reviewing learning suggestions'))) {
         return;
     }
 
@@ -2119,89 +2143,199 @@ function getLearningSignalStatus(item: ImportTransaction): ImportPreviewSignalSt
     return null;
 }
 
-const importPreviewSignalViewModels = computed<Record<number, ImportPreviewSignalViewModel>>(() => {
-    const importTransactions = props.importTransactions || [];
+const importPreviewSignalSourceContext = computed<{
+    sourceRowLookup: Map<string, ImportCheckMatchingSourceContext>;
+    version: string;
+}>(() => {
     const sourceRowLookup = new Map<string, ImportCheckMatchingSourceContext>();
-    const signalViewModels: Record<number, ImportPreviewSignalViewModel> = {};
+    const versionParts: string[] = [];
 
-    for (const item of importTransactions) {
+    for (const item of props.importTransactions || []) {
         const parserSource = (item.parserSource || '').trim();
         const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
         if (!parserSource && parserTags.length < 1) {
             continue;
         }
+
+        const previewId = getPreviewId(item);
         const sourceContext = {
             parserSource,
             parserTags
         };
 
         sourceRowLookup.set(String(item.index), sourceContext);
-        const previewId = getPreviewId(item);
         if (previewId !== null) {
             sourceRowLookup.set(String(previewId), sourceContext);
         }
+
+        versionParts.push([
+            item.index,
+            previewId ?? '',
+            parserSource,
+            parserTags.join('|')
+        ].join('::'));
     }
 
-    for (const item of importTransactions) {
-        signalViewModels[item.index] = buildImportPreviewSignalViewModel({
-            parserSource: item.parserSource,
-            parserTags: item.parserTags,
-            dedupType: item.dedupType,
-            dedupSourceIds: item.dedupSourceIds,
-            dedupSourceCount: item.matching?.dedup.source_count,
-            dedupSourceLabels: item.matching?.dedup.source_labels,
-            dedupSources: item.matching?.dedup.sources,
-            parserSourceChain: item.matching?.parser.source_chain,
-            isManuallyAnnotated: item.isManuallyAnnotated,
-            transferStatus: getTransferSignalStatus(item),
-            transferTitle: item.transferSuggestionReason,
-            transferPairOrder: item.matching?.transfer.pair_order,
-            transferSourceChain: item.matching?.transfer.source_chain,
-            learningStatus: getLearningSignalStatus(item),
-            learningTitle: item.learningRecommendationReason,
-            learningSummary: item.learningRecommendationSummary,
-            hasRecurringMatch: item.hasRecurringMatch(),
-            recurringTitle: getRecurringMatchSummary(item),
-            recurringCandidateCount: item.recurringCandidateCount,
-            recurringPrimaryReason: getPrimaryRecurringReason(item)
-        }, {
-            currentParserSource: item.parserSource,
-            matchLabel: tt('Matching'),
-            parserLabels: PARSER_LABELS,
-            parserColors: PARSER_COLORS,
-            dedupLabels: {
-                'Transfer Match': tt('Transfer Match'),
-                'Platform Duplicate': tt('Platform Duplicate'),
-                'Platform-Bank Duplicate': tt('Platform-Bank Duplicate'),
-                'Similar Duplicate': tt('Similar Duplicate'),
-                'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
-                'Cross-Batch Transfer': tt('Cross-Batch Transfer')
-            },
-            investmentReasonLabels: {
-                platform: tt('Investment Reason Platform'),
-                product: tt('Investment Reason Product'),
-                exclude: tt('Investment Reason Exclude'),
-                negative: tt('Investment Reason Negative'),
-                type: tt('Investment Reason Type')
-            },
-            sourceRoleLabels: {
-                outgoing: tt('Outgoing'),
-                incoming: tt('Incoming'),
-                debit: tt('Outgoing'),
-                credit: tt('Incoming')
-            },
-            infoLabels: {
-                sourceLabel: tt('Source'),
-                duplicateSourcesLabel: tt('Duplicate Sources'),
-                recommendedCategoryLabel: tt('Recommended Category'),
-                accountRouteLabel: tt('Account Route')
-            },
-            sourceRowLookup
-        });
-    }
-
-    return signalViewModels;
+    return {
+        sourceRowLookup,
+        version: versionParts.join('\u001f')
+    };
 });
+
+const importPreviewSignalSharedContext = computed<{
+    options: Omit<ImportPreviewSignalViewModelOptions, 'currentParserSource' | 'sourceRowLookup'>;
+    version: string;
+}>(() => {
+    const options = {
+        matchLabel: tt('Matching'),
+        parserLabels: PARSER_LABELS,
+        parserColors: PARSER_COLORS,
+        dedupLabels: {
+            'Transfer Match': tt('Transfer Match'),
+            'Platform Duplicate': tt('Platform Duplicate'),
+            'Platform-Bank Duplicate': tt('Platform-Bank Duplicate'),
+            'Similar Duplicate': tt('Similar Duplicate'),
+            'Split-Merge Duplicate': tt('Split-Merge Duplicate'),
+            'Cross-Batch Transfer': tt('Cross-Batch Transfer')
+        },
+        investmentReasonLabels: {
+            platform: tt('Investment Reason Platform'),
+            product: tt('Investment Reason Product'),
+            exclude: tt('Investment Reason Exclude'),
+            negative: tt('Investment Reason Negative'),
+            type: tt('Investment Reason Type')
+        },
+        sourceRoleLabels: {
+            outgoing: tt('Outgoing'),
+            incoming: tt('Incoming'),
+            debit: tt('Outgoing'),
+            credit: tt('Incoming')
+        },
+        infoLabels: {
+            sourceLabel: tt('Source'),
+            duplicateSourcesLabel: tt('Duplicate Sources'),
+            recommendedCategoryLabel: tt('Recommended Category'),
+            accountRouteLabel: tt('Account Route')
+        }
+    } satisfies Omit<ImportPreviewSignalViewModelOptions, 'currentParserSource' | 'sourceRowLookup'>;
+
+    return {
+        options,
+        version: [
+            options.matchLabel,
+            options.dedupLabels['Transfer Match'],
+            options.dedupLabels['Platform Duplicate'],
+            options.dedupLabels['Platform-Bank Duplicate'],
+            options.dedupLabels['Similar Duplicate'],
+            options.dedupLabels['Split-Merge Duplicate'],
+            options.dedupLabels['Cross-Batch Transfer'],
+            options.investmentReasonLabels.platform,
+            options.investmentReasonLabels.product,
+            options.investmentReasonLabels.exclude,
+            options.investmentReasonLabels.negative,
+            options.investmentReasonLabels.type,
+            options.sourceRoleLabels.outgoing,
+            options.sourceRoleLabels.incoming,
+            options.infoLabels.sourceLabel,
+            options.infoLabels.duplicateSourcesLabel,
+            options.infoLabels.recommendedCategoryLabel,
+            options.infoLabels.accountRouteLabel
+        ].join('\u001f')
+    };
+});
+
+type ImportPreviewSignalViewModelCacheEntry = {
+    signature: string;
+    viewModel: ImportPreviewSignalViewModel;
+};
+
+const importPreviewSignalViewModelCache = new WeakMap<ImportTransaction, ImportPreviewSignalViewModelCacheEntry>();
+
+function serializeImportPreviewSignalSourceChain(
+    sources: ImportMatchingSourcePayload[] | undefined
+): string {
+    return (sources || []).map(source => [
+        source.role || '',
+        source.parser_id || '',
+        source.parser_label || '',
+        source.label || '',
+        source.position || ''
+    ].join('::')).join('||');
+}
+
+function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string {
+    const dedupSourceIds = Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : [];
+    const dedupSourceLabels = Array.isArray(item.matching?.dedup.source_labels) ? item.matching?.dedup.source_labels : [];
+    const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
+
+    return [
+        importPreviewSignalSourceContext.value.version,
+        importPreviewSignalSharedContext.value.version,
+        item.index,
+        getPreviewId(item) ?? '',
+        (item.parserSource || '').trim(),
+        parserTags.join('|'),
+        item.dedupType || '',
+        dedupSourceIds.join('|'),
+        Number(item.matching?.dedup.source_count || 0),
+        dedupSourceLabels.join('|'),
+        serializeImportPreviewSignalSourceChain(item.matching?.dedup.sources),
+        serializeImportPreviewSignalSourceChain(item.matching?.parser.source_chain),
+        String(!!item.isManuallyAnnotated),
+        getTransferSignalStatus(item) || '',
+        item.transferSuggestionReason || '',
+        item.matching?.transfer.pair_order || '',
+        serializeImportPreviewSignalSourceChain(item.matching?.transfer.source_chain),
+        getLearningSignalStatus(item) || '',
+        item.learningRecommendationReason || '',
+        item.learningRecommendationSummary || '',
+        String(!!item.hasRecurringMatch()),
+        getRecurringMatchSummary(item),
+        Number(item.recurringCandidateCount || 0),
+        getPrimaryRecurringReason(item)
+    ].join('\u001f');
+}
+
+function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreviewSignalViewModel {
+    const signature = buildImportPreviewSignalCacheSignature(item);
+    const cached = importPreviewSignalViewModelCache.get(item);
+    if (cached && cached.signature === signature) {
+        return cached.viewModel;
+    }
+
+    const viewModel = buildImportPreviewSignalViewModel({
+        parserSource: item.parserSource,
+        parserTags: item.parserTags,
+        dedupType: item.dedupType,
+        dedupSourceIds: item.dedupSourceIds,
+        dedupSourceCount: item.matching?.dedup.source_count,
+        dedupSourceLabels: item.matching?.dedup.source_labels,
+        dedupSources: item.matching?.dedup.sources,
+        parserSourceChain: item.matching?.parser.source_chain,
+        isManuallyAnnotated: item.isManuallyAnnotated,
+        transferStatus: getTransferSignalStatus(item),
+        transferTitle: item.transferSuggestionReason,
+        transferPairOrder: item.matching?.transfer.pair_order,
+        transferSourceChain: item.matching?.transfer.source_chain,
+        learningStatus: getLearningSignalStatus(item),
+        learningTitle: item.learningRecommendationReason,
+        learningSummary: item.learningRecommendationSummary,
+        hasRecurringMatch: item.hasRecurringMatch(),
+        recurringTitle: getRecurringMatchSummary(item),
+        recurringCandidateCount: item.recurringCandidateCount,
+        recurringPrimaryReason: getPrimaryRecurringReason(item)
+    }, {
+        ...importPreviewSignalSharedContext.value.options,
+        currentParserSource: item.parserSource,
+        sourceRowLookup: importPreviewSignalSourceContext.value.sourceRowLookup
+    });
+
+    importPreviewSignalViewModelCache.set(item, {
+        signature,
+        viewModel
+    });
+    return viewModel;
+}
 
 function getImportTransactionRowKey(item: ImportTransaction): string {
     const previewId = getPreviewId(item);
