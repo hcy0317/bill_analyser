@@ -129,6 +129,35 @@ def _serialize_matching_feedback_event(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _serialize_reconciliation_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    serialized = {
+        "id": int(candidate.get("id") or 0),
+        "candidateId": str(candidate.get("candidate_id") or ""),
+        "candidateType": str(candidate.get("candidate_type") or ""),
+        "status": str(candidate.get("status") or ""),
+        "sessionId": str(candidate.get("session_id") or ""),
+        "importBillKey": str(candidate.get("import_bill_key") or ""),
+        "existingBillId": int(candidate.get("existing_bill_id") or 0),
+        "groupKey": str(candidate.get("group_key") or ""),
+        "amountAbs": float(candidate.get("amount_abs") or 0.0),
+        "score": float(candidate.get("score") or 0.0),
+        "level": str(candidate.get("level") or ""),
+        "reason": str(candidate.get("reason") or ""),
+        "seenCount": int(candidate.get("seen_count") or 0),
+        "firstSeenAt": str(candidate.get("first_seen_at") or ""),
+        "lastSeenAt": str(candidate.get("last_seen_at") or ""),
+        "importBill": dict(candidate.get("import_bill_snapshot") or {}),
+        "existingBill": dict(candidate.get("existing_bill_snapshot") or {}),
+    }
+    if candidate.get("preview_id") not in (None, ""):
+        serialized["previewId"] = int(candidate.get("preview_id") or 0)
+    if candidate.get("time_diff_seconds") not in (None, ""):
+        serialized["timeDiffSeconds"] = int(candidate.get("time_diff_seconds") or 0)
+    if isinstance(candidate.get("source_payload"), dict):
+        serialized["sourcePayload"] = dict(candidate.get("source_payload") or {})
+    return serialized
+
+
 def _parse_matching_candidates_selector() -> tuple[str | None, int | None]:
     session_id = str(request.args.get("sessionId") or "").strip()
     raw_bill_id = request.args.get("billId")
@@ -151,6 +180,46 @@ def _parse_matching_candidates_selector() -> tuple[str | None, int | None]:
         raise ValueError("Invalid billId")
 
     return None, bill_id
+
+
+def _parse_optional_positive_query_int(field_name: str) -> int | None:
+    raw_value = request.args.get(field_name)
+    if raw_value in (None, ""):
+        return None
+    try:
+        normalized_value = int(str(raw_value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid {field_name}") from exc
+    if normalized_value <= 0:
+        raise ValueError(f"Invalid {field_name}")
+    return normalized_value
+
+
+def _parse_reconciliation_candidates_query() -> dict[str, Any]:
+    candidate_type = str(request.args.get("candidateType") or "").strip().lower() or None
+    if candidate_type is not None and candidate_type not in {"transfer", "duplicate"}:
+        raise ValueError("Invalid candidateType")
+
+    status = str(request.args.get("status") or "").strip().lower() or None
+    if status is not None and status not in {
+        "pending",
+        "accepted",
+        "rejected",
+        "merged",
+        "rolled_back",
+        "superseded",
+    }:
+        raise ValueError("Invalid status")
+
+    limit = _parse_optional_positive_query_int("limit") or 200
+    return {
+        "session_id": str(request.args.get("sessionId") or "").strip() or None,
+        "preview_id": _parse_optional_positive_query_int("previewId"),
+        "existing_bill_id": _parse_optional_positive_query_int("billId"),
+        "candidate_type": candidate_type,
+        "status": status,
+        "limit": min(limit, 500),
+    }
 
 
 def _parse_positive_request_int(data: dict[str, Any], field_name: str) -> int:
@@ -357,6 +426,36 @@ def get_matching_bill_feedback(bill_id: int):
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("获取历史账单 matching feedback 失败: %s", exc, exc_info=True)
+        return jsonify({"success": False, "error": "Internal Server Error"}), 500
+
+
+@bp.route("/reconciliation-candidates", methods=["GET"])
+@log_method
+@require_auth
+def get_reconciliation_candidates():
+    """Read persisted import-to-formal-bill reconciliation candidates."""
+    try:
+        try:
+            query = _parse_reconciliation_candidates_query()
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+        db, _ = get_app_context()
+        user_id = _get_request_user_id()
+        candidates = _run_async(db.list_import_reconciliation_candidates(user_id=user_id, **query))
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "candidates": [
+                        _serialize_reconciliation_candidate(candidate)
+                        for candidate in list(candidates or [])
+                    ]
+                },
+            }
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("获取导入后匹配 reconciliation 候选失败: %s", exc, exc_info=True)
         return jsonify({"success": False, "error": "Internal Server Error"}), 500
 
 

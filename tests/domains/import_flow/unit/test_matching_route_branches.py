@@ -36,6 +36,31 @@ class FakeMatchingDB:
 
     def __init__(self) -> None:
         self.import_session_result: dict[str, Any] | None = {"session_id": "session-1", "user_id": 9}
+        self.reconciliation_candidate_calls: list[dict[str, Any]] = []
+        self.reconciliation_candidates_result: list[dict[str, Any]] = [
+            {
+                "id": 1,
+                "candidate_id": "reconcile:import:duplicate:bill:11:abc",
+                "candidate_type": "duplicate",
+                "status": "pending",
+                "session_id": "session-1",
+                "preview_id": 1001,
+                "import_bill_key": "preview:1001",
+                "existing_bill_id": 11,
+                "group_key": "import_reconciliation:duplicate:bill:11:amount:42.00:2026-05-01",
+                "amount_abs": 42.0,
+                "time_diff_seconds": 5,
+                "score": 0.98,
+                "level": "high",
+                "reason": "same_amount|same_day|time_close",
+                "seen_count": 2,
+                "first_seen_at": "2026-05-01T10:00:00",
+                "last_seen_at": "2026-05-01T10:01:00",
+                "import_bill_snapshot": {"description": "import"},
+                "existing_bill_snapshot": {"id": 11, "description": "existing"},
+                "source_payload": {"family": "import_reconciliation"},
+            }
+        ]
         self.pairing_investment_settings_result: dict[str, Any] | None = {
             "user_id": 9,
             "import_learning_enabled": True,
@@ -48,6 +73,10 @@ class FakeMatchingDB:
     async def get_import_session(self, session_id: str, user_id: int = 1) -> dict[str, Any] | None:
         _ = (session_id, user_id)
         return dict(self.import_session_result) if self.import_session_result else None
+
+    async def list_import_reconciliation_candidates(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self.reconciliation_candidate_calls.append(dict(kwargs))
+        return [dict(candidate) for candidate in self.reconciliation_candidates_result]
 
     async def get_pairing_investment_settings(self, user_id: int = 1) -> dict[str, Any] | None:
         _ = user_id
@@ -451,6 +480,55 @@ def test_matching_investment_settings_route_is_retired(
         assert status == 410
         assert response.get_json()["error"] == "Investment recognition settings are managed by category rules"
         assert db.update_pairing_investment_settings_calls == []
+
+
+def test_matching_reconciliation_candidates_route_is_read_only_and_filterable(
+    matching_route_app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import reconciliation route should expose persisted candidate truth without apply actions."""
+    db = FakeMatchingDB()
+    service = FakeMatchingService()
+    loop = FakeLoop()
+    _install_fake_loop(monkeypatch, loop)
+    monkeypatch.setattr(matching_module, "get_app_context", lambda: (db, service))
+
+    route = _unwrap_all(matching_module.get_reconciliation_candidates)
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconciliation-candidates"
+        "?sessionId=session-1&previewId=1001&billId=11&candidateType=duplicate&status=pending",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        payload = route().get_json() or {}
+
+    assert payload["success"] is True
+    candidate = payload["data"]["candidates"][0]
+    assert candidate["candidateId"] == "reconcile:import:duplicate:bill:11:abc"
+    assert candidate["candidateType"] == "duplicate"
+    assert candidate["previewId"] == 1001
+    assert candidate["timeDiffSeconds"] == 5
+    assert db.reconciliation_candidate_calls == [
+        {
+            "user_id": 9,
+            "session_id": "session-1",
+            "preview_id": 1001,
+            "existing_bill_id": 11,
+            "candidate_type": "duplicate",
+            "status": "pending",
+            "limit": 200,
+        }
+    ]
+
+    with matching_route_app.test_request_context(
+        "/api/matching/reconciliation-candidates?candidateType=learning",
+        method="GET",
+    ):
+        _set_request_user_id(9)
+        response, status = _unwrap_response(route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid candidateType"
 
 
 def test_matching_bill_routes_cover_candidates_and_manual_pair_branches(
