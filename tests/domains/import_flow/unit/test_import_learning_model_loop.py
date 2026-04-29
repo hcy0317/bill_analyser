@@ -219,6 +219,9 @@ async def test_green_accept_and_reject_correction_write_feedback_and_refresh_mod
                  "source_account_id": source_account_id},
             ],
         )
+        active_model = await db.get_active_import_learning_model(user_id=user_id)
+        assert active_model is not None
+        model_version = str(active_model["model_version"])
 
         accept_session_id = "target-green-accept"
         await db.create_import_session(accept_session_id, user_id=user_id, file_count=1)
@@ -244,6 +247,7 @@ async def test_green_accept_and_reject_correction_write_feedback_and_refresh_mod
                 "destinationAccountId": None,
             },
             response_mode="preview-item",
+            model_version=model_version,
             user_id=user_id,
         )
         assert accept_result["success"] is True
@@ -271,6 +275,9 @@ async def test_green_accept_and_reject_correction_write_feedback_and_refresh_mod
             (source_account_id, reject_id, user_id),
         )
         await conn.commit()
+        reject_active_model = await db.get_active_import_learning_model(user_id=user_id)
+        assert reject_active_model is not None
+        reject_model_version = str(reject_active_model["model_version"])
         reject_result = await service.apply_preview_learning_decision(
             reject_id,
             "reject",
@@ -284,6 +291,7 @@ async def test_green_accept_and_reject_correction_write_feedback_and_refresh_mod
                 "destinationAccountId": None,
             },
             response_mode="preview-item",
+            model_version=reject_model_version,
             user_id=user_id,
         )
         assert reject_result["success"] is True
@@ -300,6 +308,79 @@ async def test_green_accept_and_reject_correction_write_feedback_and_refresh_mod
             event_types = [row["event_type"] for row in await cursor.fetchall()]
         assert "model_preview_accept" in event_types
         assert "model_preview_reject" in event_types
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_generic_model_accept_rejects_stale_model_version(tmp_path: Path) -> None:
+    db, service, user_id, coffee_category_id, tea_category_id, source_account_id = await _setup_learning_domain(
+        tmp_path,
+        "learning_stale_model_accept",
+    )
+    try:
+        await _train_learning_samples(
+            db,
+            user_id=user_id,
+            session_id="train-stale-v1",
+            rows=[
+                {"counterparty": "星巴克咖啡", "description": "门店咖啡", "category_id": coffee_category_id,
+                 "source_account_id": source_account_id},
+                {"counterparty": "星巴克臻选", "description": "咖啡消费", "category_id": coffee_category_id,
+                 "source_account_id": source_account_id},
+                {"counterparty": "喜茶", "description": "芝士茶饮", "category_id": tea_category_id,
+                 "source_account_id": source_account_id},
+            ],
+        )
+
+        target_session_id = "target-stale-model"
+        await db.create_import_session(target_session_id, user_id=user_id, file_count=1)
+        target_id = await _insert_preview(
+            db,
+            session_id=target_session_id,
+            user_id=user_id,
+            parser_id="alipay",
+            counterparty="星巴克门店",
+            description="咖啡拿铁",
+            payment_method="支付宝",
+        )
+
+        seen_previews = await service.get_import_preview(target_session_id, user_id=user_id)
+        seen_learning = seen_previews[0]["matching"]["learning"]
+        seen_model_version = str(seen_learning["model_version"])
+        assert seen_learning["source"] == "model"
+
+        refreshed = await db.refresh_import_learning_model(user_id=user_id)
+        assert refreshed["trained"] is True
+        assert refreshed["model_version"] != seen_model_version
+
+        result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            f"preview:{target_id}:learning",
+            {
+                "expectedState": {
+                    "sessionId": target_session_id,
+                    "reviewStatus": "pending",
+                    "previewType": "支出",
+                    "categoryId": None,
+                    "recurringId": None,
+                    "sourceAccountId": None,
+                    "destinationAccountId": None,
+                },
+                "responseMode": "preview-item",
+                "modelVersion": seen_model_version,
+            },
+            user_id=user_id,
+        )
+
+        assert result == {
+            "success": False,
+            "error": "Learning candidate changed, please refresh",
+            "status_code": 409,
+        }
+        preview_after_conflict = await db.get_preview_bill_by_id(target_id, user_id=user_id)
+        assert preview_after_conflict is not None
+        assert preview_after_conflict["preview_matching_feedback"] == {}
+        assert await db.get_import_learning_corpus_samples(user_id=user_id, limit=None)
     finally:
         await db.close()
 

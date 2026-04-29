@@ -2150,10 +2150,14 @@ async function reviewLearningSuggestion(
         expectedState: getLearningDecisionExpectedState(item),
         responseMode: 'preview-item'
     };
+    const learningCandidate = item.matching?.learning;
+    const isModelCandidate = (learningCandidate?.source || '').trim().toLowerCase() === 'model';
+    if (isModelCandidate) {
+        payload['modelVersion'] = learningCandidate?.model_version || '';
+    }
 
     if (decision === 'accept') {
-        const ruleId = item.matching?.learning.rule_id;
-        const isModelCandidate = (item.matching?.learning.source || '').trim().toLowerCase() === 'model';
+        const ruleId = learningCandidate?.rule_id;
         if (!isModelCandidate && (typeof ruleId !== 'number' || ruleId <= 0)) {
             snackbar.value?.showMessage('Learning candidate not available');
             removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
@@ -2162,9 +2166,6 @@ async function reviewLearningSuggestion(
 
         if (typeof ruleId === 'number' && ruleId > 0) {
             payload['ruleId'] = ruleId;
-        }
-        if (isModelCandidate) {
-            payload['modelVersion'] = item.matching?.learning.model_version || '';
         }
     }
     try {

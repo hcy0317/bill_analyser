@@ -3840,6 +3840,90 @@ class BillService:
 
         return normalized_account_id
 
+    @staticmethod
+    def _extract_preview_learning_model_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        model_version = payload.get("modelVersion")
+        if model_version is None:
+            model_version = payload.get("model_version")
+        if model_version is not None:
+            metadata["model_version"] = model_version
+
+        dataset_snapshot_id = payload.get("datasetSnapshotId")
+        if dataset_snapshot_id is None:
+            dataset_snapshot_id = payload.get("dataset_snapshot_id")
+        if dataset_snapshot_id is not None:
+            metadata["dataset_snapshot_id"] = dataset_snapshot_id
+        return metadata
+
+    @classmethod
+    def _learning_model_recommendation_references_available(
+        cls,
+        recommendation: dict[str, Any],
+        *,
+        categories_by_id: dict[int, dict[str, Any]],
+        accounts_by_id: dict[int, dict[str, Any]],
+    ) -> bool:
+        for key, lookup in (
+            ("category_id", categories_by_id),
+            ("source_account_id", accounts_by_id),
+            ("destination_account_id", accounts_by_id),
+        ):
+            raw_value = recommendation.get(key)
+            if raw_value in (None, "", 0, "0"):
+                continue
+            normalized_id = cls._coerce_optional_positive_int(raw_value)
+            if normalized_id is None or normalized_id not in lookup:
+                return False
+        return True
+
+    @classmethod
+    def _validate_preview_learning_model_candidate(
+        cls,
+        recommendation: dict[str, Any],
+        *,
+        model_version: Any | None,
+        dataset_snapshot_id: Any | None,
+        require_model_version: bool,
+    ) -> dict[str, Any] | None:
+        expected_model_version = str(model_version or "").strip()
+        live_source = str(recommendation.get("source") or "").strip().lower()
+        if expected_model_version and live_source != "model":
+            return {
+                "success": False,
+                "error": "Learning candidate changed, please refresh",
+                "status_code": 409,
+            }
+        if live_source != "model":
+            return None
+
+        live_model_version = str(recommendation.get("model_version") or "").strip()
+        if require_model_version and not expected_model_version:
+            return {
+                "success": False,
+                "error": "Learning candidate changed, please refresh",
+                "status_code": 409,
+            }
+        if expected_model_version and expected_model_version != live_model_version:
+            return {
+                "success": False,
+                "error": "Learning candidate changed, please refresh",
+                "status_code": 409,
+            }
+
+        if dataset_snapshot_id not in (None, ""):
+            expected_snapshot_id = cls._coerce_optional_positive_int(dataset_snapshot_id)
+            live_snapshot_id = cls._coerce_optional_positive_int(
+                recommendation.get("dataset_snapshot_id")
+            )
+            if expected_snapshot_id is None or expected_snapshot_id != live_snapshot_id:
+                return {
+                    "success": False,
+                    "error": "Learning candidate changed, please refresh",
+                    "status_code": 409,
+                }
+        return None
+
     @log_method
     async def _accept_preview_recurring_candidate(
         self,
@@ -3926,6 +4010,7 @@ class BillService:
             "rule_id": payload.get("ruleId"),
             "user_id": user_id,
         }
+        learning_kwargs.update(self._extract_preview_learning_model_metadata(payload))
         if payload.get("responseMode") is not None:
             learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
@@ -4147,6 +4232,7 @@ class BillService:
             "expected_state": payload.get("expectedState"),
             "user_id": user_id,
         }
+        learning_kwargs.update(self._extract_preview_learning_model_metadata(payload))
         if payload.get("responseMode") is not None:
             learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
@@ -4182,6 +4268,7 @@ class BillService:
             "expected_state": payload.get("expectedState"),
             "user_id": user_id,
         }
+        learning_kwargs.update(self._extract_preview_learning_model_metadata(payload))
         if payload.get("responseMode") is not None:
             learning_kwargs["response_mode"] = payload.get("responseMode")
         result = await self.apply_preview_learning_decision(
@@ -5027,6 +5114,8 @@ class BillService:
         expected_state: dict[str, Any] | None = None,
         response_mode: str | None = None,
         rule_id: Any | None = None,
+        model_version: Any | None = None,
+        dataset_snapshot_id: Any | None = None,
         user_id: int = 1,
     ) -> dict[str, Any]:
         """Persist a preview-scoped learning decision and return refreshed preview data."""
@@ -5114,6 +5203,28 @@ class BillService:
             or current_preview_destination_account_id != expected_destination_account_id
         ):
             return {"success": False, "error": "Preview state changed, please refresh", "status_code": 409}
+
+        model_candidate_conflict = self._validate_preview_learning_model_candidate(
+            learning_recommendation,
+            model_version=model_version,
+            dataset_snapshot_id=dataset_snapshot_id,
+            require_model_version=normalized_decision in {"accept", "reject"},
+        )
+        if model_candidate_conflict:
+            return model_candidate_conflict
+
+        if str(learning_recommendation.get("source") or "").strip().lower() == "model" and not (
+            self._learning_model_recommendation_references_available(
+                learning_recommendation,
+                categories_by_id=dict(projection_context.get("learning_categories_by_id") or {}),
+                accounts_by_id=dict(projection_context.get("learning_accounts_by_id") or {}),
+            )
+        ):
+            return {
+                "success": False,
+                "error": "Learning candidate not available",
+                "status_code": 409,
+            }
 
         learning_feedback = preview.get("preview_matching_feedback", {}).get("learning")
         has_existing_learning_review = current_learning_review_status in {"accepted", "rejected"}
@@ -5680,10 +5791,18 @@ class BillService:
         semantic_result = parse_semantic_label(prediction.semantic_label)
         route_result = parse_route_label(prediction.route_label)
         recommended_type = str(semantic_result.get("type") or "").strip()
-        category_id = semantic_result.get("category_id")
-        source_account_id = route_result.get("source_account_id")
-        destination_account_id = route_result.get("destination_account_id")
+        category_id = self._coerce_optional_positive_int(semantic_result.get("category_id"))
+        source_account_id = self._coerce_optional_positive_int(route_result.get("source_account_id"))
+        destination_account_id = self._coerce_optional_positive_int(
+            route_result.get("destination_account_id")
+        )
         if not recommended_type and not category_id and not source_account_id and not destination_account_id:
+            return {}
+        if category_id is not None and category_id not in categories_by_id:
+            return {}
+        if source_account_id is not None and source_account_id not in accounts_by_id:
+            return {}
+        if destination_account_id is not None and destination_account_id not in accounts_by_id:
             return {}
 
         confirmation_key = f"{prediction.semantic_label}||{prediction.route_label}"

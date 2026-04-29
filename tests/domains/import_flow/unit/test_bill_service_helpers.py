@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.import_learning.model import ImportLearningPrediction
 from bill_analyser.utils.constants import TransactionType
 
 
@@ -1540,6 +1541,7 @@ async def test_apply_preview_learning_decision_reuses_learning_recommendation_be
             "destinationAccountId": None,
         },
         response_mode="preview-item",
+        model_version="v-test",
         user_id=1,
     )
 
@@ -1978,6 +1980,123 @@ def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch:
         categories_by_id={},
         accounts_by_id={},
     ) == {}
+
+
+def test_learning_model_signal_suppresses_missing_category_or_account_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模型预测引用不存在的分类/账户时不应生成可自动应用的候选。"""
+    service = _make_service()
+    active_model = {
+        "model_version": "v-test",
+        "dataset_snapshot_id": 101,
+        "metrics": {
+            "feature_schema_version": "import-learning-features-v1",
+            "policy_version": "learning-green-blue-policy-v1",
+            "model_parameters": {"any": "payload"},
+            "joint_label_confirmation_counts": {
+                "type=支出|category=999||source=888|destination=0": 3,
+            },
+        },
+    }
+    monkeypatch.setattr(
+        "bill_analyser.core.bill_service.predict_dual_head",
+        lambda *_args, **_kwargs: ImportLearningPrediction(
+            semantic_label="type=支出|category=999",
+            route_label="source=888|destination=0",
+            semantic_confidence=0.93,
+            route_confidence=0.91,
+            semantic_margin=0.22,
+            route_margin=0.2,
+        ),
+    )
+
+    signal = service._build_learning_model_signal_from_preview(
+        {"id": 21, "preview_counterparty": "坏引用候选"},
+        active_model,
+        learning_rules=[],
+        categories_by_id={77: {"main_category": "餐饮", "sub_category": "早餐"}},
+        accounts_by_id={2: {"name": "招商银行卡"}},
+        is_manually_annotated=False,
+    )
+
+    assert signal == {}
+
+
+@pytest.mark.asyncio
+async def test_apply_preview_learning_decision_rejects_invalid_model_reference_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """坏模型引用即使进入决策入口，也不能 accept 写入不存在的分类/账户 id。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 31,
+            "session_id": "session-invalid-model-ref",
+            "user_id": 1,
+            "preview_type": "支出",
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "坏引用候选",
+            "preview_payment_method": "支付宝",
+            "preview_description": "模型预测坏账号",
+            "preview_parser_id": "alipay",
+            "preview_matching_feedback": {},
+            "preview_matching_feedback_json": "{}",
+        }
+    ]
+    service = _make_service(fake_db)
+
+    monkeypatch.setattr(
+        service,
+        "_build_learning_model_signal_from_preview",
+        lambda *_args, **_kwargs: {
+            "rule_id": None,
+            "source": "model",
+            "mode": "blue",
+            "auto_apply": True,
+            "model_version": "v-test",
+            "score": 0.92,
+            "confidence": 0.92,
+            "margin": 0.2,
+            "confirmations": 3,
+            "level": "high",
+            "reason": "model:dual_head",
+            "recommended_type": "支出",
+            "category_id": 999,
+            "source_account_id": 888,
+            "destination_account_id": None,
+            "summary": "支出 | 坏引用",
+        },
+    )
+
+    result = await service.apply_preview_learning_decision(
+        31,
+        "accept",
+        expected_state={
+            "sessionId": "session-invalid-model-ref",
+            "reviewStatus": "pending",
+            "previewType": "支出",
+            "categoryId": None,
+            "recurringId": None,
+            "sourceAccountId": None,
+            "destinationAccountId": None,
+        },
+        response_mode="preview-item",
+        model_version="v-test",
+        user_id=1,
+    )
+
+    assert result == {
+        "success": False,
+        "error": "Learning candidate not available",
+        "status_code": 409,
+    }
+    assert fake_db.preview_learning_decision_calls == []
+    assert fake_db.preview_rows[0]["preview_source_account_id"] is None
+    assert fake_db.preview_rows[0]["preview_matching_feedback"] == {}
 
 
 @pytest.mark.asyncio
