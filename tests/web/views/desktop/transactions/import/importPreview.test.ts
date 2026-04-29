@@ -67,10 +67,12 @@ describe('import preview server-paged reset guards', () => {
         expect(source).toContain('&& pendingRequest.sortDirection === normalizedSortDirection');
 
         const pendingIndex = source.indexOf('pendingInitialCheckDataPageRequest.value = {');
-        const fetchIndex = source.indexOf('await fetchPreviewPage(1, 10, {');
+        const stepIndex = source.indexOf("currentStep.value = 'checkData';");
+        const fetchIndex = source.indexOf('void fetchPreviewPage(1, 10, {');
 
         expect(pendingIndex).toBeGreaterThanOrEqual(0);
-        expect(fetchIndex).toBeGreaterThan(pendingIndex);
+        expect(stepIndex).toBeGreaterThan(pendingIndex);
+        expect(fetchIndex).toBeGreaterThan(stepIndex);
     });
 
     test('check-data reset clears stale table sort state before a new server-paged session starts', () => {

@@ -1356,18 +1356,17 @@ async function executeStage2Dedup(): Promise<void> {
         sortDirection: previewPageSortDirection.value
     };
 
-    try {
-        await fetchPreviewPage(1, 10, {
-            sortBy: pendingInitialCheckDataPageRequest.value.sortBy,
-            sortDirection: pendingInitialCheckDataPageRequest.value.sortDirection
-        });
-    } catch (error) {
-        pendingInitialCheckDataPageRequest.value = null;
-        throw error;
-    }
-
     currentStep.value = 'checkData';
     importProcess.value = 100;
+
+    void fetchPreviewPage(1, 10, {
+        sortBy: pendingInitialCheckDataPageRequest.value.sortBy,
+        sortDirection: pendingInitialCheckDataPageRequest.value.sortDirection
+    }).catch(error => {
+        pendingInitialCheckDataPageRequest.value = null;
+        logger.error('[三阶段导入-预览分页] 首屏加载失败:', error);
+        snackbar.value?.showError(`导入失败: ${error}`);
+    });
 }
 
 /**
