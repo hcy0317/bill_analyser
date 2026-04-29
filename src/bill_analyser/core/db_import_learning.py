@@ -15,6 +15,9 @@ from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
 
 
+_UNSET: Any = object()
+
+
 class DatabaseImportLearningMixin(DatabaseFacadeBase):
     """Import annotation, long-term learning rule, and composite-match helpers."""
 
@@ -825,7 +828,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         *,
         match_value: str | None = None,
         learned_type: str | None = None,
-        learned_category_id: int | None = None,
+        learned_category_id: Any = _UNSET,
         enabled: bool | None = None,
     ) -> dict[str, Any] | None:
         """Update editable fields of a learning rule. Returns updated row or None if not found."""
@@ -890,7 +893,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             updates.append("learned_type = ?")
             params.append(learned_type)
 
-        if learned_category_id is not None:
+        if learned_category_id is not _UNSET:
             updates.append("learned_category_id = ?")
             params.append(learned_category_id)
 
@@ -919,7 +922,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
                 "composite_match_hash": updated_composite_hash,
                 "match_features": updated_match_features,
                 "learned_type": learned_type,
-                "learned_category_id": learned_category_id,
+                "learned_category_id": None if learned_category_id is _UNSET else learned_category_id,
                 "enabled": enabled,
             },
         )

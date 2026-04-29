@@ -872,6 +872,23 @@ async def test_import_learning_disabled_suppresses_preview_and_historical_candid
             "preview_parser_id": "wechat",
             "preview_selected": 1,
             "dedup_type": "remaining",
+            "preview_matching_feedback": {
+                "learning": {
+                    "rule_id": 42,
+                    "review_status": "accepted",
+                    "suppressed": False,
+                },
+            },
+            "preview_matching_feedback_json": json.dumps(
+                {
+                    "learning": {
+                        "rule_id": 42,
+                        "review_status": "accepted",
+                        "suppressed": False,
+                    },
+                },
+                ensure_ascii=False,
+            ),
         }
     ]
     service = _make_service(fake_db)
@@ -890,6 +907,7 @@ async def test_import_learning_disabled_suppresses_preview_and_historical_candid
     assert preview_items[0]["learning_recommendation_rule_id"] is None
     assert preview_items[0]["learning_recommendation_score"] == 0.0
     assert preview_items[0]["matching"]["learning"]["review_status"] == ""
+    assert preview_items[0]["matching"]["learning"]["rule_id"] is None
     assert historical_candidates == []
     assert fake_db.learning_rule_query_count == 0
 

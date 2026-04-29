@@ -326,6 +326,14 @@ async def test_import_learning_rule_enable_usage_and_delete_paths(tmp_path: Path
         assert int(updated_rule["applied_count"]) == 1
         assert updated_rule["last_applied_at"]
 
+        category_update = await db.update_import_learning_rule(rule_id, user_id=user_id, learned_category_id=77)
+        assert category_update is not None
+        assert int(category_update["learned_category_id"]) == 77
+
+        category_clear = await db.update_import_learning_rule(rule_id, user_id=user_id, learned_category_id=None)
+        assert category_clear is not None
+        assert category_clear["learned_category_id"] is None
+
         assert await db.set_import_learning_rule_enabled(rule_id, False, user_id=user_id) is True
         assert await db.count_import_learning_rules(user_id=user_id, enabled_only=True) == 0
 

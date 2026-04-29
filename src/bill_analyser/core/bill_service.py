@@ -2775,6 +2775,10 @@ class BillService:
             preview,
             context,
         )
+        matching_feedback = preview.get("preview_matching_feedback")
+        if not bool(context.get("import_learning_enabled", False)) and isinstance(matching_feedback, dict):
+            matching_feedback = {key: value for key, value in matching_feedback.items() if key != "learning"}
+
         return {
             "id": preview.get("id"),
             "preview_date": preview.get("preview_date", ""),
@@ -2821,7 +2825,7 @@ class BillService:
                 preview,
                 transfer_suggestion=transfer_suggestion,
                 learning_recommendation=learning_recommendation,
-                matching_feedback=preview.get("preview_matching_feedback"),
+                matching_feedback=matching_feedback,
                 is_manually_annotated=is_manually_annotated,
                 reconciliation_candidates=reconciliation_candidates,
             ),

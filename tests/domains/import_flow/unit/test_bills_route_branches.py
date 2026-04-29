@@ -1545,6 +1545,23 @@ def test_bills_reclassify_and_learning_routes_cover_remaining_midweight_branches
             },
         )
 
+    with bills_route_app.test_request_context(
+        "/api/bills/import/learning-rules/1",
+        method="PUT",
+        json={"learnedCategoryId": ""},
+    ):
+        _set_request_user_id(6)
+        payload = update_rule_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["learned_category_id"] is None
+        assert db.learning_rule_field_update_calls[-1] == (
+            1,
+            6,
+            {
+                "learned_category_id": None,
+            },
+        )
+
     async def _raise_update_rule_error(*_args: Any, **_kwargs: Any) -> bool:
         raise RuntimeError("update rule boom")
 
