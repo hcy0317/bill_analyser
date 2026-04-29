@@ -32,12 +32,14 @@ export interface BillMatchingCandidate {
     recommendedType: string;
     summary: string;
     suppressed: boolean;
+    reconciliation?: Record<string, unknown>;
 }
 
 export interface BillMatchingCandidatesResponse {
     billId: number;
     linkedPair: BillMatchingPairSummary | null;
     candidates: BillMatchingCandidate[];
+    reconciliation?: Record<string, unknown>;
 }
 
 export interface BillMatchingFeedbackEvent {
@@ -120,6 +122,7 @@ export function normalizeBillMatchingCandidatesResponse(
             rightBillId: toNumber(linkedPairRecord['rightBillId']),
             otherBillId: toNumber(linkedPairRecord['otherBillId'])
         } : null,
+        reconciliation: toRecord(response['reconciliation']),
         candidates: rawCandidates.map(item => {
             const candidateRecord = toRecord(item);
             const billRecord = candidateRecord['bill'] ? toRecord(candidateRecord['bill']) : null;
@@ -143,7 +146,8 @@ export function normalizeBillMatchingCandidatesResponse(
                 ruleId: toNullableNumber(candidateRecord['ruleId']),
                 recommendedType: toStringValue(candidateRecord['recommendedType']),
                 summary: toStringValue(candidateRecord['summary']),
-                suppressed: toBooleanValue(candidateRecord['suppressed'])
+                suppressed: toBooleanValue(candidateRecord['suppressed']),
+                reconciliation: toRecord(candidateRecord['reconciliation'])
             } satisfies BillMatchingCandidate;
         })
     };

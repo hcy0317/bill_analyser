@@ -144,6 +144,10 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     dedupSourceLabels?: string[];
     dedupSources?: ImportMatchingSourcePayload[];
     parserSourceChain?: ImportMatchingSourcePayload[];
+    reconciliationType?: string;
+    reconciliationStatus?: string;
+    reconciliationTitle?: string;
+    reconciliationSourceChain?: ImportMatchingSourcePayload[];
     hasRecurringMatch?: boolean;
     recurringTitle?: string;
     recurringCandidateCount?: number;
@@ -727,6 +731,18 @@ export function buildImportPreviewSignalViewModel(
         || dedupSourceCount > 0
     );
     const dedupDetailLines = buildDedupDetailLines(matchingSummary, state, options);
+    const reconciliationTitle = (state.reconciliationTitle || '').trim();
+    const reconciliationDedup = reconciliationTitle
+        ? {
+            dedupType: state.reconciliationType || 'reconciliation',
+            labelKey: state.reconciliationType || 'reconciliation',
+            label: reconciliationTitle,
+            title: reconciliationTitle,
+            color: state.reconciliationStatus === 'rejected' ? 'error' : 'secondary',
+            sourceCount: (state.reconciliationSourceChain || []).length,
+            detailLines: [reconciliationTitle]
+        }
+        : null;
     const dedup = dedupVisible
         ? {
             dedupType: matchingSummary.dedupType,
@@ -737,7 +753,7 @@ export function buildImportPreviewSignalViewModel(
             sourceCount: dedupSourceCount,
             detailLines: dedupDetailLines
         }
-        : null;
+        : reconciliationDedup;
     const transferSuggestion = buildReviewView(
         state.transferStatus,
         state.transferTitle,

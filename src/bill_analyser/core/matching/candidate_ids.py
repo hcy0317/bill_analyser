@@ -53,7 +53,23 @@ def parse_matching_candidate_id(candidate_id: str) -> dict[str, Any] | None:
     parts = normalized_candidate_id.split(":")
     parsed_candidate: dict[str, Any] | None = None
     try:
-        if len(parts) == 3 and parts[0] == "preview":
+        if (
+            len(parts) == 6
+            and parts[0] == "reconcile"
+            and parts[1] == "import"
+            and parts[3] == "bill"
+        ):
+            kind = str(parts[2] or "").strip().lower()
+            bill_id = int(parts[4])
+            import_key_hash = str(parts[5] or "").strip()
+            if kind in {"transfer", "duplicate"} and bill_id > 0 and import_key_hash:
+                parsed_candidate = {
+                    "scope": "reconciliation",
+                    "kind": kind,
+                    "existing_bill_id": bill_id,
+                    "import_key_hash": import_key_hash,
+                }
+        elif len(parts) == 3 and parts[0] == "preview":
             preview_id = int(parts[1])
             if preview_id > 0:
                 parsed_candidate = {

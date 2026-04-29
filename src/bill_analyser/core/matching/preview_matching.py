@@ -12,6 +12,7 @@ from .models import (
     ParserMatchingPayload,
     PreviewMatchingPayload,
     RecurringMatchingPayload,
+    ReconciliationMatchingPayload,
     TransferMatchingPayload,
 )
 
@@ -255,6 +256,51 @@ def _build_dedup_source_metadata(
     return source_count, source_labels, relevant_sources
 
 
+def _select_reconciliation_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    status_order = {
+        "merged": 0,
+        "accepted": 0,
+        "pending": 1,
+        "rejected": 2,
+        "rolled_back": 3,
+    }
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            status_order.get(str(candidate.get("status") or ""), 9),
+            -float(candidate.get("score") or 0.0),
+            int(candidate.get("id") or 0),
+        ),
+    )[0] if candidates else {}
+
+
+def _build_reconciliation_payload(
+    candidates: list[dict[str, Any]] | None,
+) -> ReconciliationMatchingPayload:
+    candidate = _select_reconciliation_candidate(
+        [dict(item) for item in list(candidates or []) if isinstance(item, dict)]
+    )
+    if not candidate:
+        return ReconciliationMatchingPayload()
+
+    return ReconciliationMatchingPayload(
+        candidate_id=str(candidate.get("candidate_id") or ""),
+        candidate_type=str(candidate.get("candidate_type") or ""),
+        status=str(candidate.get("status") or ""),
+        existing_bill_id=_normalize_int_or_none(candidate.get("existing_bill_id")),
+        group_id=_normalize_int_or_none(candidate.get("group_id")),
+        score=float(candidate.get("score") or 0.0),
+        level=str(candidate.get("level") or ""),
+        reason=str(candidate.get("reason") or ""),
+        signal_label=str(candidate.get("signal_label") or ""),
+        source_chain=(
+            list(candidate.get("source_chain") or [])
+            if isinstance(candidate.get("source_chain"), list)
+            else []
+        ),
+    )
+
+
 def build_preview_matching_payload(
     preview: dict[str, Any],
     *,
@@ -263,6 +309,7 @@ def build_preview_matching_payload(
     learning_recommendation: dict[str, Any] | None = None,
     matching_feedback: dict[str, Any] | None = None,
     is_manually_annotated: bool = False,
+    reconciliation_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # pylint: disable=too-many-arguments,too-many-locals
     """Group existing preview hints into a stable additive matching payload."""
@@ -413,5 +460,6 @@ def build_preview_matching_payload(
         annotation=AnnotationMatchingPayload(
             is_manually_annotated=bool(is_manually_annotated),
         ),
+        reconciliation=_build_reconciliation_payload(reconciliation_candidates),
     )
     return payload.to_dict()

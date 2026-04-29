@@ -69,6 +69,19 @@ export interface ImportMatchingAnnotationPayload {
     is_manually_annotated: boolean;
 }
 
+export interface ImportMatchingReconciliationPayload {
+    candidate_id?: string;
+    candidate_type?: string;
+    status?: string;
+    existing_bill_id?: number | null;
+    group_id?: number | null;
+    score?: number;
+    level?: string;
+    reason?: string;
+    signal_label?: string;
+    source_chain?: ImportMatchingSourcePayload[];
+}
+
 export interface ImportMatchingPayload {
     transfer: ImportMatchingTransferPayload;
     investment: ImportMatchingInvestmentPayload;
@@ -77,4 +90,5 @@ export interface ImportMatchingPayload {
     dedup: ImportMatchingDedupPayload;
     parser: ImportMatchingParserPayload;
     annotation: ImportMatchingAnnotationPayload;
+    reconciliation?: ImportMatchingReconciliationPayload;
 }

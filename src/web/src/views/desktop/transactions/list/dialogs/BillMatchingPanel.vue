@@ -144,6 +144,10 @@ const normalizedBillId = computed<number>(() => {
 
 const viewState = computed(() => buildBillMatchingViewState(candidatesResponse.value));
 const linkedPair = computed<BillMatchingPairSummary | null>(() => candidatesResponse.value.linkedPair);
+const reconciliationSignal = computed<string>(() => {
+    const signal = candidatesResponse.value.reconciliation?.['signal_label'];
+    return typeof signal === 'string' ? signal : '';
+});
 const sortedCandidates = computed<BillMatchingCandidate[]>(() => {
     return [...candidatesResponse.value.candidates].sort((left, right) => right.score - left.score);
 });
@@ -153,6 +157,10 @@ const isBusy = computed<boolean>(() => {
 const headlineText = computed<string>(() => {
     if (viewState.value.mode === 'linked' && linkedPair.value) {
         return `${tt('Linked Pair')} · ${getPairTypeLabel(linkedPair.value.pairType)} · #${linkedPair.value.otherBillId}`;
+    }
+
+    if (reconciliationSignal.value && !viewState.value.hasCandidates) {
+        return reconciliationSignal.value;
     }
 
     if (viewState.value.mode === 'candidates') {
@@ -168,6 +176,10 @@ const sublineText = computed<string>(() => {
 
     if (viewState.value.primaryCandidate) {
         return `${tt('Best Candidate')}: ${getCandidateKindLabel(viewState.value.primaryCandidate.kind)} · ${tt('Match Score')} ${formatScore(viewState.value.primaryCandidate.score)}`;
+    }
+
+    if (reconciliationSignal.value) {
+        return reconciliationSignal.value;
     }
 
     return '';
@@ -204,6 +216,12 @@ function getPairTypeLabel(pairType: string): string {
 }
 
 function getCandidateKindLabel(kind: string): string {
+    if (kind === 'reconciliation_duplicate') {
+        return tt('Duplicate');
+    }
+    if (kind === 'reconciliation_transfer') {
+        return tt('Transfer');
+    }
     if (kind === 'transfer') {
         return tt('Transfer');
     }
@@ -218,6 +236,12 @@ function getCandidateKindLabel(kind: string): string {
 }
 
 function getCandidateChipColor(kind: string): string {
+    if (kind === 'reconciliation_duplicate') {
+        return 'secondary';
+    }
+    if (kind === 'reconciliation_transfer') {
+        return 'primary';
+    }
     if (kind === 'transfer') {
         return 'primary';
     }
@@ -236,6 +260,9 @@ function formatScore(score: number): string {
 }
 
 function getCandidateTitle(candidate: BillMatchingCandidate): string {
+    if (candidate.kind.startsWith('reconciliation') && candidate.summary) {
+        return candidate.summary;
+    }
     if (candidate.bill?.description) {
         return candidate.bill.description;
     }

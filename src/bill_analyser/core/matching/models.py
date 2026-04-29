@@ -89,6 +89,22 @@ class AnnotationMatchingPayload:
 
 
 @dataclass(frozen=True)
+class ReconciliationMatchingPayload:
+    """Import-to-formal-bill reconciliation provenance payload."""
+
+    candidate_id: str = ""
+    candidate_type: str = ""
+    status: str = ""
+    existing_bill_id: int | None = None
+    group_id: int | None = None
+    score: float = 0.0
+    level: str = ""
+    reason: str = ""
+    signal_label: str = ""
+    source_chain: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class PreviewMatchingPayload:
     """Additive nested matching structure for import preview items."""
 
@@ -99,6 +115,7 @@ class PreviewMatchingPayload:
     dedup: DedupMatchingPayload = field(default_factory=DedupMatchingPayload)
     parser: ParserMatchingPayload = field(default_factory=ParserMatchingPayload)
     annotation: AnnotationMatchingPayload = field(default_factory=AnnotationMatchingPayload)
+    reconciliation: ReconciliationMatchingPayload = field(default_factory=ReconciliationMatchingPayload)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the payload as a plain dictionary."""

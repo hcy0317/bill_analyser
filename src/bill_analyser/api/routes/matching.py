@@ -102,6 +102,8 @@ def _serialize_matching_bill_candidate(candidate: dict[str, Any]) -> dict[str, A
         serialized_candidate["summary"] = str(candidate.get("summary") or "")
     if candidate.get("suppressed") not in (None, ""):
         serialized_candidate["suppressed"] = bool(candidate.get("suppressed"))
+    if isinstance(candidate.get("reconciliation"), dict):
+        serialized_candidate["reconciliation"] = dict(candidate.get("reconciliation") or {})
     return serialized_candidate
 
 
@@ -109,13 +111,16 @@ def _build_matching_bill_candidates_payload(
     bill_id: int,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "billId": bill_id,
         "linkedPair": _serialize_bill_pair(result.get("linked_pair")),
         "candidates": [
             _serialize_matching_bill_candidate(candidate) for candidate in list(result.get("candidates") or [])
         ],
     }
+    if isinstance(result.get("reconciliation"), dict):
+        payload["reconciliation"] = dict(result.get("reconciliation") or {})
+    return payload
 
 
 def _serialize_matching_feedback_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -143,6 +148,11 @@ def _serialize_reconciliation_candidate(candidate: dict[str, Any]) -> dict[str, 
         "score": float(candidate.get("score") or 0.0),
         "level": str(candidate.get("level") or ""),
         "reason": str(candidate.get("reason") or ""),
+        "groupId": int(candidate.get("group_id") or 0),
+        "groupStatus": str(candidate.get("group_status") or ""),
+        "canonicalBillId": int(candidate.get("canonical_bill_id") or 0),
+        "signalLabel": str(candidate.get("signal_label") or ""),
+        "sourceChain": list(candidate.get("source_chain") or []),
         "seenCount": int(candidate.get("seen_count") or 0),
         "firstSeenAt": str(candidate.get("first_seen_at") or ""),
         "lastSeenAt": str(candidate.get("last_seen_at") or ""),
@@ -332,6 +342,8 @@ def _build_matching_candidate_action_payload(
         response_data["pair"] = _serialize_bill_pair(result.get("pair"))
     if isinstance(result.get("bill"), dict):
         response_data["bill"] = _serialize_bill_snapshot(result.get("bill"))
+    if isinstance(result.get("projection"), dict):
+        response_data["projection"] = dict(result.get("projection") or {})
     return response_data
 
 

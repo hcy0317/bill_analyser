@@ -2631,6 +2631,27 @@ class BillService:
                 int(account["id"]): account for account in learning_accounts if account.get("id") is not None
             }
 
+        reconciliation_candidates = (
+            await self.db.list_import_reconciliation_candidates(
+                user_id=user_id,
+                session_id=session_id,
+                limit=500,
+            )
+            if session_id and user_id > 0 and hasattr(self.db, "list_import_reconciliation_candidates")
+            else []
+        )
+        reconciliation_by_preview_id: dict[int, list[dict[str, Any]]] = {}
+        reconciliation_by_template_id: dict[int, list[dict[str, Any]]] = {}
+        for candidate in reconciliation_candidates:
+            preview_id = self._coerce_optional_positive_int(candidate.get("preview_id"))
+            if preview_id is not None:
+                reconciliation_by_preview_id.setdefault(preview_id, []).append(candidate)
+
+            import_snapshot = dict(candidate.get("import_bill_snapshot") or {})
+            template_id = self._coerce_optional_positive_int(import_snapshot.get("template_id"))
+            if template_id is not None:
+                reconciliation_by_template_id.setdefault(template_id, []).append(candidate)
+
         return {
             "session_id": session_id,
             "user_id": user_id,
@@ -2638,7 +2659,67 @@ class BillService:
             "composite_learning_rules": composite_learning_rules,
             "learning_categories_by_id": learning_categories_by_id,
             "learning_accounts_by_id": learning_accounts_by_id,
+            "reconciliation_by_preview_id": reconciliation_by_preview_id,
+            "reconciliation_by_template_id": reconciliation_by_template_id,
         }
+
+    @staticmethod
+    def _coerce_optional_positive_int(raw_value: Any) -> int | None:
+        if raw_value in (None, "", 0, "0"):
+            return None
+        try:
+            normalized_value = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return normalized_value if normalized_value > 0 else None
+
+    @classmethod
+    def _normalize_import_preview_source_ids(cls, raw_value: Any) -> list[int]:
+        if raw_value in (None, ""):
+            return []
+        if isinstance(raw_value, str):
+            raw_items = [item.strip() for item in raw_value.split(",") if item.strip()]
+        elif isinstance(raw_value, list):
+            raw_items = list(raw_value)
+        elif isinstance(raw_value, (tuple, set)):
+            raw_items = list(raw_value)
+        else:
+            raw_items = [raw_value]
+
+        source_ids: list[int] = []
+        for item in raw_items:
+            normalized_id = cls._coerce_optional_positive_int(item)
+            if normalized_id is not None and normalized_id not in source_ids:
+                source_ids.append(normalized_id)
+        return source_ids
+
+    @classmethod
+    def _get_reconciliation_candidates_for_preview(
+        cls,
+        preview: dict[str, Any],
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        preview_id = cls._coerce_optional_positive_int(preview.get("id"))
+        candidates: list[dict[str, Any]] = []
+        seen_candidate_ids: set[str] = set()
+
+        def add_candidates(raw_candidates: list[dict[str, Any]] | None) -> None:
+            for candidate in raw_candidates or []:
+                candidate_id = str(candidate.get("candidate_id") or "")
+                if candidate_id and candidate_id not in seen_candidate_ids:
+                    candidates.append(candidate)
+                    seen_candidate_ids.add(candidate_id)
+
+        if preview_id is not None:
+            add_candidates(
+                dict(context.get("reconciliation_by_preview_id") or {}).get(preview_id)
+            )
+
+        template_candidates = dict(context.get("reconciliation_by_template_id") or {})
+        for source_id in cls._normalize_import_preview_source_ids(preview.get("dedup_source_ids")):
+            add_candidates(template_candidates.get(source_id))
+
+        return candidates
 
     async def _build_import_preview_item(
         self,
@@ -2675,6 +2756,10 @@ class BillService:
 
         preview_id = int(preview.get("id", 0) or 0)
         is_manually_annotated = preview_id in set(context.get("manually_annotated_preview_ids") or set())
+        reconciliation_candidates = self._get_reconciliation_candidates_for_preview(
+            preview,
+            context,
+        )
         return {
             "id": preview.get("id"),
             "preview_date": preview.get("preview_date", ""),
@@ -2716,12 +2801,14 @@ class BillService:
             "learning_recommendation_reason": learning_recommendation.get("reason", ""),
             "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
             "learning_recommendation_summary": learning_recommendation.get("summary", ""),
+            "reconciliation_candidates": reconciliation_candidates,
             "matching": build_preview_matching_payload(
                 preview,
                 transfer_suggestion=transfer_suggestion,
                 learning_recommendation=learning_recommendation,
                 matching_feedback=preview.get("preview_matching_feedback"),
                 is_manually_annotated=is_manually_annotated,
+                reconciliation_candidates=reconciliation_candidates,
             ),
         }
 
@@ -3096,14 +3183,23 @@ class BillService:
         if not result.get("bill"):
             return {"success": False, "error": "Bill not found", "status_code": 404}
 
+        reconciliation_projection = await self._build_reconciliation_projection_for_bill(
+            bill_id,
+            user_id=user_id,
+        )
         if result.get("linked_pair"):
             return {
                 "success": True,
                 "bill_id": bill_id,
                 "linked_pair": result.get("linked_pair"),
                 "candidates": [],
+                "reconciliation": reconciliation_projection,
             }
 
+        reconciliation_candidates = await self._build_reconciliation_candidates_for_bill(
+            bill_id,
+            user_id=user_id,
+        )
         transfer_candidates = list(result.get("candidates") or [])
         investment_candidates = await self._build_investment_candidates_for_bill(
             dict(result.get("bill") or {}),
@@ -3118,8 +3214,66 @@ class BillService:
             "success": True,
             "bill_id": bill_id,
             "linked_pair": result.get("linked_pair"),
-            "candidates": [*transfer_candidates, *investment_candidates, *learning_candidates],
+            "candidates": [
+                *reconciliation_candidates,
+                *transfer_candidates,
+                *investment_candidates,
+                *learning_candidates,
+            ],
+            "reconciliation": reconciliation_projection,
         }
+
+    async def _build_reconciliation_projection_for_bill(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any] | None:
+        projection_handler = getattr(self.db, "get_bill_reconciliation_projection", None)
+        if not callable(projection_handler):
+            return None
+        return await projection_handler(int(bill_id), user_id=user_id)
+
+    async def _build_reconciliation_candidates_for_bill(
+        self,
+        bill_id: int,
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        list_handler = getattr(self.db, "list_import_reconciliation_candidates", None)
+        if not callable(list_handler):
+            return []
+        raw_candidates = await list_handler(
+            user_id=user_id,
+            existing_bill_id=int(bill_id),
+            status="pending",
+            limit=50,
+        )
+        candidates: list[dict[str, Any]] = []
+        for candidate in raw_candidates:
+            import_snapshot = dict(candidate.get("import_bill_snapshot") or {})
+            signal_label = str(candidate.get("signal_label") or "")
+            candidates.append(
+                {
+                    "candidate_id": str(candidate.get("candidate_id") or ""),
+                    "kind": f"reconciliation_{candidate.get('candidate_type') or ''}",
+                    "bill_id": None,
+                    "score": float(candidate.get("score") or 0.0),
+                    "level": str(candidate.get("level") or ""),
+                    "reason": str(candidate.get("reason") or ""),
+                    "bill": self._build_historical_candidate_bill_snapshot(import_snapshot),
+                    "summary": signal_label,
+                    "suppressed": False,
+                    "status": str(candidate.get("status") or ""),
+                    "reconciliation": {
+                        "group_id": candidate.get("group_id"),
+                        "candidate_type": candidate.get("candidate_type"),
+                        "signal_label": signal_label,
+                        "source_chain": list(candidate.get("source_chain") or []),
+                    },
+                }
+            )
+        return candidates
 
     @staticmethod
     def _derive_matching_candidate_level(score: float) -> str:
@@ -3792,6 +3946,38 @@ class BillService:
         }
 
     @log_method
+    async def _accept_reconciliation_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        if str(parsed_candidate_id.get("kind") or "") not in {"transfer", "duplicate"}:
+            return {"success": False, "error": "Invalid candidateId", "status_code": 400}
+        try:
+            result = await self.db.accept_import_reconciliation_candidate(
+                candidate_id,
+                user_id=user_id,
+            )
+        except LookupError:
+            return {
+                "success": False,
+                "error": "Reconciliation candidate not found",
+                "status_code": 404,
+            }
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "accept",
+            "bill": result.get("bill"),
+            "projection": result.get("projection"),
+        }
+
+    @log_method
     async def _reject_preview_transfer_candidate(
         self,
         candidate_id: str,
@@ -3951,6 +4137,37 @@ class BillService:
         }
 
     @log_method
+    async def _clear_reconciliation_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        if str(parsed_candidate_id.get("kind") or "") not in {"transfer", "duplicate"}:
+            return {"success": False, "error": "Invalid candidateId", "status_code": 400}
+        try:
+            result = await self.db.clear_import_reconciliation_candidate(
+                candidate_id,
+                user_id=user_id,
+            )
+        except LookupError:
+            return {
+                "success": False,
+                "error": "Reconciliation candidate not found",
+                "status_code": 404,
+            }
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "clear",
+            "projection": result.get("projection"),
+        }
+
+    @log_method
     async def _reject_preview_recurring_candidate(
         self,
         candidate_id: str,
@@ -4073,6 +4290,37 @@ class BillService:
         }
 
     @log_method
+    async def _reject_reconciliation_candidate(
+        self,
+        candidate_id: str,
+        parsed_candidate_id: dict[str, Any],
+        *,
+        user_id: int = 1,
+    ) -> dict[str, Any]:
+        if str(parsed_candidate_id.get("kind") or "") not in {"transfer", "duplicate"}:
+            return {"success": False, "error": "Invalid candidateId", "status_code": 400}
+        try:
+            result = await self.db.reject_import_reconciliation_candidate(
+                candidate_id,
+                user_id=user_id,
+            )
+        except LookupError:
+            return {
+                "success": False,
+                "error": "Reconciliation candidate not found",
+                "status_code": 404,
+            }
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+
+        return {
+            "success": True,
+            "candidate_id": str(candidate_id),
+            "action": "reject",
+            "projection": result.get("projection"),
+        }
+
+    @log_method
     async def _accept_matching_candidate(
         self,
         candidate_id: str,
@@ -4089,6 +4337,13 @@ class BillService:
 
         candidate_scope = str(parsed_candidate_id.get("scope") or "")
         candidate_kind = str(parsed_candidate_id.get("kind") or "")
+
+        if candidate_scope == "reconciliation":
+            return await self._accept_reconciliation_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
 
         if candidate_scope == "preview" and candidate_kind == "transfer":
             return await self._accept_preview_transfer_candidate(
@@ -4159,6 +4414,13 @@ class BillService:
         candidate_scope = str(parsed_candidate_id.get("scope") or "")
         candidate_kind = str(parsed_candidate_id.get("kind") or "")
 
+        if candidate_scope == "reconciliation":
+            return await self._reject_reconciliation_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
+
         if candidate_scope == "preview" and candidate_kind == "transfer":
             return await self._reject_preview_transfer_candidate(
                 candidate_id,
@@ -4227,6 +4489,13 @@ class BillService:
 
         candidate_scope = str(parsed_candidate_id.get("scope") or "")
         candidate_kind = str(parsed_candidate_id.get("kind") or "")
+
+        if candidate_scope == "reconciliation":
+            return await self._clear_reconciliation_candidate(
+                candidate_id,
+                parsed_candidate_id,
+                user_id=user_id,
+            )
 
         if candidate_scope == "preview" and candidate_kind == "learning":
             if not isinstance(payload.get("expectedState"), dict):

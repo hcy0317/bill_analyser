@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-_CANDIDATE_KIND_ORDER = ("transfer", "learning", "recurring")
+_CANDIDATE_KIND_ORDER = ("reconciliation", "transfer", "learning", "recurring")
+_LEGACY_SUMMARY_KIND_ORDER = ("transfer", "learning", "recurring")
 
 
 def _normalize_dict(raw_value: Any) -> dict[str, Any]:
@@ -71,7 +72,13 @@ def _has_recurring_candidate(details: dict[str, Any]) -> bool:
     )
 
 
+def _has_reconciliation_candidate(details: dict[str, Any]) -> bool:
+    return bool(str(details.get("candidate_id") or "").strip())
+
+
 def _should_include_candidate(kind: str, details: dict[str, Any]) -> bool:
+    if kind == "reconciliation":
+        return _has_reconciliation_candidate(details)
     if kind == "transfer":
         return _has_transfer_candidate(details)
     if kind == "learning":
@@ -119,6 +126,17 @@ def _build_candidate_preview(preview: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_candidate_details(kind: str, details: dict[str, Any]) -> dict[str, Any]:
+    if kind == "reconciliation":
+        return {
+            "candidate_id": str(details.get("candidate_id") or ""),
+            "candidate_type": str(details.get("candidate_type") or ""),
+            "status": str(details.get("status") or ""),
+            "existing_bill_id": details.get("existing_bill_id"),
+            "group_id": details.get("group_id"),
+            "signal_label": str(details.get("signal_label") or ""),
+            "source_chain": _normalize_list(details.get("source_chain")),
+        }
+
     if kind == "recurring":
         return {
             "id": details.get("id"),
@@ -161,8 +179,15 @@ def _build_candidate(
 ) -> dict[str, Any]:
     preview_id = int(preview.get("id") or 0)
     normalized_details = _build_candidate_details(kind, details)
+    candidate_id = f"preview:{preview_id}:{kind}"
 
-    if kind == "recurring":
+    if kind == "reconciliation":
+        score = _coerce_float(details.get("score"))
+        level = str(details.get("level") or "")
+        reason = str(details.get("reason") or "")
+        status = str(normalized_details.get("status") or "") or "pending"
+        candidate_id = str(normalized_details.get("candidate_id") or candidate_id)
+    elif kind == "recurring":
         score = _coerce_float(normalized_details.get("match_score"))
         level = _derive_level_from_score(score)
         reason = str(normalized_details.get("match_reasons") or "")
@@ -182,7 +207,7 @@ def _build_candidate(
             status = "pending"
 
     return {
-        "candidate_id": f"preview:{preview_id}:{kind}",
+        "candidate_id": candidate_id if kind == "reconciliation" else f"preview:{preview_id}:{kind}",
         "kind": kind,
         "session_id": session_id,
         "preview_id": preview_id,
@@ -218,12 +243,18 @@ def build_matching_session_candidates(
             )
             counts_by_kind[kind] += 1
 
+    summary_counts = {
+        kind: counts_by_kind[kind] for kind in _LEGACY_SUMMARY_KIND_ORDER
+    }
+    if counts_by_kind["reconciliation"] > 0:
+        summary_counts["reconciliation"] = counts_by_kind["reconciliation"]
+
     return {
         "session_id": session_id,
         "summary": {
             "preview_count": len(previews or []),
             "candidate_count": len(candidates),
-            "counts_by_kind": counts_by_kind,
+            "counts_by_kind": summary_counts,
         },
         "candidates": candidates,
     }

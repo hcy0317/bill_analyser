@@ -9,6 +9,7 @@ from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.db import Database
 from bill_analyser.core.db_time import utc_now_iso
 from bill_analyser.core.matching import build_transfer_pair_candidates
+from bill_analyser.core.matching.candidate_ids import parse_matching_candidate_id
 from bill_analyser.core.smart_dedup import SmartDeduplicationEngine
 
 
@@ -169,6 +170,29 @@ def test_formal_transfer_candidates_keep_legacy_three_day_window() -> None:
     result = build_transfer_pair_candidates(anchor_bill, [outside_three_days, within_three_days])
 
     assert [candidate["candidate_id"] for candidate in result] == ["bill:101:transfer:102"]
+
+
+def test_reconciliation_candidate_id_parser_keeps_existing_families() -> None:
+    """Generic matching action dispatch can recognize reconciliation without breaking old ids."""
+    reconciliation_id = "reconcile:import:duplicate:bill:42:abcdef1234567890"
+
+    assert parse_matching_candidate_id(reconciliation_id) == {
+        "scope": "reconciliation",
+        "kind": "duplicate",
+        "existing_bill_id": 42,
+        "import_key_hash": "abcdef1234567890",
+    }
+    assert parse_matching_candidate_id("preview:7:learning") == {
+        "scope": "preview",
+        "preview_id": 7,
+        "kind": "learning",
+    }
+    assert parse_matching_candidate_id("bill:11:transfer:12") == {
+        "scope": "bill",
+        "bill_id": 11,
+        "kind": "transfer",
+        "candidate_bill_id": 12,
+    }
 
 
 async def _create_database(tmp_path: Path) -> Database:
@@ -486,3 +510,332 @@ async def test_bill_merge_member_update_backfills_bill_and_import_keys(tmp_path:
         assert "backfilled" in member["snapshot_json"]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_accept_merges_three_members_and_clear_rolls_back_projection(
+    tmp_path: Path,
+) -> None:
+    """Two accepted import duplicates against one formal bill share one reversible merge projection."""
+    db = await _create_database(tmp_path)
+    service = BillService(db)
+    try:
+        await service.initialize()
+        user_id = await _create_user(db, "-a2-merge")
+        manual_tag_id = await db.create_tag({"name": "人工"}, user_id=user_id)
+        alipay_tag_id = await db.create_tag({"name": "支付宝"}, user_id=user_id)
+        wechat_tag_id = await db.create_tag({"name": "微信"}, user_id=user_id)
+        existing_bill_id = await db.create_bill(
+            {
+                "date": "2026-05-01 10:00:05",
+                "type": "支出",
+                "amount": -42.0,
+                "counterparty": "merge merchant",
+                "description": "manual base|same item",
+                "payment_method": "manual",
+                "main_category": "餐饮",
+                "sub_category": "午餐",
+                "source_account_id": 3001,
+            },
+            user_id=user_id,
+        )
+        assert existing_bill_id is not None
+        assert await db.add_tags_to_bill(existing_bill_id, [manual_tag_id], user_id=user_id) is True
+
+        session_id = "session-a2-merge"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        first_preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-05-01 10:00:00",
+                "preview_type": "支出",
+                "preview_amount": 42.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "午餐",
+                "preview_counterparty": "merge merchant",
+                "preview_payment_method": "alipay",
+                "preview_description": "same item|alipay detail",
+                "preview_parser_id": "alipay",
+                "preview_parser_tags": ["parser:alipay"],
+            },
+            user_id=user_id,
+        )
+        second_preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-05-01 10:00:02",
+                "preview_type": "支出",
+                "preview_amount": 42.0,
+                "preview_main_category": "餐饮",
+                "preview_sub_category": "午餐",
+                "preview_counterparty": "merge merchant",
+                "preview_payment_method": "wechat",
+                "preview_description": "wechat detail",
+                "preview_parser_id": "wechat",
+                "preview_parser_tags": ["parser:wechat"],
+            },
+            user_id=user_id,
+        )
+
+        group_key = (
+            f"import_reconciliation:duplicate:bill:{existing_bill_id}:"
+            "amount:42.00:2026-05-01"
+        )
+        first_candidate_id = f"reconcile:import:duplicate:bill:{existing_bill_id}:a2first"
+        second_candidate_id = f"reconcile:import:duplicate:bill:{existing_bill_id}:a2second"
+        candidates = [
+            {
+                "candidate_id": first_candidate_id,
+                "candidate_type": "duplicate",
+                "session_id": session_id,
+                "preview_id": first_preview_id,
+                "import_bill_key": f"preview:{first_preview_id}",
+                "existing_bill_id": int(existing_bill_id),
+                "group_key": group_key,
+                "amount_abs": 42.0,
+                "time_diff_seconds": 5,
+                "score": 0.98,
+                "level": "high",
+                "reason": "same_amount|same_day|time_close",
+                "import_bill_snapshot": {
+                    "date": "2026-05-01 10:00:00",
+                    "type": "支出",
+                    "amount": -42.0,
+                    "description": "same item|alipay detail",
+                    "parser_id": "alipay",
+                    "tag_ids": [alipay_tag_id],
+                },
+                "existing_bill_snapshot": {
+                    "id": int(existing_bill_id),
+                    "date": "2026-05-01 10:00:05",
+                    "type": "支出",
+                    "amount": -42.0,
+                    "description": "manual base|same item",
+                },
+                "source_payload": {"family": "import_reconciliation"},
+            },
+            {
+                "candidate_id": second_candidate_id,
+                "candidate_type": "duplicate",
+                "session_id": session_id,
+                "preview_id": second_preview_id,
+                "import_bill_key": f"preview:{second_preview_id}",
+                "existing_bill_id": int(existing_bill_id),
+                "group_key": group_key,
+                "amount_abs": 42.0,
+                "time_diff_seconds": 3,
+                "score": 0.99,
+                "level": "high",
+                "reason": "same_amount|same_day|time_close",
+                "import_bill_snapshot": {
+                    "date": "2026-05-01 10:00:02",
+                    "type": "支出",
+                    "amount": -42.0,
+                    "description": "wechat detail",
+                    "parser_id": "wechat",
+                    "tag_ids": [wechat_tag_id],
+                },
+                "existing_bill_snapshot": {
+                    "id": int(existing_bill_id),
+                    "date": "2026-05-01 10:00:05",
+                    "type": "支出",
+                    "amount": -42.0,
+                    "description": "manual base|same item",
+                },
+                "source_payload": {"family": "import_reconciliation"},
+            },
+        ]
+        await db.persist_import_reconciliation_candidates(candidates, user_id=user_id)
+
+        preview_read_model = await service.get_import_preview(
+            session_id,
+            selected_only=False,
+            user_id=user_id,
+        )
+        first_preview_signal = next(
+            item for item in preview_read_model if int(item["id"]) == first_preview_id
+        )["matching"]["reconciliation"]
+        assert first_preview_signal["candidate_id"] == first_candidate_id
+        assert first_preview_signal["signal_label"] == "人工|支付宝"
+        session_candidates = await service.get_matching_session_candidates(session_id, user_id=user_id)
+        assert first_candidate_id in {
+            candidate["candidate_id"] for candidate in session_candidates["candidates"]
+        }
+
+        first_accept = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            first_candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert first_accept["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual base|same item|alipay detail"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id,
+            alipay_tag_id,
+        ]
+
+        second_accept = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            second_candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert second_accept["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual base|same item|alipay detail|wechat detail"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id,
+            alipay_tag_id,
+            wechat_tag_id,
+        ]
+
+        formal_read_model = await service.get_matching_bill_candidates(existing_bill_id, user_id=user_id)
+        assert formal_read_model["reconciliation"]["signal_label"] == "人工|支付宝|微信"
+        assert set(formal_read_model["reconciliation"]["candidate_ids"]) == {
+            first_candidate_id,
+            second_candidate_id,
+        }
+
+        first_clear = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            first_candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert first_clear["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual base|same item|wechat detail"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id,
+            wechat_tag_id,
+        ]
+        formal_read_model = await service.get_matching_bill_candidates(existing_bill_id, user_id=user_id)
+        assert formal_read_model["reconciliation"]["signal_label"] == "人工|微信"
+
+        second_clear = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            second_candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert second_clear["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual base|same item"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id
+        ]
+        formal_read_model = await service.get_matching_bill_candidates(existing_bill_id, user_id=user_id)
+        assert formal_read_model["reconciliation"] is None
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_reject_clear_keeps_manual_confirm_default(
+    tmp_path: Path,
+) -> None:
+    """Reject should suppress the candidate without applying projection; clear should restore pending review."""
+    db = await _create_database(tmp_path)
+    service = BillService(db)
+    try:
+        await service.initialize()
+        user_id = await _create_user(db, "-a2-reject")
+        existing_bill_id = await db.create_bill(
+            {
+                "date": "2026-05-02 09:00:00",
+                "type": "支出",
+                "amount": -16.0,
+                "counterparty": "reject merchant",
+                "description": "manual only",
+                "payment_method": "manual",
+                "main_category": "餐饮",
+                "sub_category": "早餐",
+                "source_account_id": 3001,
+            },
+            user_id=user_id,
+        )
+        assert existing_bill_id is not None
+        session_id = "session-a2-reject"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        preview_id = await db.insert_preview_bill(
+            session_id,
+            {
+                "preview_date": "2026-05-02 09:00:02",
+                "preview_type": "支出",
+                "preview_amount": 16.0,
+                "preview_counterparty": "reject merchant",
+                "preview_payment_method": "alipay",
+                "preview_description": "should not merge",
+                "preview_parser_id": "alipay",
+                "preview_parser_tags": ["parser:alipay"],
+            },
+            user_id=user_id,
+        )
+        candidate_id = f"reconcile:import:duplicate:bill:{existing_bill_id}:rejectme"
+        await db.persist_import_reconciliation_candidates(
+            [
+                {
+                    "candidate_id": candidate_id,
+                    "candidate_type": "duplicate",
+                    "session_id": session_id,
+                    "preview_id": preview_id,
+                    "import_bill_key": f"preview:{preview_id}",
+                    "existing_bill_id": int(existing_bill_id),
+                    "group_key": (
+                        f"import_reconciliation:duplicate:bill:{existing_bill_id}:"
+                        "amount:16.00:2026-05-02"
+                    ),
+                    "amount_abs": 16.0,
+                    "time_diff_seconds": 2,
+                    "score": 0.98,
+                    "level": "high",
+                    "reason": "same_amount|same_day|time_close",
+                    "import_bill_snapshot": {
+                        "date": "2026-05-02 09:00:02",
+                        "type": "支出",
+                        "amount": -16.0,
+                        "description": "should not merge",
+                        "parser_id": "alipay",
+                    },
+                    "existing_bill_snapshot": {
+                        "id": int(existing_bill_id),
+                        "date": "2026-05-02 09:00:00",
+                        "type": "支出",
+                        "amount": -16.0,
+                        "description": "manual only",
+                    },
+                    "source_payload": {"family": "import_reconciliation"},
+                }
+            ],
+            user_id=user_id,
+        )
+
+        reject_result = await service._reject_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert reject_result["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual only"
+        assert await service.get_matching_bill_candidates(existing_bill_id, user_id=user_id) == {
+            "success": True,
+            "bill_id": int(existing_bill_id),
+            "linked_pair": None,
+            "candidates": [],
+            "reconciliation": None,
+        }
+
+        clear_result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert clear_result["success"] is True
+        bill_candidates = await service.get_matching_bill_candidates(existing_bill_id, user_id=user_id)
+        assert [candidate["candidate_id"] for candidate in bill_candidates["candidates"]] == [candidate_id]
+    finally:
+        await service.close()
