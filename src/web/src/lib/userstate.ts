@@ -338,11 +338,9 @@ export function getCurrentUserInfo(): UserBasicInfo | null {
         const day = userInfo.fiscalYearStart & 0xff;
         logger.info(`  - 财年开始日期解码: ${month}月${day}日`);
 
-        // 🆕 警告：如果fiscalYearStart明显错误（如1, 257而非513）
+        // fiscalYearStart 应为 month << 8 | day 的复合值；仅对明显异常值保留告警
         if (userInfo.fiscalYearStart === 1) {
             logger.warn(`[getCurrentUserInfo] ⚠️ fiscalYearStart=1异常！应该是复合值如513(0x201=2月1日)，可能是登录API未正确返回`);
-        } else if (userInfo.fiscalYearStart === 257) {
-            logger.warn(`[getCurrentUserInfo] ⚠️ fiscalYearStart=257(1月1日)，但数据库中Cyansl0t用户设置为513(2月1日)，请检查登录响应`);
         }
     } else {
         logger.warn(`[getCurrentUserInfo] ⚠️ fiscalYearStart字段不存在或为falsy值`);

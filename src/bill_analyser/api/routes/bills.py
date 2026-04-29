@@ -4894,6 +4894,8 @@ def get_import_preview(session_id: str):
         page_size = max(min(page_size, 200), 1)
         sort_by = request.args.get("sort_by", default="", type=str) or ""
         sort_direction = request.args.get("sort_direction", default="asc", type=str) or "asc"
+        raw_preview_ids = request.args.get("preview_ids", default="", type=str) or ""
+        preview_ids = _parse_int_list(raw_preview_ids) if raw_preview_ids else None
 
         _, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
@@ -4909,6 +4911,7 @@ def get_import_preview(session_id: str):
                     page_size=page_size,
                     sort_by=sort_by,
                     sort_direction=sort_direction,
+                    preview_ids=preview_ids,
                     user_id=user_id,
                 )
             )
@@ -4930,6 +4933,41 @@ def get_import_preview(session_id: str):
 
     except Exception as e:
         logger.error("[获取预览] 失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route("/import/v2/preview/<session_id>/index", methods=["GET"])
+@log_method
+@require_auth
+def get_import_preview_index(session_id: str):
+    """获取导入预览全局轻量索引，用于 server-paged 模式下的全局筛选/统计/排序。"""
+    try:
+        _, bill_service, _ = get_app_context()
+        user_id = getattr(request, "user_id", 1)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            items = loop.run_until_complete(
+                bill_service.get_import_preview_filter_index(
+                    session_id,
+                    user_id=user_id,
+                )
+            )
+            return jsonify(
+                {
+                    "success": True,
+                    "data": {
+                        "items": items,
+                        "total": len(items),
+                    },
+                }
+            )
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error("[获取预览索引] 失败: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -524,6 +524,40 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
         return self._normalize_preview_row(dict(row)) if row else None
 
     @log_method
+    async def get_preview_by_ids(
+        self,
+        session_id: str,
+        preview_ids: list[int],
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        normalized_preview_ids = [int(preview_id) for preview_id in preview_ids if int(preview_id) > 0]
+        if not normalized_preview_ids:
+            return []
+
+        conn = await self._get_connection()
+        placeholders = ",".join(["?"] * len(normalized_preview_ids))
+        query = (
+            "SELECT * FROM bills_preview "
+            "WHERE session_id = ? AND user_id = ? AND id IN (" + placeholders + ")"
+        )
+        params: list[Any] = [session_id, user_id, *normalized_preview_ids]
+
+        async with conn.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+
+        preview_lookup = {
+            int(row["id"]): self._normalize_preview_row(dict(row))
+            for row in rows
+        }
+
+        return [
+            preview_lookup[preview_id]
+            for preview_id in normalized_preview_ids
+            if preview_id in preview_lookup
+        ]
+
+    @log_method
     async def update_preview_transfer_decision(
         self,
         preview_id: int,

@@ -807,6 +807,14 @@ import {
     resolveImportPreviewCategoryId,
     type ImportPreviewRecord
 } from '../importPreview.ts';
+import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
+import {
+    collectImportPreviewIndexAnnotationIssues,
+    matchesImportPreviewIndexItemFilters,
+    resolveImportPreviewIndexPage,
+    sortImportPreviewIndexItems,
+    type ImportPreviewIndexItem
+} from '../importPreviewIndex.ts';
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
@@ -1020,6 +1028,37 @@ interface PreviewTableSortItem {
     order?: PreviewTableSortDirection | boolean;
 }
 
+interface ImportPreviewIndexResponseItem {
+    id: number;
+    preview_date?: string;
+    type?: number;
+    source_amount?: number;
+    category_id?: string;
+    actual_category_name?: string;
+    source_account_id?: string;
+    destination_account_id?: string;
+    actual_source_account_name?: string;
+    actual_destination_account_name?: string;
+    comment?: string;
+    counterparty?: string;
+    payment_method?: string;
+    selected?: boolean;
+    is_manually_annotated?: boolean;
+    parser_source?: string;
+    parser_tags?: string[];
+    dedup_type?: string;
+    dedup_source_ids?: Array<number | string>;
+    transfer_status?: ImportPreviewSignalStatus | null;
+    transfer_title?: string;
+    learning_status?: ImportPreviewSignalStatus | null;
+    learning_title?: string;
+    learning_summary?: string;
+    recurring_template_id?: string;
+    recurring_candidate_count?: number;
+    recurring_match_reasons?: string;
+    recurring_matched_date?: string;
+}
+
 const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([
     'time',
     'type',
@@ -1047,6 +1086,8 @@ const emit = defineEmits<{
         sortOptions?: {
             sortBy?: string | null;
             sortDirection?: PreviewTableSortDirection | null;
+            previewIds?: number[];
+            totalCount?: number;
         }
     ): void;
 }>();
@@ -1103,6 +1144,8 @@ const tableSortBy = ref<PreviewTableSortItem[]>([]);
 const currentSortKey = ref<string>('');
 const currentSortDirection = ref<PreviewTableSortDirection>('asc');
 const serverPagedDrafts = ref<Map<number, ImportTransaction>>(new Map());
+const serverPagedPreviewIndex = ref<ImportPreviewIndexItem[]>([]);
+const serverPagedPreviewIndexLoaded = ref<boolean>(false);
 const showCustomDateRangeDialog = ref<boolean>(false);
 const showCustomDescriptionDialog = ref<boolean>(false);
 const currentDescriptionFilterValue = ref<string | null>(null);
@@ -1121,8 +1164,27 @@ const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingId
     || recurringDecisionLoadingIds.value.length > 0);
 const serverPagedMode = computed<boolean>(() => !!props.serverPaged && !!props.sessionId);
 const importTransactions = computed<ImportTransaction[]>(() => props.importTransactions || []);
+const filteredServerPagedPreviewIndex = computed<ImportPreviewIndexItem[]>(() => {
+    if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
+        return [];
+    }
+
+    const filteredItems = serverPagedPreviewIndex.value.filter(item => matchesImportPreviewIndexItemFilters(item, filters.value, {
+        tagNameById: allTagsMap.value,
+    }));
+
+    return sortImportPreviewIndexItems(
+        filteredItems,
+        currentSortKey.value,
+        currentSortDirection.value,
+    );
+});
 const totalImportTransactionCount = computed<number>(() => serverPagedMode.value
-    ? Math.max(props.totalImportTransactionCount || 0, 0)
+    ? (
+        serverPagedPreviewIndexLoaded.value
+            ? filteredServerPagedPreviewIndex.value.length
+            : Math.max(props.totalImportTransactionCount || 0, 0)
+    )
     : importTransactions.value.length);
 const tablePage = computed<number>(() => serverPagedMode.value ? 1 : currentPage.value);
 const tableItemsPerPage = computed<number>(() => serverPagedMode.value
@@ -2641,6 +2703,10 @@ async function reclassifySelected(): Promise<void> {
         logger.info(`[重新分类] 后端返回成功，preview数量: ${result.data?.preview?.length || 0}, ` +
             `session_samples_saved=${result.data?.session_samples_saved || 0}, annotation_applied=${result.data?.annotation_applied || 0}`);
 
+        if (serverPagedMode.value) {
+            await loadServerPagedPreviewIndex();
+        }
+
         // 通知父组件使用新数据
         // 父组件 ImportDialog.vue 监听 @reclassified 事件并更新 importTransactions
         if (result.data?.preview && result.data.preview.length > 0) {
@@ -3058,19 +3124,126 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
-function cloneImportTransaction(transaction: ImportTransaction): ImportTransaction {
-    const clonedTransaction = Object.assign(
-        Object.create(Object.getPrototypeOf(transaction)),
-        transaction
-    ) as ImportTransaction;
-    clonedTransaction.tagIds = [...(transaction.tagIds || [])];
-    clonedTransaction.originalTagNames = [...(transaction.originalTagNames || [])];
-    clonedTransaction.parserTags = [...(transaction.parserTags || [])];
-    clonedTransaction.dedupSourceIds = [...(transaction.dedupSourceIds || [])];
-    if (transaction.matching) {
-        clonedTransaction.matching = structuredClone(transaction.matching);
+function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexResponseItem): ImportPreviewIndexItem {
+    const time = new Date(item.preview_date || '').getTime() / 1000;
+    return {
+        id: Number(item.id || 0),
+        time: Number.isFinite(time) ? time : Date.now() / 1000,
+        type: Number(item.type || TransactionType.ModifyBalance),
+        actualCategoryName: item.actual_category_name || '',
+        categoryId: item.category_id || '',
+        actualSourceAccountName: item.actual_source_account_name || '',
+        actualDestinationAccountName: item.actual_destination_account_name || '',
+        sourceAccountId: item.source_account_id || '',
+        destinationAccountId: item.destination_account_id || '',
+        tagIds: [],
+        originalTagNames: [],
+        comment: item.comment || '',
+        isManuallyAnnotated: !!item.is_manually_annotated,
+        selected: !!item.selected,
+        sourceAmount: Number(item.source_amount || 0),
+        counterparty: item.counterparty || '',
+        paymentMethod: item.payment_method || '',
+        parserSource: item.parser_source || '',
+        parserTags: item.parser_tags || [],
+        dedupType: item.dedup_type || '',
+        dedupSourceIds: item.dedup_source_ids || [],
+        transferStatus: item.transfer_status ?? null,
+        transferTitle: item.transfer_title || '',
+        learningStatus: item.learning_status ?? null,
+        learningTitle: item.learning_title || '',
+        learningSummary: item.learning_summary || '',
+        recurringTemplateId: item.recurring_template_id || '',
+        recurringCandidateCount: Number(item.recurring_candidate_count || 0),
+        recurringMatchReasons: item.recurring_match_reasons || '',
+        recurringMatchedDate: item.recurring_matched_date || '',
+    };
+}
+
+async function loadServerPagedPreviewIndex(): Promise<void> {
+    if (!serverPagedMode.value || !props.sessionId) {
+        serverPagedPreviewIndex.value = [];
+        serverPagedPreviewIndexLoaded.value = false;
+        return;
     }
-    return clonedTransaction;
+
+    serverPagedPreviewIndexLoaded.value = false;
+    serverPagedPreviewIndex.value = [];
+
+    const token = getCurrentToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`/api/bills/import/v2/preview/${encodeURIComponent(props.sessionId)}/index`, {
+        method: 'GET',
+        headers,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`获取预览筛选索引失败: ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.error || '获取预览筛选索引失败');
+    }
+
+    const items = Array.isArray(result.data?.items)
+        ? result.data.items as ImportPreviewIndexResponseItem[]
+        : [];
+    serverPagedPreviewIndex.value = items.map(mapImportPreviewIndexResponseItem);
+    serverPagedPreviewIndexLoaded.value = true;
+}
+
+function syncPreviewFilterIndexFromTransaction(transaction: ImportTransaction): void {
+    if (!serverPagedMode.value) {
+        return;
+    }
+
+    const previewId = getPreviewId(transaction);
+    if (previewId === null) {
+        return;
+    }
+
+    const target = serverPagedPreviewIndex.value.find(item => item.id === previewId);
+    if (!target) {
+        return;
+    }
+
+    target.time = transaction.time;
+    target.type = transaction.type;
+    target.actualCategoryName = transaction.actualCategoryName || '';
+    target.categoryId = transaction.categoryId || '';
+    target.actualSourceAccountName = transaction.actualSourceAccountName || '';
+    target.actualDestinationAccountName = transaction.actualDestinationAccountName || '';
+    target.sourceAccountId = transaction.sourceAccountId || '';
+    target.destinationAccountId = transaction.destinationAccountId || '';
+    target.comment = transaction.comment || '';
+    target.isManuallyAnnotated = !!transaction.isManuallyAnnotated;
+    target.selected = !!transaction.selected;
+    target.sourceAmount = Number(transaction.sourceAmount || 0);
+    target.counterparty = transaction.counterparty || '';
+    target.paymentMethod = transaction.paymentMethod || '';
+    target.parserSource = transaction.parserSource || '';
+    target.parserTags = [...(transaction.parserTags || [])];
+    target.dedupType = transaction.dedupType || '';
+    target.dedupSourceIds = [...(transaction.dedupSourceIds || [])];
+    target.transferStatus = getTransferSignalStatus(transaction);
+    target.transferTitle = transaction.transferSuggestionReason || '';
+    target.learningStatus = getLearningSignalStatus(transaction);
+    target.learningTitle = transaction.learningRecommendationReason || '';
+    target.learningSummary = transaction.learningRecommendationSummary || '';
+    target.recurringTemplateId = transaction.recurringTemplateId || '';
+    target.recurringCandidateCount = Number(transaction.recurringCandidateCount || 0);
+    target.recurringMatchReasons = transaction.recurringMatchReasons || '';
+    target.recurringMatchedDate = transaction.recurringMatchedDate || '';
+}
+
+function cloneImportTransaction(transaction: ImportTransaction): ImportTransaction {
+    return cloneImportPreviewDraftTransaction(getPreviewState(transaction));
 }
 
 function cacheCurrentPageDrafts(): void {
@@ -3216,7 +3389,20 @@ function emitServerPagedRequest(
     const normalizedSortDirection = normalizePreviewTableSortDirection(
         options.sortDirection ?? currentSortDirection.value
     );
-    const pageChanged = currentPage.value !== normalizedPage;
+    const filteredPreviewIndexItems = sortImportPreviewIndexItems(
+        serverPagedPreviewIndex.value.filter(item => matchesImportPreviewIndexItemFilters(item, filters.value, {
+            tagNameById: allTagsMap.value,
+        })),
+        normalizedSortKey,
+        normalizedSortDirection,
+    );
+    const resolvedPageState = resolveImportPreviewIndexPage(
+        filteredPreviewIndexItems,
+        normalizedPage,
+        normalizedPageSize,
+    );
+    const effectivePage = resolvedPageState.page;
+    const pageChanged = currentPage.value !== effectivePage;
     const pageSizeChanged = countPerPage.value !== normalizedPageSize;
     const sortChanged = currentSortKey.value !== normalizedSortKey
         || currentSortDirection.value !== normalizedSortDirection;
@@ -3229,11 +3415,15 @@ function emitServerPagedRequest(
         cacheCurrentPageDrafts();
     }
 
-    currentPage.value = normalizedPage;
+    currentPage.value = effectivePage;
     countPerPage.value = normalizedPageSize;
     currentSortKey.value = normalizedSortKey;
     currentSortDirection.value = normalizedSortDirection;
-    emit('requestPage', normalizedPage, normalizedPageSize, getCurrentServerPagedSortRequest());
+    emit('requestPage', effectivePage, normalizedPageSize, {
+        ...getCurrentServerPagedSortRequest(),
+        previewIds: resolvedPageState.previewIds,
+        totalCount: resolvedPageState.totalCount,
+    });
 }
 
 function updatePreviewTablePage(page: number): void {
@@ -3281,6 +3471,7 @@ watch(
     transactions => {
         (transactions || []).forEach(transaction => syncTransferDecisionBaseline(transaction));
         rehydrateCurrentPageDrafts();
+        (transactions || []).forEach(transaction => syncPreviewFilterIndexFromTransaction(transaction));
     },
     { immediate: true }
 );
@@ -3290,6 +3481,8 @@ watch(
     ([isServerPaged]) => {
         if (!isServerPaged) {
             serverPagedDrafts.value = new Map();
+            serverPagedPreviewIndex.value = [];
+            serverPagedPreviewIndexLoaded.value = false;
             currentSortKey.value = '';
             currentSortDirection.value = 'asc';
             return;
@@ -3299,12 +3492,32 @@ watch(
         const activeSort = tableSortBy.value[0];
         currentSortKey.value = normalizeServerPagedSortKey(activeSort?.key ?? '');
         currentSortDirection.value = normalizePreviewTableSortDirection(activeSort?.order);
-        emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
-            cacheDrafts: false,
-            force: true
-        });
+        void loadServerPagedPreviewIndex()
+            .then(() => {
+                emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
+                    cacheDrafts: false,
+                    force: true
+                });
+            })
+            .catch(error => {
+                logger.error('[导入预览索引] 加载失败:', error);
+                snackbar.value?.showError(`导入失败: ${error}`);
+            });
     },
     { immediate: true }
+);
+
+watch(
+    () => JSON.stringify(filters.value),
+    () => {
+        if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
+            return;
+        }
+
+        emitServerPagedRequest(1, countPerPage.value > 0 ? countPerPage.value : 10, {
+            force: true,
+        });
+    }
 );
 
 function getDateFilterSummary(): string {
@@ -3845,7 +4058,15 @@ const selectedIncomeTransactionCount = computed<number>(() => importTransactionS
 const selectedTransferTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedTransferCount);
 const selectedRecurringMatchCount = computed<number>(() => importTransactionSelectionSummary.value.selectedRecurringMatchCount);
 const selectedInvalidTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedInvalidCount);
-const annotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.annotationCount);
+const annotationTransactionCount = computed<number>(() => {
+    if (!serverPagedMode.value || !serverPagedPreviewIndexLoaded.value) {
+        return importTransactionSelectionSummary.value.annotationCount;
+    }
+
+    return filteredServerPagedPreviewIndex.value.filter(
+        transaction => collectImportPreviewIndexAnnotationIssues(transaction).length > 0,
+    ).length;
+});
 const selectedAnnotationTransactionCount = computed<number>(() => importTransactionSelectionSummary.value.selectedAnnotationCount);
 const selectedAnnotationTransactions = computed<ImportTransaction[]>(() => importTransactionSelectionSummary.value.selectedAnnotationTransactions);
 const annotationReasonSummaries = computed<AnnotationReasonSummary[]>(() => importTransactionSelectionSummary.value.annotationReasonSummaries);
@@ -3857,13 +4078,17 @@ const allTransactionSelected = computed<boolean>(() => currentPageTransactions.v
     && currentPageTransactions.value.every(transaction => transaction.selected));
 
 const allUsedCategoryNames = computed<string[]>(() => {
-    if (importTransactions.value.length < 1) {
+    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
+        ? serverPagedPreviewIndex.value
+        : importTransactions.value;
+
+    if (sourceItems.length < 1) {
         return [];
     }
 
     const categoryNames: Record<string, boolean> = {};
 
-    for (const transaction of importTransactions.value) {
+    for (const transaction of sourceItems) {
         if (transaction.actualCategoryName && transaction.actualCategoryName !== '') {
             categoryNames[transaction.actualCategoryName] = true;
         }
@@ -3873,13 +4098,17 @@ const allUsedCategoryNames = computed<string[]>(() => {
 });
 
 const allUsedAccountNames = computed<string[]>(() => {
-    if (importTransactions.value.length < 1) {
+    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
+        ? serverPagedPreviewIndex.value
+        : importTransactions.value;
+
+    if (sourceItems.length < 1) {
         return [];
     }
 
     const accountNames: Record<string, boolean> = {};
 
-    for (const transaction of importTransactions.value) {
+    for (const transaction of sourceItems) {
         if (transaction.actualSourceAccountName && transaction.actualSourceAccountName !== '') {
             accountNames[transaction.actualSourceAccountName] = true;
         }
@@ -3893,13 +4122,17 @@ const allUsedAccountNames = computed<string[]>(() => {
 });
 
 const allUsedTagNames = computed<string[]>(() => {
-    if (importTransactions.value.length < 1) {
+    const sourceItems = serverPagedMode.value && serverPagedPreviewIndexLoaded.value
+        ? serverPagedPreviewIndex.value
+        : importTransactions.value;
+
+    if (sourceItems.length < 1) {
         return [];
     }
 
     const tagNames: Record<string, boolean> = {};
 
-    for (const transaction of importTransactions.value) {
+    for (const transaction of sourceItems) {
         if (!transaction.tagIds || !transaction.originalTagNames) {
             continue;
         }
@@ -4318,6 +4551,8 @@ function updateTransactionData(transaction: ImportTransaction): void {
     if (transaction.destinationAccountId && allAccountsMap.value[transaction.destinationAccountId]) {
         transaction.actualDestinationAccountName = allAccountsMap.value[transaction.destinationAccountId]!.name;
     }
+
+    syncPreviewFilterIndexFromTransaction(transaction);
 }
 
 function showBatchReplaceDialog(type: BatchReplaceDialogDataType, allSourceTagItems?: NameValue[]): void {

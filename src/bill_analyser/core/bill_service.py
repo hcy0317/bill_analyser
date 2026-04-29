@@ -2724,6 +2724,204 @@ class BillService:
         }
 
     @staticmethod
+    def _map_import_preview_type_to_frontend_value(preview_type: str | None) -> int:
+        normalized_preview_type = str(preview_type or "").strip()
+        if normalized_preview_type in {"收入", "income"}:
+            return int(TransactionType.INCOME)
+        if normalized_preview_type in {"支出", "expense"}:
+            return int(TransactionType.EXPENSE)
+        if normalized_preview_type in {"转账", "transfer"}:
+            return int(TransactionType.TRANSFER)
+        if normalized_preview_type in {"投资", "investment"}:
+            return int(TransactionType.INVESTMENT)
+        return 1
+
+    @staticmethod
+    def _resolve_import_preview_transfer_signal_status(preview_item: dict[str, Any]) -> str | None:
+        matching = dict(preview_item.get("matching") or {})
+        transfer_matching = dict(matching.get("transfer") or {})
+        review_status = str(transfer_matching.get("review_status") or "").strip().lower()
+        if review_status in {"accepted", "rejected"}:
+            return review_status
+
+        suggested_preview_type = str(preview_item.get("suggested_preview_type") or "").strip().lower()
+        preview_type = str(preview_item.get("preview_type") or "").strip().lower()
+        transfer_score = float(preview_item.get("transfer_suggestion_score") or 0)
+        transfer_suppressed = bool(transfer_matching.get("suppressed"))
+        if (
+            suggested_preview_type in {"转账", "transfer"}
+            and preview_type not in {"转账", "transfer"}
+            and transfer_score > 0
+            and not transfer_suppressed
+        ):
+            return "pending"
+
+        return None
+
+    @staticmethod
+    def _resolve_import_preview_learning_signal_status(preview_item: dict[str, Any]) -> str | None:
+        matching = dict(preview_item.get("matching") or {})
+        learning_matching = dict(matching.get("learning") or {})
+        review_status = str(learning_matching.get("review_status") or "").strip().lower()
+        if review_status in {"accepted", "rejected"}:
+            return review_status
+
+        try:
+            learning_rule_id = int(learning_matching.get("rule_id") or 0)
+        except (TypeError, ValueError):
+            learning_rule_id = 0
+
+        has_pending_learning = (
+            float(preview_item.get("learning_recommendation_score") or 0) > 0
+            or bool(str(preview_item.get("learning_recommendation_summary") or "").strip())
+            or bool(str(preview_item.get("learning_recommendation_reason") or "").strip())
+            or bool(str(preview_item.get("learning_recommendation_type") or "").strip())
+            or learning_rule_id > 0
+        ) and not bool(learning_matching.get("suppressed"))
+
+        return "pending" if has_pending_learning else None
+
+    @classmethod
+    def _build_import_preview_filter_index_item(
+        cls,
+        preview_item: dict[str, Any],
+        *,
+        categories_by_id: dict[int, dict[str, Any]],
+        accounts_by_id: dict[int, dict[str, Any]],
+    ) -> dict[str, Any]:
+        preview_type = str(preview_item.get("preview_type") or "")
+        frontend_type = cls._map_import_preview_type_to_frontend_value(preview_type)
+        category_id = preview_item.get("category_id")
+        normalized_category_id = str(category_id) if category_id not in (None, "", 0, "0") else ""
+        category_row = categories_by_id.get(int(category_id)) if normalized_category_id and str(category_id).isdigit() else None
+        actual_category_name = (
+            str(
+                category_row.get("name")
+                or category_row.get("sub_category")
+                or category_row.get("main_category")
+                or ""
+            )
+            if category_row
+            else str(preview_item.get("preview_sub_category") or preview_item.get("preview_main_category") or "")
+        )
+
+        source_account_id = preview_item.get("preview_source_account_id")
+        normalized_source_account_id = (
+            str(source_account_id) if source_account_id not in (None, "", 0, "0") else ""
+        )
+        source_account_row = accounts_by_id.get(int(source_account_id)) if normalized_source_account_id else None
+        actual_source_account_name = (
+            str(source_account_row.get("name") or "")
+            if source_account_row
+            else str(preview_item.get("preview_payment_method") or "")
+        )
+
+        destination_account_id = preview_item.get("preview_destination_account_id")
+        normalized_destination_account_id = (
+            str(destination_account_id) if destination_account_id not in (None, "", 0, "0") else ""
+        )
+        destination_account_row = accounts_by_id.get(int(destination_account_id)) if normalized_destination_account_id else None
+        actual_destination_account_name = (
+            str(destination_account_row.get("name") or "")
+            if destination_account_row
+            else ""
+        )
+        raw_dedup_source_ids = preview_item.get("dedup_source_ids") or []
+        if isinstance(raw_dedup_source_ids, str):
+            dedup_source_ids = [
+                int(value.strip()) if value.strip().isdigit() else value.strip()
+                for value in raw_dedup_source_ids.split(",")
+                if value.strip()
+            ]
+        else:
+            dedup_source_ids = list(raw_dedup_source_ids)
+
+        return {
+            "id": int(preview_item.get("id") or 0),
+            "preview_date": str(preview_item.get("preview_date") or ""),
+            "type": frontend_type,
+            "source_amount": float(preview_item.get("preview_amount") or 0),
+            "category_id": normalized_category_id,
+            "actual_category_name": actual_category_name,
+            "source_account_id": normalized_source_account_id,
+            "destination_account_id": normalized_destination_account_id,
+            "actual_source_account_name": actual_source_account_name,
+            "actual_destination_account_name": actual_destination_account_name,
+            "comment": str(preview_item.get("preview_description") or ""),
+            "counterparty": str(preview_item.get("preview_counterparty") or ""),
+            "payment_method": str(preview_item.get("preview_payment_method") or ""),
+            "selected": bool(preview_item.get("preview_selected", True)),
+            "is_manually_annotated": bool(preview_item.get("preview_is_manually_annotated")),
+            "parser_source": str(preview_item.get("preview_parser_id") or ""),
+            "parser_tags": list(preview_item.get("preview_parser_tags") or []),
+            "dedup_type": str(preview_item.get("dedup_type") or ""),
+            "dedup_source_ids": dedup_source_ids,
+            "transfer_status": cls._resolve_import_preview_transfer_signal_status(preview_item),
+            "transfer_title": str(preview_item.get("transfer_suggestion_reason") or ""),
+            "learning_status": cls._resolve_import_preview_learning_signal_status(preview_item),
+            "learning_title": str(preview_item.get("learning_recommendation_reason") or ""),
+            "learning_summary": str(preview_item.get("learning_recommendation_summary") or ""),
+            "recurring_template_id": (
+                str(preview_item.get("preview_recurring_id") or "")
+                if preview_item.get("preview_recurring_id") not in (None, "", 0, "0")
+                else ""
+            ),
+            "recurring_candidate_count": int(preview_item.get("preview_recurring_candidate_count") or 0),
+            "recurring_match_reasons": str(preview_item.get("preview_recurring_match_reasons") or ""),
+            "recurring_matched_date": str(preview_item.get("preview_recurring_matched_date") or ""),
+        }
+
+    @log_method
+    async def get_import_preview_filter_index(
+        self,
+        session_id: str,
+        *,
+        selected_only: bool = False,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        previews = await self.db.get_preview_by_session(
+            session_id,
+            user_id=user_id,
+            selected_only=selected_only,
+        )
+        if not previews:
+            return []
+
+        preview_user_id = int(previews[0].get("user_id") or user_id or 1)
+        projection_context = await self._load_import_preview_projection_context(
+            session_id,
+            user_id=preview_user_id,
+        )
+        categories = await self.db.get_all_categories(user_id=preview_user_id)
+        accounts = await self.db.get_all_accounts(user_id=preview_user_id)
+        categories_by_id = {
+            int(category["id"]): category
+            for category in categories
+            if category.get("id") not in (None, "", 0, "0")
+        }
+        accounts_by_id = {
+            int(account["id"]): account
+            for account in accounts
+            if account.get("id") not in (None, "", 0, "0")
+        }
+
+        result: list[dict[str, Any]] = []
+        for preview in previews:
+            preview_item = await self._build_import_preview_item(
+                preview,
+                user_id=preview_user_id,
+                projection_context=projection_context,
+            )
+            result.append(
+                self._build_import_preview_filter_index_item(
+                    preview_item,
+                    categories_by_id=categories_by_id,
+                    accounts_by_id=accounts_by_id,
+                )
+            )
+        return result
+
+    @staticmethod
     def _normalize_import_preview_page_sort_direction(sort_direction: str | None) -> str:
         return "desc" if str(sort_direction or "").strip().lower() == "desc" else "asc"
 
@@ -2786,6 +2984,7 @@ class BillService:
         page_size: int = 50,
         sort_by: str | None = None,
         sort_direction: str | None = None,
+        preview_ids: list[int] | None = None,
         selected_only: bool = False,
         user_id: int = 1,
     ) -> dict[str, Any]:
@@ -2793,8 +2992,38 @@ class BillService:
         normalized_page_size = max(min(int(page_size or 50), 200), 1)
         normalized_sort_by = self._normalize_import_preview_page_sort_key(sort_by)
         normalized_sort_direction = self._normalize_import_preview_page_sort_direction(sort_direction)
+        normalized_preview_ids = []
+        if preview_ids:
+            for preview_id in preview_ids:
+                normalized_preview_id = int(preview_id or 0)
+                if normalized_preview_id > 0 and normalized_preview_id not in normalized_preview_ids:
+                    normalized_preview_ids.append(normalized_preview_id)
 
-        if hasattr(self.db, "get_preview_page_by_session"):
+        if normalized_preview_ids and hasattr(self.db, "get_preview_by_ids"):
+            previews = await self.db.get_preview_by_ids(
+                session_id,
+                normalized_preview_ids,
+                user_id=user_id,
+            )
+            total = len(normalized_preview_ids)
+        elif normalized_preview_ids:
+            all_previews = await self.db.get_preview_by_session(
+                session_id,
+                user_id=user_id,
+                selected_only=selected_only,
+            )
+            preview_lookup = {
+                int(preview.get("id") or 0): preview
+                for preview in all_previews
+                if int(preview.get("id") or 0) > 0
+            }
+            previews = [
+                preview_lookup[preview_id]
+                for preview_id in normalized_preview_ids
+                if preview_id in preview_lookup
+            ]
+            total = len(normalized_preview_ids)
+        elif hasattr(self.db, "get_preview_page_by_session"):
             previews, total = await self.db.get_preview_page_by_session(
                 session_id,
                 user_id=user_id,

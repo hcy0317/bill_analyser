@@ -92,24 +92,21 @@ def _dedupe_text_items(items: list[str]) -> list[str]:
     return deduped
 
 
-def _infer_source_labels_from_preview_text(preview: dict[str, Any]) -> list[str]:
-    """Best-effort display fallback when structured dedup source metadata is incomplete."""
-    combined_text = " ".join(
-        str(preview.get(field) or "").strip()
-        for field in ("preview_payment_method", "preview_counterparty", "preview_description")
-    ).lower()
-    if not combined_text:
-        return []
-
-    inferred_labels: list[str] = []
-    for parser_id, display_label in _PARSER_DISPLAY_LABELS.items():
-        normalized_parser_id = str(parser_id or "").strip().lower()
-        normalized_display_label = str(display_label or "").strip()
-        if not normalized_display_label:
-            continue
-        if normalized_display_label.lower() in combined_text or normalized_parser_id in combined_text:
-            inferred_labels.append(normalized_display_label)
-    return _dedupe_text_items(inferred_labels)
+def _infer_source_labels_from_preview_parser_metadata(preview: dict[str, Any]) -> list[str]:
+    """Best-effort parser-only fallback when structured source-chain metadata is incomplete."""
+    primary_parser_id = str(preview.get("preview_parser_id") or "").strip().lower()
+    parser_groups = _build_parser_tag_groups(
+        preview.get("preview_parser_tags"),
+        primary_parser_id=primary_parser_id,
+    )
+    parser_labels = [
+        _parser_display_label(str(group.get("parser_id") or "").strip().lower())
+        for group in parser_groups
+        if str(group.get("parser_id") or "").strip()
+    ]
+    if primary_parser_id:
+        parser_labels.insert(0, _parser_display_label(primary_parser_id))
+    return _dedupe_text_items([label for label in parser_labels if label])
 
 
 def _build_parser_tag_groups(raw_tags: Any, *, primary_parser_id: str = "") -> list[dict[str, Any]]:
@@ -170,14 +167,10 @@ def _extract_channel_value(tags: list[str]) -> str:
     return ""
 
 
-def _select_source_label(parser_id: str, payment_method: Any = "") -> str:
-    """Prefer human-facing payment labels, then parser display labels."""
-    normalized_payment_method = str(payment_method or "").strip()
-    if normalized_payment_method and normalized_payment_method.lower() != parser_id.lower():
-        return normalized_payment_method
-
+def _select_source_label(parser_id: str) -> str:
+    """Use parser-derived labels as the canonical source display."""
     parser_label = _parser_display_label(parser_id)
-    return parser_label or normalized_payment_method
+    return parser_label or parser_id
 
 
 def _build_preview_source_chain(preview: dict[str, Any]) -> list[dict[str, Any]]:
@@ -204,9 +197,8 @@ def _build_preview_source_chain(preview: dict[str, Any]) -> list[dict[str, Any]]
         else:
             role = "primary" if index == 0 else "related"
 
-        payment_method = preview.get("preview_payment_method", "") if index == 0 else ""
         parser_label = _parser_display_label(parser_id)
-        label = _select_source_label(parser_id, payment_method)
+        label = _select_source_label(parser_id)
         account_id = None
         if role in {"outgoing", "primary", "kept"}:
             account_id = _normalize_int_or_none(preview.get("preview_source_account_id"))
@@ -253,7 +245,7 @@ def _build_dedup_source_metadata(
     if dedup_type == "platform_bank" and len(source_labels) < 2:
         source_labels = _dedupe_text_items([
             *source_labels,
-            *_infer_source_labels_from_preview_text(preview),
+            *_infer_source_labels_from_preview_parser_metadata(preview),
         ])
 
     source_count = 0

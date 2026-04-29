@@ -55,6 +55,7 @@ class FakeBillServiceDB:
         self.cleared_sessions: list[str] = []
         self.cleared_session_calls: list[tuple[str, int]] = []
         self.preview_query_calls: list[tuple[str, int, bool]] = []
+        self.preview_ids_query_calls: list[tuple[str, tuple[int, ...], int]] = []
         self.preview_bill_query_calls: list[tuple[int, int]] = []
         self.preview_learning_decision_calls: list[tuple[int, str, dict[str, Any] | None, int]] = []
         self.annotation_query_count = 0
@@ -201,6 +202,27 @@ class FakeBillServiceDB:
             if int(preview.get("id") or 0) == preview_id and int(preview.get("user_id") or user_id) == user_id:
                 return dict(preview)
         return None
+
+    async def get_preview_by_ids(
+        self,
+        session_id: str,
+        preview_ids: list[int],
+        *,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        normalized_preview_ids = tuple(int(preview_id) for preview_id in preview_ids)
+        self.preview_ids_query_calls.append((session_id, normalized_preview_ids, user_id))
+        preview_lookup = {
+            int(preview.get("id") or 0): dict(preview)
+            for preview in self.preview_rows
+            if preview.get("session_id") in (None, session_id)
+            and preview.get("user_id") in (None, user_id)
+        }
+        return [
+            preview_lookup[preview_id]
+            for preview_id in normalized_preview_ids
+            if preview_id in preview_lookup
+        ]
 
     async def get_import_annotation_samples(self, _session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         _ = user_id
@@ -928,6 +950,141 @@ async def test_import_preview_selection_updates_and_cancel_session_helpers() -> 
 
 
 @pytest.mark.asyncio
+async def test_get_import_preview_page_supports_explicit_preview_ids() -> None:
+    """server-paged 详情读取应支持按显式 preview_ids 保序返回当前页行。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.preview_rows = [
+        {
+            "id": 1,
+            "session_id": "session-preview-ids",
+            "user_id": 1,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 12.3,
+            "preview_destination_amount": 0,
+            "preview_main_category": "餐饮",
+            "preview_sub_category": "早餐",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "包子铺",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "早餐",
+            "preview_parser_id": "cmbc",
+            "preview_parser_tags": ["parser:cmbc"],
+            "preview_selected": 1,
+            "dedup_type": "",
+            "dedup_source_ids": [],
+        },
+        {
+            "id": 2,
+            "session_id": "session-preview-ids",
+            "user_id": 1,
+            "preview_date": "2025-01-03 08:30:00",
+            "preview_type": "收入",
+            "preview_amount": 88.8,
+            "preview_destination_amount": 0,
+            "preview_main_category": "工资",
+            "preview_sub_category": "",
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "公司",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "工资",
+            "preview_parser_id": "cmbc",
+            "preview_parser_tags": ["parser:cmbc"],
+            "preview_selected": 1,
+            "dedup_type": "",
+            "dedup_source_ids": [],
+        },
+    ]
+    service = _make_service(fake_db)
+
+    page = await service.get_import_preview_page(
+        "session-preview-ids",
+        preview_ids=[2, 1],
+        user_id=1,
+    )
+
+    assert [item["id"] for item in page["preview"]] == [2, 1]
+    assert page["total"] == 2
+    assert fake_db.preview_ids_query_calls == [("session-preview-ids", (2, 1), 1)]
+
+
+@pytest.mark.asyncio
+async def test_get_import_preview_filter_index_builds_global_filterable_rows() -> None:
+    """轻量索引应返回跨页筛选所需的全局字段与信号状态。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.category_by_id.update({
+        88: {"main_category": "工资", "sub_category": ""},
+    })
+    fake_db.preview_rows = [
+        {
+            "id": 1,
+            "session_id": "session-index",
+            "user_id": 1,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 12.3,
+            "preview_destination_amount": 0,
+            "preview_main_category": "餐饮",
+            "preview_sub_category": "早餐",
+            "category_id": 77,
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "包子铺",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "早餐",
+            "preview_parser_id": "cmbc",
+            "preview_parser_tags": ["parser:cmbc"],
+            "preview_selected": 1,
+            "dedup_type": "transfer",
+            "dedup_source_ids": [11, 12],
+        },
+        {
+            "id": 2,
+            "session_id": "session-index",
+            "user_id": 1,
+            "preview_date": "2025-01-03 09:00:00",
+            "preview_type": "收入",
+            "preview_amount": 88.8,
+            "preview_destination_amount": 0,
+            "preview_main_category": "工资",
+            "preview_sub_category": "",
+            "category_id": 88,
+            "preview_source_account_id": 2,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "公司",
+            "preview_payment_method": "招商银行卡",
+            "preview_description": "工资",
+            "preview_parser_id": "cmbc",
+            "preview_parser_tags": ["parser:cmbc"],
+            "preview_selected": 0,
+            "dedup_type": "",
+            "dedup_source_ids": [],
+            "preview_matching_feedback": {
+                "learning": {
+                    "review_status": "accepted",
+                    "suppressed": False,
+                    "rule_id": 7,
+                }
+            },
+        },
+    ]
+    fake_db.annotation_samples = [{"preview_id": 1}]
+    service = _make_service(fake_db)
+
+    result = await service.get_import_preview_filter_index("session-index", user_id=1)
+
+    assert [item["id"] for item in result] == [1, 2]
+    assert result[0]["actual_category_name"] == "早餐"
+    assert result[0]["actual_source_account_name"] == "招商银行卡"
+    assert result[0]["transfer_status"] == "pending"
+    assert result[0]["is_manually_annotated"] is True
+    assert result[1]["learning_status"] == "accepted"
+    assert result[1]["selected"] is False
+
+
+@pytest.mark.asyncio
 async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_groups() -> None:
     """导入预览应新增 matching 镜像结构，并保持现有平铺字段不变。"""
     fake_db = FakeBillServiceDB()
@@ -976,7 +1133,7 @@ async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_g
             "role": "outgoing",
             "parser_id": "cmbc",
             "parser_label": "民生银行",
-            "label": "民生银行卡",
+            "label": "民生银行",
             "channel": "bank",
             "tags": ["parser:cmbc", "channel:bank"],
             "account_id": 2,
@@ -996,14 +1153,14 @@ async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_g
         "type": "transfer",
         "source_ids": [101, 102],
         "source_count": 2,
-        "source_labels": ["民生银行卡", "微信"],
+        "source_labels": ["民生银行", "微信"],
         "sources": [
             {
                 "position": 0,
                 "role": "outgoing",
                 "parser_id": "cmbc",
                 "parser_label": "民生银行",
-                "label": "民生银行卡",
+                "label": "民生银行",
                 "channel": "bank",
                 "tags": ["parser:cmbc", "channel:bank"],
                 "account_id": 2,
@@ -1029,7 +1186,7 @@ async def test_get_import_preview_adds_matching_transfer_parser_and_annotation_g
                 "role": "outgoing",
                 "parser_id": "cmbc",
                 "parser_label": "民生银行",
-                "label": "民生银行卡",
+                "label": "民生银行",
                 "channel": "bank",
                 "tags": ["parser:cmbc", "channel:bank"],
                 "account_id": 2,

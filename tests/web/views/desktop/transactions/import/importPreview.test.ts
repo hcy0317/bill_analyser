@@ -65,14 +65,24 @@ describe('import preview server-paged reset guards', () => {
         expect(source).toContain('const normalizedSortBy = normalizePreviewPageSortBy(sortOptions?.sortBy ?? previewPageSortBy.value);');
         expect(source).toContain('&& pendingRequest.sortBy === normalizedSortBy');
         expect(source).toContain('&& pendingRequest.sortDirection === normalizedSortDirection');
+        expect(source).toContain('await fetchPreviewPage(normalizedPage, normalizedPageSize, {');
+        expect(source).toContain("logger.error('[三阶段导入-预览分页] Check Data 加载失败:', error);");
+        expect(source).toContain("snackbar.value?.showError(`导入失败: ${error}`);");
+        expect(source).toContain('previewIds: sortOptions?.previewIds,');
+        expect(source).toContain('totalCount: sortOptions?.totalCount,');
+        expect(source).not.toContain('void fetchPreviewPage(1, 10, {');
 
         const pendingIndex = source.indexOf('pendingInitialCheckDataPageRequest.value = {');
         const stepIndex = source.indexOf("currentStep.value = 'checkData';");
-        const fetchIndex = source.indexOf('void fetchPreviewPage(1, 10, {');
+        const handlerIndex = source.indexOf('if (pendingRequest');
+        const clearPendingIndex = source.indexOf('pendingInitialCheckDataPageRequest.value = null;', handlerIndex);
+        const fetchIndex = source.indexOf('await fetchPreviewPage(normalizedPage, normalizedPageSize, {', handlerIndex);
 
         expect(pendingIndex).toBeGreaterThanOrEqual(0);
         expect(stepIndex).toBeGreaterThan(pendingIndex);
-        expect(fetchIndex).toBeGreaterThan(stepIndex);
+        expect(handlerIndex).toBeGreaterThanOrEqual(0);
+        expect(clearPendingIndex).toBeGreaterThan(handlerIndex);
+        expect(fetchIndex).toBeGreaterThan(clearPendingIndex);
     });
 
     test('check-data reset clears stale table sort state before a new server-paged session starts', () => {

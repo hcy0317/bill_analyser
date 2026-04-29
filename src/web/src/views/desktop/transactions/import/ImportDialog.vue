@@ -1223,6 +1223,8 @@ function normalizePreviewPageSortDirection(value: string | null | undefined): 'a
 type PreviewPageRequestOptions = {
     sortBy?: string | null;
     sortDirection?: 'asc' | 'desc' | null;
+    previewIds?: number[];
+    totalCount?: number;
 };
 
 async function fetchPreviewPage(
@@ -1240,6 +1242,9 @@ async function fetchPreviewPage(
     const normalizedSortDirection = normalizePreviewPageSortDirection(
         sortOptions.sortDirection ?? previewPageSortDirection.value
     );
+    const normalizedPreviewIds = Array.isArray(sortOptions.previewIds)
+        ? sortOptions.previewIds.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0)
+        : [];
     const token = getCurrentToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
@@ -1256,6 +1261,9 @@ async function fetchPreviewPage(
     if (normalizedSortBy) {
         searchParams.set('sort_by', normalizedSortBy);
         searchParams.set('sort_direction', normalizedSortDirection);
+    }
+    if (normalizedPreviewIds.length > 0) {
+        searchParams.set('preview_ids', normalizedPreviewIds.join(','));
     }
 
     const response = await fetch(
@@ -1278,9 +1286,11 @@ async function fetchPreviewPage(
 
     const previewData = Array.isArray(result.data?.preview) ? result.data.preview as ImportPreviewRecord[] : [];
     importTransactions.value = previewData.map((item, idx) => convertPreviewToImportTransaction(item, idx));
-    previewTotalCount.value = Number(result.data?.total || 0);
+    previewTotalCount.value = typeof sortOptions.totalCount === 'number'
+        ? Math.max(sortOptions.totalCount, 0)
+        : Number(result.data?.total || 0);
     logger.info(
-        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, rows=${previewData.length}, total=${previewTotalCount.value}`
+        `[三阶段导入-预览分页] 加载 page=${normalizedPage}, page_size=${normalizedPageSize}, sort_by=${normalizedSortBy || 'default'}, sort_direction=${normalizedSortDirection}, preview_ids=${normalizedPreviewIds.length}, rows=${previewData.length}, total=${previewTotalCount.value}`
     );
 }
 
@@ -1303,13 +1313,19 @@ async function onCheckDataPageRequested(
         && pendingRequest.sortBy === normalizedSortBy
         && pendingRequest.sortDirection === normalizedSortDirection) {
         pendingInitialCheckDataPageRequest.value = null;
-        return;
     }
 
-    await fetchPreviewPage(normalizedPage, normalizedPageSize, {
-        sortBy: normalizedSortBy,
-        sortDirection: normalizedSortDirection
-    });
+    try {
+        await fetchPreviewPage(normalizedPage, normalizedPageSize, {
+            sortBy: normalizedSortBy,
+            sortDirection: normalizedSortDirection,
+            previewIds: sortOptions?.previewIds,
+            totalCount: sortOptions?.totalCount,
+        });
+    } catch (error) {
+        logger.error('[三阶段导入-预览分页] Check Data 加载失败:', error);
+        snackbar.value?.showError(`导入失败: ${error}`);
+    }
 }
 
 async function executeStage2Dedup(): Promise<void> {
@@ -1358,15 +1374,6 @@ async function executeStage2Dedup(): Promise<void> {
 
     currentStep.value = 'checkData';
     importProcess.value = 100;
-
-    void fetchPreviewPage(1, 10, {
-        sortBy: pendingInitialCheckDataPageRequest.value.sortBy,
-        sortDirection: pendingInitialCheckDataPageRequest.value.sortDirection
-    }).catch(error => {
-        pendingInitialCheckDataPageRequest.value = null;
-        logger.error('[三阶段导入-预览分页] 首屏加载失败:', error);
-        snackbar.value?.showError(`导入失败: ${error}`);
-    });
 }
 
 /**

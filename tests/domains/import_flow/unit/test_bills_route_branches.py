@@ -558,13 +558,24 @@ class FakeBillsService:
         page_size: int = 50,
         sort_by: str | None = None,
         sort_direction: str | None = None,
+        preview_ids: list[int] | None = None,
         selected_only: bool = False,
         user_id: int = 1,
     ) -> dict[str, Any]:
         _ = (selected_only, user_id)
         normalized_sort_direction = "desc" if str(sort_direction or "").lower() == "desc" else "asc"
-        self.preview_calls.append((session_id, page, page_size, sort_by, normalized_sort_direction))
+        normalized_preview_ids = [int(item) for item in (preview_ids or [])]
+        self.preview_calls.append((session_id, page, page_size, sort_by, normalized_sort_direction, normalized_preview_ids))
         preview_rows = [dict(item) for item in self.preview_result]
+        if normalized_preview_ids:
+            preview_lookup = {int(item.get("id") or 0): item for item in preview_rows}
+            preview_rows = [preview_lookup[preview_id] for preview_id in normalized_preview_ids if preview_id in preview_lookup]
+            return {
+                "preview": preview_rows,
+                "total": len(preview_rows),
+                "page": page,
+                "page_size": page_size,
+            }
         sort_field_mapping = {
             "time": "preview_date",
             "type": "preview_type",
@@ -596,6 +607,17 @@ class FakeBillsService:
             "page": page,
             "page_size": page_size,
         }
+
+    async def get_import_preview_filter_index(
+        self,
+        session_id: str,
+        *,
+        selected_only: bool = False,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        _ = (selected_only, user_id)
+        self.preview_calls.append(("index", session_id))
+        return [dict(item) for item in self.preview_result]
 
     async def promote_session_annotations_to_learning(
         self,
@@ -2776,7 +2798,61 @@ def test_bills_import_session_and_preview_routes_cover_lookup_paging_and_update_
         payload = preview_route("sess-sort").get_json() or {}
         assert payload["success"] is True
         assert payload["data"]["preview"][0]["preview_counterparty"] == "Alpha"
-        assert service.preview_calls[-1] == ("sess-sort", 1, 10, "counterparty", "asc")
+        assert service.preview_calls[-1] == ("sess-sort", 1, 10, "counterparty", "asc", [])
+
+    service.preview_result = [
+        {"id": 11, "preview_amount": 66.0, "preview_selected": True},
+        {"id": 22, "preview_amount": 88.0, "preview_selected": False},
+        {"id": 33, "preview_amount": 99.0, "preview_selected": True},
+    ]
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/preview/sess-id-page?page=3&page_size=10&preview_ids=22,11",
+        method="GET",
+    ):
+        _set_request_user_id(5)
+        payload = preview_route("sess-id-page").get_json() or {}
+        assert payload["success"] is True
+        assert [item["id"] for item in payload["data"]["preview"]] == [22, 11]
+        assert service.preview_calls[-1] == ("sess-id-page", 3, 10, "", "asc", [22, 11])
+
+    service.preview_result = [
+        {
+            "id": 1,
+            "preview_date": "2026-08-01 10:00:00",
+            "type": 3,
+            "source_amount": 66.0,
+            "category_id": "77",
+            "actual_category_name": "早餐",
+            "source_account_id": "2",
+            "destination_account_id": "",
+            "actual_source_account_name": "招商银行卡",
+            "actual_destination_account_name": "",
+            "comment": "早餐",
+            "selected": True,
+            "is_manually_annotated": False,
+            "parser_source": "cmbc",
+            "parser_tags": ["parser:cmbc"],
+            "dedup_type": "transfer",
+            "dedup_source_ids": [11, 12],
+            "transfer_status": "pending",
+            "transfer_title": "likely transfer",
+            "learning_status": None,
+            "learning_title": "",
+            "learning_summary": "",
+            "recurring_template_id": "",
+            "recurring_candidate_count": 0,
+            "recurring_match_reasons": "",
+            "recurring_matched_date": "",
+        }
+    ]
+    index_route = _unwrap_all(bills_module.get_import_preview_index)
+    with bills_route_app.test_request_context("/api/bills/import/v2/preview/sess-index/index", method="GET"):
+        _set_request_user_id(5)
+        payload = index_route("sess-index").get_json() or {}
+        assert payload["success"] is True
+        assert payload["data"]["total"] == 1
+        assert payload["data"]["items"][0]["id"] == 1
+        assert service.preview_calls[-1] == ("index", "sess-index")
 
     async def _raise_preview_list_error(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("preview list boom")
