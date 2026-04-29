@@ -14,6 +14,10 @@ from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
 
 
+class ReconciliationProjectionConflictError(ValueError):
+    """Raised when a bill changed after the last reconciliation projection."""
+
+
 class DatabaseReconciliationMixin(DatabaseFacadeBase):
     """Durable candidate truth for import-to-persisted-bill reconciliation."""
 
@@ -831,6 +835,44 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
             )
         return filtered_tag_ids
 
+    async def _assert_reconciliation_projection_current(
+        self,
+        conn: Any,
+        *,
+        bill_id: int,
+        user_id: int,
+        metadata: dict[str, Any],
+    ) -> None:
+        projection = (
+            dict(metadata.get("projection"))
+            if isinstance(metadata.get("projection"), dict)
+            else {}
+        )
+        candidate_ids = [
+            str(candidate_id)
+            for candidate_id in list(projection.get("candidate_ids") or [])
+            if str(candidate_id)
+        ]
+        if not projection or not candidate_ids:
+            return
+
+        current_bill = await self._get_bill_projection_snapshot(
+            conn,
+            bill_id=bill_id,
+            user_id=user_id,
+        )
+        current_description = str(current_bill.get("description") or "")
+        projected_description = str(projection.get("description") or "")
+        current_tag_ids = sorted(self._normalize_tag_ids(current_bill.get("tag_ids")))
+        projected_tag_ids = sorted(self._normalize_tag_ids(projection.get("tag_ids")))
+        if (
+            current_description != projected_description
+            or current_tag_ids != projected_tag_ids
+        ):
+            raise ReconciliationProjectionConflictError(
+                "Bill changed since reconciliation projection, please refresh"
+            )
+
     async def _find_reconciliation_preview_id(
         self,
         conn: Any,
@@ -922,6 +964,12 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
         bill_id = int(base_bill.get("id") or 0)
         if bill_id <= 0:
             raise LookupError("Bill not found")
+        await self._assert_reconciliation_projection_current(
+            conn,
+            bill_id=bill_id,
+            user_id=user_id,
+            metadata=metadata,
+        )
 
         group_candidates = await self._load_group_candidates(
             conn,
@@ -1087,7 +1135,9 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
                     (preview_id, normalized_user_id),
                 ) as cursor:
                     preview_row = await cursor.fetchone()
-                preview_selection_before = bool(preview_row["preview_selected"]) if preview_row else None
+                preview_selection_before = (
+                    bool(preview_row["preview_selected"]) if preview_row else None
+                )
 
             await self._set_reconciliation_candidate_status(
                 conn,
@@ -1173,12 +1223,18 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
                 user_id=normalized_user_id,
             )
             group_id = int(candidate.get("group_id") or 0)
+            was_applied = str(candidate.get("status") or "") in self._APPLIED_STATUSES
             base_bill, metadata = await self._prepare_reconciliation_base_snapshot(
                 conn,
                 candidate,
                 user_id=normalized_user_id,
             )
             now = utc_now_iso()
+            preview_id = await self._find_reconciliation_preview_id(
+                conn,
+                candidate,
+                user_id=normalized_user_id,
+            )
             await self._set_reconciliation_candidate_status(
                 conn,
                 row_id=int(candidate["id"]),
@@ -1196,6 +1252,31 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
                 now=now,
                 metadata=metadata,
             )
+            if was_applied and preview_id is not None:
+                group_candidates = await self._load_group_candidates(
+                    conn,
+                    group_key=str(candidate.get("group_key") or ""),
+                    user_id=normalized_user_id,
+                )
+                same_preview_still_applied = False
+                for group_candidate in group_candidates:
+                    if str(group_candidate.get("status") or "") not in self._APPLIED_STATUSES:
+                        continue
+                    group_preview_id = await self._find_reconciliation_preview_id(
+                        conn,
+                        group_candidate,
+                        user_id=normalized_user_id,
+                    )
+                    same_preview_still_applied = group_preview_id == preview_id
+                    if same_preview_still_applied:
+                        break
+                if not same_preview_still_applied:
+                    await self._set_reconciliation_preview_selected(
+                        conn,
+                        preview_id=preview_id,
+                        selected=True,
+                        user_id=normalized_user_id,
+                    )
             event_id = await self._append_bill_merge_event(
                 conn,
                 user_id=normalized_user_id,
@@ -1359,43 +1440,44 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
               AND m.bill_id = ?
               AND m.member_type = 'existing_bill'
             ORDER BY g.updated_at DESC, g.id DESC
-            LIMIT 1
             """,
             (normalized_user_id, self._IMPORT_RECONCILIATION_FAMILY, normalized_bill_id),
         ) as cursor:
-            group_row = await cursor.fetchone()
-        if group_row is None:
+            group_rows = await cursor.fetchall()
+        if not group_rows:
             return None
 
-        group = dict(group_row)
-        metadata = self._json_loads(group.get("metadata_json"))
-        projection = (
-            dict(metadata.get("projection"))
-            if isinstance(metadata.get("projection"), dict)
-            else {}
-        )
-        candidate_ids = [
-            str(candidate_id)
-            for candidate_id in list(projection.get("candidate_ids") or [])
-            if str(candidate_id)
-        ]
-        if not projection or not candidate_ids:
-            return None
-        return {
-            "group_id": int(group.get("id") or 0),
-            "group_type": str(group.get("group_type") or ""),
-            "status": str(group.get("status") or ""),
-            "canonical_bill_id": self._normalize_optional_int(group.get("canonical_bill_id")),
-            "signal_label": str(projection.get("signal_label") or ""),
-            "source_chain": (
-                list(projection.get("source_chain") or [])
-                if isinstance(projection.get("source_chain"), list)
-                else []
-            ),
-            "candidate_ids": candidate_ids,
-            "description": str(projection.get("description") or ""),
-            "tag_ids": self._normalize_tag_ids(projection.get("tag_ids")),
-        }
+        for group_row in group_rows:
+            group = dict(group_row)
+            metadata = self._json_loads(group.get("metadata_json"))
+            projection = (
+                dict(metadata.get("projection"))
+                if isinstance(metadata.get("projection"), dict)
+                else {}
+            )
+            candidate_ids = [
+                str(candidate_id)
+                for candidate_id in list(projection.get("candidate_ids") or [])
+                if str(candidate_id)
+            ]
+            if not projection or not candidate_ids:
+                continue
+            return {
+                "group_id": int(group.get("id") or 0),
+                "group_type": str(group.get("group_type") or ""),
+                "status": str(group.get("status") or ""),
+                "canonical_bill_id": self._normalize_optional_int(group.get("canonical_bill_id")),
+                "signal_label": str(projection.get("signal_label") or ""),
+                "source_chain": (
+                    list(projection.get("source_chain") or [])
+                    if isinstance(projection.get("source_chain"), list)
+                    else []
+                ),
+                "candidate_ids": candidate_ids,
+                "description": str(projection.get("description") or ""),
+                "tag_ids": self._normalize_tag_ids(projection.get("tag_ids")),
+            }
+        return None
 
     @log_method
     async def record_bill_merge_event(

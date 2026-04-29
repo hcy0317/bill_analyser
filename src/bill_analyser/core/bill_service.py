@@ -26,6 +26,7 @@ from ..utils.validator import BillValidator
 from .bill_date_utils import parse_bill_datetime
 from .category_engine import CategoryEngine
 from .db import Database
+from .db_reconciliation import ReconciliationProjectionConflictError
 from .investment_matching import (
     classify_investment_pnl_change,
     clean_investment_product_name,
@@ -3966,6 +3967,8 @@ class BillService:
                 "error": "Reconciliation candidate not found",
                 "status_code": 404,
             }
+        except ReconciliationProjectionConflictError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
         except ValueError as exc:
             return {"success": False, "error": str(exc), "status_code": 400}
 
@@ -4157,6 +4160,8 @@ class BillService:
                 "error": "Reconciliation candidate not found",
                 "status_code": 404,
             }
+        except ReconciliationProjectionConflictError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
         except ValueError as exc:
             return {"success": False, "error": str(exc), "status_code": 400}
 
@@ -4310,6 +4315,8 @@ class BillService:
                 "error": "Reconciliation candidate not found",
                 "status_code": 404,
             }
+        except ReconciliationProjectionConflictError as exc:
+            return {"success": False, "error": str(exc), "status_code": 409}
         except ValueError as exc:
             return {"success": False, "error": str(exc), "status_code": 400}
 
