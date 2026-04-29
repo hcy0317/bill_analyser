@@ -136,6 +136,15 @@ class DatabaseFacadeBase:  # pylint: disable=too-many-public-methods
     async def get_import_annotation_samples(self, session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
         ...
 
+    async def get_import_learning_corpus_samples(
+        self,
+        user_id: int = 1,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        ...
+
     async def list_import_learning_suggestions_for_session(
         self,
         session_id: str,
@@ -176,6 +185,22 @@ class DatabaseFacadeBase:  # pylint: disable=too-many-public-methods
         session_id: str | None = None,
         preview_id: int | None = None,
         payload: dict[str, Any] | None = None,
+    ) -> None:
+        ...
+
+    async def record_import_learning_feedback_event(
+        self,
+        event_type: str,
+        *,
+        user_id: int = 1,
+        rule_id: int | None = None,
+        suggestion_id: int | None = None,
+        session_id: str | None = None,
+        preview_id: int | None = None,
+        bill_id: int | None = None,
+        candidate_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+        conn: aiosqlite.Connection | None = None,
     ) -> None:
         ...
 

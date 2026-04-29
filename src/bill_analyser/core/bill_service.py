@@ -1184,7 +1184,7 @@ class BillService:
             self.logger.debug("[长期学习] 已关闭或用户不存在: user_id=%d", user_id)
             return 0
 
-        rules = await self.db.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=1000)
+        rules = await self.db.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=None)
         if not rules:
             return 0
 
@@ -1287,11 +1287,22 @@ class BillService:
 
             applied_count += 1
             rule_id = matched_rule.get("id")
-            if record_usage and rule_id:
+            if rule_id:
                 matched_rule_ids.append(int(rule_id))
 
         if record_usage and matched_rule_ids:
             await self.db.increment_import_learning_rule_usage(matched_rule_ids, user_id=user_id)
+        if applied_count > 0 and hasattr(self.db, "record_import_learning_feedback_event"):
+            await self.db.record_import_learning_feedback_event(
+                "rule_auto_apply",
+                user_id=user_id,
+                payload={
+                    "applied_count": applied_count,
+                    "bill_count": len(bills),
+                    "rule_ids": sorted(set(matched_rule_ids)),
+                    "type_only": bool(type_only),
+                },
+            )
 
         if applied_count > 0:
             self.logger.info(
@@ -2612,9 +2623,11 @@ class BillService:
         manually_annotated_preview_ids = {
             int(sample["preview_id"]) for sample in annotation_samples if sample.get("preview_id")
         }
+        user = await self.db.get_user_by_id(user_id) if user_id > 0 else None
+        import_learning_enabled = bool(user.get("import_learning_enabled", 1)) if user else False
         learning_rules = (
-            await self.db.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=1000)
-            if user_id > 0
+            await self.db.get_import_learning_rules(user_id=user_id, enabled_only=True, limit=None)
+            if user_id > 0 and import_learning_enabled
             else []
         )
         composite_learning_rules = [
@@ -2656,6 +2669,7 @@ class BillService:
         return {
             "session_id": session_id,
             "user_id": user_id,
+            "import_learning_enabled": import_learning_enabled,
             "manually_annotated_preview_ids": manually_annotated_preview_ids,
             "composite_learning_rules": composite_learning_rules,
             "learning_categories_by_id": learning_categories_by_id,
@@ -3397,10 +3411,14 @@ class BillService:
         if bill_id <= 0:
             return []
 
+        user = await self.db.get_user_by_id(user_id)
+        if not user or not bool(user.get("import_learning_enabled", 1)):
+            return []
+
         learning_rules = await self.db.get_import_learning_rules(
             user_id=user_id,
             enabled_only=True,
-            limit=1000,
+            limit=None,
         )
         composite_learning_rules = [
             rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")

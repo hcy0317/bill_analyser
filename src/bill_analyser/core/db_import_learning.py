@@ -129,6 +129,35 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             return None
         return non_empty
 
+    @classmethod
+    def parse_composite_match_value(cls, raw_value: Any) -> dict[str, str] | None:
+        """Parse editable composite matchValue text back into runtime match features."""
+        alias_to_key = {
+            "p": "parser_id",
+            "parser": "parser_id",
+            "parser_id": "parser_id",
+            "c": "counterparty",
+            "counterparty": "counterparty",
+            "d": "description",
+            "description": "description",
+            "m": "payment_method",
+            "payment": "payment_method",
+            "payment_method": "payment_method",
+        }
+        features: dict[str, str] = {}
+        for part in str(raw_value or "").split("|"):
+            if "=" not in part:
+                continue
+            raw_key, raw_feature_value = part.split("=", 1)
+            key = alias_to_key.get(cls._normalize_import_learning_text(raw_key))
+            value = cls._normalize_import_learning_text(raw_feature_value)
+            if key and value:
+                features[key] = value
+
+        if len(features) < 2:
+            return None
+        return features
+
     async def _record_import_learning_rule_log(
         self,
         conn: aiosqlite.Connection,
@@ -165,6 +194,206 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             ),
         )
 
+    @staticmethod
+    def _build_import_learning_concept_key(
+        *,
+        rule_id: int | None = None,
+        suggestion_id: int | None = None,
+        candidate_id: str | None = None,
+        fallback: str = "",
+    ) -> tuple[str, str]:
+        if rule_id:
+            return (f"rule:{int(rule_id)}", "rule")
+        if suggestion_id:
+            return (f"suggestion:{int(suggestion_id)}", "suggestion")
+        if candidate_id:
+            return (f"candidate:{candidate_id}", "candidate")
+        return (fallback or "global", "global")
+
+    async def record_import_learning_feedback_event(
+        self,
+        event_type: str,
+        *,
+        user_id: int = 1,
+        rule_id: int | None = None,
+        suggestion_id: int | None = None,
+        session_id: str | None = None,
+        preview_id: int | None = None,
+        bill_id: int | None = None,
+        candidate_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+        conn: aiosqlite.Connection | None = None,
+    ) -> None:
+        normalized_event_type = str(event_type or "").strip()
+        if not normalized_event_type:
+            return
+
+        active_conn = conn or await self._get_connection()
+        now = utc_now_iso()
+        payload = dict(payload or {})
+        await active_conn.execute(
+            """
+            INSERT INTO import_learning_feedback_events (
+                user_id, event_type, rule_id, suggestion_id, session_id,
+                preview_id, bill_id, candidate_id, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                normalized_event_type,
+                rule_id,
+                suggestion_id,
+                session_id,
+                preview_id,
+                bill_id,
+                candidate_id,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                now,
+            ),
+        )
+
+        concept_key, concept_type = self._build_import_learning_concept_key(
+            rule_id=rule_id,
+            suggestion_id=suggestion_id,
+            candidate_id=candidate_id,
+            fallback=normalized_event_type,
+        )
+        accepted_delta = 1 if "accept" in normalized_event_type else 0
+        rejected_delta = 1 if "reject" in normalized_event_type else 0
+        auto_applied_delta = int(payload.get("applied_count") or 1) if "auto_apply" in normalized_event_type else 0
+        rollback_delta = 1 if "rollback" in normalized_event_type or bool(payload.get("rollback")) else 0
+        await active_conn.execute(
+            """
+            INSERT INTO import_learning_concept_stats (
+                user_id, concept_key, concept_type,
+                accepted_count, rejected_count, auto_applied_count, rollback_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, concept_key, concept_type) DO UPDATE SET
+                accepted_count = accepted_count + excluded.accepted_count,
+                rejected_count = rejected_count + excluded.rejected_count,
+                auto_applied_count = auto_applied_count + excluded.auto_applied_count,
+                rollback_count = rollback_count + excluded.rollback_count,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                concept_key,
+                concept_type,
+                accepted_delta,
+                rejected_delta,
+                auto_applied_delta,
+                rollback_delta,
+                now,
+            ),
+        )
+
+        if conn is None:
+            await active_conn.commit()
+
+    async def _get_import_learning_corpus_preview(
+        self,
+        conn: aiosqlite.Connection,
+        *,
+        session_id: str,
+        preview_id: int,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        async with conn.execute(
+            """
+            SELECT id, session_id, user_id, preview_parser_id,
+                   preview_counterparty, preview_description,
+                   preview_payment_method, preview_type,
+                   preview_main_category, preview_sub_category,
+                   preview_source_account_id, preview_destination_account_id
+            FROM bills_preview
+            WHERE id = ? AND session_id = ? AND user_id = ?
+            LIMIT 1
+            """,
+            (preview_id, session_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _upsert_import_learning_corpus_sample(
+        self,
+        conn: aiosqlite.Connection,
+        *,
+        session_id: str,
+        user_id: int,
+        preview_id: int,
+        sample: dict[str, Any],
+        now: str,
+    ) -> bool:
+        preview = await self._get_import_learning_corpus_preview(
+            conn,
+            session_id=session_id,
+            preview_id=preview_id,
+            user_id=user_id,
+        )
+        if not preview:
+            return False
+
+        parser_id = str(preview.get("preview_parser_id") or "")
+        counterparty = str(preview.get("preview_counterparty") or "")
+        description = str(preview.get("preview_description") or "")
+        payment_method = str(preview.get("preview_payment_method") or "")
+        composite_hash = self.build_composite_match_hash(
+            parser_id=parser_id,
+            counterparty=counterparty,
+            description=description,
+            payment_method=payment_method,
+        )
+        match_features = self.build_composite_match_features(
+            parser_id=parser_id,
+            counterparty=counterparty,
+            description=description,
+            payment_method=payment_method,
+        )
+        await conn.execute(
+            """
+            INSERT INTO import_learning_corpus_samples (
+                user_id, session_id, preview_id,
+                parser_id, counterparty, description, payment_method,
+                composite_match_hash, match_features_json,
+                annotated_type, annotated_category_id,
+                annotated_source_account_id, annotated_destination_account_id,
+                source_snapshot_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, session_id, preview_id) DO UPDATE SET
+                parser_id = excluded.parser_id,
+                counterparty = excluded.counterparty,
+                description = excluded.description,
+                payment_method = excluded.payment_method,
+                composite_match_hash = excluded.composite_match_hash,
+                match_features_json = excluded.match_features_json,
+                annotated_type = excluded.annotated_type,
+                annotated_category_id = excluded.annotated_category_id,
+                annotated_source_account_id = excluded.annotated_source_account_id,
+                annotated_destination_account_id = excluded.annotated_destination_account_id,
+                source_snapshot_json = excluded.source_snapshot_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                session_id,
+                preview_id,
+                parser_id,
+                counterparty,
+                description,
+                payment_method,
+                composite_hash,
+                json.dumps(match_features or {}, ensure_ascii=False, sort_keys=True),
+                sample.get("preview_type") or sample.get("annotated_type"),
+                sample.get("category_id") or sample.get("annotated_category_id"),
+                sample.get("preview_source_account_id") or sample.get("annotated_source_account_id"),
+                sample.get("preview_destination_account_id") or sample.get("annotated_destination_account_id"),
+                json.dumps(preview, ensure_ascii=False, sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        return True
+
     @log_method
     async def save_import_annotation_samples(
         self,
@@ -182,6 +411,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             preview_id = sample.get("preview_id") or sample.get("id")
             if not preview_id:
                 continue
+            normalized_preview_id = int(preview_id)
             await conn.execute(
                 """
                 INSERT INTO import_annotation_samples (
@@ -200,7 +430,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
                 (
                     session_id,
                     user_id,
-                    preview_id,
+                    normalized_preview_id,
                     sample.get("preview_type") or sample.get("annotated_type"),
                     sample.get("category_id") or sample.get("annotated_category_id"),
                     sample.get("preview_source_account_id") or sample.get("annotated_source_account_id"),
@@ -208,6 +438,14 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
                     now,
                     now,
                 ),
+            )
+            await self._upsert_import_learning_corpus_sample(
+                conn,
+                session_id=session_id,
+                user_id=user_id,
+                preview_id=normalized_preview_id,
+                sample=sample,
+                now=now,
             )
             saved_count += 1
 
@@ -227,6 +465,34 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         ) as cursor:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+    @log_method
+    async def get_import_learning_corpus_samples(
+        self,
+        user_id: int = 1,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        conn = await self._get_connection()
+        query = "SELECT * FROM import_learning_corpus_samples WHERE user_id = ? ORDER BY updated_at DESC, id DESC"
+        params: list[Any] = [user_id]
+        if limit is not None and limit > 0:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, max(offset, 0)])
+        async with conn.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    @log_method
+    async def count_import_learning_corpus_samples(self, user_id: int = 1) -> int:
+        conn = await self._get_connection()
+        async with conn.execute(
+            "SELECT COUNT(*) AS total_count FROM import_learning_corpus_samples WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row["total_count"] if row else 0)
 
     @log_method
     async def list_import_learning_suggestions_for_session(
@@ -575,13 +841,50 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         now = utc_now_iso()
         updates: list[str] = ["updated_at = ?"]
         params: list[Any] = [now]
+        updated_match_value = str(existing["match_value"] or "")
+        updated_normalized_match_value = str(existing["normalized_match_value"] or "")
+        updated_match_features: dict[str, str] | None = None
+        updated_composite_hash = str(existing["composite_match_hash"] or "")
 
         if match_value is not None:
-            updates.append("match_value = ?")
-            params.append(match_value)
-            normalized = match_value.strip().lower()
-            updates.append("normalized_match_value = ?")
-            params.append(normalized)
+            existing_match_type = str(existing["match_type"] or "")
+            if existing_match_type == "composite":
+                updated_match_features = self.parse_composite_match_value(match_value)
+                if not updated_match_features:
+                    raise ValueError("composite matchValue must contain at least two keyed features")
+                updated_composite_hash = self.build_composite_match_hash(
+                    parser_id=updated_match_features.get("parser_id", ""),
+                    counterparty=updated_match_features.get("counterparty", ""),
+                    description=updated_match_features.get("description", ""),
+                    payment_method=updated_match_features.get("payment_method", ""),
+                ) or ""
+                updated_match_value = updated_composite_hash
+                updated_normalized_match_value = updated_composite_hash
+                updates.append("match_value = ?")
+                params.append(updated_match_value)
+                updates.append("normalized_match_value = ?")
+                params.append(updated_normalized_match_value)
+                updates.append("parser_id = ?")
+                params.append(updated_match_features.get("parser_id", ""))
+                updates.append("composite_match_hash = ?")
+                params.append(updated_composite_hash)
+                updates.append("match_features_json = ?")
+                params.append(json.dumps(updated_match_features, ensure_ascii=False, sort_keys=True))
+            else:
+                updated_match_value = match_value
+                updated_normalized_match_value = self._normalize_import_learning_text(match_value)
+                if not updated_normalized_match_value:
+                    raise ValueError("matchValue cannot be empty")
+                updates.append("match_value = ?")
+                params.append(updated_match_value)
+                updates.append("normalized_match_value = ?")
+                params.append(updated_normalized_match_value)
+                updates.append("composite_match_hash = ?")
+                params.append(None)
+                updates.append("match_features_json = ?")
+                params.append(None)
+                updates.append("parser_id = ?")
+                params.append(None)
 
         if learned_type is not None:
             updates.append("learned_type = ?")
@@ -606,11 +909,19 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             user_id=user_id,
             action="updated",
             match_type=existing["match_type"],
-            match_value=match_value or existing["match_value"],
-            normalized_match_value=(match_value or existing["match_value"]).strip().lower(),
+            match_value=updated_match_value,
+            normalized_match_value=updated_normalized_match_value,
             session_id=existing["source_session_id"],
             preview_id=existing["source_preview_id"],
-            payload={"match_value": match_value, "learned_type": learned_type, "enabled": enabled},
+            payload={
+                "match_value": match_value,
+                "normalized_match_value": updated_normalized_match_value,
+                "composite_match_hash": updated_composite_hash,
+                "match_features": updated_match_features,
+                "learned_type": learned_type,
+                "learned_category_id": learned_category_id,
+                "enabled": enabled,
+            },
         )
         await conn.commit()
 
@@ -713,7 +1024,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
 
     @log_method
     async def mine_learning_suggestions(self, user_id: int = 1) -> dict[str, int]:
-        """从所有历史 annotation_samples 中挖掘学习建议，写入 import_learning_suggestions。
+        """从 durable corpus 中挖掘学习建议，写入 import_learning_suggestions。
 
         Returns:
             dict with keys: total_annotations, mined, created, updated, skipped_conflict, skipped_existing
@@ -722,13 +1033,10 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
 
         async with conn.execute(
             """
-            SELECT s.*, bp.preview_parser_id, bp.preview_counterparty,
-                   bp.preview_description, bp.preview_payment_method,
-                   bp.preview_type
-            FROM import_annotation_samples s
-            JOIN bills_preview bp ON bp.id = s.preview_id AND bp.session_id = s.session_id
-            WHERE s.user_id = ?
-            ORDER BY s.session_id, s.updated_at ASC
+            SELECT *
+            FROM import_learning_corpus_samples
+            WHERE user_id = ?
+            ORDER BY session_id, updated_at ASC, id ASC
             """,
             (user_id,),
         ) as cursor:
@@ -748,18 +1056,32 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         conflicted_hashes: set[str] = set()
 
         for annotation in all_annotations:
-            composite_hash = self.build_composite_match_hash(
-                parser_id=annotation.get("preview_parser_id", ""),
-                counterparty=annotation.get("preview_counterparty", ""),
-                description=annotation.get("preview_description", ""),
-                payment_method=annotation.get("preview_payment_method", ""),
-            )
-            match_features = self.build_composite_match_features(
-                parser_id=annotation.get("preview_parser_id", ""),
-                counterparty=annotation.get("preview_counterparty", ""),
-                description=annotation.get("preview_description", ""),
-                payment_method=annotation.get("preview_payment_method", ""),
-            )
+            composite_hash = str(annotation.get("composite_match_hash") or "")
+            match_features: dict[str, str] | None = None
+            try:
+                parsed_features = json.loads(annotation.get("match_features_json") or "{}")
+                if isinstance(parsed_features, dict):
+                    match_features = {
+                        str(key): self._normalize_import_learning_text(value)
+                        for key, value in parsed_features.items()
+                        if self._normalize_import_learning_text(value)
+                    }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                match_features = None
+            if not composite_hash:
+                composite_hash = self.build_composite_match_hash(
+                    parser_id=annotation.get("parser_id", ""),
+                    counterparty=annotation.get("counterparty", ""),
+                    description=annotation.get("description", ""),
+                    payment_method=annotation.get("payment_method", ""),
+                ) or ""
+            if not match_features:
+                match_features = self.build_composite_match_features(
+                    parser_id=annotation.get("parser_id", ""),
+                    counterparty=annotation.get("counterparty", ""),
+                    description=annotation.get("description", ""),
+                    payment_method=annotation.get("payment_method", ""),
+                )
             if not composite_hash or not match_features:
                 continue
             if composite_hash in conflicted_hashes:
@@ -898,7 +1220,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         self,
         user_id: int = 1,
         status: str | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         conn = await self._get_connection()
@@ -908,7 +1230,7 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             query += " AND status = ?"
             params.append(status)
         query += " ORDER BY sample_count DESC, updated_at DESC, id DESC"
-        if limit > 0:
+        if limit is not None and limit > 0:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, max(offset, 0)])
         async with conn.execute(query, tuple(params)) as cursor:
@@ -1010,6 +1332,14 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             normalized_match_value=suggestion["normalized_match_value"],
             payload={"suggestion_id": suggestion_id},
         )
+        await self.record_import_learning_feedback_event(
+            "suggestion_accept",
+            user_id=user_id,
+            rule_id=rule_id,
+            suggestion_id=suggestion_id,
+            payload={"status": "accepted"},
+            conn=conn,
+        )
 
         await conn.commit()
         return {"suggestion_id": suggestion_id, "rule_id": rule_id, "status": "accepted"}
@@ -1031,6 +1361,13 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         await conn.execute(
             "UPDATE import_learning_suggestions SET status = 'rejected', updated_at = ? WHERE id = ?",
             (now, suggestion_id),
+        )
+        await self.record_import_learning_feedback_event(
+            "suggestion_reject",
+            user_id=user_id,
+            suggestion_id=suggestion_id,
+            payload={"status": "rejected"},
+            conn=conn,
         )
         await conn.commit()
         return True

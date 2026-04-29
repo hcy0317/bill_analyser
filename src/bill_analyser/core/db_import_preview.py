@@ -837,6 +837,34 @@ class DatabaseImportPreviewMixin(DatabaseFacadeBase):
                 await conn.rollback()
                 return None
 
+            event_type = f"preview_{normalized_decision}"
+            if normalized_decision == "clear" and should_restore_previous_preview:
+                event_type = "preview_rollback"
+            feedback_learning = (
+                feedback_payload.get("learning") if isinstance(feedback_payload, dict) else {}
+            )
+            feedback_rule_id = (
+                feedback_learning.get("rule_id")
+                if isinstance(feedback_learning, dict)
+                else learning_feedback.get("rule_id")
+            )
+            normalized_feedback_rule_id = (
+                int(feedback_rule_id) if feedback_rule_id not in (None, "", 0, "0") else None
+            )
+            if hasattr(self, "record_import_learning_feedback_event"):
+                await self.record_import_learning_feedback_event(
+                    event_type,
+                    user_id=user_id,
+                    rule_id=normalized_feedback_rule_id,
+                    session_id=str(preview.get("session_id") or ""),
+                    preview_id=preview_id,
+                    payload={
+                        "decision": normalized_decision,
+                        "rollback": bool(should_restore_previous_preview),
+                    },
+                    conn=conn,
+                )
+
             await conn.commit()
         except Exception:
             await conn.rollback()

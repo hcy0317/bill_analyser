@@ -35,6 +35,9 @@
                                                    @click="handleBatchAccept">
                                                 {{ tt('Batch Accept') }} ({{ selectedIds.length }})
                                             </v-btn>
+                                            <v-chip size="small" variant="tonal" color="info">
+                                                {{ filteredSuggestions.length }} / {{ suggestionsTotal }}
+                                            </v-chip>
                                             <v-btn class="learning-panel-refresh"
                                                    variant="text"
                                                    color="default"
@@ -137,6 +140,9 @@
                                     <Teleport :disabled="!hasHeaderActionsTarget" :to="headerActionsTarget">
                                     <div class="learning-section-actions"
                                          :class="{ 'learning-section-actions--external': hasHeaderActionsTarget }">
+                                        <v-chip size="small" variant="tonal" color="info">
+                                            {{ filteredRules.length }} / {{ rulesTotal }}
+                                        </v-chip>
                                         <v-btn variant="text"
                                                class="learning-panel-refresh"
                                                color="default"
@@ -951,6 +957,7 @@ const loading = computed(() => (
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
 const rules = computed(() => store.rules);
+const rulesTotal = computed(() => store.rulesTotal);
 const hideSectionTitle = computed(() => Boolean(props.hideSectionTitle));
 const hasHeaderActionsTarget = computed(() => Boolean(props.headerActionsTarget));
 const headerActionsTarget = computed(() => props.headerActionsTarget || 'body');

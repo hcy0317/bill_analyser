@@ -68,6 +68,7 @@ async def test_database_facade_base_async_stubs_are_explicit_noops() -> None:
     ) is None
     assert await probe.get_preview_by_session("session-id", user_id=10, selected_only=True) is None
     assert await probe.get_import_annotation_samples("session-id", user_id=11) is None
+    assert await probe.get_import_learning_corpus_samples(user_id=11, limit=5, offset=1) is None
     assert await probe._record_import_learning_rule_log(
         cast("Any", None),
         rule_id=12,
@@ -79,6 +80,14 @@ async def test_database_facade_base_async_stubs_are_explicit_noops() -> None:
         session_id="session-id",
         preview_id=14,
         payload={"scope": "pytest"},
+    ) is None
+    assert await probe.record_import_learning_feedback_event(
+        "preview_accept",
+        user_id=13,
+        rule_id=12,
+        preview_id=14,
+        payload={"scope": "pytest"},
+        conn=cast("Any", None),
     ) is None
     assert await probe.get_budget_by_id(15, user_id=16) is None
 

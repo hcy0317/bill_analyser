@@ -3213,10 +3213,11 @@ def list_import_learning_rules():
 @log_method
 @require_auth
 def update_import_learning_rule(rule_id: int):
-    """启用或禁用单条长期导入学习规则。"""
+    """更新单条长期导入学习规则。"""
     try:
         data = request.get_json(silent=True) or {}
-        if "enabled" not in data:
+        editable_fields = {"matchValue", "learnedType", "learnedCategoryId"}
+        if "enabled" not in data and not any(field in data for field in editable_fields):
             return jsonify({"success": False, "error": "enabled is required"}), 400
 
         db, _, _ = get_app_context()
@@ -3224,6 +3225,27 @@ def update_import_learning_rule(rule_id: int):
         asyncio.set_event_loop(loop)
 
         try:
+            if any(field in data for field in editable_fields):
+                update_payload: dict[str, Any] = {}
+                if "matchValue" in data:
+                    update_payload["match_value"] = str(data.get("matchValue") or "").strip()
+                if "learnedType" in data:
+                    update_payload["learned_type"] = str(data.get("learnedType") or "").strip()
+                if "learnedCategoryId" in data:
+                    raw_category_id = data.get("learnedCategoryId")
+                    update_payload["learned_category_id"] = (
+                        None if raw_category_id in (None, "", 0, "0") else int(raw_category_id)
+                    )
+                if "enabled" in data:
+                    update_payload["enabled"] = bool(data.get("enabled"))
+
+                result = loop.run_until_complete(
+                    db.update_import_learning_rule(rule_id, user_id=request.user_id, **update_payload)
+                )
+                if result is None:
+                    return jsonify({"success": False, "error": "Rule not found"}), 404
+                return jsonify({"success": True, "result": result})
+
             success = loop.run_until_complete(
                 db.set_import_learning_rule_enabled(rule_id, bool(data.get("enabled")), user_id=request.user_id)
             )
@@ -3231,6 +3253,8 @@ def update_import_learning_rule(rule_id: int):
                 return jsonify({"success": False, "error": "Rule not found"}), 404
 
             return jsonify({"success": True, "result": True})
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
         finally:
             loop.close()
 

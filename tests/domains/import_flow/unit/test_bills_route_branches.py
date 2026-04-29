@@ -121,6 +121,7 @@ class FakeBillsDB:
         self.learning_rule_count_calls: list[tuple[int, bool]] = []
         self.learning_rule_query_calls: list[tuple[int, bool, int | None, int]] = []
         self.learning_rule_update_calls: list[tuple[int, bool, int]] = []
+        self.learning_rule_field_update_calls: list[tuple[int, int, dict[str, Any]]] = []
         self.learning_rule_delete_calls: list[tuple[int, int]] = []
         self.query_bills_result: tuple[list[dict[str, Any]], int] = ([{"id": 1, "description": "早餐"}], 1)
         self.tags_for_bill: dict[int, list[dict[str, Any]]] = {1: [{"id": 7, "name": "早餐"}]}
@@ -337,6 +338,18 @@ class FakeBillsDB:
     async def set_import_learning_rule_enabled(self, rule_id: int, enabled: bool, *, user_id: int) -> bool:
         self.learning_rule_update_calls.append((rule_id, enabled, user_id))
         return self.set_learning_rule_enabled_result
+
+    async def update_import_learning_rule(
+        self,
+        rule_id: int,
+        *,
+        user_id: int,
+        **kwargs: Any,
+    ) -> dict[str, Any] | None:
+        self.learning_rule_field_update_calls.append((rule_id, user_id, dict(kwargs)))
+        if not self.set_learning_rule_enabled_result:
+            return None
+        return {**self.learning_rules[0], **kwargs}
 
     async def delete_import_learning_rule(self, rule_id: int, *, user_id: int) -> bool:
         self.learning_rule_delete_calls.append((rule_id, user_id))
@@ -1513,6 +1526,24 @@ def test_bills_reclassify_and_learning_routes_cover_remaining_midweight_branches
         _set_request_user_id(2)
         payload = update_rule_route(1).get_json() or {}
         assert payload == {"success": True, "result": True}
+
+    with bills_route_app.test_request_context(
+        "/api/bills/import/learning-rules/1",
+        method="PUT",
+        json={"matchValue": "c=新商户|d=新描述|p=wechat|m=微信支付", "learnedType": "收入"},
+    ):
+        _set_request_user_id(6)
+        payload = update_rule_route(1).get_json() or {}
+        assert payload["success"] is True
+        assert payload["result"]["match_value"] == "c=新商户|d=新描述|p=wechat|m=微信支付"
+        assert db.learning_rule_field_update_calls[-1] == (
+            1,
+            6,
+            {
+                "match_value": "c=新商户|d=新描述|p=wechat|m=微信支付",
+                "learned_type": "收入",
+            },
+        )
 
     async def _raise_update_rule_error(*_args: Any, **_kwargs: Any) -> bool:
         raise RuntimeError("update rule boom")

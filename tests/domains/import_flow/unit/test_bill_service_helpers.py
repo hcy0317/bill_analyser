@@ -827,6 +827,74 @@ async def test_apply_import_learning_rules_ignores_stale_account_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_import_learning_disabled_suppresses_preview_and_historical_candidates() -> None:
+    """关闭 import_learning_enabled 后，preview 与已入库 learning candidate 都不应继续冒出。"""
+    fake_db = FakeBillServiceDB()
+    fake_db.user = {
+        "id": 1,
+        "cash_account_id": 99,
+        "cash_transfer_category_id": 10,
+        "import_learning_enabled": 0,
+    }
+    fake_db.import_rules = [
+        {
+            "id": 42,
+            "match_type": "composite",
+            "match_features_json": json.dumps(
+                {
+                    "parser_id": "wechat",
+                    "counterparty": "早餐铺",
+                    "description": "共同描述",
+                    "payment_method": "微信支付",
+                },
+                ensure_ascii=False,
+            ),
+            "composite_match_hash": "different-hash",
+            "learned_type": "收入",
+        }
+    ]
+    fake_db.preview_rows = [
+        {
+            "id": 11,
+            "session_id": "session-learning-disabled",
+            "user_id": 1,
+            "preview_date": "2025-01-02 08:30:00",
+            "preview_type": "支出",
+            "preview_amount": 12.3,
+            "preview_destination_amount": 0,
+            "preview_main_category": "",
+            "preview_sub_category": "",
+            "preview_source_account_id": None,
+            "preview_destination_account_id": None,
+            "preview_counterparty": "早餐铺",
+            "preview_payment_method": "微信支付",
+            "preview_description": "共同描述",
+            "preview_parser_id": "wechat",
+            "preview_selected": 1,
+            "dedup_type": "remaining",
+        }
+    ]
+    service = _make_service(fake_db)
+
+    preview_items = await service.get_import_preview("session-learning-disabled", user_id=1)
+    historical_candidates = await service._build_learning_candidates_for_bill(
+        {
+            "id": 1,
+            "counterparty": "早餐铺",
+            "description": "共同描述",
+            "payment_method": "微信支付",
+        },
+        user_id=1,
+    )
+
+    assert preview_items[0]["learning_recommendation_rule_id"] is None
+    assert preview_items[0]["learning_recommendation_score"] == 0.0
+    assert preview_items[0]["matching"]["learning"]["review_status"] == ""
+    assert historical_candidates == []
+    assert fake_db.learning_rule_query_count == 0
+
+
+@pytest.mark.asyncio
 async def test_batch_import_preview_confirmed_and_simple_db_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     """批量导入汇总、预览确认和轻量 DB wrapper 应按契约返回结果。"""
     fake_db = FakeBillServiceDB()

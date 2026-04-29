@@ -2129,8 +2129,8 @@ export default {
     },
 
     updateLearningRule: ({ ruleId, ...fields }: { ruleId: number, matchValue?: string, learnedType?: string, learnedCategoryId?: number, enabled?: boolean }): ApiResponsePromise<any> => {
-        return axios.put(`learning/rules/${ruleId}`, fields).then(response => {
-            return buildApiResponse(response, response.data?.data);
+        return axios.put(`bills/import/learning-rules/${ruleId}`, fields).then(response => {
+            return buildApiResponse(response, response.data?.data ?? response.data?.result);
         });
     },
 
