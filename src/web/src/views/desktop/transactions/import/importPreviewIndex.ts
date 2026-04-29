@@ -27,6 +27,7 @@ export interface ImportPreviewIndexItem extends ImportCheckVisibleTransactionLik
     learningStatus?: ImportPreviewSignalStatus | null;
     learningTitle?: string;
     learningSummary?: string;
+    learningMode?: string;
     recurringTemplateId?: string;
     recurringCandidateCount?: number;
     recurringMatchReasons?: string;
@@ -96,6 +97,7 @@ export function buildImportPreviewIndexSignalViewModel(item: ImportPreviewIndexI
         learningStatus: item.learningStatus ?? null,
         learningTitle: item.learningTitle || '',
         learningSummary: item.learningSummary || '',
+        learningMode: item.learningMode || '',
         hasRecurringMatch: !!item.recurringTemplateId,
         recurringTitle: item.recurringMatchReasons || '',
         recurringCandidateCount: Number(item.recurringCandidateCount || 0),

@@ -991,6 +991,10 @@ interface MatchingSessionCandidateItem {
         summary?: string;
         review_status?: string;
         suppressed?: boolean;
+        source?: string;
+        mode?: string;
+        auto_apply?: boolean;
+        model_version?: string;
     };
 }
 
@@ -1053,6 +1057,7 @@ interface ImportPreviewIndexResponseItem {
     learning_status?: ImportPreviewSignalStatus | null;
     learning_title?: string;
     learning_summary?: string;
+    learning_mode?: string;
     recurring_template_id?: string;
     recurring_candidate_count?: number;
     recurring_match_reasons?: string;
@@ -1675,6 +1680,10 @@ function clearLearningRecommendationState(item: ImportTransaction): void {
         item.matching.learning.summary = '';
         item.matching.learning.review_status = '';
         item.matching.learning.suppressed = false;
+        item.matching.learning.source = '';
+        item.matching.learning.mode = '';
+        item.matching.learning.auto_apply = false;
+        item.matching.learning.model_version = '';
     }
 
     updateTransactionData(item);
@@ -1699,6 +1708,10 @@ function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, cand
         item.matching.learning.summary = details.summary || '';
         item.matching.learning.review_status = details.review_status || '';
         item.matching.learning.suppressed = !!details.suppressed;
+        item.matching.learning.source = details.source || '';
+        item.matching.learning.mode = details.mode || '';
+        item.matching.learning.auto_apply = !!details.auto_apply;
+        item.matching.learning.model_version = details.model_version || '';
     }
 
     updateTransactionData(item);
@@ -2140,13 +2153,19 @@ async function reviewLearningSuggestion(
 
     if (decision === 'accept') {
         const ruleId = item.matching?.learning.rule_id;
-        if (typeof ruleId !== 'number' || ruleId <= 0) {
+        const isModelCandidate = (item.matching?.learning.source || '').trim().toLowerCase() === 'model';
+        if (!isModelCandidate && (typeof ruleId !== 'number' || ruleId <= 0)) {
             snackbar.value?.showMessage('Learning candidate not available');
             removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
             return;
         }
 
-        payload['ruleId'] = ruleId;
+        if (typeof ruleId === 'number' && ruleId > 0) {
+            payload['ruleId'] = ruleId;
+        }
+        if (isModelCandidate) {
+            payload['modelVersion'] = item.matching?.learning.model_version || '';
+        }
     }
     try {
         let response;
@@ -2458,6 +2477,8 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         getLearningSignalStatus(item) || '',
         item.learningRecommendationReason || '',
         item.learningRecommendationSummary || '',
+        item.matching?.learning.mode || '',
+        String(!!item.matching?.learning.auto_apply),
         String(!!item.hasRecurringMatch()),
         getRecurringMatchSummary(item),
         Number(item.recurringCandidateCount || 0),
@@ -2493,6 +2514,8 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         learningStatus: getLearningSignalStatus(item),
         learningTitle: item.learningRecommendationReason,
         learningSummary: item.learningRecommendationSummary,
+        learningMode: item.matching?.learning.mode || '',
+        learningAutoApplied: !!item.matching?.learning.auto_apply,
         hasRecurringMatch: item.hasRecurringMatch(),
         recurringTitle: getRecurringMatchSummary(item),
         recurringCandidateCount: item.recurringCandidateCount,
@@ -3161,6 +3184,7 @@ function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexResponseItem)
         learningStatus: item.learning_status ?? null,
         learningTitle: item.learning_title || '',
         learningSummary: item.learning_summary || '',
+        learningMode: item.learning_mode || '',
         recurringTemplateId: item.recurring_template_id || '',
         recurringCandidateCount: Number(item.recurring_candidate_count || 0),
         recurringMatchReasons: item.recurring_match_reasons || '',
@@ -3244,6 +3268,7 @@ function syncPreviewFilterIndexFromTransaction(transaction: ImportTransaction): 
     target.learningStatus = getLearningSignalStatus(transaction);
     target.learningTitle = transaction.learningRecommendationReason || '';
     target.learningSummary = transaction.learningRecommendationSummary || '';
+    target.learningMode = transaction.matching?.learning.mode || '';
     target.recurringTemplateId = transaction.recurringTemplateId || '';
     target.recurringCandidateCount = Number(transaction.recurringCandidateCount || 0);
     target.recurringMatchReasons = transaction.recurringMatchReasons || '';

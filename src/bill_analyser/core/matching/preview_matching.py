@@ -462,4 +462,22 @@ def build_preview_matching_payload(
         ),
         reconciliation=_build_reconciliation_payload(reconciliation_candidates),
     )
-    return payload.to_dict()
+    result = payload.to_dict()
+    learning_extras = {
+        key: learning_recommendation.get(key)
+        for key in (
+            "source",
+            "mode",
+            "auto_apply",
+            "model_version",
+            "confidence",
+            "margin",
+            "confirmations",
+            "feature_schema_version",
+            "policy_version",
+        )
+        if learning_recommendation.get(key) not in (None, "")
+    }
+    if learning_extras:
+        result["learning"].update(learning_extras)
+    return result

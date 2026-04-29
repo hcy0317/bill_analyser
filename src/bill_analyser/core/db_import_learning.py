@@ -13,6 +13,13 @@ if TYPE_CHECKING:
 from ..utils.logger import log_method
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
+from .import_learning.features import (
+    FEATURE_SCHEMA_VERSION,
+    build_label_confirmation_counts,
+    prepare_training_samples,
+)
+from .import_learning.model import MODEL_KEY, train_dual_head_model
+from .import_learning.policy import POLICY_VERSION
 
 
 _UNSET: Any = object()
@@ -453,6 +460,8 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
             saved_count += 1
 
         await conn.commit()
+        if saved_count > 0:
+            await self.refresh_import_learning_model(user_id=user_id)
         return saved_count
 
     @log_method
@@ -496,6 +505,167 @@ class DatabaseImportLearningMixin(DatabaseFacadeBase):
         ) as cursor:
             row = await cursor.fetchone()
         return int(row["total_count"] if row else 0)
+
+    @log_method
+    async def get_active_import_learning_model(self, user_id: int = 1) -> dict[str, Any] | None:
+        conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT *
+            FROM import_learning_model_registry
+            WHERE user_id = ? AND model_key = ? AND status = 'active'
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (user_id, MODEL_KEY),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+
+        model_row = dict(row)
+        try:
+            metrics_payload = json.loads(model_row.get("metrics_json") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metrics_payload = {}
+        model_row["metrics"] = metrics_payload if isinstance(metrics_payload, dict) else {}
+        return model_row
+
+    @log_method
+    async def get_import_learning_model_suppressed_preview_ids(
+        self,
+        session_id: str,
+        *,
+        user_id: int = 1,
+    ) -> set[int]:
+        """Return preview ids where prior user feedback should block model auto-suggestions."""
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            return set()
+
+        conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT DISTINCT preview_id
+            FROM import_learning_feedback_events
+            WHERE user_id = ?
+              AND session_id = ?
+              AND preview_id IS NOT NULL
+              AND event_type IN ('model_preview_reject', 'preview_rollback')
+            """,
+            (user_id, normalized_session_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        suppressed_ids: set[int] = set()
+        for row in rows:
+            try:
+                suppressed_ids.add(int(row["preview_id"]))
+            except (TypeError, ValueError):
+                continue
+        return suppressed_ids
+
+    @log_method
+    async def refresh_import_learning_model(self, user_id: int = 1) -> dict[str, Any]:
+        """Create a versioned dataset snapshot and refresh the active trainable model."""
+        conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT *
+            FROM import_learning_corpus_samples
+            WHERE user_id = ?
+            ORDER BY updated_at ASC, id ASC
+            """,
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        corpus_rows = [dict(row) for row in rows]
+        samples = prepare_training_samples(corpus_rows)
+        confirmation_counts = build_label_confirmation_counts(samples)
+        label_counts: dict[str, int] = {}
+        for sample in samples:
+            label_counts[sample.semantic_label] = label_counts.get(sample.semantic_label, 0) + 1
+
+        now = utc_now_iso()
+        snapshot_payload = {
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "policy_version": POLICY_VERSION,
+            "sample_ids": [sample.sample_id for sample in samples],
+            "semantic_label_counts": label_counts,
+            "joint_label_confirmation_counts": confirmation_counts,
+        }
+        training_result = train_dual_head_model(samples)
+        snapshot_status = "ready" if training_result.trainable else "insufficient"
+        cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_dataset_snapshots (
+                user_id, name, corpus_sample_count, filters_json,
+                status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                f"{MODEL_KEY}:{now}",
+                len(samples),
+                json.dumps(snapshot_payload, ensure_ascii=False, sort_keys=True),
+                snapshot_status,
+                now,
+                now,
+            ),
+        )
+        dataset_snapshot_id = int(cursor.lastrowid or 0)
+
+        if not training_result.trainable or not training_result.parameters:
+            await conn.commit()
+            return {
+                "trained": False,
+                "reason": training_result.reason,
+                "dataset_snapshot_id": dataset_snapshot_id,
+                "sample_count": len(samples),
+            }
+
+        model_version = f"v{dataset_snapshot_id}"
+        model_payload = {
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "policy_version": POLICY_VERSION,
+            "parameter_ref": "metrics_json.model_parameters",
+            "model_parameters": training_result.parameters,
+            "training_metrics": training_result.metrics,
+            "joint_label_confirmation_counts": confirmation_counts,
+        }
+        await conn.execute(
+            """
+            UPDATE import_learning_model_registry
+            SET status = 'archived', updated_at = ?
+            WHERE user_id = ? AND model_key = ? AND status = 'active'
+            """,
+            (now, user_id, MODEL_KEY),
+        )
+        await conn.execute(
+            """
+            INSERT INTO import_learning_model_registry (
+                user_id, model_key, model_version, dataset_snapshot_id,
+                status, metrics_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                user_id,
+                MODEL_KEY,
+                model_version,
+                dataset_snapshot_id,
+                json.dumps(model_payload, ensure_ascii=False, sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        await conn.commit()
+        return {
+            "trained": True,
+            "reason": training_result.reason,
+            "dataset_snapshot_id": dataset_snapshot_id,
+            "model_version": model_version,
+            "sample_count": len(samples),
+        }
 
     @log_method
     async def list_import_learning_suggestions_for_session(

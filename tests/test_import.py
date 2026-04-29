@@ -1184,8 +1184,8 @@ async def test_get_import_preview_skips_transfer_suggestion_for_existing_transfe
 
 
 @pytest.mark.asyncio
-async def test_get_import_preview_returns_learning_similarity_recommendation(service):
-    """测试预览接口会为高相似长期学习规则返回推荐信号。"""
+async def test_get_import_preview_returns_learning_model_recommendation(service):
+    """测试预览接口会消费 active learning model 返回推荐信号。"""
     user_id = await service.db.create_user({
         "username": "learning_similarity_user",
         "email": "learning_similarity_user@example.com",
@@ -1219,42 +1219,66 @@ async def test_get_import_preview_returns_learning_similarity_recommendation(ser
     }, user_id=user_id)
     assert category_id is not None
 
-    conn = await getattr(service.db, "_get_connection")()
-    now = datetime.now().isoformat()
-    rule_hash = service.db.build_composite_match_hash(
-        parser_id="alipay",
-        counterparty="星巴克咖啡",
-        description="门店消费",
-        payment_method="支付宝",
+    training_session_id = "learning-model-training-session"
+    await service.db.create_import_session(training_session_id, user_id=user_id, file_count=1)
+    training_rows = [
+        ("星巴克咖啡", "门店消费"),
+        ("星巴克臻选", "咖啡消费"),
+        ("星巴克烘焙", "咖啡早餐"),
+    ]
+    inserted = await service.db.insert_preview_bills_batch(
+        training_session_id,
+        [
+            {
+                "preview_data": {
+                    "preview_date": f"2026-03-0{index} 08:10:00",
+                    "preview_type": "支出",
+                    "preview_amount": 38.0 + index,
+                    "preview_destination_amount": 0.0,
+                    "preview_main_category": "餐饮",
+                    "preview_sub_category": "咖啡",
+                    "preview_source_account_id": None,
+                    "preview_destination_account_id": None,
+                    "preview_counterparty": counterparty,
+                    "preview_payment_method": "支付宝",
+                    "preview_description": description,
+                    "preview_parser_id": "alipay",
+                },
+                "dedup_type": "remaining",
+                "dedup_source_ids": [],
+            }
+            for index, (counterparty, description) in enumerate(training_rows, start=1)
+        ],
+        user_id=user_id,
     )
-    assert rule_hash is not None
-    await conn.execute(
-        """
-        INSERT INTO import_learning_rules (
-            user_id, match_type, match_value, normalized_match_value,
-            learned_type, learned_category_id, enabled,
-            parser_id, composite_match_hash, match_features_json,
-            applied_count, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            "composite",
-            rule_hash,
-            rule_hash,
-            "支出",
-            category_id,
-            "alipay",
-            rule_hash,
-            '{"counterparty": "星巴克咖啡", "description": "门店消费", "parser_id": "alipay", "payment_method": "支付宝"}',
-            6,
-            now,
-            now,
-        )
-    )
-    await conn.commit()
+    assert inserted == 3
 
-    session_id = "learning-similarity-preview-session"
+    conn = await getattr(service.db, "_get_connection")()
+    async with conn.execute(
+        "SELECT id FROM bills_preview WHERE session_id = ? AND user_id = ? ORDER BY id",
+        (training_session_id, user_id),
+    ) as cursor:
+        training_preview_ids = [int(row["id"]) for row in await cursor.fetchall()]
+    assert len(training_preview_ids) == 3
+    saved_count = await service.db.save_import_annotation_samples(
+        training_session_id,
+        [
+            {
+                "id": preview_id,
+                "preview_type": "支出",
+                "category_id": category_id,
+                "preview_source_account_id": None,
+                "preview_destination_account_id": None,
+            }
+            for preview_id in training_preview_ids
+        ],
+        user_id=user_id,
+    )
+    assert saved_count == 3
+    active_model = await service.db.get_active_import_learning_model(user_id=user_id)
+    assert active_model is not None
+
+    session_id = "learning-model-preview-session"
     await service.db.create_import_session(session_id, user_id=user_id, file_count=1)
     inserted = await service.db.insert_preview_bills_batch(session_id, [{
         "preview_data": {
@@ -1279,10 +1303,13 @@ async def test_get_import_preview_returns_learning_similarity_recommendation(ser
     previews = await service.get_import_preview(session_id)
     assert len(previews) == 1
     assert previews[0]["learning_recommendation_level"] in {"high", "medium", "low"}
-    assert previews[0]["learning_recommendation_score"] >= 0.72
+    assert previews[0]["learning_recommendation_score"] >= 0.70
     assert previews[0]["learning_recommendation_type"] == "支出"
     assert previews[0]["learning_recommendation_summary"] == "支出 | 餐饮/咖啡"
-    assert "parser_id" in previews[0]["learning_recommendation_reason"]
+    assert previews[0]["learning_recommendation_source"] == "model"
+    assert previews[0]["learning_recommendation_mode"] == "blue"
+    assert previews[0]["matching"]["learning"]["review_status"] == "accepted"
+    assert "model:dual_head" in previews[0]["learning_recommendation_reason"]
 
 
 @pytest.mark.asyncio

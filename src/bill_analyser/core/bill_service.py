@@ -37,6 +37,14 @@ from .investment_matching import (
 from .investment_settings import (
     build_user_investment_keyword_settings,
 )
+from .import_learning.features import (
+    FEATURE_SCHEMA_VERSION,
+    build_feature_payload,
+    parse_route_label,
+    parse_semantic_label,
+)
+from .import_learning.model import MODEL_KEY, predict_dual_head
+from .import_learning.policy import POLICY_VERSION, evaluate_learning_policy
 from .matching import build_matching_session_candidates, build_preview_matching_payload
 from .matching.candidate_ids import (
     build_formal_learning_candidate_id,
@@ -2630,12 +2638,25 @@ class BillService:
             if user_id > 0 and import_learning_enabled
             else []
         )
+        active_learning_model = (
+            await self.db.get_active_import_learning_model(user_id=user_id)
+            if user_id > 0 and import_learning_enabled and hasattr(self.db, "get_active_import_learning_model")
+            else None
+        )
+        learning_model_suppressed_preview_ids = (
+            await self.db.get_import_learning_model_suppressed_preview_ids(session_id, user_id=user_id)
+            if session_id
+            and user_id > 0
+            and import_learning_enabled
+            and hasattr(self.db, "get_import_learning_model_suppressed_preview_ids")
+            else set()
+        )
         composite_learning_rules = [
             rule for rule in learning_rules if rule.get("match_type") == "composite" and rule.get("match_features_json")
         ]
         learning_categories_by_id: dict[int, dict[str, Any]] = {}
         learning_accounts_by_id: dict[int, dict[str, Any]] = {}
-        if composite_learning_rules and user_id > 0:
+        if (composite_learning_rules or active_learning_model) and user_id > 0:
             learning_categories = await self.db.get_all_categories(user_id=user_id)
             learning_accounts = await self.db.get_all_accounts(user_id=user_id)
             learning_categories_by_id = {
@@ -2672,6 +2693,8 @@ class BillService:
             "import_learning_enabled": import_learning_enabled,
             "manually_annotated_preview_ids": manually_annotated_preview_ids,
             "composite_learning_rules": composite_learning_rules,
+            "active_learning_model": active_learning_model,
+            "learning_model_suppressed_preview_ids": learning_model_suppressed_preview_ids,
             "learning_categories_by_id": learning_categories_by_id,
             "learning_accounts_by_id": learning_accounts_by_id,
             "reconciliation_by_preview_id": reconciliation_by_preview_id,
@@ -2759,18 +2782,61 @@ class BillService:
             )
 
         transfer_suggestion = self._build_transfer_suggestion_from_preview(preview)
-        learning_recommendation = self._build_learning_similarity_signal_from_preview(
-            preview,
-            list(context.get("composite_learning_rules") or []),
-            categories_by_id=dict(context.get("learning_categories_by_id") or {}),
-            accounts_by_id=dict(context.get("learning_accounts_by_id") or {}),
-        )
         category_id = preview.get("category_id")
         if category_id in (None, "", 0, "0"):
             category_id = await self._get_preview_category_id(preview, user_id=preview_user_id)
 
         preview_id = int(preview.get("id", 0) or 0)
         is_manually_annotated = preview_id in set(context.get("manually_annotated_preview_ids") or set())
+        learning_rules = list(context.get("composite_learning_rules") or [])
+        categories_by_id = dict(context.get("learning_categories_by_id") or {})
+        accounts_by_id = dict(context.get("learning_accounts_by_id") or {})
+        learning_recommendation = self._build_learning_similarity_signal_from_preview(
+            preview,
+            learning_rules,
+            categories_by_id=categories_by_id,
+            accounts_by_id=accounts_by_id,
+        )
+        is_model_suppressed = preview_id in set(context.get("learning_model_suppressed_preview_ids") or set())
+        if not learning_recommendation:
+            active_model_for_preview = None
+            if isinstance(context, dict) and not is_model_suppressed:
+                active_model_for_preview = context.get("active_learning_model")
+            learning_recommendation = self._build_learning_model_signal_from_preview(
+                preview,
+                active_model_for_preview,
+                learning_rules=learning_rules,
+                categories_by_id=categories_by_id,
+                accounts_by_id=accounts_by_id,
+                is_manually_annotated=is_manually_annotated,
+            )
+        if learning_recommendation.get("auto_apply") and not preview.get("preview_matching_feedback", {}).get("learning"):
+            auto_applied_preview = await self.db.update_preview_learning_decision(
+                preview_id,
+                "accept",
+                user_id=preview_user_id,
+                applied_result=self._build_preview_learning_model_apply_payload(learning_recommendation),
+            )
+            if auto_applied_preview and not auto_applied_preview.get("_state_conflict"):
+                preview = auto_applied_preview
+                category_id = preview.get("category_id")
+                if category_id in (None, "", 0, "0"):
+                    category_id = await self._get_preview_category_id(preview, user_id=preview_user_id)
+                if hasattr(self.db, "record_import_learning_feedback_event"):
+                    await self.db.record_import_learning_feedback_event(
+                        "model_blue_auto_apply",
+                        user_id=preview_user_id,
+                        session_id=session_id,
+                        preview_id=preview_id,
+                        candidate_id=f"model:{learning_recommendation.get('model_version')}:preview:{preview_id}",
+                        payload={
+                            "applied_count": 1,
+                            "model_version": learning_recommendation.get("model_version"),
+                            "confidence": learning_recommendation.get("confidence"),
+                            "margin": learning_recommendation.get("margin"),
+                            "confirmations": learning_recommendation.get("confirmations"),
+                        },
+                    )
         reconciliation_candidates = self._get_reconciliation_candidates_for_preview(
             preview,
             context,
@@ -2820,6 +2886,9 @@ class BillService:
             "learning_recommendation_reason": learning_recommendation.get("reason", ""),
             "learning_recommendation_type": learning_recommendation.get("recommended_type", ""),
             "learning_recommendation_summary": learning_recommendation.get("summary", ""),
+            "learning_recommendation_mode": learning_recommendation.get("mode", ""),
+            "learning_recommendation_source": learning_recommendation.get("source", ""),
+            "learning_recommendation_model_version": learning_recommendation.get("model_version", ""),
             "reconciliation_candidates": reconciliation_candidates,
             "matching": build_preview_matching_payload(
                 preview,
@@ -2969,6 +3038,7 @@ class BillService:
             "learning_status": cls._resolve_import_preview_learning_signal_status(preview_item),
             "learning_title": str(preview_item.get("learning_recommendation_reason") or ""),
             "learning_summary": str(preview_item.get("learning_recommendation_summary") or ""),
+            "learning_mode": str(preview_item.get("learning_recommendation_mode") or ""),
             "recurring_template_id": (
                 str(preview_item.get("preview_recurring_id") or "")
                 if preview_item.get("preview_recurring_id") not in (None, "", 0, "0")
@@ -4840,13 +4910,28 @@ class BillService:
                 user_id=preview_user_id,
             )
 
-        composite_learning_rules = list(context.get("composite_learning_rules") or [])
-
-        return self._build_learning_similarity_signal_from_preview(
+        preview_id = int(preview.get("id", 0) or 0)
+        is_manually_annotated = preview_id in set(context.get("manually_annotated_preview_ids") or set())
+        learning_rules = list(context.get("composite_learning_rules") or [])
+        categories_by_id = dict(context.get("learning_categories_by_id") or {})
+        accounts_by_id = dict(context.get("learning_accounts_by_id") or {})
+        learning_recommendation = self._build_learning_similarity_signal_from_preview(
             preview,
-            composite_learning_rules,
-            categories_by_id=dict(context.get("learning_categories_by_id") or {}),
-            accounts_by_id=dict(context.get("learning_accounts_by_id") or {}),
+            learning_rules,
+            categories_by_id=categories_by_id,
+            accounts_by_id=accounts_by_id,
+        )
+        if learning_recommendation:
+            return learning_recommendation
+
+        is_model_suppressed = preview_id in set(context.get("learning_model_suppressed_preview_ids") or set())
+        return self._build_learning_model_signal_from_preview(
+            preview,
+            None if is_model_suppressed else context.get("active_learning_model"),
+            learning_rules=learning_rules,
+            categories_by_id=categories_by_id,
+            accounts_by_id=accounts_by_id,
+            is_manually_annotated=is_manually_annotated,
         )
 
     async def _build_preview_learning_apply_payload(
@@ -4892,6 +4977,47 @@ class BillService:
                 )
 
         return applied_result
+
+    async def _record_preview_learning_decision_training_sample(
+        self,
+        preview: dict[str, Any],
+        *,
+        decision: str,
+        user_id: int,
+        model_version: str = "",
+    ) -> None:
+        session_id = str(preview.get("session_id") or "")
+        preview_id = self._coerce_optional_positive_int(preview.get("id"))
+        if not session_id or preview_id is None:
+            return
+
+        category_id = await self._get_preview_category_id(preview, user_id=user_id)
+        await self.db.save_import_annotation_samples(
+            session_id,
+            [
+                {
+                    "id": preview_id,
+                    "preview_type": preview.get("preview_type"),
+                    "category_id": category_id,
+                    "preview_source_account_id": preview.get("preview_source_account_id"),
+                    "preview_destination_account_id": preview.get("preview_destination_account_id"),
+                }
+            ],
+            user_id=user_id,
+        )
+        if hasattr(self.db, "record_import_learning_feedback_event"):
+            await self.db.record_import_learning_feedback_event(
+                f"model_preview_{decision}",
+                user_id=user_id,
+                session_id=session_id,
+                preview_id=preview_id,
+                candidate_id=f"model:{model_version}:preview:{preview_id}" if model_version else None,
+                payload={
+                    "decision": decision,
+                    "model_version": model_version,
+                    "corrective_sample": decision == "reject",
+                },
+            )
 
     @log_method
     async def apply_preview_learning_decision(  # pylint: disable=too-many-locals,too-many-return-statements,too-many-boolean-expressions
@@ -5002,44 +5128,53 @@ class BillService:
 
         applied_result: dict[str, Any] | None = None
         if normalized_decision == "accept":
-            if rule_id in (None, ""):
-                return {"success": False, "error": "Missing ruleId", "status_code": 400}
-
-            try:
-                normalized_rule_id = self._normalize_preview_learning_rule_id(rule_id)
-            except ValueError:
-                return {"success": False, "error": "Invalid request", "status_code": 400}
-
             live_learning_rule_id = int(learning_recommendation.get("rule_id") or 0)
-            if live_learning_rule_id > 0:
-                if live_learning_rule_id != normalized_rule_id:
+            if str(learning_recommendation.get("source") or "") == "model":
+                if rule_id not in (None, ""):
                     return {
                         "success": False,
                         "error": "Learning candidate not available",
                         "status_code": 400,
                     }
-            elif retained_learning_rule_id != normalized_rule_id:
-                return {
-                    "success": False,
-                    "error": "Learning candidate not available",
-                    "status_code": 400,
-                }
+                applied_result = self._build_preview_learning_model_apply_payload(learning_recommendation)
+            else:
+                if rule_id in (None, ""):
+                    return {"success": False, "error": "Missing ruleId", "status_code": 400}
 
-            learning_rule = await self.db.get_import_learning_rule_by_id(
-                normalized_rule_id,
-                user_id=user_id,
-            )
-            if not learning_rule:
-                return {
-                    "success": False,
-                    "error": "Learning candidate not available",
-                    "status_code": 400,
-                }
+                try:
+                    normalized_rule_id = self._normalize_preview_learning_rule_id(rule_id)
+                except ValueError:
+                    return {"success": False, "error": "Invalid request", "status_code": 400}
 
-            applied_result = await self._build_preview_learning_apply_payload(
-                learning_rule,
-                user_id=user_id,
-            )
+                if live_learning_rule_id > 0:
+                    if live_learning_rule_id != normalized_rule_id:
+                        return {
+                            "success": False,
+                            "error": "Learning candidate not available",
+                            "status_code": 400,
+                        }
+                elif retained_learning_rule_id != normalized_rule_id:
+                    return {
+                        "success": False,
+                        "error": "Learning candidate not available",
+                        "status_code": 400,
+                    }
+
+                learning_rule = await self.db.get_import_learning_rule_by_id(
+                    normalized_rule_id,
+                    user_id=user_id,
+                )
+                if not learning_rule:
+                    return {
+                        "success": False,
+                        "error": "Learning candidate not available",
+                        "status_code": 400,
+                    }
+
+                applied_result = await self._build_preview_learning_apply_payload(
+                    learning_rule,
+                    user_id=user_id,
+                )
         elif normalized_decision != "clear" and not has_existing_learning_review:
             if not learning_recommendation:
                 return {
@@ -5076,6 +5211,21 @@ class BillService:
             return {"success": False, "error": "Preview bill not found", "status_code": 404}
 
         session_id = str(updated_preview.get("session_id") or "")
+        if normalized_decision in {"accept", "reject"}:
+            await self._record_preview_learning_decision_training_sample(
+                updated_preview,
+                decision=normalized_decision,
+                user_id=int(updated_preview.get("user_id") or user_id or 1),
+                model_version=str(learning_recommendation.get("model_version") or ""),
+            )
+        elif normalized_decision == "clear" and isinstance(projection_context, dict):
+            suppressed_preview_ids = set(projection_context.get("learning_model_suppressed_preview_ids") or set())
+            suppressed_preview_ids.add(preview_id)
+            projection_context = {
+                **projection_context,
+                "learning_model_suppressed_preview_ids": suppressed_preview_ids,
+            }
+
         if str(response_mode or "").strip().lower() == "preview-item":
             return {
                 "success": True,
@@ -5422,6 +5572,175 @@ class BillService:
                 parts.append(source_account_name or destination_account_name)
 
         return " | ".join(parts)
+
+    @staticmethod
+    def _learning_exact_rule_matches_preview(
+        preview: dict[str, Any],
+        learning_rules: list[dict[str, Any]],
+    ) -> bool:
+        preview_composite_hash = Database.build_composite_match_hash(
+            parser_id=preview.get("preview_parser_id", ""),
+            counterparty=preview.get("preview_counterparty", ""),
+            description=preview.get("preview_description", ""),
+            payment_method=preview.get("preview_payment_method", ""),
+        )
+        if not preview_composite_hash:
+            return False
+        return any(
+            str(rule.get("composite_match_hash") or "") == preview_composite_hash
+            for rule in learning_rules
+        )
+
+    @staticmethod
+    def _build_learning_model_feature_row(preview: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "parser_id": preview.get("preview_parser_id", ""),
+            "counterparty": preview.get("preview_counterparty", ""),
+            "description": preview.get("preview_description", ""),
+            "payment_method": preview.get("preview_payment_method", ""),
+            "source_snapshot_json": json.dumps(
+                {
+                    "preview_amount": preview.get("preview_amount"),
+                    "preview_type": preview.get("preview_type"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        }
+
+    @staticmethod
+    def _build_learning_model_result_summary(
+        recommendation: dict[str, Any],
+        categories_by_id: dict[int, dict[str, Any]],
+        accounts_by_id: dict[int, dict[str, Any]],
+    ) -> str:
+        return BillService._build_learning_rule_result_summary(
+            {
+                "learned_type": recommendation.get("recommended_type"),
+                "learned_category_id": recommendation.get("category_id"),
+                "learned_source_account_id": recommendation.get("source_account_id"),
+                "learned_destination_account_id": recommendation.get("destination_account_id"),
+            },
+            categories_by_id,
+            accounts_by_id,
+        )
+
+    @staticmethod
+    def _build_preview_learning_model_apply_payload(recommendation: dict[str, Any]) -> dict[str, Any]:
+        applied_result: dict[str, Any] = {}
+        recommended_type = str(recommendation.get("recommended_type") or "").strip()
+        if recommended_type:
+            applied_result["preview_type"] = recommended_type
+
+        category_id = recommendation.get("category_id")
+        if category_id not in (None, "", 0, "0"):
+            applied_result["preview_main_category"] = str(recommendation.get("main_category") or "")
+            applied_result["preview_sub_category"] = str(recommendation.get("sub_category") or "")
+
+        source_account_id = recommendation.get("source_account_id")
+        if source_account_id not in (None, "", 0, "0"):
+            applied_result["preview_source_account_id"] = int(source_account_id)
+
+        destination_account_id = recommendation.get("destination_account_id")
+        if destination_account_id not in (None, "", 0, "0"):
+            applied_result["preview_destination_account_id"] = int(destination_account_id)
+
+        return applied_result
+
+    def _build_learning_model_signal_from_preview(
+        self,
+        preview: dict[str, Any],
+        active_model: dict[str, Any] | None,
+        *,
+        learning_rules: list[dict[str, Any]],
+        categories_by_id: dict[int, dict[str, Any]],
+        accounts_by_id: dict[int, dict[str, Any]],
+        is_manually_annotated: bool,
+    ) -> dict[str, Any]:
+        """Use the active trainable model to produce green/blue preview recommendations."""
+        if not active_model:
+            return {}
+        if self._learning_exact_rule_matches_preview(preview, learning_rules):
+            return {}
+
+        metrics_payload = dict(active_model.get("metrics") or {})
+        if str(metrics_payload.get("feature_schema_version") or "") != FEATURE_SCHEMA_VERSION:
+            return {}
+        if str(metrics_payload.get("policy_version") or "") != POLICY_VERSION:
+            return {}
+        model_parameters = metrics_payload.get("model_parameters")
+        if not isinstance(model_parameters, dict):
+            return {}
+
+        feature_row = self._build_learning_model_feature_row(preview)
+        prediction = predict_dual_head(model_parameters, build_feature_payload(feature_row))
+        if not prediction:
+            return {}
+
+        semantic_result = parse_semantic_label(prediction.semantic_label)
+        route_result = parse_route_label(prediction.route_label)
+        recommended_type = str(semantic_result.get("type") or "").strip()
+        category_id = semantic_result.get("category_id")
+        source_account_id = route_result.get("source_account_id")
+        destination_account_id = route_result.get("destination_account_id")
+        if not recommended_type and not category_id and not source_account_id and not destination_account_id:
+            return {}
+
+        confirmation_key = f"{prediction.semantic_label}||{prediction.route_label}"
+        confirmation_counts = dict(metrics_payload.get("joint_label_confirmation_counts") or {})
+        confirmation_count = int(confirmation_counts.get(confirmation_key) or 0)
+        conflict_reasons = ["manual_annotation"] if is_manually_annotated else []
+        policy_decision = evaluate_learning_policy(
+            prediction,
+            confirmation_count=confirmation_count,
+            conflict_reasons=conflict_reasons,
+        )
+        if policy_decision.mode == "none":
+            return {}
+
+        category = categories_by_id.get(int(category_id)) if category_id else None
+        source_account = accounts_by_id.get(int(source_account_id)) if source_account_id else None
+        destination_account = accounts_by_id.get(int(destination_account_id)) if destination_account_id else None
+        recommendation = {
+            "rule_id": None,
+            "source": "model",
+            "mode": policy_decision.mode,
+            "auto_apply": policy_decision.auto_apply,
+            "score": policy_decision.score,
+            "confidence": policy_decision.confidence,
+            "margin": policy_decision.margin,
+            "confirmations": confirmation_count,
+            "level": policy_decision.level,
+            "model_key": MODEL_KEY,
+            "model_version": str(active_model.get("model_version") or ""),
+            "dataset_snapshot_id": active_model.get("dataset_snapshot_id"),
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "policy_version": POLICY_VERSION,
+            "recommended_type": recommended_type,
+            "category_id": category_id,
+            "source_account_id": source_account_id,
+            "destination_account_id": destination_account_id,
+            "main_category": str(category.get("main_category") or "") if category else "",
+            "sub_category": str(category.get("sub_category") or "") if category else "",
+            "source_account_name": str(source_account.get("name") or "") if source_account else "",
+            "destination_account_name": str(destination_account.get("name") or "") if destination_account else "",
+        }
+        recommendation["summary"] = self._build_learning_model_result_summary(
+            recommendation,
+            categories_by_id,
+            accounts_by_id,
+        )
+        reason_parts = [
+            "model:dual_head",
+            f"version:{recommendation['model_version']}",
+            f"semantic:{prediction.semantic_confidence:.2f}/{prediction.semantic_margin:.2f}",
+            f"route:{prediction.route_confidence:.2f}/{prediction.route_margin:.2f}",
+            f"confirmations:{confirmation_count}",
+        ]
+        if policy_decision.rejection_reasons:
+            reason_parts.append("gate:" + "/".join(policy_decision.rejection_reasons))
+        recommendation["reason"] = ", ".join(reason_parts)
+        return recommendation
 
     def _build_learning_similarity_signal_from_preview(
         self,

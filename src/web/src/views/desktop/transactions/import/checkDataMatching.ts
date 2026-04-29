@@ -39,6 +39,7 @@ export interface ImportCheckMatchingDedupTitleOptions {
 }
 
 export type ImportPreviewSignalStatus = 'pending' | 'accepted' | 'rejected';
+export type ImportPreviewLearningMode = 'green' | 'blue' | '';
 
 export interface ImportPreviewSignalDecision {
     decision: 'accept' | 'reject' | 'clear';
@@ -140,6 +141,8 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     learningStatus?: ImportPreviewSignalStatus | null;
     learningTitle?: string;
     learningSummary?: string;
+    learningMode?: ImportPreviewLearningMode | string;
+    learningAutoApplied?: boolean;
     dedupSourceCount?: number;
     dedupSourceLabels?: string[];
     dedupSources?: ImportMatchingSourcePayload[];
@@ -770,21 +773,29 @@ export function buildImportPreviewSignalViewModel(
         transferDetailLines
     );
     const learningDetailLines = buildLearningDetailLines(state, options);
+    const normalizedLearningMode = (state.learningMode || '').trim().toLowerCase();
+    const isBlueLearning = normalizedLearningMode === 'blue' || !!state.learningAutoApplied;
+    const learningReviewedActions = isBlueLearning
+        ? [{ decision: 'clear', labelKey: 'Undo Learning Auto Apply', color: 'primary' } as ImportPreviewSignalDecision]
+        : [];
     const learning = buildReviewView(
         state.learningStatus,
         buildSignalTitle(learningDetailLines, state.learningTitle),
-        'Learning Suggestion',
-        'Learning Suggestion Accepted',
+        isBlueLearning ? 'Blue Learning Auto Apply' : 'Learning Suggestion',
+        isBlueLearning ? 'Blue Learning Applied' : 'Learning Suggestion Accepted',
         'Learning Suggestion Rejected',
         [
-            { decision: 'accept', labelKey: 'Apply Suggestion', color: 'secondary' },
+            { decision: 'accept', labelKey: 'Apply Suggestion', color: isBlueLearning ? 'primary' : 'secondary' },
             { decision: 'reject', labelKey: 'Reject Learning Suggestion', color: 'error' }
         ],
         undefined,
         state.learningSummary,
-        [],
+        learningReviewedActions,
         learningDetailLines
     );
+    if (learning && isBlueLearning) {
+        learning.color = 'primary';
+    }
     const recurring = state.hasRecurringMatch || (state.recurringCandidateCount || 0) > 0
         ? {
             hasMatch: !!state.hasRecurringMatch,

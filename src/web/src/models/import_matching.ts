@@ -40,6 +40,13 @@ export interface ImportMatchingLearningPayload {
     summary: string;
     review_status?: string;
     suppressed?: boolean;
+    source?: string;
+    mode?: string;
+    auto_apply?: boolean;
+    model_version?: string;
+    confidence?: number;
+    margin?: number;
+    confirmations?: number;
 }
 
 export interface ImportMatchingRecurringPayload {

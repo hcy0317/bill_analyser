@@ -26,6 +26,8 @@ FREQUENCY_PATTERNS = [
 
 MIN_OCCURRENCES = 3  # Minimum transactions to consider a pattern
 MAX_GAP_RATIO = 2.0  # Max allowed gap relative to detected interval
+MAX_INTERVAL_VARIATION = 0.5  # Coefficient of variation above this is irregular
+MIN_PATTERN_CONFIDENCE = 0.6
 
 
 @dataclass
@@ -83,6 +85,9 @@ def _detect_frequency(intervals: list[float]) -> tuple[str, float, float]:
 
     avg_interval = mean(intervals)
     interval_stdev = stdev(intervals) if len(intervals) > 1 else 0
+    interval_variation = interval_stdev / avg_interval if avg_interval > 0 else 0
+    if interval_variation > MAX_INTERVAL_VARIATION:
+        return ("irregular", avg_interval, 0)
 
     best_match = None
     best_score = 0.0
@@ -204,6 +209,11 @@ def detect_recurring_patterns(
         if avg_raw <= 0:
             continue
 
+        raw_stdev = stdev(intervals) if len(intervals) > 1 else 0
+        raw_variation = raw_stdev / avg_raw if avg_raw > 0 else 0
+        if raw_variation > MAX_INTERVAL_VARIATION:
+            continue
+
         # Filter out extreme gaps (likely not part of the pattern)
         valid_intervals = [
             iv for iv in intervals if iv <= avg_raw * MAX_GAP_RATIO and iv > 0
@@ -223,7 +233,7 @@ def detect_recurring_patterns(
         confidence = freq_confidence * 0.5 + recency_score * 0.3 + count_score * 0.2
         confidence = round(min(confidence, 1.0), 3)
 
-        if confidence < 0.3:
+        if confidence < MIN_PATTERN_CONFIDENCE:
             continue
 
         next_date = _estimate_next_date(dates[-1], frequency, avg_interval)

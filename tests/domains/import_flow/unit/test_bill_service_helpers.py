@@ -1395,12 +1395,19 @@ async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_le
 
     monkeypatch.setattr(
         service,
-        "_build_learning_similarity_signal_from_preview",
+        "_build_learning_model_signal_from_preview",
         lambda *_args, **_kwargs: {
-            "rule_id": 42,
+            "rule_id": None,
+            "source": "model",
+            "mode": "green",
+            "auto_apply": False,
+            "model_version": "v-test",
             "score": 0.88,
+            "confidence": 0.88,
+            "margin": 0.18,
+            "confirmations": 2,
             "level": "high",
-            "reason": "parser_id:exact",
+            "reason": "model:dual_head",
             "recommended_type": "投资",
             "summary": "投资 | 投资理财/基金 | 支付宝 → 理财账户",
         },
@@ -1429,17 +1436,18 @@ async def test_get_import_preview_keeps_investment_matching_empty_and_mirrors_le
         "review_status": "",
         "suppressed": False,
     }
-    assert preview_item["learning_recommendation_rule_id"] == 42
-    assert matching["learning"] == {
-        "rule_id": 42,
-        "score": 0.88,
-        "level": "high",
-        "reason": "parser_id:exact",
-        "recommended_type": "投资",
-        "summary": "投资 | 投资理财/基金 | 支付宝 → 理财账户",
-        "review_status": "pending",
-        "suppressed": False,
-    }
+    assert preview_item["learning_recommendation_rule_id"] is None
+    learning = matching["learning"]
+    assert learning["rule_id"] is None
+    assert learning["source"] == "model"
+    assert learning["mode"] == "green"
+    assert learning["model_version"] == "v-test"
+    assert learning["score"] == 0.88
+    assert learning["reason"] == "model:dual_head"
+    assert learning["recommended_type"] == "投资"
+    assert learning["summary"] == "投资 | 投资理财/基金 | 支付宝 → 理财账户"
+    assert learning["review_status"] == "pending"
+    assert learning["suppressed"] is False
     assert matching["recurring"] == {
         "id": 9,
         "name": "每月定投",
@@ -1495,21 +1503,28 @@ async def test_apply_preview_learning_decision_reuses_learning_recommendation_be
 
     call_count = {"value": 0}
 
-    def _fake_build_learning_similarity_signal_from_preview(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    def _fake_build_learning_model_signal_from_preview(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         call_count["value"] += 1
         return {
-            "rule_id": 42,
+            "rule_id": None,
+            "source": "model",
+            "mode": "green",
+            "auto_apply": False,
+            "model_version": "v-test",
             "score": 0.88,
+            "confidence": 0.88,
+            "margin": 0.18,
+            "confirmations": 2,
             "level": "high",
-            "reason": "parser_id:exact",
+            "reason": "model:dual_head",
             "recommended_type": "收入",
             "summary": "收入 | 其他收入/原路退款 | 民生银行",
         }
 
     monkeypatch.setattr(
         service,
-        "_build_learning_similarity_signal_from_preview",
-        _fake_build_learning_similarity_signal_from_preview,
+        "_build_learning_model_signal_from_preview",
+        _fake_build_learning_model_signal_from_preview,
     )
 
     result = await service.apply_preview_learning_decision(
@@ -1966,7 +1981,7 @@ def test_learning_similarity_signal_suppresses_ambiguous_candidates(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_preview_learning_row_only_decision_reuses_projection_context() -> None:
+async def test_preview_learning_row_only_decision_reuses_projection_context(monkeypatch: pytest.MonkeyPatch) -> None:
     """learning preview-item 决策应只加载一次投影上下文，避免 row-only 路径重复查库。"""
     fake_db = FakeBillServiceDB()
     parsed_features = {
@@ -2010,6 +2025,26 @@ async def test_preview_learning_row_only_decision_reuses_projection_context() ->
     ]
     service = _make_service(fake_db)
 
+    monkeypatch.setattr(
+        service,
+        "_build_learning_model_signal_from_preview",
+        lambda *_args, **_kwargs: {
+            "rule_id": None,
+            "source": "model",
+            "mode": "green",
+            "auto_apply": False,
+            "model_version": "v-test",
+            "score": 0.88,
+            "confidence": 0.88,
+            "margin": 0.18,
+            "confirmations": 2,
+            "level": "high",
+            "reason": "model:dual_head",
+            "recommended_type": "支出",
+            "summary": "支出 | 餐饮/早餐 | 招商银行卡",
+        },
+    )
+
     result = await service.apply_preview_learning_decision(
         11,
         "reject",
@@ -2025,8 +2060,9 @@ async def test_preview_learning_row_only_decision_reuses_projection_context() ->
     )
 
     assert result["success"] is True
-    assert result["preview_item"]["matching"]["learning"]["rule_id"] == 42
-    assert result["preview_item"]["matching"]["learning"]["review_status"] == "rejected"
+    learning = result["preview_item"]["matching"]["learning"]
+    assert learning["rule_id"] == 42
+    assert learning["review_status"] == "rejected"
     assert result["preview_item"]["learning_recommendation_summary"] == "支出 | 餐饮/早餐 | 招商银行卡"
     assert fake_db.preview_bill_query_calls == [(11, 1)]
     assert fake_db.preview_learning_decision_calls == [
