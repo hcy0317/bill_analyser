@@ -2230,6 +2230,7 @@ class BillService:
                 )
 
                 bill = {
+                    "session_id": session_id,
                     "date": template.get("parser_date", ""),
                     "amount": float(template.get("parser_amount", 0)),
                     "type": template.get("parser_type", ""),
@@ -2240,6 +2241,7 @@ class BillService:
                     "original_category": template.get("parser_original_category", ""),
                     "source_account_id": template.get("parser_account_id"),
                     "_template_id": template.get("id"),  # 保存模板ID用于回溯
+                    "_session_id": session_id,
                     "_parser_id": parser_id,
                     "_parser_tags": parser_tags,
                     "_payment_method_source": payment_method_source,  # 记录来源便于调试

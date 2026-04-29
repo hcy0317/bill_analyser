@@ -229,14 +229,24 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
         now: str,
     ) -> None:
         snapshot_json = self._json_dumps(snapshot)
+        normalized_bill_id = self._normalize_optional_int(bill_id)
+        normalized_import_bill_key = str(import_bill_key or "").strip() or None
+        normalized_candidate_id = str(candidate_id or "").strip() or None
         cursor = await conn.execute(
             """
             UPDATE bill_merge_members
-            SET candidate_id = ?, snapshot_json = ?, role = ?, updated_at = ?
+            SET candidate_id = COALESCE(?, candidate_id),
+                bill_id = COALESCE(?, bill_id),
+                import_bill_key = COALESCE(?, import_bill_key),
+                snapshot_json = ?,
+                role = ?,
+                updated_at = ?
             WHERE group_id = ? AND member_key = ? AND user_id = ?
             """,
             (
-                candidate_id,
+                normalized_candidate_id,
+                normalized_bill_id,
+                normalized_import_bill_key,
                 snapshot_json,
                 role,
                 now,
@@ -260,9 +270,9 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
                 user_id,
                 member_key,
                 member_type,
-                bill_id,
-                import_bill_key,
-                candidate_id,
+                normalized_bill_id,
+                normalized_import_bill_key,
+                normalized_candidate_id,
                 role,
                 snapshot_json,
                 now,
@@ -544,6 +554,19 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
 
         now = utc_now_iso()
         conn = await self._get_connection()
+        async with conn.execute(
+            """
+            SELECT id
+            FROM bill_merge_groups
+            WHERE id = ? AND user_id = ?
+            LIMIT 1
+            """,
+            (normalized_group_id, normalized_user_id),
+        ) as cursor:
+            group_row = await cursor.fetchone()
+        if group_row is None:
+            raise ValueError("Merge group not found")
+
         event_id = await self._append_bill_merge_event(
             conn,
             user_id=normalized_user_id,

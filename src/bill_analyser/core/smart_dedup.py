@@ -765,6 +765,20 @@ class SmartDeduplicationEngine:
         if preview_id not in (None, "", 0, "0"):
             return f"preview:{int(preview_id)}"
 
+        session_id = str(
+            bill.get("session_id")
+            or bill.get("_session_id")
+            or bill.get("import_session_id")
+            or ""
+        ).strip()
+        template_id = (
+            bill.get("_template_id")
+            or bill.get("template_id")
+            or bill.get("parser_template_id")
+        )
+        if session_id and template_id not in (None, "", 0, "0"):
+            return f"session:{session_id}:template:{int(template_id)}"
+
         if bill.get("_dedup_id"):
             return f"dedup:{bill['_dedup_id']}"
 
@@ -805,6 +819,21 @@ class SmartDeduplicationEngine:
             "destination_account_id": bill.get("destination_account_id") or 0,
         }
         if imported:
+            session_id = str(
+                bill.get("session_id")
+                or bill.get("_session_id")
+                or bill.get("import_session_id")
+                or ""
+            ).strip()
+            template_id = (
+                bill.get("_template_id")
+                or bill.get("template_id")
+                or bill.get("parser_template_id")
+            )
+            if session_id:
+                snapshot["session_id"] = session_id
+            if template_id not in (None, "", 0, "0"):
+                snapshot["template_id"] = int(template_id)
             snapshot["parser_id"] = str(bill.get("_parser_id") or bill.get("source") or "")
             snapshot["parser_tags"] = self._merge_parser_tags(bill)
         return snapshot
