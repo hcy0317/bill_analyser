@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -852,6 +853,17 @@ async def _get_preview_selected(db: Database, preview_id: int, *, user_id: int) 
     return bool(row["preview_selected"])
 
 
+async def _get_merge_group_metadata(db: Database, group_key: str, *, user_id: int) -> dict[str, Any]:
+    conn = await db._get_connection()  # pylint: disable=protected-access
+    async with conn.execute(
+        "SELECT metadata_json FROM bill_merge_groups WHERE group_key = ? AND user_id = ?",
+        (group_key, user_id),
+    ) as cursor:
+        row = await cursor.fetchone()
+    assert row is not None
+    return dict(json.loads(row["metadata_json"] or "{}"))
+
+
 @pytest.mark.asyncio
 async def test_reconciliation_recompute_conflicts_after_manual_bill_edit(
     tmp_path: Path,
@@ -1022,6 +1034,245 @@ async def test_reconciliation_recompute_conflicts_after_manual_bill_edit(
         bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
         assert bill is not None
         assert bill["description"] == "manual override after merge"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id,
+            override_tag_id,
+        ]
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_persist_same_group_preserves_active_projection(
+    tmp_path: Path,
+) -> None:
+    """Refreshing an existing group must not erase rollback/projection metadata."""
+    db = await _create_database(tmp_path)
+    service = BillService(db)
+    try:
+        await service.initialize()
+        user_id = await _create_user(db, "-a2-preserve-projection")
+        manual_tag_id = await db.create_tag({"name": "人工"}, user_id=user_id)
+        import_tag_id = await db.create_tag({"name": "支付宝"}, user_id=user_id)
+        existing_bill_id = await db.create_bill(
+            {
+                "date": "2026-05-06 10:00:00",
+                "type": "支出",
+                "amount": -42.0,
+                "counterparty": "preserve merchant",
+                "description": "manual base",
+                "payment_method": "manual",
+                "main_category": "餐饮",
+                "sub_category": "午餐",
+                "source_account_id": 3001,
+            },
+            user_id=user_id,
+        )
+        assert existing_bill_id is not None
+        assert await db.add_tags_to_bill(existing_bill_id, [manual_tag_id], user_id=user_id) is True
+        session_id = "session-a2-preserve-projection"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        group_key = (
+            f"import_reconciliation:duplicate:bill:{existing_bill_id}:"
+            "amount:42.00:2026-05-06"
+        )
+        candidate_id = f"reconcile:import:duplicate:bill:{existing_bill_id}:preserve"
+        candidate = {
+            "candidate_id": candidate_id,
+            "candidate_type": "duplicate",
+            "session_id": session_id,
+            "import_bill_key": "session:preserve:template:1",
+            "existing_bill_id": int(existing_bill_id),
+            "group_key": group_key,
+            "amount_abs": 42.0,
+            "time_diff_seconds": 1,
+            "score": 0.98,
+            "level": "high",
+            "reason": "same_amount|same_day|time_close",
+            "import_bill_snapshot": {
+                "date": "2026-05-06 10:00:01",
+                "type": "支出",
+                "amount": -42.0,
+                "description": "import detail",
+                "parser_id": "alipay",
+                "tag_ids": [import_tag_id],
+            },
+            "existing_bill_snapshot": {
+                "id": int(existing_bill_id),
+                "date": "2026-05-06 10:00:00",
+                "type": "支出",
+                "amount": -42.0,
+                "description": "manual base",
+            },
+            "source_payload": {"family": "import_reconciliation"},
+        }
+        await db.persist_import_reconciliation_candidates([candidate], user_id=user_id)
+
+        accept_result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert accept_result["success"] is True
+        await db.persist_import_reconciliation_candidates(
+            [{**candidate, "reason": "refreshed after accept"}],
+            user_id=user_id,
+        )
+
+        projection = await db.get_bill_reconciliation_projection(existing_bill_id, user_id=user_id)
+        assert projection is not None
+        assert projection["candidate_ids"] == [candidate_id]
+        assert projection["description"] == "manual base|import detail"
+
+        reject_result = await service._reject_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert reject_result["success"] is True
+        clear_result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert clear_result["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual base"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id
+        ]
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_clear_noop_rebases_future_decisions_after_manual_edit(
+    tmp_path: Path,
+) -> None:
+    """After clear leaves no applied candidate, later decisions must use the current bill as base."""
+    db = await _create_database(tmp_path)
+    service = BillService(db)
+    try:
+        await service.initialize()
+        user_id = await _create_user(db, "-a2-clear-rebase")
+        manual_tag_id = await db.create_tag({"name": "人工"}, user_id=user_id)
+        import_tag_id = await db.create_tag({"name": "支付宝"}, user_id=user_id)
+        override_tag_id = await db.create_tag({"name": "人工改动"}, user_id=user_id)
+        existing_bill_id = await db.create_bill(
+            {
+                "date": "2026-05-07 10:00:00",
+                "type": "支出",
+                "amount": -42.0,
+                "counterparty": "rebase merchant",
+                "description": "manual base",
+                "payment_method": "manual",
+                "main_category": "餐饮",
+                "sub_category": "午餐",
+                "source_account_id": 3001,
+            },
+            user_id=user_id,
+        )
+        assert existing_bill_id is not None
+        assert await db.add_tags_to_bill(existing_bill_id, [manual_tag_id], user_id=user_id) is True
+        session_id = "session-a2-clear-rebase"
+        await db.create_import_session(session_id, user_id=user_id, file_count=1)
+        group_key = (
+            f"import_reconciliation:duplicate:bill:{existing_bill_id}:"
+            "amount:42.00:2026-05-07"
+        )
+        candidate_id = f"reconcile:import:duplicate:bill:{existing_bill_id}:rebase"
+        await db.persist_import_reconciliation_candidates(
+            [
+                {
+                    "candidate_id": candidate_id,
+                    "candidate_type": "duplicate",
+                    "session_id": session_id,
+                    "import_bill_key": "session:rebase:template:1",
+                    "existing_bill_id": int(existing_bill_id),
+                    "group_key": group_key,
+                    "amount_abs": 42.0,
+                    "time_diff_seconds": 1,
+                    "score": 0.98,
+                    "level": "high",
+                    "reason": "same_amount|same_day|time_close",
+                    "import_bill_snapshot": {
+                        "date": "2026-05-07 10:00:01",
+                        "type": "支出",
+                        "amount": -42.0,
+                        "description": "import detail",
+                        "parser_id": "alipay",
+                        "tag_ids": [import_tag_id],
+                    },
+                    "existing_bill_snapshot": {
+                        "id": int(existing_bill_id),
+                        "date": "2026-05-07 10:00:00",
+                        "type": "支出",
+                        "amount": -42.0,
+                        "description": "manual base",
+                    },
+                    "source_payload": {"family": "import_reconciliation"},
+                }
+            ],
+            user_id=user_id,
+        )
+        accept_result = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert accept_result["success"] is True
+        clear_result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert clear_result["success"] is True
+        cleared_metadata = await _get_merge_group_metadata(db, group_key, user_id=user_id)
+        assert "base_bill_snapshot" not in cleared_metadata
+        assert "projection" not in cleared_metadata
+
+        assert await db.update_bill(
+            existing_bill_id,
+            {"description": "manual edit after clear"},
+            user_id=user_id,
+        ) is True
+        assert await db.update_bill_tags(
+            existing_bill_id,
+            [manual_tag_id, override_tag_id],
+            user_id=user_id,
+        ) is True
+
+        second_accept = await service._accept_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert second_accept["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual edit after clear|import detail"
+        assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
+            manual_tag_id,
+            import_tag_id,
+            override_tag_id,
+        ]
+
+        reject_result = await service._reject_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert reject_result["success"] is True
+        clear_again_result = await service._clear_matching_candidate(  # pylint: disable=protected-access
+            candidate_id,
+            {},
+            user_id=user_id,
+        )
+        assert clear_again_result["success"] is True
+        bill = await db.get_bill_by_id(existing_bill_id, user_id=user_id)
+        assert bill is not None
+        assert bill["description"] == "manual edit after clear"
         assert sorted(tag["id"] for tag in await db.get_tags_for_bill(existing_bill_id, user_id=user_id)) == [
             manual_tag_id,
             override_tag_id,

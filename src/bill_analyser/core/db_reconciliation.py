@@ -361,7 +361,7 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
     ) -> int:
         async with conn.execute(
             """
-            SELECT id
+            SELECT id, metadata_json
             FROM bill_merge_groups
             WHERE user_id = ? AND family = ? AND group_key = ?
             LIMIT 1
@@ -370,13 +370,19 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
         ) as cursor:
             existing_group = await cursor.fetchone()
 
-        metadata_json = self._json_dumps(
+        metadata = (
+            self._json_loads(existing_group["metadata_json"])
+            if existing_group
+            else {}
+        )
+        metadata.update(
             {
                 "candidate_type": candidate["candidate_type"],
                 "amount_abs": candidate["amount_abs"],
                 "session_id": candidate["session_id"],
             }
         )
+        metadata_json = self._json_dumps(metadata)
         if existing_group:
             group_id = int(existing_group["id"])
             await conn.execute(
@@ -981,6 +987,37 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
             for candidate in group_candidates
             if str(candidate.get("status") or "") in self._APPLIED_STATUSES
         ]
+        previous_projection = (
+            dict(metadata.get("projection"))
+            if isinstance(metadata.get("projection"), dict)
+            else {}
+        )
+        previous_candidate_ids = [
+            str(candidate_id)
+            for candidate_id in list(previous_projection.get("candidate_ids") or [])
+            if str(candidate_id)
+        ]
+        had_applied_projection = bool(previous_projection and previous_candidate_ids)
+        if not applied_candidates and not had_applied_projection:
+            next_metadata = {**metadata}
+            next_metadata.pop("base_bill_snapshot", None)
+            next_metadata.pop("projection", None)
+            await conn.execute(
+                """
+                UPDATE bill_merge_groups
+                SET status = ?, canonical_bill_id = NULL, metadata_json = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (
+                    self._PENDING_STATUS,
+                    self._json_dumps(next_metadata),
+                    now,
+                    group_id,
+                    user_id,
+                ),
+            )
+            return {}
+
         import_snapshots = [
             dict(candidate.get("import_bill_snapshot") or {})
             for candidate in applied_candidates
@@ -1026,11 +1063,13 @@ class DatabaseReconciliationMixin(DatabaseFacadeBase):
                 if str(candidate.get("candidate_id") or "")
             ],
         }
-        next_metadata = {
-            **metadata,
-            "base_bill_snapshot": base_bill,
-            "projection": projection,
-        }
+        next_metadata = {**metadata}
+        if applied_candidates:
+            next_metadata["base_bill_snapshot"] = base_bill
+            next_metadata["projection"] = projection
+        else:
+            next_metadata.pop("base_bill_snapshot", None)
+            next_metadata.pop("projection", None)
         next_status = "merged" if applied_candidates else self._PENDING_STATUS
         await conn.execute(
             """
