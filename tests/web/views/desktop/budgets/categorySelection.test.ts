@@ -1,8 +1,12 @@
 import { describe, expect, test } from '@jest/globals';
 
+import { DateRange } from '@/core/datetime.ts';
+import { getUnixTimeFromLocalDatetime } from '@/lib/datetime.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
 import {
+    buildBudgetDrilldownRouteQuery,
     findBudgetCategoryIdByNames,
+    getBudgetDrilldownCategoryIds,
     resolveBudgetCategorySelection
 } from '@/views/desktop/budgets/categorySelection.ts';
 
@@ -74,5 +78,54 @@ describe('categorySelection helpers', () => {
         expect(findBudgetCategoryIdByNames(CATEGORIES, '餐饮', '晚餐')).toBe('');
         expect(findBudgetCategoryIdByNames(CATEGORIES, '杂项', '不存在')).toBe('');
         expect(findBudgetCategoryIdByNames(CATEGORIES, '不存在')).toBe('');
+    });
+
+    test('getBudgetDrilldownCategoryIds expands a primary category to include its children', () => {
+        expect(getBudgetDrilldownCategoryIds(CATEGORIES, '餐饮')).toBe('100,101,102');
+        expect(getBudgetDrilldownCategoryIds(CATEGORIES, '杂项')).toBe('300');
+    });
+
+    test('getBudgetDrilldownCategoryIds resolves secondary categories and falls back safely', () => {
+        expect(getBudgetDrilldownCategoryIds(CATEGORIES, '交通', '地铁')).toBe('201');
+        expect(getBudgetDrilldownCategoryIds(CATEGORIES, '交通', '不存在', '200')).toBe('200');
+        expect(getBudgetDrilldownCategoryIds(CATEGORIES, '不存在', undefined, '999')).toBe('999');
+    });
+
+    test('buildBudgetDrilldownRouteQuery builds transaction-list-compatible query params', () => {
+        const minDate = new Date(2026, 3, 1, 0, 0, 0);
+        const maxDate = new Date(2026, 5, 30, 23, 59, 59);
+
+        expect(buildBudgetDrilldownRouteQuery({
+            categories: CATEGORIES,
+            primaryCategoryName: '餐饮',
+            startDate: '2026-04-01',
+            endDate: '2026-06-30',
+            transactionType: 3,
+            accountIds: ['acc-1', '', 'acc-2'],
+            tagIds: ['tag-1', '', 'tag-2']
+        })).toStrictEqual({
+            type: '3',
+            categoryIds: '100,101,102',
+            dateType: String(DateRange.Custom.type),
+            minTime: String(getUnixTimeFromLocalDatetime(minDate)),
+            maxTime: String(getUnixTimeFromLocalDatetime(maxDate)),
+            accountIds: 'acc-1,acc-2',
+            tagIds: 'tag-1,tag-2'
+        });
+    });
+
+    test('buildBudgetDrilldownRouteQuery omits invalid optional params while preserving fallback category', () => {
+        expect(buildBudgetDrilldownRouteQuery({
+            categories: CATEGORIES,
+            primaryCategoryName: '不存在',
+            secondaryCategoryName: '不存在',
+            fallbackCategoryId: 'fallback-1',
+            startDate: 'bad-date',
+            endDate: '2026-06-30',
+            transactionType: 5
+        })).toStrictEqual({
+            type: '5',
+            categoryIds: 'fallback-1'
+        });
     });
 });

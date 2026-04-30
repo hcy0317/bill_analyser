@@ -586,7 +586,7 @@
                                                 </div>
                                                 <!-- 一级分类进度条（始终显示，无论是否有一级分类预算，点击跳转到账单列表） -->
                                                 <div class="budget-progress-container cursor-pointer"
-                                                       @click.stop="navigateToTransactions(group.category, null, getPrimaryBudgetForHeader(group))"
+                                                       @click.stop="navigateToTransactions(group.category, getPrimaryBudgetForHeader(group))"
                                                      :title="tt('Click to view transactions')">
                                                     <v-progress-linear
                                                         :model-value="Math.min(getGroupExecutionRate(group), 100)"
@@ -667,7 +667,7 @@
                                                         </div>
                                                     </div>
                                                     <div class="budget-progress-container cursor-pointer"
-                                                         @click.stop="navigateToTransactions(budget.category, null, budget)"
+                                                         @click.stop="navigateToTransactions(budget.category, budget)"
                                                          :title="tt('Click to view transactions')">
                                                         <v-progress-linear
                                                             :model-value="Math.min(budget.executionRate, 100)"
@@ -1025,6 +1025,7 @@ import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilte
 import TransactionTagFilterSettingsCard from '@/views/desktop/common/cards/TransactionTagFilterSettingsCard.vue';
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
+import { buildBudgetDrilldownRouteQuery } from './categorySelection.ts';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
 import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
 import {
@@ -3109,67 +3110,71 @@ function formatAmount(amount: number): string {
 /**
  * 点击进度条跳转到对应分类和时间的账单列表
  * @param category 主分类名称
- * @param subCategory 子分类名称（可选）
  * @param budget 预算对象（用于获取日期范围）
  */
-function navigateToTransactions(category: string, subCategory: string | null, budget: Budget | null): void {
-    // 构建查询参数
-    const query: Record<string, string> = {};
+function navigateToTransactions(category: string, budget: Budget | null): void {
+    const drilldownDateRange = getBudgetDrilldownDateRange(budget);
+    const query = buildBudgetDrilldownRouteQuery({
+        categories: budgetPrimaryCategories.value,
+        primaryCategoryName: category,
+        secondaryCategoryName: budget?.subCategory || null,
+        fallbackCategoryId: budget?.categoryId || '',
+        startDate: drilldownDateRange?.startDate,
+        endDate: drilldownDateRange?.endDate,
+        transactionType: activeBudgetType.value === BudgetType.Expense ? 3 : 5,
+        accountIds: accountFilter.value,
+        tagIds: tagFilter.value
+    });
 
-    // 设置分类筛选
-    if (category) {
-        query['category'] = category;
-        if (subCategory) {
-            query['subCategory'] = subCategory;
-        }
-    }
-
-    // 设置日期范围（从预算对象获取）
-    if (budget) {
-        if (budget.startDate) {
-            query['startDate'] = budget.startDate;
-        }
-        if (budget.endDate) {
-            query['endDate'] = budget.endDate;
-        }
-    } else {
-        // 如果没有预算对象，使用当前选择的周期
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth();
-
-        switch (activePeriodFilter.value) {
-            case 'thisMonth':
-                query['startDate'] = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01`;
-                query['endDate'] = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${new Date(currentYear, currentMonth + 1, 0).getDate()}`;
-                break;
-            case 'lastMonth': {
-                const lastMonthDate = new Date(currentYear, currentMonth - 1, 1);
-                query['startDate'] = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}-01`;
-                query['endDate'] = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}-${new Date(lastMonthDate.getFullYear(), lastMonthDate.getMonth() + 1, 0).getDate()}`;
-                break;
-            }
-            case 'thisYear':
-                query['startDate'] = `${currentYear}-01-01`;
-                query['endDate'] = `${currentYear}-12-31`;
-                break;
-            case 'custom':
-                if (customStartDate.value) query['startDate'] = customStartDate.value;
-                if (customEndDate.value) query['endDate'] = customEndDate.value;
-                break;
-        }
-    }
-
-    // 设置交易类型（支出或投资）
-    query['type'] = activeBudgetType.value === BudgetType.Expense ? '3' : '5';
-
-    console.log(`[Budget] 跳转到账单列表: category=${category}, subCategory=${subCategory}, query=`, query);
+    console.log(`[Budget] 跳转到账单列表: category=${category}, query=`, query);
 
     // 跳转到账单列表页面
     router.push({
         path: '/transaction/list',
         query: query
     });
+}
+
+function getBudgetDrilldownDateRange(budget: Budget | null): { startDate: string; endDate: string } | null {
+    if (budget?.startDate && budget.endDate) {
+        return {
+            startDate: budget.startDate,
+            endDate: budget.endDate
+        };
+    }
+
+    const periodRequest = getCurrentPeriodRequest();
+
+    if (periodRequest.startDate && periodRequest.endDate) {
+        return {
+            startDate: periodRequest.startDate,
+            endDate: periodRequest.endDate
+        };
+    }
+
+    if (periodRequest.periodType === BudgetPeriodType.Monthly && periodRequest.year && periodRequest.month) {
+        return {
+            startDate: formatDateOnly(new Date(periodRequest.year, periodRequest.month - 1, 1)),
+            endDate: formatDateOnly(new Date(periodRequest.year, periodRequest.month, 0))
+        };
+    }
+
+    if (periodRequest.periodType === BudgetPeriodType.Quarterly && periodRequest.year && periodRequest.quarter) {
+        const quarterStartMonth = (periodRequest.quarter - 1) * 3;
+        return {
+            startDate: formatDateOnly(new Date(periodRequest.year, quarterStartMonth, 1)),
+            endDate: formatDateOnly(new Date(periodRequest.year, quarterStartMonth + 3, 0))
+        };
+    }
+
+    if (periodRequest.periodType === BudgetPeriodType.Yearly && periodRequest.year) {
+        return {
+            startDate: formatDateOnly(new Date(periodRequest.year, 0, 1)),
+            endDate: formatDateOnly(new Date(periodRequest.year, 11, 31))
+        };
+    }
+
+    return null;
 }
 
 /**
