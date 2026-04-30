@@ -117,6 +117,21 @@ def _list_llm_memory_events_for_user(*, user_id: int, session_id: str | None = N
     return asyncio.run(_list())
 
 
+def _set_llm_memory_events_created_at(*, event_ids: list[int], created_at: str) -> None:
+    from bill_analyser.api.app import db
+
+    async def _update() -> None:
+        conn = await db._get_connection()
+        placeholders = ", ".join("?" for _ in event_ids)
+        await conn.execute(
+            f"UPDATE llm_memory_events SET created_at = ? WHERE id IN ({placeholders})",
+            (created_at, *event_ids),
+        )
+        await conn.commit()
+
+    asyncio.run(_update())
+
+
 def _create_test_account(client, auth_headers, *, name: str) -> dict[str, Any]:
     response = client.post(
         "/api/accounts/",
@@ -1413,6 +1428,236 @@ class TestLLMImportSessionAnalysisAPI:
         assert reject_events[0]["user_correction_category"] == "人工分类"
         assert reject_events[0]["user_correction_account"] == "手工账户链路"
         assert any(event["event_type"] == "recommendation" for event in events)
+
+    def test_llm_preview_recommend_accept_does_not_require_live_provider_after_recommendation(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_accept_no_provider")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-accept-no-provider",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        suggestion = {
+            "preview_id": fixture["preview_id"],
+            "suggested_main_category": fixture["main_category"],
+            "suggested_sub_category": fixture["sub_category"],
+            "suggested_source_account": fixture["source_account"]["name"],
+            "suggested_destination_account": fixture["destination_account"]["name"],
+            "confidence": 0.91,
+            "reason": "接受后不应再依赖 provider",
+        }
+        provider = _FakePreviewRecommendationProvider([suggestion])
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        recommend_response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"]}],
+            },
+        )
+        assert recommend_response.status_code == 200, recommend_response.get_data(as_text=True)
+        llm_payload = recommend_response.get_json()["data"]["suggestions"][0]["matching"]["llm"]
+
+        def _provider_should_not_be_created(*_args, **_kwargs):
+            raise AssertionError("accept should not create a live LLM provider")
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", _provider_should_not_be_created)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": False,
+            "provider": "openai",
+            "provider_config": {"model": "disabled-model"},
+        }
+
+        accept_response = client.post(
+            "/api/llm/preview-recommend/accept",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_id": fixture["preview_id"],
+                "suggestion": llm_payload,
+            },
+        )
+
+        assert accept_response.status_code == 200, accept_response.get_data(as_text=True)
+        accept_payload = accept_response.get_json()
+        assert accept_payload["success"] is True
+        assert accept_payload["data"]["decision"] == "accept"
+        assert accept_payload["data"]["matching"]["llm"]["review_status"] == "accepted"
+
+    def test_llm_preview_recommend_reject_does_not_require_live_provider_after_recommendation(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_reject_no_provider")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-reject-no-provider",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        suggestion = {
+            "preview_id": fixture["preview_id"],
+            "suggested_main_category": fixture["main_category"],
+            "suggested_sub_category": fixture["sub_category"],
+            "suggested_source_account": fixture["source_account"]["name"],
+            "suggested_destination_account": fixture["destination_account"]["name"],
+            "confidence": 0.79,
+            "reason": "拒绝后不应再依赖 provider",
+        }
+        provider = _FakePreviewRecommendationProvider([suggestion])
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        recommend_response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"]}],
+            },
+        )
+        assert recommend_response.status_code == 200, recommend_response.get_data(as_text=True)
+        llm_payload = recommend_response.get_json()["data"]["suggestions"][0]["matching"]["llm"]
+
+        def _provider_should_not_be_created(*_args, **_kwargs):
+            raise AssertionError("reject should not create a live LLM provider")
+
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", _provider_should_not_be_created)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": False,
+            "provider": "openai",
+            "provider_config": {"model": "disabled-model"},
+        }
+
+        reject_response = client.post(
+            "/api/llm/preview-recommend/reject",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_id": fixture["preview_id"],
+                "suggestion": llm_payload,
+            },
+        )
+
+        assert reject_response.status_code == 200, reject_response.get_data(as_text=True)
+        reject_payload = reject_response.get_json()
+        assert reject_payload["success"] is True
+        assert reject_payload["data"]["decision"] == "reject"
+        assert reject_payload["data"]["matching"]["llm"]["review_status"] == "rejected"
+
+    def test_llm_memory_route_orders_same_second_feedback_before_pending_and_counts_filtered_total(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_memory_order_and_total")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-memory-order-total",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        suggestion = {
+            "preview_id": fixture["preview_id"],
+            "suggested_main_category": fixture["main_category"],
+            "suggested_sub_category": fixture["sub_category"],
+            "suggested_source_account": fixture["source_account"]["name"],
+            "suggested_destination_account": fixture["destination_account"]["name"],
+            "confidence": 0.91,
+            "reason": "同秒排序应优先反馈事件",
+        }
+        provider = _FakePreviewRecommendationProvider([suggestion])
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        recommend_response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"]}],
+            },
+        )
+        assert recommend_response.status_code == 200, recommend_response.get_data(as_text=True)
+        recommend_result = recommend_response.get_json()["data"]["suggestions"][0]
+
+        accept_response = client.post(
+            "/api/llm/preview-recommend/accept",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_id": fixture["preview_id"],
+                "suggestion": recommend_result["matching"]["llm"],
+            },
+        )
+        assert accept_response.status_code == 200, accept_response.get_data(as_text=True)
+        accept_result = accept_response.get_json()["data"]
+
+        _set_llm_memory_events_created_at(
+            event_ids=[int(recommend_result["event_id"]), int(accept_result["event_id"])],
+            created_at="2026-04-30 08:00:00",
+        )
+
+        memory_response = client.get(
+            "/api/llm/memory",
+            headers=auth_headers,
+            query_string={"session_id": fixture["session_id"]},
+        )
+        assert memory_response.status_code == 200, memory_response.get_data(as_text=True)
+        memory_payload = memory_response.get_json()
+        assert memory_payload["success"] is True
+        assert memory_payload["total"] == 2
+        assert len(memory_payload["data"]) == 2
+        assert memory_payload["data"][0]["event_type"] == "feedback"
+        assert memory_payload["data"][0]["decision"] == "accept"
+        assert memory_payload["data"][1]["event_type"] == "recommendation"
+
+        filtered_response = client.get(
+            "/api/llm/memory",
+            headers=auth_headers,
+            query_string={
+                "session_id": fixture["session_id"],
+                "event_type": "feedback",
+            },
+        )
+        assert filtered_response.status_code == 200, filtered_response.get_data(as_text=True)
+        filtered_payload = filtered_response.get_json()
+        assert filtered_payload["success"] is True
+        assert filtered_payload["total"] == 1
+        assert len(filtered_payload["data"]) == 1
+        assert filtered_payload["data"][0]["event_type"] == "feedback"
 
     def test_llm_candidate_routes_are_user_scoped(self, client):
         _reset_llm_rate_limit_state()

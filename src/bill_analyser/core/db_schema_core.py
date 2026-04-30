@@ -170,8 +170,16 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
             "ON llm_memory_events(user_id, created_at DESC)"
         )
         await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_memory_events_user_order "
+            "ON llm_memory_events(user_id, created_at DESC, id DESC)"
+        )
+        await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_llm_memory_events_session "
             "ON llm_memory_events(user_id, session_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_memory_events_session_order "
+            "ON llm_memory_events(user_id, session_id, created_at DESC, id DESC)"
         )
 
         await conn.execute(

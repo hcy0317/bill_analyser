@@ -767,7 +767,7 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
             query += " AND event_type = ?"
             params.append(event_type)
 
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         async with conn.execute(query, params) as cursor:
@@ -780,6 +780,7 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
         user_id: int,
         *,
         session_id: str | None = None,
+        event_type: str | None = None,
     ) -> int:
         """Count LLM memory events."""
         conn = await self._get_connection()
@@ -788,6 +789,9 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
         if session_id is not None:
             query += " AND session_id = ?"
             params.append(session_id)
+        if event_type is not None:
+            query += " AND event_type = ?"
+            params.append(event_type)
         async with conn.execute(query, params) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0

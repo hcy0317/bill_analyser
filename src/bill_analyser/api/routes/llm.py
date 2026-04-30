@@ -94,18 +94,25 @@ def _get_llm_config(user_id: int | None = None) -> dict[str, Any]:
     return _copy_runtime_llm_config(default_config)
 
 
-def _get_llm_service(user_id: int) -> LLMLearningService:
+def _get_llm_service(
+    user_id: int,
+    *,
+    require_provider: bool = True,
+) -> LLMLearningService:
     """Build LLM learning service from current config."""
     db = cast("Any", current_app.config.get("DB_INSTANCE"))
-    config = _get_llm_config(user_id)
+    provider = None
+    advanced_settings: dict[str, Any] = {}
 
-    provider_name = config.get("provider", "openai")
-    provider_config = config.get("provider_config", {})
-    advanced_settings = normalize_llm_advanced_settings(
-        config.get("advanced_settings") or provider_config.get("advanced_settings") or {}
-    )
+    if require_provider:
+        config = _get_llm_config(user_id)
+        provider_name = config.get("provider", "openai")
+        provider_config = config.get("provider_config", {})
+        advanced_settings = normalize_llm_advanced_settings(
+            config.get("advanced_settings") or provider_config.get("advanced_settings") or {}
+        )
+        provider = ProviderFactory.create(provider_name, provider_config)
 
-    provider = ProviderFactory.create(provider_name, provider_config)
     return LLMLearningService(db=db, provider=provider, advanced_settings=advanced_settings)
 
 
@@ -591,10 +598,6 @@ def preview_recommend_accept():
     """接受黄色 LLM 推荐并写入 MEMORY。"""
     try:
         user_id = _get_request_user_id()
-        config = _get_llm_config(user_id)
-        if not config.get("enabled", False):
-            return _error_response("LLM service is not enabled", "LLM_DISABLED", 400)
-
         data = request.get_json(silent=True) or {}
 
         session_id = data.get("session_id")
@@ -606,7 +609,7 @@ def preview_recommend_accept():
                 "session_id and preview_id are required", "INVALID_REQUEST", 400
             )
 
-        service = _get_llm_service(user_id)
+        service = _get_llm_service(user_id, require_provider=False)
         accept_result = _run_async(
             service.accept_preview_recommendation(
                 user_id=user_id,
@@ -640,10 +643,6 @@ def preview_recommend_reject():
     """拒绝黄色 LLM 推荐并写入 MEMORY（含可选用户纠正）。"""
     try:
         user_id = _get_request_user_id()
-        config = _get_llm_config(user_id)
-        if not config.get("enabled", False):
-            return _error_response("LLM service is not enabled", "LLM_DISABLED", 400)
-
         data = request.get_json(silent=True) or {}
 
         session_id = data.get("session_id")
@@ -656,7 +655,7 @@ def preview_recommend_reject():
                 "session_id and preview_id are required", "INVALID_REQUEST", 400
             )
 
-        service = _get_llm_service(user_id)
+        service = _get_llm_service(user_id, require_provider=False)
         reject_result = _run_async(
             service.reject_preview_recommendation(
                 user_id=user_id,
@@ -706,7 +705,13 @@ def list_memory_events():
                 offset=offset,
             )
         )
-        total = _run_async(db.get_llm_memory_events_count(user_id, session_id=session_id))
+        total = _run_async(
+            db.get_llm_memory_events_count(
+                user_id,
+                session_id=session_id,
+                event_type=event_type,
+            )
+        )
 
         return jsonify({"success": True, "data": events, "total": total})
     except Exception as exc:  # pylint: disable=broad-exception-caught

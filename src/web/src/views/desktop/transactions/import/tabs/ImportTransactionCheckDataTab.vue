@@ -858,6 +858,11 @@ import {
     buildImportCheckDecisionExpectedState,
     buildImportCheckLearningDecisionExpectedState
 } from '../checkDataCandidateReview.ts';
+import {
+    buildLLMSignalMemoryMap,
+    type LLMMemoryEventItem,
+    type LLMSignalMemoryState
+} from '../llmSignalMemory.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
@@ -1004,28 +1009,6 @@ interface MatchingSessionCandidateItem {
         auto_apply?: boolean;
         model_version?: string;
     };
-}
-
-interface LLMMemoryEventItem {
-    preview_id?: number | null;
-    decision?: string | null;
-    llm_response_raw?: string | null;
-    suggested_main_category?: string | null;
-    suggested_sub_category?: string | null;
-    suggested_source_account?: string | null;
-    suggested_destination_account?: string | null;
-    confidence?: number | null;
-}
-
-interface LLMSignalMemoryState {
-    reviewStatus: ImportPreviewSignalStatus | '';
-    suppressed: boolean;
-    suggestedMainCategory: string;
-    suggestedSubCategory: string;
-    suggestedSourceAccount: string;
-    suggestedDestinationAccount: string;
-    confidence: number;
-    reason: string;
 }
 
 interface TransferDecisionPreviewBaseline {
@@ -1884,38 +1867,6 @@ function syncTransactionFromLLMPreviewPayload(
     syncLearningDecisionBaseline(item);
 }
 
-function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalMemoryState | null {
-    const previewId = Number(event.preview_id || 0);
-    if (!previewId) {
-        return null;
-    }
-
-    let rawSuggestion: ImportPreviewLLMMatchingPayload = {};
-    try {
-        rawSuggestion = event.llm_response_raw ? JSON.parse(event.llm_response_raw) : {};
-    } catch {
-        rawSuggestion = {};
-    }
-
-    const reviewStatus = String(event.decision || '').trim().toLowerCase();
-    const normalizedReviewStatus: ImportPreviewSignalStatus | '' = reviewStatus === 'accept'
-        ? 'accepted'
-        : reviewStatus === 'reject'
-            ? 'rejected'
-            : '';
-
-    return {
-        reviewStatus: normalizedReviewStatus || 'pending',
-        suppressed: normalizedReviewStatus === 'rejected',
-        suggestedMainCategory: String(event.suggested_main_category || rawSuggestion.suggested_main_category || ''),
-        suggestedSubCategory: String(event.suggested_sub_category || rawSuggestion.suggested_sub_category || ''),
-        suggestedSourceAccount: String(event.suggested_source_account || rawSuggestion.suggested_source_account || ''),
-        suggestedDestinationAccount: String(event.suggested_destination_account || rawSuggestion.suggested_destination_account || ''),
-        confidence: Number(event.confidence || rawSuggestion.confidence || 0),
-        reason: String(rawSuggestion.reason || ''),
-    };
-}
-
 function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = []): void {
     for (const transaction of transactions) {
         const previewId = getPreviewId(transaction);
@@ -1958,20 +1909,10 @@ async function refreshLLMSessionSignalMemory(force: boolean = false): Promise<vo
             session_id: props.sessionId,
             limit: 500
         });
-        const events = Array.isArray(response.data?.result)
-            ? response.data.result as LLMMemoryEventItem[]
+        const events = Array.isArray(response.data?.result?.events)
+            ? response.data.result.events as LLMMemoryEventItem[]
             : [];
-        const nextMemoryMap = new Map<number, LLMSignalMemoryState>();
-        for (const event of events) {
-            const previewId = Number(event.preview_id || 0);
-            if (!previewId || nextMemoryMap.has(previewId)) {
-                continue;
-            }
-            const signalState = parseLLMMemoryEventSignal(event);
-            if (signalState) {
-                nextMemoryMap.set(previewId, signalState);
-            }
-        }
+        const nextMemoryMap = buildLLMSignalMemoryMap(events);
         llmSessionSignalMemory.value = nextMemoryMap;
         applyLLMSignalMemoryToTransactions(importTransactions.value);
     } catch (error) {

@@ -49,7 +49,7 @@ class LLMLearningService:
     def __init__(
         self,
         db: Any,
-        provider: LLMProvider,
+        provider: LLMProvider | None,
         advanced_settings: dict[str, Any] | None = None,
     ) -> None:
         self._db = db
@@ -90,6 +90,8 @@ class LLMLearningService:
         )
 
     async def _generate(self, prompt: str) -> LLMResponse:
+        if self._provider is None:
+            raise RuntimeError("LLM provider is not available")
         return await self._provider.generate(
             prompt=prompt,
             system_prompt=self._system_prompt(),

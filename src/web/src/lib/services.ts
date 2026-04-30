@@ -312,6 +312,11 @@ interface LLMAnalyzeTransactionsResponse {
     mode?: 'import_session' | 'persisted_selection' | 'persisted_uncategorized';
 }
 
+interface LLMMemoryEventsResponse {
+    events: Array<Record<string, unknown>>;
+    total: number;
+}
+
 interface UpdateImportPreviewItemPayload {
     id: number;
     type?: string;
@@ -2400,9 +2405,14 @@ export default {
         });
     },
 
-    getLLMMemoryEvents: (params?: { session_id?: string; event_type?: string; limit?: number; offset?: number }): ApiResponsePromise<any> => {
+    getLLMMemoryEvents: (params?: { session_id?: string; event_type?: string; limit?: number; offset?: number }): ApiResponsePromise<LLMMemoryEventsResponse> => {
         return axios.get('llm/memory', { params }).then(response => {
-            return buildApiResponse(response, response.data?.data);
+            return buildApiResponse(response, {
+                events: Array.isArray(response.data?.data)
+                    ? response.data.data
+                    : [],
+                total: Number(response.data?.total || 0)
+            });
         });
     },
 
