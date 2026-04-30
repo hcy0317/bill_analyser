@@ -34,7 +34,9 @@ import {
     type ExportTransactionDataRequest
 } from '@/models/data_management.ts';
 import type {
-    RecognizedReceiptImageResponse
+    RecognizedReceiptImageResponse,
+    ReceiptImageErrorCode,
+    RecognizeReceiptImageError
 } from '@/models/large_language_model.ts';
 
 import {
@@ -103,6 +105,52 @@ export interface TransactionMonthList {
     readonly items: Transaction[];
     readonly totalAmount: TransactionTotalAmount;
     readonly dailyTotalAmounts: Record<string, TransactionTotalAmount>;
+}
+
+const KNOWN_RECEIPT_IMAGE_ERROR_CODES: ReadonlySet<ReceiptImageErrorCode> = new Set<ReceiptImageErrorCode>([
+    'provider_unconfigured',
+    'timeout',
+    'parse_error',
+    'cancelled',
+    'rate_limited',
+    'unknown'
+]);
+
+export function mapReceiptImageErrorCode(rawCode: string | undefined, status: number): ReceiptImageErrorCode {
+    if (rawCode && KNOWN_RECEIPT_IMAGE_ERROR_CODES.has(rawCode as ReceiptImageErrorCode) && rawCode !== 'unknown') {
+        return rawCode as ReceiptImageErrorCode;
+    }
+
+    if (status === 501) {
+        return 'provider_unconfigured';
+    }
+
+    if (status === 504) {
+        return 'timeout';
+    }
+
+    if (status === 422) {
+        return 'parse_error';
+    }
+
+    if (status === 499) {
+        return 'cancelled';
+    }
+
+    if (status === 429) {
+        return 'rate_limited';
+    }
+
+    return 'unknown';
+}
+
+export function buildRecognizeReceiptImageError(errorCode: ReceiptImageErrorCode, message: string, status: number, originalError?: unknown): RecognizeReceiptImageError {
+    return {
+        errorCode,
+        message,
+        status,
+        originalError
+    };
 }
 
 export const useTransactionsStore = defineStore('transactions', () => {
@@ -1312,28 +1360,54 @@ export const useTransactionsStore = defineStore('transactions', () => {
     function recognizeReceiptImage({ imageFile, cancelableUuid }: { imageFile: File, cancelableUuid?: string }): Promise<RecognizedReceiptImageResponse> {
         return new Promise((resolve, reject) => {
             services.recognizeReceiptImage({ imageFile, cancelableUuid }).then(response => {
-                const data = response.data;
+                const data = response.data as unknown as {
+                    success?: boolean;
+                    result?: {
+                        amount?: number | null;
+                        trade_time?: string | null;
+                        description?: string | null;
+                        provenance?: { provider?: string; model?: string; request_id?: string };
+                        confidence?: number | null;
+                    };
+                };
 
                 if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to recognize image' });
+                    reject(buildRecognizeReceiptImageError('unknown', 'Unable to recognize image', 0));
                     return;
                 }
 
-                resolve(data.result);
+                const raw = data.result;
+                const provenance = raw.provenance || {};
+                const normalized: RecognizedReceiptImageResponse = {
+                    amount: typeof raw.amount === 'number' ? raw.amount : null,
+                    tradeTime: typeof raw.trade_time === 'string' ? raw.trade_time : null,
+                    description: typeof raw.description === 'string' ? raw.description : null,
+                    provenance: {
+                        provider: typeof provenance.provider === 'string' ? provenance.provider : 'unknown',
+                        model: typeof provenance.model === 'string' ? provenance.model : undefined,
+                        requestId: typeof provenance.request_id === 'string' ? provenance.request_id : ''
+                    },
+                    confidence: typeof raw.confidence === 'number' ? raw.confidence : null
+                };
+
+                resolve(normalized);
             }).catch(error => {
-                if (error.canceled) {
-                    reject(error);
+                if (error && error.canceled) {
+                    reject(buildRecognizeReceiptImageError('cancelled', 'Recognition cancelled', 499, error));
+                    return;
                 }
 
                 logger.error('failed to recognize image', error);
 
-                if (error.response && error.response.data && error.response.data.errorMessage) {
-                    reject({ error: error.response.data });
-                } else if (!error.processed) {
-                    reject({ message: 'Unable to recognize image' });
-                } else {
-                    reject(error);
-                }
+                const responseData = error && error.response && error.response.data;
+                const status: number = (error && error.response && typeof error.response.status === 'number') ? error.response.status : 0;
+                const rawErrorCode: string | undefined = responseData && typeof responseData.errorCode === 'string' ? responseData.errorCode : undefined;
+                const errorCode: ReceiptImageErrorCode = mapReceiptImageErrorCode(rawErrorCode, status);
+                const message: string = (responseData && typeof responseData.errorMessage === 'string' && responseData.errorMessage)
+                    || (responseData && typeof responseData.message === 'string' && responseData.message)
+                    || 'Unable to recognize image';
+
+                reject(buildRecognizeReceiptImageError(errorCode, message, status, error));
             });
         });
     }

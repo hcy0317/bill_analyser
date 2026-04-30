@@ -1689,16 +1689,24 @@ function add(template?: TransactionTemplate): void {
 
 function addByRecognizingImage(): void {
     aiImageRecognitionDialog.value?.open().then(result => {
+        // result is RecognizedReceiptImageResponse: { amount(yuan|null), tradeTime(ISO|null), description, provenance, confidence }
+        // Convert yuan -> cents to match Bill Analyser frontend money convention; skip when backend cannot determine.
+        const amountInCents = (typeof result.amount === 'number' && Number.isFinite(result.amount))
+            ? Math.round(result.amount * 100)
+            : undefined;
+
+        let tradeTimeUnixSeconds: number | undefined = undefined;
+        if (result.tradeTime) {
+            const parsedMs = Date.parse(result.tradeTime);
+            if (!Number.isNaN(parsedMs)) {
+                tradeTimeUnixSeconds = Math.floor(parsedMs / 1000);
+            }
+        }
+
         editDialog.value?.open({
-            time: result.time,
-            type: result.type,
-            categoryId: result.categoryId,
-            accountId: result.sourceAccountId,
-            destinationAccountId: result.destinationAccountId,
-            amount: result.sourceAmount,
-            destinationAmount: result.destinationAmount,
-            tagIds: result.tagIds ? result.tagIds.join(',') : undefined,
-            comment: result.comment,
+            time: tradeTimeUnixSeconds,
+            amount: amountInCents,
+            comment: result.description ?? undefined,
             noTransactionDraft: true
         }).then(result => {
             if (result && result.message) {

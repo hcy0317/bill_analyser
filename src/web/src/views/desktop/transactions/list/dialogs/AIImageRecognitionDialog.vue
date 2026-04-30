@@ -65,7 +65,8 @@ import { KnownFileType } from '@/core/file.ts';
 import { ThemeType } from '@/core/theme.ts';
 import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 
-import type { RecognizedReceiptImageResponse } from '@/models/large_language_model.ts';
+import type { RecognizedReceiptImageResponse, RecognizeReceiptImageError } from '@/models/large_language_model.ts';
+import { RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD } from '@/models/large_language_model.ts';
 
 import { generateRandomUUID } from '@/lib/misc.ts';
 import { compressJpgImage } from '@/lib/ui/common.ts';
@@ -165,21 +166,48 @@ function recognize(): void {
         imageFile: imageFile.value,
         cancelableUuid: cancelRecognizingUuid.value
     }).then(response => {
+        if (response.confidence !== null && response.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
+            snackbar.value?.showMessage('Low confidence recognition, please verify');
+        }
+
         resolveFunc?.(response);
         showState.value = false;
         recognizing.value = false;
         cancelRecognizingUuid.value = undefined;
-    }).catch(error => {
-        if (error.canceled) {
+    }).catch((error: RecognizeReceiptImageError | { canceled?: boolean } | unknown) => {
+        const typed = error as RecognizeReceiptImageError;
+        const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
+
+        recognizing.value = false;
+
+        if (errorCode === 'cancelled') {
+            cancelRecognizingUuid.value = undefined;
             return;
         }
 
-        recognizing.value = false;
         cancelRecognizingUuid.value = undefined;
 
-        if (!error.processed) {
-            snackbar.value?.showError(error);
+        if (errorCode === 'provider_unconfigured') {
+            snackbar.value?.showError('Receipt recognition is not configured');
+            return;
         }
+
+        if (errorCode === 'timeout') {
+            snackbar.value?.showError('Recognition timed out, please try again');
+            return;
+        }
+
+        if (errorCode === 'parse_error') {
+            snackbar.value?.showError('Could not parse this image, please try a clearer one');
+            return;
+        }
+
+        if (errorCode === 'rate_limited') {
+            snackbar.value?.showError('Too many requests, please wait a moment');
+            return;
+        }
+
+        snackbar.value?.showError('Unable to recognize image');
     });
 }
 
