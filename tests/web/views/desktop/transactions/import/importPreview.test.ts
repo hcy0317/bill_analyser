@@ -56,6 +56,70 @@ describe('import preview category resolution', () => {
             preview_sub_category: '咖啡'
         }, categoriesById)).toBe('');
     });
+
+    test('normalizes string category ids and ignores zero-like persisted values', () => {
+        expect(resolveImportPreviewCategoryId({
+            id: 4,
+            category_id: ' 11 ',
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡'
+        }, categoriesById)).toBe('11');
+
+        expect(resolveImportPreviewCategoryId({
+            id: 5,
+            category_id: ' 0 ',
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡'
+        }, categoriesById)).toBe('11');
+    });
+
+    test('returns empty when no preview category names are available', () => {
+        expect(resolveImportPreviewCategoryId({
+            id: 6,
+            category_id: null,
+            categoryId: undefined,
+            preview_main_category: '',
+            preview_sub_category: ''
+        }, categoriesById)).toBe('');
+    });
+
+    test('skips empty category slots and supports top-level main-category fallback', () => {
+        expect(resolveImportPreviewCategoryId({
+            id: 7,
+            preview_main_category: '餐饮',
+            preview_sub_category: ''
+        }, {
+            ...categoriesById,
+            emptySlot: undefined
+        })).toBe('10');
+    });
+
+    test('skips undefined category entries before resolving a nested fallback match', () => {
+        expect(resolveImportPreviewCategoryId({
+            id: 8,
+            preview_main_category: '餐饮',
+            preview_sub_category: '咖啡'
+        }, {
+            emptySlot: undefined,
+            ...categoriesById
+        })).toBe('11');
+    });
+
+    test('keeps scanning top-level categories until a later main-category match is found', () => {
+        expect(resolveImportPreviewCategoryId({
+            id: 9,
+            preview_main_category: '咖啡',
+            preview_sub_category: ''
+        }, {
+            emptySlot: undefined,
+            otherTopLevel: {
+                id: 'otherTopLevel',
+                name: '交通',
+                parentId: '0'
+            },
+            ...categoriesById
+        })).toBe('12');
+    });
 });
 
 describe('import preview server-paged reset guards', () => {

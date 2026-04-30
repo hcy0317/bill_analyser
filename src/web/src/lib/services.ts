@@ -2338,6 +2338,74 @@ export default {
         });
     },
 
+    // ── LLM Preview Recommend (A5 黄色推荐) ──────────
+
+    llmPreviewRecommend: ({
+        sessionId,
+        previewIds,
+        previewUpdates,
+        limit
+    }: {
+        sessionId: string;
+        previewIds?: number[];
+        previewUpdates?: Record<string, any>[];
+        limit?: number;
+    }): ApiResponsePromise<any> => {
+        return axios.post('llm/preview-recommend', {
+            session_id: sessionId,
+            preview_ids: previewIds,
+            preview_updates: previewUpdates,
+            limit: limit || 20
+        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    llmPreviewRecommendAccept: ({
+        sessionId,
+        previewId,
+        suggestion
+    }: {
+        sessionId: string;
+        previewId: number;
+        suggestion: Record<string, any>;
+    }): ApiResponsePromise<any> => {
+        return axios.post('llm/preview-recommend/accept', {
+            session_id: sessionId,
+            preview_id: previewId,
+            suggestion
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    llmPreviewRecommendReject: ({
+        sessionId,
+        previewId,
+        suggestion,
+        userCorrection
+    }: {
+        sessionId: string;
+        previewId: number;
+        suggestion: Record<string, any>;
+        userCorrection?: Record<string, any>;
+    }): ApiResponsePromise<any> => {
+        return axios.post('llm/preview-recommend/reject', {
+            session_id: sessionId,
+            preview_id: previewId,
+            suggestion,
+            user_correction: userCorrection
+        }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
+    getLLMMemoryEvents: (params?: { session_id?: string; event_type?: string; limit?: number; offset?: number }): ApiResponsePromise<any> => {
+        return axios.get('llm/memory', { params }).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+
     // ── Anomaly Insights (异常洞察) ──────────
 
     getAnomalies: ({

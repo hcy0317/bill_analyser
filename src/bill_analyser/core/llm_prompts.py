@@ -110,3 +110,89 @@ def build_rule_induction_prompt(
 ]
 
 只返回 JSON，不要有其他文字。"""
+
+
+def build_import_preview_recommendation_prompt(
+    transactions: list[dict[str, Any]],
+    *,
+    existing_categories: list[str] | None = None,
+    existing_accounts: list[str] | None = None,
+    memory_context: list[dict[str, Any]] | None = None,
+) -> str:
+    """构建导入预览分类推荐 prompt，为预览行推荐分类和账户路由。
+
+    This is the frozen A0-contract prompt artifact:
+    ``build_import_preview_recommendation_prompt(...)``
+
+    The LLM output is applied to the preview draft as a yellow signal.
+    Accept/reject both write into llm_memory_events.
+    """
+    txn_lines: list[str] = []
+    for i, txn in enumerate(transactions, 1):
+        txn_lines.append(
+            f"  {i}. preview_id={txn.get('id')}, "
+            f"date=\"{txn.get('date', '')}\", "
+            f"amount={txn.get('amount', 0)}元, "
+            f"type={txn.get('type', '')}, "
+            f"counterparty=\"{txn.get('counterparty', '')}\", "
+            f"description=\"{txn.get('description', '')}\", "
+            f"payment_method=\"{txn.get('payment_method', '')}\""
+        )
+
+    transactions_block = "\n".join(txn_lines)
+
+    categories_block = ""
+    if existing_categories:
+        categories_block = (
+            "\n已有分类体系（优先从中选择）：\n"
+            + "\n".join(f"  - {cat}" for cat in existing_categories[:50])
+            + "\n"
+        )
+
+    accounts_block = ""
+    if existing_accounts:
+        accounts_block = (
+            "\n已有账户（若需要给出账户路由，请优先使用这些账户名）：\n"
+            + "\n".join(f"  - {account}" for account in existing_accounts[:50])
+            + "\n"
+        )
+
+    memory_block = ""
+    if memory_context:
+        memory_lines: list[str] = []
+        for mem in memory_context[:20]:
+            decision = mem.get("decision", "")
+            cat = mem.get("suggested_main_category", "")
+            sub = mem.get("suggested_sub_category", "")
+            desc = mem.get("description_hint", "")
+            if decision and cat:
+                memory_lines.append(
+                    f"  - {decision}: \"{desc}\" → {cat}/{sub}"
+                )
+        if memory_lines:
+            memory_block = (
+                "\n历史记忆（你过去的推荐和用户反馈，请从中学习）：\n"
+                + "\n".join(memory_lines)
+                + "\n"
+            )
+
+    return f"""以下是一批待导入的交易记录，请为每笔交易推荐最合适的主分类、子分类和账户路由。
+{categories_block}{accounts_block}{memory_block}
+交易列表：
+{transactions_block}
+
+请以如下 JSON 格式返回（数组，每个元素对应一笔交易）：
+[
+  {{
+    "preview_id": <预览行ID>,
+    "suggested_main_category": "<推荐主分类>",
+    "suggested_sub_category": "<推荐子分类>",
+    "suggested_source_account": "<推荐来源账户，可为空>",
+    "suggested_destination_account": "<推荐目标账户，可为空>",
+    "confidence": <0.0-1.0之间的置信度>,
+    "reason": "<简短推荐理由>"
+  }}
+]
+
+分类应尽可能贴合中文个人财务常见分类体系。如果历史记忆中有相似交易的反馈，优先参考用户的纠正。
+只返回 JSON，不要有其他文字。"""

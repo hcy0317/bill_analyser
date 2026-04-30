@@ -9,6 +9,7 @@ from .models import (
     DedupMatchingPayload,
     InvestmentMatchingPayload,
     LearningMatchingPayload,
+    LLMRecommendationPayload,
     ParserMatchingPayload,
     PreviewMatchingPayload,
     RecurringMatchingPayload,
@@ -307,6 +308,7 @@ def build_preview_matching_payload(
     transfer_suggestion: dict[str, Any] | None = None,
     investment_signal: dict[str, Any] | None = None,
     learning_recommendation: dict[str, Any] | None = None,
+    llm_recommendation: dict[str, Any] | None = None,
     matching_feedback: dict[str, Any] | None = None,
     is_manually_annotated: bool = False,
     reconciliation_candidates: list[dict[str, Any]] | None = None,
@@ -316,6 +318,7 @@ def build_preview_matching_payload(
     transfer_suggestion = transfer_suggestion or {}
     investment_signal = investment_signal or {}
     learning_recommendation = learning_recommendation or {}
+    llm_recommendation = llm_recommendation or {}
     matching_feedback = matching_feedback or {}
 
     transfer_feedback = (
@@ -400,6 +403,42 @@ def build_preview_matching_payload(
     transfer_source_chain = [dict(source) for source in parser_source_chain if source.get("role") in {"outgoing", "incoming"}]
     transfer_pair_order = "outgoing_first" if len(transfer_source_chain) >= 2 else ""
 
+    # LLM yellow signal
+    llm_feedback = (
+        matching_feedback.get("llm") if isinstance(matching_feedback, dict) else {}
+    )
+    if not isinstance(llm_feedback, dict):
+        llm_feedback = {}
+    explicit_llm_signal = bool(
+        str(llm_recommendation.get("suggested_main_category") or "").strip()
+        or str(llm_recommendation.get("suggested_sub_category") or "").strip()
+        or str(llm_recommendation.get("suggested_source_account") or "").strip()
+        or str(llm_recommendation.get("suggested_destination_account") or "").strip()
+        or str(llm_recommendation.get("reason") or "").strip()
+        or float(llm_recommendation.get("confidence", 0.0) or 0.0) > 0.0
+    )
+    if not explicit_llm_signal and llm_feedback:
+        llm_recommendation = {
+            "suggested_main_category": llm_feedback.get("suggested_main_category"),
+            "suggested_sub_category": llm_feedback.get("suggested_sub_category"),
+            "suggested_source_account": llm_feedback.get("suggested_source_account"),
+            "suggested_destination_account": llm_feedback.get("suggested_destination_account"),
+            "confidence": llm_feedback.get("confidence", 0.0),
+            "reason": llm_feedback.get("reason", ""),
+        }
+    has_llm_signal = bool(
+        str(llm_recommendation.get("suggested_main_category") or "").strip()
+        or str(llm_recommendation.get("suggested_sub_category") or "").strip()
+        or str(llm_recommendation.get("suggested_source_account") or "").strip()
+        or str(llm_recommendation.get("suggested_destination_account") or "").strip()
+        or str(llm_recommendation.get("reason") or "").strip()
+        or float(llm_recommendation.get("confidence", 0.0) or 0.0) > 0.0
+    )
+    llm_review_status = str(llm_feedback.get("review_status") or "").strip().lower()
+    if llm_review_status not in {"accepted", "rejected"}:
+        llm_review_status = "pending" if has_llm_signal else ""
+    llm_suppressed = bool(llm_feedback.get("suppressed")) or llm_review_status == "rejected"
+
     payload = PreviewMatchingPayload(
         transfer=TransferMatchingPayload(
             candidate_type=str(transfer_suggestion.get("suggested_preview_type") or ""),
@@ -430,6 +469,16 @@ def build_preview_matching_payload(
             summary=str(learning_recommendation.get("summary") or ""),
             review_status=learning_review_status,
             suppressed=learning_suppressed,
+        ),
+        llm=LLMRecommendationPayload(
+            suggested_main_category=str(llm_recommendation.get("suggested_main_category") or ""),
+            suggested_sub_category=str(llm_recommendation.get("suggested_sub_category") or ""),
+            suggested_source_account=str(llm_recommendation.get("suggested_source_account") or ""),
+            suggested_destination_account=str(llm_recommendation.get("suggested_destination_account") or ""),
+            confidence=float(llm_recommendation.get("confidence", 0.0) or 0.0),
+            reason=str(llm_recommendation.get("reason") or ""),
+            review_status=llm_review_status,
+            suppressed=llm_suppressed,
         ),
         recurring=RecurringMatchingPayload(
             id=_normalize_int_or_none(preview.get("preview_recurring_id")),

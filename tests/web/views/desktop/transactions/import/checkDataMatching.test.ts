@@ -11,6 +11,7 @@ import {
     hasImportCheckMatchingDedupContext,
     hasImportCheckMatchingContext,
     matchesImportPreviewSignalFilter,
+    resolveImportCheckMatchingTransferParserSources,
     resolveImportPreviewInvestmentDecisionState,
     shouldShowImportCheckMatchingDedupSourceCount
 } from '@/views/desktop/transactions/import/checkDataMatching.ts';
@@ -153,6 +154,16 @@ describe('checkDataMatching helpers', () => {
         expect(getImportCheckMatchingDedupLabel(summary)).toBe('Split-Merge Duplicate');
     });
 
+    test('humanizes unknown dedup types when no canonical label exists', () => {
+        const summary = getImportCheckMatchingContextSummary({
+            dedupType: 'manual_merge_case',
+            dedupSourceIds: [501]
+        });
+
+        expect(getImportCheckMatchingDedupLabel(summary)).toBe('Manual Merge Case');
+        expect(getImportCheckMatchingDedupTitle(summary)).toBe('Manual Merge Case');
+    });
+
     test('builds compact signal cell model without exposing raw parser tags in body labels', () => {
         const viewModel = buildImportPreviewSignalViewModel({
             parserSource: 'alipay',
@@ -202,6 +213,36 @@ describe('checkDataMatching helpers', () => {
             'Reject Learning Suggestion'
         ]);
         expect(viewModel.investment).toBeNull();
+    });
+
+    test('builds yellow llm suggestion signals with warning review actions and detail lines', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            llmStatus: 'pending',
+            llmTitle: '根据历史记忆推荐',
+            llmSummary: '餐饮/咖啡 | 招商银行→支付宝',
+            llmConfidence: 0.87,
+            llmCategoryPath: '餐饮/咖啡',
+            llmSourceAccount: '招商银行',
+            llmDestinationAccount: '支付宝'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.llm?.labelKey).toBe('LLM Suggestion');
+        expect(viewModel.llm?.color).toBe('warning');
+        expect(viewModel.llm?.actions.map(action => action.labelKey)).toStrictEqual([
+            'Apply Suggestion',
+            'Reject LLM Suggestion'
+        ]);
+        expect(viewModel.llm?.detailLines).toContain('推荐：餐饮-咖啡');
+        expect(viewModel.llm?.detailLines).toContain('账户链路：招商银行→支付宝');
+        expect(viewModel.llm?.detailLines).toContain('Confidence: 87%');
+        expect(viewModel.hasAnySignal).toBe(true);
     });
 
     test('formats transfer details from structured source metadata and hides redundant parser chip', () => {
@@ -255,6 +296,69 @@ describe('checkDataMatching helpers', () => {
             '转入：微信'
         ]);
         expect(viewModel.transferSuggestion?.title).toBe('转出：民生银行卡 | 转入：微信');
+    });
+
+    test('falls back to parser labels and parser ids for transfer source details when explicit labels are missing', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            transferStatus: 'pending',
+            transferPairOrder: 'outgoing_first',
+            transferSourceChain: [
+                {
+                    position: 0,
+                    role: 'outgoing',
+                    parser_id: 'cmbc',
+                    parser_label: '民生银行'
+                },
+                {
+                    position: 1,
+                    role: 'other',
+                    parser_id: 'wechat'
+                }
+            ]
+        }, {
+            parserLabels: {
+                wechat: '微信'
+            },
+            sourceRoleLabels: {
+                outgoing: '转出'
+            }
+        });
+
+        expect(viewModel.transferSuggestion?.detailLines).toStrictEqual([
+            '转出：民生银行',
+            '微信'
+        ]);
+    });
+
+    test('sorts known transfer source roles ahead of unknown roles', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            transferStatus: 'pending',
+            transferPairOrder: 'outgoing_first',
+            transferSourceChain: [
+                {
+                    position: 0,
+                    role: 'other',
+                    parser_id: 'wechat'
+                },
+                {
+                    position: 1,
+                    role: 'outgoing',
+                    parser_label: '民生银行'
+                }
+            ]
+        }, {
+            parserLabels: {
+                wechat: '微信'
+            },
+            sourceRoleLabels: {
+                outgoing: '转出'
+            }
+        });
+
+        expect(viewModel.transferSuggestion?.detailLines).toStrictEqual([
+            '转出：民生银行',
+            '微信'
+        ]);
     });
 
     test('hides parser chip when platform duplicate is present', () => {
@@ -436,6 +540,24 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
+    test('falls back cleanly when the recommended-category label is blank', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningSummary: '支出 | 餐饮/咖啡'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: ' ',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(viewModel.learning?.detailLines).toStrictEqual([
+            ': 支出|餐饮-咖啡'
+        ]);
+    });
+
     test('removes learning clear actions after review states', () => {
         const acceptedViewModel = buildImportPreviewSignalViewModel({
             learningStatus: 'accepted',
@@ -455,11 +577,47 @@ describe('checkDataMatching helpers', () => {
         ]);
     });
 
+    test('keeps blue learning suggestions highlighted and supports rejected review rendering', () => {
+        const bluePending = buildImportPreviewSignalViewModel({
+            learningStatus: 'pending',
+            learningMode: 'blue',
+            learningSummary: '支出 | 餐饮/咖啡'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+        const rejected = buildImportPreviewSignalViewModel({
+            learningStatus: 'rejected',
+            learningSummary: '支出 | 餐饮/咖啡'
+        }, {
+            infoLabels: {
+                sourceLabel: '来源',
+                duplicateSourcesLabel: '重复来源',
+                recommendedCategoryLabel: '推荐分类',
+                accountRouteLabel: '账户链路'
+            }
+        });
+
+        expect(bluePending.learning?.color).toBe('primary');
+        expect(rejected.learning?.labelKey).toBe('Learning Suggestion Rejected');
+        expect(rejected.learning?.color).toBe('error');
+    });
+
     test('formats investment reason keys with caller-provided labels', () => {
         expect(formatInvestmentSignalReason('platform:蚂蚁财富, product:黄金ETF', {
             platform: 'Platform',
             product: 'Product'
         })).toBe('Platform: 蚂蚁财富, Product: 黄金ETF');
+    });
+
+    test('preserves plain investment reason fragments and key-only labels', () => {
+        expect(formatInvestmentSignalReason(' , manual_flag, platform:  ', {
+            platform: 'Platform'
+        })).toBe('manual_flag, Platform');
     });
 
     test('resolves investment decision state from minimal action payloads', () => {
@@ -547,6 +705,7 @@ describe('checkDataMatching helpers', () => {
 
         expect(matchesImportPreviewSignalFilter(learningViewModel, 'learning')).toBe(true);
         expect(matchesImportPreviewSignalFilter(learningViewModel, null)).toBe(true);
+        expect(matchesImportPreviewSignalFilter(learningViewModel, 'unexpected' as never)).toBe(true);
     });
 
     test('keeps parser and investment signals out of the type column model', () => {
@@ -571,5 +730,82 @@ describe('checkDataMatching helpers', () => {
         expect(hasImportCheckMatchingContext(summary)).toBe(false);
         expect(getImportCheckMatchingDedupTitle(summary)).toBe('');
         expect(getImportCheckMatchingParserTagsText(summary)).toBe('');
+    });
+
+    test('covers fallback review titles for reconciliation, recurring, transfer, learning, and llm signals', () => {
+        const viewModel = buildImportPreviewSignalViewModel({
+            transferStatus: 'accepted',
+            transferTitle: '手工转账确认',
+            learningStatus: 'accepted',
+            learningTitle: '历史学习建议',
+            llmStatus: 'accepted',
+            llmTitle: 'LLM 兜底建议',
+            reconciliationTitle: '历史归并候选',
+            reconciliationStatus: 'rejected',
+            hasRecurringMatch: true,
+            recurringTitle: '每月账单',
+            recurringCandidateCount: 2,
+            recurringPrimaryReason: '金额相同'
+        });
+
+        expect(viewModel.dedup).toStrictEqual({
+            dedupType: 'reconciliation',
+            labelKey: 'reconciliation',
+            label: '历史归并候选',
+            title: '历史归并候选',
+            color: 'error',
+            sourceCount: 0,
+            detailLines: ['历史归并候选']
+        });
+        expect(viewModel.transferSuggestion?.title).toBe('手工转账确认');
+        expect(viewModel.transferSuggestion?.actions).toStrictEqual([
+            { decision: 'clear', labelKey: 'Clear', color: 'warning' }
+        ]);
+        expect(viewModel.learning?.detailLines).toStrictEqual(['历史学习建议']);
+        expect(viewModel.learning?.actions).toStrictEqual([]);
+        expect(viewModel.llm?.detailLines).toStrictEqual(['LLM 兜底建议']);
+        expect(viewModel.recurring).toStrictEqual({
+            hasMatch: true,
+            title: '每月账单',
+            candidateCount: 2,
+            primaryReason: '金额相同'
+        });
+        expect(matchesImportPreviewSignalFilter(viewModel, 'transfer')).toBe(true);
+    });
+
+    test('shows dedup fallback lines when source counts or source arrays make the signal visible', () => {
+        const countOnlyViewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'platform_bank',
+            dedupSourceCount: 1
+        });
+        const sourceArrayViewModel = buildImportPreviewSignalViewModel({
+            dedupType: 'similar',
+            dedupSources: [
+                {
+                    position: 0,
+                    parser_id: 'alipay',
+                    parser_label: '支付宝'
+                }
+            ]
+        });
+
+        expect(countOnlyViewModel.dedup?.detailLines).toStrictEqual(['Platform Duplicate']);
+        expect(countOnlyViewModel.dedup?.sourceCount).toBe(1);
+        expect(sourceArrayViewModel.dedup?.labelKey).toBe('Similar Duplicate');
+        expect(sourceArrayViewModel.dedup?.detailLines).toStrictEqual(['Similar Duplicate']);
+    });
+
+    test('uses default parser-source and investment-reason fallbacks when optional options are omitted', () => {
+        expect(resolveImportCheckMatchingTransferParserSources({
+            parserId: 'cmbc',
+            parserTags: [undefined as unknown as string, 'note:skip', 'parser:wechat'],
+            dedupType: 'transfer',
+            dedupSourceIds: ['11'],
+            isManuallyAnnotated: false
+        })).toStrictEqual(['cmbc', 'wechat']);
+
+        expect(formatInvestmentSignalReason('platform:蚂蚁财富, custom:Alpha, type:')).toBe(
+            'Platform: 蚂蚁财富, custom: Alpha, Type'
+        );
     });
 });

@@ -77,6 +77,22 @@ class _FailingLLMProvider:
         raise RuntimeError("provider unavailable")
 
 
+class _FakePreviewRecommendationProvider:
+    def __init__(self, suggestions: list[dict[str, Any]]) -> None:
+        self.suggestions = suggestions
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate(self, **kwargs) -> LLMResponse:  # pragma: no cover - trivial async stub
+        self.calls.append(kwargs)
+        return LLMResponse(
+            content=json.dumps(self.suggestions, ensure_ascii=False),
+            model="preview-model",
+            provider="preview-provider",
+            tokens_used=36,
+            raw_response={"stub": True},
+        )
+
+
 def _list_llm_candidates_for_user(*, user_id: int) -> list[dict]:
     from bill_analyser.api.app import db
 
@@ -90,6 +106,123 @@ def _reset_llm_rate_limit_state() -> None:
     from bill_analyser.core import llm_learning_service
 
     llm_learning_service._RATE_LIMIT_BUCKETS.clear()  # pylint: disable=protected-access
+
+
+def _list_llm_memory_events_for_user(*, user_id: int, session_id: str | None = None) -> list[dict]:
+    from bill_analyser.api.app import db
+
+    async def _list() -> list[dict]:
+        return await db.get_llm_memory_events(user_id=user_id, session_id=session_id, limit=100)
+
+    return asyncio.run(_list())
+
+
+def _create_test_account(client, auth_headers, *, name: str) -> dict[str, Any]:
+    response = client.post(
+        "/api/accounts/",
+        headers=auth_headers,
+        json={
+            "name": name,
+            "category": 1,
+            "type": 1,
+            "icon": "1",
+            "color": "00ccff",
+            "currency": "CNY",
+            "balance": 0,
+            "comment": "pytest llm preview recommendation account",
+            "hidden": False,
+            "aliases": [],
+        },
+    )
+    assert response.status_code == 201, response.get_data(as_text=True)
+    return response.get_json()["result"]
+
+
+def _get_category_path_by_id(*, user_id: int, category_id: int) -> tuple[str, str]:
+    from bill_analyser.api.app import db
+
+    async def _fetch() -> tuple[str, str]:
+        category = await db.get_category_by_id(category_id, user_id=user_id)
+        assert category is not None
+        return (
+            str(category.get("main_category") or ""),
+            str(category.get("sub_category") or ""),
+        )
+
+    return asyncio.run(_fetch())
+
+
+def _prepare_llm_preview_fixture(
+    client,
+    auth_headers,
+    *,
+    prefix: str,
+    preview_patch: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    current_user_id = _get_current_user_id(client, auth_headers)
+    category = _ensure_test_expense_category(client, auth_headers)
+    main_category, sub_category = _get_category_path_by_id(
+        user_id=current_user_id,
+        category_id=int(category["id"]),
+    )
+    source_account = _create_test_account(
+        client,
+        auth_headers,
+        name=f"{prefix}-source-{int(time.time() * 1000)}",
+    )
+    destination_account = _create_test_account(
+        client,
+        auth_headers,
+        name=f"{prefix}-destination-{int(time.time() * 1000)}",
+    )
+    session_id = f"{prefix}-session-{int(time.time() * 1000)}"
+
+    from bill_analyser.api import app as api_app
+
+    async def _prepare() -> int:
+        await api_app.db.create_import_session(session_id, user_id=current_user_id, file_count=1)
+        preview_payload = {
+            "preview_date": "2026-08-08 09:00:00",
+            "preview_type": "支出",
+            "preview_amount": 32.5,
+            "preview_counterparty": "测试咖啡店",
+            "preview_payment_method": "支付宝",
+            "preview_description": "早餐咖啡",
+            "preview_parser_id": "alipay",
+        }
+        if preview_patch:
+            preview_payload.update(preview_patch)
+
+        preview_id = await api_app.db.insert_preview_bill(
+            session_id,
+            preview_payload,
+            user_id=current_user_id,
+        )
+        return int(preview_id)
+
+    preview_id = asyncio.run(_prepare())
+    return {
+        "current_user_id": current_user_id,
+        "session_id": session_id,
+        "preview_id": preview_id,
+        "category": category,
+        "main_category": main_category,
+        "sub_category": sub_category,
+        "source_account": source_account,
+        "destination_account": destination_account,
+    }
+
+
+def _get_preview_item_from_page(client, auth_headers, *, session_id: str, preview_id: int) -> dict[str, Any]:
+    response = client.get(
+        f"/api/bills/import/v2/preview/{session_id}?page=1&page_size=20",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json()
+    assert payload["success"] is True
+    preview_rows = payload["data"]["preview"]
+    return next(row for row in preview_rows if int(row["id"]) == int(preview_id))
 
 
 class TestLLMImportSessionAnalysisAPI:
@@ -951,6 +1084,335 @@ class TestLLMImportSessionAnalysisAPI:
         blocked_payload = blocked_response.get_json()
         assert "Rate limit exceeded" in blocked_payload["error"]
         assert blocked_payload["code"] == "LLM_RATE_LIMITED"
+
+    def test_llm_preview_recommend_applies_blank_preview_fields_and_writes_memory(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_recommend_apply")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-apply",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        provider = _FakePreviewRecommendationProvider(
+            [
+                {
+                    "preview_id": fixture["preview_id"],
+                    "suggested_main_category": fixture["main_category"],
+                    "suggested_sub_category": fixture["sub_category"],
+                    "suggested_source_account": fixture["source_account"]["name"],
+                    "suggested_destination_account": fixture["destination_account"]["name"],
+                    "confidence": 0.88,
+                    "reason": "历史记忆建议",
+                }
+            ]
+        )
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"], "preview_type": "支出"}],
+            },
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["data"]["count"] == 1
+        suggestion_result = payload["data"]["suggestions"][0]
+        assert "preview_main_category" in suggestion_result["applied_fields"]
+        if fixture["sub_category"]:
+            assert "preview_sub_category" in suggestion_result["applied_fields"]
+        assert "preview_source_account_id" in suggestion_result["applied_fields"]
+        assert "preview_destination_account_id" in suggestion_result["applied_fields"]
+        assert suggestion_result["matching"]["llm"]["review_status"] == "pending"
+        assert fixture["source_account"]["name"] in provider.calls[0]["prompt"]
+        assert fixture["destination_account"]["name"] in provider.calls[0]["prompt"]
+
+        preview_item = _get_preview_item_from_page(
+            client,
+            auth_headers,
+            session_id=fixture["session_id"],
+            preview_id=fixture["preview_id"],
+        )
+        assert preview_item["preview_main_category"] == fixture["main_category"]
+        assert preview_item["preview_sub_category"] == fixture["sub_category"]
+        assert int(preview_item["preview_source_account_id"]) == int(fixture["source_account"]["id"])
+        assert int(preview_item["preview_destination_account_id"]) == int(fixture["destination_account"]["id"])
+        assert preview_item["matching"]["llm"]["suggested_source_account"] == fixture["source_account"]["name"]
+        assert preview_item["matching"]["llm"]["review_status"] == "pending"
+
+        events = _list_llm_memory_events_for_user(
+            user_id=fixture["current_user_id"],
+            session_id=fixture["session_id"],
+        )
+        assert len(events) == 1
+        assert events[0]["event_type"] == "recommendation"
+        assert events[0]["decision"] is None
+
+    def test_llm_preview_recommend_does_not_override_existing_preview_fields(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_recommend_no_override")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-no-override",
+        )
+        source_account_id = int(fixture["source_account"]["id"])
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        provider = _FakePreviewRecommendationProvider(
+            [
+                {
+                    "preview_id": fixture["preview_id"],
+                    "suggested_main_category": "LLM不同分类",
+                    "suggested_sub_category": "LLM不同子分类",
+                    "suggested_source_account": fixture["destination_account"]["name"],
+                    "confidence": 0.73,
+                    "reason": "不应覆盖已有草稿",
+                }
+            ]
+        )
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        async def _seed_existing_values() -> None:
+            await api_app.db.update_preview_bills_batch(
+                fixture["session_id"],
+                [
+                    {
+                        "id": fixture["preview_id"],
+                        "preview_main_category": "已有主分类",
+                        "preview_sub_category": "已有子分类",
+                        "preview_source_account_id": source_account_id,
+                    }
+                ],
+                user_id=fixture["current_user_id"],
+            )
+
+        asyncio.run(_seed_existing_values())
+
+        response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"], "preview_type": "支出"}],
+            },
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        assert payload["success"] is True
+        suggestion_result = payload["data"]["suggestions"][0]
+        assert suggestion_result["applied_fields"] == []
+
+        preview_item = _get_preview_item_from_page(
+            client,
+            auth_headers,
+            session_id=fixture["session_id"],
+            preview_id=fixture["preview_id"],
+        )
+        assert preview_item["preview_main_category"] == "已有主分类"
+        assert preview_item["preview_sub_category"] == "已有子分类"
+        assert int(preview_item["preview_source_account_id"]) == source_account_id
+        assert preview_item["matching"]["llm"]["suggested_main_category"] == "LLM不同分类"
+        assert preview_item["matching"]["llm"]["review_status"] == "pending"
+
+    def test_llm_preview_recommend_accept_keeps_preview_and_projects_matching_signal(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_recommend_accept")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-accept",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        suggestion = {
+            "preview_id": fixture["preview_id"],
+            "suggested_main_category": fixture["main_category"],
+            "suggested_sub_category": fixture["sub_category"],
+            "suggested_source_account": fixture["source_account"]["name"],
+            "suggested_destination_account": fixture["destination_account"]["name"],
+            "confidence": 0.91,
+            "reason": "接受黄色建议",
+        }
+        provider = _FakePreviewRecommendationProvider([suggestion])
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        recommend_response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"]}],
+            },
+        )
+        assert recommend_response.status_code == 200, recommend_response.get_data(as_text=True)
+        llm_payload = recommend_response.get_json()["data"]["suggestions"][0]["matching"]["llm"]
+
+        accept_response = client.post(
+            "/api/llm/preview-recommend/accept",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_id": fixture["preview_id"],
+                "suggestion": llm_payload,
+            },
+        )
+
+        assert accept_response.status_code == 200, accept_response.get_data(as_text=True)
+        accept_payload = accept_response.get_json()
+        assert accept_payload["success"] is True
+        assert accept_payload["data"]["decision"] == "accept"
+        assert accept_payload["data"]["restored"] is False
+
+        preview_item = _get_preview_item_from_page(
+            client,
+            auth_headers,
+            session_id=fixture["session_id"],
+            preview_id=fixture["preview_id"],
+        )
+        assert preview_item["preview_main_category"] == fixture["main_category"]
+        assert preview_item["preview_sub_category"] == fixture["sub_category"]
+        assert preview_item["matching"]["llm"]["review_status"] == "accepted"
+        assert preview_item["matching"]["llm"]["suppressed"] is False
+
+        events = _list_llm_memory_events_for_user(
+            user_id=fixture["current_user_id"],
+            session_id=fixture["session_id"],
+        )
+        assert len(events) == 2
+        assert any(event["event_type"] == "feedback" and event["decision"] == "accept" for event in events)
+        assert any(event["event_type"] == "recommendation" for event in events)
+
+    def test_llm_preview_recommend_reject_restores_snapshot_and_writes_feedback(
+        self,
+        client,
+        monkeypatch,
+    ):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_preview_recommend_reject")
+        fixture = _prepare_llm_preview_fixture(
+            client,
+            auth_headers,
+            prefix="pytest-llm-preview-reject",
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        suggestion = {
+            "preview_id": fixture["preview_id"],
+            "suggested_main_category": fixture["main_category"],
+            "suggested_sub_category": fixture["sub_category"],
+            "suggested_source_account": fixture["source_account"]["name"],
+            "suggested_destination_account": fixture["destination_account"]["name"],
+            "confidence": 0.79,
+            "reason": "拒绝黄色建议",
+        }
+        provider = _FakePreviewRecommendationProvider([suggestion])
+        monkeypatch.setattr(llm_routes.ProviderFactory, "create", lambda *_args, **_kwargs: provider)
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "preview-model"},
+        }
+
+        recommend_response = client.post(
+            "/api/llm/preview-recommend",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_updates": [{"id": fixture["preview_id"]}],
+            },
+        )
+        assert recommend_response.status_code == 200, recommend_response.get_data(as_text=True)
+        llm_payload = recommend_response.get_json()["data"]["suggestions"][0]["matching"]["llm"]
+
+        reject_response = client.post(
+            "/api/llm/preview-recommend/reject",
+            headers=auth_headers,
+            json={
+                "session_id": fixture["session_id"],
+                "preview_id": fixture["preview_id"],
+                "suggestion": llm_payload,
+                "user_correction": {
+                    "category": "人工分类",
+                    "account": "手工账户链路",
+                },
+            },
+        )
+
+        assert reject_response.status_code == 200, reject_response.get_data(as_text=True)
+        reject_payload = reject_response.get_json()
+        assert reject_payload["success"] is True
+        assert reject_payload["data"]["decision"] == "reject"
+        assert reject_payload["data"]["restored"] is True
+
+        preview_item = _get_preview_item_from_page(
+            client,
+            auth_headers,
+            session_id=fixture["session_id"],
+            preview_id=fixture["preview_id"],
+        )
+        assert preview_item["preview_main_category"] == ""
+        assert preview_item["preview_sub_category"] == ""
+        assert not preview_item.get("preview_source_account_id")
+        assert not preview_item.get("preview_destination_account_id")
+        assert preview_item["matching"]["llm"]["review_status"] == "rejected"
+        assert preview_item["matching"]["llm"]["suppressed"] is True
+
+        events = _list_llm_memory_events_for_user(
+            user_id=fixture["current_user_id"],
+            session_id=fixture["session_id"],
+        )
+        assert len(events) == 2
+        reject_events = [
+            event for event in events
+            if event["event_type"] == "feedback" and event["decision"] == "reject"
+        ]
+        assert len(reject_events) == 1
+        assert reject_events[0]["user_correction_category"] == "人工分类"
+        assert reject_events[0]["user_correction_account"] == "手工账户链路"
+        assert any(event["event_type"] == "recommendation" for event in events)
 
     def test_llm_candidate_routes_are_user_scoped(self, client):
         _reset_llm_rate_limit_state()

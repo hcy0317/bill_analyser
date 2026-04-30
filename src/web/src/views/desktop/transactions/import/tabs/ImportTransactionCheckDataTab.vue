@@ -107,8 +107,10 @@
                 :row-busy="isPreviewMatchingDecisionBusy(getPreviewId(item))"
                 :transfer-busy="isTransferDecisionBusy(item)"
                 :learning-busy="isLearningDecisionBusy(item)"
+                :llm-busy="isLLMDecisionBusy(item)"
                 @review-transfer="reviewTransferSuggestion(item, $event)"
                 @review-learning="reviewLearningSuggestion(item, $event)"
+                @review-llm="reviewLLMRecommendation(item, $event)"
                 @open-recurring="openRecurringCandidateDialog(item)"
                 @clear-recurring="clearRecurringMatch(item)"
             />
@@ -393,6 +395,11 @@
                                :prepend-icon="mdiAutoFix"
                                @click="reclassifySelected">
                             {{ tt('Reclassify') }}
+                        </v-btn>
+                        <v-btn :disabled="!!disabled || llmPreviewRecommending || selectedImportTransactionCount < 1 || !props.sessionId"
+                               :prepend-icon="mdiStar"
+                               @click="applyLLMPreviewRecommendations">
+                            {{ tt('Apply LLM Suggestions') }}
                         </v-btn>
                         <v-btn :disabled="!!disabled || llmSessionAnalyzing || selectedImportTransactionCount < 1 || !props.sessionId"
                                :prepend-icon="mdiAutoFix"
@@ -804,6 +811,7 @@ import BatchReplaceAllTypesDialog from '../dialogs/BatchReplaceAllTypesDialog.vu
 import BatchCreateDialog, { type BatchCreateDialogDataType } from '../dialogs/BatchCreateDialog.vue';
 import ImportLearningSuggestionDialog from '../dialogs/ImportLearningSuggestionDialog.vue';
 import {
+    type ImportPreviewLLMMatchingPayload,
     resolveImportPreviewCategoryId,
     type ImportPreviewRecord
 } from '../importPreview.ts';
@@ -998,6 +1006,28 @@ interface MatchingSessionCandidateItem {
     };
 }
 
+interface LLMMemoryEventItem {
+    preview_id?: number | null;
+    decision?: string | null;
+    llm_response_raw?: string | null;
+    suggested_main_category?: string | null;
+    suggested_sub_category?: string | null;
+    suggested_source_account?: string | null;
+    suggested_destination_account?: string | null;
+    confidence?: number | null;
+}
+
+interface LLMSignalMemoryState {
+    reviewStatus: ImportPreviewSignalStatus | '';
+    suppressed: boolean;
+    suggestedMainCategory: string;
+    suggestedSubCategory: string;
+    suggestedSourceAccount: string;
+    suggestedDestinationAccount: string;
+    confidence: number;
+    reason: string;
+}
+
 interface TransferDecisionPreviewBaseline {
     type: number;
     categoryId: string;
@@ -1162,11 +1192,15 @@ const recurringCandidates = ref<RecurringCandidateItem[]>([]);
 const selectedRecurringCandidateId = ref<string>('');
 const transferDecisionLoadingIds = ref<number[]>([]);
 const learningDecisionLoadingIds = ref<number[]>([]);
+const llmDecisionLoadingIds = ref<number[]>([]);
 const recurringDecisionLoadingIds = ref<number[]>([]);
+const llmPreviewRecommending = ref<boolean>(false);
 const llmSessionAnalyzing = ref<boolean>(false);
 const isMatchingDecisionBusy = computed<boolean>(() => transferDecisionLoadingIds.value.length > 0
     || learningDecisionLoadingIds.value.length > 0
+    || llmDecisionLoadingIds.value.length > 0
     || recurringDecisionLoadingIds.value.length > 0);
+const llmSessionSignalMemory = ref<Map<number, LLMSignalMemoryState>>(new Map());
 const serverPagedMode = computed<boolean>(() => !!props.serverPaged && !!props.sessionId);
 const importTransactions = computed<ImportTransaction[]>(() => props.importTransactions || []);
 const filteredServerPagedPreviewIndex = computed<ImportPreviewIndexItem[]>(() => {
@@ -1718,6 +1752,233 @@ function syncLearningCandidateFromSessionCandidate(item: ImportTransaction, cand
     syncLearningDecisionBaseline(item);
 }
 
+function getLLMMatchingPayload(item: ImportTransaction): ImportPreviewLLMMatchingPayload {
+    return (((item.matching as unknown as { llm?: ImportPreviewLLMMatchingPayload }) || {}).llm || {}) as ImportPreviewLLMMatchingPayload;
+}
+
+function ensureLLMMatchingPayload(item: ImportTransaction): ImportPreviewLLMMatchingPayload {
+    const nextMatching = {
+        ...((item.matching as unknown as Record<string, unknown> | undefined) || {})
+    };
+    const llmPayload = {
+        ...((nextMatching['llm'] as ImportPreviewLLMMatchingPayload | undefined) || {})
+    };
+    nextMatching['llm'] = llmPayload;
+    item.matching = nextMatching as unknown as typeof item.matching;
+    return llmPayload;
+}
+
+function getLLMSignalCategoryPath(llmPayload: ImportPreviewLLMMatchingPayload): string {
+    return [llmPayload.suggested_main_category || '', llmPayload.suggested_sub_category || '']
+        .filter(part => !!part)
+        .join('/');
+}
+
+function getLLMSignalAccountRoute(llmPayload: ImportPreviewLLMMatchingPayload): string {
+    return [llmPayload.suggested_source_account || '', llmPayload.suggested_destination_account || '']
+        .filter(part => !!part)
+        .join('→');
+}
+
+function getLLMSignalStatus(item: ImportTransaction): ImportPreviewSignalStatus | null {
+    const llmPayload = getLLMMatchingPayload(item);
+    const reviewStatus = String(llmPayload.review_status || '').trim().toLowerCase();
+    if (reviewStatus === 'accepted' || reviewStatus === 'rejected') {
+        return reviewStatus;
+    }
+
+    const hasPendingSignal = !!getLLMSignalCategoryPath(llmPayload)
+        || !!getLLMSignalAccountRoute(llmPayload)
+        || Number(llmPayload.confidence || 0) > 0
+        || !!String(llmPayload.reason || '').trim();
+    return hasPendingSignal && !llmPayload.suppressed ? 'pending' : null;
+}
+
+function hasMeaningfulLLMMatchingPayload(llmPayload: ImportPreviewLLMMatchingPayload | undefined): boolean {
+    if (!llmPayload) {
+        return false;
+    }
+
+    return !!getLLMSignalCategoryPath(llmPayload)
+        || !!getLLMSignalAccountRoute(llmPayload)
+        || Number(llmPayload.confidence || 0) > 0
+        || !!String(llmPayload.reason || '').trim()
+        || !!String(llmPayload.review_status || '').trim()
+        || !!llmPayload.suppressed;
+}
+
+function buildLLMSignalSummary(llmPayload: ImportPreviewLLMMatchingPayload): string {
+    return [
+        getLLMSignalCategoryPath(llmPayload),
+        getLLMSignalAccountRoute(llmPayload)
+    ].filter(part => !!part).join(' | ');
+}
+
+function mergePreviewMatchingPayload(
+    currentMatching: ImportPreviewRecord['matching'] | ImportTransaction['matching'] | undefined,
+    incomingMatching: ImportPreviewRecord['matching'] | undefined
+): ImportPreviewRecord['matching'] | ImportTransaction['matching'] | undefined {
+    if (!incomingMatching) {
+        return currentMatching;
+    }
+
+    const currentRecord = ((currentMatching as unknown as Record<string, unknown>) || {});
+    const incomingRecord = (incomingMatching as unknown as Record<string, unknown>);
+    const currentLLM = currentRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
+    const incomingLLM = incomingRecord['llm'] as ImportPreviewLLMMatchingPayload | undefined;
+
+    return {
+        ...currentRecord,
+        ...incomingRecord,
+        llm: hasMeaningfulLLMMatchingPayload(incomingLLM) ? incomingLLM : currentLLM,
+    } as ImportPreviewRecord['matching'];
+}
+
+function mergeLLMMatchingFromPayload(item: ImportTransaction, llmPayload: ImportPreviewLLMMatchingPayload | undefined): void {
+    if (!llmPayload) {
+        return;
+    }
+
+    const nextLLM = ensureLLMMatchingPayload(item);
+    nextLLM.suggested_main_category = llmPayload.suggested_main_category || '';
+    nextLLM.suggested_sub_category = llmPayload.suggested_sub_category || '';
+    nextLLM.suggested_source_account = llmPayload.suggested_source_account || '';
+    nextLLM.suggested_destination_account = llmPayload.suggested_destination_account || '';
+    nextLLM.confidence = Number(llmPayload.confidence || 0);
+    nextLLM.reason = llmPayload.reason || '';
+    nextLLM.review_status = llmPayload.review_status || '';
+    nextLLM.suppressed = !!llmPayload.suppressed;
+}
+
+function syncTransactionFromLLMPreviewPayload(
+    item: ImportTransaction,
+    payload: {
+        preview?: ImportPreviewRecord | null;
+        matching?: { llm?: ImportPreviewLLMMatchingPayload } | null;
+        applied_fields?: string[];
+    }
+): void {
+    const previewData = payload.preview;
+    if (previewData) {
+        item.categoryId = resolveImportPreviewCategoryId(previewData, allCategoriesMap.value);
+        item.originalCategoryName = previewData.preview_sub_category || previewData.preview_main_category || '';
+        item.actualCategoryName = item.originalCategoryName;
+        item.sourceAccountId = previewData.preview_source_account_id ? String(previewData.preview_source_account_id) : '';
+        item.destinationAccountId = previewData.preview_destination_account_id ? String(previewData.preview_destination_account_id) : '';
+        item.comment = previewData.preview_description || item.comment;
+        item.counterparty = previewData.preview_counterparty || item.counterparty;
+        item.paymentMethod = previewData.preview_payment_method || item.paymentMethod;
+        item.parserSource = previewData.preview_parser_id || item.parserSource;
+        item.parserTags = Array.isArray(previewData.preview_parser_tags)
+            ? previewData.preview_parser_tags
+            : item.parserTags;
+    }
+
+    mergeLLMMatchingFromPayload(item, payload.matching?.llm);
+    if (Array.isArray(payload.applied_fields) && payload.applied_fields.length > 0) {
+        item.resetTransferSuggestionDecisionState();
+    }
+
+    updateTransactionData(item);
+    syncTransferDecisionBaseline(item);
+    syncLearningDecisionBaseline(item);
+}
+
+function parseLLMMemoryEventSignal(event: LLMMemoryEventItem): LLMSignalMemoryState | null {
+    const previewId = Number(event.preview_id || 0);
+    if (!previewId) {
+        return null;
+    }
+
+    let rawSuggestion: ImportPreviewLLMMatchingPayload = {};
+    try {
+        rawSuggestion = event.llm_response_raw ? JSON.parse(event.llm_response_raw) : {};
+    } catch {
+        rawSuggestion = {};
+    }
+
+    const reviewStatus = String(event.decision || '').trim().toLowerCase();
+    const normalizedReviewStatus: ImportPreviewSignalStatus | '' = reviewStatus === 'accept'
+        ? 'accepted'
+        : reviewStatus === 'reject'
+            ? 'rejected'
+            : '';
+
+    return {
+        reviewStatus: normalizedReviewStatus || 'pending',
+        suppressed: normalizedReviewStatus === 'rejected',
+        suggestedMainCategory: String(event.suggested_main_category || rawSuggestion.suggested_main_category || ''),
+        suggestedSubCategory: String(event.suggested_sub_category || rawSuggestion.suggested_sub_category || ''),
+        suggestedSourceAccount: String(event.suggested_source_account || rawSuggestion.suggested_source_account || ''),
+        suggestedDestinationAccount: String(event.suggested_destination_account || rawSuggestion.suggested_destination_account || ''),
+        confidence: Number(event.confidence || rawSuggestion.confidence || 0),
+        reason: String(rawSuggestion.reason || ''),
+    };
+}
+
+function applyLLMSignalMemoryToTransactions(transactions: ImportTransaction[] = []): void {
+    for (const transaction of transactions) {
+        const previewId = getPreviewId(transaction);
+        if (previewId === null) {
+            continue;
+        }
+
+        const memorySignal = llmSessionSignalMemory.value.get(previewId);
+        if (!memorySignal) {
+            continue;
+        }
+
+        mergeLLMMatchingFromPayload(transaction, {
+            suggested_main_category: memorySignal.suggestedMainCategory,
+            suggested_sub_category: memorySignal.suggestedSubCategory,
+            suggested_source_account: memorySignal.suggestedSourceAccount,
+            suggested_destination_account: memorySignal.suggestedDestinationAccount,
+            confidence: memorySignal.confidence,
+            reason: memorySignal.reason,
+            review_status: memorySignal.reviewStatus,
+            suppressed: memorySignal.suppressed,
+        });
+        updateTransactionData(transaction);
+    }
+}
+
+async function refreshLLMSessionSignalMemory(force: boolean = false): Promise<void> {
+    if (!props.sessionId) {
+        llmSessionSignalMemory.value = new Map();
+        return;
+    }
+
+    if (!force && llmSessionSignalMemory.value.size > 0) {
+        applyLLMSignalMemoryToTransactions(importTransactions.value);
+        return;
+    }
+
+    try {
+        const response = await services.getLLMMemoryEvents({
+            session_id: props.sessionId,
+            limit: 500
+        });
+        const events = Array.isArray(response.data?.result)
+            ? response.data.result as LLMMemoryEventItem[]
+            : [];
+        const nextMemoryMap = new Map<number, LLMSignalMemoryState>();
+        for (const event of events) {
+            const previewId = Number(event.preview_id || 0);
+            if (!previewId || nextMemoryMap.has(previewId)) {
+                continue;
+            }
+            const signalState = parseLLMMemoryEventSignal(event);
+            if (signalState) {
+                nextMemoryMap.set(previewId, signalState);
+            }
+        }
+        llmSessionSignalMemory.value = nextMemoryMap;
+        applyLLMSignalMemoryToTransactions(importTransactions.value);
+    } catch (error) {
+        logger.error('[LLM Memory] 加载失败:', error);
+    }
+}
+
 function hasTransferDecisionRelevantDraftChanges(item: ImportTransaction): boolean {
     const baseline = getPreviewState(item)._previewDecisionBaseline;
     if (!baseline) {
@@ -1812,6 +2073,7 @@ function isPreviewMatchingDecisionBusy(previewId: number | null): boolean {
 
     return hasDecisionLoadingId(transferDecisionLoadingIds.value, previewId)
         || hasDecisionLoadingId(learningDecisionLoadingIds.value, previewId)
+        || hasDecisionLoadingId(llmDecisionLoadingIds.value, previewId)
         || hasDecisionLoadingId(recurringDecisionLoadingIds.value, previewId);
 }
 
@@ -1823,6 +2085,11 @@ function isTransferDecisionBusy(item: ImportTransaction): boolean {
 function isLearningDecisionBusy(item: ImportTransaction): boolean {
     const previewId = getPreviewId(item);
     return previewId !== null && hasDecisionLoadingId(learningDecisionLoadingIds.value, previewId);
+}
+
+function isLLMDecisionBusy(item: ImportTransaction): boolean {
+    const previewId = getPreviewId(item);
+    return previewId !== null && hasDecisionLoadingId(llmDecisionLoadingIds.value, previewId);
 }
 
 function getPreviewTransactionTypeNumber(previewType?: string): number | undefined {
@@ -1986,7 +2253,7 @@ function syncTransactionFromPreviewDecision(item: ImportTransaction, previewData
     item.dedupSourceIds = Array.isArray(previewData.dedup_source_ids)
         ? previewData.dedup_source_ids
         : item.dedupSourceIds;
-    item.matching = previewData.matching || item.matching;
+    item.matching = mergePreviewMatchingPayload(item.matching, previewData.matching) as unknown as typeof item.matching;
     item.isManuallyAnnotated = !!previewData.preview_is_manually_annotated || !!previewData.matching?.annotation.is_manually_annotated;
 
     item.recurringTemplateId = previewData.preview_recurring_id ? String(previewData.preview_recurring_id) : '';
@@ -2201,6 +2468,60 @@ async function reviewLearningSuggestion(
         snackbar.value?.showMessage(errorMessage);
     } finally {
         removeDecisionLoadingId(learningDecisionLoadingIds, previewId);
+    }
+}
+
+async function reviewLLMRecommendation(
+    item: ImportTransaction,
+    decision: 'accept' | 'reject'
+): Promise<void> {
+    const previewId = getPreviewId(item);
+    if (!props.sessionId || previewId === null) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (shouldBlockSignalActionWhileEditing(tt('Please sync manual preview edits before reviewing LLM suggestions'))) {
+        return;
+    }
+
+    if (isPreviewMatchingDecisionBusy(previewId)) {
+        return;
+    }
+
+    addDecisionLoadingId(llmDecisionLoadingIds, previewId);
+
+    try {
+        const suggestion = {
+            ...getLLMMatchingPayload(item)
+        };
+        const response = decision === 'accept'
+            ? await services.llmPreviewRecommendAccept({
+                sessionId: props.sessionId,
+                previewId,
+                suggestion
+            })
+            : await services.llmPreviewRecommendReject({
+                sessionId: props.sessionId,
+                previewId,
+                suggestion
+            });
+
+        const result = response.data?.result;
+        const responseSessionId = result?.session_id || result?.sessionId || '';
+        if (!result || responseSessionId !== props.sessionId) {
+            throw new Error('LLM recommendation response is out of date');
+        }
+
+        syncTransactionFromLLMPreviewPayload(item, result);
+        await refreshLLMSessionSignalMemory(true);
+        snackbar.value?.showMessage(tt(decision === 'accept' ? 'LLM Suggestion Accepted' : 'LLM Suggestion Rejected'));
+    } catch (error) {
+        const errorMessage = getActionErrorMessage(error, 'LLM recommendation decision failed');
+        logger.error(`[LLM 建议决策] 失败: ${errorMessage}`, error);
+        snackbar.value?.showMessage(errorMessage);
+    } finally {
+        removeDecisionLoadingId(llmDecisionLoadingIds, previewId);
     }
 }
 
@@ -2452,6 +2773,7 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
     const dedupSourceIds = Array.isArray(item.dedupSourceIds) ? item.dedupSourceIds : [];
     const dedupSourceLabels = Array.isArray(item.matching?.dedup.source_labels) ? item.matching?.dedup.source_labels : [];
     const parserTags = Array.isArray(item.parserTags) ? item.parserTags : [];
+    const llmPayload = getLLMMatchingPayload(item);
 
     return [
         importPreviewSignalSourceContext.value.version,
@@ -2480,6 +2802,14 @@ function buildImportPreviewSignalCacheSignature(item: ImportTransaction): string
         item.learningRecommendationSummary || '',
         item.matching?.learning.mode || '',
         String(!!item.matching?.learning.auto_apply),
+        getLLMSignalStatus(item) || '',
+        String(llmPayload.suggested_main_category || ''),
+        String(llmPayload.suggested_sub_category || ''),
+        String(llmPayload.suggested_source_account || ''),
+        String(llmPayload.suggested_destination_account || ''),
+        String(llmPayload.reason || ''),
+        Number(llmPayload.confidence || 0),
+        String(!!llmPayload.suppressed),
         String(!!item.hasRecurringMatch()),
         getRecurringMatchSummary(item),
         Number(item.recurringCandidateCount || 0),
@@ -2494,6 +2824,7 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         return cached.viewModel;
     }
 
+    const llmPayload = getLLMMatchingPayload(item);
     const viewModel = buildImportPreviewSignalViewModel({
         parserSource: item.parserSource,
         parserTags: item.parserTags,
@@ -2517,6 +2848,13 @@ function getImportPreviewSignalViewModel(item: ImportTransaction): ImportPreview
         learningSummary: item.learningRecommendationSummary,
         learningMode: item.matching?.learning.mode || '',
         learningAutoApplied: !!item.matching?.learning.auto_apply,
+        llmStatus: getLLMSignalStatus(item),
+        llmTitle: String(llmPayload.reason || ''),
+        llmSummary: buildLLMSignalSummary(llmPayload),
+        llmConfidence: Number(llmPayload.confidence || 0),
+        llmCategoryPath: getLLMSignalCategoryPath(llmPayload),
+        llmSourceAccount: String(llmPayload.suggested_source_account || ''),
+        llmDestinationAccount: String(llmPayload.suggested_destination_account || ''),
         hasRecurringMatch: item.hasRecurringMatch(),
         recurringTitle: getRecurringMatchSummary(item),
         recurringCandidateCount: item.recurringCandidateCount,
@@ -2787,6 +3125,82 @@ function buildSelectedPreviewUpdates(): Record<string, unknown>[] {
             selected: transaction.selected
         };
     }).filter(item => !!item.id);
+}
+
+function getTrackedTransactionByPreviewId(previewId: number): ImportTransaction | null {
+    for (const transaction of importTransactions.value) {
+        if (getPreviewId(transaction) === previewId) {
+            return transaction;
+        }
+    }
+
+    return serverPagedDrafts.value.get(previewId) || null;
+}
+
+async function applyLLMPreviewRecommendations(): Promise<void> {
+    commitEditingTransactionDraft();
+
+    if (!props.sessionId) {
+        snackbar.value?.showMessage('No session ID available');
+        return;
+    }
+
+    if (llmPreviewRecommending.value) {
+        return;
+    }
+
+    llmPreviewRecommending.value = true;
+    try {
+        const previewUpdates = buildSelectedPreviewUpdates();
+        if (!previewUpdates.length) {
+            snackbar.value?.showMessage(tt('No preview rows available for LLM recommendation'));
+            return;
+        }
+
+        const response = await services.llmPreviewRecommend({
+            sessionId: props.sessionId,
+            previewUpdates
+        });
+        const suggestions = Array.isArray(response.data?.result?.suggestions)
+            ? response.data.result.suggestions as Array<{
+                preview_id?: number;
+                preview?: ImportPreviewRecord | null;
+                matching?: { llm?: ImportPreviewLLMMatchingPayload } | null;
+                applied_fields?: string[];
+            }>
+            : [];
+
+        for (const suggestion of suggestions) {
+            const previewId = Number(suggestion.preview_id || 0);
+            if (!previewId) {
+                continue;
+            }
+
+            const target = getTrackedTransactionByPreviewId(previewId);
+            if (!target) {
+                continue;
+            }
+
+            syncTransactionFromLLMPreviewPayload(target, suggestion);
+        }
+
+        await refreshLLMSessionSignalMemory(true);
+
+        if (suggestions.length > 0) {
+            snackbar.value?.showMessage(tt('LLM preview recommendation updated {count} rows', {
+                count: suggestions.length
+            }));
+            return;
+        }
+
+        snackbar.value?.showMessage(tt('LLM preview recommendation completed, but no suggestions were generated'));
+    } catch (error) {
+        const errorMessage = getActionErrorMessage(error, 'LLM preview recommendation failed');
+        logger.error(`[LLM 黄色建议] 失败: ${errorMessage}`, error);
+        snackbar.value?.showMessage(errorMessage);
+    } finally {
+        llmPreviewRecommending.value = false;
+    }
 }
 
 async function analyzeSelectedPreviewWithLLM(): Promise<void> {
@@ -3503,9 +3917,26 @@ function updatePreviewTableSort(sortBy: PreviewTableSortInputItem[] = []): void 
 watch(
     () => props.importTransactions,
     transactions => {
-        (transactions || []).forEach(transaction => syncTransferDecisionBaseline(transaction));
         rehydrateCurrentPageDrafts();
+        (transactions || []).forEach(transaction => {
+            syncTransferDecisionBaseline(transaction);
+            syncLearningDecisionBaseline(transaction);
+        });
+        applyLLMSignalMemoryToTransactions(transactions || []);
         (transactions || []).forEach(transaction => syncPreviewFilterIndexFromTransaction(transaction));
+    },
+    { immediate: true }
+);
+
+watch(
+    () => props.sessionId,
+    sessionId => {
+        llmSessionSignalMemory.value = new Map();
+        if (!sessionId) {
+            return;
+        }
+
+        void refreshLLMSessionSignalMemory(true);
     },
     { immediate: true }
 );
@@ -4576,14 +5007,20 @@ function updateTransactionData(transaction: ImportTransaction): void {
 
     if (transaction.categoryId && allCategoriesMap.value[transaction.categoryId]) {
         transaction.actualCategoryName = allCategoriesMap.value[transaction.categoryId]!.name;
+    } else if (!transaction.categoryId || transaction.categoryId === '0' || !allCategoriesMap.value[transaction.categoryId]) {
+        transaction.actualCategoryName = '';
     }
 
     if (transaction.sourceAccountId && allAccountsMap.value[transaction.sourceAccountId]) {
         transaction.actualSourceAccountName = allAccountsMap.value[transaction.sourceAccountId]!.name;
+    } else if (!transaction.sourceAccountId || transaction.sourceAccountId === '0' || !allAccountsMap.value[transaction.sourceAccountId]) {
+        transaction.actualSourceAccountName = '';
     }
 
     if (transaction.destinationAccountId && allAccountsMap.value[transaction.destinationAccountId]) {
         transaction.actualDestinationAccountName = allAccountsMap.value[transaction.destinationAccountId]!.name;
+    } else if (!transaction.destinationAccountId || transaction.destinationAccountId === '0' || !allAccountsMap.value[transaction.destinationAccountId]) {
+        transaction.actualDestinationAccountName = '';
     }
 
     syncPreviewFilterIndexFromTransaction(transaction);

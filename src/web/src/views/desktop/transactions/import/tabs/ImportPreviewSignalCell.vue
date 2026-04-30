@@ -232,6 +232,66 @@
             </div>
         </div>
 
+        <div class="signal-group" v-if="viewModel.llm">
+            <div class="signal-stack signal-stack--learning">
+                <v-menu
+                    v-if="hasSignalDetails(viewModel.llm.detailLines)"
+                    open-on-hover
+                    location="bottom start"
+                    :close-on-content-click="false">
+                    <template #activator="{ props: menuProps }">
+                        <v-chip
+                            v-bind="menuProps"
+                            class="signal-chip"
+                            :color="viewModel.llm.color"
+                            variant="tonal"
+                            size="x-small"
+                            :prepend-icon="getStatusIcon(viewModel.llm.status)">
+                            {{ tt(viewModel.llm.labelKey) }}
+                        </v-chip>
+                    </template>
+                    <v-card class="signal-detail-card" variant="outlined">
+                        <v-card-text class="pa-2">
+                            <div
+                                v-for="line in viewModel.llm.detailLines"
+                                :key="`llm-${line}`"
+                                class="text-caption">
+                                {{ line }}
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </v-menu>
+                <v-chip
+                    v-else
+                    class="signal-chip"
+                    :color="viewModel.llm.color"
+                    variant="tonal"
+                    size="x-small"
+                    :prepend-icon="getStatusIcon(viewModel.llm.status)">
+                    {{ tt(viewModel.llm.labelKey) }}
+                </v-chip>
+                <div
+                    v-if="viewModel.llm.actions.length > 0"
+                    :class="getActionRowClass(viewModel.llm.actions.length)">
+                    <v-btn
+                        v-for="action in viewModel.llm.actions"
+                        :key="`llm-${action.decision}`"
+                        class="signal-action-btn"
+                        variant="text"
+                        :color="action.color"
+                        size="x-small"
+                        :loading="llmBusy"
+                        :disabled="disabled || rowBusy"
+                        @click.stop="emitLLMReview(action.decision)">
+                        <template #loader>
+                            <v-progress-circular indeterminate :size="12" :width="2" class="signal-action-loader" />
+                        </template>
+                        {{ tt(action.labelKey) }}
+                    </v-btn>
+                </div>
+            </div>
+        </div>
+
         <div class="signal-group" v-if="viewModel.recurring">
             <v-chip
                 v-if="viewModel.recurring.hasMatch"
@@ -302,11 +362,13 @@ defineProps<{
     rowBusy?: boolean;
     transferBusy?: boolean;
     learningBusy?: boolean;
+    llmBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
     (e: 'reviewTransfer', decision: 'accept' | 'reject' | 'clear'): void;
     (e: 'reviewLearning', decision: 'accept' | 'reject' | 'clear'): void;
+    (e: 'reviewLlm', decision: 'accept' | 'reject'): void;
     (e: 'openRecurring'): void;
     (e: 'clearRecurring'): void;
 }>();
@@ -350,6 +412,14 @@ function getLearningIcon(status: ImportPreviewSignalStatus): string {
     }
 
     return getStatusIcon(status);
+}
+
+function emitLLMReview(decision: 'accept' | 'reject' | 'clear'): void {
+    if (decision === 'clear') {
+        return;
+    }
+
+    emit('reviewLlm', decision);
 }
 </script>
 

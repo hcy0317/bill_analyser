@@ -124,6 +124,7 @@ export interface ImportPreviewSignalViewModel {
     transferSuggestion: ImportPreviewSignalReviewView | null;
     investment: ImportPreviewSignalReviewView | null;
     learning: ImportPreviewSignalReviewView | null;
+    llm: ImportPreviewSignalReviewView | null;
     recurring: ImportPreviewSignalRecurringView | null;
     hasAnySignal: boolean;
 }
@@ -143,6 +144,13 @@ export interface ImportPreviewSignalState extends ImportCheckMatchingContextStat
     learningSummary?: string;
     learningMode?: ImportPreviewLearningMode | string;
     learningAutoApplied?: boolean;
+    llmStatus?: ImportPreviewSignalStatus | null;
+    llmTitle?: string;
+    llmSummary?: string;
+    llmConfidence?: number;
+    llmCategoryPath?: string;
+    llmSourceAccount?: string;
+    llmDestinationAccount?: string;
     dedupSourceCount?: number;
     dedupSourceLabels?: string[];
     dedupSources?: ImportMatchingSourcePayload[];
@@ -360,6 +368,10 @@ function normalizeLearningCategoryPath(categoryPath: string): string {
     return categoryPath.trim().replace(/\s*\/\s*/g, '-');
 }
 
+function normalizeLLMCategoryPath(categoryPath: string): string {
+    return normalizeLearningCategoryPath(categoryPath);
+}
+
 function isPlaceholderLearningAccount(account: string): boolean {
     return account.trim() === '' || account.trim() === '-';
 }
@@ -377,6 +389,17 @@ function normalizeLearningAccountRoute(accountRoute: string): string {
     }
 
     return routeParts.map(part => (isPlaceholderLearningAccount(part) ? '-' : part)).join('→');
+}
+
+function formatConfidencePercent(confidence: number | undefined): string {
+    const numericConfidence = typeof confidence === 'number' && Number.isFinite(confidence)
+        ? confidence
+        : 0;
+    if (numericConfidence <= 0) {
+        return '';
+    }
+
+    return `${Math.round(numericConfidence * 100)}%`;
 }
 
 function sortSourceChain(
@@ -533,6 +556,38 @@ function buildLearningDetailLines(
     return state.learningTitle ? [state.learningTitle] : [];
 }
 
+function buildLLMDetailLines(
+    state: ImportPreviewSignalState,
+    options: ImportCheckMatchingDedupTitleOptions
+): string[] {
+    const infoLabels = getSignalInfoLabels(options);
+    const detailLines: string[] = [];
+    const llmCategoryPath = normalizeLLMCategoryPath(state.llmCategoryPath || '');
+    if (llmCategoryPath) {
+        const recommendationLabel = normalizeLearningRecommendationLabel(infoLabels.recommendedCategoryLabel)
+            || infoLabels.recommendedCategoryLabel;
+        detailLines.push(formatInfoLine(recommendationLabel, llmCategoryPath));
+    }
+
+    const llmAccountRoute = normalizeLearningAccountRoute(
+        [state.llmSourceAccount || '', state.llmDestinationAccount || ''].filter(part => part !== '').join('→')
+    );
+    if (llmAccountRoute) {
+        detailLines.push(formatInfoLine(infoLabels.accountRouteLabel, llmAccountRoute));
+    }
+
+    const llmConfidence = formatConfidencePercent(state.llmConfidence);
+    if (llmConfidence) {
+        detailLines.push(formatInfoLine('Confidence', llmConfidence));
+    }
+
+    if (detailLines.length > 0) {
+        return detailLines;
+    }
+
+    return state.llmTitle ? [state.llmTitle] : [];
+}
+
 function buildSignalTitle(detailLines: string[], fallbackTitle: string | undefined = ''): string {
     return detailLines.length > 0 ? detailLines.join(' | ') : (fallbackTitle || '');
 }
@@ -653,7 +708,8 @@ function buildReviewView(
     profileText?: string,
     summary?: string,
     reviewedActions: ImportPreviewSignalDecision[] = [{ decision: 'clear', labelKey: 'Clear', color: 'warning' }],
-    detailLines: string[] = []
+    detailLines: string[] = [],
+    pendingColor: string = 'info'
 ): ImportPreviewSignalReviewView | null {
     if (!status) {
         return null;
@@ -670,7 +726,7 @@ function buildReviewView(
             status,
             labelKey: pendingLabelKey,
             title: resolvedTitle,
-            color: 'info',
+            color: pendingColor,
             profileText,
             summary,
             actions: pendingActions,
@@ -796,6 +852,23 @@ export function buildImportPreviewSignalViewModel(
     if (learning && isBlueLearning) {
         learning.color = 'primary';
     }
+    const llmDetailLines = buildLLMDetailLines(state, options);
+    const llm = buildReviewView(
+        state.llmStatus,
+        buildSignalTitle(llmDetailLines, state.llmTitle),
+        'LLM Suggestion',
+        'LLM Suggestion Accepted',
+        'LLM Suggestion Rejected',
+        [
+            { decision: 'accept', labelKey: 'Apply Suggestion', color: 'warning' },
+            { decision: 'reject', labelKey: 'Reject LLM Suggestion', color: 'error' }
+        ],
+        undefined,
+        state.llmSummary,
+        [],
+        llmDetailLines,
+        'warning'
+    );
     const recurring = state.hasRecurringMatch || (state.recurringCandidateCount || 0) > 0
         ? {
             hasMatch: !!state.hasRecurringMatch,
@@ -812,11 +885,13 @@ export function buildImportPreviewSignalViewModel(
         transferSuggestion,
         investment: null,
         learning,
+        llm,
         recurring,
         hasAnySignal: !!parser
             || !!dedup
             || !!transferSuggestion
             || !!learning
+            || !!llm
             || !!recurring
     };
 }

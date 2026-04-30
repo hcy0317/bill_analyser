@@ -140,6 +140,42 @@ class DatabaseSchemaCoreMixin(DatabaseFacadeBase):
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS llm_memory_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id TEXT,
+                preview_id INTEGER,
+                event_type TEXT NOT NULL DEFAULT 'recommendation',
+                decision TEXT,
+                prompt_text TEXT,
+                llm_response_raw TEXT,
+                llm_provider TEXT,
+                llm_model TEXT,
+                suggested_main_category TEXT,
+                suggested_sub_category TEXT,
+                suggested_source_account TEXT,
+                suggested_destination_account TEXT,
+                confidence REAL DEFAULT 0.0,
+                user_correction_category TEXT,
+                user_correction_account TEXT,
+                snapshot_before TEXT,
+                snapshot_after TEXT,
+                metadata TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_memory_events_user "
+            "ON llm_memory_events(user_id, created_at DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_memory_events_session "
+            "ON llm_memory_events(user_id, session_id)"
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS llm_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL DEFAULT 1,

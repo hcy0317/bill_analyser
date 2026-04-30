@@ -89,6 +89,20 @@ class AnnotationMatchingPayload:
 
 
 @dataclass(frozen=True)
+class LLMRecommendationPayload:
+    """Yellow LLM recommendation signal payload for import preview."""
+
+    suggested_main_category: str = ""
+    suggested_sub_category: str = ""
+    suggested_source_account: str = ""
+    suggested_destination_account: str = ""
+    confidence: float = 0.0
+    reason: str = ""
+    review_status: str = ""
+    suppressed: bool = False
+
+
+@dataclass(frozen=True)
 class ReconciliationMatchingPayload:
     """Import-to-formal-bill reconciliation provenance payload."""
 
@@ -111,6 +125,7 @@ class PreviewMatchingPayload:
     transfer: TransferMatchingPayload = field(default_factory=TransferMatchingPayload)
     investment: InvestmentMatchingPayload = field(default_factory=InvestmentMatchingPayload)
     learning: LearningMatchingPayload = field(default_factory=LearningMatchingPayload)
+    llm: LLMRecommendationPayload = field(default_factory=LLMRecommendationPayload)
     recurring: RecurringMatchingPayload = field(default_factory=RecurringMatchingPayload)
     dedup: DedupMatchingPayload = field(default_factory=DedupMatchingPayload)
     parser: ParserMatchingPayload = field(default_factory=ParserMatchingPayload)

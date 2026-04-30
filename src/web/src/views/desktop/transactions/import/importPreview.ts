@@ -1,5 +1,20 @@
 import type { ImportMatchingPayload } from '@/models/import_matching.ts';
 
+export interface ImportPreviewLLMMatchingPayload {
+    suggested_main_category?: string;
+    suggested_sub_category?: string;
+    suggested_source_account?: string;
+    suggested_destination_account?: string;
+    confidence?: number;
+    reason?: string;
+    review_status?: string;
+    suppressed?: boolean;
+}
+
+export type ImportPreviewMatchingPayload = ImportMatchingPayload & {
+    llm?: ImportPreviewLLMMatchingPayload;
+};
+
 export interface ImportPreviewCategoryLike {
     id?: string;
     name: string;
@@ -47,7 +62,7 @@ export interface ImportPreviewRecord {
     dedup_source_ids?: Array<number | string> | string;
     preview_parser_id?: string;
     preview_parser_tags?: string[];
-    matching?: ImportMatchingPayload;
+    matching?: ImportPreviewMatchingPayload;
     preview_is_manually_annotated?: boolean;
 }
 
