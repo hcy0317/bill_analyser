@@ -818,6 +818,9 @@ interface LLMCandidateItem {
     reason?: string;
     category_name?: string;
     target_category?: string;
+    suggested_main_category?: string;
+    suggested_sub_category?: string;
+    suggested_rule_expression?: string;
 }
 
 interface SelectOption {
@@ -1111,16 +1114,71 @@ function toLLMConfigs(result: unknown): LLMConfigItem[] {
 }
 
 function toLLMCandidates(result: unknown): LLMCandidateItem[] {
-    if (Array.isArray(result)) {
-        return result as LLMCandidateItem[];
-    }
+    const rawItems = Array.isArray(result)
+        ? result
+        : (result && typeof result === 'object' && 'candidates' in result && Array.isArray((result as { candidates?: unknown }).candidates)
+            ? (result as { candidates: unknown[] }).candidates
+            : []);
 
-    if (result && typeof result === 'object' && 'candidates' in result) {
-        const candidates = (result as { candidates?: unknown }).candidates;
-        return Array.isArray(candidates) ? candidates as LLMCandidateItem[] : [];
-    }
+    return rawItems.map((item) => {
+        const record = (item && typeof item === 'object') ? item as Record<string, unknown> : {};
+        const mainCategory = typeof record['suggested_main_category'] === 'string'
+            ? record['suggested_main_category']
+            : '';
+        const subCategory = typeof record['suggested_sub_category'] === 'string'
+            ? record['suggested_sub_category']
+            : '';
+        const categoryName = typeof record['category_name'] === 'string' && record['category_name']
+            ? record['category_name']
+            : [mainCategory, subCategory].filter(Boolean).join('/');
+        const suggestedRuleExpression = typeof record['suggested_rule_expression'] === 'string'
+            ? record['suggested_rule_expression']
+            : '';
+        const llmResponseRaw = typeof record['llm_response_raw'] === 'string'
+            ? record['llm_response_raw']
+            : '';
+        let parsedReason = '';
+        if (llmResponseRaw) {
+            try {
+                const parsed = JSON.parse(llmResponseRaw) as Record<string, unknown>;
+                const payloadReason = parsed['reason'];
+                const payloadExplanation = parsed['explanation'];
+                parsedReason = typeof payloadReason === 'string'
+                    ? payloadReason
+                    : (typeof payloadExplanation === 'string' ? payloadExplanation : '');
+            } catch {
+                parsedReason = '';
+            }
+        }
 
-    return [];
+        return {
+            id: Number(record['id'] || 0),
+            type: typeof record['type'] === 'string' ? record['type'] : undefined,
+            status: typeof record['status'] === 'string' ? record['status'] : 'pending',
+            confidence: typeof record['confidence'] === 'number'
+                ? record['confidence']
+                : Number(record['confidence'] || 0),
+            rule_type: typeof record['rule_type'] === 'string'
+                ? record['rule_type']
+                : (typeof record['type'] === 'string' ? record['type'] : undefined),
+            rule_content: typeof record['rule_content'] === 'string' && record['rule_content']
+                ? record['rule_content']
+                : suggestedRuleExpression,
+            expression: typeof record['expression'] === 'string' && record['expression']
+                ? record['expression']
+                : suggestedRuleExpression,
+            reason: typeof record['reason'] === 'string' && record['reason']
+                ? record['reason']
+                : parsedReason,
+            category_name: categoryName || undefined,
+            target_category: typeof record['target_category'] === 'string'
+                ? record['target_category']
+                : categoryName || undefined,
+            suggested_main_category: mainCategory || undefined,
+            suggested_sub_category: subCategory || undefined,
+            suggested_rule_expression: suggestedRuleExpression || undefined,
+        };
+    });
 }
 
 function extractPayloadMessage(payload: unknown, depth = 0): string | null {
@@ -1550,7 +1608,7 @@ async function handleDeleteConfig(configId: number) {
 async function loadLLMCandidates() {
     llmLoading.value = true;
     try {
-        const resp = await services.getLLMCandidates({ limit: 100 });
+        const resp = await services.getLLMCandidates({ type: 'rule_synthesis', limit: 100 });
         if (resp.data?.success && resp.data.result) {
             llmCandidates.value = toLLMCandidates(resp.data.result);
             selectedLLMIds.value = selectedLLMIds.value.filter(id =>
@@ -1567,12 +1625,12 @@ async function loadLLMCandidates() {
 async function handleLLMGenerate() {
     llmLoading.value = true;
     try {
-        const resp = await services.analyzeLLMTransactions({ limit: 20 });
+        const resp = await services.generateLLMRuleSynthesis({ limit: 8 });
         const created = resp.data?.result?.candidates_created ?? 0;
-        showInfoMessage('Generated LLM Suggestions Summary', { count: created });
+        showInfoMessage('Generated LLM Rule Candidates Summary', { count: created });
         await loadLLMCandidates();
     } catch (error: unknown) {
-        store.error = getRequestErrorMessage(error, 'Failed to generate LLM suggestions');
+        store.error = getRequestErrorMessage(error, 'Failed to generate LLM rule candidates');
     } finally {
         llmLoading.value = false;
     }
@@ -1592,7 +1650,7 @@ async function handleLLMBatchAccept() {
         selectedLLMIds.value = [];
         await loadLLMCandidates();
     } catch (error: unknown) {
-        store.error = getRequestErrorMessage(error, 'Failed to batch accept LLM suggestions');
+        store.error = getRequestErrorMessage(error, 'Failed to batch accept LLM rule candidates');
     } finally {
         llmLoading.value = false;
     }

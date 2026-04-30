@@ -246,6 +246,40 @@ def induce_rules():
 
 
 # ------------------------------------------------------------------
+# POST /rule-synthesis
+# ------------------------------------------------------------------
+@bp.route("/rule-synthesis", methods=["POST"])
+@log_method
+@require_auth
+def synthesize_rules():
+    """使用 LLM 从长期学习知识摘要归纳规则中心候选。"""
+    try:
+        user_id = _get_request_user_id()
+        config = _get_llm_config(user_id)
+        if not config.get("enabled", False):
+            return _error_response("LLM service is not enabled", "LLM_DISABLED", 400)
+
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request"}), 400
+
+        limit = data.get("limit", 8)
+        service = _get_llm_service(user_id)
+        result = _run_async(service.synthesize_rule_candidates(user_id=user_id, limit=limit))
+        return jsonify({"success": True, "data": result, "total": result["candidates_created"]})
+    except RuntimeError as exc:
+        logger.warning("LLM 规则候选归纳失败: %s", exc)
+        if str(exc).startswith("Rate limit exceeded"):
+            return _error_response(str(exc), "LLM_RATE_LIMITED", 429)
+        return _error_response(str(exc), "LLM_PROVIDER_UNAVAILABLE", 503)
+    except ValueError as exc:
+        return _error_response(str(exc), "INVALID_REQUEST", 400)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("LLM 规则候选归纳失败: %s", exc)
+        return _error_response(str(exc), "INTERNAL_ERROR", 500)
+
+
+# ------------------------------------------------------------------
 # GET /candidates
 # ------------------------------------------------------------------
 @bp.route("/candidates", methods=["GET"])
@@ -271,7 +305,13 @@ def list_candidates():
                 offset=offset,
             )
         )
-        total = _run_async(db.get_llm_candidates_count(user_id=user_id, status=status))
+        total = _run_async(
+            db.get_llm_candidates_count(
+                user_id=user_id,
+                status=status,
+                type=type_,
+            )
+        )
 
         return jsonify({"success": True, "data": candidates, "total": total})
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -311,11 +351,7 @@ def accept_candidate(candidate_id: int):
     """接受 LLM 候选建议"""
     try:
         user_id = _get_request_user_id()
-        config = _get_llm_config(user_id)
-        if not config.get("enabled", False):
-            return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
-
-        service = _get_llm_service(user_id)
+        service = _get_llm_service(user_id, require_provider=False)
         result = _run_async(service.accept_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": result})
@@ -336,11 +372,7 @@ def reject_candidate(candidate_id: int):
     """拒绝 LLM 候选建议"""
     try:
         user_id = _get_request_user_id()
-        config = _get_llm_config(user_id)
-        if not config.get("enabled", False):
-            return jsonify({"success": False, "error": "LLM service is not enabled"}), 400
-
-        service = _get_llm_service(user_id)
+        service = _get_llm_service(user_id, require_provider=False)
         result = _run_async(service.reject_candidate(candidate_id, user_id=user_id))
 
         return jsonify({"success": True, "data": {"rejected": result}})

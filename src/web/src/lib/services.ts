@@ -312,6 +312,13 @@ interface LLMAnalyzeTransactionsResponse {
     mode?: 'import_session' | 'persisted_selection' | 'persisted_uncategorized';
 }
 
+interface LLMRuleSynthesisResponse {
+    candidates_created: number;
+    candidates: LLMAnalyzeTransactionCandidate[];
+    mode?: 'rule_synthesis';
+    knowledge_summary_pack?: Record<string, unknown>;
+}
+
 interface LLMMemoryEventsResponse {
     events: Array<Record<string, unknown>>;
     total: number;
@@ -2291,6 +2298,17 @@ export default {
         return axios.post('llm/induce-rules', {
             category_id: categoryId,
             sample_count: sampleCount || 10
+        }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
+            return buildApiResponse(response, response.data?.data);
+        });
+    },
+    generateLLMRuleSynthesis: ({
+        limit
+    }: {
+        limit?: number
+    } = {}): ApiResponsePromise<LLMRuleSynthesisResponse> => {
+        return axios.post('llm/rule-synthesis', {
+            limit: limit || 8
         }, { timeout: DEFAULT_LLM_API_TIMEOUT } as any).then(response => {
             return buildApiResponse(response, response.data?.data);
         });

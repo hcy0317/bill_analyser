@@ -65,7 +65,7 @@ export function isModalShowing(): number {
 }
 
 export function onSwipeoutDeleted(domId: string, callback: () => void): void {
-    f7.swipeout.delete(f7.$('#' + domId), callback);
+    f7.swipeout.delete('#' + domId, callback);
 }
 
 export function autoChangeTextareaSize(el: HTMLElement): void {
@@ -111,7 +111,11 @@ export function getElementActualHeights(selector: string): Record<string, number
         return heights;
     }
 
-    for (const el of elements) {
+    for (let index = 0; index < elements.length; index++) {
+        const el = elements[index];
+        if (!el) {
+            continue;
+        }
         const rect = el.getBoundingClientRect();
         heights[el.id] = rect.height;
     }
@@ -127,6 +131,9 @@ export function getElementBoundingRect(selector: string): DOMRect | null {
     }
 
     const el = elements[0];
+    if (!el) {
+        return null;
+    }
     return el.getBoundingClientRect();
 }
 
@@ -148,8 +155,14 @@ export function scrollToSelectedItem(parentEl: Framework7Dom, containerSelector:
         - (container.outerHeight() - selectedItem.outerHeight()) / 2;
 
     if (selectedItem.length > 1) {
-        const firstSelectedItem = f7.$(selectedItem[0]);
-        const lastSelectedItem = f7.$(selectedItem[selectedItem.length - 1]);
+        const firstSelectedElement = selectedItem[0];
+        const lastSelectedElement = selectedItem[selectedItem.length - 1];
+        if (!firstSelectedElement || !lastSelectedElement) {
+            return;
+        }
+
+        const firstSelectedItem = f7.$(firstSelectedElement);
+        const lastSelectedItem = f7.$(lastSelectedElement);
 
         const firstSelectedItemInTop = firstSelectedItem.offset().top - container.offset().top - containerPaddingTop;
         const lastSelectedItemInTop = lastSelectedItem.offset().top - container.offset().top - containerPaddingTop;
@@ -191,8 +204,6 @@ export function scrollSheetToTop(sheetElement: HTMLElement | undefined, windowNo
 export function onInfiniteScrolling(callback: (e: Event) => void): void {
     f7.$('.infinite-scroll-content').on('scroll', (e: Event) => {
         callback(e);
-    }, {
-        passive: true
     });
 }
 

@@ -16,7 +16,7 @@
     "lint": "vue-tsc --noEmit && eslint . --fix",
     "lint:ci": "vue-tsc --noEmit && eslint .",
     "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand",
-    "test:coverage": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand --coverage",
+    "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand --coverage",
     "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch"
   },
   "dependencies": {

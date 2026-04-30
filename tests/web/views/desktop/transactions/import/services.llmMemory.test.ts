@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
 
 const mockAxiosGet = jest.fn<(...args: Array<unknown>) => Promise<any>>();
+const mockAxiosPost = jest.fn<(...args: Array<unknown>) => Promise<any>>();
 
 jest.mock('axios', () => ({
     __esModule: true,
     default: {
         get: mockAxiosGet,
-        post: jest.fn(),
+        post: mockAxiosPost,
         put: jest.fn(),
         delete: jest.fn(),
         defaults: {
@@ -47,6 +48,7 @@ import services from '@/lib/services.ts';
 describe('services llm memory wrapper', () => {
     beforeEach(() => {
         mockAxiosGet.mockReset();
+        mockAxiosPost.mockReset();
     });
 
     test('preserves both filtered events and total from /api/llm/memory responses', async () => {
@@ -89,6 +91,39 @@ describe('services llm memory wrapper', () => {
                 }
             ],
             total: 3
+        });
+    });
+
+    test('calls /api/llm/rule-synthesis and preserves created candidates summary', async () => {
+        mockAxiosPost.mockResolvedValue({
+            data: {
+                success: true,
+                data: {
+                    mode: 'rule_synthesis',
+                    candidates_created: 2,
+                    candidates: [
+                        { id: 11, type: 'rule_synthesis' },
+                        { id: 12, type: 'rule_synthesis' }
+                    ]
+                }
+            }
+        });
+
+        const response = await services.generateLLMRuleSynthesis({ limit: 6 });
+
+        expect(mockAxiosPost).toHaveBeenCalledWith(
+            'llm/rule-synthesis',
+            { limit: 6 },
+            { timeout: expect.any(Number) }
+        );
+        expect(response.data.success).toBe(true);
+        expect(response.data.result).toStrictEqual({
+            mode: 'rule_synthesis',
+            candidates_created: 2,
+            candidates: [
+                { id: 11, type: 'rule_synthesis' },
+                { id: 12, type: 'rule_synthesis' }
+            ]
         });
     });
 });

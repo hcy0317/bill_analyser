@@ -93,6 +93,22 @@ class _FakePreviewRecommendationProvider:
         )
 
 
+class _RuleSynthesisLLMProvider:
+    def __init__(self, candidates: list[dict[str, Any]]) -> None:
+        self.candidates = candidates
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate(self, **kwargs) -> LLMResponse:  # pragma: no cover - trivial async stub
+        self.calls.append(kwargs)
+        return LLMResponse(
+            content=json.dumps(self.candidates, ensure_ascii=False),
+            model="rule-synthesis-model",
+            provider="rule-synthesis-provider",
+            tokens_used=48,
+            raw_response={"stub": True},
+        )
+
+
 def _list_llm_candidates_for_user(*, user_id: int) -> list[dict]:
     from bill_analyser.api.app import db
 
@@ -226,6 +242,144 @@ def _prepare_llm_preview_fixture(
         "source_account": source_account,
         "destination_account": destination_account,
     }
+
+
+def _seed_rule_synthesis_knowledge_pack(
+    *,
+    user_id: int,
+    category_id: int,
+    category_path: tuple[str, str],
+) -> None:
+    from bill_analyser.api.app import db
+    from bill_analyser.core.import_learning.model import MODEL_KEY
+
+    async def _seed() -> None:
+        conn = await db._get_connection()
+        snapshot_cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_dataset_snapshots (
+                user_id, name, corpus_sample_count, filters_json,
+                status, created_at, updated_at
+            ) VALUES (?, 'pytest-rule-synthesis', 11, '{}', 'ready', datetime('now', 'localtime'), datetime('now', 'localtime'))
+            """,
+            (user_id,),
+        )
+        dataset_snapshot_id = int(snapshot_cursor.lastrowid or 0)
+        rule_cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_rules (
+                user_id, match_type, match_value, normalized_match_value,
+                learned_type, learned_category_id,
+                learned_source_account_id, learned_destination_account_id,
+                enabled, parser_id, composite_match_hash, match_features_json,
+                applied_count, created_at, updated_at
+            ) VALUES (?, 'composite', ?, ?, '支出', ?, NULL, NULL, 1, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+            """,
+            (
+                user_id,
+                "c=星巴克咖啡|d=早餐咖啡|m=支付宝",
+                "c=星巴克咖啡|d=早餐咖啡|m=支付宝",
+                category_id,
+                "alipay",
+                "c=星巴克咖啡|d=早餐咖啡|m=支付宝",
+                json.dumps(
+                    {
+                        "counterparty": "星巴克咖啡",
+                        "description": "早餐咖啡",
+                        "payment_method": "支付宝",
+                    },
+                    ensure_ascii=False,
+                ),
+                6,
+            ),
+        )
+        rule_id = int(rule_cursor.lastrowid or 0)
+        suggestion_cursor = await conn.execute(
+            """
+            INSERT INTO import_learning_suggestions (
+                user_id, match_type, match_value, normalized_match_value,
+                composite_match_hash, match_features_json,
+                suggested_type, suggested_category_id,
+                suggested_source_account_id, suggested_destination_account_id,
+                sample_count, source_session_ids_json, source_preview_ids_json,
+                status, summary, created_at, updated_at
+            ) VALUES (?, 'composite', ?, ?, ?, ?, '支出', ?, NULL, NULL, 5, '[]', '[]', 'pending', ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+            """,
+            (
+                user_id,
+                "c=瑞幸咖啡|d=门店咖啡|m=微信",
+                "c=瑞幸咖啡|d=门店咖啡|m=微信",
+                "c=瑞幸咖啡|d=门店咖啡|m=微信",
+                json.dumps(
+                    {
+                        "counterparty": "瑞幸咖啡",
+                        "description": "门店咖啡",
+                        "payment_method": "微信",
+                    },
+                    ensure_ascii=False,
+                ),
+                category_id,
+                f"{category_path[0]}/{category_path[1]}",
+            ),
+        )
+        suggestion_id = int(suggestion_cursor.lastrowid or 0)
+        await conn.execute(
+            """
+            INSERT INTO import_learning_concept_stats (
+                user_id, concept_key, concept_type,
+                accepted_count, rejected_count, auto_applied_count, rollback_count, updated_at
+            ) VALUES (?, ?, 'rule', 4, 0, 2, 0, datetime('now', 'localtime'))
+            """,
+            (user_id, f"rule:{rule_id}"),
+        )
+        await conn.execute(
+            """
+            INSERT INTO import_learning_concept_stats (
+                user_id, concept_key, concept_type,
+                accepted_count, rejected_count, auto_applied_count, rollback_count, updated_at
+            ) VALUES (?, ?, 'suggestion', 3, 0, 1, 0, datetime('now', 'localtime'))
+            """,
+            (user_id, f"suggestion:{suggestion_id}"),
+        )
+        await conn.execute(
+            """
+            INSERT INTO import_learning_model_registry (
+                user_id, model_key, model_version, dataset_snapshot_id,
+                status, metrics_json, created_at, updated_at
+            ) VALUES (?, ?, 'v321', ?, 'active', ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+            """,
+            (
+                user_id,
+                MODEL_KEY,
+                dataset_snapshot_id,
+                json.dumps(
+                    {
+                        "feature_schema_version": "v-test",
+                        "policy_version": "policy-test",
+                        "sample_count": 11,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        await conn.execute(
+            """
+            INSERT INTO llm_memory_events (
+                user_id, event_type, decision,
+                suggested_main_category, suggested_sub_category,
+                metadata, created_at
+            ) VALUES (?, 'feedback', 'accept', ?, ?, ?, datetime('now', 'localtime'))
+            """,
+            (
+                user_id,
+                category_path[0],
+                category_path[1],
+                "咖啡门店交易通常接受为餐饮/咖啡",
+            ),
+        )
+        await conn.commit()
+
+    asyncio.run(_seed())
 
 
 def _get_preview_item_from_page(client, auth_headers, *, session_id: str, preview_id: int) -> dict[str, Any]:
@@ -1710,3 +1864,165 @@ class TestLLMImportSessionAnalysisAPI:
         owner_get = client.get(f"/api/llm/candidates/{candidate_id}", headers=owner_headers)
         assert owner_get.status_code == 200
         assert owner_get.get_json()["data"]["id"] == candidate_id
+
+    def test_llm_rule_synthesis_builds_rule_center_candidates(self, client, monkeypatch):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_rule_synthesis_candidates")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        main_category, sub_category = _get_category_path_by_id(
+            user_id=current_user_id,
+            category_id=int(category["id"]),
+        )
+        expected_category_name = "/".join(part for part in (main_category, sub_category) if part)
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        _seed_rule_synthesis_knowledge_pack(
+            user_id=current_user_id,
+            category_id=int(category["id"]),
+            category_path=(main_category, sub_category),
+        )
+        monkeypatch.setattr(
+            llm_routes.ProviderFactory,
+            "create",
+            lambda *_args, **_kwargs: _RuleSynthesisLLMProvider(
+                [
+                    {
+                        "rule_name": "咖啡门店归纳规则",
+                        "suggested_main_category": main_category,
+                        "suggested_sub_category": sub_category,
+                        "rule_expression": "OR={星巴克,瑞幸}+AND={咖啡}+NOT={退款}",
+                        "confidence": 0.92,
+                        "reason": "长期学习规则和接受反馈都指向咖啡门店消费。",
+                    }
+                ]
+            ),
+        )
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        response = client.post(
+            "/api/llm/rule-synthesis",
+            headers=auth_headers,
+            json={"limit": 4},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["data"]["mode"] == "rule_synthesis"
+        assert payload["data"]["candidates_created"] == 1
+        assert payload["data"]["knowledge_summary_pack"]["categories"]
+        candidate = payload["data"]["candidates"][0]
+        assert candidate["type"] == "rule_synthesis"
+        assert candidate["category_name"] == expected_category_name
+        assert candidate["rule_expression"] == "OR={星巴克,瑞幸}+AND={咖啡}+NOT={退款}"
+
+        llm_candidates = [
+            item for item in _list_llm_candidates_for_user(user_id=current_user_id)
+            if item.get("type") == "rule_synthesis"
+        ]
+        assert len(llm_candidates) == 1
+        assert llm_candidates[0]["suggested_rule_expression"] == "OR={星巴克,瑞幸}+AND={咖啡}+NOT={退款}"
+
+    def test_llm_rule_synthesis_skips_invalid_rule_expression_candidates(self, client, monkeypatch):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_rule_synthesis_invalid_rule")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        main_category, sub_category = _get_category_path_by_id(
+            user_id=current_user_id,
+            category_id=int(category["id"]),
+        )
+
+        from bill_analyser.api import app as api_app
+        from bill_analyser.api.routes import llm as llm_routes
+
+        _seed_rule_synthesis_knowledge_pack(
+            user_id=current_user_id,
+            category_id=int(category["id"]),
+            category_path=(main_category, sub_category),
+        )
+        monkeypatch.setattr(
+            llm_routes.ProviderFactory,
+            "create",
+            lambda *_args, **_kwargs: _RuleSynthesisLLMProvider(
+                [
+                    {
+                        "rule_name": "坏规则",
+                        "suggested_main_category": main_category,
+                        "suggested_sub_category": sub_category,
+                        "rule_expression": "OR={星巴克",
+                        "confidence": 0.88,
+                        "reason": "malformed",
+                    }
+                ]
+            ),
+        )
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": True,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        response = client.post(
+            "/api/llm/rule-synthesis",
+            headers=auth_headers,
+            json={"limit": 4},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["data"]["candidates_created"] == 0
+        assert payload["data"]["candidates"] == []
+
+    def test_llm_candidate_accept_does_not_require_live_provider_for_rule_review(self, client):
+        _reset_llm_rate_limit_state()
+        auth_headers = _build_isolated_auth_headers(client, "test_llm_candidate_accept_without_provider")
+        current_user_id = _get_current_user_id(client, auth_headers)
+        category = _ensure_test_expense_category(client, auth_headers)
+        main_category, sub_category = _get_category_path_by_id(
+            user_id=current_user_id,
+            category_id=int(category["id"]),
+        )
+
+        from bill_analyser.api import app as api_app
+
+        api_app.app.config["LLM_CONFIG"] = {
+            "enabled": False,
+            "provider": "openai",
+            "provider_config": {"model": "fake-model"},
+        }
+
+        async def _prepare_candidate() -> int:
+            return await api_app.db.create_llm_candidate(
+                user_id=current_user_id,
+                type="rule_synthesis",
+                source_bill_ids=[],
+                suggested_main_category=main_category,
+                suggested_sub_category=sub_category,
+                suggested_rule_expression="OR={星巴克,瑞幸}+AND={咖啡}",
+                confidence=0.9,
+                llm_provider="fake-provider",
+                llm_model="fake-model",
+                llm_response_raw=json.dumps({"reason": "offline review"}, ensure_ascii=False),
+            )
+
+        candidate_id = asyncio.run(_prepare_candidate())
+
+        response = client.post(
+            f"/api/llm/candidates/{candidate_id}/accept",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        assert payload["success"] is True
+        assert payload["data"]["status"] == "accepted"
+        assert payload["data"]["created_rule_id"] > 0

@@ -330,6 +330,7 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
         self,
         user_id: int,
         status: str | None = None,
+        type: str | None = None,
     ) -> int:
         """获取 LLM 候选建议总数。"""
         conn = await self._get_connection()
@@ -340,6 +341,10 @@ class DatabaseLLMCandidatesMixin(DatabaseFacadeBase):
         if status is not None:
             query += " AND status = ?"
             params.append(status)
+
+        if type is not None:
+            query += " AND type = ?"
+            params.append(type)
 
         async with conn.execute(query, params) as cursor:
             row = await cursor.fetchone()

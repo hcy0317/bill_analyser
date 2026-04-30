@@ -196,3 +196,56 @@ def build_import_preview_recommendation_prompt(
 
 分类应尽可能贴合中文个人财务常见分类体系。如果历史记忆中有相似交易的反馈，优先参考用户的纠正。
 只返回 JSON，不要有其他文字。"""
+
+
+def build_rule_expression_synthesis_prompt(
+    knowledge_summary_pack: dict[str, Any],
+    *,
+    max_candidates: int = 8,
+) -> str:
+    """Build the frozen A6 prompt artifact for rule-center rule synthesis.
+
+    The input is a KnowledgeSummaryPack distilled from the durable learning
+    system, not raw preview rows. Output must stay within the existing
+    category-rule expression grammar so candidates can be reviewed and
+    optionally promoted into the canonical rule system.
+    """
+    summary_json = json.dumps(
+        knowledge_summary_pack,
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    )
+    return f"""以下是 Bill Analyser 的长期学习知识摘要（KnowledgeSummaryPack）。
+请基于这些长期学习证据，为规则中心归纳出可人工审核的分类规则候选。
+
+约束：
+- 只能输出“候选规则”，不要假设会自动写入正式规则系统。
+- 候选必须兼容现有规则表达式语法：
+  - OR={{关键词1,关键词2}}
+  - AND={{关键词1,关键词2}}
+  - NOT={{关键词1}}
+  - REGEX={{模式1,模式2}}
+  - 可以使用 +、/、|、× 和括号组合
+- 不要输出无效语法、空表达式或与知识摘要明显冲突的规则。
+- 优先覆盖证据稳定、反馈正向、可复用的模式。
+- 推荐分类必须严格来自 knowledge_summary_pack.existing_categories 中已有的分类路径。
+- 如果证据不足，请少提，不要为了凑数量强行生成。
+- 最多输出 {max_candidates} 条候选。
+
+KnowledgeSummaryPack:
+{summary_json}
+
+请以如下 JSON 格式返回：
+[
+  {{
+    "rule_name": "<候选名称>",
+    "suggested_main_category": "<主分类>",
+    "suggested_sub_category": "<子分类，可为空>",
+    "rule_expression": "<规则表达式>",
+    "confidence": <0.0-1.0之间的置信度>,
+    "reason": "<简短说明归纳依据>"
+  }}
+]
+
+只返回 JSON，不要有其他文字。"""
