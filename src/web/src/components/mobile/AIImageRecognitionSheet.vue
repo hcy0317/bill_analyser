@@ -40,7 +40,8 @@ import { useTransactionsStore } from '@/stores/transaction.ts';
 import { KnownFileType } from '@/core/file.ts';
 import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 
-import type { RecognizedReceiptImageResponse } from '@/models/large_language_model.ts';
+import type { RecognizedReceiptImageResponse, RecognizeReceiptImageError } from '@/models/large_language_model.ts';
+import { RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD } from '@/models/large_language_model.ts';
 
 import { generateRandomUUID } from '@/lib/misc.ts';
 import { compressJpgImage } from '@/lib/ui/common.ts';
@@ -125,23 +126,59 @@ function confirm(): void {
         imageFile: imageFile.value,
         cancelableUuid: cancelRecognizingUuid.value
     }).then(response => {
+        if (response.confidence !== null && response.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
+            showToast('Low confidence recognition, please verify');
+        }
+
         recognizing.value = false;
         cancelRecognizingUuid.value = undefined;
         closeAllDialog();
         emit('update:show', false);
         emit('recognition:change', response);
-    }).catch(error => {
-        if (error.canceled) {
+    }).catch((error: RecognizeReceiptImageError | { canceled?: boolean } | unknown) => {
+        const typed = error as RecognizeReceiptImageError;
+        const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
+
+        // axios cancel sentinel — silent, store-level cancellation will surface as errorCode 'cancelled' below.
+        if ((error as { canceled?: boolean })?.canceled) {
+            recognizing.value = false;
+            cancelRecognizingUuid.value = undefined;
             return;
         }
 
         recognizing.value = false;
+
+        if (errorCode === 'cancelled') {
+            cancelRecognizingUuid.value = undefined;
+            closeAllDialog();
+            return;
+        }
+
         cancelRecognizingUuid.value = undefined;
         closeAllDialog();
 
-        if (!error.processed) {
-            showToast(error.message || error);
+        if (errorCode === 'provider_unconfigured') {
+            // Keep sheet open so user understands config is missing; do not emit update:show=false.
+            showToast('Receipt recognition is not configured');
+            return;
         }
+
+        if (errorCode === 'timeout') {
+            showToast('Recognition timed out, please try again');
+            return;
+        }
+
+        if (errorCode === 'parse_error') {
+            showToast('Could not parse this image, please try a clearer one');
+            return;
+        }
+
+        if (errorCode === 'rate_limited') {
+            showToast('Too many requests, please wait a moment');
+            return;
+        }
+
+        showToast('Unable to recognize image');
     });
 }
 

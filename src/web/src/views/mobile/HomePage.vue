@@ -310,42 +310,26 @@ function reload(done?: () => void): void {
 }
 
 function onReceiptRecognitionChanged(result: RecognizedReceiptImageResponse): void {
+    // result is RecognizedReceiptImageResponse: { amount(yuan|null), tradeTime(ISO|null), description, provenance, confidence }
+    // URL query keys remain ezbookkeeping-style (amount/time/comment) since /transaction/add still parses those names;
+    // only the value sources are migrated to the new C1/C2 contract.
     const params: string[] = [];
 
-    if (result.type) {
-        params.push(`type=${result.type}`);
+    if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
+        const amountInCents = Math.round(result.amount * 100);
+        params.push(`amount=${amountInCents}`);
     }
 
-    if (result.time) {
-        params.push(`time=${result.time}`);
+    if (result.tradeTime) {
+        const parsedMs = Date.parse(result.tradeTime);
+        if (!Number.isNaN(parsedMs)) {
+            const tradeTimeUnixSeconds = Math.floor(parsedMs / 1000);
+            params.push(`time=${tradeTimeUnixSeconds}`);
+        }
     }
 
-    if (result.categoryId) {
-        params.push(`categoryId=${result.categoryId}`);
-    }
-
-    if (result.sourceAccountId) {
-        params.push(`accountId=${result.sourceAccountId}`);
-    }
-
-    if (result.destinationAccountId) {
-        params.push(`destinationAccountId=${result.destinationAccountId}`);
-    }
-
-    if (result.sourceAmount) {
-        params.push(`amount=${result.sourceAmount}`);
-    }
-
-    if (result.destinationAmount) {
-        params.push(`destinationAmount=${result.destinationAmount}`);
-    }
-
-    if (result.tagIds) {
-        params.push(`tagIds=${result.tagIds.join(',')}`);
-    }
-
-    if (result.comment) {
-        params.push(`comment=${encodeURIComponent(result.comment)}`);
+    if (result.description) {
+        params.push(`comment=${encodeURIComponent(result.description)}`);
     }
 
     params.push(`noTransactionDraft=true`);
