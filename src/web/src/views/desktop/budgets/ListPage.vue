@@ -74,6 +74,13 @@
                                            :disabled="loading || updating" @click="exportBudgets" v-if="activeViewMode === 'budget'">
                                         {{ tt('Export') }}
                                     </v-btn>
+                                    <div v-if="activeViewMode === 'budget'" class="ms-3 budget-period-toolbar">
+                                        <btn-horizontal-group
+                                            :disabled="loading || updating"
+                                            :buttons="budgetPeriodTypeButtons"
+                                            v-model="activeBudgetPeriodType"
+                                        />
+                                    </div>
                                     <input type="file" ref="fileInput" style="display: none" accept=".json" @change="onFileSelected" />
 
                                     <!-- 全部展开/折叠切换按钮（单一按钮带动画） -->
@@ -133,23 +140,13 @@
                                                @click="shiftHistoricalDateRange(1)"/>
                                     </v-btn-group>
 
-                                    <v-menu location="bottom" v-if="activeViewMode === 'history'">
-                                        <template #activator="{ props }">
-                                            <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :prepend-icon="mdiCalendarRangeOutline" :disabled="loading"
-                                                   v-bind="props">{{ historicalAggregationLabel }}</v-btn>
-                                        </template>
-                                        <v-list>
-                                            <v-list-item class="cursor-pointer"
-                                                         :key="aggregation.value"
-                                                         :value="aggregation.value"
-                                                         :append-icon="(historicalAggregationType === aggregation.value ? mdiCheck : undefined)"
-                                                         :title="aggregation.name"
-                                                         v-for="aggregation in historicalAggregationOptions"
-                                                         @click="historicalAggregationType = aggregation.value">
-                                            </v-list-item>
-                                        </v-list>
-                                    </v-menu>
+                                    <div v-if="activeViewMode === 'history'" class="ms-3 budget-period-toolbar">
+                                        <btn-horizontal-group
+                                            :disabled="loading"
+                                            :buttons="historyAggregationButtons"
+                                            v-model="activeHistoricalAggregationType"
+                                        />
+                                    </div>
 
                                     <v-btn v-if="activeViewMode === 'history'"
                                            density="compact" color="default" variant="text" size="32"
@@ -748,6 +745,61 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <div v-if="historicalBudgetGroups.length > 0" class="mt-6">
+                                    <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
+                                        <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budget Groups') }}</div>
+                                        <v-btn density="compact" color="default" variant="text" @click="toggleAllHistoricalGroups">
+                                            {{ areAllHistoricalGroupsExpanded ? tt('Collapse All') : tt('Expand All') }}
+                                        </v-btn>
+                                    </div>
+
+                                    <v-expansion-panels v-model="historicalExpandedGroupKeys" multiple variant="accordion">
+                                        <v-expansion-panel
+                                            v-for="group in historicalBudgetGroups"
+                                            :key="group.key"
+                                            :value="group.key"
+                                            class="budget-history-period-panel"
+                                        >
+                                            <v-expansion-panel-title>
+                                                <div class="d-flex align-center flex-wrap ga-4 w-100">
+                                                    <span class="text-subtitle-2 font-weight-medium">{{ group.label }}</span>
+                                                    <span class="text-caption text-medium-emphasis">{{ group.startDate }} - {{ group.endDate }}</span>
+                                                    <span class="ms-auto text-caption text-medium-emphasis">{{ tt('Items') }}: {{ group.itemCount }}</span>
+                                                    <span class="text-caption text-medium-emphasis">{{ tt('Budget') }}: {{ formatAmount(group.totalBudget / 100) }}</span>
+                                                    <span class="text-caption text-medium-emphasis">{{ tt('Spent') }}: {{ formatAmount(group.totalSpent / 100) }}</span>
+                                                    <span class="text-caption font-weight-medium" :class="getExecutionRateColorClass(group.totalExecutionRate)">
+                                                        {{ group.totalExecutionRate.toFixed(1) }}%
+                                                    </span>
+                                                </div>
+                                            </v-expansion-panel-title>
+                                            <v-expansion-panel-text>
+                                                <v-table density="comfortable" class="budget-history-period-table">
+                                                    <thead>
+                                                    <tr>
+                                                        <th>{{ tt('Category') }}</th>
+                                                        <th>{{ tt('Budget') }}</th>
+                                                        <th>{{ tt('Spent') }}</th>
+                                                        <th>{{ tt('Remaining') }}</th>
+                                                        <th>{{ tt('Execution Rate') }}</th>
+                                                    </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                    <tr v-for="item in group.items" :key="item.id">
+                                                        <td>{{ item.displayCategory }}</td>
+                                                        <td>{{ formatAmount(item.budgetAmount / 100) }}</td>
+                                                        <td>{{ formatAmount(item.spentAmount / 100) }}</td>
+                                                        <td>{{ formatAmount(item.remainingAmount / 100) }}</td>
+                                                        <td :class="getExecutionRateColorClass(item.executionRate)">
+                                                            {{ item.executionRate.toFixed(1) }}%
+                                                        </td>
+                                                    </tr>
+                                                    </tbody>
+                                                </v-table>
+                                            </v-expansion-panel-text>
+                                        </v-expansion-panel>
+                                    </v-expansion-panels>
+                                </div>
                             </div>
 
                             <div v-else class="d-flex flex-column align-center justify-center py-16">
@@ -1028,6 +1080,7 @@ import EditDialog from './list/dialogs/EditDialog.vue';
 import { buildBudgetDrilldownRouteQuery } from './categorySelection.ts';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
 import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
+import { buildHistoricalBudgetPeriodGroups } from './historyGrouping.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
@@ -1040,6 +1093,12 @@ import {
     type HistoricalCategoryChartPoint,
     type HistoricalLegendSelection
 } from './historyPolarChart.ts';
+import {
+    getBudgetPeriodTypeFromFilter,
+    getBudgetRelativeScopeFromFilter,
+    toBudgetRelativePeriodFilter,
+    type BudgetRelativePeriodScope
+} from './periodFilters.ts';
 
 import { ref, computed, useTemplateRef, watch, onMounted, nextTick } from 'vue';
 import { useDisplay, useTheme } from 'vuetify';
@@ -1111,7 +1170,6 @@ import {
     mdiInformationOutline,
     mdiArrowLeft,
     mdiArrowRight,
-    mdiCalendarRangeOutline,
     mdiChartBoxOutline,
     mdiChartTimelineVariant
 } from '@mdi/js';
@@ -1218,6 +1276,7 @@ const historicalDateType = ref<number>(DateRange.RecentTwelveMonths.type);
 const showHistoricalDateDialog = ref<boolean>(false);
 const historicalMinDatetime = ref<number>(0);
 const historicalMaxDatetime = ref<number>(0);
+const historicalExpandedGroupKeys = ref<string[]>([]);
 
 // 预算类型：支出或投资
 const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
@@ -1304,25 +1363,41 @@ const collapsedCategories = ref<Set<string>>(new Set());
 // 计算属性
 // ============================================================================
 
-const quickPeriodFilters = computed<PeriodFilter[]>(() => [
-    { name: tt('This Month'), value: 'thisMonth' },
-    { name: tt('This Quarter'), value: 'thisQuarter' },
-    { name: tt('This Year'), value: 'thisYear' }
+const budgetPeriodTypeButtons = computed(() => [
+    { name: tt('Monthly'), value: BudgetPeriodType.Monthly },
+    { name: tt('Quarterly'), value: BudgetPeriodType.Quarterly },
+    { name: tt('Yearly'), value: BudgetPeriodType.Yearly }
 ]);
 
-const previousPeriodFilters = computed<PeriodFilter[]>(() => [
-    { name: tt('Last Month'), value: 'lastMonth' },
-    { name: tt('Last Quarter'), value: 'lastQuarter' },
-    { name: tt('Last Year'), value: 'lastYear' }
-]);
+const activeBudgetRelativeScope = computed<BudgetRelativePeriodScope>({
+    get() {
+        return getBudgetRelativeScopeFromFilter(activePeriodFilter.value);
+    },
+    set(scope: BudgetRelativePeriodScope) {
+        const nextFilter = toBudgetRelativePeriodFilter(activeBudgetPeriodType.value, scope);
+        if (nextFilter === activePeriodFilter.value) {
+            return;
+        }
 
-// 所有周期筛选选项（用于侧边栏列表）
-const allPeriodFilters = computed<PeriodFilter[]>(() => [
-    ...quickPeriodFilters.value,
-    ...previousPeriodFilters.value,
-    { name: tt('Expired Budgets'), value: 'expired' },
-    { name: tt('Custom Range'), value: 'custom' }
-]);
+        activePeriodFilter.value = nextFilter;
+        reload(false);
+    }
+});
+
+const activeBudgetPeriodType = computed<BudgetPeriodType>({
+    get() {
+        return getBudgetPeriodTypeFromFilter(activePeriodFilter.value);
+    },
+    set(periodType: BudgetPeriodType) {
+        const nextFilter = toBudgetRelativePeriodFilter(periodType, activeBudgetRelativeScope.value);
+        if (nextFilter === activePeriodFilter.value) {
+            return;
+        }
+
+        activePeriodFilter.value = nextFilter;
+        reload(false);
+    }
+});
 
 const forecastPeriodFilters = computed<PeriodFilter[]>(() => [
     { name: tt('Monthly Forecast'), value: 'thisMonth' },
@@ -1333,7 +1408,10 @@ const forecastPeriodFilters = computed<PeriodFilter[]>(() => [
 const visiblePeriodFilters = computed<PeriodFilter[]>(() => {
     return activeViewMode.value === 'forecast'
         ? forecastPeriodFilters.value
-        : allPeriodFilters.value;
+        : [
+            { name: tt('Current Period'), value: toBudgetRelativePeriodFilter(activeBudgetPeriodType.value, 'current') },
+            { name: tt('Previous Period'), value: toBudgetRelativePeriodFilter(activeBudgetPeriodType.value, 'previous') }
+        ];
 });
 
 // 当前选中的周期筛选索引（用于标签页）
@@ -1644,7 +1722,7 @@ const firstDayOfWeek = computed(() => userStore.currentUserFirstDayOfWeek);
 const viewModeButtons = computed(() => [
     { name: tt('Budget Management'), value: 'budget' },
     { name: tt('Period Forecast'), value: 'forecast' },
-    { name: tt('Expired Budgets'), value: 'history' }
+    { name: tt('Historical Budgets'), value: 'history' }
 ]);
 const currentViewTitle = computed(() => {
     if (activeViewMode.value === 'forecast') {
@@ -1718,11 +1796,6 @@ const filteredSummary = computed(() => {
 
 type HistoricalAggregationType = BudgetPeriodType | 'fiscal_year';
 
-interface HistoricalAggregationOption {
-    name: string;
-    value: HistoricalAggregationType;
-}
-
 interface HistoricalPeriodRange {
     key: string;
     label: string;
@@ -1735,19 +1808,35 @@ interface HistoricalPeriodRange {
  */
 const HISTORICAL_FISCAL_YEAR = 'fiscal_year' as const;
 const historicalAggregationType = ref<HistoricalAggregationType>(BudgetPeriodType.Monthly);
+const historyAggregationButtons = computed(() => [
+    { name: tt('Monthly'), value: BudgetPeriodType.Monthly },
+    { name: tt('Quarterly'), value: BudgetPeriodType.Quarterly },
+    { name: tt('Yearly'), value: BudgetPeriodType.Yearly }
+]);
+
+const activeHistoricalAggregationType = computed<BudgetPeriodType>({
+    get() {
+        return historicalAggregationType.value === HISTORICAL_FISCAL_YEAR
+            ? BudgetPeriodType.Yearly
+            : historicalAggregationType.value;
+    },
+    set(nextType: BudgetPeriodType) {
+        if (historicalAggregationType.value === nextType) {
+            return;
+        }
+
+        historicalAggregationType.value = nextType;
+        if (activeViewMode.value === 'history') {
+            reload(false);
+        }
+    }
+});
 
 const fiscalYearStartValue = computed<number>(() => userStore.currentUserFiscalYearStart);
 
 const fiscalYearStartInfo = computed(() => {
     return FiscalYearStart.valueOf(fiscalYearStartValue.value) || FiscalYearStart.Default;
 });
-
-const historicalAggregationOptions = computed<HistoricalAggregationOption[]>(() => [
-    { name: tt('Monthly'), value: BudgetPeriodType.Monthly },
-    { name: tt('Quarterly'), value: BudgetPeriodType.Quarterly },
-    { name: tt('Yearly'), value: BudgetPeriodType.Yearly },
-    { name: tt('FiscalYearly'), value: HISTORICAL_FISCAL_YEAR }
-]);
 
 function parseDateOnly(text: string): Date | null {
     if (!text) {
@@ -1766,11 +1855,6 @@ function normalizeHistoryAmountCents(value: number): number {
 function addMonths(sourceDate: Date, months: number): Date {
     return new Date(sourceDate.getFullYear(), sourceDate.getMonth() + months, 1);
 }
-
-const historicalAggregationLabel = computed(() => {
-    const matched = historicalAggregationOptions.value.find(item => item.value === historicalAggregationType.value);
-    return matched?.name || tt('Monthly');
-});
 
 function isValidHistoricalUnixTime(value: number): boolean {
     return Number.isFinite(value) && value > 0;
@@ -1823,6 +1907,12 @@ function getHistoricalBudgetQueryRange(): { startDate: string; endDate: string }
     };
 }
 
+function getHistoricalRequestPeriodType(): BudgetPeriodType {
+    return historicalAggregationType.value === HISTORICAL_FISCAL_YEAR
+        ? BudgetPeriodType.Yearly
+        : historicalAggregationType.value;
+}
+
 function buildBudgetHistoryRequestSignature(req: BudgetHistoryRequest): string {
     return JSON.stringify({
         type: req.type ?? null,
@@ -1843,7 +1933,7 @@ const activeHistoricalHistoryRequestSignature = computed<string>(() => {
 
     return buildBudgetHistoryRequestSignature({
         type: activeBudgetType.value,
-        periodType: BudgetPeriodType.Monthly,
+        periodType: getHistoricalRequestPeriodType(),
         startDate: historyRange.startDate,
         endDate: historyRange.endDate,
         categoryId: categoryFilter.value || undefined,
@@ -2279,6 +2369,33 @@ const historicalChartModel = computed(() => {
     );
 });
 const historicalLabelAnimationState = createHistoricalLabelAnimationState();
+const historicalBudgetGroups = computed(() => {
+    return buildHistoricalBudgetPeriodGroups({
+        items: filteredHistoricalItems.value,
+        aggregationType: historicalAggregationType.value,
+        fiscalYearStartMonth: fiscalYearStartInfo.value.month,
+        fiscalYearStartDay: fiscalYearStartInfo.value.day,
+        uncategorizedLabel: tt('Uncategorized')
+    });
+});
+const areAllHistoricalGroupsExpanded = computed(() => (
+    historicalBudgetGroups.value.length > 0
+    && historicalExpandedGroupKeys.value.length === historicalBudgetGroups.value.length
+));
+
+watch(
+    () => historicalBudgetGroups.value.map(group => group.key),
+    (groupKeys) => {
+        if (groupKeys.length === 0) {
+            historicalExpandedGroupKeys.value = [];
+            return;
+        }
+
+        const retainedKeys = historicalExpandedGroupKeys.value.filter(groupKey => groupKeys.includes(groupKey));
+        historicalExpandedGroupKeys.value = retainedKeys.length > 0 ? retainedKeys : [groupKeys[0] || ''];
+    },
+    { immediate: true }
+);
 
 const historicalLegendGroups = computed(() => historicalChartModel.value.legendGroups);
 const historicalChartUpdateOptions = {
@@ -2433,7 +2550,7 @@ async function loadHistoricalBudgetView(requestId: number): Promise<void> {
     const historyRange = getHistoricalBudgetQueryRange();
     const historyRequest: BudgetHistoryRequest = {
         type: activeBudgetType.value,
-        periodType: BudgetPeriodType.Monthly,
+        periodType: getHistoricalRequestPeriodType(),
         startDate: historyRange.startDate,
         endDate: historyRange.endDate,
         categoryId: categoryFilter.value || undefined,
@@ -2606,13 +2723,17 @@ function getAmountFilterParameterCount(filterType: string): number {
  * 设置周期筛选器
  */
 function setPeriodFilter(filter: string): void {
-    // 如果点击自定义范围，弹出日期选择对话框
-    if (filter === 'custom') {
-        showCustomDateDialog.value = true;
-        return;
-    }
     activePeriodFilter.value = filter;
     reload(false);
+}
+
+function toggleAllHistoricalGroups(): void {
+    if (areAllHistoricalGroupsExpanded.value) {
+        historicalExpandedGroupKeys.value = [];
+        return;
+    }
+
+    historicalExpandedGroupKeys.value = historicalBudgetGroups.value.map(group => group.key);
 }
 
 /**
@@ -3561,6 +3682,16 @@ watch(filterKeyword, (newVal) => {
     flex: 0 0 auto;
 }
 
+.budget-period-toolbar {
+    flex: 0 0 228px;
+    width: 228px;
+}
+
+.budget-period-toolbar :deep(.v-btn) {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
 .budget-forecast-title-button {
     flex: 0 0 112px;
     width: 112px;
@@ -3860,6 +3991,15 @@ watch(filterKeyword, (newVal) => {
 
 .budget-history-panel {
     background-color: transparent;
+}
+
+.budget-history-period-panel {
+    background-color: rgba(var(--v-theme-surface), 0.78);
+}
+
+.budget-history-period-table :deep(th),
+.budget-history-period-table :deep(td) {
+    white-space: nowrap;
 }
 
 .budget-history-aggregation-select {
