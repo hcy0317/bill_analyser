@@ -39,6 +39,7 @@ from bill_analyser.constants import PROJECT_ROOT, STATIC_DIR
 from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.category_engine import CategoryEngine
 from bill_analyser.core.db import Database
+from bill_analyser.core.ocr_service import OcrService, OcrServiceError
 from bill_analyser.utils.config import ConfigValidationError, load_api_runtime_settings, load_default_user_settings
 from bill_analyser.utils.logger import get_logger
 
@@ -168,14 +169,72 @@ def create_app():
         return {"success": True, "status": "healthy", "version": __version__}
 
     @flask_app.route("/api/ml/receipt-recognition", methods=["POST"])
-    def receipt_recognition_disabled_safe():
-        """AI 小票识图当前保持 disabled-safe 501 占位语义。"""
-        return {
-            "success": False,
-            "error": "Not Implemented",
-            "errorMessage": "Receipt recognition not implemented",
-            "message": "Receipt recognition not implemented",
-        }, 501
+    def receipt_recognition_endpoint():
+        """AI 小票识图 OCR 端点。
+
+        privacy: 请求即用即弃；后端不持久化任何上传图像。仅审计
+        ``len(image_bytes)``、``mime``、``sha256[:12]``、``user_id`` 与结果状态。
+        """
+        # pylint: disable=import-outside-toplevel
+        from flask import request as flask_request
+
+        from bill_analyser.api.middleware.auth import require_auth as _require_auth
+        from bill_analyser.api.routes.request_context_helpers import (
+            run_async_in_new_loop as _run_async,
+        )
+
+        @_require_auth
+        def _handle():
+            user_id = getattr(flask_request, "user_id", None)
+            service: OcrService | None = flask_app.config.get("OCR_SERVICE")
+            if service is None:
+                service = OcrService.from_environment()
+                flask_app.config["OCR_SERVICE"] = service
+
+            file_obj = flask_request.files.get("image")
+            image_bytes = b""
+            mime = ""
+            if file_obj is not None:
+                image_bytes = file_obj.read() or b""
+                mime = file_obj.mimetype or "application/octet-stream"
+            elif flask_request.data:
+                image_bytes = flask_request.data
+                mime = flask_request.mimetype or "application/octet-stream"
+
+            cancelled_flag = (flask_request.form.get("cancelled") or "").strip().lower()
+            cancelled = cancelled_flag in {"1", "true", "yes", "on"}
+
+            try:
+                result = _run_async(
+                    service.recognize(
+                        user_id=user_id,
+                        image_bytes=image_bytes,
+                        mime=mime,
+                        cancelled=cancelled,
+                    )
+                )
+            except OcrServiceError as svc_err:
+                payload = {
+                    "success": False,
+                    "errorCode": svc_err.code,
+                    "errorMessage": svc_err.message or "Receipt recognition not implemented"
+                    if svc_err.code == "provider_unconfigured"
+                    else svc_err.message,
+                    "message": svc_err.message
+                    or (
+                        "Receipt recognition not implemented"
+                        if svc_err.code == "provider_unconfigured"
+                        else svc_err.code
+                    ),
+                }
+                return payload, svc_err.http_status
+
+            return {
+                "success": True,
+                "result": result.to_payload(),
+            }, 200
+
+        return _handle()
 
     @flask_app.route("/", defaults={"path": ""})
     @flask_app.route("/<path:path>")
