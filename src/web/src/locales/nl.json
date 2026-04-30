@@ -2392,5 +2392,13 @@
     "Funds": "Fondsen",
     "Cryptocurrency": "Cryptovaluta",
     "Other": "Overige",
-    "No secondary investment categories are available": "Geen secundaire beleggingscategorieën beschikbaar"
+    "No secondary investment categories are available": "Geen secundaire beleggingscategorieën beschikbaar",
+    "Historical Budget Groups": "Historische budgetgroepen",
+    "Items": "Items",
+    "Create budgets and wait for execution data": "Maak budgetten en wacht op uitvoeringsgegevens",
+    "Uncategorized": "Ongecategoriseerd",
+    "Remaining": "Resterend",
+    "Current Period": "Huidige periode",
+    "Previous Period": "Vorige periode",
+    "Filter by Period": "Filteren op periode"
 }

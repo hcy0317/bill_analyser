@@ -2814,5 +2814,13 @@
     "Samples": "樣本",
     "Suggested Action": "建議動作",
     "Yes": "是",
-    "No": "否"
+    "No": "否",
+    "Historical Budget Groups": "往期預算分組",
+    "Items": "項",
+    "Create budgets and wait for execution data": "建立預算並等待執行資料",
+    "Uncategorized": "未分類",
+    "Remaining": "剩餘",
+    "Current Period": "本期",
+    "Previous Period": "上期",
+    "Filter by Period": "按週期篩選"
 }

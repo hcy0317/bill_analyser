@@ -63,6 +63,7 @@ import {
 import VChart from 'vue-echarts';
 
 import 'line-awesome/dist/line-awesome/css/line-awesome.css';
+import '@/styles/desktop/line-awesome-font-display.scss';
 
 import { PerfectScrollbar } from 'vue3-perfect-scrollbar';
 

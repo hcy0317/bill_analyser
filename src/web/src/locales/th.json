@@ -2392,5 +2392,13 @@
     "Funds": "กองทุน",
     "Cryptocurrency": "สกุลเงินดิจิทัล",
     "Other": "อื่นๆ",
-    "No secondary investment categories are available": "ไม่มีหมวดหมู่การลงทุนรองที่พร้อมใช้งาน"
+    "No secondary investment categories are available": "ไม่มีหมวดหมู่การลงทุนรองที่พร้อมใช้งาน",
+    "Historical Budget Groups": "กลุ่มงบประมาณในอดีต",
+    "Items": "รายการ",
+    "Create budgets and wait for execution data": "สร้างงบประมาณและรอข้อมูลการดำเนินการ",
+    "Uncategorized": "ไม่มีหมวดหมู่",
+    "Remaining": "คงเหลือ",
+    "Current Period": "งวดปัจจุบัน",
+    "Previous Period": "งวดก่อนหน้า",
+    "Filter by Period": "กรองตามงวด"
 }

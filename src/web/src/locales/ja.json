@@ -2392,5 +2392,13 @@
     "Funds": "ファンド",
     "Cryptocurrency": "暗号通貨",
     "Other": "その他",
-    "No secondary investment categories are available": "利用可能な投資サブカテゴリがありません"
+    "No secondary investment categories are available": "利用可能な投資サブカテゴリがありません",
+    "Historical Budget Groups": "履歴予算グループ",
+    "Items": "アイテム",
+    "Create budgets and wait for execution data": "予算を作成して実行データを待つ",
+    "Uncategorized": "未分類",
+    "Remaining": "残り",
+    "Current Period": "今期",
+    "Previous Period": "前期",
+    "Filter by Period": "期間で絞り込む"
 }

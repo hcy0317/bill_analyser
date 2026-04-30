@@ -150,7 +150,7 @@
 
                                     <v-btn v-if="activeViewMode === 'history'"
                                            density="compact" color="default" variant="text" size="32"
-                                           class="ms-2" :icon="true" :loading="loading || updating" @click="reload(true)">
+                                           class="ms-3" :icon="true" :loading="loading || updating" @click="reload(true)">
                                         <template #loader>
                                             <v-progress-circular indeterminate size="20"/>
                                         </template>
@@ -749,14 +749,24 @@
                                 <div v-if="historicalBudgetGroups.length > 0" class="mt-6">
                                     <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
                                         <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budget Groups') }}</div>
-                                        <v-btn density="compact" color="default" variant="text" @click="toggleAllHistoricalGroups">
-                                            {{ areAllHistoricalGroupsExpanded ? tt('Collapse All') : tt('Expand All') }}
-                                        </v-btn>
+                                        <div class="d-flex align-center ga-2">
+                                            <v-chip v-if="selectedHistoricalPeriodKey"
+                                                    size="small"
+                                                    color="primary"
+                                                    variant="outlined"
+                                                    closable
+                                                    @click:close="selectedHistoricalPeriodKey = null">
+                                                {{ selectedHistoricalPeriodKey }}
+                                            </v-chip>
+                                            <v-btn density="compact" color="default" variant="text" @click="toggleAllHistoricalGroups">
+                                                {{ areAllHistoricalGroupsExpanded ? tt('Collapse All') : tt('Expand All') }}
+                                            </v-btn>
+                                        </div>
                                     </div>
 
                                     <v-expansion-panels v-model="historicalExpandedGroupKeys" multiple variant="accordion">
                                         <v-expansion-panel
-                                            v-for="group in historicalBudgetGroups"
+                                            v-for="group in visibleHistoricalBudgetGroups"
                                             :key="group.key"
                                             :value="group.key"
                                             class="budget-history-period-panel"
@@ -765,6 +775,12 @@
                                                 <div class="d-flex align-center flex-wrap ga-4 w-100">
                                                     <span class="text-subtitle-2 font-weight-medium">{{ group.label }}</span>
                                                     <span class="text-caption text-medium-emphasis">{{ group.startDate }} - {{ group.endDate }}</span>
+                                                    <v-btn density="compact" color="default" variant="text" size="x-small"
+                                                           class="budget-history-focus-btn"
+                                                           :disabled="historicalBudgetGroups.length <= 1"
+                                                           @click.stop="toggleHistoricalPeriodFocus(group.key)">
+                                                        {{ selectedHistoricalPeriodKey === group.key ? tt('Clear Selection') : tt('Filter by Period') }}
+                                                    </v-btn>
                                                     <span class="ms-auto text-caption text-medium-emphasis">{{ tt('Items') }}: {{ group.itemCount }}</span>
                                                     <span class="text-caption text-medium-emphasis">{{ tt('Budget') }}: {{ formatAmount(group.totalBudget / 100) }}</span>
                                                     <span class="text-caption text-medium-emphasis">{{ tt('Spent') }}: {{ formatAmount(group.totalSpent / 100) }}</span>
@@ -774,26 +790,105 @@
                                                 </div>
                                             </v-expansion-panel-title>
                                             <v-expansion-panel-text>
-                                                <v-table density="comfortable" class="budget-history-period-table">
-                                                    <thead>
-                                                    <tr>
-                                                        <th>{{ tt('Category') }}</th>
-                                                        <th>{{ tt('Budget') }}</th>
-                                                        <th>{{ tt('Spent') }}</th>
-                                                        <th>{{ tt('Remaining') }}</th>
-                                                        <th>{{ tt('Execution Rate') }}</th>
-                                                    </tr>
-                                                    </thead>
+                                                <v-table density="comfortable" class="budget-table budget-history-period-table" :hover="false">
                                                     <tbody>
-                                                    <tr v-for="item in group.items" :key="item.id">
-                                                        <td>{{ item.displayCategory }}</td>
-                                                        <td>{{ formatAmount(item.budgetAmount / 100) }}</td>
-                                                        <td>{{ formatAmount(item.spentAmount / 100) }}</td>
-                                                        <td>{{ formatAmount(item.remainingAmount / 100) }}</td>
-                                                        <td :class="getExecutionRateColorClass(item.executionRate)">
-                                                            {{ item.executionRate.toFixed(1) }}%
-                                                        </td>
-                                                    </tr>
+                                                    <template v-for="row in group.rows" :key="row.key">
+                                                        <tr class="budget-list-row budget-history-row">
+                                                            <td class="pa-0">
+                                                                <div class="budget-item budget-primary d-flex px-4 py-3"
+                                                                     :class="{ 'bg-grey-lighten-4': !isDarkMode, 'bg-grey-darken-3': isDarkMode }">
+                                                                    <item-icon
+                                                                        v-if="row.primaryIcon"
+                                                                        class="me-3 flex-shrink-0"
+                                                                        icon-type="category"
+                                                                        :icon-id="row.primaryIcon"
+                                                                        :color="row.primaryIconColor"
+                                                                        :size="36"
+                                                                    />
+                                                                    <div class="d-flex flex-column flex-grow-1">
+                                                                        <div class="d-flex align-center justify-space-between mb-1">
+                                                                            <div class="d-flex align-center flex-grow-1">
+                                                                                <span class="budget-category-name text-body-1 font-weight-bold">
+                                                                                    {{ row.displayCategory }}
+                                                                                </span>
+                                                                                <span class="budget-percent text-body-2 ms-2"
+                                                                                      :class="getExecutionRateTextClass(row.executionRate)">
+                                                                                    {{ row.executionRate.toFixed(1) }}%
+                                                                                </span>
+                                                                            </div>
+                                                                            <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
+                                                                                <span class="budget-spent text-body-2">
+                                                                                    {{ formatAmount(row.spentAmount / 100) }}
+                                                                                </span>
+                                                                                <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
+                                                                                <span class="budget-total text-body-2 text-medium-emphasis">
+                                                                                    {{ formatAmount(row.budgetAmount / 100) }}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="budget-progress-container">
+                                                                            <v-progress-linear
+                                                                                :model-value="Math.min(row.executionRate, 100)"
+                                                                                :color="getProgressColorByRate(row.executionRate)"
+                                                                                :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
+                                                                                :bg-opacity="1"
+                                                                                :height="6"
+                                                                                rounded
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                        <tr v-for="child in row.childRows" :key="child.key"
+                                                            class="budget-list-row budget-sub-row budget-history-sub-row">
+                                                            <td class="pa-0">
+                                                                <div class="budget-item budget-secondary d-flex px-4 py-2"
+                                                                     style="padding-left: 56px !important;">
+                                                                    <item-icon
+                                                                        v-if="child.secondaryIcon"
+                                                                        class="me-3 flex-shrink-0"
+                                                                        icon-type="category"
+                                                                        :icon-id="child.secondaryIcon"
+                                                                        :color="child.secondaryIconColor"
+                                                                        :size="28"
+                                                                    />
+                                                                    <div class="d-flex flex-column flex-grow-1">
+                                                                        <div class="d-flex align-center justify-space-between mb-1">
+                                                                            <div class="d-flex align-center flex-grow-1">
+                                                                                <span class="budget-category-name text-body-2 font-weight-medium">
+                                                                                    {{ child.displayCategory }}
+                                                                                </span>
+                                                                                <span class="budget-percent text-body-2 ms-2"
+                                                                                      :class="getExecutionRateTextClass(child.executionRate)">
+                                                                                    {{ child.executionRate.toFixed(1) }}%
+                                                                                </span>
+                                                                            </div>
+                                                                            <div class="budget-amounts d-flex align-center justify-end ms-auto" style="min-width: 150px;">
+                                                                                <span class="budget-spent text-body-2">
+                                                                                    {{ formatAmount(child.spentAmount / 100) }}
+                                                                                </span>
+                                                                                <span class="budget-separator text-body-2 text-medium-emphasis mx-1">/</span>
+                                                                                <span class="budget-total text-body-2 text-medium-emphasis">
+                                                                                    {{ formatAmount(child.budgetAmount / 100) }}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div class="budget-progress-container">
+                                                                            <v-progress-linear
+                                                                                :model-value="Math.min(child.executionRate, 100)"
+                                                                                :color="getProgressColorByRate(child.executionRate)"
+                                                                                :bg-color="isDarkMode ? '#444444' : '#f0f0f0'"
+                                                                                :bg-opacity="1"
+                                                                                :height="6"
+                                                                                rounded
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </template>
                                                     </tbody>
                                                 </v-table>
                                             </v-expansion-panel-text>
@@ -1080,7 +1175,7 @@ import EditDialog from './list/dialogs/EditDialog.vue';
 import { buildBudgetDrilldownRouteQuery } from './categorySelection.ts';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
 import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
-import { buildHistoricalBudgetPeriodGroups } from './historyGrouping.ts';
+import { buildHistoricalBudgetPeriodGroups, type HistoricalBudgetCategoryMeta } from './historyGrouping.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
@@ -1277,6 +1372,7 @@ const showHistoricalDateDialog = ref<boolean>(false);
 const historicalMinDatetime = ref<number>(0);
 const historicalMaxDatetime = ref<number>(0);
 const historicalExpandedGroupKeys = ref<string[]>([]);
+const selectedHistoricalPeriodKey = ref<string | null>(null);
 
 // 预算类型：支出或投资
 const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
@@ -2101,6 +2197,20 @@ const filteredHistoricalItems = computed<BudgetHistoryItem[]>(() => {
     });
 });
 
+const periodFilteredHistoricalItems = computed<BudgetHistoryItem[]>(() => {
+    if (!selectedHistoricalPeriodKey.value) {
+        return filteredHistoricalItems.value;
+    }
+    return filteredHistoricalItems.value.filter((item) => {
+        const itemDate = parseDateOnly(item.periodStart);
+        if (!itemDate) {
+            return false;
+        }
+        const period = resolveHistoricalPeriodByDate(historicalAggregationType.value, itemDate);
+        return period.key === selectedHistoricalPeriodKey.value;
+    });
+});
+
 const historicalPeriods = computed<HistoricalPeriodRange[]>(() => {
     const range = getHistoricalBudgetQueryRange();
     return buildHistoricalAggregationPeriods(
@@ -2112,7 +2222,7 @@ const historicalPeriods = computed<HistoricalPeriodRange[]>(() => {
 
 const historicalCategoryChartData = computed<{ categories: string[]; points: HistoricalCategoryChartPoint[] }>(() => {
     const periods = historicalPeriods.value;
-    const items = filteredHistoricalItems.value;
+    const items = periodFilteredHistoricalItems.value;
 
     if (!periods.length || !items.length) {
         return { categories: [], points: [] };
@@ -2348,6 +2458,7 @@ watch(
 
 watch(activeBudgetType, () => {
     historicalLegendSelection.value = {};
+    selectedHistoricalPeriodKey.value = null;
     resetHistoricalLabelAnimationState(historicalLabelAnimationState);
     if (activeViewMode.value === 'history') {
         scheduleHistoricalChartResize();
@@ -2356,10 +2467,15 @@ watch(activeBudgetType, () => {
 
 watch(historicalBudgetLevel, () => {
     historicalLegendSelection.value = {};
+    selectedHistoricalPeriodKey.value = null;
     resetHistoricalCategoryAnimationState(historicalLabelAnimationState);
     if (activeViewMode.value === 'history') {
         scheduleHistoricalChartResize();
     }
+});
+
+watch(historicalAggregationType, () => {
+    selectedHistoricalPeriodKey.value = null;
 });
 
 const historicalChartModel = computed(() => {
@@ -2369,14 +2485,49 @@ const historicalChartModel = computed(() => {
     );
 });
 const historicalLabelAnimationState = createHistoricalLabelAnimationState();
+
+const historicalCategoryMeta = computed<Record<string, HistoricalBudgetCategoryMeta>>(() => {
+    const meta: Record<string, HistoricalBudgetCategoryMeta> = {};
+    for (const cat of budgetPrimaryCategories.value) {
+        const subMeta: Record<string, HistoricalBudgetCategoryMeta> = {};
+        for (const sub of cat.subCategories || []) {
+            subMeta[sub.name] = {
+                color: sub.color,
+                icon: sub.icon,
+                iconColor: sub.color,
+                displayOrder: sub.displayOrder ?? Number.MAX_SAFE_INTEGER
+            };
+        }
+        meta[cat.name] = {
+            color: cat.color,
+            icon: cat.icon,
+            iconColor: cat.color,
+            displayOrder: cat.displayOrder ?? Number.MAX_SAFE_INTEGER,
+            subCategories: subMeta
+        };
+    }
+    return meta;
+});
+
 const historicalBudgetGroups = computed(() => {
     return buildHistoricalBudgetPeriodGroups({
         items: filteredHistoricalItems.value,
         aggregationType: historicalAggregationType.value,
         fiscalYearStartMonth: fiscalYearStartInfo.value.month,
         fiscalYearStartDay: fiscalYearStartInfo.value.day,
-        uncategorizedLabel: tt('Uncategorized')
+        uncategorizedLabel: tt('Uncategorized'),
+        levelMode: historicalBudgetLevel.value,
+        legendSelection: historicalLegendSelection.value,
+        categoryMeta: historicalCategoryMeta.value,
+        fallbackPalette: CATEGORY_CHART_PALETTE
     });
+});
+
+const visibleHistoricalBudgetGroups = computed(() => {
+    if (!selectedHistoricalPeriodKey.value) {
+        return historicalBudgetGroups.value;
+    }
+    return historicalBudgetGroups.value.filter(group => group.key === selectedHistoricalPeriodKey.value);
 });
 const areAllHistoricalGroupsExpanded = computed(() => (
     historicalBudgetGroups.value.length > 0
@@ -2388,11 +2539,16 @@ watch(
     (groupKeys) => {
         if (groupKeys.length === 0) {
             historicalExpandedGroupKeys.value = [];
+            selectedHistoricalPeriodKey.value = null;
             return;
         }
 
         const retainedKeys = historicalExpandedGroupKeys.value.filter(groupKey => groupKeys.includes(groupKey));
         historicalExpandedGroupKeys.value = retainedKeys.length > 0 ? retainedKeys : [groupKeys[0] || ''];
+
+        if (selectedHistoricalPeriodKey.value && !groupKeys.includes(selectedHistoricalPeriodKey.value)) {
+            selectedHistoricalPeriodKey.value = null;
+        }
     },
     { immediate: true }
 );
@@ -3130,6 +3286,19 @@ function getGroupProgressColor(group: BudgetGroup): string {
     }
     // 降级使用执行率颜色
     return getExecutionRateColor(getGroupExecutionRate(group));
+}
+
+function getProgressColorByRate(rate: number): string {
+    return getExecutionRateColor(rate);
+}
+
+function toggleHistoricalPeriodFocus(periodKey: string): void {
+    if (selectedHistoricalPeriodKey.value === periodKey) {
+        selectedHistoricalPeriodKey.value = null;
+        return;
+    }
+    selectedHistoricalPeriodKey.value = periodKey;
+    historicalExpandedGroupKeys.value = [periodKey];
 }
 
 /**

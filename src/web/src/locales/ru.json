@@ -2392,5 +2392,13 @@
     "Funds": "Фонды",
     "Cryptocurrency": "Криптовалюта",
     "Other": "Другое",
-    "No secondary investment categories are available": "Нет доступных вторичных категорий инвестиций"
+    "No secondary investment categories are available": "Нет доступных вторичных категорий инвестиций",
+    "Historical Budget Groups": "Исторические группы бюджета",
+    "Items": "Элементы",
+    "Create budgets and wait for execution data": "Создайте бюджеты и дождитесь данных выполнения",
+    "Uncategorized": "Без категории",
+    "Remaining": "Остаток",
+    "Current Period": "Текущий период",
+    "Previous Period": "Предыдущий период",
+    "Filter by Period": "Фильтр по периоду"
 }

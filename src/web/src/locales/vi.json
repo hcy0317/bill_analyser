@@ -2392,5 +2392,13 @@
     "Funds": "Quỹ",
     "Cryptocurrency": "Tiền điện tử",
     "Other": "Khác",
-    "No secondary investment categories are available": "Không có danh mục đầu tư phụ nào"
+    "No secondary investment categories are available": "Không có danh mục đầu tư phụ nào",
+    "Historical Budget Groups": "Nhóm ngân sách lịch sử",
+    "Items": "Mục",
+    "Create budgets and wait for execution data": "Tạo ngân sách và chờ dữ liệu thực thi",
+    "Uncategorized": "Chưa phân loại",
+    "Remaining": "Còn lại",
+    "Current Period": "Kỳ hiện tại",
+    "Previous Period": "Kỳ trước",
+    "Filter by Period": "Lọc theo kỳ"
 }

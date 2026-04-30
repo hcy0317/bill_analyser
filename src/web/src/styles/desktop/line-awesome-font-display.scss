@@ -1,0 +1,40 @@
+/**
+ * Override the @font-face declarations from line-awesome to use font-display: swap.
+ * Without this, the line-awesome icon glyphs render invisibly during the FOIT
+ * (flash of invisible text) period, which is noticeable on slower icon-heavy
+ * pages such as the Budget management table.
+ *
+ * The url() values are resolved by Vite at build time so the fingerprinted
+ * production filenames are used. The original line-awesome.css is still loaded
+ * via desktop-main.ts; these declarations win because they appear later in
+ * the cascade and use the same family names.
+ */
+@font-face {
+    font-family: "Line Awesome Free";
+    font-style: normal;
+    font-weight: 900;
+    font-display: swap;
+    src: url("line-awesome/dist/line-awesome/fonts/la-solid-900.woff2") format("woff2"),
+         url("line-awesome/dist/line-awesome/fonts/la-solid-900.woff") format("woff"),
+         url("line-awesome/dist/line-awesome/fonts/la-solid-900.ttf") format("truetype");
+}
+
+@font-face {
+    font-family: "Line Awesome Free";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("line-awesome/dist/line-awesome/fonts/la-regular-400.woff2") format("woff2"),
+         url("line-awesome/dist/line-awesome/fonts/la-regular-400.woff") format("woff"),
+         url("line-awesome/dist/line-awesome/fonts/la-regular-400.ttf") format("truetype");
+}
+
+@font-face {
+    font-family: "Line Awesome Brands";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("line-awesome/dist/line-awesome/fonts/la-brands-400.woff2") format("woff2"),
+         url("line-awesome/dist/line-awesome/fonts/la-brands-400.woff") format("woff"),
+         url("line-awesome/dist/line-awesome/fonts/la-brands-400.ttf") format("truetype");
+}

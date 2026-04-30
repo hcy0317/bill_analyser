@@ -172,6 +172,12 @@ RUNTIME_CRITICAL_PATHS = (
     (REPO_ROOT / 'data' / 'config').resolve(),
 )
 
+# AI 工具合法写入的工作目录（即使被 .gitignore 忽略也放行）
+AI_WORK_DIRECTORIES = (
+    (REPO_ROOT / '.tmp').resolve(),
+    (REPO_ROOT / '.sisyphus').resolve(),
+)
+
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
     try:
@@ -827,9 +833,15 @@ def collect_candidate_paths(tool_input: dict[str, Any], cwd_value: Any) -> tuple
 
 def ignored_path_denial_reason(path: Path, repo_root: Path = REPO_ROOT) -> str | None:
     """Return a deny reason for ignored paths or unavailable git state."""
+    # Allow writes to AI work directories even if gitignored
+    resolved_path = path.resolve()
+    for work_dir in AI_WORK_DIRECTORIES:
+        if _is_relative_to(resolved_path, work_dir) or resolved_path == work_dir:
+            return None
+
     denial_reason: str | None = None
     try:
-        relative_path = path.resolve().relative_to(repo_root).as_posix()
+        relative_path = resolved_path.relative_to(repo_root).as_posix()
     except ValueError:
         label = format_display_path(path, repo_root)
         denial_reason = (

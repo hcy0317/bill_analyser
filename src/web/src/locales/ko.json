@@ -2392,5 +2392,13 @@
     "Funds": "펀드",
     "Cryptocurrency": "암호화폐",
     "Other": "기타",
-    "No secondary investment categories are available": "사용 가능한 투자 하위 카테고리가 없습니다"
+    "No secondary investment categories are available": "사용 가능한 투자 하위 카테고리가 없습니다",
+    "Historical Budget Groups": "과거 예산 그룹",
+    "Items": "항목",
+    "Create budgets and wait for execution data": "예산을 생성하고 실행 데이터를 기다립니다",
+    "Uncategorized": "미분류",
+    "Remaining": "남은",
+    "Current Period": "현재 기간",
+    "Previous Period": "이전 기간",
+    "Filter by Period": "기간으로 필터링"
 }

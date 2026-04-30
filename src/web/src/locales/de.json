@@ -2392,5 +2392,13 @@
     "Funds": "Fonds",
     "Cryptocurrency": "Kryptowährung",
     "Other": "Andere",
-    "No secondary investment categories are available": "Keine sekundären Investitionskategorien verfügbar"
+    "No secondary investment categories are available": "Keine sekundären Investitionskategorien verfügbar",
+    "Historical Budget Groups": "Historische Budgetgruppen",
+    "Items": "Elemente",
+    "Create budgets and wait for execution data": "Erstellen Sie Budgets und warten Sie auf Ausführungsdaten",
+    "Uncategorized": "Nicht kategorisiert",
+    "Remaining": "Verbleibend",
+    "Current Period": "Aktueller Zeitraum",
+    "Previous Period": "Vorheriger Zeitraum",
+    "Filter by Period": "Nach Zeitraum filtern"
 }

@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(export GIT_EDITOR=true)",
+      "Bash(GIT_COMMITTER_NAME=\"hcy0317\" GIT_COMMITTER_EMAIL=\"hcy0317@users.noreply.github.com\" git commit *)",
+      "Bash(git reset *)",
+      "Bash(git *)"
     ]
   }
 }
