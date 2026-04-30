@@ -61,7 +61,7 @@ dev = [
 universal = true
 
 [tool.poe.tasks]
-test = "pytest --cov=src/bill_analyser --cov-report xml --junitxml=./junit.xml -n auto"
+test = "pytest --cov=src/bill_analyser --cov-report xml --cov-report term-missing --cov-fail-under=90 --junitxml=./junit.xml -n auto"
 bump = "bump-my-version bump"
 show-bump = "bump-my-version show-bump"
 
@@ -113,6 +113,8 @@ ignore = [
 ]
 
 [tool.coverage.report]
+fail_under = 90
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",

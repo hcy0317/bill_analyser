@@ -482,7 +482,8 @@ static/
 #hcy0317 Ignore 
 .tmp/
 .sisyphus/
-bills/*
+.docs/superpowers/
+bills/
 .VSCodeCounter/
 output/*
 uploads/*

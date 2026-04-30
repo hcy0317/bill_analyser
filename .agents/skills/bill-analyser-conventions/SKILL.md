@@ -38,8 +38,8 @@ Use this skill when you are:
 
 ## Verification Baseline
 
-- `src/bill_analyser/**`：先跑受影响 pytest 与 pylint；业务代码验收前必须全量运行 `./.venv/Scripts/python.exe -m pytest tests/ -v`。
-- `src/web/**`：至少在 `src/web` 下运行 `npm run lint`，必要时补最小构建验证。
+- `src/bill_analyser/**`：先跑受影响 pytest 与 pylint；代码交付前必须全量运行 `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing tests/ -v`，并满足覆盖率 > 90%。
+- `src/web/**`：至少在 `src/web` 下运行 `npm run lint`；如果交付了前端代码，还必须运行 `npm run test:coverage`，并满足覆盖率 > 90%。
 - `.github/**`、`.agents/**`、`.claude/**`、`scripts/hooks/**`：运行 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` 与相关 hook / 健康检查 pytest。
 - API 路由或契约相关改动要复核 `src/web/src/lib/services.ts` 与相关 store。
 - 涉及金额字段、统计口径、导入链路时要人工复核元/分转换与调用顺序。

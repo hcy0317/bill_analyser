@@ -3,7 +3,7 @@
 # Minimal repository-level Codex fallback for CI / doctor checks.
 # Keep this file intentionally thin; the user-level profile remains the primary runtime surface.
 
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 approval_policy = "never"
 [features]
 multi_agent = true
