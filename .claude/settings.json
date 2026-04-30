@@ -16,6 +16,39 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Shell|Execute|run_in_terminal|Edit|Write|Create|create_file|apply_patch|Delete|delete_file|Remove|remove",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -X utf8 scripts/hooks/post_tool_validation_hint.py",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -X utf8 scripts/hooks/stop_commit_title_hint.py",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
