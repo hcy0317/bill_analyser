@@ -163,6 +163,14 @@
             </f7-list-item>
         </f7-list>
 
+        <f7-list strong inset dividers class="margin-top">
+            <f7-list-item link="/budgets" :title="tt('Budget Management')" chevron-center>
+                <template #media>
+                    <f7-icon f7="chart_bar"></f7-icon>
+                </template>
+            </f7-list-item>
+        </f7-list>
+
         <f7-toolbar tabbar icons bottom class="main-tabbar">
             <f7-link class="link" href="/transaction/list">
                 <f7-icon f7="square_list"></f7-icon>

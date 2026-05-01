@@ -46,6 +46,8 @@ import TagListPage from '@/views/mobile/tags/ListPage.vue';
 
 import TemplateListPage from '@/views/mobile/templates/ListPage.vue';
 
+import BudgetListPage from '@/views/mobile/budgets/ListPage.vue';
+
 function asyncResolve(component: unknown): (ctx: Router.RouteCallbackCtx) => void {
     return function({ resolve }: { resolve: ({ component }: { component: unknown }) => void }): void {
         return resolve({
@@ -336,6 +338,11 @@ const routes: Router.RouteParameters[] = [
     {
         path: '/template/edit',
         async: asyncResolve(TransactionEditPage),
+        beforeEnter: [checkLogin]
+    },
+    {
+        path: '/budgets',
+        async: asyncResolve(BudgetListPage),
         beforeEnter: [checkLogin]
     },
     {
