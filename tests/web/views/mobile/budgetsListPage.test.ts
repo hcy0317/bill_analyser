@@ -4,8 +4,12 @@ import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
 
 import { Budget, BudgetType } from '@/models/budget.ts';
+import type { TransactionCategory } from '@/models/transaction_category.ts';
 import {
+    buildMobileBudgetGroups,
     formatBudgetAmount,
+    getBudgetGroupExecutionRate,
+    getBudgetGroupProgressPercent,
     getBudgetProgressPercent,
     selectBudgetsByType
 } from '@/views/mobile/budgets/listPageHelpers.ts';
@@ -26,7 +30,29 @@ function makeBudget(overrides: Partial<Budget> = {}): Budget {
     if (overrides.executionRate !== undefined) {
         b.executionRate = overrides.executionRate;
     }
+    if (overrides.category !== undefined) {
+        b.category = overrides.category;
+    }
+    if (overrides.subCategory !== undefined) {
+        b.subCategory = overrides.subCategory;
+    }
+    if (overrides.categoryIcon !== undefined) {
+        b.categoryIcon = overrides.categoryIcon;
+    }
+    if (overrides.categoryColor !== undefined) {
+        b.categoryColor = overrides.categoryColor;
+    }
     return b;
+}
+
+function makePrimaryCategory(overrides: Partial<TransactionCategory>): TransactionCategory {
+    return {
+        id: overrides.id ?? 'cat-food',
+        name: overrides.name ?? 'Food',
+        icon: overrides.icon ?? 'food',
+        color: overrides.color ?? 'ff9900',
+        subCategories: overrides.subCategories ?? []
+    } as TransactionCategory;
 }
 
 describe('mobile budgets ListPage helpers (S4)', () => {
@@ -94,6 +120,72 @@ describe('mobile budgets ListPage helpers (S4)', () => {
             expect(selectBudgetsByType(BudgetType.Investment, [], [])).toEqual([]);
         });
     });
+
+    describe('buildMobileBudgetGroups', () => {
+        test('groups secondary budgets below the primary category and uses category icon/color', () => {
+            const primary = makeBudget({
+                id: 'p-food',
+                category: 'Food',
+                subCategory: '',
+                amount: 10000,
+                spentAmount: 3000
+            });
+            const breakfast = makeBudget({
+                id: 's-breakfast',
+                category: 'Food',
+                subCategory: 'Breakfast',
+                amount: 2000,
+                spentAmount: 500,
+                categoryIcon: 'breakfast',
+                categoryColor: '00aa00'
+            });
+
+            const groups = buildMobileBudgetGroups({
+                budgets: [breakfast, primary],
+                primaryCategories: [makePrimaryCategory({ name: 'Food', icon: 'restaurant', color: 'ff8800' })],
+                collapsedCategories: new Set()
+            });
+
+            expect(groups).toHaveLength(1);
+            expect(groups[0]!.category).toBe('Food');
+            expect(groups[0]!.categoryIcon).toBe('restaurant');
+            expect(groups[0]!.categoryColor).toBe('ff8800');
+            expect(groups[0]!.primaryBudgets.map(b => b.id)).toEqual(['p-food']);
+            expect(groups[0]!.subBudgets.map(b => b.subCategory)).toEqual(['Breakfast']);
+            expect(groups[0]!.totalAmount).toBe(10000);
+            expect(groups[0]!.totalSpent).toBe(3000);
+        });
+
+        test('falls back to secondary totals when no primary budget exists', () => {
+            const coffee = makeBudget({
+                id: 's-coffee',
+                category: 'Food',
+                subCategory: 'Coffee',
+                amount: 2000,
+                spentAmount: 2200
+            });
+            const lunch = makeBudget({
+                id: 's-lunch',
+                category: 'Food',
+                subCategory: 'Lunch',
+                amount: 3000,
+                spentAmount: 900
+            });
+
+            const groups = buildMobileBudgetGroups({
+                budgets: [lunch, coffee],
+                primaryCategories: [],
+                collapsedCategories: new Set(['Food'])
+            });
+
+            expect(groups[0]!.totalAmount).toBe(5000);
+            expect(groups[0]!.totalSpent).toBe(3100);
+            expect(groups[0]!.isCollapsed).toBe(true);
+            expect(groups[0]!.subBudgets.map(b => b.subCategory)).toEqual(['Coffee', 'Lunch']);
+            expect(getBudgetGroupExecutionRate(groups[0]!)).toBe(62);
+            expect(getBudgetGroupProgressPercent(groups[0]!)).toBe(62);
+        });
+    });
 });
 
 describe('mobile budgets ListPage.vue source contract (S4)', () => {
@@ -128,6 +220,14 @@ describe('mobile budgets ListPage.vue source contract (S4)', () => {
 
     test('renders f7-progressbar bound to the bounded ratio helper', () => {
         expect(source).toMatch(/<f7-progressbar[\s\S]*?:progress="getBudgetProgressPercent\(budget\)"/);
+        expect(source).toMatch(/<f7-progressbar[\s\S]*?:progress="getBudgetGroupProgressPercent\(group\)"/);
+    });
+
+    test('renders primary category groups with category icons and collapse state', () => {
+        expect(source).toContain('groupedBudgets');
+        expect(source).toContain('toggleBudgetGroup');
+        expect(source).toContain('group.isCollapsed');
+        expect(source).toMatch(/icon-type="category"[\s\S]*?:icon-id="group\.categoryIcon"/);
     });
 
     test('shows the empty state when filteredBudgets is empty (no crash)', () => {

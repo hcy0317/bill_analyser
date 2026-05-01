@@ -6,6 +6,7 @@
   - `GET /api/statistics/category-statistics`
   - `GET /api/statistics/category-statistics/trends`
   - `GET /api/statistics/asset-trends`
+- 移动端统计分析页使用移动专用 ECharts 饼图组件展示分类占比，容器和饼图半径按手机视口放大，避免沿用桌面或旧 SVG 尺寸导致图表过小。
 - 旧 `transaction-statistics*` 兼容子路径已删除，当前通过 legacy 404 回归测试防止恢复
 - 汇率主链已切到 `GET /api/statistics/exchange-rates`
 - 用户自定义汇率写接口已收口到统计域 REST：`PUT /api/statistics/exchange-rates/custom`、`DELETE /api/statistics/exchange-rates/custom/<currency>`；旧 `v1/exchange_rates/user_custom/update.json` 与 `v1/exchange_rates/user_custom/delete.json` 已停止使用，并由 legacy 404 回归保护
@@ -17,7 +18,7 @@
 - 账单写入/导入辅助旧 rewrite 已移除：`v1/transactions/add.json`、`v1/transactions/modify.json`、`v1/transactions/delete.json`、`v1/transactions/import.json`、`v1/transactions/reconciliation_statements.json` 当前应返回 404
 - 分类写入旧 rewrite 已移除：`v1/transaction/categories/list.json`、`v1/transaction/categories/add.json`、`v1/transaction/categories/add_batch.json` 当前应返回 404
 - 导入提交前端已统一走 `POST /api/bills/import/v2/confirm`；旧 `v1/transactions/import/process.json` 与 `v1/transactions/parse_dsv_file.json` 已停止使用，并由 legacy 404 回归保护
-- AI 小票识图前端已切到 `POST /api/ml/receipt-recognition`；当前 Python 后端提供 disabled-safe `501 Not Implemented` 占位语义，旧 `v1/llm/transactions/recognize_receipt_image.json` 已停止使用，并由 legacy 404 回归保护
+- AI 小票识图前端已切到 `POST /api/ml/receipt-recognition`；后端通过 `GET/PUT /api/ml/receipt-recognition/config` 持久化当前 OCR provider/lang 配置，默认 disabled 时继续返回 `501 provider_unconfigured`，启用 `tesseract` 后按内存即用即弃语义识别并返回金额(元)、时间、描述与置信度；旧 `v1/llm/transactions/recognize_receipt_image.json` 已停止使用，并由 legacy 404 回归保护
 - 交易列表前端主链已切到 `GET /api/bills/`；按月列表主链已切到 `GET /api/bills/by-month`
 - 旧 `v1/transactions/list.json` 与 `v1/transactions/list/by_month.json` 已移除，并由 legacy 404 回归保护
 - 交易图片前端主链已切到 `POST /api/bills/pictures` 与 `POST /api/bills/pictures/unused`

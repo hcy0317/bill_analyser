@@ -463,7 +463,7 @@
                 v-if="showTransactionPictures || (transaction.pictures && transaction.pictures.length > 0)"
             >
                 <template #footer>
-                    <f7-block class="margin-top-half no-padding no-margin" :class="{ 'readonly': submitting || uploadingPicture || removingPictureId }">
+                    <f7-block class="margin-top-half no-padding no-margin" :class="{ 'readonly': submitting || uploadingPicture || recognizingPicture || removingPictureId }">
                         <swiper-container
                             :pagination="false"
                             :space-between="10"
@@ -484,8 +484,8 @@
                             </swiper-slide>
                             <swiper-slide @click="showOpenPictureDialog" v-if="canAddTransactionPicture">
                                 <div class="display-flex justify-content-center align-items-center transaction-picture transaction-picture-add">
-                                    <f7-icon class="picture-control-icon" f7="plus" v-if="!uploadingPicture"></f7-icon>
-                                    <f7-preloader :size="28" v-if="uploadingPicture" />
+                                    <f7-icon class="picture-control-icon" f7="plus" v-if="!uploadingPicture && !recognizingPicture"></f7-icon>
+                                    <f7-preloader :size="28" v-if="uploadingPicture || recognizingPicture" />
                                 </div>
                             </swiper-slide>
                         </swiper-container>
@@ -527,9 +527,6 @@
             <f7-actions-group v-if="mode !== TransactionEditPageMode.View">
                 <f7-actions-button v-if="transaction.hideAmount" @click="transaction.hideAmount = false">{{ tt('Show Amount') }}</f7-actions-button>
                 <f7-actions-button v-if="!transaction.hideAmount" @click="transaction.hideAmount = true">{{ tt('Hide Amount') }}</f7-actions-button>
-            </f7-actions-group>
-            <f7-actions-group v-if="pageTypeAndMode?.type === TransactionEditPageType.Transaction && (mode === TransactionEditPageMode.Add || mode === TransactionEditPageMode.Edit) && isTransactionPicturesEnabled() && !showTransactionPictures">
-                <f7-actions-button @click="showTransactionPictures = true">{{ tt('Add Picture') }}</f7-actions-button>
             </f7-actions-group>
             <f7-actions-group v-if="pageTypeAndMode?.type === TransactionEditPageType.Transaction && mode === TransactionEditPageMode.View && transaction.type !== TransactionType.ModifyBalance">
                 <f7-actions-button @click="duplicate(false, false)">{{ tt('Duplicate') }}</f7-actions-button>
@@ -587,6 +584,8 @@ import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
 import { Transaction } from '@/models/transaction.ts';
+import type { RecognizedReceiptImageResponse, RecognizeReceiptImageError } from '@/models/large_language_model.ts';
+import { RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD } from '@/models/large_language_model.ts';
 
 import {
     getActualUnixTimeForStore,
@@ -710,9 +709,10 @@ const showScheduledEndDateSheet = ref<boolean>(false);
 const showGeoLocationMapSheet = ref<boolean>(false);
 const showTransactionTagSheet = ref<boolean>(false);
 const addingDefaultCategories = ref<boolean>(false);
+const recognizingPicture = ref<boolean>(false);
 const showTransactionPictures = ref<boolean>(pageTypeAndMode?.type === TransactionEditPageType.Transaction
     && (pageTypeAndMode?.mode === TransactionEditPageMode.Add || pageTypeAndMode?.mode === TransactionEditPageMode.Edit)
-    && settingsStore.appSettings.alwaysShowTransactionPicturesInMobileTransactionEditPage);
+    && isTransactionPicturesEnabled());
 
 const isDarkMode = computed<boolean>(() => environmentsStore.framework7DarkMode || false);
 
@@ -1312,14 +1312,81 @@ function showDateTimeDialog(sheetMode: string): void {
 }
 
 function showOpenPictureDialog(): void {
-    if (!canAddTransactionPicture.value || submitting.value) {
+    if (!canAddTransactionPicture.value || submitting.value || recognizingPicture.value) {
         return;
     }
 
     pictureInput.value?.click();
 }
 
-function uploadPicture(event: Event): void {
+function shouldRecognizeUploadedPicture(): boolean {
+    return pageTypeAndMode?.type === TransactionEditPageType.Transaction
+        && mode.value === TransactionEditPageMode.Add;
+}
+
+function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
+    if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
+        transaction.value.sourceAmount = Math.round(result.amount * 100);
+    }
+
+    if (result.tradeTime) {
+        const parsedMs = Date.parse(result.tradeTime);
+        if (!Number.isNaN(parsedMs)) {
+            transaction.value.time = Math.floor(parsedMs / 1000);
+        }
+    }
+
+    if (result.description) {
+        transaction.value.comment = result.description;
+    }
+
+    if (result.confidence !== null && result.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
+        showToast('Low confidence recognition, please verify');
+    }
+}
+
+function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown): void {
+    const typed = error as RecognizeReceiptImageError;
+    const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
+
+    if (errorCode === 'provider_unconfigured') {
+        showToast('Receipt recognition is not configured');
+        return;
+    }
+    if (errorCode === 'timeout') {
+        showToast('Recognition timed out, please try again');
+        return;
+    }
+    if (errorCode === 'parse_error') {
+        showToast('Could not parse this image, please try a clearer one');
+        return;
+    }
+    if (errorCode === 'rate_limited') {
+        showToast('Too many requests, please wait a moment');
+        return;
+    }
+
+    showToast('Unable to recognize image');
+}
+
+async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
+    if (!shouldRecognizeUploadedPicture()) {
+        return;
+    }
+
+    recognizingPicture.value = true;
+    try {
+        const result = await transactionsStore.recognizeReceiptImage({ imageFile: pictureFile });
+        applyReceiptRecognitionResult(result);
+        showToast('Image recognized and filled');
+    } catch (error) {
+        showReceiptRecognitionError(error);
+    } finally {
+        recognizingPicture.value = false;
+    }
+}
+
+async function uploadPicture(event: Event): Promise<void> {
     if (!event || !event.target) {
         return;
     }
@@ -1337,18 +1404,27 @@ function uploadPicture(event: Event): void {
     uploadingPicture.value = true;
     submitting.value = true;
 
-    transactionsStore.uploadTransactionPicture({ pictureFile }).then(response => {
+    try {
+        const response = await transactionsStore.uploadTransactionPicture({
+            pictureFile,
+            clientSessionId: clientSessionId.value
+        });
         transaction.value.addPicture(response);
         uploadingPicture.value = false;
-        submitting.value = false;
-    }).catch(error => {
+        await recognizeUploadedPicture(pictureFile);
+    } catch (error: unknown) {
+        const processed = !!(error && typeof error === 'object' && (error as { processed?: boolean }).processed);
+        if (!processed) {
+            const message = error && typeof error === 'object' && 'message' in error
+                ? String((error as { message?: string }).message || '')
+                : '';
+            showToast(message || 'Unable to upload transaction picture');
+        }
+    } finally {
         uploadingPicture.value = false;
         submitting.value = false;
-
-        if (!error.processed) {
-            showToast(error.message || error);
-        }
-    });
+        recognizingPicture.value = false;
+    }
 }
 
 function viewOrRemovePicture(pictureInfo: TransactionPictureInfoBasicResponse): void {

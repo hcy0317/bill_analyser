@@ -70,25 +70,20 @@
                 </div>
             </f7-card-header>
             <f7-card-content class="pie-chart-container" style="margin-top: -6px" :padding="false">
-                <pie-chart
+                <e-charts-pie-chart
                     :items="[{value: 60, color: '7c7c7f'}, {value: 20, color: 'a5a5aa'}, {value: 20, color: 'c5c5c9'}]"
                     :skeleton="true"
-                    :show-center-text="true"
-                    :show-selected-item-info="true"
                     class="statistics-pie-chart"
                     name-field="name"
                     value-field="value"
                     color-field="color"
-                    center-text-background="#cccccc"
                     v-if="loading"
-                ></pie-chart>
-                <pie-chart
+                ></e-charts-pie-chart>
+                <e-charts-pie-chart
                     :items="categoricalAnalysisData.items"
                     :min-valid-percent="0.0001"
                     :show-value="showAmountInChart"
                     :show-percent="showPercentInCategoricalChart"
-                    :show-center-text="true"
-                    :show-selected-item-info="true"
                     :enable-click-item="true"
                     :default-currency="defaultCurrency"
                     class="statistics-pie-chart"
@@ -96,19 +91,12 @@
                     value-field="totalAmount"
                     percent-field="percent"
                     hidden-field="hidden"
-                    v-else-if="!loading"
+                    v-else-if="!loading && categoricalAnalysisData.items && categoricalAnalysisData.items.length"
                     @click="onClickPieChartItem"
-                >
-                    <text class="statistics-pie-chart-total-amount-title" v-if="categoricalAnalysisData.items && categoricalAnalysisData.items.length">
-                        {{ totalAmountName }}
-                    </text>
-                    <text class="statistics-pie-chart-total-amount-value" v-if="categoricalAnalysisData.items && categoricalAnalysisData.items.length">
-                        {{ getDisplayAmount(categoricalAnalysisData.totalAmount, defaultCurrency, 16) }}
-                    </text>
-                    <text class="statistics-pie-chart-total-no-data" cy="50%" v-if="!categoricalAnalysisData.items || !categoricalAnalysisData.items.length">
-                        {{ tt('No data') }}
-                    </text>
-                </pie-chart>
+                ></e-charts-pie-chart>
+                <div class="statistics-pie-chart-no-data text-align-center" v-else-if="!loading && (!categoricalAnalysisData.items || !categoricalAnalysisData.items.length)" style="padding: 32px 16px;">
+                    {{ tt('No data') }}
+                </div>
             </f7-card-content>
         </f7-card>
 
@@ -217,9 +205,9 @@
                 </div>
             </f7-card-header>
             <f7-card-content style="margin-top: -14px" :padding="false">
-                <trends-bar-chart
+                <e-charts-trends-chart
+                    v-if="!loading && !reloading && trendsAnalysisData && trendsAnalysisData.items && trendsAnalysisData.items.length"
                     chart-mode="monthly"
-                    :loading="loading || reloading"
                     :start-time="undefined"
                     :end-time="undefined"
                     :start-year-month="query.trendChartStartYearMonth"
@@ -228,13 +216,16 @@
                     :data-aggregation-type="ChartDataAggregationType.Sum"
                     :date-aggregation-type="trendDateAggregationType"
                     :fiscal-year-start="fiscalYearStart"
-                    :items="trendsAnalysisData && trendsAnalysisData.items && trendsAnalysisData.items.length ? trendsAnalysisData.items : []"
+                    :items="trendsAnalysisData.items"
                     :stacked="showStackedInTrendsChart"
                     :translate-name="translateNameInTrendsChart"
                     :default-currency="defaultCurrency"
+                    :type="query.trendChartType"
+                    :enable-click-item="true"
                     id-field="id"
                     name-field="name"
                     value-field="totalAmount"
+                    color-field="color"
                     hidden-field="hidden"
                     display-orders-field="displayOrders"
                     @click="onClickTrendChartItem"
@@ -253,9 +244,9 @@
                 </div>
             </f7-card-header>
             <f7-card-content style="margin-top: -14px" :padding="false">
-                <trends-bar-chart
+                <e-charts-trends-chart
+                    v-if="!loading && !reloading && assetTrendsData && assetTrendsData.items && assetTrendsData.items.length"
                     chart-mode="daily"
-                    :loading="loading || reloading"
                     :start-time="query.assetTrendsChartStartTime"
                     :end-time="query.assetTrendsChartEndTime"
                     :start-year-month="undefined"
@@ -264,13 +255,16 @@
                     :data-aggregation-type="ChartDataAggregationType.Last"
                     :date-aggregation-type="assetTrendsDateAggregationType"
                     :fiscal-year-start="fiscalYearStart"
-                    :items="assetTrendsData && assetTrendsData.items && assetTrendsData.items.length ? assetTrendsData.items : []"
+                    :items="assetTrendsData.items"
                     :stacked="showStackedInTrendsChart"
                     :translate-name="translateNameInTrendsChart"
                     :default-currency="defaultCurrency"
+                    :type="query.assetTrendsChartType"
+                    :enable-click-item="true"
                     id-field="id"
                     name-field="name"
                     value-field="totalAmount"
+                    color-field="color"
                     hidden-field="hidden"
                     display-orders-field="displayOrders"
                     @click="onClickTrendChartItem"

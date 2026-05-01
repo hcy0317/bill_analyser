@@ -5,6 +5,8 @@ Flask Web API 服务器 - 账单分析系统
 """
 
 import asyncio
+import json
+import os
 import sys
 
 from flask import Flask, abort, send_from_directory
@@ -39,8 +41,17 @@ from bill_analyser.constants import PROJECT_ROOT, STATIC_DIR
 from bill_analyser.core.bill_service import BillService
 from bill_analyser.core.category_engine import CategoryEngine
 from bill_analyser.core.db import Database
-from bill_analyser.core.ocr_service import OcrService, OcrServiceError
-from bill_analyser.utils.config import ConfigValidationError, load_api_runtime_settings, load_default_user_settings
+from bill_analyser.core.ocr_provider import DISABLED_PROVIDER_NAME, OcrProviderFactory
+from bill_analyser.core.ocr_service import (
+    OcrService,
+    OcrServiceError,
+    normalize_ocr_config,
+)
+from bill_analyser.utils.config import (
+    ConfigValidationError,
+    load_api_runtime_settings,
+    load_default_user_settings,
+)
 from bill_analyser.utils.logger import get_logger
 
 logger = get_logger("WebAPI")
@@ -52,6 +63,62 @@ BILL_SERVICE_INSTANCE: BillService | None = None
 db: Database | None = None  # pylint: disable=invalid-name
 category_engine: CategoryEngine | None = None  # pylint: disable=invalid-name
 bill_service: BillService | None = None  # pylint: disable=invalid-name
+
+_OCR_CONFIG_SETTING_KEY = "receipt_ocr_config"
+
+
+def _default_ocr_config() -> dict:
+    return normalize_ocr_config(
+        {
+            "provider": OcrProviderFactory.resolve_default_provider_name(),
+            "lang": os.environ.get("BILL_OCR_LANG"),
+        }
+    )
+
+
+def _ocr_config_response_payload(config: dict) -> dict:
+    normalized = normalize_ocr_config(config)
+    available_providers = [DISABLED_PROVIDER_NAME, *OcrProviderFactory.available_providers()]
+    return {
+        **normalized,
+        "available_providers": available_providers,
+        "configured": normalized["provider"] != DISABLED_PROVIDER_NAME,
+    }
+
+
+def _decode_stored_ocr_config(raw_value: str | None) -> dict:
+    if not raw_value:
+        return _default_ocr_config()
+    try:
+        loaded = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return _default_ocr_config()
+    return normalize_ocr_config(loaded)
+
+
+def _load_ocr_config(flask_app: Flask, run_async) -> dict:
+    database = flask_app.config.get("DB_INSTANCE") or db
+    if database is None or not hasattr(database, "get_app_setting"):
+        return _default_ocr_config()
+    raw_value = run_async(database.get_app_setting(_OCR_CONFIG_SETTING_KEY))
+    return _decode_stored_ocr_config(raw_value)
+
+
+def _store_ocr_config(flask_app: Flask, config: dict, run_async) -> bool:
+    database = flask_app.config.get("DB_INSTANCE") or db
+    if database is None or not hasattr(database, "set_app_setting"):
+        return False
+    return bool(
+        run_async(
+            database.set_app_setting(
+                _OCR_CONFIG_SETTING_KEY,
+                json.dumps(normalize_ocr_config(config), ensure_ascii=False),
+                value_type="json",
+                description="Receipt OCR runtime configuration",
+                is_encrypted=False,
+            )
+        )
+    )
 
 
 def _log_python_runtime_details():
@@ -68,7 +135,7 @@ def _log_python_runtime_details():
     logger.info("%s", "=" * 60)
 
 
-def create_app():
+def create_app():  # pylint: disable=too-many-statements
     """创建Flask应用"""
     flask_app = Flask(__name__)
     runtime_config = load_api_runtime_settings()
@@ -188,7 +255,7 @@ def create_app():
             user_id = getattr(flask_request, "user_id", None)
             service: OcrService | None = flask_app.config.get("OCR_SERVICE")
             if service is None:
-                service = OcrService.from_environment()
+                service = OcrService.from_config(_load_ocr_config(flask_app, _run_async))
                 flask_app.config["OCR_SERVICE"] = service
 
             file_obj = flask_request.files.get("image")
@@ -236,6 +303,62 @@ def create_app():
 
         return _handle()
 
+    @flask_app.route("/api/ml/receipt-recognition/config", methods=["GET", "PUT"])
+    def receipt_recognition_config_endpoint():
+        """OCR 配置端点；配置只保存 provider/lang，不保存上传图片或识别结果。"""
+        # pylint: disable=import-outside-toplevel
+        from flask import jsonify, request as flask_request
+
+        from bill_analyser.api.middleware.auth import require_auth as _require_auth
+        from bill_analyser.api.routes.request_context_helpers import (
+            run_async_in_new_loop as _run_async,
+        )
+
+        @_require_auth
+        def _handle():
+            if flask_request.method == "GET":
+                config = _load_ocr_config(flask_app, _run_async)
+                return jsonify({"success": True, "result": _ocr_config_response_payload(config)})
+
+            data = flask_request.get_json(silent=True) or {}
+            provider = str(data.get("provider") or DISABLED_PROVIDER_NAME).strip().lower()
+            if provider in {"", "none", "off"}:
+                provider = DISABLED_PROVIDER_NAME
+
+            available_providers = {
+                DISABLED_PROVIDER_NAME,
+                *OcrProviderFactory.available_providers(),
+            }
+            if provider not in available_providers:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Bad Request",
+                            "message": "Unknown OCR provider",
+                        }
+                    ),
+                    400,
+                )
+
+            config = normalize_ocr_config({**data, "provider": provider})
+            if not _store_ocr_config(flask_app, config, _run_async):
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Service Unavailable",
+                            "message": "Unable to persist OCR config",
+                        }
+                    ),
+                    503,
+                )
+
+            flask_app.config.pop("OCR_SERVICE", None)
+            return jsonify({"success": True, "result": _ocr_config_response_payload(config)})
+
+        return _handle()
+
     @flask_app.route("/", defaults={"path": ""})
     @flask_app.route("/<path:path>")
     def serve_frontend(path):
@@ -261,7 +384,11 @@ def create_app():
         if flask_request.path.startswith("/api/v1/") or (
             flask_request.path.startswith("/api/") and flask_request.path.endswith(".json")
         ):
-            return {"success": False, "error": "Not Found", "message": "Legacy endpoint not found"}, 404
+            return {
+                "success": False,
+                "error": "Not Found",
+                "message": "Legacy endpoint not found",
+            }, 404
 
         return {
             "success": False,
@@ -356,7 +483,10 @@ async def create_default_admin_user(database: Database):
             logger.info("创建默认管理员用户: %s", username)
 
             password = default_user_config["password"]
-            password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            password_hash = bcrypt.hashpw(
+                password.encode("utf-8"),
+                bcrypt.gensalt(),
+            ).decode("utf-8")
 
             await database.create_user(
                 {
@@ -405,7 +535,12 @@ def main():
     logger.info("API文档: http://%s:%s/api/", host, port)
     logger.info("=" * 50)
 
-    app.run(host=host, port=port, debug=runtime_config["debug"], threaded=runtime_config["threaded"])
+    app.run(
+        host=host,
+        port=port,
+        debug=runtime_config["debug"],
+        threaded=runtime_config["threaded"],
+    )
 
 
 if __name__ == "__main__":

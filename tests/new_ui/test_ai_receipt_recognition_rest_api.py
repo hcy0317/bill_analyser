@@ -115,6 +115,43 @@ def test_ai_receipt_recognition_success_with_stub_provider(client, auth_headers,
     assert 0.0 <= result["confidence"] <= 1.0
 
 
+def test_ai_receipt_recognition_config_round_trip(client, auth_headers, reset_ocr_service):
+    from bill_analyser.api.app import app
+
+    app.config["OCR_SERVICE"] = OcrService(provider=None)
+
+    update_response = client.put(
+        "/api/ml/receipt-recognition/config",
+        headers=auth_headers,
+        json={"provider": "tesseract", "lang": "eng"},
+    )
+    assert update_response.status_code == 200, update_response.get_data(as_text=True)
+    update_body = update_response.get_json() or {}
+    assert update_body["success"] is True
+    assert update_body["result"]["provider"] == "tesseract"
+    assert update_body["result"]["lang"] == "eng"
+    assert update_body["result"]["configured"] is True
+    assert "OCR_SERVICE" not in app.config
+
+    get_response = client.get("/api/ml/receipt-recognition/config", headers=auth_headers)
+    assert get_response.status_code == 200, get_response.get_data(as_text=True)
+    get_body = get_response.get_json() or {}
+    assert get_body["result"]["provider"] == "tesseract"
+    assert "disabled" in get_body["result"]["available_providers"]
+
+
+def test_ai_receipt_recognition_config_rejects_unknown_provider(client, auth_headers, reset_ocr_service):
+    response = client.put(
+        "/api/ml/receipt-recognition/config",
+        headers=auth_headers,
+        json={"provider": "unknown-provider", "lang": "eng"},
+    )
+    assert response.status_code == 400, response.get_data(as_text=True)
+    body = response.get_json() or {}
+    assert body["success"] is False
+    assert "Unknown OCR provider" in body["message"]
+
+
 def test_ai_receipt_recognition_rate_limited(client, auth_headers, reset_ocr_service):
     from bill_analyser.api.app import app
 

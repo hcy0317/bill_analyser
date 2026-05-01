@@ -294,6 +294,13 @@ interface CreateLLMConfigRequest {
     advanced_settings?: LLMAdvancedSettings;
 }
 
+export interface OCRConfigResponse {
+    provider: string;
+    lang: string;
+    available_providers: string[];
+    configured: boolean;
+}
+
 interface LLMAnalyzeTransactionCandidate {
     id: number;
     session_id?: string;
@@ -1733,6 +1740,12 @@ export default {
             timeout: DEFAULT_LLM_API_TIMEOUT,
             cancelableUuid: cancelableUuid
         } as ApiRequestConfig);
+    },
+    getOCRConfig: (): ApiResponsePromise<OCRConfigResponse> => {
+        return axios.get<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config');
+    },
+    updateOCRConfig: (config: { provider: string; lang: string }): ApiResponsePromise<OCRConfigResponse> => {
+        return axios.put<ApiResponse<OCRConfigResponse>>('ml/receipt-recognition/config', config);
     },
     getLatestExchangeRates: (param: { ignoreError?: boolean, provider?: string }): ApiResponsePromise<LatestExchangeRateResponse> => {
         return axios.get<ApiResponse<LatestExchangeRateResponse>>('statistics/exchange-rates', {

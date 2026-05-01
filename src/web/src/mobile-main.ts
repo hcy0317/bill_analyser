@@ -39,6 +39,16 @@ import Framework7PhotoBrowser from 'framework7/components/photo-browser';
 // @ts-expect-error there is a function called "registerComponents" in the framework7-vue package, but it is not declared in the type definition file
 import Framework7Vue, { registerComponents } from 'framework7-vue/bundle';
 
+import * as echarts from 'echarts/core';
+import { CanvasRenderer } from 'echarts/renderers';
+import { LineChart, BarChart, PieChart as EChartsPieChartType, ScatterChart, CandlestickChart } from 'echarts/charts';
+import {
+    GridComponent,
+    TooltipComponent,
+    LegendComponent,
+} from 'echarts/components';
+import VChart from 'vue-echarts';
+
 import 'framework7-icons';
 import 'line-awesome/dist/line-awesome/css/line-awesome.css';
 
@@ -56,6 +66,8 @@ import TransactionCalendar from '@/components/common/TransactionCalendar.vue';
 import ItemIcon from '@/components/mobile/ItemIcon.vue';
 import LanguageSelectButton from '@/components/mobile/LanguageSelectButton.vue';
 import PieChart from '@/components/mobile/PieChart.vue';
+import EChartsPieChart from '@/components/mobile/EChartsPieChart.vue';
+import EChartsTrendsChart from '@/components/mobile/EChartsTrendsChart.vue';
 import TrendsBarChart from '@/components/mobile/TrendsBarChart.vue';
 import PinCodeInputSheet from '@/components/mobile/PinCodeInputSheet.vue';
 import PasswordInputSheet from '@/components/mobile/PasswordInputSheet.vue';
@@ -136,6 +148,18 @@ Framework7.use([
     Framework7Vue
 ]);
 
+echarts.use([
+    CanvasRenderer,
+    LineChart,
+    BarChart,
+    EChartsPieChartType,
+    ScatterChart,
+    CandlestickChart,
+    GridComponent,
+    TooltipComponent,
+    LegendComponent
+]);
+
 const app = createApp(App);
 const pinia = createPinia();
 const i18n = createI18n(getI18nOptions());
@@ -144,6 +168,7 @@ app.use(pinia);
 app.use(i18n);
 
 app.component('VueDatePicker', VueDatePicker);
+app.component('VChart', VChart);
 
 app.component('PinCodeInput', PinCodeInput);
 app.component('MapView', MapView);
@@ -154,6 +179,8 @@ app.component('TransactionCalendar', TransactionCalendar);
 app.component('ItemIcon', ItemIcon);
 app.component('LanguageSelectButton', LanguageSelectButton);
 app.component('PieChart', PieChart);
+app.component('EChartsPieChart', EChartsPieChart);
+app.component('EChartsTrendsChart', EChartsTrendsChart);
 app.component('TrendsBarChart', TrendsBarChart);
 app.component('PinCodeInputSheet', PinCodeInputSheet);
 app.component('PasswordInputSheet', PasswordInputSheet);

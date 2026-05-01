@@ -524,7 +524,7 @@
                         </v-row>
                     </v-window-item>
                     <v-window-item value="pictures">
-                        <v-row class="transaction-pictures align-content-start" :class="{ 'readonly': submitting || uploadingPicture || removingPictureId }">
+                        <v-row class="transaction-pictures align-content-start" :class="{ 'readonly': submitting || uploadingPicture || recognizingPicture || removingPictureId }">
                             <v-col :key="picIdx" cols="6" md="3" v-for="(pictureInfo, picIdx) in transaction.pictures">
                                 <v-avatar rounded="lg" variant="tonal" size="160"
                                           class="cursor-pointer transaction-picture"
@@ -554,8 +554,8 @@
                                           :class="{ 'enabled': !submitting, 'cursor-pointer': !submitting }"
                                           color="rgba(0,0,0,0)" @click="showOpenPictureDialog">
                                     <v-tooltip activator="parent" v-if="!submitting">{{ tt('Add Picture') }}</v-tooltip>
-                                    <v-icon class="transaction-picture-add-icon" size="56" :icon="mdiImagePlusOutline" v-if="!uploadingPicture"/>
-                                    <v-progress-circular color="grey-500" indeterminate size="48" v-if="uploadingPicture"></v-progress-circular>
+                                    <v-icon class="transaction-picture-add-icon" size="56" :icon="mdiImagePlusOutline" v-if="!uploadingPicture && !recognizingPicture"/>
+                                    <v-progress-circular color="grey-500" indeterminate size="48" v-if="uploadingPicture || recognizingPicture"></v-progress-circular>
                                 </v-avatar>
                             </v-col>
                         </v-row>
@@ -715,6 +715,8 @@ import { TransactionTag } from '@/models/transaction_tag.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
 import { Transaction } from '@/models/transaction.ts';
+import type { RecognizedReceiptImageResponse, RecognizeReceiptImageError } from '@/models/large_language_model.ts';
+import { RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD } from '@/models/large_language_model.ts';
 
 import {
     getTimezoneOffsetMinutes,
@@ -858,6 +860,7 @@ const noTransactionDraft = ref<boolean>(false);
 const geoMenuState = ref<boolean>(false);
 const tagSearchContent = ref<string>('');
 const removingPictureId = ref<string>('');
+const recognizingPicture = ref<boolean>(false);
 const addingDefaultCategories = ref<boolean>(false);
 const loadingRecurringCandidates = ref<boolean>(false);
 const recurringBindingSubmitting = ref<boolean>(false);
@@ -1684,14 +1687,84 @@ function saveNewTag(tagName: string): void {
 }
 
 function showOpenPictureDialog(): void {
-    if (!canAddTransactionPicture.value || submitting.value) {
+    if (!canAddTransactionPicture.value || submitting.value || recognizingPicture.value) {
         return;
     }
 
     pictureInput.value?.click();
 }
 
-function uploadPicture(event: Event): void {
+function shouldRecognizeUploadedPicture(): boolean {
+    return props.type === TransactionEditPageType.Transaction && mode.value === TransactionEditPageMode.Add;
+}
+
+function applyReceiptRecognitionResult(result: RecognizedReceiptImageResponse): void {
+    if (typeof result.amount === 'number' && Number.isFinite(result.amount)) {
+        transaction.value.sourceAmount = Math.round(result.amount * 100);
+    }
+
+    if (result.tradeTime) {
+        const parsedMs = Date.parse(result.tradeTime);
+        if (!Number.isNaN(parsedMs)) {
+            transaction.value.time = Math.floor(parsedMs / 1000);
+        }
+    }
+
+    if (result.description) {
+        transaction.value.comment = result.description;
+    }
+
+    if (result.confidence !== null && result.confidence < RECEIPT_IMAGE_LOW_CONFIDENCE_THRESHOLD) {
+        snackbar.value?.showMessage('Low confidence recognition, please verify');
+    }
+}
+
+function showReceiptRecognitionError(error: RecognizeReceiptImageError | unknown): void {
+    const typed = error as RecognizeReceiptImageError;
+    const errorCode = typed && typeof typed.errorCode === 'string' ? typed.errorCode : 'unknown';
+
+    if (errorCode === 'provider_unconfigured') {
+        snackbar.value?.showError('Receipt recognition is not configured');
+        return;
+    }
+
+    if (errorCode === 'timeout') {
+        snackbar.value?.showError('Recognition timed out, please try again');
+        return;
+    }
+
+    if (errorCode === 'parse_error') {
+        snackbar.value?.showError('Could not parse this image, please try a clearer one');
+        return;
+    }
+
+    if (errorCode === 'rate_limited') {
+        snackbar.value?.showError('Too many requests, please wait a moment');
+        return;
+    }
+
+    snackbar.value?.showError('Unable to recognize image');
+}
+
+async function recognizeUploadedPicture(pictureFile: File): Promise<void> {
+    if (!shouldRecognizeUploadedPicture()) {
+        return;
+    }
+
+    recognizingPicture.value = true;
+    try {
+        const result = await transactionsStore.recognizeReceiptImage({ imageFile: pictureFile });
+        applyReceiptRecognitionResult(result);
+        activeTab.value = 'basicInfo';
+        snackbar.value?.showMessage('Image recognized and filled');
+    } catch (error) {
+        showReceiptRecognitionError(error);
+    } finally {
+        recognizingPicture.value = false;
+    }
+}
+
+async function uploadPicture(event: Event): Promise<void> {
     if (!event || !event.target) {
         return;
     }
@@ -1709,18 +1782,25 @@ function uploadPicture(event: Event): void {
     uploadingPicture.value = true;
     submitting.value = true;
 
-    transactionsStore.uploadTransactionPicture({ pictureFile }).then(response => {
+    try {
+        const response = await transactionsStore.uploadTransactionPicture({
+            pictureFile,
+            clientSessionId: clientSessionId.value
+        });
         transaction.value.addPicture(response);
         uploadingPicture.value = false;
-        submitting.value = false;
-    }).catch(error => {
+
+        await recognizeUploadedPicture(pictureFile);
+    } catch (error: unknown) {
+        const processed = !!(error && typeof error === 'object' && (error as { processed?: boolean }).processed);
+        if (!processed) {
+            snackbar.value?.showError('Unable to upload transaction picture');
+        }
+    } finally {
         uploadingPicture.value = false;
         submitting.value = false;
-
-        if (!error.processed) {
-            snackbar.value?.showError(error);
-        }
-    });
+        recognizingPicture.value = false;
+    }
 }
 
 function viewOrRemovePicture(pictureInfo: TransactionPictureInfoBasicResponse): void {

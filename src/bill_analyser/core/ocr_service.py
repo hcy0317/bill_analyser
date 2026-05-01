@@ -30,6 +30,7 @@ from typing import Any, Deque
 from ..utils.logger import get_logger
 from .ocr_provider import (
     CloudOcrNotConfigured,
+    DISABLED_PROVIDER_NAME,
     OcrProvider,
     OcrProviderFactory,
     OcrRawResult,
@@ -64,6 +65,7 @@ class OcrServiceError(RuntimeError):
 
     @property
     def http_status(self) -> int:
+        """HTTP status mapped from the typed OCR error code."""
         return ERROR_HTTP_STATUS.get(self.code, 500)
 
 
@@ -89,6 +91,7 @@ class OcrRecognitionResult:
     raw_provider_response: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
+        """Return the frontend OCR response payload."""
         return {
             "amount": self.amount,
             "trade_time": self.trade_time,
@@ -129,6 +132,7 @@ class OcrRateLimiter:
         return True
 
     def reset(self, user_id: Any | None = None) -> None:
+        """Clear all buckets, or only the specified user's bucket."""
         if user_id is None:
             self._buckets.clear()
         else:
@@ -204,6 +208,28 @@ def parse_receipt_text(text: str) -> dict[str, Any]:
 
 
 _DEFAULT_TIMEOUT_SECONDS = 30.0
+_DEFAULT_OCR_LANG = "chi_sim+eng"
+
+
+def normalize_ocr_config(config: Any) -> dict[str, Any]:
+    """Normalize OCR runtime config from DB/API/env-compatible payloads."""
+    raw_config = config if isinstance(config, dict) else {}
+    provider = str(raw_config.get("provider") or DISABLED_PROVIDER_NAME).strip().lower()
+    if provider in {"", "none", "off"}:
+        provider = DISABLED_PROVIDER_NAME
+
+    allowed_providers = {DISABLED_PROVIDER_NAME, *OcrProviderFactory.available_providers()}
+    if provider not in allowed_providers:
+        provider = DISABLED_PROVIDER_NAME
+
+    lang = str(raw_config.get("lang") or _DEFAULT_OCR_LANG).strip()
+    if not lang or len(lang) > 64 or not re.fullmatch(r"[A-Za-z0-9_+.-]+", lang):
+        lang = _DEFAULT_OCR_LANG
+
+    return {
+        "provider": provider,
+        "lang": lang,
+    }
 
 
 class OcrService:
@@ -228,18 +254,26 @@ class OcrService:
 
     @property
     def provider(self) -> OcrProvider | None:
+        """Return the active provider, or None when OCR is disabled."""
         return self._provider
 
     @property
     def rate_limiter(self) -> OcrRateLimiter:
+        """Return the service rate limiter."""
         return self._rate_limiter
 
     @classmethod
     def from_environment(cls) -> "OcrService":
         """根据 env ``BILL_OCR_PROVIDER`` 构造服务；无 provider 时构造 disabled 实例。"""
-        provider_name = OcrProviderFactory.resolve_default_provider_name()
+        return cls.from_config({"provider": OcrProviderFactory.resolve_default_provider_name()})
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any] | None) -> "OcrService":
+        """根据持久化配置构造服务；无 provider 时构造 disabled 实例。"""
+        normalized_config = normalize_ocr_config(config)
+        provider_name = normalized_config["provider"]
         try:
-            provider = OcrProviderFactory.create(provider_name, {})
+            provider = OcrProviderFactory.create(provider_name, normalized_config)
         except (ProviderUnavailable, ValueError):
             provider = None
         return cls(provider=provider)

@@ -55,7 +55,11 @@ function installPostFormImpl(): void {
 beforeEach(async () => {
     calls.length = 0;
     axiosMock.postForm.mockReset();
+    axiosMock.get.mockReset();
+    axiosMock.put.mockReset();
     installPostFormImpl();
+    axiosMock.get.mockImplementation(() => Promise.resolve({ data: { success: true, result: { provider: 'disabled', lang: 'chi_sim+eng', available_providers: ['disabled', 'tesseract'], configured: false } } }));
+    axiosMock.put.mockImplementation(() => Promise.resolve({ data: { success: true, result: { provider: 'tesseract', lang: 'eng', available_providers: ['disabled', 'tesseract'], configured: true } } }));
     jest.resetModules();
     services = (await import('@/lib/services.ts')).default;
 });
@@ -93,5 +97,22 @@ describe('services.recognizeReceiptImage', () => {
 
         const call = calls[0]!;
         expect(call.config['cancelableUuid']).toBeUndefined();
+    });
+});
+
+describe('services OCR config', () => {
+    test('loads OCR config from receipt-recognition config endpoint', async () => {
+        await services.getOCRConfig();
+
+        expect(axiosMock.get).toHaveBeenCalledWith('ml/receipt-recognition/config');
+    });
+
+    test('updates OCR config through receipt-recognition config endpoint', async () => {
+        await services.updateOCRConfig({ provider: 'tesseract', lang: 'eng' });
+
+        expect(axiosMock.put).toHaveBeenCalledWith('ml/receipt-recognition/config', {
+            provider: 'tesseract',
+            lang: 'eng'
+        });
     });
 });

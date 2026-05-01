@@ -434,6 +434,53 @@
                                         </div>
                                     </v-card-text>
                                 </v-card>
+
+                                <v-card variant="outlined" class="mb-4">
+                                    <v-card-title class="text-subtitle-1 d-flex align-center">
+                                        <span>{{ tt('OCR Config') }}</span>
+                                        <v-spacer />
+                                        <v-chip size="small"
+                                                :color="ocrConfig.configured ? 'success' : 'warning'"
+                                                variant="tonal">
+                                            {{ tt(ocrConfig.configured ? 'Enabled' : 'Disabled') }}
+                                        </v-chip>
+                                    </v-card-title>
+                                    <v-divider />
+                                    <v-card-text class="pt-4">
+                                        <v-row>
+                                            <v-col cols="12" md="5">
+                                                <v-select v-model="ocrConfigForm.provider"
+                                                          :items="ocrProviderOptions"
+                                                          item-title="title"
+                                                          item-value="value"
+                                                          :label="tt('Provider')"
+                                                          variant="outlined"
+                                                          density="comfortable"
+                                                          hide-details
+                                                          :loading="ocrConfigLoading"
+                                                          :disabled="ocrConfigLoading || ocrConfigSaving" />
+                                            </v-col>
+                                            <v-col cols="12" md="5">
+                                                <v-text-field v-model="ocrConfigForm.lang"
+                                                              :label="tt('OCR Language')"
+                                                              variant="outlined"
+                                                              density="comfortable"
+                                                              hide-details
+                                                              :disabled="ocrConfigForm.provider === 'disabled' || ocrConfigLoading || ocrConfigSaving" />
+                                            </v-col>
+                                            <v-col cols="12" md="2" class="d-flex align-center">
+                                                <v-btn class="learning-panel-action w-100"
+                                                       variant="outlined"
+                                                       color="default"
+                                                       :loading="ocrConfigSaving"
+                                                       :disabled="ocrConfigLoading"
+                                                       @click="saveOCRConfig">
+                                                    {{ tt('Save') }}
+                                                </v-btn>
+                                            </v-col>
+                                        </v-row>
+                                    </v-card-text>
+                                </v-card>
             </template>
 
             <template v-if="activeTab === 'llm'">
@@ -747,7 +794,7 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useLearningStore } from '@/stores/learning.ts';
 import type { LearningSuggestion, LearningRule } from '@/models/learning_center.ts';
 import { getSuggestionFeatureSummary, getRuleFeatureSummary } from '@/models/learning_center.ts';
-import services from '@/lib/services.ts';
+import services, { type OCRConfigResponse } from '@/lib/services.ts';
 
 import {
     mdiRefresh,
@@ -863,10 +910,22 @@ const ruleEnabledFilterMenu = ref(false);
 const ruleAppliedFilterMenu = ref(false);
 const llmLoading = ref(false);
 const llmConfigLoading = ref(false);
+const ocrConfigLoading = ref(false);
+const ocrConfigSaving = ref(false);
 const llmSavedConfigs = ref<LLMConfigItem[]>([]);
 const llmCandidates = ref<LLMCandidateItem[]>([]);
 const llmStatusFilter = ref<string>('');
 const selectedLLMIds = ref<number[]>([]);
+const ocrConfig = ref<OCRConfigResponse>({
+    provider: 'disabled',
+    lang: 'chi_sim+eng',
+    available_providers: ['disabled', 'tesseract', 'cloud_stub'],
+    configured: false,
+});
+const ocrConfigForm = ref<{ provider: string; lang: string }>({
+    provider: 'disabled',
+    lang: 'chi_sim+eng',
+});
 
 const llmProviderOptions: LLMProviderOption[] = [
     {
@@ -936,6 +995,16 @@ const llmProviderOptions: LLMProviderOption[] = [
     },
 ];
 
+const ocrProviderOptions = computed<SelectOption[]>(() => {
+    const providers = ocrConfig.value.available_providers.length
+        ? ocrConfig.value.available_providers
+        : ['disabled', 'tesseract', 'cloud_stub'];
+    return providers.map(provider => ({
+        title: ocrProviderLabel(provider),
+        value: provider,
+    }));
+});
+
 const defaultLLMProviderOption = llmProviderOptions[0] as LLMProviderOption;
 
 const llmReasoningDepthOptions = [
@@ -956,6 +1025,8 @@ const loading = computed(() => (
     || store.rulesLoading
     || llmLoading.value
     || llmConfigLoading.value
+    || ocrConfigLoading.value
+    || ocrConfigSaving.value
 ));
 const error = computed(() => store.error);
 const suggestionsTotal = computed(() => store.suggestionsTotal);
@@ -1267,7 +1338,7 @@ async function refreshCurrentTab() {
     } else if (activeTab.value === 'llm') {
         await loadLLMCandidates();
     } else if (activeTab.value === 'llm-config') {
-        await loadLLMConfigs();
+        await Promise.all([loadLLMConfigs(), loadOCRConfig()]);
     } else {
         await store.loadRules();
     }
@@ -1587,6 +1658,63 @@ function llmProviderLabel(provider: string): string {
         ?? provider;
 }
 
+function ocrProviderLabel(provider: string): string {
+    const labels: Record<string, string> = {
+        disabled: tt('Disabled'),
+        tesseract: 'Tesseract',
+        cloud_stub: 'Cloud Stub',
+    };
+    return labels[provider] ?? provider;
+}
+
+function applyOCRConfig(config: OCRConfigResponse): void {
+    ocrConfig.value = {
+        provider: config.provider || 'disabled',
+        lang: config.lang || 'chi_sim+eng',
+        available_providers: Array.isArray(config.available_providers) && config.available_providers.length
+            ? config.available_providers
+            : ['disabled', 'tesseract', 'cloud_stub'],
+        configured: !!config.configured,
+    };
+    ocrConfigForm.value = {
+        provider: ocrConfig.value.provider,
+        lang: ocrConfig.value.lang,
+    };
+}
+
+async function loadOCRConfig() {
+    ocrConfigLoading.value = true;
+    try {
+        const resp = await services.getOCRConfig();
+        if (resp.data?.success && resp.data.result) {
+            applyOCRConfig(resp.data.result);
+        }
+    } catch { /* ignore config load errors */ }
+    finally {
+        ocrConfigLoading.value = false;
+    }
+}
+
+async function saveOCRConfig() {
+    ocrConfigSaving.value = true;
+    try {
+        const resp = await services.updateOCRConfig({
+            provider: ocrConfigForm.value.provider,
+            lang: ocrConfigForm.value.lang.trim() || 'chi_sim+eng',
+        });
+        if (resp.data?.success && resp.data.result) {
+            applyOCRConfig(resp.data.result);
+            showInfoMessage('OCR Config Saved', {});
+        } else {
+            store.error = getPayloadErrorMessage(resp.data?.result, 'Failed to save OCR config');
+        }
+    } catch (error: unknown) {
+        store.error = getRequestErrorMessage(error, 'Failed to save OCR config');
+    } finally {
+        ocrConfigSaving.value = false;
+    }
+}
+
 async function handleActivateConfig(configId: number) {
     try {
         await services.activateLLMConfig(configId);
@@ -1697,6 +1825,7 @@ watch(activeTab, (tab) => {
         loadLLMCandidates();
     } else if (tab === 'llm-config') {
         loadLLMConfigs();
+        loadOCRConfig();
     } else {
         store.loadRules();
     }

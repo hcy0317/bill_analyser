@@ -11,6 +11,7 @@
   - `/api/templates`
   - `/api/budgets`
   - `/api/backup`
+- `app.py` 直接提供 ML 小票识图入口：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`
 
 ## 5.1.1 当前 REST 收口进展（2026-03-06）
 - 账户域首批 legacy action 已收口到 REST：

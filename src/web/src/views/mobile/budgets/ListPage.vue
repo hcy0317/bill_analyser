@@ -39,41 +39,100 @@
         </f7-list>
 
         <f7-list strong inset dividers media-list class="margin-vertical budget-list" v-else>
-            <f7-list-item
-                swipeout
-                class="budget-list-item"
-                :key="budget.id"
-                v-for="budget in filteredBudgets"
-                @click="onBudgetTap(budget)"
-            >
-                <template #title>
-                    <span class="budget-name">{{ budget.name || budget.fullCategoryName }}</span>
+            <template :key="group.category" v-for="group in groupedBudgets">
+                <f7-list-item
+                    swipeout
+                    class="budget-list-item budget-group-list-item"
+                    @click="toggleBudgetGroup(group.category)"
+                >
+                    <template #media>
+                        <div class="budget-group-media">
+                            <f7-icon class="budget-collapse-icon" :f7="group.isCollapsed ? 'chevron_right' : 'chevron_down'"></f7-icon>
+                            <item-icon
+                                class="budget-category-icon"
+                                icon-type="category"
+                                :icon-id="group.categoryIcon"
+                                :color="group.categoryColor"
+                                size="28px"
+                            ></item-icon>
+                        </div>
+                    </template>
+                    <template #title>
+                        <span class="budget-name">{{ group.category }}</span>
+                    </template>
+                    <template #after>
+                        <span class="budget-execution-rate" :class="getBudgetGroupRateClass(group)">
+                            {{ getBudgetGroupExecutionRate(group).toFixed(1) }}%
+                        </span>
+                    </template>
+                    <template #text>
+                        <div class="budget-progress-row">
+                            <f7-progressbar
+                                :progress="getBudgetGroupProgressPercent(group)"
+                                :class="getBudgetGroupProgressClass(group)"
+                            ></f7-progressbar>
+                        </div>
+                        <div class="budget-amount-row">
+                            <span class="budget-amount-spent">{{ formatAmount(group.totalSpent / 100) }}</span>
+                            <span class="budget-amount-divider"> / </span>
+                            <span class="budget-amount-target">{{ formatAmount(group.totalAmount / 100) }}</span>
+                        </div>
+                    </template>
+                    <f7-swipeout-actions right v-if="getPrimaryBudgetForHeader(group)">
+                        <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="openEditSheet(getPrimaryBudgetForHeader(group)!)"></f7-swipeout-button>
+                        <f7-swipeout-button color="red" class="padding-horizontal" @click="requestDelete(getPrimaryBudgetForHeader(group)!)">
+                            <f7-icon f7="trash"></f7-icon>
+                        </f7-swipeout-button>
+                    </f7-swipeout-actions>
+                </f7-list-item>
+
+                <template v-if="!group.isCollapsed">
+                    <f7-list-item
+                        swipeout
+                        class="budget-list-item budget-sub-list-item"
+                        :key="budget.id"
+                        v-for="budget in getExpandedBudgetRows(group)"
+                        @click="onBudgetTap(budget)"
+                    >
+                        <template #media>
+                            <item-icon
+                                class="budget-category-icon"
+                                icon-type="category"
+                                :icon-id="budget.categoryIcon || group.categoryIcon"
+                                :color="budget.categoryColor || group.categoryColor"
+                                size="24px"
+                            ></item-icon>
+                        </template>
+                        <template #title>
+                            <span class="budget-name">{{ budget.subCategory || budget.name || budget.fullCategoryName }}</span>
+                        </template>
+                        <template #after>
+                            <span class="budget-execution-rate" :class="{ 'text-color-red': budget.isOverBudget, 'text-color-orange': !budget.isOverBudget && budget.alertTriggered }">
+                                {{ budget.executionRateText }}
+                            </span>
+                        </template>
+                        <template #text>
+                            <div class="budget-progress-row">
+                                <f7-progressbar
+                                    :progress="getBudgetProgressPercent(budget)"
+                                    :class="{ 'color-red': budget.isOverBudget, 'color-orange': !budget.isOverBudget && budget.alertTriggered }"
+                                ></f7-progressbar>
+                            </div>
+                            <div class="budget-amount-row">
+                                <span class="budget-amount-spent">{{ formatAmount(budget.spentAmountInYuan) }}</span>
+                                <span class="budget-amount-divider"> / </span>
+                                <span class="budget-amount-target">{{ formatAmount(budget.amountInYuan) }}</span>
+                            </div>
+                        </template>
+                        <f7-swipeout-actions right>
+                            <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="openEditSheet(budget)"></f7-swipeout-button>
+                            <f7-swipeout-button color="red" class="padding-horizontal" @click="requestDelete(budget)">
+                                <f7-icon f7="trash"></f7-icon>
+                            </f7-swipeout-button>
+                        </f7-swipeout-actions>
+                    </f7-list-item>
                 </template>
-                <template #after>
-                    <span class="budget-execution-rate" :class="{ 'text-color-red': budget.isOverBudget, 'text-color-orange': !budget.isOverBudget && budget.alertTriggered }">
-                        {{ budget.executionRateText }}
-                    </span>
-                </template>
-                <template #text>
-                    <div class="budget-progress-row">
-                        <f7-progressbar
-                            :progress="getBudgetProgressPercent(budget)"
-                            :class="{ 'color-red': budget.isOverBudget, 'color-orange': !budget.isOverBudget && budget.alertTriggered }"
-                        ></f7-progressbar>
-                    </div>
-                    <div class="budget-amount-row">
-                        <span class="budget-amount-spent">{{ formatAmount(budget.spentAmountInYuan) }}</span>
-                        <span class="budget-amount-divider"> / </span>
-                        <span class="budget-amount-target">{{ formatAmount(budget.amountInYuan) }}</span>
-                    </div>
-                </template>
-                <f7-swipeout-actions right>
-                    <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="openEditSheet(budget)"></f7-swipeout-button>
-                    <f7-swipeout-button color="red" class="padding-horizontal" @click="requestDelete(budget)">
-                        <f7-icon f7="trash"></f7-icon>
-                    </f7-swipeout-button>
-                </f7-swipeout-actions>
-            </f7-list-item>
+            </template>
         </f7-list>
 
         <budget-edit-sheet
@@ -108,9 +167,16 @@ import { ref, computed } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useI18nUIComponents, showLoading, hideLoading } from '@/lib/ui/mobile.ts';
 import { useBudgetStore } from '@/stores/budget.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { CategoryType } from '@/core/category.ts';
 import { Budget, BudgetType, BudgetPeriodType } from '@/models/budget.ts';
+import type { TransactionCategory } from '@/models/transaction_category.ts';
 import {
+    type MobileBudgetGroup,
+    buildMobileBudgetGroups,
     formatBudgetAmount,
+    getBudgetGroupExecutionRate,
+    getBudgetGroupProgressPercent,
     getBudgetProgressPercent,
     selectBudgetsByType
 } from '@/views/mobile/budgets/listPageHelpers.ts';
@@ -120,9 +186,11 @@ import logger from '@/lib/logger.ts';
 const { tt } = useI18n();
 const { showToast } = useI18nUIComponents();
 const budgetStore = useBudgetStore();
+const transactionCategoriesStore = useTransactionCategoriesStore();
 
 const loading = ref<boolean>(true);
 const activeBudgetType = ref<BudgetType>(BudgetType.Expense);
+const collapsedBudgetGroups = ref<Set<string>>(new Set());
 
 // Edit sheet state. `editingBudget` is null when creating; otherwise a clone of
 // the selected list row that the EditSheet operates on without mutating the
@@ -143,6 +211,22 @@ const filteredBudgets = computed<Budget[]>(() => {
     );
 });
 
+const currentCategoryType = computed<CategoryType>(() => {
+    return activeBudgetType.value === BudgetType.Investment
+        ? CategoryType.Investment
+        : CategoryType.Expense;
+});
+
+const budgetPrimaryCategories = computed<TransactionCategory[]>(() => {
+    return transactionCategoriesStore.allTransactionCategories[currentCategoryType.value] || [];
+});
+
+const groupedBudgets = computed<MobileBudgetGroup[]>(() => buildMobileBudgetGroups({
+    budgets: filteredBudgets.value,
+    primaryCategories: budgetPrimaryCategories.value,
+    collapsedCategories: collapsedBudgetGroups.value
+}));
+
 const deleteConfirmLabel = computed<string>(() => {
     const target = budgetToDelete.value;
     if (!target) {
@@ -161,6 +245,7 @@ function switchBudgetType(type: BudgetType): void {
         return;
     }
     activeBudgetType.value = type;
+    collapsedBudgetGroups.value = new Set();
     void reload(false);
 }
 
@@ -172,6 +257,41 @@ function switchBudgetType(type: BudgetType): void {
 // path or duplicate it under views/mobile/budgets.
 function onBudgetTap(budget: Budget): void {
     logger.info(`[MobileBudgets] Tap budget (drilldown still deferred): ${budget.id}`);
+}
+
+function toggleBudgetGroup(category: string): void {
+    if (collapsedBudgetGroups.value.has(category)) {
+        collapsedBudgetGroups.value.delete(category);
+    } else {
+        collapsedBudgetGroups.value.add(category);
+    }
+    collapsedBudgetGroups.value = new Set(collapsedBudgetGroups.value);
+}
+
+function getPrimaryBudgetForHeader(group: MobileBudgetGroup): Budget | null {
+    return group.primaryBudgets[0] || null;
+}
+
+function getExpandedBudgetRows(group: MobileBudgetGroup): Budget[] {
+    const rows = group.primaryBudgets.length > 1 ? [...group.primaryBudgets] : [];
+    rows.push(...group.subBudgets);
+    return rows;
+}
+
+function getBudgetGroupRateClass(group: MobileBudgetGroup): Record<string, boolean> {
+    const rate = getBudgetGroupExecutionRate(group);
+    return {
+        'text-color-red': rate > 100,
+        'text-color-orange': rate >= 80 && rate <= 100
+    };
+}
+
+function getBudgetGroupProgressClass(group: MobileBudgetGroup): Record<string, boolean> {
+    const rate = getBudgetGroupExecutionRate(group);
+    return {
+        'color-red': rate > 100,
+        'color-orange': rate >= 80 && rate <= 100
+    };
 }
 
 function openCreateSheet(): void {
@@ -255,11 +375,14 @@ function getCurrentPeriodRequest(): {
 function reload(done: unknown): Promise<void> {
     loading.value = true;
     const req = getCurrentPeriodRequest();
-    return budgetStore.loadAllBudgets({
+    return Promise.all([
+        transactionCategoriesStore.loadAllCategories({ force: false }),
+        budgetStore.loadAllBudgets({
         force: true,
         type: req.type,
         periodType: req.periodType
-    }).then(() => {
+        })
+    ]).then(() => {
         return budgetStore.loadBudgetExecution({
             type: req.type,
             periodType: req.periodType,
@@ -290,6 +413,30 @@ function onPageAfterIn(): void {
 
 .budget-list .budget-list-item .item-title-row {
     align-items: center;
+}
+
+.budget-list .budget-group-list-item {
+    --f7-list-item-title-font-weight: 600;
+}
+
+.budget-list .budget-sub-list-item {
+    --f7-list-item-padding-left: 48px;
+}
+
+.budget-list .budget-group-media {
+    display: flex;
+    align-items: center;
+    min-width: 52px;
+}
+
+.budget-list .budget-collapse-icon {
+    color: var(--f7-text-color);
+    opacity: 0.45;
+    margin-inline-end: 5px;
+}
+
+.budget-list .budget-category-icon {
+    flex-shrink: 0;
 }
 
 .budget-list .budget-progress-row {
