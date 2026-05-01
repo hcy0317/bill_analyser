@@ -22,6 +22,10 @@
                                v-if="transaction.type !== TransactionType.ModifyBalance"
                                :disabled="mode === TransactionEditPageMode.View"
                                @click="transaction.type = TransactionType.Transfer"></f7-button>
+                    <f7-button :text="tt('Investment')" :active="transaction.type === TransactionType.Investment"
+                               v-if="transaction.type !== TransactionType.ModifyBalance"
+                               :disabled="mode === TransactionEditPageMode.View"
+                               @click="transaction.type = TransactionType.Investment"></f7-button>
                     <f7-button :text="tt('Modify Balance')" :active="transaction.type === TransactionType.ModifyBalance"
                                :disabled="true"
                                v-if="pageTypeAndMode?.type === TransactionEditPageType.Transaction && transaction.type === TransactionType.ModifyBalance"></f7-button>
@@ -85,6 +89,23 @@
                 :title="getDisplayAmount(transaction.destinationAmount, transaction.hideAmount, destinationAccountCurrency)"
                 @click="showDestinationAmountSheet = true"
                 v-if="transaction.type === TransactionType.Transfer"
+            >
+                <number-pad-sheet :min-value="TRANSACTION_MIN_AMOUNT"
+                                  :max-value="TRANSACTION_MAX_AMOUNT"
+                                  :currency="destinationAccountCurrency"
+                                  v-model:show="showDestinationAmountSheet"
+                                  v-model="transaction.destinationAmount"
+                ></number-pad-sheet>
+            </f7-list-item>
+
+            <f7-list-item
+                class="transaction-edit-amount text-color-success"
+                link="#" no-chevron
+                :class="destinationAmountClass"
+                :header="tt('Investment Amount')"
+                :title="getDisplayAmount(transaction.destinationAmount, transaction.hideAmount, destinationAccountCurrency)"
+                @click="showDestinationAmountSheet = true"
+                v-if="transaction.type === TransactionType.Investment"
             >
                 <number-pad-sheet :min-value="TRANSACTION_MIN_AMOUNT"
                                   :max-value="TRANSACTION_MAX_AMOUNT"
@@ -191,6 +212,38 @@
             </f7-list-item>
 
             <f7-list-item
+                class="list-item-with-header-and-title list-item-title-hide-overflow"
+                key="investmentCategorySelection"
+                link="#" no-chevron
+                :class="{ 'readonly': mode === TransactionEditPageMode.View }"
+                :header="tt('Category')"
+                @click="handleCategoryItemClick"
+                v-if="transaction.type === TransactionType.Investment"
+            >
+                <template #title>
+                    <div class="list-item-custom-title" v-if="hasAvailableInvestmentCategories">
+                        <span>{{ getTransactionPrimaryCategoryName(transaction.investmentCategoryId, allCategories[CategoryType.Investment], transaction.category) }}</span>
+                        <f7-icon class="category-separate-icon icon-with-direction" f7="chevron_right"></f7-icon>
+                        <span>{{ getTransactionSecondaryCategoryName(transaction.investmentCategoryId, allCategories[CategoryType.Investment], transaction.category) }}</span>
+                    </div>
+                    <div class="list-item-custom-title" v-else-if="!hasAvailableInvestmentCategories">
+                        <span>{{ tt('None') }}</span>
+                    </div>
+                </template>
+                <tree-view-selection-sheet primary-key-field="id" primary-title-field="name"
+                                           primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
+                                           primary-hidden-field="hidden" primary-sub-items-field="subCategories"
+                                           secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
+                                           secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
+                                           secondary-hidden-field="hidden"
+                                           :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
+                                           :items="allCategories[CategoryType.Investment]"
+                                           v-model:show="showCategorySheet"
+                                           v-model="transaction.investmentCategoryId">
+                </tree-view-selection-sheet>
+            </f7-list-item>
+
+            <f7-list-item
                 class="list-item-with-header-and-title"
                 link="#" no-chevron
                 :class="{ 'disabled': !allVisibleAccounts.length || (mode === TransactionEditPageMode.Edit && transaction.type === TransactionType.ModifyBalance), 'readonly': mode === TransactionEditPageMode.View }"
@@ -220,6 +273,30 @@
                 :header="tt('Destination Account')"
                 :title="destinationAccountName"
                 v-if="transaction.type === TransactionType.Transfer"
+                @click="showDestinationAccountSheet = true"
+            >
+                <two-column-list-item-selection-sheet primary-key-field="id" primary-value-field="category"
+                                                      primary-title-field="name" primary-footer-field="displayBalance"
+                                                      primary-icon-field="icon" primary-icon-type="account"
+                                                      primary-sub-items-field="accounts"
+                                                      :primary-title-i18n="true"
+                                                      secondary-key-field="id" secondary-value-field="id"
+                                                      secondary-title-field="name" secondary-footer-field="displayBalance"
+                                                      secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
+                                                      :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
+                                                      :items="allVisibleCategorizedAccounts"
+                                                      v-model:show="showDestinationAccountSheet"
+                                                      v-model="transaction.destinationAccountId">
+                </two-column-list-item-selection-sheet>
+            </f7-list-item>
+
+            <f7-list-item
+                class="list-item-with-header-and-title"
+                link="#" no-chevron
+                :class="{ 'disabled': !allVisibleAccounts.length, 'readonly': mode === TransactionEditPageMode.View }"
+                :header="tt('Investment Account')"
+                :title="destinationAccountName"
+                v-if="transaction.type === TransactionType.Investment"
                 @click="showDestinationAccountSheet = true"
             >
                 <two-column-list-item-selection-sheet primary-key-field="id" primary-value-field="category"
@@ -580,6 +657,7 @@ const {
     hasAvailableExpenseCategories,
     hasAvailableIncomeCategories,
     hasAvailableTransferCategories,
+    hasAvailableInvestmentCategories,
     canAddTransactionPicture,
     title,
     saveButtonTitle,
@@ -851,6 +929,10 @@ function hasAvailableCategoriesForType(type: number): boolean {
         return hasAvailableTransferCategories.value;
     }
 
+    if (type === TransactionType.Investment) {
+        return hasAvailableInvestmentCategories.value;
+    }
+
     return false;
 }
 
@@ -966,7 +1048,7 @@ function init(): void {
 
     if (queryType &&
         queryType >= TransactionType.Income &&
-        queryType <= TransactionType.Transfer) {
+        queryType <= TransactionType.Investment) {
         transaction.value.type = queryType;
     } else if (queryType === TransactionType.ModifyBalance &&
         pageTypeAndMode.type === TransactionEditPageType.Transaction &&
@@ -1341,6 +1423,7 @@ watch(() => transaction.value.type, (newType, oldType) => {
         transaction.value.expenseCategoryId = '';
         transaction.value.incomeCategoryId = '';
         transaction.value.transferCategoryId = '';
+        transaction.value.investmentCategoryId = '';
 
         logger.info(`交易类型从 ${oldType} 切换到 ${newType}，已重置分类选择`);
     }
