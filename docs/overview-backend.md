@@ -29,15 +29,15 @@
 - `db_budgets_core.py` / `db_budgets_execution.py` / `db_budgets_forecast.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询；预算分类上下文会把历史 `categories.type=1` 归一为当前支出类型 `3`，避免旧分类预算在执行统计和预算列表中被类型过滤漏掉
 - `db_budgets_reporting.py`：预算 reporting 兼容聚合层；运行时通过它组合 execution/history 与 forecast/import/export 两个预算域 mixin
 - `db_import_configs.py` / `db_import_sessions.py` / `db_import_preview.py` / `db_import_learning.py` / `import_learning/`：导入模板配置、三阶段会话、预览编辑/确认、长期学习 durable corpus、exact/manual 学习规则、session-scoped dry-run suggestions，以及基于 dataset snapshot / active model registry 的轻量双头学习模型训练与推理
-- `bill_service.py`：导入主流程编排（含 v2 三阶段导入）
-- `smart_dedup.py`：智能去重引擎主实现；导入批次内按"完全重复 → 平台-银行去重 → 转账配对 → 相似去重 → 分账去重"的顺序处理，含数据库对比时再追加数据库重复检测与跨批次转账配对。平台-银行去重优先保留支付平台账单；同号平台/银行候选直接按重复处理，异号候选只有在没有明确转账意图且具备文本重复证据时才先于转账配对吸收，避免把真实转账错误归并为平台-银行重复。
-- `category_engine.py`：分类规则匹配式解析与分类匹配（含类型过滤与预编译优化）；运行时仅从 `category_rules` canonical source 加载规则，不再回退到 `categories.keywords`。`rule_expression` 后端兼容旧 `OR:a|b&AND:c&NOT:d`，正式语法由 `OR={...}`、`AND={...}`、`NOT={...}`、`REGEX={...}` 子句组成：`+` 表示 AND，`/` 表示同一表达式内 OR，`|` 表示表达式级 OR，`×` 或 `NOT` 表示 AND NOT；多层括号按 AST 优先级执行。前端共享规则构建器把一条 canonical 分类规则呈现为"多个表达式 + 表达式内多个规则块"，支持多层括号、连接符与 OR/AND/NOT 标签分离展示，并在同一表达式内保持 `/` 连接块同组展示；迁移旧关键词会转义分隔符与括号，避免特殊字符关键词被拆成错误语义。分类规则运行时匹配顺序由 `categories.priority`、`category_id` 与规则 id 的稳定顺序决定，`category_rules.priority` 仅作为兼容元数据保留；加载规则时会把历史 `categories.type=1` 归一为支出类型，匹配结果会保留 canonical category id/type，无法解析到真实分类时 fail closed，不生成同名虚拟分类。
-- `exchange_rate_providers.py`：多汇率提供者聚合
+- `bill_service.py`：账单服务公共导入 facade；真实实现按 `bill_service_parts/` mixin 组合，分别维护 legacy 导入、v2 三阶段导入、预览投影/分页、账户匹配、学习规则/信号、matching 读写、preview 决策与 reclassify 等域。
+- `smart_dedup/`：智能去重引擎 package；公共导入仍由 `core.smart_dedup` 输出，内部按模型、标准化、精确重复、平台-银行、分组/相似、转账、reconciliation 与数据库重复检测拆分。导入批次内仍按"完全重复 → 平台-银行去重 → 转账配对 → 相似去重 → 分账去重"顺序处理，含数据库对比时再追加数据库重复检测与跨批次转账配对。
+- `category_engine/`：分类规则匹配 package；公共导入仍由 `core.category_engine` 输出，内部按表达式 AST/转义、预编译规则、匹配器与 `CategoryEngine` 规则加载/缓存拆分。运行时仅从 `category_rules` canonical source 加载规则，不再回退到 `categories.keywords`。`rule_expression` 后端兼容旧 `OR:a|b&AND:c&NOT:d`，正式语法由 `OR={...}`、`AND={...}`、`NOT={...}`、`REGEX={...}` 子句组成：`+` 表示 AND，`/` 表示同一表达式内 OR，`|` 表示表达式级 OR，`×` 或 `NOT` 表示 AND NOT；多层括号按 AST 优先级执行。分类规则运行时匹配顺序由 `categories.priority`、`category_id` 与规则 id 的稳定顺序决定，无法解析到真实分类时 fail closed，不生成同名虚拟分类。
+- `exchange_rate_providers/`：多汇率 provider package；公共导入仍由 `core.exchange_rate_providers` 输出，内部按 provider 基类、解析辅助、中国 provider、全球 provider 与 manager 拆分。
+- `llm_learning_service/`：LLM 学习服务 package；公共导入仍由 `core.llm_learning_service` 输出，内部按 provider 调用、高级参数、限流、导入会话分析、规则合成与预览推荐拆分，用户级 active config 与高级参数保持实例/请求隔离。
 - `budget.py`：历史预算管理兼容层，保留 `BudgetManager` 供旧 CLI / 旧测试路径复用；当前 CLI 预算报告主链直接走 `Database.get_budget_execution_details()`
 - `sync.py`：同步相关编排
 - `analyzer.py`：统计分析、聚合与图表/报表数据生成主服务，仍是统计域的活跃运行时代码
 - `report.py` / `utils/report_export.py`：`core.report` 保留旧导入路径兼容壳，真实 PDF / Excel / HTML 报告导出实现已归并到 `utils.report_export`
-- `smart_dedup.py`：智能去重引擎主实现，仍在导入主链中承担平台银行配对、相似去重与分账去重
 - `smart_dedup_v641_backup.py` 等历史版本备份文件已从运行时代码树移除
 
 ## 3.2.1 Database façade 关系

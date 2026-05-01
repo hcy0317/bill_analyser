@@ -4,7 +4,7 @@
 - `desktop/`：桌面主界面（账户、交易、统计、预算、分类、标签、模板、用户设置）
 - `desktop/pairingcenter/ListPage.vue` 当前承载桌面端 canonical 规则中心：一级导航分为"配对总览""规则配置""长期学习""LLM 识别"。"配对总览"下有"转账配对 / 投资配对"，读取并管理历史正式账单 pair；"规则配置"下有"分类识别 / 周期识别"，分别承接 category rules 与 recurring matching 入口，投资类识别规则也作为投资分类下的 category rule 表达式在"分类识别"中维护；"长期学习"下保留自动建议与学习规则；"LLM 识别"下保留 LLM 规则候选与 LLM 配置，其中 LLM 配置页同时承接小票 OCR 的 provider/lang 配置入口。候选主链当前收口到 `rule_synthesis` 人工审核流：服务端先把 durable learning rules / suggestions、concept stats、active model metadata 与近期 `llm_memory_events(feedback)` 汇总成 `KnowledgeSummaryPack`，再由 LLM 归纳出兼容现有 category rule grammar 的候选表达式，前端只展示这类待审核候选，accept/reject 不依赖实时 provider。页面以预算管理式纵向导航 + 二级 tabs 展示当前域，右侧标题栏统一承载当前二级标题、刷新/新增/生成建议/筛选等动作，正文子组件不再重复渲染同名标题；分类识别表格的批量选择、表头筛选、每页数量与分页统计都收敛在表头/分页区，分类表头筛选按收入 / 支出 / 转账 / 投资聚类并在视口内滚动，避免选项过多时撑高页面。
 - `/pairing/list` 是规则中心运行态主路由，并使用 `domain/tab` query 表达当前业务域与二级视图；UI 的一级导航由 `domain/tab` 派生：`domain=transfer|investment&tab=overview` 属于"配对总览"，`domain=transfer&tab=rules` 属于"规则配置"，`domain=learning` 属于长期学习，`domain=llm` 属于 LLM 识别。旧深链 `pairType` / `view` / `tab` query 会被归一化到新 domain/tab；旧投资识别设置深链会改写到 `domain=transfer&tab=rules` 的分类识别页；`/rules/center` 与 `/learning/center` 只重定向到同一规则中心页面，不再保有独立持久化业务中心语义。
-- `desktop/budgets/ListPage.vue` 的预算管理页现把周期入口收口为标题栏 `月度 / 季度 / 年度` 切换 + 左侧 `当前周期 / 上一周期` 快捷切换，切换会真实改变预算列表/执行请求语义；预算列表中的进度条 drilldown 统一跳转到 `/transaction/list` 的 canonical query contract：分类走 `categoryIds`，时间范围走 `dateType=Custom + minTime/maxTime`，账户/标签上下文复用 `accountIds/tagIds`。同页的历史预算执行视图继续使用 `historyPolarChart.ts` 生成往期预算执行图，分类隐藏/显示通过 legend selection 同步到柱状预算金额、圆环分组与标签，剩余可见分类会重新填满极坐标布局；一级/二级分类标签保留上一帧角度状态，跨 0° 时按最短圆弧平滑过渡，并补充了按月/季/年聚类的可折叠历史预算列表，方便直接查看每个周期下的预算明细。
+- `desktop/budgets/ListPage.vue` 的预算管理页现把周期入口收口为标题栏 `月度 / 季度 / 年度` 切换 + 左侧 `当前周期 / 上一周期` 快捷切换，切换会真实改变预算列表/执行请求语义；预算 reload 会与预算数据并行加载分类元数据，一级/二级预算图标优先使用预算返回的分类图标并回退到分类 store，不再依赖其他页面预热。预算列表中的进度条 drilldown 统一跳转到 `/transaction/list` 的 canonical query contract：分类走 `categoryIds`，时间范围走 `dateType=Custom + minTime/maxTime`，账户/标签上下文复用 `accountIds/tagIds`。同页的历史预算执行视图继续使用 `historyPolarChart.ts` 生成往期预算执行图，分类隐藏/显示通过 legend selection 同步到柱状预算金额、圆环分组与标签，剩余可见分类会重新填满极坐标布局；一级/二级分类标签保留上一帧角度状态，跨 0° 时按最短圆弧平滑过渡，并补充了按月/季/年聚类的可折叠历史预算列表，方便直接查看每个周期下的预算明细。
 - `mobile/`：移动端界面（交易、账户、统计、预算、设置等）。移动端添加/编辑账单在交易表单内常态显示图片控件；添加账单上传图片后会调用小票 OCR 识别并回填金额、时间与描述。移动端预算管理按一级分类聚类展示，一级分类行显示分类图标、汇总进度和金额，二级分类预算缩进在对应一级分类下并支持折叠/展开。移动首页不提供异常洞察、周期配对或配对中心的独立入口；这些能力的桌面规则中心与后端 matching/learning 主链仍保留。
 - `base/`：公共页面基础
 
@@ -14,3 +14,7 @@
 
 ## 4.3 服务层（`src/web/src/lib/services.ts`）
 - 统一 axios 请求、鉴权头注入、401 刷新 token、REST 主链调用封装
+
+## 4.4 分类图标
+- 分类图标统一由 `src/web/src/lib/icon.ts` 的 resolver 归一化，支持数字 preset id、Line Awesome class 与历史 `mdi-*` 分类图标值；`ItemIconBase` 只消费 resolver 输出，未知/空图标统一回落到默认分类图标。
+- 规则中心和预算管理不再用 `mdiCloseCircle` 作为正常分类缺失图标兜底；分类筛选、规则行、预算分组与二级预算行都通过同一分类图标解析链路渲染。
