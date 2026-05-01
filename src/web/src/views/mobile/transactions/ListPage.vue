@@ -265,8 +265,8 @@
                                                 <span v-if="transaction.utcOffset !== currentTimezoneOffsetMinutes">{{ `(${getDisplayTimezone(transaction)})` }}</span>
                                                 <span v-if="transaction.sourceAccount">·</span>
                                                 <span v-if="transaction.sourceAccount">{{ transaction.sourceAccount.name }}</span>
-                                                <f7-icon class="transaction-account-arrow icon-with-direction" f7="arrow_right" v-if="transaction.sourceAccount && transaction.type === TransactionType.Transfer && transaction.destinationAccount && transaction.sourceAccount.id !== transaction.destinationAccount.id"></f7-icon>
-                                                <span v-if="transaction.sourceAccount && transaction.type === TransactionType.Transfer && transaction.destinationAccount && transaction.sourceAccount.id !== transaction.destinationAccount.id">{{ transaction.destinationAccount.name }}</span>
+                                                <f7-icon class="transaction-account-arrow icon-with-direction" f7="arrow_right" v-if="transaction.sourceAccount && (transaction.type === TransactionType.Transfer || transaction.type === TransactionType.Investment) && transaction.destinationAccount && transaction.sourceAccount.id !== transaction.destinationAccount.id"></f7-icon>
+                                                <span v-if="transaction.sourceAccount && (transaction.type === TransactionType.Transfer || transaction.type === TransactionType.Investment) && transaction.destinationAccount && transaction.sourceAccount.id !== transaction.destinationAccount.id">{{ transaction.destinationAccount.name }}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -484,6 +484,11 @@
                 <f7-list-item :class="{ 'list-item-selected': query.type === 4 }" :title="tt('Transfer')" @click="changeTypeFilter(4)">
                     <template #after>
                         <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="query.type === 4"></f7-icon>
+                    </template>
+                </f7-list-item>
+                <f7-list-item :class="{ 'list-item-selected': query.type === 5 }" :title="tt('Investment')" @click="changeTypeFilter(5)">
+                    <template #after>
+                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="query.type === 5"></f7-icon>
                     </template>
                 </f7-list-item>
 
