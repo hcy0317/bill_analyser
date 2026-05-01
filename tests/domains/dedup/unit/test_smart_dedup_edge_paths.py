@@ -6,8 +6,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from bill_analyser.core import smart_dedup as smart_dedup_module
 from bill_analyser.core.smart_dedup import SmartDeduplicationEngine
+from bill_analyser.core.smart_dedup import grouping as smart_dedup_grouping
 
 
 class FakeDedupDB:
@@ -247,7 +247,7 @@ def test_similar_duplicates_cover_controlled_rejection_paths(monkeypatch: pytest
         ]
     ) == []
 
-    original_float = getattr(smart_dedup_module, "float", float)
+    original_float = getattr(smart_dedup_grouping, "float", float)
 
     diff_engine = SmartDeduplicationEngine()
     monkeypatch.setattr(
@@ -267,7 +267,7 @@ def test_similar_duplicates_cover_controlled_rejection_paths(monkeypatch: pytest
             return 10.0 if diff_counts[text] == 1 else 12.0
         return original_float(raw_value)
 
-    monkeypatch.setattr(smart_dedup_module, "float", _diff_float, raising=False)
+    monkeypatch.setattr(smart_dedup_grouping, "float", _diff_float, raising=False)
     assert diff_engine._find_similar_duplicates(
         [
             make_bill(date="stable", amount="left", source_account_id="wechat", _parser_id=""),
@@ -293,7 +293,7 @@ def test_similar_duplicates_cover_controlled_rejection_paths(monkeypatch: pytest
             return 10.0 if sign_counts[text] == 1 else -10.0
         return original_float(raw_value)
 
-    monkeypatch.setattr(smart_dedup_module, "float", _sign_float, raising=False)
+    monkeypatch.setattr(smart_dedup_grouping, "float", _sign_float, raising=False)
     assert sign_engine._find_similar_duplicates(
         [
             make_bill(date="stable", amount="left", source_account_id="wechat", _parser_id=""),
@@ -301,7 +301,7 @@ def test_similar_duplicates_cover_controlled_rejection_paths(monkeypatch: pytest
         ]
     ) == []
 
-    monkeypatch.setattr(smart_dedup_module, "float", original_float, raising=False)
+    monkeypatch.setattr(smart_dedup_grouping, "float", original_float, raising=False)
 
     shared_secondary = make_bill(
         date="2025-01-02 12:00:05",
