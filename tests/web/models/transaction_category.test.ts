@@ -3,6 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import { DEFAULT_CATEGORY_COLOR } from '@/consts/color.ts';
 import { DEFAULT_CATEGORY_ICON_ID } from '@/consts/icon.ts';
 import { CategoryType } from '@/core/category.ts';
+import { resolveCategoryIcon } from '@/lib/icon.ts';
 import {
     TransactionCategory,
     type TransactionCategoryInfoResponse
@@ -181,6 +182,22 @@ describe('TransactionCategory model', () => {
 
         expect(category.ruleExpression).toBe('早餐|咖啡');
         expect(category.keywords).toBe('早餐|咖啡');
+    });
+
+    test('TransactionCategory icons are display-resolved through the shared category resolver', () => {
+        const legacyCategory = TransactionCategory.of(SAMPLE_CATEGORY_RESPONSE);
+        const presetCategory = TransactionCategory.of({
+            ...SAMPLE_CATEGORY_RESPONSE,
+            icon: 830 as unknown as string
+        });
+        const lineAwesomeCategory = TransactionCategory.of({
+            ...SAMPLE_CATEGORY_RESPONSE,
+            icon: 'las la-wallet'
+        });
+
+        expect(resolveCategoryIcon(legacyCategory.icon)).toBe('las la-utensils');
+        expect(resolveCategoryIcon(presetCategory.icon)).toBe('las la-chart-pie');
+        expect(resolveCategoryIcon(lineAwesomeCategory.icon)).toBe('las la-wallet');
     });
 
     test('TransactionCategory collection helpers build arrays, maps and lookups', () => {

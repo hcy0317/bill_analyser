@@ -516,7 +516,6 @@
                                             />
                                             <!-- 分类图标（放大，与文字+进度条等高） -->
                                             <item-icon
-                                                v-if="group.categoryIcon"
                                                 class="me-3 flex-shrink-0"
                                                 icon-type="category"
                                                 :icon-id="group.categoryIcon"
@@ -610,11 +609,10 @@
                                             <div class="budget-item budget-secondary d-flex px-4 py-2"
                                                  style="padding-left: 56px !important;">
                                                 <item-icon
-                                                    v-if="budget.categoryIcon"
                                                     class="me-3 flex-shrink-0"
                                                     icon-type="category"
-                                                    :icon-id="budget.categoryIcon"
-                                                    :color="budget.categoryColor"
+                                                    :icon-id="getBudgetCategoryIcon(budget, group)"
+                                                    :color="getBudgetCategoryColor(budget, group)"
                                                     :size="28"
                                                 />
                                                 <div class="d-flex flex-column flex-grow-1">
@@ -1645,8 +1643,8 @@ const groupedBudgets = computed<BudgetGroup[]>(() => {
         if (!groups.has(categoryKey)) {
             // 从分类配置中获取正确的图标和颜色（而非从预算数据中获取）
             const primaryCategory = primaryCategoryByName[categoryKey];
-            const categoryIcon = primaryCategory?.icon || '';
-            const categoryColor = primaryCategory?.color || '';
+            const categoryIcon = primaryCategory?.icon || budget.categoryIcon || '';
+            const categoryColor = normalizeCategoryColor(primaryCategory?.color || budget.categoryColor);
 
             groups.set(categoryKey, {
                 category: categoryKey,
@@ -1715,6 +1713,23 @@ function getPrimaryBudgetForHeader(group: BudgetGroup): Budget | null {
 
 function getExpandedPrimaryBudgets(group: BudgetGroup): Budget[] {
     return group.primaryBudgets.length > 1 ? group.primaryBudgets : [];
+}
+
+function normalizeCategoryColor(color: string | null | undefined): string {
+    return String(color || '').trim().replace(/^#/, '');
+}
+
+function toCssCategoryColor(color: string | null | undefined): string {
+    const normalizedColor = normalizeCategoryColor(color);
+    return normalizedColor ? `#${normalizedColor}` : '';
+}
+
+function getBudgetCategoryIcon(budget: Budget, group: BudgetGroup): string {
+    return budget.categoryIcon || group.categoryIcon;
+}
+
+function getBudgetCategoryColor(budget: Budget, group: BudgetGroup): string {
+    return normalizeCategoryColor(budget.categoryColor) || group.categoryColor;
 }
 
 function groupHasExpandedRows(group: BudgetGroup): boolean {
@@ -3264,8 +3279,10 @@ function getExecutionRateColor(rate: number): string {
 function getBudgetProgressColor(budget: Budget): string {
     // 优先使用分类颜色
     if (budget.categoryColor) {
-        // 将十六进制颜色转换为样式颜色值（添加 # 前缀）
-        return `#${budget.categoryColor}`;
+        const categoryColor = toCssCategoryColor(budget.categoryColor);
+        if (categoryColor) {
+            return categoryColor;
+        }
     }
     // 降级使用执行率颜色
     return getExecutionRateColor(budget.executionRate);
@@ -3277,12 +3294,18 @@ function getBudgetProgressColor(budget: Budget): string {
 function getGroupProgressColor(group: BudgetGroup): string {
     // 优先使用分类颜色
     if (group.categoryColor) {
-        return `#${group.categoryColor}`;
+        const groupColor = toCssCategoryColor(group.categoryColor);
+        if (groupColor) {
+            return groupColor;
+        }
     }
     // 如果有一级分类预算，使用其分类颜色
     const primaryBudget = getPrimaryBudgetForHeader(group);
     if (primaryBudget && primaryBudget.categoryColor) {
-        return `#${primaryBudget.categoryColor}`;
+        const primaryBudgetColor = toCssCategoryColor(primaryBudget.categoryColor);
+        if (primaryBudgetColor) {
+            return primaryBudgetColor;
+        }
     }
     // 降级使用执行率颜色
     return getExecutionRateColor(getGroupExecutionRate(group));
@@ -3583,12 +3606,29 @@ async function reload(force: boolean): Promise<void> {
         }
 
         const periodRequest = getCurrentPeriodRequest();
-
-        await budgetStore.loadAllBudgets({
+        const categoryLoadPromise = transactionCategoriesStore.loadAllCategories({ force: false });
+        const budgetLoadPromise = budgetStore.loadAllBudgets({
             force,
             type: activeBudgetType.value,
             periodType: periodRequest.periodType
         });
+
+        const [categoryLoadResult, budgetLoadResult] = await Promise.allSettled([
+            categoryLoadPromise,
+            budgetLoadPromise
+        ]);
+
+        if (budgetLoadResult.status === 'rejected') {
+            throw budgetLoadResult.reason;
+        }
+
+        if (categoryLoadResult.status === 'rejected') {
+            const categoryLoadError = categoryLoadResult.reason as { isUpToDate?: boolean; message?: string };
+            if (!categoryLoadError.isUpToDate) {
+                snackbar.value?.showError(categoryLoadError.message || tt('Failed to load categories'));
+            }
+        }
+
         await budgetStore.loadBudgetExecution({
             type: activeBudgetType.value,
             periodType: periodRequest.periodType,

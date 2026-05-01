@@ -115,6 +115,13 @@ describe('rule center UX source guards', () => {
         expect(filterOrder.indexOf('CategoryType.Expense')).toBeLessThan(filterOrder.indexOf('CategoryType.Transfer'));
         expect(filterOrder.indexOf('CategoryType.Transfer')).toBeLessThan(filterOrder.indexOf('CategoryType.Investment'));
         expect(source).toContain('const fallbackPrimaryCategory = findPrimaryCategoryByName(item.category_name)');
+        expect(source).toContain("const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'zh-Hans', 'en']))");
+        expect(source).not.toContain('v-if="option.icon && option.color"');
+        expect(source).not.toContain('v-if="group.icon && group.color"');
+        expect(source).not.toContain('v-if="item.category_icon && item.category_color"');
+        expect(source).not.toContain('<v-icon v-else :icon="mdiCloseCircle" color="grey" />');
+        expect(source).not.toContain('<v-icon v-else size="22" :icon="mdiCloseCircle" color="grey" />');
+        expect(source).not.toContain('<v-icon v-else size="24" :icon="mdiCloseCircle" color="grey" />');
         expect(source).not.toContain("tt('Batch Manage')");
         expect(source).not.toContain('v-if="bulkMode"');
         expect(source).not.toContain('v-model="rulePrimaryCategoryFilterKey"');

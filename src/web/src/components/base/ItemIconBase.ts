@@ -1,10 +1,11 @@
 import { computed } from 'vue';
 
 import type {ColorStyleValue, ColorValue} from '@/core/color.ts';
-import { ALL_ACCOUNT_ICONS, DEFAULT_ACCOUNT_ICON, ALL_CATEGORY_ICONS, DEFAULT_CATEGORY_ICON } from '@/consts/icon.ts';
+import { ALL_ACCOUNT_ICONS, DEFAULT_ACCOUNT_ICON } from '@/consts/icon.ts';
 import { DEFAULT_ICON_COLOR, DEFAULT_ACCOUNT_COLOR, DEFAULT_CATEGORY_COLOR, DEFAULT_COLOR_STYLE_VARIABLE } from '@/consts/color.ts';
 
 import { isNumber } from '@/lib/common.ts';
+import { resolveCategoryIcon } from '@/lib/icon.ts';
 
 type IconItemStyleName = string;
 type IconItemStyleValue = ColorValue | string | number | undefined;
@@ -57,22 +58,7 @@ export function useItemIconBase(props: CommonIconProps) {
     }
 
     function getCategoryIcon(iconId: string | number | null | undefined): string {
-        // 处理空图标 ID
-        if (iconId === null || iconId === undefined) {
-            return DEFAULT_CATEGORY_ICON.icon;
-        }
-
-        if (isNumber(iconId)) {
-            iconId = iconId.toString();
-        }
-
-        const iconInfo = ALL_CATEGORY_ICONS[iconId];
-
-        if (!iconInfo) {
-            return DEFAULT_CATEGORY_ICON.icon;
-        }
-
-        return iconInfo.icon;
+        return resolveCategoryIcon(iconId);
     }
 
     function getAccountIconStyle(color?: ColorValue, defaultColor?: ColorStyleValue, additionalColorAttr?: string): Record<IconItemStyleName, IconItemStyleValue> {

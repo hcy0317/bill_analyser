@@ -162,13 +162,11 @@
                                                 >
                                                     <template #prepend>
                                                         <ItemIcon
-                                                            v-if="option.icon && option.color"
                                                             icon-type="category"
                                                             size="24px"
                                                             :icon-id="option.icon"
                                                             :color="option.color"
                                                         />
-                                                        <v-icon v-else :icon="mdiCloseCircle" color="grey" />
                                                     </template>
                                                     <v-list-item-title>{{ option.title }}</v-list-item-title>
                                                 </v-list-item>
@@ -338,13 +336,11 @@
                                                 :icon="isCategoryGroupCollapsed(group.key) ? mdiChevronRight : mdiChevronDown"
                                             />
                                             <ItemIcon
-                                                v-if="group.icon && group.color"
                                                 icon-type="category"
                                                 size="22px"
                                                 :icon-id="group.icon"
                                                 :color="group.color"
                                             />
-                                            <v-icon v-else size="22" :icon="mdiCloseCircle" color="grey" />
                                             <span class="font-weight-medium">{{ group.title }}</span>
                                             <v-chip size="x-small" variant="tonal">{{ group.items.length }}</v-chip>
                                         </div>
@@ -364,13 +360,11 @@
                                         <td class="rule-center-column-category">
                                             <div class="d-flex align-center" :title="item.category_full_name">
                                                 <ItemIcon
-                                                    v-if="item.category_icon && item.category_color"
                                                     icon-type="category"
                                                     size="24px"
                                                     :icon-id="item.category_icon"
                                                     :color="item.category_color"
                                                 />
-                                                <v-icon v-else size="24" :icon="mdiCloseCircle" color="grey" />
                                                 <span class="ms-2 text-truncate">{{ item.category_display_name }}</span>
                                             </div>
                                         </td>
@@ -1050,7 +1044,7 @@ const categoryPickerItems = computed<CategoryPickerPrimaryItem[]>(() => {
 });
 
 const localizedPresetPrimaryCategoryMap = computed<Map<string, PrimaryCategoryDisplayInfo>>(() => {
-    const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'en']));
+    const localizedCategoryLocales = Array.from(new Set([getCurrentLanguageTag(), 'zh-Hans', 'en']));
     const metadataByName = new Map<string, PrimaryCategoryDisplayInfo>();
 
     for (const locale of localizedCategoryLocales) {

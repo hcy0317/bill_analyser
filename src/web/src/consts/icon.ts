@@ -620,6 +620,9 @@ export const ALL_CATEGORY_ICONS: Record<string, IconInfo> = {
     '821': {
         icon: 'las la-user-md'
     },
+    '830': {
+        icon: 'las la-chart-pie'
+    },
     '840': {
         icon: 'las la-stethoscope'
     },
