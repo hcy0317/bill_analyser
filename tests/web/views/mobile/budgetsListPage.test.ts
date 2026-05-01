@@ -135,11 +135,52 @@ describe('mobile budgets ListPage.vue source contract (S4)', () => {
         expect(source).toMatch(/tt\('No data'\)/);
     });
 
-    test('tap handler is a deferred no-op for S4 (drilldown wired in S5)', () => {
-        // Decision recorded: the desktop drilldown query depends on
-        // buildBudgetDrilldownRouteQuery (categories + fiscal-year + filters);
-        // mobile does not yet have this context, so S4 only logs the tap.
-        expect(source).toContain('drilldown deferred to S5');
+    test('tap handler is still a deferred no-op (drilldown owned by S6/S9)', () => {
+        // Decision recorded again in S5: the desktop drilldown query depends
+        // on buildBudgetDrilldownRouteQuery, which lives in
+        // views/desktop/budgets/categorySelection.ts — outside the mobile
+        // budgets/ owned_paths. The tap stays a logging no-op until a later
+        // slice promotes the helper into a shared module.
+        expect(source).toMatch(/drilldown still deferred/);
         expect(source).not.toMatch(/router\.push\(/);
+        expect(source).not.toMatch(/f7router\.navigate\(/);
+    });
+});
+
+describe('mobile budgets ListPage.vue write-parity affordances (S5)', () => {
+    const source = readSource(LIST_PAGE_PATH);
+
+    test('navbar exposes a + button that opens the create sheet', () => {
+        expect(source).toMatch(/<f7-nav-right[\s\S]*?icon-f7="plus"[\s\S]*?@click="openCreateSheet"/);
+    });
+
+    test('mounts BudgetEditSheet bound to showEditSheet + editingBudget + activeBudgetType', () => {
+        expect(source).toContain('<budget-edit-sheet');
+        expect(source).toMatch(/v-model:show="showEditSheet"/);
+        expect(source).toMatch(/:budget="editingBudget"/);
+        expect(source).toMatch(/:default-type="activeBudgetType"/);
+        expect(source).toMatch(/@save="onSheetSave"/);
+        expect(source).toMatch(/@delete:request="requestDelete"/);
+    });
+
+    test('row swipeout exposes Edit + Delete actions', () => {
+        expect(source).toContain('<f7-swipeout-actions');
+        expect(source).toMatch(/openEditSheet\(budget\)/);
+        expect(source).toMatch(/requestDelete\(budget\)/);
+    });
+
+    test('save handler delegates to budgetStore.saveBudget (no new store actions)', () => {
+        expect(source).toMatch(/budgetStore\.saveBudget\(\{\s*budget:\s*updated\s*\}\)/);
+    });
+
+    test('confirmDelete handler delegates to budgetStore.deleteBudget (no new store actions)', () => {
+        // Note: the in-flight task brief calls this "removeBudget" but the
+        // real store action is named deleteBudget — we use the real one.
+        expect(source).toMatch(/budgetStore\.deleteBudget\(\{\s*budgetId:\s*target\.id\s*\}\)/);
+    });
+
+    test('delete confirmation uses an action sheet, not a destructive auto-delete', () => {
+        expect(source).toContain('showDeleteActionSheet');
+        expect(source).toMatch(/<f7-actions[\s\S]*?:opened="showDeleteActionSheet"/);
     });
 });
