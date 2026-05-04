@@ -973,6 +973,399 @@ async def test_budget_execution_filters_same_category_budgets_by_period_type(tmp
 
 
 @pytest.mark.asyncio
+async def test_budget_period_rollup_uses_month_quarter_year_parent_semantics(tmp_path: Path) -> None:
+    """月/季/年预算应按父子预算语义回卷，且年度不重复叠加月度和季度。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_period_rollup")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="周期回卷分类",
+            sub_category="",
+            icon="calendar",
+            color="#2266aa",
+        )
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="周期二级回卷分类",
+            sub_category="早餐",
+            icon="coffee",
+            color="#aa6622",
+        )
+
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="预置年预算",
+            category="周期回卷分类",
+            sub_category="",
+            period_type="yearly",
+            amount=500.0,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="一月预算",
+            category="周期回卷分类",
+            sub_category="",
+            period_type="monthly",
+            amount=80.0,
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="二月预算",
+            category="周期回卷分类",
+            sub_category="",
+            period_type="monthly",
+            amount=90.0,
+            start_date="2026-02-01",
+            end_date="2026-02-28",
+        )
+
+        q1_budget = await db.get_budget_by_category(
+            "周期回卷分类",
+            "",
+            "quarterly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        year_budget = await db.get_budget_by_category(
+            "周期回卷分类",
+            "",
+            "yearly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        assert q1_budget is not None
+        assert q1_budget["amount"] == pytest.approx(170.0)
+        assert year_budget is not None
+        assert year_budget["amount"] == pytest.approx(500.0)
+
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="三月预算",
+            category="周期回卷分类",
+            sub_category="",
+            period_type="monthly",
+            amount=400.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+
+        q1_budget_after = await db.get_budget_by_category(
+            "周期回卷分类",
+            "",
+            "quarterly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        year_budget_after = await db.get_budget_by_category(
+            "周期回卷分类",
+            "",
+            "yearly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        assert q1_budget_after is not None
+        assert q1_budget_after["amount"] == pytest.approx(570.0)
+        assert year_budget_after is not None
+        assert year_budget_after["amount"] == pytest.approx(570.0)
+
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="二季度预算",
+            category="周期回卷分类",
+            sub_category="",
+            period_type="quarterly",
+            amount=900.0,
+            start_date="2026-04-01",
+            end_date="2026-06-30",
+        )
+        year_budget_with_mixed_quarters = await db.get_budget_by_category(
+            "周期回卷分类",
+            "",
+            "yearly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        assert year_budget_with_mixed_quarters is not None
+        assert year_budget_with_mixed_quarters["amount"] == pytest.approx(1470.0)
+
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="一月早餐预算",
+            category="周期二级回卷分类",
+            sub_category="早餐",
+            period_type="monthly",
+            amount=50.0,
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+        )
+
+        q1_secondary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "早餐",
+            "quarterly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        q1_primary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "",
+            "quarterly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        yearly_secondary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "早餐",
+            "yearly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+        yearly_primary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "",
+            "yearly",
+            "2026-01-01",
+            user_id=user_id,
+        )
+
+        assert q1_secondary_budget is not None
+        assert q1_secondary_budget["end_date"] == "2026-03-31"
+        assert q1_primary_budget is not None
+        assert q1_primary_budget["end_date"] == "2026-03-31"
+        assert yearly_secondary_budget is not None
+        assert yearly_secondary_budget["end_date"] == "2026-12-31"
+        assert yearly_primary_budget is not None
+        assert yearly_primary_budget["end_date"] == "2026-12-31"
+
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="旧季度早餐预算",
+            category="周期二级回卷分类",
+            sub_category="早餐",
+            period_type="quarterly",
+            amount=10.0,
+            start_date="2027-01-01",
+            end_date="2027-01-31",
+        )
+        await _create_budget(
+            db,
+            user_id=user_id,
+            name="二月早餐预算",
+            category="周期二级回卷分类",
+            sub_category="早餐",
+            period_type="monthly",
+            amount=60.0,
+            start_date="2027-02-01",
+            end_date="2027-02-28",
+        )
+
+        stale_q1_secondary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "早餐",
+            "quarterly",
+            "2027-01-01",
+            user_id=user_id,
+        )
+        stale_q1_primary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "",
+            "quarterly",
+            "2027-01-01",
+            user_id=user_id,
+        )
+        stale_yearly_secondary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "早餐",
+            "yearly",
+            "2027-01-01",
+            user_id=user_id,
+        )
+        stale_yearly_primary_budget = await db.get_budget_by_category(
+            "周期二级回卷分类",
+            "",
+            "yearly",
+            "2027-01-01",
+            user_id=user_id,
+        )
+
+        assert stale_q1_secondary_budget is not None
+        assert stale_q1_secondary_budget["amount"] == pytest.approx(60.0)
+        assert stale_q1_secondary_budget["end_date"] == "2027-03-31"
+        assert stale_q1_primary_budget is not None
+        assert stale_q1_primary_budget["amount"] == pytest.approx(60.0)
+        assert stale_q1_primary_budget["end_date"] == "2027-03-31"
+        assert stale_yearly_secondary_budget is not None
+        assert stale_yearly_secondary_budget["amount"] == pytest.approx(60.0)
+        assert stale_yearly_secondary_budget["end_date"] == "2027-12-31"
+        assert stale_yearly_primary_budget is not None
+        assert stale_yearly_primary_budget["amount"] == pytest.approx(60.0)
+        assert stale_yearly_primary_budget["end_date"] == "2027-12-31"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_history_returns_zero_spend_budget_rows_for_empty_period(tmp_path: Path) -> None:
+    """对应周期没有账单支出时，历史预算仍应返回预算行而不是空数据。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_zero_spend_history")
+        await _create_category(
+            db,
+            user_id=user_id,
+            main_category="零支出历史分类",
+            sub_category="",
+            icon="wallet",
+            color="#33aa66",
+        )
+        budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="零支出历史预算",
+            category="零支出历史分类",
+            sub_category="",
+            amount=120.0,
+            start_date="2026-04-01",
+            end_date="2026-04-30",
+        )
+
+        history_items = await db.get_budget_execution_history(
+            budget_type=3,
+            period_type="monthly",
+            start_date="2026-04-01",
+            end_date="2026-04-30",
+            budget_id=budget_id,
+            user_id=user_id,
+        )
+
+        assert len(history_items) == 1
+        assert history_items[0]["budget_id"] == budget_id
+        assert history_items[0]["budget_amount"] == pytest.approx(120.0)
+        assert history_items[0]["spent_amount"] == pytest.approx(0.0)
+        assert history_items[0]["type"] == 3
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_budget_history_keeps_expense_and_investment_rows_type_scoped(tmp_path: Path) -> None:
+    """持久化和实时历史都应带预算类型，避免支出/投资筛选串数据。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "db_budget_history_type_scope")
+        main_category = "历史类型隔离分类"
+        expense_category_id = await _create_category(
+            db,
+            user_id=user_id,
+            main_category=main_category,
+            sub_category="日常消费",
+            category_type=3,
+            icon="shopping",
+            color="#cc6633",
+        )
+        investment_category_id = await _create_category(
+            db,
+            user_id=user_id,
+            main_category=main_category,
+            sub_category="基金持仓",
+            category_type=5,
+            icon="chart-line",
+            color="#3366cc",
+        )
+        expense_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="支出历史预算",
+            category=main_category,
+            sub_category="日常消费",
+            amount=100.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+        investment_budget_id = await _create_budget(
+            db,
+            user_id=user_id,
+            name="投资历史预算",
+            category=main_category,
+            sub_category="基金持仓",
+            amount=200.0,
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-10 08:00:00",
+            type="支出",
+            amount=-25.0,
+            main_category=main_category,
+            sub_category="日常消费",
+            description="支出类型账单",
+        )
+        await _create_bill(
+            db,
+            user_id=user_id,
+            date="2026-03-11 08:00:00",
+            type="投资",
+            amount=-80.0,
+            main_category=main_category,
+            sub_category="基金持仓",
+            description="投资类型账单",
+        )
+
+        assert (
+            await db.create_budget_execution_snapshots(
+                budget_type=5,
+                period_type="monthly",
+                start_date="2026-03-01",
+                end_date="2026-03-31",
+                budget_id=investment_budget_id,
+                user_id=user_id,
+            )
+        )["created_count"] == 1
+
+        investment_history = await db.get_budget_execution_history(
+            budget_type=5,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            user_id=user_id,
+        )
+        expense_history = await db.get_budget_execution_history(
+            budget_type=3,
+            period_type="monthly",
+            start_date="2026-03-01",
+            end_date="2026-03-31",
+            user_id=user_id,
+        )
+
+        assert {item["budget_id"] for item in investment_history} == {investment_budget_id}
+        assert investment_history[0]["spent_amount"] == pytest.approx(80.0)
+        assert investment_history[0]["type"] == 5
+        assert investment_history[0]["category_id"] == str(investment_category_id)
+        assert {item["budget_id"] for item in expense_history} == {expense_budget_id}
+        assert expense_history[0]["spent_amount"] == pytest.approx(25.0)
+        assert expense_history[0]["type"] == 3
+        assert expense_history[0]["category_id"] == str(expense_category_id)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_budget_history_supports_daily_and_weekly_period_ranges(tmp_path: Path) -> None:
     """预算历史动态补算应支持 daily / weekly 分桶。"""
     db = await _create_database(tmp_path)

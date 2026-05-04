@@ -32,6 +32,7 @@ from bill_analyser.api.routes import (
     networth,
     recurring,
     rules,
+    settings_bundle,
     statistics,
     tags,
     templates,
@@ -227,6 +228,7 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(rules.bp, url_prefix="/api/rules")
     flask_app.register_blueprint(insights.bp, url_prefix="/api/insights")
     flask_app.register_blueprint(llm.bp, url_prefix="/api/llm")
+    flask_app.register_blueprint(settings_bundle.bp, url_prefix="/api/settings/bundle")
     flask_app.register_blueprint(encryption.bp, url_prefix="/api/settings/encryption")
 
     # 健康检查端点

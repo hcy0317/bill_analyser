@@ -690,7 +690,7 @@
                                 <span class="text-caption text-medium-emphasis">{{ tt('Loading') }}...</span>
                             </div>
 
-                            <div v-else-if="historicalLegendGroups.length > 0" class="budget-history-panel">
+                            <div v-else-if="canShowHistoricalBudgetPanel" class="budget-history-panel">
                                 <div class="budget-history-chart-shell">
                                     <v-chart
                                         v-if="historicalChartModel.primaryBands.length > 0"
@@ -744,9 +744,9 @@
                                     </div>
                                 </div>
 
-                                <div v-if="historicalBudgetGroups.length > 0" class="mt-6">
+                                <div v-if="historicalBudgetGroups.length > 0 || selectedHistoricalPeriodKey" class="mt-6">
                                     <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-3">
-                                        <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budget Groups') }}</div>
+                                        <div class="text-subtitle-1 font-weight-medium">{{ tt('Historical Budgets') }}</div>
                                         <div class="d-flex align-center ga-2">
                                             <v-chip v-if="selectedHistoricalPeriodKey"
                                                     size="small"
@@ -795,17 +795,38 @@
                                                             <td class="pa-0">
                                                                 <div class="budget-item budget-primary d-flex px-4 py-3"
                                                                      :class="{ 'bg-grey-lighten-4': !isDarkMode, 'bg-grey-darken-3': isDarkMode }">
-                                                                    <item-icon
-                                                                        v-if="row.primaryIcon"
-                                                                        class="me-3 flex-shrink-0"
-                                                                        icon-type="category"
-                                                                        :icon-id="row.primaryIcon"
-                                                                        :color="row.primaryIconColor"
-                                                                        :size="36"
-                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        class="budget-history-row-icon-button me-3"
+                                                                        :aria-label="tt('Filter Categories')"
+                                                                        @click.stop="toggleHistoricalPrimaryLegend(row.primaryCategory)"
+                                                                    >
+                                                                        <item-icon
+                                                                            v-if="row.primaryIcon"
+                                                                            icon-type="category"
+                                                                            :icon-id="row.primaryIcon"
+                                                                            :color="row.primaryIconColor"
+                                                                            :size="36"
+                                                                        />
+                                                                        <span v-else class="budget-history-row-swatch" :style="{ backgroundColor: row.primaryColor }"></span>
+                                                                        <v-tooltip activator="parent">{{ tt('Filter Categories') }}</v-tooltip>
+                                                                    </button>
                                                                     <div class="d-flex flex-column flex-grow-1">
                                                                         <div class="d-flex align-center justify-space-between mb-1">
                                                                             <div class="d-flex align-center flex-grow-1">
+                                                                                <v-btn v-if="row.childRows.length > 0"
+                                                                                       density="compact"
+                                                                                       color="default"
+                                                                                       variant="text"
+                                                                                       size="24"
+                                                                                       class="budget-history-primary-toggle me-1"
+                                                                                       :icon="true"
+                                                                                       @click.stop="toggleHistoricalPrimaryCollapse(group.key, row)">
+                                                                                    <v-icon :icon="isHistoricalPrimaryCollapsed(group.key, row) ? mdiChevronRight : mdiChevronDown" size="18" />
+                                                                                    <v-tooltip activator="parent">
+                                                                                        {{ isHistoricalPrimaryCollapsed(group.key, row) ? tt('Expand All') : tt('Collapse All') }}
+                                                                                    </v-tooltip>
+                                                                                </v-btn>
                                                                                 <span class="budget-category-name text-body-1 font-weight-bold">
                                                                                     {{ row.displayCategory }}
                                                                                 </span>
@@ -838,19 +859,27 @@
                                                                 </div>
                                                             </td>
                                                         </tr>
-                                                        <tr v-for="child in row.childRows" :key="child.key"
+                                                        <tr v-for="child in (isHistoricalPrimaryCollapsed(group.key, row) ? [] : row.childRows)" :key="child.key"
                                                             class="budget-list-row budget-sub-row budget-history-sub-row">
                                                             <td class="pa-0">
                                                                 <div class="budget-item budget-secondary d-flex px-4 py-2"
                                                                      style="padding-left: 56px !important;">
-                                                                    <item-icon
-                                                                        v-if="child.secondaryIcon"
-                                                                        class="me-3 flex-shrink-0"
-                                                                        icon-type="category"
-                                                                        :icon-id="child.secondaryIcon"
-                                                                        :color="child.secondaryIconColor"
-                                                                        :size="28"
-                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        class="budget-history-row-icon-button budget-history-row-icon-button--secondary me-3"
+                                                                        :aria-label="tt('Filter Categories')"
+                                                                        @click.stop="toggleHistoricalSecondaryLegend(`${child.primaryCategory}::${child.secondaryCategory}`)"
+                                                                    >
+                                                                        <item-icon
+                                                                            v-if="child.secondaryIcon"
+                                                                            icon-type="category"
+                                                                            :icon-id="child.secondaryIcon"
+                                                                            :color="child.secondaryIconColor"
+                                                                            :size="28"
+                                                                        />
+                                                                        <span v-else class="budget-history-row-swatch budget-history-row-swatch--secondary" :style="{ backgroundColor: child.color }"></span>
+                                                                        <v-tooltip activator="parent">{{ tt('Filter Categories') }}</v-tooltip>
+                                                                    </button>
                                                                     <div class="d-flex flex-column flex-grow-1">
                                                                         <div class="d-flex align-center justify-space-between mb-1">
                                                                             <div class="d-flex align-center flex-grow-1">
@@ -1173,7 +1202,12 @@ import EditDialog from './list/dialogs/EditDialog.vue';
 import { buildBudgetDrilldownRouteQuery } from './categorySelection.ts';
 import { filterAndSortForecasts, summarizeForecastRisks } from './forecastDisplay.ts';
 import { buildBudgetForecastLoadRequest } from './forecastRequest.ts';
-import { buildHistoricalBudgetPeriodGroups, type HistoricalBudgetCategoryMeta } from './historyGrouping.ts';
+import {
+    buildHistoricalBudgetPeriodGroups,
+    filterHistoricalBudgetItemsByType,
+    type HistoricalBudgetCategoryMeta,
+    type HistoricalBudgetCategoryRow
+} from './historyGrouping.ts';
 import {
     buildHistoricalPolarChartModel,
     buildHistoricalPolarChartOption,
@@ -1370,6 +1404,7 @@ const showHistoricalDateDialog = ref<boolean>(false);
 const historicalMinDatetime = ref<number>(0);
 const historicalMaxDatetime = ref<number>(0);
 const historicalExpandedGroupKeys = ref<string[]>([]);
+const historicalCollapsedPrimaryKeys = ref<string[]>([]);
 const selectedHistoricalPeriodKey = ref<string | null>(null);
 
 // 预算类型：支出或投资
@@ -2196,7 +2231,12 @@ const filteredHistoricalItems = computed<BudgetHistoryItem[]>(() => {
         ? allCategoriesMap.value[selectedCategory.parentId]
         : selectedCategory;
 
-    return currentHistory.value.items.filter((item: BudgetHistoryItem) => {
+    const typeFilteredItems = filterHistoricalBudgetItemsByType(
+        currentHistory.value.items,
+        activeBudgetType.value
+    );
+
+    return typeFilteredItems.filter((item: BudgetHistoryItem) => {
         if (!selectedCategory) {
             return true;
         }
@@ -2568,7 +2608,20 @@ watch(
     { immediate: true }
 );
 
+watch(
+    () => historicalBudgetGroups.value.flatMap(group => group.rows.map(row => `${group.key}::${row.key}`)),
+    (rowKeys) => {
+        historicalCollapsedPrimaryKeys.value = historicalCollapsedPrimaryKeys.value.filter(rowKey => rowKeys.includes(rowKey));
+    },
+    { immediate: true }
+);
+
 const historicalLegendGroups = computed(() => historicalChartModel.value.legendGroups);
+const canShowHistoricalBudgetPanel = computed(() => (
+    historicalLegendGroups.value.length > 0
+    || historicalBudgetGroups.value.length > 0
+    || !!selectedHistoricalPeriodKey.value
+));
 const historicalChartUpdateOptions = {
     notMerge: false,
     lazyUpdate: false,
@@ -2639,6 +2692,21 @@ function toggleHistoricalSecondaryLegend(secondaryKey: string): void {
         historicalLegendSelection.value,
         secondaryKey
     );
+}
+
+function buildHistoricalPrimaryCollapseKey(groupKey: string, row: HistoricalBudgetCategoryRow): string {
+    return `${groupKey}::${row.key}`;
+}
+
+function isHistoricalPrimaryCollapsed(groupKey: string, row: HistoricalBudgetCategoryRow): boolean {
+    return historicalCollapsedPrimaryKeys.value.includes(buildHistoricalPrimaryCollapseKey(groupKey, row));
+}
+
+function toggleHistoricalPrimaryCollapse(groupKey: string, row: HistoricalBudgetCategoryRow): void {
+    const key = buildHistoricalPrimaryCollapseKey(groupKey, row);
+    historicalCollapsedPrimaryKeys.value = historicalCollapsedPrimaryKeys.value.includes(key)
+        ? historicalCollapsedPrimaryKeys.value.filter(item => item !== key)
+        : [...historicalCollapsedPrimaryKeys.value, key];
 }
 
 function ensureHistoricalDateRangeInitialized(): void {
@@ -4209,6 +4277,45 @@ watch(filterKeyword, (newVal) => {
 .budget-history-period-table :deep(th),
 .budget-history-period-table :deep(td) {
     white-space: nowrap;
+}
+
+.budget-history-row-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 50%;
+    background-color: transparent;
+    cursor: pointer;
+    padding: 0;
+}
+
+.budget-history-row-icon-button--secondary {
+    width: 28px;
+    height: 28px;
+}
+
+.budget-history-row-icon-button:hover {
+    background-color: rgba(var(--v-theme-primary), 0.08);
+}
+
+.budget-history-row-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: currentColor;
+}
+
+.budget-history-row-swatch--secondary {
+    width: 18px;
+    height: 18px;
+}
+
+.budget-history-primary-toggle {
+    flex-shrink: 0;
 }
 
 .budget-history-aggregation-select {

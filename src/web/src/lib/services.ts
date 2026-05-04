@@ -49,7 +49,9 @@ import type {
     ExportTransactionDataRequest,
     ClearDataRequest,
     ClearAccountTransactionsRequest,
-    DataStatisticsResponse
+    DataStatisticsResponse,
+    SettingsBundleImportResult,
+    SettingsBundleSectionKey
 } from '@/models/data_management.ts';
 import type {
     UserCustomExchangeRateUpdateRequest,
@@ -372,6 +374,30 @@ function toBudgetAmountInCents(value: unknown): number {
     return Math.round(amount * 100);
 }
 
+function normalizeRestBudgetType(value: unknown): BudgetType | null {
+    if (value === BudgetType.Expense || value === BudgetType.Investment) {
+        return value;
+    }
+
+    const normalizedText = String(value ?? '').trim().toLowerCase();
+    if (normalizedText === 'expense') {
+        return BudgetType.Expense;
+    }
+    if (normalizedText === 'investment') {
+        return BudgetType.Investment;
+    }
+
+    const numericValue = Number(value);
+    if (numericValue === BudgetType.Expense || numericValue === 1) {
+        return BudgetType.Expense;
+    }
+    if (numericValue === BudgetType.Investment) {
+        return BudgetType.Investment;
+    }
+
+    return null;
+}
+
 function mapRestBudgetToFrontend(item: any, fallbackType = BudgetType.Expense): any {
     const categoryInfo = item?.category_info || {};
 
@@ -585,25 +611,30 @@ function mapRestHistoryToFrontend(restResult: any): any {
     const summary = restResult?.summary || {};
 
     return {
-        items: items.map((item: any) => ({
-            id: String(item?.id ?? ''),
-            budgetId: String(item?.budget_id ?? item?.budgetId ?? ''),
-            name: item?.name || '',
-            category: item?.category || '',
-            subCategory: item?.sub_category || item?.subCategory || '',
-            periodType: item?.period_type || item?.periodType || BudgetPeriodType.Monthly,
-            periodStart: item?.period_start || item?.periodStart || '',
-            periodEnd: item?.period_end || item?.periodEnd || '',
-            budgetAmount: toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0),
-            spentAmount: toBudgetAmountInCents(item?.spent_amount ?? item?.spentAmount ?? 0),
-            remainingAmount: toBudgetAmountInCents(item?.remaining_amount ?? item?.remainingAmount ?? 0),
-            executionRate: item?.execution_rate ?? item?.executionRate ?? 0,
-            status: item?.status || '',
-            filterSummary: item?.filter_summary || item?.filterSummary || '',
-            calculatedAt: item?.calculated_at || item?.calculatedAt || '',
-            alertThreshold: item?.alert_threshold ?? item?.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
-            enabled: item?.enabled ?? DEFAULT_BUDGET_ENABLED
-        })),
+        items: items.map((item: any) => {
+            const budgetType = normalizeRestBudgetType(item?.budget_type ?? item?.budgetType ?? item?.type);
+
+            return {
+                id: String(item?.id ?? ''),
+                budgetId: String(item?.budget_id ?? item?.budgetId ?? ''),
+                name: item?.name || '',
+                ...(budgetType === null ? {} : { type: budgetType }),
+                category: item?.category || '',
+                subCategory: item?.sub_category || item?.subCategory || '',
+                periodType: item?.period_type || item?.periodType || BudgetPeriodType.Monthly,
+                periodStart: item?.period_start || item?.periodStart || '',
+                periodEnd: item?.period_end || item?.periodEnd || '',
+                budgetAmount: toBudgetAmountInCents(item?.budget_amount ?? item?.budgetAmount ?? 0),
+                spentAmount: toBudgetAmountInCents(item?.spent_amount ?? item?.spentAmount ?? 0),
+                remainingAmount: toBudgetAmountInCents(item?.remaining_amount ?? item?.remainingAmount ?? 0),
+                executionRate: item?.execution_rate ?? item?.executionRate ?? 0,
+                status: item?.status || '',
+                filterSummary: item?.filter_summary || item?.filterSummary || '',
+                calculatedAt: item?.calculated_at || item?.calculatedAt || '',
+                alertThreshold: item?.alert_threshold ?? item?.alertThreshold ?? DEFAULT_BUDGET_ALERT_THRESHOLD,
+                enabled: item?.enabled ?? DEFAULT_BUDGET_ENABLED
+            };
+        }),
         count: summary?.count ?? items.length,
         periodStart: summary?.period_start || summary?.periodStart || '',
         periodEnd: summary?.period_end || summary?.periodEnd || ''
@@ -1163,6 +1194,42 @@ export default {
         } else {
             return Promise.reject('Parameter Invalid');
         }
+    },
+    getExportedSettingsBundle: (): Promise<AxiosResponse<BlobPart>> => {
+        return axios.get<BlobPart>('settings/bundle/export', {
+            responseType: 'blob',
+            timeout: DEFAULT_EXPORT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
+    getExportedSettingsBundleSection: (sectionKey: SettingsBundleSectionKey): Promise<AxiosResponse<BlobPart>> => {
+        return axios.get<BlobPart>(`settings/bundle/sections/${sectionKey}/export`, {
+            responseType: 'blob',
+            timeout: DEFAULT_EXPORT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
+    previewImportSettingsBundle: (bundle: unknown): ApiResponsePromise<SettingsBundleImportResult> => {
+        return axios.post<ApiResponse<SettingsBundleImportResult>>('settings/bundle/import/preview', bundle);
+    },
+    previewImportSettingsBundleSection: (
+        sectionKey: SettingsBundleSectionKey,
+        bundle: unknown
+    ): ApiResponsePromise<SettingsBundleImportResult> => {
+        return axios.post<ApiResponse<SettingsBundleImportResult>>(
+            `settings/bundle/sections/${sectionKey}/import/preview`,
+            bundle
+        );
+    },
+    importSettingsBundle: (bundle: unknown): ApiResponsePromise<SettingsBundleImportResult> => {
+        return axios.post<ApiResponse<SettingsBundleImportResult>>('settings/bundle/import', bundle);
+    },
+    importSettingsBundleSection: (
+        sectionKey: SettingsBundleSectionKey,
+        bundle: unknown
+    ): ApiResponsePromise<SettingsBundleImportResult> => {
+        return axios.post<ApiResponse<SettingsBundleImportResult>>(
+            `settings/bundle/sections/${sectionKey}/import`,
+            bundle
+        );
     },
     clearAllData: (req: ClearDataRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('data/clear/all', req, {

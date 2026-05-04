@@ -195,6 +195,7 @@ export interface BudgetHistoryItem {
     readonly id: string;                    // 快照ID
     readonly budgetId: string;              // 预算ID
     readonly name: string;                  // 预算名称
+    readonly type?: BudgetType;             // 预算类型（支出/投资）
     readonly category: string;              // 主分类
     readonly subCategory: string;           // 子分类
     readonly periodType: BudgetPeriodType;  // 周期类型

@@ -43,15 +43,12 @@
                                             <span>{{ tt('Transaction Categories') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
                                                    :disabled="loading || updating" @click="add">{{ tt('Add') }}</v-btn>
-                                            <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :disabled="loading || updating" @click="exportCategories">
-                                                {{ tt('Export') }}
-                                            </v-btn>
-                                            <v-btn class="ms-3" color="default" variant="outlined"
-                                                   :disabled="loading || updating" @click="importCategories">
-                                                {{ tt('Import') }}
-                                            </v-btn>
-                                            <input type="file" ref="fileInput" style="display: none" accept=".json" @change="onFileSelected" />
+                                            <settings-json-import-export-button
+                                                section-key="transactionCategories"
+                                                filename-prefix="transaction-categories"
+                                                :disabled="loading || updating"
+                                                @imported="reload(true)"
+                                            />
                                             <v-btn class="ms-3" color="primary" variant="tonal"
                                                    :disabled="loading || updating" @click="saveSortResult"
                                                    v-if="displayOrderModified">{{ tt('Save Display Order') }}</v-btn>
@@ -210,6 +207,7 @@ import { VNavigationDrawer } from 'vuetify/components/VNavigationDrawer';
 
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
 import PresetDialog from './list/dialogs/PresetDialog.vue';
 
@@ -240,7 +238,6 @@ import {
     mdiDrag,
     mdiDotsVertical
 } from '@mdi/js';
-import services from '@/lib/services.ts';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -256,7 +253,6 @@ const navbar = useTemplateRef<VNavigationDrawer>('navbar');
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editDialog = useTemplateRef<EditDialogType>('editDialog');
-const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
 const activeCategoryType = ref<CategoryType>(CategoryType.Expense);
 const activeTab = ref<string>('categoryPage');
@@ -497,69 +493,6 @@ function onPresetCategorySaved(e: { message: string }): void {
     if (e && e.message) {
         snackbar.value?.showMessage(e.message);
         reload(false);
-    }
-}
-
-function exportCategories() {
-    loading.value = true;
-    services.exportTransactionCategories().then(response => {
-        loading.value = false;
-        if (response.data.success) {
-            const dataStr = JSON.stringify(response.data.result, null, 2);
-            const blob = new Blob([dataStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `categories_export_${new Date().toISOString().slice(0, 10)}.json`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            snackbar.value?.showMessage('Categories exported successfully');
-        } else {
-            snackbar.value?.showError((response.data as any).error || 'Export failed');
-        }
-    }).catch(error => {
-        loading.value = false;
-        snackbar.value?.showError(error);
-    });
-}
-
-function importCategories() {
-    fileInput.value?.click();
-}
-
-function onFileSelected(event: Event) {
-    const target = event.target as HTMLInputElement;
-    if (target.files && target.files.length > 0) {
-        const file = target.files[0];
-        if (!file) {
-            return;
-        }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const json = JSON.parse(e.target?.result as string);
-                loading.value = true;
-                services.importTransactionCategories(json).then(response => {
-                    loading.value = false;
-                    if (response.data.success) {
-                        snackbar.value?.showMessage(`Imported: ${response.data.result.imported}, Updated: ${response.data.result.updated}`);
-                        reload(true);
-                    } else {
-                        snackbar.value?.showError((response.data as any).error || 'Import failed');
-                    }
-                }).catch(error => {
-                    loading.value = false;
-                    snackbar.value?.showError(error);
-                });
-            } catch {
-                snackbar.value?.showError('Invalid JSON file');
-            }
-            // Reset input
-            target.value = '';
-        };
-        reader.readAsText(file);
     }
 }
 

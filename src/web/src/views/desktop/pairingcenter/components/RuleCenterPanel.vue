@@ -79,6 +79,12 @@
                                         </v-list-item>
                                     </v-list>
                                 </v-menu>
+                                <settings-json-import-export-button
+                                    section-key="categoryRecognitionRules"
+                                    filename-prefix="category-recognition-rules"
+                                    :disabled="loading"
+                                    @imported="fetchAll"
+                                />
                                 <v-btn
                                     color="default"
                                     variant="text"
@@ -724,6 +730,7 @@ import {
 import type { RuleExpressionDisplayClause } from '@/components/common/keywordExpression.ts';
 import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 

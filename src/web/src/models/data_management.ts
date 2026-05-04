@@ -38,3 +38,25 @@ export interface DisplayDataStatistics {
     readonly totalTransactionTemplateCount: string;
     readonly totalScheduledTransactionCount: string;
 }
+
+export interface SettingsBundleImportSectionSummary {
+    readonly created: number;
+    readonly updated: number;
+    readonly skipped: number;
+}
+
+export interface SettingsBundleImportResult {
+    readonly dryRun: boolean;
+    readonly schemaVersion: number;
+    readonly sections: Record<string, SettingsBundleImportSectionSummary>;
+    readonly warnings: string[];
+}
+
+export type SettingsBundleSectionKey =
+    'accounts'
+    | 'transactionCategories'
+    | 'transactionTags'
+    | 'transactionTemplates'
+    | 'scheduledTransactions'
+    | 'categoryRecognitionRules'
+    | 'llmConfigs';

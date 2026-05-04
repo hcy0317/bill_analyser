@@ -1,11 +1,13 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+    BudgetType,
     BudgetPeriodType,
     type BudgetHistoryItem
 } from '@/models/budget.ts';
 import {
-    buildHistoricalBudgetPeriodGroups
+    buildHistoricalBudgetPeriodGroups,
+    filterHistoricalBudgetItemsByType
 } from '@/views/desktop/budgets/historyGrouping.ts';
 
 function createHistoryItem(overrides: Partial<BudgetHistoryItem>): BudgetHistoryItem {
@@ -13,6 +15,7 @@ function createHistoryItem(overrides: Partial<BudgetHistoryItem>): BudgetHistory
         id: overrides.id || 'item-1',
         budgetId: overrides.budgetId || 'budget-1',
         name: overrides.name || '预算',
+        type: overrides.type,
         category: overrides.category || '餐饮',
         subCategory: overrides.subCategory || '',
         periodType: overrides.periodType || BudgetPeriodType.Monthly,
@@ -161,5 +164,100 @@ describe('historyGrouping helpers', () => {
 
         const dining = groups[0]?.rows.find(row => row.primaryCategory === '餐饮');
         expect(dining?.childRows.map(child => child.displayCategory)).toStrictEqual(['早餐']);
+    });
+
+    test('hides a primary row when every existing secondary is hidden by legend selection', () => {
+        const groups = buildHistoricalBudgetPeriodGroups({
+            items: [
+                createHistoryItem({
+                    id: 'primary',
+                    category: '餐饮',
+                    budgetAmount: 30000,
+                    spentAmount: 10000
+                }),
+                createHistoryItem({
+                    id: 'breakfast',
+                    category: '餐饮',
+                    subCategory: '早餐',
+                    budgetAmount: 12000,
+                    spentAmount: 4000
+                }),
+                createHistoryItem({
+                    id: 'lunch',
+                    category: '餐饮',
+                    subCategory: '午餐',
+                    budgetAmount: 8000,
+                    spentAmount: 6000
+                })
+            ],
+            aggregationType: BudgetPeriodType.Monthly,
+            fiscalYearStartMonth: 1,
+            fiscalYearStartDay: 1,
+            uncategorizedLabel: '未分类',
+            levelMode: 'secondary',
+            legendSelection: {
+                '餐饮::早餐': false,
+                '餐饮::午餐': false
+            },
+            categoryMeta: {},
+            fallbackPalette: ['#5470c6']
+        });
+
+        expect(groups).toStrictEqual([]);
+    });
+
+    test('keeps primary-only history rows visible when their fallback legend item is selected', () => {
+        const groups = buildHistoricalBudgetPeriodGroups({
+            items: [
+                createHistoryItem({
+                    id: 'primary',
+                    category: '交通',
+                    budgetAmount: 6000,
+                    spentAmount: 0
+                })
+            ],
+            aggregationType: BudgetPeriodType.Monthly,
+            fiscalYearStartMonth: 1,
+            fiscalYearStartDay: 1,
+            uncategorizedLabel: '未分类',
+            levelMode: 'secondary',
+            legendSelection: {},
+            categoryMeta: {},
+            fallbackPalette: ['#91cc75']
+        });
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0]?.rows).toStrictEqual([
+            expect.objectContaining({
+                primaryCategory: '交通',
+                budgetAmount: 6000,
+                spentAmount: 0,
+                childRows: []
+            })
+        ]);
+    });
+
+    test('filters historical items by budget type when the response includes type metadata', () => {
+        const expense = createHistoryItem({
+            id: 'expense',
+            type: BudgetType.Expense,
+            category: '餐饮'
+        });
+        const investment = createHistoryItem({
+            id: 'investment',
+            type: BudgetType.Investment,
+            category: '基金'
+        });
+        const legacyUnknown = createHistoryItem({
+            id: 'legacy',
+            type: undefined,
+            category: '交通'
+        });
+
+        expect(filterHistoricalBudgetItemsByType([
+            expense,
+            investment,
+            legacyUnknown
+        ], BudgetType.Expense).map(item => item.id)).toStrictEqual(['expense', 'legacy']);
     });
 });

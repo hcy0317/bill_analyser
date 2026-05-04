@@ -426,7 +426,11 @@ def test_budget_primary_secondary_rules(client, auth_headers):
     }, headers=auth_headers)
     assert create_secondary_a.status_code == 201
 
-    first_list = client.get("/api/budgets/", query_string={"category": category_name}, headers=auth_headers)
+    first_list = client.get(
+        "/api/budgets/",
+        query_string={"category": category_name, "period_type": "monthly"},
+        headers=auth_headers,
+    )
     assert first_list.status_code == 200
     first_items = first_list.get_json()["result"]
     assert len(first_items) == 2
@@ -450,7 +454,11 @@ def test_budget_primary_secondary_rules(client, auth_headers):
     }, headers=auth_headers)
     assert create_secondary_b.status_code == 201
 
-    second_list = client.get("/api/budgets/", query_string={"category": category_name}, headers=auth_headers)
+    second_list = client.get(
+        "/api/budgets/",
+        query_string={"category": category_name, "period_type": "monthly"},
+        headers=auth_headers,
+    )
     second_items = second_list.get_json()["result"]
     updated_primary = next(item for item in second_items if int(item["id"]) == int(primary_budget["id"]))
     assert updated_primary["amount"] == 180.0
@@ -463,7 +471,11 @@ def test_budget_primary_secondary_rules(client, auth_headers):
     }, headers=auth_headers)
     assert create_secondary_c.status_code == 201
 
-    third_list = client.get("/api/budgets/", query_string={"category": category_name}, headers=auth_headers)
+    third_list = client.get(
+        "/api/budgets/",
+        query_string={"category": category_name, "period_type": "monthly"},
+        headers=auth_headers,
+    )
     third_items = third_list.get_json()["result"]
     synced_primary = next(item for item in third_items if int(item["id"]) == int(primary_budget["id"]))
     assert synced_primary["amount"] == 200.0
@@ -472,7 +484,11 @@ def test_budget_primary_secondary_rules(client, auth_headers):
     assert delete_primary.status_code == 200
     assert delete_primary.get_json()["success"] is True
 
-    final_list = client.get("/api/budgets/", query_string={"category": category_name}, headers=auth_headers)
+    final_list = client.get(
+        "/api/budgets/",
+        query_string={"category": category_name, "period_type": "monthly"},
+        headers=auth_headers,
+    )
     final_items = final_list.get_json()["result"]
     assert final_items == []
 

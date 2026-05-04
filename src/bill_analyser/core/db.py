@@ -20,6 +20,7 @@ from .db_recurring_suggestions import DatabaseRecurringSuggestionsMixin
 from .db_runtime import DatabaseRuntimeMixin
 from .db_schema import DatabaseSchemaMixin
 from .db_shared import BudgetExecutionRequest, BudgetForecastRequest, BudgetGroupKey
+from .db_settings_bundle import DatabaseSettingsBundleMixin
 from .db_tags import DatabaseTagsMixin
 from .db_templates import DatabaseTemplatesMixin
 from .db_user_data import DatabaseUserDataMixin
@@ -44,6 +45,7 @@ class DatabaseUserSecurityMixin(
 
 
 class DatabaseTransactionalDataMixin(  # pylint: disable=too-many-ancestors
+    DatabaseSettingsBundleMixin,
     DatabaseRecurringSuggestionsMixin,
     DatabaseTemplatesMixin,
     DatabaseTagsMixin,

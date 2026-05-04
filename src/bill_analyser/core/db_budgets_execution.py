@@ -1,5 +1,7 @@
 """Budget execution, snapshot, and history helpers for the split database facade."""
 
+# pylint: disable=duplicate-code
+
 from __future__ import annotations
 
 import json
@@ -73,11 +75,12 @@ class DatabaseBudgetExecutionHistoryMixin(DatabaseBudgetsCoreMixin):
 
         async with conn.execute(budget_query, budget_params) as cursor:
             raw_budgets = [dict(row) for row in await cursor.fetchall()]
-        return self._filter_budget_execution_candidates(
+        filtered_budgets = self._filter_budget_execution_candidates(
             raw_budgets,
             request,
             category_context,
         )
+        return self._dedupe_budget_execution_candidates(filtered_budgets)
 
     def _filter_budget_execution_candidates(
         self,
@@ -105,6 +108,36 @@ class DatabaseBudgetExecutionHistoryMixin(DatabaseBudgetsCoreMixin):
                 continue
             budgets.append({**budget, "_resolved_budget_type": resolved_budget_type})
         return budgets
+
+    @staticmethod
+    def _dedupe_budget_execution_candidates(
+        budgets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Collapse synchronized parent duplicates for one exact period/category key."""
+        selected: dict[tuple[str, str, str, str, int], dict[str, Any]] = {}
+        order: list[tuple[str, str, str, str, int]] = []
+        for budget in budgets:
+            category = str(budget.get("category") or "").strip()
+            sub_category = str(budget.get("sub_category") or "").strip()
+            period_type = str(budget.get("period_type") or "").strip()
+            start_date = str(budget.get("start_date") or "").strip()
+            if category and period_type and start_date:
+                key = (category, sub_category, period_type, start_date, 0)
+            else:
+                key = (category, sub_category, period_type, start_date, int(budget.get("id") or 0))
+            current = selected.get(key)
+            if current is None:
+                selected[key] = budget
+                order.append(key)
+                continue
+            budget_rank = (float(budget.get("amount") or 0), int(budget.get("id") or 0))
+            current_rank = (
+                float(current.get("amount") or 0),
+                int(current.get("id") or 0),
+            )
+            if budget_rank >= current_rank:
+                selected[key] = budget
+        return [selected[key] for key in order]
 
     def _resolve_budget_execution_window(
         self,
@@ -446,6 +479,42 @@ class DatabaseBudgetExecutionHistoryMixin(DatabaseBudgetsCoreMixin):
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def _enrich_budget_execution_history_items(
+        self,
+        history_items: list[dict[str, Any]],
+        request: BudgetExecutionRequest,
+        category_context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Attach the same category/type contract used by live execution rows."""
+        enriched_items: list[dict[str, Any]] = []
+        for item in history_items:
+            resolved_budget_type = self._resolve_budget_category_type(
+                item.get("category"),
+                item.get("sub_category"),
+                category_context,
+                preferred_type=request.budget_type,
+            )
+            if resolved_budget_type != request.budget_type:
+                continue
+
+            category_info = self._resolve_budget_category_info(
+                item.get("category"),
+                item.get("sub_category"),
+                category_context,
+                resolved_budget_type,
+            )
+            enriched_items.append(
+                {
+                    **item,
+                    "type": resolved_budget_type,
+                    "category_info": category_info,
+                    "category_id": (
+                        str(category_info.get("id") or "") if category_info else ""
+                    ),
+                }
+            )
+        return enriched_items
+
     @staticmethod
     def _extract_exact_budget_history_items(
         history_items: list[dict[str, Any]],
@@ -507,11 +576,17 @@ class DatabaseBudgetExecutionHistoryMixin(DatabaseBudgetsCoreMixin):
     ) -> list[dict[str, Any]]:
         """Resolve execution history from snapshots with on-demand fallback."""
         conn = await self._get_connection()
+        categories = await self.get_all_categories(user_id=request.user_id)
+        category_context = self._build_budget_category_context(categories)
         filter_summary = self._build_budget_history_filter_summary_for_request(request)
-        history_items = await self._fetch_budget_execution_history_items(
-            conn,
+        history_items = self._enrich_budget_execution_history_items(
+            await self._fetch_budget_execution_history_items(
+                conn,
+                request,
+                filter_summary,
+            ),
             request,
-            filter_summary,
+            category_context,
         )
         if not request.start_date or not request.end_date:
             return history_items

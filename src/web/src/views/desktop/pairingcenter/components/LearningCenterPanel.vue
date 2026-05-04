@@ -384,6 +384,12 @@
                                                @click="openAddConfigDialog">
                                             {{ tt('Add Config') }}
                                         </v-btn>
+                                        <settings-json-import-export-button
+                                            section-key="llmConfigs"
+                                            filename-prefix="llm-configs"
+                                            :disabled="loading || llmConfigLoading"
+                                            @imported="loadLLMConfigs"
+                                        />
                                         <v-btn class="learning-panel-refresh"
                                                variant="text"
                                                color="default"
@@ -790,6 +796,7 @@ import axios from 'axios';
 import { ref, computed, watch, useTemplateRef, onBeforeUnmount } from 'vue';
 
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { useLearningStore } from '@/stores/learning.ts';
 import type { LearningSuggestion, LearningRule } from '@/models/learning_center.ts';

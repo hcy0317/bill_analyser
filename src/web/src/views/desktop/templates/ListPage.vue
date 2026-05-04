@@ -7,6 +7,12 @@
                         <span>{{ templateType === TemplateType.Schedule.type ? tt('Scheduled Transactions') : tt('Transaction Templates') }}</span>
                         <v-btn class="ms-3" color="default" variant="outlined"
                                :disabled="loading || updating" @click="add">{{ tt('Add') }}</v-btn>
+                        <settings-json-import-export-button
+                            :section-key="settingsBundleSectionKey"
+                            :filename-prefix="settingsBundleFilePrefix"
+                            :disabled="loading || updating"
+                            @imported="reload"
+                        />
                         <v-btn class="ms-3" color="primary" variant="tonal"
                                :disabled="loading || updating" @click="saveSortResult"
                                v-if="displayOrderModified">{{ tt('Save Display Order') }}</v-btn>
@@ -148,6 +154,7 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import EditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
@@ -158,6 +165,7 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
 
 import { TemplateType } from '@/core/template.ts';
+import type { SettingsBundleSectionKey } from '@/models/data_management.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import {
@@ -204,6 +212,12 @@ const showHidden = ref<boolean>(false);
 const templates = computed<TransactionTemplate[]>(() => transactionTemplatesStore.allTransactionTemplates[templateType.value] || []);
 const noAvailableTemplate = computed<boolean>(() => isNoAvailableTemplate(templates.value, showHidden.value));
 const availableTemplateCount = computed<number>(() => getAvailableTemplateCount(templates.value, showHidden.value));
+const settingsBundleSectionKey = computed<SettingsBundleSectionKey>(() => (
+    templateType.value === TemplateType.Schedule.type ? 'scheduledTransactions' : 'transactionTemplates'
+));
+const settingsBundleFilePrefix = computed<string>(() => (
+    templateType.value === TemplateType.Schedule.type ? 'scheduled-transactions' : 'transaction-templates'
+));
 
 function init(): void {
     templateType.value = props.initType;

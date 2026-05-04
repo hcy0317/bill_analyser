@@ -12,6 +12,7 @@
 - `budgets.py`：预算 CRUD、执行统计、导入导出
 - `statistics.py`：统计总览、趋势、汇率
 - `templates.py`：模板管理
+- `settings_bundle.py`：设置 JSON 包导入导出；统一覆盖账户、交易分类、交易标签、交易模板、定时交易、分类识别规则与 LLM 配置，并提供各页面使用的 section-scoped export / preview import / import，导入只做非破坏性 upsert
 - `backup.py`：备份相关接口
 
 ## 3.1.1 API 适配器出口（`src/bill_analyser/api/adapters/`）
@@ -24,9 +25,9 @@
 - `db.py`：薄 `Database` façade；对外维持统一导入入口，内部按 mixin 组装数据库能力
 - `db_runtime.py` / `db_shared.py` / `db_time.py`：数据库连接生命周期、共享请求/分组数据结构、UTC 时间与缓存辅助
 - `db_schema.py` + `db_schema_core.py` + `db_schema_users_security.py` + `db_schema_templates_imports.py`：schema 初始化与迁移编排；核心业务表、用户安全表、模板/导入相关表分别维护
-- `db_bills.py` / `db_categories.py` / `db_accounts.py` / `db_tags.py` / `db_templates.py`：账单、分类、账户、标签、模板域的 CRUD、批量操作与查询辅助
+- `db_bills.py` / `db_categories.py` / `db_accounts.py` / `db_tags.py` / `db_templates.py` / `db_settings_bundle.py`：账单、分类、账户、标签、模板域的 CRUD、批量操作、设置包导入导出与查询辅助
 - `db_users_auth.py` / `db_user_data.py` / `db_audit_backup.py`：用户与会话、2FA 与应用设置、用户数据管理、审计/备份域持久化逻辑
-- `db_budgets_core.py` / `db_budgets_execution.py` / `db_budgets_forecast.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询；预算分类上下文会把历史 `categories.type=1` 归一为当前支出类型 `3`，避免旧分类预算在执行统计和预算列表中被类型过滤漏掉
+- `db_budgets_core.py` / `db_budgets_execution.py` / `db_budgets_forecast.py`：预算主数据、分类上下文与分组 helper，以及执行统计 / 历史 / 预测 / 导入导出查询；预算分类上下文会把历史 `categories.type=1` 归一为当前支出类型 `3`，避免旧分类预算在执行统计和预算列表中被类型过滤漏掉。一级/二级分类预算与月度/季度/年度预算都按父子预算关系上卷：子集总额不超过父级时保留父级金额，超过时父级金额提升为子集总和；历史预算读取会在无账单支出时按需返回预算行，并在支出/投资类型之间保持隔离。
 - `db_budgets_reporting.py`：预算 reporting 兼容聚合层；运行时通过它组合 execution/history 与 forecast/import/export 两个预算域 mixin
 - `db_import_configs.py` / `db_import_sessions.py` / `db_import_preview.py` / `db_import_learning.py` / `import_learning/`：导入模板配置、三阶段会话、预览编辑/确认、长期学习 durable corpus、exact/manual 学习规则、session-scoped dry-run suggestions，以及基于 dataset snapshot / active model registry 的轻量双头学习模型训练与推理
 - `bill_service.py`：账单服务公共导入 facade；真实实现按 `bill_service_parts/` mixin 组合，分别维护 legacy 导入、v2 三阶段导入、预览投影/分页、账户匹配、学习规则/信号、matching 读写、preview 决策与 reclassify 等域。
@@ -42,7 +43,7 @@
 
 ## 3.2.1 Database façade 关系
 - 外部调用方（API 路由、服务、测试）继续只从 `src/bill_analyser/core/db.py` 导入 `Database`
-- `Database` 通过多继承顺序组合各域 mixin：预算 reporting → 导入 preview / session / config / learning → 用户数据 / 认证 → 模板 / 标签 / 账户 / 分类 / 账单 → 审计备份 → schema → runtime
+- `Database` 通过多继承顺序组合各域 mixin：预算 reporting → 导入 preview / session / config / learning → 用户数据 / 认证 → 设置包 / 模板 / 标签 / 账户 / 分类 / 账单 → 审计备份 → schema → runtime
 - schema 初始化由 `DatabaseSchemaMixin.init_db()` 统一编排，并在运行时通过 `DatabaseRuntimeMixin` 提供连接、路径重定向、缓存与上下文管理
 - 这种结构保持了公共 API 稳定，同时把预算域、导入链路、账户/标签/模板、认证安全等高耦合逻辑拆到独立文件维护
 

@@ -57,6 +57,12 @@
                                             <span>{{ tt('Account List') }}</span>
                                             <v-btn class="ms-3" color="default" variant="outlined"
                                                    :disabled="loading" @click="add">{{ tt('Add') }}</v-btn>
+                                            <settings-json-import-export-button
+                                                section-key="accounts"
+                                                filename-prefix="accounts"
+                                                :disabled="loading"
+                                                @imported="reload(true)"
+                                            />
                                             <v-btn class="ms-3" color="primary" variant="tonal"
                                                    :disabled="loading" @click="saveSortResult"
                                                    v-if="displayOrderModified">{{ tt('Save Display Order') }}</v-btn>
@@ -320,6 +326,7 @@ import ReconciliationStatementDialog from './list/dialogs/ReconciliationStatemen
 import MoveAllTransactionsDialog from '@/views/desktop/accounts/list/dialogs/MoveAllTransactionsDialog.vue';
 import ClearAllTransactionsDialog from '@/views/desktop/accounts/list/dialogs/ClearAllTransactionsDialog.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 
 import { ref, computed, onMounted, useTemplateRef, watch } from 'vue';
 import { useDisplay } from 'vuetify';

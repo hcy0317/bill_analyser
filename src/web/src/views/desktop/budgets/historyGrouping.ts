@@ -1,4 +1,5 @@
 import {
+    BudgetType,
     BudgetPeriodType,
     type BudgetHistoryItem
 } from '@/models/budget.ts';
@@ -62,6 +63,40 @@ function formatDateOnly(date: Date): string {
 function normalizeAmount(value: number): number {
     const amount = Number(value);
     return Number.isFinite(amount) ? Math.max(0, amount) : 0;
+}
+
+export function normalizeHistoricalBudgetType(value: unknown): BudgetType | null {
+    if (value === BudgetType.Expense || value === BudgetType.Investment) {
+        return value;
+    }
+
+    const normalizedText = String(value ?? '').trim().toLowerCase();
+    if (normalizedText === 'expense') {
+        return BudgetType.Expense;
+    }
+    if (normalizedText === 'investment') {
+        return BudgetType.Investment;
+    }
+
+    const numericValue = Number(value);
+    if (numericValue === BudgetType.Expense || numericValue === 1) {
+        return BudgetType.Expense;
+    }
+    if (numericValue === BudgetType.Investment) {
+        return BudgetType.Investment;
+    }
+
+    return null;
+}
+
+export function filterHistoricalBudgetItemsByType(
+    items: BudgetHistoryItem[],
+    activeType: BudgetType
+): BudgetHistoryItem[] {
+    return items.filter(item => {
+        const itemType = normalizeHistoricalBudgetType(item.type);
+        return itemType === null || itemType === activeType;
+    });
 }
 
 function buildFiscalYearPeriod(targetDate: Date, fiscalYearStartMonth: number, fiscalYearStartDay: number) {
@@ -338,6 +373,10 @@ export function buildHistoricalBudgetPeriodGroups({
             });
 
             if (visibleSecondaries.length === 0) {
+                if (sortedSecondaries.length > 0) {
+                    continue;
+                }
+
                 const fallbackKey = `${primary.primaryCategory}::${primary.primaryCategory}`;
                 const fallbackVisible = isLegendSelected(fallbackKey);
                 if (!fallbackVisible || (primary.primaryBudgetAmount <= 0 && primary.primarySpentAmount <= 0)) {

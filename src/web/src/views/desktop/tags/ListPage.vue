@@ -7,6 +7,12 @@
                         <span>{{ tt('Transaction Tags') }}</span>
                         <v-btn class="ms-3" color="default" variant="outlined"
                                :disabled="loading || updating || hasEditingTag" @click="add">{{ tt('Add') }}</v-btn>
+                        <settings-json-import-export-button
+                            section-key="transactionTags"
+                            filename-prefix="transaction-tags"
+                            :disabled="loading || updating || hasEditingTag"
+                            @imported="reload"
+                        />
                         <v-btn class="ms-3" color="primary" variant="tonal"
                                :disabled="loading || updating || hasEditingTag" @click="saveSortResult"
                                v-if="displayOrderModified">{{ tt('Save Display Order') }}</v-btn>
@@ -227,6 +233,7 @@
 <script setup lang="ts">
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 
