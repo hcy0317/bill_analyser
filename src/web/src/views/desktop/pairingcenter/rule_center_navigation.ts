@@ -1,5 +1,5 @@
 export type RuleCenterDomain = 'transfer' | 'investment' | 'learning' | 'llm';
-export type RuleCenterTab = 'overview' | 'rules' | 'config';
+export type RuleCenterTab = 'overview' | 'rules' | 'config' | 'ocr-config';
 export type LegacyRuleTab = 'rules' | 'learning' | 'recurring';
 
 export interface RuleCenterSelection {
@@ -22,6 +22,9 @@ function firstString(value: unknown): string | undefined {
 
 export function normalizeRuleCenterTab(domain: RuleCenterDomain, tab?: string): RuleCenterTab {
     if (domain === 'llm') {
+        if (tab === 'ocr-config') {
+            return 'ocr-config';
+        }
         return tab === 'config' ? 'config' : 'overview';
     }
 
@@ -105,6 +108,15 @@ export function normalizeRuleCenterSelection(input: {
             return {
                 domain: 'llm',
                 tab: 'overview',
+                legacyRuleTab: 'learning',
+                shouldRewriteQuery: true,
+            };
+        }
+
+        if (tab === 'ocr-config') {
+            return {
+                domain: 'llm',
+                tab: 'ocr-config',
                 legacyRuleTab: 'learning',
                 shouldRewriteQuery: true,
             };

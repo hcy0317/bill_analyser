@@ -104,15 +104,50 @@ def test_ai_receipt_recognition_success_with_stub_provider(client, auth_headers,
     data = response.get_json() or {}
     assert data["success"] is True
     result = data["result"]
-    assert set(result.keys()) >= {"amount", "trade_time", "description", "provenance", "confidence", "raw_provider_response"}
+    assert set(result.keys()) >= {
+        "amount",
+        "trade_time",
+        "description",
+        "payment_platform",
+        "provenance",
+        "confidence",
+        "raw_provider_response",
+    }
     assert result["amount"] == pytest.approx(12.34)
     assert "2025" in (result["trade_time"] or "")
+    assert result["payment_platform"] is None
     assert (result["description"] or "").startswith("拿铁") or "拿铁" in (result["description"] or "")
     provenance = result["provenance"]
     assert provenance["provider"] == "stub"
     assert provenance["model"] == "stub-1"
     assert provenance["request_id"]
     assert 0.0 <= result["confidence"] <= 1.0
+
+
+def test_ai_receipt_recognition_extracts_payment_screenshot_fields(client, auth_headers, reset_ocr_service):
+    from bill_analyser.api.app import app
+
+    text = """
+    微信支付
+    支付成功
+    ￥18.80
+    交易对方
+    瑞幸咖啡
+    支付时间 2026年5月4日 08:09:10
+    """
+    app.config["OCR_SERVICE"] = OcrService(
+        provider=_StubProvider(text=text, confidence=0.4),
+        rate_limiter=OcrRateLimiter(60.0, 100),
+    )
+
+    response = _post_image(client, auth_headers)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    result = (response.get_json() or {})["result"]
+    assert result["amount"] == pytest.approx(18.80)
+    assert result["trade_time"] == "2026-05-04 08:09:10"
+    assert result["description"] == "瑞幸咖啡"
+    assert result["payment_platform"] == "wechat_pay"
+    assert result["confidence"] >= 0.9
 
 
 def test_ai_receipt_recognition_config_round_trip(client, auth_headers, reset_ocr_service):

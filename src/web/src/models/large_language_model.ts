@@ -8,6 +8,7 @@ export interface RecognizedReceiptImageResponse {
     readonly amount: number | null;        // yuan (per Bill Analyser OCR contract); store layer keeps as-is, ListPage caller converts to cents.
     readonly tradeTime: string | null;     // ISO 8601 string, may be null when provider cannot determine.
     readonly description: string | null;
+    readonly paymentPlatform: string | null;
     readonly provenance: ReceiptImageProvenance;
     readonly confidence: number | null;    // 0..1
 

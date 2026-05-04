@@ -7,12 +7,12 @@
 - `rules.py`：规则中心 legacy 兼容聚合口；当前 overview 只聚合 learning rules、category rule count 与 recurring rules，不再把 legacy `category_keywords` 作为运行时总览来源
 - `accounts.py`：账户管理、余额同步
 - `categories.py`：分类管理、规则维护
-- `category_rules.py`：分类规则的 canonical CRUD / migrate / test 接口；category rules 是当前分类规则体系的正式入口
+- `category_rules.py`：分类规则的 canonical CRUD / migrate / defaults / test 接口；category rules 是当前分类规则体系的正式入口，`POST /api/category-rules/defaults` 会幂等补齐内置日常分类和分类识别规则
 - `tags.py`：标签管理与关联
 - `budgets.py`：预算 CRUD、执行统计、导入导出
 - `statistics.py`：统计总览、趋势、汇率
 - `templates.py`：模板管理
-- `settings_bundle.py`：设置 JSON 包导入导出；统一覆盖账户、交易分类、交易标签、交易模板、定时交易、分类识别规则与 LLM 配置，并提供各页面使用的 section-scoped export / preview import / import，导入只做非破坏性 upsert
+- `settings_bundle.py`：设置 JSON 包导入导出；统一覆盖账户、交易分类、交易标签、交易模板、定时交易、分类识别规则、LLM 配置与 OCR 配置，并提供各页面使用的 section-scoped export / preview import / import，导入只做非破坏性 upsert；LLM/OCR 单 section 导出必须校验当前登录密码
 - `backup.py`：备份相关接口
 
 ## 3.1.1 API 适配器出口（`src/bill_analyser/api/adapters/`）
@@ -33,6 +33,8 @@
 - `bill_service.py`：账单服务公共导入 facade；真实实现按 `bill_service_parts/` mixin 组合，分别维护 legacy 导入、v2 三阶段导入、预览投影/分页、账户匹配、学习规则/信号、matching 读写、preview 决策与 reclassify 等域。
 - `smart_dedup/`：智能去重引擎 package；公共导入仍由 `core.smart_dedup` 输出，内部按模型、标准化、精确重复、平台-银行、分组/相似、转账、reconciliation 与数据库重复检测拆分。导入批次内仍按"完全重复 → 平台-银行去重 → 转账配对 → 相似去重 → 分账去重"顺序处理，含数据库对比时再追加数据库重复检测与跨批次转账配对。
 - `category_engine/`：分类规则匹配 package；公共导入仍由 `core.category_engine` 输出，内部按表达式 AST/转义、预编译规则、匹配器与 `CategoryEngine` 规则加载/缓存拆分。运行时仅从 `category_rules` canonical source 加载规则，不再回退到 `categories.keywords`。`rule_expression` 后端兼容旧 `OR:a|b&AND:c&NOT:d`，正式语法由 `OR={...}`、`AND={...}`、`NOT={...}`、`REGEX={...}` 子句组成：`+` 表示 AND，`/` 表示同一表达式内 OR，`|` 表示表达式级 OR，`×` 或 `NOT` 表示 AND NOT；多层括号按 AST 优先级执行。分类规则运行时匹配顺序由 `categories.priority`、`category_id` 与规则 id 的稳定顺序决定，无法解析到真实分类时 fail closed，不生成同名虚拟分类。
+- `default_category_seed.py`：内置日常生活分类与规则种子，按餐饮、食品日用、居住家庭、交通出行、医疗健康、教育成长、娱乐休闲、收入、转账等主域提供非破坏式补全；规则写入 canonical `category_rules` 并按名称幂等跳过。
+- `payment_screenshot_parser.py` / `ocr_service.py`：OCR 服务在 provider 识别出的文本上抽取支付截图字段；当前只承诺支付宝与微信支付截图中的金额、时间、商户/备注和平台标识，不做 embeddings 存储或后台全量图片处理。
 - `exchange_rate_providers/`：多汇率 provider package；公共导入仍由 `core.exchange_rate_providers` 输出，内部按 provider 基类、解析辅助、中国 provider、全球 provider 与 manager 拆分。
 - `llm_learning_service/`：LLM 学习服务 package；公共导入仍由 `core.llm_learning_service` 输出，内部按 provider 调用、高级参数、限流、导入会话分析、规则合成与预览推荐拆分，用户级 active config 与高级参数保持实例/请求隔离。
 - `budget.py`：历史预算管理兼容层，保留 `BudgetManager` 供旧 CLI / 旧测试路径复用；当前 CLI 预算报告主链直接走 `Database.get_budget_execution_details()`

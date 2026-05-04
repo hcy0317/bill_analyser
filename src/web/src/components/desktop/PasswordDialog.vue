@@ -25,8 +25,8 @@
                     v-model="password"
                     :type="showPassword ? 'text' : 'password'"
                     :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-                    :label="tt('Operation Password')"
-                    :placeholder="tt('Please enter operation password')"
+                    :label="labelContent"
+                    :placeholder="placeholderContent"
                     :error-messages="errorMessage"
                     variant="outlined"
                     density="comfortable"
@@ -37,10 +37,9 @@
                 ></v-text-field>
 
                 <!-- 提示信息 -->
-                <div class="text-caption text-grey">
+                <div v-if="hintContent" class="text-caption text-grey">
                     <v-icon size="small" class="mr-1">mdi-information-outline</v-icon>
-                    {{ tt('Password can be configured via environment variable') }}:
-                    <code class="text-pink">BILL_ANALYSER_OPERATION_PASSWORD</code>
+                    <span v-html="hintContent"></span>
                 </div>
             </v-card-text>
 
@@ -80,6 +79,12 @@ const errorMessage = ref<string>('');
 const titleContent = ref<string>(props.title || tt('Verify Operation Password'));
 const textContent = ref<string>(props.text || '');
 const warningContent = ref<string>(props.warning || '');
+const labelContent = ref<string>(tt('Operation Password'));
+const placeholderContent = ref<string>(tt('Please enter operation password'));
+const hintContent = ref<string>(
+    `${tt('Password can be configured via environment variable')}: `
+    + '<code class="text-pink">BILL_ANALYSER_OPERATION_PASSWORD</code>'
+);
 
 let resolveFunc: ((value?: string) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
@@ -93,6 +98,11 @@ function open(
     password.value = '';
     errorMessage.value = '';
     showPassword.value = false;
+    warningContent.value = '';
+    labelContent.value = tt('Operation Password');
+    placeholderContent.value = tt('Please enter operation password');
+    hintContent.value = `${tt('Password can be configured via environment variable')}: `
+        + '<code class="text-pink">BILL_ANALYSER_OPERATION_PASSWORD</code>';
 
     // 解析参数
     if (!textOrOptions || isObject(textOrOptions)) {
@@ -108,6 +118,15 @@ function open(
             if (isString(actualOptions['warning'])) {
                 warningContent.value = tt(actualOptions['warning'] as string, actualOptions);
             }
+            if (isString(actualOptions['label'])) {
+                labelContent.value = tt(actualOptions['label'] as string, actualOptions);
+            }
+            if (isString(actualOptions['placeholder'])) {
+                placeholderContent.value = tt(actualOptions['placeholder'] as string, actualOptions);
+            }
+            if (isString(actualOptions['hint'])) {
+                hintContent.value = tt(actualOptions['hint'] as string, actualOptions);
+            }
         }
     } else if (isString(textOrOptions)) {
         // 第二个参数是text
@@ -120,6 +139,15 @@ function open(
 
             if (isString(options['warning'])) {
                 warningContent.value = tt(options['warning'] as string, options);
+            }
+            if (isString(options['label'])) {
+                labelContent.value = tt(options['label'] as string, options);
+            }
+            if (isString(options['placeholder'])) {
+                placeholderContent.value = tt(options['placeholder'] as string, options);
+            }
+            if (isString(options['hint'])) {
+                hintContent.value = tt(options['hint'] as string, options);
             }
         }
     }

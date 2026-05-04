@@ -46,6 +46,7 @@ from bill_analyser.core.investment_settings import (
     build_user_investment_keyword_settings,
     serialize_keyword_list,
 )
+from bill_analyser.core.default_category_seed import ensure_default_category_seed
 from bill_analyser.utils.config import load_auth_settings as load_server_auth_settings
 from bill_analyser.utils.constants import FRONTEND_TO_BACKEND_TYPE
 from bill_analyser.utils.logger import get_logger, log_method
@@ -1393,6 +1394,7 @@ def register():
         preset_categories_saved = loop.run_until_complete(
             _save_register_categories(db, user_id, normalized_register_categories)
         )
+        loop.run_until_complete(ensure_default_category_seed(db, user_id=user_id))
 
         default_accounts_result = loop.run_until_complete(
             _create_register_default_accounts(db, user_id, data.get("language", "zh_Hans"))

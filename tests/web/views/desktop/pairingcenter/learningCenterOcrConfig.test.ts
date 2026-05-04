@@ -6,22 +6,28 @@ function readSource(relativePath: string): string {
 }
 
 const PANEL_PATH = 'src/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
+const OCR_PANEL_PATH = 'src/views/desktop/pairingcenter/components/OcrConfigPanel.vue';
+const LIST_PAGE_PATH = 'src/views/desktop/pairingcenter/ListPage.vue';
 
 describe('LearningCenterPanel OCR config placement', () => {
-    test('LLM config tab also renders OCR config controls', () => {
+    test('LLM config tab no longer renders OCR config controls', () => {
         const source = readSource(PANEL_PATH);
 
         expect(source).toContain("activeTab === 'llm-config'");
-        expect(source).toContain("{{ tt('OCR Config') }}");
-        expect(source).toContain('v-model="ocrConfigForm.provider"');
-        expect(source).toContain('v-model="ocrConfigForm.lang"');
+        expect(source).not.toContain('v-model="ocrConfigForm.provider"');
+        expect(source).not.toContain('v-model="ocrConfigForm.lang"');
+        expect(source).not.toContain('loadOCRConfig');
     });
 
-    test('refreshing LLM config loads both LLM configs and OCR config', () => {
-        const source = readSource(PANEL_PATH);
+    test('OCR config is a standalone sibling page with import/export controls', () => {
+        const source = readSource(OCR_PANEL_PATH);
+        const listPage = readSource(LIST_PAGE_PATH);
 
-        expect(source).toContain('Promise.all([loadLLMConfigs(), loadOCRConfig()])');
+        expect(listPage).toContain("value: 'ocr-config'");
+        expect(listPage).toContain('<ocr-config-panel');
         expect(source).toContain('const resp = await services.getOCRConfig();');
         expect(source).toContain('const resp = await services.updateOCRConfig');
+        expect(source).toContain('section-key="ocrConfig"');
+        expect(source).toContain('password-required-for-export');
     });
 });

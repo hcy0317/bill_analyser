@@ -51,6 +51,7 @@ import type {
     ClearAccountTransactionsRequest,
     DataStatisticsResponse,
     SettingsBundleImportResult,
+    SettingsBundleExportAuth,
     SettingsBundleSectionKey
 } from '@/models/data_management.ts';
 import type {
@@ -1201,11 +1202,18 @@ export default {
             timeout: DEFAULT_EXPORT_API_TIMEOUT
         } as ApiRequestConfig);
     },
-    getExportedSettingsBundleSection: (sectionKey: SettingsBundleSectionKey): Promise<AxiosResponse<BlobPart>> => {
-        return axios.get<BlobPart>(`settings/bundle/sections/${sectionKey}/export`, {
+    getExportedSettingsBundleSection: (
+        sectionKey: SettingsBundleSectionKey,
+        auth?: SettingsBundleExportAuth
+    ): Promise<AxiosResponse<BlobPart>> => {
+        const config = {
             responseType: 'blob',
             timeout: DEFAULT_EXPORT_API_TIMEOUT
-        } as ApiRequestConfig);
+        } as ApiRequestConfig;
+        if (auth?.password) {
+            return axios.post<BlobPart>(`settings/bundle/sections/${sectionKey}/export`, auth, config);
+        }
+        return axios.get<BlobPart>(`settings/bundle/sections/${sectionKey}/export`, config);
     },
     previewImportSettingsBundle: (bundle: unknown): ApiResponsePromise<SettingsBundleImportResult> => {
         return axios.post<ApiResponse<SettingsBundleImportResult>>('settings/bundle/import/preview', bundle);

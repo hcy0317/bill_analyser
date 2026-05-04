@@ -115,7 +115,13 @@ def test_parse_receipt_text_description_fallback_first_line():
 
 def test_parse_receipt_text_empty():
     out = parse_receipt_text("")
-    assert out == {"amount": None, "trade_time": None, "description": None}
+    assert out == {
+        "amount": None,
+        "trade_time": None,
+        "description": None,
+        "payment_platform": None,
+        "payment_confidence": 0.0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -185,9 +191,18 @@ def test_service_success_payload_shape():
     )
     result = _run(service.recognize(user_id=42, image_bytes=b"\x89PNG", mime="image/png"))
     payload = result.to_payload()
-    assert set(payload.keys()) == {"amount", "trade_time", "description", "provenance", "confidence", "raw_provider_response"}
+    assert set(payload.keys()) == {
+        "amount",
+        "trade_time",
+        "description",
+        "payment_platform",
+        "provenance",
+        "confidence",
+        "raw_provider_response",
+    }
     assert payload["amount"] == pytest.approx(99.50)
     assert payload["trade_time"] == "2024-12-31 23:59"
+    assert payload["payment_platform"] is None
     assert "跨年" in (payload["description"] or "")
     prov = payload["provenance"]
     assert prov["provider"] == "ok-stub"

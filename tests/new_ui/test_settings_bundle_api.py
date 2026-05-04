@@ -13,6 +13,8 @@ from tests.new_ui.test_bills_api import (
     _get_current_user_id,
 )
 
+ISOLATED_USER_PASSWORD = "Test123456!"
+
 
 def _create_account(client, auth_headers, *, name: str) -> dict[str, Any]:
     response = client.post(
@@ -139,6 +141,12 @@ def test_settings_bundle_export_redacts_llm_and_contains_requested_sections(clie
         },
     )
     assert llm_response.status_code == 200, llm_response.get_data(as_text=True)
+    ocr_response = client.put(
+        "/api/ml/receipt-recognition/config",
+        headers=auth_headers,
+        json={"provider": "cloud_stub", "lang": "eng"},
+    )
+    assert ocr_response.status_code == 200, ocr_response.get_data(as_text=True)
 
     export_response = client.get("/api/settings/bundle/export", headers=auth_headers)
 
@@ -154,14 +162,35 @@ def test_settings_bundle_export_redacts_llm_and_contains_requested_sections(clie
         "scheduledTransactions",
         "categoryRecognitionRules",
         "llmConfigs",
+        "ocrConfig",
     ):
         assert section_name in bundle["sections"]
         assert bundle["counts"][section_name] >= 1
 
-        section_export_response = client.get(
-            f"/api/settings/bundle/sections/{section_name}/export",
-            headers=auth_headers,
-        )
+        if section_name in {"llmConfigs", "ocrConfig"}:
+            get_without_password = client.get(
+                f"/api/settings/bundle/sections/{section_name}/export",
+                headers=auth_headers,
+            )
+            assert get_without_password.status_code == 400
+
+            bad_password = client.post(
+                f"/api/settings/bundle/sections/{section_name}/export",
+                headers=auth_headers,
+                json={"password": "wrong-password"},
+            )
+            assert bad_password.status_code == 401
+
+            section_export_response = client.post(
+                f"/api/settings/bundle/sections/{section_name}/export",
+                headers=auth_headers,
+                json={"password": ISOLATED_USER_PASSWORD},
+            )
+        else:
+            section_export_response = client.get(
+                f"/api/settings/bundle/sections/{section_name}/export",
+                headers=auth_headers,
+            )
         assert section_export_response.status_code == 200, (
             section_export_response.get_data(as_text=True)
         )
@@ -177,10 +206,13 @@ def test_settings_bundle_export_redacts_llm_and_contains_requested_sections(clie
     assert llm_config["apiKey"] == ""
     assert llm_config["hasApiKey"] is True
     assert llm_config["activeInSource"] is True
+    assert bundle["sections"]["ocrConfig"][0]["provider"] == "cloud_stub"
+    assert bundle["sections"]["ocrConfig"][0]["lang"] == "eng"
 
-    llm_section_response = client.get(
+    llm_section_response = client.post(
         "/api/settings/bundle/sections/llmConfigs/export",
         headers=auth_headers,
+        json={"password": ISOLATED_USER_PASSWORD},
     )
     assert llm_section_response.status_code == 200, llm_section_response.get_data(as_text=True)
     assert secret not in llm_section_response.get_data(as_text=True)
@@ -351,6 +383,13 @@ def test_settings_bundle_import_preview_is_dry_run_and_import_upserts(client):
                     "isActive": True,
                 }
             ],
+            "ocrConfig": [
+                {
+                    "externalRef": "ocrConfig:receipt-recognition",
+                    "provider": "cloud_stub",
+                    "lang": "eng",
+                }
+            ],
         },
     }
 
@@ -391,6 +430,7 @@ def test_settings_bundle_import_preview_is_dry_run_and_import_upserts(client):
         "llm": 0,
     }
 
+    api_app.app.config["OCR_SERVICE"] = object()
     import_response = client.post(
         "/api/settings/bundle/import",
         headers=auth_headers,
@@ -400,6 +440,8 @@ def test_settings_bundle_import_preview_is_dry_run_and_import_upserts(client):
     imported = import_response.get_json()["result"]
     assert imported["dryRun"] is False
     assert imported["sections"]["categoryRecognitionRules"]["created"] == 1
+    assert imported["sections"]["ocrConfig"]["created"] + imported["sections"]["ocrConfig"]["updated"] == 1
+    assert "OCR_SERVICE" not in api_app.app.config
 
     async def _fetch_imported_state() -> dict[str, Any]:
         conn = await api_app.db._get_connection()
@@ -433,6 +475,7 @@ def test_settings_bundle_import_preview_is_dry_run_and_import_upserts(client):
             "account": account,
             "templateRow": template_row,
             "rule": rule,
+            "ocr": await api_app.db.get_app_setting("receipt_ocr_config"),
         }
 
     imported_state = asyncio.run(_fetch_imported_state())
@@ -444,6 +487,7 @@ def test_settings_bundle_import_preview_is_dry_run_and_import_upserts(client):
     assert imported_state["account"]["initial_balance"] == 10.25
     assert imported_state["templateRow"]["amount"] == 66
     assert imported_state["rule"]["main_category"] == f"import-main-{suffix}"
+    assert json.loads(imported_state["ocr"]) == {"provider": "cloud_stub", "lang": "eng"}
 
     second_import = client.post(
         "/api/settings/bundle/import",

@@ -59,4 +59,9 @@ export type SettingsBundleSectionKey =
     | 'transactionTemplates'
     | 'scheduledTransactions'
     | 'categoryRecognitionRules'
-    | 'llmConfigs';
+    | 'llmConfigs'
+    | 'ocrConfig';
+
+export interface SettingsBundleExportAuth {
+    readonly password?: string;
+}

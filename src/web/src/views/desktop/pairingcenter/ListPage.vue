@@ -161,6 +161,13 @@
                                         hide-section-title
                                         :header-actions-target="learningHeaderActionsTarget" />
                                 </template>
+
+                                <template v-else-if="activeDomain === 'llm' && activeTab === 'ocr-config'">
+                                    <ocr-config-panel
+                                        key="ocr-config"
+                                        hide-section-title
+                                        :header-actions-target="learningHeaderActionsTarget" />
+                                </template>
                             </v-card-text>
                         </v-card>
                     </v-main>
@@ -199,6 +206,7 @@ import type { BillMatchingPairDetail } from '@/models/bill_matching.ts';
 import { useMatchingStore } from '@/stores/matching.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import LearningCenterPanel from '@/views/desktop/pairingcenter/components/LearningCenterPanel.vue';
+import OcrConfigPanel from '@/views/desktop/pairingcenter/components/OcrConfigPanel.vue';
 import PairsOverviewTable from '@/views/desktop/pairingcenter/components/PairsOverviewTable.vue';
 import RuleCenterPanel from '@/views/desktop/pairingcenter/components/RuleCenterPanel.vue';
 import {
@@ -220,7 +228,8 @@ type SecondaryNavValue =
     | 'learning-overview'
     | 'learning-rules'
     | 'llm-recognition'
-    | 'llm-config';
+    | 'llm-config'
+    | 'ocr-config';
 
 type PrimaryNavOption = {
     value: PrimaryNavValue;
@@ -340,6 +349,10 @@ const activeSecondary = computed<SecondaryNavValue>(() => {
         return 'llm-config';
     }
 
+    if (activeDomain.value === 'llm' && activeTab.value === 'ocr-config') {
+        return 'ocr-config';
+    }
+
     if (activeDomain.value === 'llm') {
         return 'llm-recognition';
     }
@@ -433,6 +446,15 @@ function secondaryTabsForPrimary(primary: PrimaryNavValue): SecondaryTabOption[]
             selection: {
                 domain: 'llm',
                 tab: 'config',
+                legacyRuleTab: 'learning',
+            },
+        },
+        {
+            value: 'ocr-config',
+            label: tt('OCR Config'),
+            selection: {
+                domain: 'llm',
+                tab: 'ocr-config',
                 legacyRuleTab: 'learning',
             },
         },

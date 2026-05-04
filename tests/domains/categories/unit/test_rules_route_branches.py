@@ -541,3 +541,103 @@ def test_category_rules_migrate_route_imports_investment_settings_as_rule_expres
     repeat_payload = repeat_response.get_json() or {}
     assert repeat_payload["success"] is True
     assert repeat_payload["data"] == {"migrated": 0, "skipped": 1}
+
+
+def test_category_rules_defaults_route_seeds_daily_categories_and_rules(
+    client: Any,
+    db_instance: Any,
+) -> None:
+    """Daily defaults should be present after registration and remain route-idempotent."""
+    unauthorized = client.post("/api/category-rules/defaults")
+    assert unauthorized.status_code == 401
+
+    suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    username = f"test_defaults_{suffix}"
+    password = "Test123456!"
+    register_response = client.post(
+        "/api/auth/register",
+        json={
+            "username": username,
+            "email": f"{username}@example.com",
+            "password": password,
+            "nickname": username,
+            "categories": [
+                {
+                    "name": f"已有分类{suffix}",
+                    "type": 3,
+                    "subCategories": [],
+                }
+            ],
+        },
+    )
+    assert register_response.status_code in (200, 201), register_response.get_data(as_text=True)
+    register_test_user_for_cleanup(db_instance, username)
+
+    login_response = client.post(
+        "/api/auth/login",
+        json={"loginName": username, "password": password},
+    )
+    assert login_response.status_code == 200, login_response.get_data(as_text=True)
+    token = (login_response.get_json() or {}).get("result", {}).get("token")
+    assert token
+    headers = {"Authorization": f"Bearer {token}"}
+    user = _run(db_instance.get_user_by_username(username))
+    user_id = int(user["id"])
+
+    response = client.post("/api/category-rules/defaults", headers=headers)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    payload = response.get_json() or {}
+    assert payload["success"] is True
+    assert payload["data"]["categories"]["created"] == 0
+    assert payload["data"]["categories"]["skipped"] >= 80
+    assert payload["data"]["rules"]["created"] == 0
+    assert payload["data"]["rules"]["skipped"] >= 30
+    assert payload["data"]["rules"]["missingCategories"] == 0
+
+    food_delivery = _run(
+        db_instance.get_category_by_name("餐饮", "外卖", user_id=user_id)
+    )
+    salary = _run(
+        db_instance.get_category_by_name("工作收入", "工资", user_id=user_id)
+    )
+    transfer = _run(
+        db_instance.get_category_by_name("账户互转", "信用卡还款", user_id=user_id)
+    )
+    assert food_delivery is not None
+    assert salary is not None
+    assert transfer is not None
+
+    delivery_rules = _run(
+        db_instance.get_category_rules(
+            user_id=user_id,
+            category_id=food_delivery["id"],
+            enabled_only=False,
+        )
+    )
+    assert [rule["name"] for rule in delivery_rules] == ["default:餐饮/外卖"]
+
+    engine = client.application.config["CATEGORY_ENGINE_INSTANCE"]
+    assert engine.match_category(
+        {
+            "counterparty": "美团外卖",
+            "description": "订单-黄焖鸡米饭",
+            "type": "支出",
+            "amount": -28.5,
+        }
+    ) == ("餐饮", "外卖")
+    assert engine.match_category(
+        {
+            "counterparty": "招商银行",
+            "description": "工资代发",
+            "type": "收入",
+            "amount": 18000,
+        }
+    ) == ("工作收入", "工资")
+
+    repeat_response = client.post("/api/category-rules/defaults", headers=headers)
+    assert repeat_response.status_code == 200, repeat_response.get_data(as_text=True)
+    repeat_payload = repeat_response.get_json() or {}
+    assert repeat_payload["success"] is True
+    assert repeat_payload["data"]["categories"]["created"] == 0
+    assert repeat_payload["data"]["rules"]["created"] == 0
+    assert repeat_payload["data"]["rules"]["missingCategories"] == 0

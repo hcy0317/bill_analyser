@@ -69,10 +69,13 @@
                                     <v-btn class="ms-3" color="default" variant="outlined"
                                            :disabled="loading || updating" @click="importBudgets" v-if="activeViewMode === 'budget'">
                                         {{ tt('Import') }}
-                                    </v-btn>
-                                    <v-btn class="ms-3" color="default" variant="outlined"
-                                           :disabled="loading || updating" @click="exportBudgets" v-if="activeViewMode === 'budget'">
-                                        {{ tt('Export') }}
+                                        <v-menu activator="parent" :open-on-hover="true" :open-delay="1500">
+                                            <v-list density="compact" min-width="180">
+                                                <v-list-item :disabled="loading || updating" @click.stop="exportBudgets">
+                                                    <v-list-item-title>{{ tt('Export') }}</v-list-item-title>
+                                                </v-list-item>
+                                            </v-list>
+                                        </v-menu>
                                     </v-btn>
                                     <div v-if="activeViewMode === 'budget'" class="ms-3 budget-period-toolbar">
                                         <btn-horizontal-group

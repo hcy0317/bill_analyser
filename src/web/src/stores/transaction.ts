@@ -1366,6 +1366,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                         amount?: number | null;
                         trade_time?: string | null;
                         description?: string | null;
+                        payment_platform?: string | null;
                         provenance?: { provider?: string; model?: string; request_id?: string };
                         confidence?: number | null;
                     };
@@ -1382,6 +1383,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     amount: typeof raw.amount === 'number' ? raw.amount : null,
                     tradeTime: typeof raw.trade_time === 'string' ? raw.trade_time : null,
                     description: typeof raw.description === 'string' ? raw.description : null,
+                    paymentPlatform: typeof raw.payment_platform === 'string' ? raw.payment_platform : null,
                     provenance: {
                         provider: typeof provenance.provider === 'string' ? provenance.provider : 'unknown',
                         model: typeof provenance.model === 'string' ? provenance.model : undefined,

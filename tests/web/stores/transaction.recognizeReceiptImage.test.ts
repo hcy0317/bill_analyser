@@ -134,6 +134,7 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
                     amount: 12.34,
                     trade_time: '2026-04-01T08:30:00Z',
                     description: 'Coffee',
+                    payment_platform: 'wechat_pay',
                     provenance: { provider: 'openai', model: 'gpt-x', request_id: 'req-1' },
                     confidence: 0.91
                 }
@@ -147,6 +148,7 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
             amount: 12.34,
             tradeTime: '2026-04-01T08:30:00Z',
             description: 'Coffee',
+            paymentPlatform: 'wechat_pay',
             provenance: { provider: 'openai', model: 'gpt-x', requestId: 'req-1' },
             confidence: 0.91
         });
@@ -172,6 +174,7 @@ describe('useTransactionsStore.recognizeReceiptImage', () => {
         expect(result.amount).toBeNull();
         expect(result.tradeTime).toBeNull();
         expect(result.description).toBeNull();
+        expect(result.paymentPlatform).toBeNull();
         expect(result.confidence).toBeNull();
         expect(result.provenance.provider).toBe('unknown');
         expect(result.provenance.requestId).toBe('');

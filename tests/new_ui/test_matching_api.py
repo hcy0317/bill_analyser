@@ -2444,8 +2444,8 @@ class TestMatchingAPI:
                     "preview_date": "2026-07-22 09:20:00",
                     "preview_type": "支出",
                     "preview_amount": 38.8,
-                    "preview_main_category": "餐饮",
-                    "preview_sub_category": "早餐",
+                    "preview_main_category": "pytest transfer reject main",
+                    "preview_sub_category": "pytest transfer reject sub",
                     "preview_counterparty": "pytest generic reject vendor",
                     "preview_payment_method": "银行卡",
                     "preview_description": "pytest generic reject preview",
@@ -2480,7 +2480,7 @@ class TestMatchingAPI:
         assert reject_data["data"]["previewId"] == preview_id
         reject_preview = next(item for item in reject_data["data"]["preview"] if int(item["id"]) == preview_id)
         assert reject_preview["preview_type"] == "支出"
-        assert reject_preview["preview_main_category"] == "餐饮"
+        assert reject_preview["preview_main_category"] == "pytest transfer reject main"
         assert reject_preview["matching"]["transfer"]["review_status"] == "rejected"
         assert reject_preview["matching"]["transfer"]["suppressed"] is True
 
@@ -3529,8 +3529,8 @@ class TestMatchingAPI:
             db.create_category(
                 {
                     "type": 1,
-                    "main_category": "餐饮",
-                    "sub_category": "午餐",
+                    "main_category": "pytest bill learning accept main",
+                    "sub_category": "pytest bill learning accept sub",
                     "description": "",
                     "priority": 0,
                     "keywords": "",
@@ -3599,8 +3599,8 @@ class TestMatchingAPI:
         accepted_bill = accept_data["data"]["bill"]
         assert accepted_bill["id"] == anchor_bill_id
         assert accepted_bill["type"] == "收入"
-        assert accepted_bill["mainCategory"] == "餐饮"
-        assert accepted_bill["subCategory"] == "午餐"
+        assert accepted_bill["mainCategory"] == "pytest bill learning accept main"
+        assert accepted_bill["subCategory"] == "pytest bill learning accept sub"
         assert accepted_bill["destinationAccountId"] == destination_account_id
 
         follow_up_response = client.get(f"/api/matching/bills/{anchor_bill_id}/candidates", headers=auth_headers)

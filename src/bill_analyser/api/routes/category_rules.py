@@ -11,6 +11,7 @@ from bill_analyser.api.routes.request_context_helpers import (
 from bill_analyser.api.routes.request_context_helpers import (
     run_async_in_new_loop as _run_async,
 )
+from bill_analyser.core.default_category_seed import ensure_default_category_seed
 from bill_analyser.utils.logger import get_logger, log_method
 
 logger = get_logger("CategoryRulesAPI")
@@ -218,6 +219,27 @@ def migrate_keywords():
         return jsonify({"success": True, "data": result})
     except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("迁移关键词失败: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ------------------------------------------------------------------
+# POST /defaults  – create missing built-in daily categories and rules
+# ------------------------------------------------------------------
+@bp.route("/defaults", methods=["POST"])
+@log_method
+@require_auth
+def ensure_daily_defaults():
+    """补齐内置日常分类和分类识别规则。"""
+    try:
+        db, engine = _get_app_services()
+        user_id = _get_request_user_id()
+
+        result = _run_async(ensure_default_category_seed(db, user_id=user_id))
+
+        _reload_engine(engine, db, user_id)
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("补齐默认分类规则失败: %s", exc)
         return jsonify({"success": False, "error": str(exc)}), 500
 
 

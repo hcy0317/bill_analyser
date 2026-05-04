@@ -12,7 +12,7 @@
   - `/api/budgets`
   - `/api/backup`
   - `/api/settings/bundle`
-- `app.py` 直接提供 ML 小票识图入口：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`
+- `app.py` 直接提供 ML 小票识图入口：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。
 
 ## 5.1.1 当前 REST 收口进展（2026-03-06）
 - 账户域首批 legacy action 已收口到 REST：
@@ -40,11 +40,11 @@
 - 账户域历史 rewrite 与旧 `/get` `/modify` `/hide` `/delete` `/move` 兼容路由已移除。
 - 标签域 `bp_v1` 注册与全部 v1 兼容实现已移除。
 - 设置包域使用 REST 主链提供统一 JSON 导入导出：
-  - `GET /api/settings/bundle/export` 导出账户、交易分类、交易标签、交易模板、定时交易、分类识别规则与 LLM 配置骨架；
+  - `GET /api/settings/bundle/export` 导出账户、交易分类、交易标签、交易模板、定时交易、分类识别规则、LLM 配置骨架与 OCR 配置；
   - `POST /api/settings/bundle/import/preview` 做 dry-run 预览，不写入目标库；
   - `POST /api/settings/bundle/import` 按稳定键 merge/upsert，完成跨域 ID 重映射并刷新分类引擎；
-  - `GET /api/settings/bundle/sections/<section_key>/export`、`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 为账户、分类、标签、模板、定时交易、分类识别规则和 LLM 配置页面提供单 section JSON 导入导出；section 导入只写当前 section，分类与分类识别导入后刷新分类引擎；
-  - LLM 配置导出不包含 API Key 明文，导入后不自动激活。
+  - `GET /api/settings/bundle/sections/<section_key>/export`、`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 为账户、分类、标签、模板、定时交易、分类识别规则、LLM 配置和 OCR 配置页面提供单 section JSON 导入导出；section 导入只写当前 section，分类与分类识别导入后刷新分类引擎；
+  - `llmConfigs` 与 `ocrConfig` 的单 section 导出必须使用 `POST /sections/<section_key>/export` 并携带当前登录密码；LLM 配置导出不包含 API Key 明文，导入后不自动激活。
 - 账单/分类/账户路由层已完成一轮适配器收敛：
   - `bills.py` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `accounts.py` / `categories.py` / `bills.py` 已统一改从中性适配器模块导入。

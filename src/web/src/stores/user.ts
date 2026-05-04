@@ -20,6 +20,7 @@ import type {
     ExportTransactionDataRequest,
     DataStatisticsResponse,
     SettingsBundleImportResult,
+    SettingsBundleExportAuth,
     SettingsBundleSectionKey
 } from '@/models/data_management.ts';
 
@@ -462,9 +463,12 @@ export const useUserStore = defineStore('user', () => {
         });
     }
 
-    function getExportedSettingsBundleSection(sectionKey: SettingsBundleSectionKey): Promise<Blob> {
+    function getExportedSettingsBundleSection(
+        sectionKey: SettingsBundleSectionKey,
+        auth?: SettingsBundleExportAuth
+    ): Promise<Blob> {
         return new Promise((resolve, reject) => {
-            services.getExportedSettingsBundleSection(sectionKey).then(response => {
+            services.getExportedSettingsBundleSection(sectionKey, auth).then(response => {
                 const contentType = response.headers['content-type']?.toString() || KnownFileType.JSON.contentType;
                 const blob = new Blob([response.data], { type: contentType });
                 resolve(blob);

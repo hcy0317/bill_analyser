@@ -36,6 +36,7 @@ from .ocr_provider import (
     OcrRawResult,
     ProviderUnavailable,
 )
+from .payment_screenshot_parser import parse_payment_screenshot_text
 
 logger = get_logger("OcrService")
 
@@ -86,6 +87,7 @@ class OcrRecognitionResult:
     amount: float | None
     trade_time: str | None
     description: str | None
+    payment_platform: str | None
     provenance: dict[str, Any]
     confidence: float
     raw_provider_response: dict[str, Any] = field(default_factory=dict)
@@ -96,6 +98,7 @@ class OcrRecognitionResult:
             "amount": self.amount,
             "trade_time": self.trade_time,
             "description": self.description,
+            "payment_platform": self.payment_platform,
             "provenance": dict(self.provenance),
             "confidence": float(self.confidence),
             "raw_provider_response": dict(self.raw_provider_response),
@@ -143,63 +146,19 @@ class OcrRateLimiter:
 # Receipt text → structured fields heuristics
 # --------------------------------------------------------------------------- #
 
-# 中文 ¥/￥ 符号、CNY、RMB、金额关键词
-_AMOUNT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?:金额|实付|付款金额|合计|总计)[^\d\-]{0,6}(-?\d+(?:\.\d{1,2})?)"),
-    re.compile(r"[¥￥]\s*(-?\d+(?:\.\d{1,2})?)"),
-    re.compile(r"(-?\d+\.\d{2})\s*(?:元|CNY|RMB)"),
-]
-
-_TIME_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?)"),
-    re.compile(r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})"),
-]
-
-_DESCRIPTION_HINTS: list[re.Pattern[str]] = [
-    re.compile(r"(?:商品|商家|商户|订单名称|交易对方|对方账户|对方)[：: ]\s*([^\n\r]{1,60})"),
-]
-
-
 def parse_receipt_text(text: str) -> dict[str, Any]:
     """启发式从 OCR 纯文本抽取金额/时间/描述。
 
     无法抽取的字段返回 ``None``，调用方负责标注 ``confidence``。
     """
-    if not text:
-        return {"amount": None, "trade_time": None, "description": None}
-
-    amount: float | None = None
-    for pattern in _AMOUNT_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            try:
-                amount = float(match.group(1))
-                break
-            except (ValueError, IndexError):
-                continue
-
-    trade_time: str | None = None
-    for pattern in _TIME_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            trade_time = match.group(1)
-            break
-
-    description: str | None = None
-    for pattern in _DESCRIPTION_HINTS:
-        match = pattern.search(text)
-        if match:
-            description = match.group(1).strip()
-            break
-    if description is None:
-        # 退化策略：取第一行非空文本，截断。
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped:
-                description = stripped[:60]
-                break
-
-    return {"amount": amount, "trade_time": trade_time, "description": description}
+    parsed = parse_payment_screenshot_text(text)
+    return {
+        "amount": parsed.amount,
+        "trade_time": parsed.trade_time,
+        "description": parsed.description,
+        "payment_platform": parsed.payment_platform,
+        "payment_confidence": parsed.confidence,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -346,8 +305,18 @@ class OcrService:
             amount=_coerce_float(structured.get("amount")),
             trade_time=_coerce_str(structured.get("trade_time")),
             description=_coerce_str(structured.get("description")),
+            payment_platform=_coerce_str(structured.get("payment_platform")),
             provenance=provenance,
-            confidence=max(0.0, min(1.0, float(raw.confidence or 0.0))),
+            confidence=max(
+                0.0,
+                min(
+                    1.0,
+                    max(
+                        float(raw.confidence or 0.0),
+                        float(structured.get("payment_confidence") or 0.0),
+                    ),
+                ),
+            ),
             raw_provider_response=dict(raw.raw_provider_response or {}),
         )
         logger.info("ocr success: %s confidence=%.3f", audit, result.confidence)

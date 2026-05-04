@@ -1,9 +1,8 @@
 <template>
     <v-btn
         :class="props.buttonClass"
-        color="primary"
-        variant="elevated"
-        :prepend-icon="mdiImport"
+        color="default"
+        variant="outlined"
         :disabled="props.disabled || busy"
         @click="importSection"
     >
@@ -20,20 +19,16 @@
             :open-delay="1500"
             location="bottom start"
         >
-            <v-card min-width="240">
-                <v-list density="compact" :disabled="props.disabled || busy">
-                    <v-list-item @click.stop="exportSection">
-                        <template #prepend>
-                            <v-icon :icon="mdiExport" />
-                        </template>
-                        <v-list-item-title>{{ tt('Export Settings JSON') }}</v-list-item-title>
-                    </v-list-item>
-                </v-list>
-            </v-card>
+            <v-list density="compact" min-width="240" :disabled="props.disabled || busy">
+                <v-list-item @click.stop="exportSection">
+                    <v-list-item-title>{{ tt('Export Settings JSON') }}</v-list-item-title>
+                </v-list-item>
+            </v-list>
         </v-menu>
     </v-btn>
 
     <confirm-dialog ref="confirmDialog" />
+    <password-dialog ref="passwordDialog" />
     <snack-bar ref="snackbar" />
 </template>
 
@@ -41,6 +36,7 @@
 import { computed, ref, useTemplateRef } from 'vue';
 
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
+import PasswordDialog from '@/components/desktop/PasswordDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import { useI18n } from '@/locales/helpers.ts';
 import { openTextFileContent, startDownloadFile } from '@/lib/ui/common.ts';
@@ -51,12 +47,8 @@ import type {
 } from '@/models/data_management.ts';
 import { useUserStore } from '@/stores/user.ts';
 
-import {
-    mdiExport,
-    mdiImport,
-} from '@mdi/js';
-
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
+type PasswordDialogType = InstanceType<typeof PasswordDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 
 const props = withDefaults(defineProps<{
@@ -64,10 +56,12 @@ const props = withDefaults(defineProps<{
     filenamePrefix?: string;
     disabled?: boolean;
     buttonClass?: string;
+    passwordRequiredForExport?: boolean;
 }>(), {
     filenamePrefix: '',
     disabled: false,
     buttonClass: 'ms-3',
+    passwordRequiredForExport: false,
 });
 
 const emit = defineEmits<{
@@ -78,6 +72,7 @@ const { tt } = useI18n();
 const userStore = useUserStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
+const passwordDialog = useTemplateRef<PasswordDialogType>('passwordDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const importing = ref(false);
@@ -92,6 +87,7 @@ const sectionLabels: Record<SettingsBundleSectionKey, string> = {
     scheduledTransactions: 'Scheduled Transactions',
     categoryRecognitionRules: 'Category Recognition Rules',
     llmConfigs: 'LLM Configs',
+    ocrConfig: 'OCR Config',
 };
 
 const emptySummary: SettingsBundleImportSectionSummary = {
@@ -116,14 +112,34 @@ function buildImportDetails(result: SettingsBundleImportResult): string[] {
     return details;
 }
 
-function exportSection(): void {
+async function exportSection(): Promise<void> {
     if (busy.value || props.disabled) {
         return;
     }
 
+    let password: string | undefined;
+    if (props.passwordRequiredForExport) {
+        try {
+            password = await passwordDialog.value?.open(
+                'Verify Login Password',
+                'Please enter your login password',
+                {
+                    label: 'Login Password',
+                    placeholder: 'Please enter your login password',
+                    hint: '',
+                }
+            );
+        } catch {
+            return;
+        }
+        if (!password) {
+            return;
+        }
+    }
+
     exporting.value = true;
 
-    userStore.getExportedSettingsBundleSection(props.sectionKey).then(data => {
+    userStore.getExportedSettingsBundleSection(props.sectionKey, { password }).then(data => {
         startDownloadFile(getSectionFileName(), data);
         exporting.value = false;
         snackbar.value?.showMessage('Settings exported');

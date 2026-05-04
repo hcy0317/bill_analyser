@@ -11,8 +11,10 @@ from typing import Any
 from .db_shared import DatabaseFacadeBase
 from .db_time import utc_now_iso
 from .db_llm_config import normalize_llm_advanced_settings
+from .ocr_service import normalize_ocr_config
 
 SETTINGS_BUNDLE_SCHEMA_VERSION = 1
+OCR_CONFIG_SETTING_KEY = "receipt_ocr_config"
 SETTINGS_BUNDLE_SECTION_KEYS = (
     "accounts",
     "transactionCategories",
@@ -21,6 +23,7 @@ SETTINGS_BUNDLE_SECTION_KEYS = (
     "scheduledTransactions",
     "categoryRecognitionRules",
     "llmConfigs",
+    "ocrConfig",
 )
 LOCAL_REF_NAMESPACE = "__local_settings_bundle_id__"
 
@@ -139,6 +142,7 @@ class DatabaseSettingsBundleMixin(DatabaseFacadeBase):
         scheduled = await self._export_settings_templates(conn, user_id=user_id, template_type=2)
         rules = await self.get_category_rules(user_id=user_id, enabled_only=False)
         llm_configs = await self.get_llm_configs(user_id=user_id)
+        ocr_config = await self.get_app_setting(OCR_CONFIG_SETTING_KEY)
 
         account_refs = {int(item["id"]): f"account:{item['id']}" for item in accounts}
         account_names = {int(item["id"]): _safe_text(item.get("name")) for item in accounts}
@@ -179,6 +183,9 @@ class DatabaseSettingsBundleMixin(DatabaseFacadeBase):
             "llmConfigs": [
                 self._export_settings_llm_config(item)
                 for item in llm_configs
+            ],
+            "ocrConfig": [
+                self._export_settings_ocr_config(ocr_config)
             ],
         }
 
@@ -265,6 +272,9 @@ class DatabaseSettingsBundleMixin(DatabaseFacadeBase):
             )
             await self._import_settings_llm_configs(
                 conn, sections["llmConfigs"], user_id, result
+            )
+            await self._import_settings_ocr_config(
+                conn, sections["ocrConfig"], result
             )
 
             if dry_run:
@@ -450,6 +460,19 @@ class DatabaseSettingsBundleMixin(DatabaseFacadeBase):
             "baseUrl": config.get("base_url") or "",
             "advancedSettings": normalize_llm_advanced_settings(config.get("advanced_settings")),
             "activeInSource": bool(config.get("is_active")),
+        }
+
+    @staticmethod
+    def _export_settings_ocr_config(raw_value: str | None) -> dict[str, Any]:
+        try:
+            loaded = json.loads(raw_value) if raw_value else {}
+        except json.JSONDecodeError:
+            loaded = {}
+        normalized = normalize_ocr_config(loaded)
+        return {
+            "externalRef": "ocrConfig:receipt-recognition",
+            "provider": normalized.get("provider") or "disabled",
+            "lang": normalized.get("lang") or "chi_sim+eng",
         }
 
     async def _import_settings_accounts(
@@ -1326,3 +1349,50 @@ class DatabaseSettingsBundleMixin(DatabaseFacadeBase):
                     "is_active": 0,
                 }
                 section["created"] += 1
+
+    async def _import_settings_ocr_config(
+        self,
+        conn: Any,
+        configs: list[dict[str, Any]],
+        result: dict[str, Any],
+    ) -> None:
+        section = result["sections"]["ocrConfig"]
+        if not configs:
+            return
+        item = configs[0]
+        normalized = normalize_ocr_config({
+            "provider": _safe_text(item.get("provider"), "disabled"),
+            "lang": _safe_text(item.get("lang"), "chi_sim+eng"),
+        })
+        now = utc_now_iso()
+        async with conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (OCR_CONFIG_SETTING_KEY,),
+        ) as cursor:
+            existing = await cursor.fetchone()
+        await conn.execute(
+            """
+            INSERT INTO app_settings (
+                key, value, value_type, description, is_encrypted, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                value_type = excluded.value_type,
+                description = excluded.description,
+                is_encrypted = excluded.is_encrypted,
+                updated_at = excluded.updated_at
+            """,
+            (
+                OCR_CONFIG_SETTING_KEY,
+                json.dumps(normalized, ensure_ascii=False),
+                "json",
+                "Receipt OCR runtime configuration",
+                0,
+                now,
+                now,
+            ),
+        )
+        if existing:
+            section["updated"] += 1
+        else:
+            section["created"] += 1

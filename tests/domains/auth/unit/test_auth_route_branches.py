@@ -2157,8 +2157,15 @@ def test_login_and_register_routes_cover_error_pending_2fa_and_success_paths(
     async def _create_register_default_accounts_stub(*_args, **_kwargs) -> dict[str, Any]:
         return {"success": True}
 
+    seeded_user_ids: list[int] = []
+
+    async def _ensure_default_category_seed_stub(_db, *, user_id: int) -> dict[str, Any]:
+        seeded_user_ids.append(user_id)
+        return {"categories": {"created": 0, "skipped": 0}, "rules": {"created": 0, "skipped": 0}}
+
     monkeypatch.setattr(auth_module, "_save_register_categories", _save_register_categories_stub)
     monkeypatch.setattr(auth_module, "_create_register_default_accounts", _create_register_default_accounts_stub)
+    monkeypatch.setattr(auth_module, "ensure_default_category_seed", _ensure_default_category_seed_stub)
 
     with auth_route_unit_app.test_request_context("/api/auth/login", method="POST", json={}):
         response, status = _unwrap_response(login_route())
@@ -2343,6 +2350,7 @@ def test_login_and_register_routes_cover_error_pending_2fa_and_success_paths(
     assert payload["result"]["needVerifyEmail"] is True
     assert payload["result"]["presetCategoriesSaved"] is True
     assert payload["result"]["presetAccountsSaved"] is True
+    assert seeded_user_ids == [77]
 
 
 def test_auth_entry_and_refresh_routes_cover_remaining_generic_exceptions(

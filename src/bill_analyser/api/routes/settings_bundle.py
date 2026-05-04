@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+import bcrypt
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from bill_analyser.api.middleware.auth import require_auth
@@ -23,6 +24,7 @@ from bill_analyser.utils.logger import get_logger, log_method
 logger = get_logger("SettingsBundleAPI")
 
 bp = Blueprint("settings_bundle", __name__)
+SENSITIVE_EXPORT_SECTIONS = {"llmConfigs", "ocrConfig"}
 
 
 def _get_request_user_id() -> int:
@@ -92,6 +94,41 @@ def _should_reload_category_engines(section_key: str) -> bool:
     return section_key in {"transactionCategories", "categoryRecognitionRules"}
 
 
+def _should_reload_ocr_service(section_key: str) -> bool:
+    return section_key == "ocrConfig"
+
+
+def _reload_ocr_service() -> None:
+    current_app.config.pop("OCR_SERVICE", None)
+
+
+def _verify_sensitive_export_password(db: Any, user_id: int, password: str) -> bool:
+    user = _run_async(db.get_user_by_id(user_id)) if hasattr(db, "get_user_by_id") else None
+    password_hash = (user or {}).get("password_hash", "")
+    if password_hash and password:
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except ValueError:
+            logger.warning("设置导出密码校验遇到无效 password_hash, user_id=%s", user_id)
+    return False
+
+
+def _require_sensitive_export_password(
+    db: Any,
+    user_id: int,
+    section_key: str,
+) -> tuple[Response, int] | None:
+    if section_key not in SENSITIVE_EXPORT_SECTIONS:
+        return None
+    data = request.get_json(silent=True) or {}
+    password = str(data.get("password") or "")
+    if not password:
+        return jsonify({"success": False, "error": "password is required"}), 400
+    if not _verify_sensitive_export_password(db, user_id, password):
+        return jsonify({"success": False, "error": "Invalid password"}), 401
+    return None
+
+
 @bp.route("/export", methods=["GET"])
 @log_method
 @require_auth
@@ -112,7 +149,7 @@ def export_settings_bundle():
         return jsonify({"success": False, "error": "Failed to export settings bundle"}), 500
 
 
-@bp.route("/sections/<section_key>/export", methods=["GET"])
+@bp.route("/sections/<section_key>/export", methods=["GET", "POST"])
 @log_method
 @require_auth
 def export_settings_bundle_section(section_key: str):
@@ -122,6 +159,11 @@ def export_settings_bundle_section(section_key: str):
     try:
         db = _get_db()
         user_id = _get_request_user_id()
+        if request.method != "POST" and section_key in SENSITIVE_EXPORT_SECTIONS:
+            return jsonify({"success": False, "error": "password is required"}), 400
+        auth_error = _require_sensitive_export_password(db, user_id, section_key)
+        if auth_error is not None:
+            return auth_error
         bundle = _run_async(db.export_user_settings_bundle(user_id=user_id))
         section_bundle = _filter_bundle_section(bundle, section_key)
         json_text = json.dumps(section_bundle, ensure_ascii=False, separators=(",", ":"))
@@ -197,6 +239,7 @@ def import_settings_bundle():
         user_id = _get_request_user_id()
         result = _run_async(db.import_user_settings_bundle(data, user_id=user_id))
         _reload_category_engines(db, user_id)
+        _reload_ocr_service()
         return jsonify({"success": True, "result": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -226,6 +269,8 @@ def import_settings_bundle_section(section_key: str):
         ))
         if _should_reload_category_engines(section_key):
             _reload_category_engines(db, user_id)
+        if _should_reload_ocr_service(section_key):
+            _reload_ocr_service()
         return jsonify({"success": True, "result": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
