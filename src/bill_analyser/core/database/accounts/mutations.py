@@ -7,14 +7,23 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from bill_analyser.utils.logger import log_method
+from bill_analyser.core import account_rust_bridge
 from bill_analyser.core.database.time import utc_now_iso
+from bill_analyser.utils.logger import log_method
 
 
 class AccountMutationsMixin:
+    """Account master-data mutation and account operation helpers."""
+
     @log_method
     async def create_account(self, data: dict[str, Any], user_id: int = 1) -> int:
         """创建账户。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.create_account(self.db_path, data, user_id=user_id)
+        return await self._create_account_python(data, user_id=user_id)
+
+    async def _create_account_python(self, data: dict[str, Any], user_id: int = 1) -> int:
+        """通过 aiosqlite fallback 创建账户。"""
         conn = await self._get_connection()
         now = utc_now_iso()
         sub_accounts = data.get("subAccounts", [])
@@ -69,6 +78,12 @@ class AccountMutationsMixin:
     @log_method
     async def update_account(self, account_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
         """更新账户。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.update_account(self.db_path, account_id, data, user_id=user_id)
+        return await self._update_account_python(account_id, data, user_id=user_id)
+
+    async def _update_account_python(self, account_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
+        """通过 aiosqlite fallback 更新账户。"""
         if not data:
             return False
 
@@ -123,10 +138,46 @@ class AccountMutationsMixin:
     @log_method
     async def delete_account(self, account_id: int, user_id: int = 1) -> bool:
         """删除账户。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.delete_account(self.db_path, account_id, user_id=user_id)
+        return await self._delete_account_python(account_id, user_id=user_id)
+
+    async def _delete_account_python(self, account_id: int, user_id: int = 1) -> bool:
+        """通过 aiosqlite fallback 删除账户。"""
         conn = await self._get_connection()
         cursor = await conn.execute("DELETE FROM accounts WHERE id = ? AND user_id = ?", (account_id, user_id))
         await conn.commit()
         return cursor.rowcount > 0
+
+    @log_method
+    async def update_account_display_orders(
+        self,
+        orders: list[tuple[int, int]],
+        user_id: int = 1,
+    ) -> bool:
+        """批量更新账户显示顺序。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.update_display_orders(self.db_path, orders, user_id=user_id)
+        return await self._update_account_display_orders_python(orders, user_id=user_id)
+
+    async def _update_account_display_orders_python(
+        self,
+        orders: list[tuple[int, int]],
+        user_id: int = 1,
+    ) -> bool:
+        """通过 aiosqlite fallback 批量更新账户显示顺序。"""
+        if not orders:
+            return True
+
+        conn = await self._get_connection()
+        now = utc_now_iso()
+        for account_id, display_order in orders:
+            await conn.execute(
+                "UPDATE accounts SET display_order = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (display_order, now, account_id, user_id),
+            )
+        await conn.commit()
+        return True
 
     @log_method
     async def move_all_transactions(

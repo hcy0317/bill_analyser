@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 315
-- Rust backend files: 35
+- Python backend files: 316
+- Rust backend files: 36
 - Migration domains: 22
-- Files marked port: 252
+- Files marked port: 253
 - Files marked facade: 63
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -17,7 +17,7 @@ It does not change runtime behavior and does not mark any Python business file a
 
 | Domain | Port | Facade | Deferred |
 | --- | ---: | ---: | ---: |
-| accounts | 6 | 2 | 0 |
+| accounts | 7 | 2 | 0 |
 | ai-learning-llm | 24 | 6 | 0 |
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
@@ -58,7 +58,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/middleware/auth.py | api-runtime-shell | api-middleware | facade | 265 |
 | src/bill_analyser/api/routes/__init__.py | api-runtime-shell | package-marker | facade | 3 |
 | src/bill_analyser/api/routes/accounts/__init__.py | accounts | package-marker | facade | 34 |
-| src/bill_analyser/api/routes/accounts/crud.py | accounts | api-route | port | 298 |
+| src/bill_analyser/api/routes/accounts/crud.py | accounts | api-route | port | 297 |
 | src/bill_analyser/api/routes/accounts/support.py | accounts | api-route | port | 56 |
 | src/bill_analyser/api/routes/accounts/transactions.py | accounts | api-route | port | 219 |
 | src/bill_analyser/api/routes/auth/__init__.py | auth-security | package-marker | facade | 67 |
@@ -146,6 +146,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/templates.py | tags-templates | api-route | port | 239 |
 | src/bill_analyser/constants.py | shared-primitives | backend-module | port | 17 |
 | src/bill_analyser/core/__init__.py | shared-primitives | package-marker | facade | 6 |
+| src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port | 176 |
 | src/bill_analyser/core/ai/__init__.py | ai-learning-llm | package-marker | facade | 1 |
 | src/bill_analyser/core/ai/llm/__init__.py | ai-learning-llm | package-marker | facade | 1 |
 | src/bill_analyser/core/ai/llm/learning_service/__init__.py | ai-learning-llm | package-marker | facade | 11 |
@@ -197,10 +198,10 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/category_engine/expression.py | classification-rules | core-service | port | 112 |
 | src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 642 |
 | src/bill_analyser/core/database/__init__.py | database-facade | package-marker | facade | 2 |
-| src/bill_analyser/core/database/accounts/__init__.py | accounts | package-marker | facade | 20 |
+| src/bill_analyser/core/database/accounts/__init__.py | accounts | package-marker | facade | 28 |
 | src/bill_analyser/core/database/accounts/balances.py | accounts | database-access | port | 309 |
-| src/bill_analyser/core/database/accounts/mutations.py | accounts | database-access | port | 251 |
-| src/bill_analyser/core/database/accounts/reads.py | accounts | database-access | port | 284 |
+| src/bill_analyser/core/database/accounts/mutations.py | accounts | database-access | port | 300 |
+| src/bill_analyser/core/database/accounts/reads.py | accounts | database-access | port | 303 |
 | src/bill_analyser/core/database/audit_backup/__init__.py | backup-operations | package-implementation | port | 269 |
 | src/bill_analyser/core/database/bills/__init__.py | bills-import | package-implementation | port | 692 |
 | src/bill_analyser/core/database/budgets/__init__.py | budgets | package-marker | facade | 2 |
@@ -392,6 +393,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/lib.rs
 - crates/bill-analyser-db/src/path.rs
 - crates/bill-analyser-db/src/schema.rs
+- crates/bill-analyser-db/src/taxonomy/accounts.rs
 - crates/bill-analyser-db/src/taxonomy/mod.rs
 - crates/bill-analyser-db/src/taxonomy/tags.rs
 - crates/bill-analyser-db/src/transaction.rs

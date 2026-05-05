@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
 
+from bill_analyser.core import account_rust_bridge
 from bill_analyser.core.db import Database
 
 if TYPE_CHECKING:
@@ -30,6 +33,10 @@ async def _create_user(db: Database, username: str) -> int:
             "email_verified": 1,
         }
     )
+
+
+def _fail_account_bridge(*_args: object, **_kwargs: object) -> None:
+    pytest.fail("account Rust bridge should not be used for this database mode")
 
 
 async def _create_bill(
@@ -217,5 +224,234 @@ async def test_tag_crud_display_order_and_bill_relations_round_trip(tmp_path: Pa
         assert [tag["name"] for tag in await db.get_tags_for_bill(bill_id, user_id=user_id)] == [
             "通勤"
         ]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_account_crud_subaccounts_display_order_and_user_scope_round_trip(tmp_path: Path) -> None:
+    """账户主数据链路应覆盖 CRUD、子账户、显示顺序和用户隔离。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "taxonomy_account_user")
+        other_user_id = await _create_user(db, "taxonomy_account_other_user")
+
+        parent_id = await db.create_account(
+            {
+                "name": "Rust父账户",
+                "type": 2,
+                "category": 1,
+                "currency": "CNY",
+                "icon": "1",
+                "color": "ffcc00",
+                "balance": 0.0,
+                "initial_balance": 0.0,
+                "hidden": False,
+                "display_order": 20,
+                "comment": "父账户",
+                "aliases": ["主账户", "家庭账户"],
+                "subAccounts": [
+                    {
+                        "name": "Rust子账户",
+                        "type": 1,
+                        "category": 1,
+                        "currency": "USD",
+                        "balance": 10.5,
+                        "initial_balance": 10.5,
+                        "display_order": 30,
+                        "aliases": [],
+                    }
+                ],
+            },
+            user_id=user_id,
+        )
+        second_id = await db.create_account(
+            {
+                "name": "Rust排序账户",
+                "type": 1,
+                "category": "asset",
+                "currency": "CNY",
+                "display_order": 10,
+            },
+            user_id=user_id,
+        )
+        other_account_id = await db.create_account(
+            {"name": "其他用户账户", "type": 1},
+            user_id=other_user_id,
+        )
+
+        parent = await db.get_account_by_id(parent_id, user_id=user_id)
+        assert parent is not None
+        assert parent["name"] == "Rust父账户"
+        assert json.loads(parent["aliases"]) == ["主账户", "家庭账户"]
+
+        sub_accounts = await db.get_sub_accounts(parent_id, user_id=user_id)
+        assert len(sub_accounts) == 1
+        child_id = int(sub_accounts[0]["id"])
+        assert sub_accounts[0]["parent_id"] == parent_id
+        assert sub_accounts[0]["currency"] == "USD"
+
+        assert await db.update_account(
+            parent_id,
+            {
+                "id": str(parent_id),
+                "name": "Rust父账户-已更新",
+                "hidden": True,
+                "displayOrder": 40,
+                "parent_id": second_id,
+                "clientSessionId": "frontend-session",
+            },
+            user_id=user_id,
+        ) is True
+        assert await db.update_account(other_account_id, {"name": "越权更新"}, user_id=user_id) is False
+        assert await db.update_account_display_orders(
+            [(parent_id, 2), (second_id, 1), (other_account_id, 0)],
+            user_id=user_id,
+        ) is True
+
+        all_accounts = await db.get_all_accounts(user_id=user_id)
+        assert [account["name"] for account in all_accounts] == [
+            "Rust排序账户",
+            "Rust父账户-已更新",
+            "Rust子账户",
+        ]
+        assert all_accounts[1]["hidden"] in (1, True)
+        assert all_accounts[0]["category"] == "asset"
+
+        other_account = await db.get_account_by_id(other_account_id, user_id=other_user_id)
+        assert other_account is not None
+        assert other_account["display_order"] == 0
+        assert other_account["name"] == "其他用户账户"
+        moved_parent = await db.get_account_by_id(parent_id, user_id=user_id)
+        assert moved_parent is not None
+        assert moved_parent["parent_id"] == second_id
+
+        assert await db.delete_account(child_id, user_id=user_id) is True
+        assert await db.get_account_by_id(child_id, user_id=user_id) is None
+        assert await db.delete_account(other_account_id, user_id=user_id) is False
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_account_file_bridge_preserves_legacy_userless_account_round_trip(tmp_path: Path) -> None:
+    """文件库账户 bridge 不应比旧 Python 连接更严格要求 users 行先存在。"""
+    db = await _create_database(tmp_path)
+    try:
+        account_id = await db.create_account(
+            {
+                "name": "历史无用户账户",
+                "type": 1,
+                "aliases": ["旧数据", 12, True, None],
+            },
+            user_id=1,
+        )
+
+        account = await db.get_account_by_id(account_id, user_id=1)
+        assert account is not None
+        assert account["name"] == "历史无用户账户"
+        assert json.loads(account["aliases"]) == ["旧数据", "12", "True", "None"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_account_master_data_in_memory_fallback_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """:memory: 账户主数据应继续使用 Python fallback 并保持闭环。"""
+    monkeypatch.setattr(account_rust_bridge, "create_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "update_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "delete_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "update_display_orders", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "list_accounts", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "get_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "get_sub_accounts", _fail_account_bridge)
+
+    db = Database(":memory:")
+    await db.init_db()
+    try:
+        user_id = await _create_user(db, "taxonomy_account_memory_user")
+        parent_id = await db.create_account(
+            {
+                "name": "内存父账户",
+                "type": 2,
+                "category": 1,
+                "currency": "CNY",
+                "balance": 0.0,
+                "initial_balance": 0.0,
+                "hidden": False,
+                "display_order": 3,
+                "aliases": ["内存账户"],
+                "subAccounts": [{"name": "内存子账户", "type": 1, "display_order": 4}],
+            },
+            user_id=user_id,
+        )
+        second_id = await db.create_account({"name": "内存排序账户", "type": 1}, user_id=user_id)
+
+        assert await db.update_account_display_orders(
+            [(parent_id, 2), (second_id, 1)],
+            user_id=user_id,
+        ) is True
+        assert await db.update_account_display_orders([], user_id=user_id) is True
+        accounts = await db.get_all_accounts(user_id=user_id)
+        assert [account["name"] for account in accounts[:2]] == ["内存排序账户", "内存父账户"]
+
+        parent = await db.get_account_by_id(parent_id, user_id=user_id)
+        assert parent is not None
+        assert json.loads(parent["aliases"]) == ["内存账户"]
+
+        sub_accounts = await db.get_sub_accounts(parent_id, user_id=user_id)
+        assert len(sub_accounts) == 1
+        child_id = int(sub_accounts[0]["id"])
+
+        assert await db.update_account(parent_id, {"hidden": True}, user_id=user_id) is True
+        updated_parent = await db.get_account_by_id(parent_id, user_id=user_id)
+        assert updated_parent is not None
+        assert updated_parent["hidden"] in (1, True)
+
+        assert await db.delete_account(child_id, user_id=user_id) is True
+        assert await db.get_account_by_id(child_id, user_id=user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_account_master_data_sqlcipher_fallback_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """启用 SQLCipher 配置时账户主数据应继续走 Python fallback。"""
+    monkeypatch.setattr(account_rust_bridge, "create_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "update_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "delete_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "update_display_orders", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "list_accounts", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "get_account", _fail_account_bridge)
+    monkeypatch.setattr(account_rust_bridge, "get_sub_accounts", _fail_account_bridge)
+
+    db = await _create_database(tmp_path)
+    db._encryption_config = SimpleNamespace(enabled=True)
+    try:
+        user_id = await _create_user(db, "taxonomy_account_sqlcipher_user")
+        account_id = await db.create_account(
+            {
+                "name": "SQLCipher账户",
+                "type": 1,
+                "display_order": 2,
+                "aliases": ["加密"],
+            },
+            user_id=user_id,
+        )
+
+        assert await db.update_account(account_id, {"display_order": 1, "hidden": True}, user_id=user_id) is True
+        accounts = await db.get_all_accounts(user_id=user_id)
+        assert [account["name"] for account in accounts] == ["SQLCipher账户"]
+        assert accounts[0]["hidden"] in (1, True)
+
+        account = await db.get_account_by_id(account_id, user_id=user_id)
+        assert account is not None
+        assert json.loads(account["aliases"]) == ["加密"]
+
+        assert await db.delete_account(account_id, user_id=user_id) is True
+        assert await db.get_account_by_id(account_id, user_id=user_id) is None
     finally:
         await db.close()

@@ -111,6 +111,7 @@ CORE_DOMAIN_BY_SEGMENT = {
 
 CORE_DOMAIN_BY_FILE = {
     "analyzer.py": "statistics-reporting",
+    "account_rust_bridge.py": "accounts",
     "auth_rust_bridge.py": "auth-security",
     "bill_date_utils.py": "shared-primitives",
     "constants.py": "shared-primitives",

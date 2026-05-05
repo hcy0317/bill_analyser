@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
+
 from .support import *  # noqa: F403
 
 
@@ -271,7 +273,7 @@ def update_account_display_orders():
 
         db = get_app_context()
 
-        success_count = 0
+        orders: list[tuple[int, int]] = []
         for item in new_orders:
             if "id" not in item or "displayOrder" not in item:
                 return jsonify(
@@ -280,16 +282,13 @@ def update_account_display_orders():
 
             acc_id = int(item["id"])
             order = int(item["displayOrder"])
-            update_result = _run_async(
-                db.update_account(acc_id, {"display_order": order}, user_id=user_id),
-            )
-            if update_result:
-                success_count += 1
+            orders.append((acc_id, order))
+
+        _run_async(db.update_account_display_orders(orders, user_id=user_id))
 
         logger.info(
-            "[账户排序更新] 完成: user_id=%s, success=%s/%s",
+            "[账户排序更新] 完成: user_id=%s, count=%s",
             user_id,
-            success_count,
             len(new_orders),
         )
         return jsonify({"success": True, "result": True})

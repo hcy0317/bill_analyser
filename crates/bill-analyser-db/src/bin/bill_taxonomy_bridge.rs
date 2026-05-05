@@ -1,5 +1,8 @@
 use std::io::{self, Read};
 
+use bill_analyser_db::taxonomy::accounts::{
+    open_accounts_connection, parse_account_display_orders, AccountsRepository,
+};
 use bill_analyser_db::taxonomy::tags::{
     open_tags_connection, parse_display_orders, TagsRepository,
 };
@@ -28,6 +31,46 @@ fn run() -> Result<(), String> {
         serde_json::from_str(&input).map_err(|_| "failed to parse bridge input".to_string())?;
 
     let response = match command.as_str() {
+        "list-accounts" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.list_accounts(user_id)
+            }))
+        }
+        "get-account" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.get_account(required_i64(&payload, "account_id")?, user_id)
+            }))
+        }
+        "get-sub-accounts" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.get_sub_accounts(required_i64(&payload, "parent_id")?, user_id)
+            }))
+        }
+        "create-account" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.create_account(required_value(&payload, "payload")?, user_id)
+            }))
+        }
+        "update-account" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.update_account(
+                    required_i64(&payload, "account_id")?,
+                    required_value(&payload, "payload")?,
+                    user_id,
+                )
+            }))
+        }
+        "delete-account" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                repository.delete_account(required_i64(&payload, "account_id")?, user_id)
+            }))
+        }
+        "update-account-display-orders" => {
+            result_response(with_accounts_repository(&payload, |repository, user_id| {
+                let orders = parse_account_display_orders(required_value(&payload, "orders")?)?;
+                repository.update_display_orders(&orders, user_id)
+            }))
+        }
         "list-tags" => result_response(with_tags_repository(&payload, |repository, user_id| {
             repository.list_tags(user_id)
         })),
@@ -58,6 +101,17 @@ fn run() -> Result<(), String> {
 
     println!("{response}");
     Ok(())
+}
+
+fn with_accounts_repository<T>(
+    payload: &Value,
+    operation: impl FnOnce(&mut AccountsRepository<'_>, i64) -> DbResult<T>,
+) -> DbResult<T> {
+    let db_path = required_str(payload, "db_path")?;
+    let user_id = required_i64(payload, "user_id")?;
+    let mut connection = open_accounts_connection(db_path)?;
+    let mut repository = AccountsRepository::new(&mut connection);
+    operation(&mut repository, user_id)
 }
 
 fn with_tags_repository<T>(

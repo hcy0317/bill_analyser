@@ -33,6 +33,7 @@ class FakeAccountsDB:
         self.password_valid = True
         self.move_result: dict[str, Any] = {"success": True, "moved_count": 2}
         self.clear_result: dict[str, Any] = {"success": True, "deleted_count": 3}
+        self.last_display_orders: list[tuple[int, int]] = []
 
     def get_all_accounts(self, user_id: int = 0) -> list[dict[str, Any]] | None:
         _ = user_id
@@ -65,6 +66,15 @@ class FakeAccountsDB:
         if account is None:
             return False
         account.update(payload)
+        return True
+
+    def update_account_display_orders(self, orders: list[tuple[int, int]], user_id: int = 0) -> bool:
+        _ = user_id
+        self.last_display_orders = list(orders)
+        for account_id, display_order in orders:
+            account = self.accounts.get(int(account_id))
+            if account is not None:
+                account["display_order"] = int(display_order)
         return True
 
     def delete_account(self, account_id: int, user_id: int = 0) -> bool:
@@ -249,6 +259,7 @@ def test_accounts_routes_cover_crud_sort_sync_and_transaction_actions(
         payload = update_display_orders().get_json() or {}
         assert payload["success"] is True
         assert payload["result"] is True
+        assert db.last_display_orders == [(2, 5)]
 
     with accounts_route_app.test_request_context("/api/accounts/sync-balances", method="POST"):
         payload = sync_all_balances().get_json() or {}

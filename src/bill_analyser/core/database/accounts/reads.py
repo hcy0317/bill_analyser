@@ -7,13 +7,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from bill_analyser.core import account_rust_bridge
 from bill_analyser.utils.logger import log_method
 
 
 class AccountReadsMixin:
+    """Account master-data read helpers."""
+
     @log_method
     async def get_all_accounts(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取所有账户。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.list_accounts(self.db_path, user_id=user_id)
+        return await self._get_all_accounts_python(user_id=user_id)
+
+    async def _get_all_accounts_python(self, user_id: int = 1) -> list[dict[str, Any]]:
+        """通过 aiosqlite fallback 获取所有账户。"""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM accounts WHERE user_id = ? ORDER BY display_order, name",
@@ -25,6 +34,12 @@ class AccountReadsMixin:
     @log_method
     async def get_account_by_id(self, account_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """根据 ID 获取账户。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.get_account(self.db_path, account_id, user_id=user_id)
+        return await self._get_account_by_id_python(account_id, user_id=user_id)
+
+    async def _get_account_by_id_python(self, account_id: int, user_id: int = 1) -> dict[str, Any] | None:
+        """通过 aiosqlite fallback 根据 ID 获取账户。"""
         conn = await self._get_connection()
         async with conn.execute("SELECT * FROM accounts WHERE id = ? AND user_id = ?", (account_id, user_id)) as cursor:
             row = await cursor.fetchone()
@@ -33,6 +48,12 @@ class AccountReadsMixin:
     @log_method
     async def get_sub_accounts(self, parent_id: int, user_id: int = 1) -> list[dict[str, Any]]:
         """获取子账户列表。"""
+        if self._should_use_rust_account_bridge():
+            return account_rust_bridge.get_sub_accounts(self.db_path, parent_id, user_id=user_id)
+        return await self._get_sub_accounts_python(parent_id, user_id=user_id)
+
+    async def _get_sub_accounts_python(self, parent_id: int, user_id: int = 1) -> list[dict[str, Any]]:
+        """通过 aiosqlite fallback 获取子账户列表。"""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM accounts WHERE parent_id = ? AND user_id = ?",

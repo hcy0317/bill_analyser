@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 315
-- Current Rust backend files: 35 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 316
+- Current Rust backend files: 36 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -99,11 +99,26 @@ Runtime startup via `start_backend.ps1` and backend CI now build `bill_taxonomy_
 
 Explicit S5a deferrals: `bill_tags` relationship read/write helpers, settings bundle tag import/upsert, accounts/categories/templates taxonomy domains, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5a because the route shell, in-memory fallback, SQLCipher fallback, batch orchestration, settings import, and relationship helpers remain active owners.
 
+## S5b Accounts Master Data Runtime Bridge
+
+S5b migrates only account master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns account balance synchronization, account transaction move/clear operations, audit/password side effects, SQLCipher setup, in-memory databases, and settings bundle account import/upsert; settings bundle account export reads accounts through the Database façade, so file-backed export observes the Rust-backed list path.
+
+| Python responsibility | Rust S5b mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/accounts/reads.py` `get_all_accounts`, `get_account_by_id`, `get_sub_accounts` for file DBs | `crates/bill-analyser-db/src/taxonomy/accounts.rs` implements user-scoped list/get/subaccount reads with existing account table fields and list ordering; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/account_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
+| `src/bill_analyser/core/database/accounts/mutations.py` `create_account`, `update_account`, `delete_account`, `update_account_display_orders` for file DBs | Rust repository writes the same `accounts` columns, preserves parent_id/subAccounts creation, hidden/display_order, aliases JSON, balance/initial_balance, currency/icon/color/comment/category/type, and user_id-scoped mutations | runtime bridge |
+| `src/bill_analyser/core/database/accounts/**` `:memory:` and SQLCipher account CRUD/display-order behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
+| Legacy file-backed databases and tests that hold account rows before matching user rows | Rust account connection keeps Python's account-path foreign-key PRAGMA behavior instead of making S5b stricter than the previous aiosqlite account connection | retained parity |
+| Account balance synchronization, account transaction move/clear, operation password checks, audit logs, and settings bundle account import/upsert | Python remains the owner; these side-effecting operation paths are deferred to later accounts-operations or settings-bundle taxonomy slices. Settings bundle account export uses the façade read path and therefore uses Rust-backed list on file DBs | retained / export via façade |
+| `src/bill_analyser/api/routes/accounts/**` REST contract | Route shell, URL/status/envelope, and frontend camelCase/snake_case compatibility remain in Python; display-order REST orchestration now calls the same Database façade batch method that bridges to Rust on file DBs | facade retained |
+
+Explicit S5b deferrals: account balance sync, account transaction move/clear, audit/security password actions, alias-learning helpers, historical account suggestions, settings bundle account import/upsert, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5b because the route shell, in-memory fallback, SQLCipher fallback, balance/operation helpers, audit side effects, account-learning helpers, and settings import/upsert remain active owners.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
 | --- | ---: | ---: | ---: |
-| accounts | 6 | 2 | 0 |
+| accounts | 7 | 2 | 0 |
 | ai-learning-llm | 24 | 6 | 0 |
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
