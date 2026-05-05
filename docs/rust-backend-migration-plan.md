@@ -23,6 +23,22 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 - S1 的 `ApiResponse` 只代表 Rust runtime shell foundation；后续业务 API 迁移必须为对应 endpoint 增加现有 Flask envelope parity adapter 或测试，不能把 S1 envelope 直接当成全站业务响应替代品。
 - 后续功能域切片必须在各自 feature-gap review 中逐项声明 Python business item 的 `ported`、`facade_only`、`verified_dead` 或 `deferred_with_reason` 状态；S1 的 `business_migration` 保持 `none`。
 
+## S2 Shared Primitives Mapping
+
+S2 adds foundational Rust primitives and adapter helpers only. Flask REST remains the runtime shell, and no Python business route or service is retired in this slice.
+
+| Python responsibility | Rust S2 mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/utils/currency.py` cents/yuan conversion, symbols, amount validation baseline | `crates/bill-analyser-core/src/primitives/money.rs` and `crates/bill-analyser-core/src/primitives/currency.rs` provide exact cent storage, explicit yuan text conversion, half-up rounding, transaction amount range validation, default `CNY`, and symbol lookup | foundational port |
+| `src/bill_analyser/utils/constants.py` transaction IDs, default currency, default/max pagination, sort field/order constants | `crates/bill-analyser-core/src/primitives/transaction_type.rs`, `pagination.rs`, `sorting.rs`, `ids.rs`, and `currency.rs` define typed reusable constants and parsers | foundational port |
+| `src/bill_analyser/core/bill_date_utils.py` supported bill date parsing and normalized `YYYY-MM-DD HH:MM:SS` text | `crates/bill-analyser-core/src/primitives/date_time.rs` supports existing dash, slash, Chinese, date-only, minute, second, and ISO-prefix inputs | foundational port |
+| `src/bill_analyser/api/adapters/account_adapter.py` alias parsing and hierarchy constants | `crates/bill-analyser-core/src/adapters/account.rs` and `category.rs` provide shared alias parsing and `0`/`virtual_*` helpers | foundational port |
+| `src/bill_analyser/api/adapters/category_adapter.py` category virtual parent conventions | `crates/bill-analyser-core/src/adapters/category.rs` records the `virtual_<main>` parent ID convention | foundational port |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` type-name mapping, sign convention, timestamp normalization, and page response shape | `crates/bill-analyser-core/src/adapters/transaction.rs`, `adapters/api.rs`, and `primitives/date_time.rs` provide typed mappings and response pagination helpers | foundational port |
+| `src/bill_analyser/api/routes/request_context_helpers.py` positive `user_id` request context expectation | `crates/bill-analyser-core/src/primitives/ids.rs` and `auth.rs` provide positive `UserId` parsing plus camelCase serialized `AuthContext` | foundational port |
+
+Explicit S2 deferrals: account category/type display maps, category type maps, tag filters, amount filter operators, error-code message localization, and historical dedup mode constants remain with their owning future business/API domains; `format_currency_display` UI formatting remains in Python until a display/reporting slice needs it; full account/category/transaction object projection, database-backed enrichment, `run_async_in_new_loop`, route status/envelope parity per endpoint, and any Python runtime cleanup are also deferred.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
