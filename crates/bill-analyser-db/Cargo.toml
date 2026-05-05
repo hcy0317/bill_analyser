@@ -1,0 +1,22 @@
+[package]
+name = "bill-analyser-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Internal SQLite runtime and schema foundations for Bill Analyser."
+publish = false
+
+[lib]
+name = "bill_analyser_db"
+path = "src/lib.rs"
+
+[dependencies]
+bill-analyser-core = { path = "../bill-analyser-core" }
+rusqlite.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -39,6 +39,22 @@ S2 adds foundational Rust primitives and adapter helpers only. Flask REST remain
 
 Explicit S2 deferrals: account category/type display maps, category type maps, tag filters, amount filter operators, error-code message localization, and historical dedup mode constants remain with their owning future business/API domains; `format_currency_display` UI formatting remains in Python until a display/reporting slice needs it; full account/category/transaction object projection, database-backed enrichment, `run_async_in_new_loop`, route status/envelope parity per endpoint, and any Python runtime cleanup are also deferred.
 
+## S3 SQLite Schema Runtime Foundation
+
+S3 adds `crates/bill-analyser-db` as an internal Rust DB runtime foundation only. Flask/Python remains the Database façade and no business DB write path is Rust-primary in this slice.
+
+| Python responsibility | Rust S3 mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/runtime.py` database path resolution and connection lifecycle guardrails | `crates/bill-analyser-db/src/path.rs` and `connection.rs` provide explicit temp/copy DB path guards, `data/bills.db` rejection, WAL/foreign_keys/synchronous/cache/temp-store PRAGMA setup, and busy timeout configuration for Rust-side dry-run use | foundational port |
+| `src/bill_analyser/core/database/shared.py` default positive `user_id` contract | `crates/bill-analyser-db/src/user_scope.rs` wraps core `UserId` into parameterized `user_id = ?` SQL scope helpers without inline values | foundational port |
+| `src/bill_analyser/core/database/schema/__init__.py` schema orchestration boundary | `crates/bill-analyser-db/src/schema.rs` records schema responsibility mapping and supports copied-fixture schema validation dry-runs | foundational port |
+| `src/bill_analyser/core/database/schema/core/*`, `templates_imports/*`, `users_security.py` table DDL and legacy migrations | Rust records these as deferred; Python schema initialization remains the runtime owner until the corresponding business/auth/import slices migrate table ownership with parity tests | deferred |
+| `src/bill_analyser/core/database/encryption.py` SQLCipher opt-in behavior | Deferred; Python remains the only SQLCipher runtime owner in S3 | deferred |
+
+S3 uses `rusqlite` with the bundled SQLite feature rather than `sqlx`: this keeps the first DB layer synchronous, small, and internal while avoiding a Tokio runtime or Python bridge before any business write path is ready. The crate is tested only against temporary/copy databases and refuses the repository `data/bills.db` path.
+
+Explicit S3 deferrals: full Python schema DDL porting, SQLCipher parity, aiosqlite async lifecycle parity, all business CRUD helpers, and any Python database cleanup remain with later domain slices. S3 does not delete or replace Python runtime files and does not introduce Rust-primary writes.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |

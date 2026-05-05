@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/bill-analyser-core"]
+members = ["crates/bill-analyser-core", "crates/bill-analyser-db"]
 resolver = "2"
 
 [workspace.package]
@@ -12,6 +12,8 @@ chrono = { version = "0.4", default-features = false, features = ["std", "serde"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3.14"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
