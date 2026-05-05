@@ -49,4 +49,5 @@
 - 账单/分类/账户路由层已完成一轮适配器收敛：
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `accounts/` / `categories/` / `bills/` 已统一改从中性适配器模块导入。
+- 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；普通文件 SQLite 库的分类 list/tree/get/create/update/delete/import/export/default seed master-data 持久化经 Python Database façade 桥接到 Rust taxonomy runtime，其中 default seed 使用批量 `ensure_categories` 避免逐条启动 bridge；分类统计、分类规则/matcher、`:memory:`、SQLCipher 和设置包分类 import/upsert 仍由 Python 路径处理。
 - 主要 REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`accounts/`、`categories/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分。

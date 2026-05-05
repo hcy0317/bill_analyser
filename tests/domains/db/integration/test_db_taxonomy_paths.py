@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from bill_analyser.core import account_rust_bridge
+from bill_analyser.core import account_rust_bridge, category_rust_bridge
 from bill_analyser.core.db import Database
+from bill_analyser.core.default_category_seed import ensure_default_categories
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,6 +38,10 @@ async def _create_user(db: Database, username: str) -> int:
 
 def _fail_account_bridge(*_args: object, **_kwargs: object) -> None:
     pytest.fail("account Rust bridge should not be used for this database mode")
+
+
+def _fail_category_bridge(*_args: object, **_kwargs: object) -> None:
+    pytest.fail("category Rust bridge should not be used for this database mode")
 
 
 async def _create_bill(
@@ -171,6 +176,155 @@ async def test_get_all_categories_fallback_respects_user_scope_and_category_stat
         assert await db.delete_category(int(parent_category_id), user_id=first_user_id) is True
         assert await db.get_category_by_id(int(parent_category_id), user_id=first_user_id) is None
         assert await db.get_category_by_id(int(child_category_id), user_id=first_user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_category_default_seed_uses_file_backed_master_data_path(tmp_path: Path) -> None:
+    """默认分类种子的主数据补全应通过同一个分类 façade 在文件库闭环。"""
+    db = await _create_database(tmp_path)
+    try:
+        user_id = await _create_user(db, "taxonomy_category_seed_user")
+        first_result = await ensure_default_categories(db, user_id=user_id)
+        second_result = await ensure_default_categories(db, user_id=user_id)
+
+        assert first_result["created"] > 0
+        assert second_result["created"] == 0
+        assert second_result["skipped"] >= first_result["created"]
+        seeded = await db.get_category_by_name("餐饮", "早餐", user_id=user_id)
+        assert seeded is not None
+        assert seeded["icon"]
+        assert seeded["color"]
+        assert await db.get_category_by_name("", "", user_id=user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_category_master_data_in_memory_fallback_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """:memory: 分类主数据应继续使用 Python fallback 并保持闭环。"""
+    monkeypatch.setattr(category_rust_bridge, "list_categories", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "get_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "get_category_by_name", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "create_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "update_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "delete_category", _fail_category_bridge)
+    monkeypatch.setattr(
+        category_rust_bridge,
+        "delete_categories_by_main_category",
+        _fail_category_bridge,
+    )
+    monkeypatch.setattr(
+        category_rust_bridge,
+        "update_main_category_name",
+        _fail_category_bridge,
+    )
+
+    db = Database(":memory:")
+    await db.init_db()
+    try:
+        user_id = await _create_user(db, "taxonomy_category_memory_user")
+        parent_payload = {
+            "type": 3,
+            "main_category": "内存分类",
+            "sub_category": "",
+            "description": "父级",
+            "priority": 2,
+            "keywords": "",
+            "hidden": False,
+            "icon": "mdi-folder",
+            "color": "#336699",
+        }
+        child_payload = {
+            "type": 3,
+            "main_category": "内存分类",
+            "sub_category": "子类",
+            "description": "",
+            "priority": 1,
+            "keywords": "fallback",
+            "hidden": False,
+            "icon": "",
+            "color": "",
+        }
+        assert await db.ensure_categories([parent_payload, child_payload], user_id=user_id) == {
+            "created": 2,
+            "skipped": 0,
+        }
+        assert await db.ensure_categories([parent_payload, child_payload], user_id=user_id) == {
+            "created": 0,
+            "skipped": 2,
+        }
+        parent = await db.get_category_by_name("内存分类", "", user_id=user_id)
+        child = await db.get_category_by_name("内存分类", "子类", user_id=user_id)
+        assert parent is not None
+        assert child is not None
+        parent_id = parent["id"]
+        child_id = child["id"]
+
+        assert parent_id is not None
+        assert child_id is not None
+        assert await db.update_category(child_id, {"hidden": True}, user_id=user_id) is True
+        categories = await db.get_all_categories(user_id=user_id)
+        assert [category["sub_category"] for category in categories] == ["子类", ""]
+
+        assert await db.update_main_category_name("内存分类", "内存分类改名", user_id=user_id) is True
+        renamed = await db.get_category_by_name("内存分类改名", "子类", user_id=user_id)
+        assert renamed is not None
+        assert renamed["hidden"] in (1, True)
+
+        assert await db.delete_category(parent_id, user_id=user_id) is True
+        assert await db.get_category_by_id(child_id, user_id=user_id) is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_category_master_data_sqlcipher_fallback_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """启用 SQLCipher 配置时分类主数据应继续走 Python fallback。"""
+    monkeypatch.setattr(category_rust_bridge, "list_categories", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "get_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "get_category_by_name", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "create_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "update_category", _fail_category_bridge)
+    monkeypatch.setattr(category_rust_bridge, "delete_category", _fail_category_bridge)
+    monkeypatch.setattr(
+        category_rust_bridge,
+        "delete_categories_by_main_category",
+        _fail_category_bridge,
+    )
+    monkeypatch.setattr(
+        category_rust_bridge,
+        "update_main_category_name",
+        _fail_category_bridge,
+    )
+
+    db = await _create_database(tmp_path)
+    db._encryption_config = SimpleNamespace(enabled=True)
+    try:
+        user_id = await _create_user(db, "taxonomy_category_sqlcipher_user")
+        category_id = await db.create_category(
+            {
+                "type": 3,
+                "main_category": "SQLCipher分类",
+                "sub_category": "",
+                "priority": 2,
+                "hidden": False,
+            },
+            user_id=user_id,
+        )
+        assert category_id is not None
+
+        assert await db.update_category(category_id, {"priority": 1}, user_id=user_id) is True
+        categories = await db.get_all_categories(user_id=user_id)
+        assert [category["main_category"] for category in categories] == ["SQLCipher分类"]
+        assert int(categories[0]["priority"]) == 1
+
+        assert await db.delete_categories_by_main_category("SQLCipher分类", user_id=user_id) is True
+        assert await db.get_category_by_id(category_id, user_id=user_id) is None
     finally:
         await db.close()
 

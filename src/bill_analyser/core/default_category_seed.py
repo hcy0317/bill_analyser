@@ -569,40 +569,20 @@ async def ensure_default_category_seed(db: Any, user_id: int = 1) -> dict[str, A
 async def ensure_default_categories(db: Any, user_id: int = 1) -> dict[str, int]:
     """Create missing primary and secondary categories without overwriting custom data."""
 
+    category_payloads = _default_category_payloads()
+    ensure_categories = getattr(db, "ensure_categories", None)
+    if callable(ensure_categories):
+        return await ensure_categories(category_payloads, user_id=user_id)
+
     created = 0
     skipped = 0
 
-    for category in DEFAULT_DAILY_CATEGORIES:
-        main_created = await _ensure_category(
-            db,
-            user_id=user_id,
-            category_type=category.type,
-            main_category=category.name,
-            sub_category="",
-            priority=category.priority,
-            icon=category.icon,
-            color=category.color,
-        )
-        if main_created:
+    for payload in category_payloads:
+        created_id = await db.create_category(payload, user_id=user_id)
+        if created_id is not None:
             created += 1
         else:
             skipped += 1
-
-        for offset, sub_category in enumerate(category.sub_categories, start=1):
-            sub_created = await _ensure_category(
-                db,
-                user_id=user_id,
-                category_type=category.type,
-                main_category=category.name,
-                sub_category=sub_category.name,
-                priority=category.priority + offset,
-                icon=sub_category.icon,
-                color=sub_category.color,
-            )
-            if sub_created:
-                created += 1
-            else:
-                skipped += 1
 
     return {"created": created, "skipped": skipped}
 
@@ -613,18 +593,16 @@ async def ensure_default_category_rules(db: Any, user_id: int = 1) -> dict[str, 
     created = 0
     skipped = 0
     missing_categories = 0
+    categories_by_name = await _load_category_lookup(db, user_id=user_id)
+    existing_rule_names = await _load_existing_rule_names(db, user_id=user_id)
 
     for rule in DEFAULT_DAILY_CATEGORY_RULES:
-        category = await db.get_category_by_name(
-            rule.main_category,
-            rule.sub_category,
-            user_id=user_id,
-        )
+        category = categories_by_name.get((rule.main_category, rule.sub_category))
         if not category:
             missing_categories += 1
             continue
 
-        if await _rule_exists(db, user_id=user_id, name=rule.name):
+        if rule.name in existing_rule_names:
             skipped += 1
             continue
 
@@ -643,6 +621,7 @@ async def ensure_default_category_rules(db: Any, user_id: int = 1) -> dict[str, 
             skipped += 1
         else:
             created += 1
+            existing_rule_names.add(rule.name)
 
     return {
         "created": created,
@@ -651,42 +630,57 @@ async def ensure_default_category_rules(db: Any, user_id: int = 1) -> dict[str, 
     }
 
 
-async def _ensure_category(
-    db: Any,
-    *,
-    user_id: int,
-    category_type: int,
-    main_category: str,
-    sub_category: str,
-    priority: int,
-    icon: str,
-    color: str,
-) -> bool:
-    existing = await db.get_category_by_name(main_category, sub_category, user_id=user_id)
-    if existing:
-        return False
+def _default_category_payloads() -> list[dict[str, Any]]:
+    """Build default category rows in the same order as the seed constants."""
+    payloads: list[dict[str, Any]] = []
+    for category in DEFAULT_DAILY_CATEGORIES:
+        payloads.append(
+            {
+                "type": category.type,
+                "main_category": category.name,
+                "sub_category": "",
+                "description": "",
+                "priority": category.priority,
+                "keywords": "",
+                "hidden": False,
+                "icon": category.icon,
+                "color": category.color,
+            }
+        )
+        for offset, sub_category in enumerate(category.sub_categories, start=1):
+            payloads.append(
+                {
+                    "type": category.type,
+                    "main_category": category.name,
+                    "sub_category": sub_category.name,
+                    "description": "",
+                    "priority": category.priority + offset,
+                    "keywords": "",
+                    "hidden": False,
+                    "icon": sub_category.icon,
+                    "color": sub_category.color,
+                }
+            )
+    return payloads
 
-    created_id = await db.create_category(
-        {
-            "type": category_type,
-            "main_category": main_category,
-            "sub_category": sub_category,
-            "description": "",
-            "priority": priority,
-            "keywords": "",
-            "hidden": False,
-            "icon": icon,
-            "color": color,
-        },
-        user_id=user_id,
-    )
-    return created_id is not None
+
+async def _load_category_lookup(db: Any, *, user_id: int) -> dict[tuple[str, str], dict[str, Any]]:
+    categories = await db.get_all_categories(user_id=user_id)
+    return {
+        (
+            str(category.get("main_category") or ""),
+            str(category.get("sub_category") or ""),
+        ): category
+        for category in categories
+        if int(category.get("id", 0) or 0) > 0
+    }
 
 
-async def _rule_exists(db: Any, *, user_id: int, name: str) -> bool:
+async def _load_existing_rule_names(db: Any, *, user_id: int) -> set[str]:
     conn = await db._get_connection()  # pylint: disable=protected-access
     async with conn.execute(
-        "SELECT 1 FROM category_rules WHERE user_id = ? AND name = ? LIMIT 1",
-        (user_id, name),
+        "SELECT name FROM category_rules WHERE user_id = ?",
+        (user_id,),
     ) as cursor:
-        return await cursor.fetchone() is not None
+        rows = await cursor.fetchall()
+    return {str(row[0]) for row in rows}

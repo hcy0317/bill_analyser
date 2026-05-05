@@ -7,6 +7,7 @@ from typing import Any
 
 import aiosqlite
 
+from bill_analyser.core import category_rust_bridge
 from bill_analyser.utils.logger import log_method
 from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
@@ -15,9 +16,23 @@ from bill_analyser.core.database.time import utc_now_iso
 class DatabaseCategoriesMixin(DatabaseFacadeBase):
     """Category CRUD, lookup, statistics, and cascade helpers."""
 
+    def _should_use_rust_category_bridge(self) -> bool:
+        """Use Rust category CRUD only for regular file DBs sharing the SQLite file."""
+        db_path_text = str(self.db_path)
+        if db_path_text in {":memory:", "file::memory:?cache=shared"}:
+            return False
+        encryption_config = getattr(self, "_encryption_config", None)
+        return not bool(getattr(encryption_config, "enabled", False))
+
     @log_method
     async def get_all_categories(self, user_id: int = 1) -> list[dict[str, Any]]:
         """获取所有分类（从 categories 表）。"""
+        if self._should_use_rust_category_bridge():
+            return category_rust_bridge.list_categories(self.db_path, user_id=user_id)
+        return await self._get_all_categories_python(user_id=user_id)
+
+    async def _get_all_categories_python(self, user_id: int = 1) -> list[dict[str, Any]]:
+        """通过 aiosqlite fallback 获取所有分类。"""
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
 
@@ -78,6 +93,26 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         user_id: int = 1,
     ) -> dict[str, Any] | None:
         """根据名称获取分类。"""
+        if self._should_use_rust_category_bridge():
+            return category_rust_bridge.get_category_by_name(
+                self.db_path,
+                main_category,
+                sub_category,
+                user_id=user_id,
+            )
+        return await self._get_category_by_name_python(
+            main_category,
+            sub_category,
+            user_id=user_id,
+        )
+
+    async def _get_category_by_name_python(
+        self,
+        main_category: str,
+        sub_category: str,
+        user_id: int = 1,
+    ) -> dict[str, Any] | None:
+        """通过 aiosqlite fallback 根据名称获取分类。"""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM categories WHERE main_category = ? AND sub_category = ? AND user_id = ?",
@@ -89,6 +124,23 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
     @log_method
     async def create_category(self, category_data: dict[str, Any], user_id: int = 1) -> int | None:
         """创建分类。"""
+        if self._should_use_rust_category_bridge():
+            category_id = category_rust_bridge.create_category(
+                self.db_path,
+                category_data,
+                user_id=user_id,
+            )
+            if category_id is not None:
+                self._clear_cache("category_mappings")
+            return category_id
+        return await self._create_category_python(category_data, user_id=user_id)
+
+    async def _create_category_python(
+        self,
+        category_data: dict[str, Any],
+        user_id: int = 1,
+    ) -> int | None:
+        """通过 aiosqlite fallback 创建分类。"""
         conn = await self._get_connection()
         main_category = category_data.get("main_category")
         sub_category = category_data.get("sub_category", "")
@@ -153,6 +205,33 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
             return None
 
     @log_method
+    async def ensure_categories(
+        self,
+        categories: list[dict[str, Any]],
+        user_id: int = 1,
+    ) -> dict[str, int]:
+        """批量创建缺失分类，不覆盖已有分类。"""
+        if self._should_use_rust_category_bridge():
+            result = category_rust_bridge.ensure_categories(
+                self.db_path,
+                categories,
+                user_id=user_id,
+            )
+            if result["created"] > 0:
+                self._clear_cache("category_mappings")
+            return result
+
+        created = 0
+        skipped = 0
+        for category_data in categories:
+            category_id = await self._create_category_python(category_data, user_id=user_id)
+            if category_id is None:
+                skipped += 1
+            else:
+                created += 1
+        return {"created": created, "skipped": skipped}
+
+    @log_method
     async def update_category(
         self,
         category_id: int,
@@ -160,6 +239,25 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         user_id: int = 1,
     ) -> bool:
         """更新分类。"""
+        if self._should_use_rust_category_bridge():
+            updated = category_rust_bridge.update_category(
+                self.db_path,
+                category_id,
+                updates,
+                user_id=user_id,
+            )
+            if updated:
+                self._clear_cache("category_mappings")
+            return updated
+        return await self._update_category_python(category_id, updates, user_id=user_id)
+
+    async def _update_category_python(
+        self,
+        category_id: int,
+        updates: dict[str, Any],
+        user_id: int = 1,
+    ) -> bool:
+        """通过 aiosqlite fallback 更新分类。"""
         conn = await self._get_connection()
         try:
             valid_fields = [
@@ -200,6 +298,19 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
     @log_method
     async def delete_category(self, category_id: int, user_id: int = 1) -> bool:
         """删除分类（父分类级联删除子分类）。"""
+        if self._should_use_rust_category_bridge():
+            deleted = category_rust_bridge.delete_category(
+                self.db_path,
+                category_id,
+                user_id=user_id,
+            )
+            if deleted:
+                self._clear_cache("category_mappings")
+            return deleted
+        return await self._delete_category_python(category_id, user_id=user_id)
+
+    async def _delete_category_python(self, category_id: int, user_id: int = 1) -> bool:
+        """通过 aiosqlite fallback 删除分类（父分类级联删除子分类）。"""
         conn = await self._get_connection()
         try:
             conn.row_factory = aiosqlite.Row
@@ -284,6 +395,20 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
     @log_method
     async def get_category_by_id(self, category_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """获取单个分类。"""
+        if self._should_use_rust_category_bridge():
+            return category_rust_bridge.get_category(
+                self.db_path,
+                category_id,
+                user_id=user_id,
+            )
+        return await self._get_category_by_id_python(category_id, user_id=user_id)
+
+    async def _get_category_by_id_python(
+        self,
+        category_id: int,
+        user_id: int = 1,
+    ) -> dict[str, Any] | None:
+        """通过 aiosqlite fallback 根据 ID 获取分类。"""
         conn = await self._get_connection()
         conn.row_factory = aiosqlite.Row
         async with conn.execute(
@@ -340,6 +465,26 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         user_id: int = 1,
     ) -> bool:
         """根据主分类名称删除所有相关分类。"""
+        if self._should_use_rust_category_bridge():
+            deleted = category_rust_bridge.delete_categories_by_main_category(
+                self.db_path,
+                main_category,
+                user_id=user_id,
+            )
+            if deleted:
+                self._clear_cache("category_mappings")
+            return deleted
+        return await self._delete_categories_by_main_category_python(
+            main_category,
+            user_id=user_id,
+        )
+
+    async def _delete_categories_by_main_category_python(
+        self,
+        main_category: str,
+        user_id: int = 1,
+    ) -> bool:
+        """通过 aiosqlite fallback 根据主分类名称删除所有相关分类。"""
         conn = await self._get_connection()
         try:
             cursor = await conn.execute(
@@ -370,6 +515,30 @@ class DatabaseCategoriesMixin(DatabaseFacadeBase):
         user_id: int = 1,
     ) -> bool:
         """更新主分类名称（级联更新所有子分类）。"""
+        if self._should_use_rust_category_bridge():
+            updated = category_rust_bridge.update_main_category_name(
+                self.db_path,
+                old_name,
+                new_name,
+                user_id=user_id,
+            )
+            if updated:
+                self._clear_cache("account_mappings")
+                self._clear_cache("category_mappings")
+            return updated
+        return await self._update_main_category_name_python(
+            old_name,
+            new_name,
+            user_id=user_id,
+        )
+
+    async def _update_main_category_name_python(
+        self,
+        old_name: str,
+        new_name: str,
+        user_id: int = 1,
+    ) -> bool:
+        """通过 aiosqlite fallback 更新主分类名称（级联更新所有子分类）。"""
         conn = await self._get_connection()
         try:
             cursor = await conn.execute(

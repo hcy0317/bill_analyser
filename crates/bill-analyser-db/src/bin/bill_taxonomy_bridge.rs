@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use bill_analyser_db::taxonomy::accounts::{
     open_accounts_connection, parse_account_display_orders, AccountsRepository,
 };
+use bill_analyser_db::taxonomy::categories::{open_categories_connection, CategoriesRepository};
 use bill_analyser_db::taxonomy::tags::{
     open_tags_connection, parse_display_orders, TagsRepository,
 };
@@ -96,6 +97,73 @@ fn run() -> Result<(), String> {
                 repository.update_display_orders(&orders, user_id)
             }))
         }
+        "list-categories" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| repository.list_categories(user_id),
+        )),
+        "get-category" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.get_category_by_id(required_i64(&payload, "category_id")?, user_id)
+            },
+        )),
+        "get-category-by-name" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.get_category_by_name(
+                    required_str_allow_empty(&payload, "main_category")?,
+                    required_str_allow_empty(&payload, "sub_category")?,
+                    user_id,
+                )
+            },
+        )),
+        "create-category" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.create_category(required_value(&payload, "payload")?, user_id)
+            },
+        )),
+        "ensure-categories" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.ensure_categories(required_value(&payload, "payload")?, user_id)
+            },
+        )),
+        "update-category" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.update_category(
+                    required_i64(&payload, "category_id")?,
+                    required_value(&payload, "payload")?,
+                    user_id,
+                )
+            },
+        )),
+        "delete-category" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.delete_category(required_i64(&payload, "category_id")?, user_id)
+            },
+        )),
+        "delete-categories-by-main-category" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.delete_categories_by_main_category(
+                    required_str(&payload, "main_category")?,
+                    user_id,
+                )
+            },
+        )),
+        "update-main-category-name" => result_response(with_categories_repository(
+            &payload,
+            |repository, user_id| {
+                repository.update_main_category_name(
+                    required_str(&payload, "old_name")?,
+                    required_str(&payload, "new_name")?,
+                    user_id,
+                )
+            },
+        )),
         _ => return Err("unknown taxonomy bridge command".to_string()),
     };
 
@@ -125,6 +193,17 @@ fn with_tags_repository<T>(
     operation(&mut repository, user_id)
 }
 
+fn with_categories_repository<T>(
+    payload: &Value,
+    operation: impl FnOnce(&mut CategoriesRepository<'_>, i64) -> DbResult<T>,
+) -> DbResult<T> {
+    let db_path = required_str(payload, "db_path")?;
+    let user_id = required_i64(payload, "user_id")?;
+    let mut connection = open_categories_connection(db_path)?;
+    let mut repository = CategoriesRepository::new(&mut connection);
+    operation(&mut repository, user_id)
+}
+
 fn result_response<T: Serialize>(result: DbResult<T>) -> Value {
     match result {
         Ok(result) => json!({"success": true, "result": result}),
@@ -142,6 +221,15 @@ fn required_str<'payload>(payload: &'payload Value, key: &str) -> DbResult<&'pay
     required_value(payload, key)?
         .as_str()
         .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| DbError::InvalidOperation(format!("{key} must be text")))
+}
+
+fn required_str_allow_empty<'payload>(
+    payload: &'payload Value,
+    key: &str,
+) -> DbResult<&'payload str> {
+    required_value(payload, key)?
+        .as_str()
         .ok_or_else(|| DbError::InvalidOperation(format!("{key} must be text")))
 }
 

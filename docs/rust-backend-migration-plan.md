@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 316
-- Current Rust backend files: 36 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 317
+- Current Rust backend files: 37 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -114,6 +114,20 @@ S5b migrates only account master-data persistence to Rust for regular file-backe
 
 Explicit S5b deferrals: account balance sync, account transaction move/clear, audit/security password actions, alias-learning helpers, historical account suggestions, settings bundle account import/upsert, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5b because the route shell, in-memory fallback, SQLCipher fallback, balance/operation helpers, audit side effects, account-learning helpers, and settings import/upsert remain active owners.
 
+## S5c Categories Master Data Runtime Bridge
+
+S5c migrates category master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns category route validation/envelopes, category statistics, category rule CRUD/matching, settings bundle category import/upsert, SQLCipher setup, and in-memory databases. Default category seed category creation now uses a batch `ensure_categories()` façade call so file-backed registration/default-seed flows cross the Rust taxonomy runtime once per seed run instead of once per category; default category-rule creation remains Python-owned until S6.
+
+| Python responsibility | Rust S5c mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/categories/__init__.py` `get_all_categories`, `get_category_by_id`, `get_category_by_name`, `create_category`, `ensure_categories`, `update_category`, `delete_category`, `delete_categories_by_main_category`, and `update_main_category_name` for file DBs | `crates/bill-analyser-db/src/taxonomy/categories.rs` implements user-scoped CRUD, batch missing-category ensure, parent delete cascade by `main_category`, main-category bulk rename, unique-conflict parity, bills-derived fallback when `categories` is empty, and stable `ORDER BY priority ASC, main_category, sub_category`; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/category_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
+| `src/bill_analyser/core/database/categories/__init__.py` `:memory:` and SQLCipher category CRUD/tree behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
+| `src/bill_analyser/core/default_category_seed.py` default category master data | Category seed constants/orchestration remain Python, but file-backed `db.ensure_categories()` persists missing default category rows through one Rust bridge process; default category-rule creation stays Python and now preloads category/rule maps to avoid per-rule taxonomy bridge calls | mixed: master data via façade, rules retained |
+| Settings bundle transaction category export/import | Export reads categories through `get_all_categories()`, so file DB export observes the Rust-backed list path; import/upsert remains direct Python SQL and is deferred to S5e settings-bundle taxonomy integration | mixed: export via façade, import retained |
+| `src/bill_analyser/api/routes/categories/**` REST contract | Route shell, URL/status/envelope, virtual parent IDs, tree/list formatting, import/export route orchestration, and category rule route behavior remain in Python and are exercised through the same Database façade methods | facade retained |
+
+Explicit S5c deferrals: category rules and matcher, category statistics, settings bundle category import/upsert, SQLCipher Rust access, route-shell cleanup, and Python seed/rule orchestration remain deferred. No Python business code is deleted in S5c except now-unused private seed/rule lookup helpers removed after replacing them with batch category payload generation and rule-name preloading; all retained paths are still active owners.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -127,7 +141,7 @@ Explicit S5b deferrals: account balance sync, account transaction move/clear, au
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
-| classification-rules | 16 | 2 | 0 |
+| classification-rules | 17 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 2 | 0 |

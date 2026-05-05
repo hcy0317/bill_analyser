@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 316
-- Rust backend files: 36
+- Python backend files: 317
+- Rust backend files: 37
 - Migration domains: 22
-- Files marked port: 253
+- Files marked port: 254
 - Files marked facade: 63
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -26,7 +26,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
-| classification-rules | 16 | 2 | 0 |
+| classification-rules | 17 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 2 | 0 |
@@ -197,11 +197,12 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/category_engine/engine.py | classification-rules | core-service | port | 622 |
 | src/bill_analyser/core/category_engine/expression.py | classification-rules | core-service | port | 112 |
 | src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 642 |
+| src/bill_analyser/core/category_rust_bridge.py | classification-rules | core-service | port | 249 |
 | src/bill_analyser/core/database/__init__.py | database-facade | package-marker | facade | 2 |
 | src/bill_analyser/core/database/accounts/__init__.py | accounts | package-marker | facade | 28 |
 | src/bill_analyser/core/database/accounts/balances.py | accounts | database-access | port | 309 |
-| src/bill_analyser/core/database/accounts/mutations.py | accounts | database-access | port | 300 |
-| src/bill_analyser/core/database/accounts/reads.py | accounts | database-access | port | 303 |
+| src/bill_analyser/core/database/accounts/mutations.py | accounts | database-access | port | 302 |
+| src/bill_analyser/core/database/accounts/reads.py | accounts | database-access | port | 305 |
 | src/bill_analyser/core/database/audit_backup/__init__.py | backup-operations | package-implementation | port | 269 |
 | src/bill_analyser/core/database/bills/__init__.py | bills-import | package-implementation | port | 692 |
 | src/bill_analyser/core/database/budgets/__init__.py | budgets | package-marker | facade | 2 |
@@ -217,7 +218,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/budgets/execution/snapshots.py | budgets | database-access | port | 134 |
 | src/bill_analyser/core/database/budgets/forecast/__init__.py | budgets | package-implementation | port | 510 |
 | src/bill_analyser/core/database/budgets/reporting/__init__.py | budgets | package-marker | facade | 13 |
-| src/bill_analyser/core/database/categories/__init__.py | classification-rules | package-implementation | port | 410 |
+| src/bill_analyser/core/database/categories/__init__.py | classification-rules | package-implementation | port | 579 |
 | src/bill_analyser/core/database/category_rules/__init__.py | classification-rules | package-implementation | port | 551 |
 | src/bill_analyser/core/database/encryption.py | auth-security | database-access | port | 105 |
 | src/bill_analyser/core/database/imports/__init__.py | bills-import | package-marker | facade | 2 |
@@ -295,7 +296,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/users/auth/__init__.py | auth-security | package-implementation | port | 578 |
 | src/bill_analyser/core/database/users/data/__init__.py | auth-security | package-implementation | port | 351 |
 | src/bill_analyser/core/db.py | database-facade | core-service | facade | 86 |
-| src/bill_analyser/core/default_category_seed.py | classification-rules | core-service | port | 692 |
+| src/bill_analyser/core/default_category_seed.py | classification-rules | core-service | port | 686 |
 | src/bill_analyser/core/exchange_rate_providers/__init__.py | statistics-reporting | package-marker | facade | 33 |
 | src/bill_analyser/core/exchange_rate_providers/base.py | statistics-reporting | core-service | port | 77 |
 | src/bill_analyser/core/exchange_rate_providers/china.py | statistics-reporting | core-service | port | 236 |
@@ -394,6 +395,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/path.rs
 - crates/bill-analyser-db/src/schema.rs
 - crates/bill-analyser-db/src/taxonomy/accounts.rs
+- crates/bill-analyser-db/src/taxonomy/categories.rs
 - crates/bill-analyser-db/src/taxonomy/mod.rs
 - crates/bill-analyser-db/src/taxonomy/tags.rs
 - crates/bill-analyser-db/src/transaction.rs
