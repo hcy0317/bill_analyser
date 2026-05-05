@@ -10,7 +10,7 @@
 import asyncio
 import sqlite3
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.db import Database
 from tests.runtime_paths import get_test_db_path, remove_test_database_family
 

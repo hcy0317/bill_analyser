@@ -12,9 +12,9 @@ from typing import Any, cast
 import pytest
 
 from bill_analyser.constants import TEST_DB_DIR_ENV
-from bill_analyser.core import db_runtime
-from bill_analyser.core.db_runtime import DatabaseRuntimeMixin, _resolve_database_path
-from bill_analyser.core.db_time import utc_now
+from bill_analyser.core.database import runtime as db_runtime
+from bill_analyser.core.database.runtime import DatabaseRuntimeMixin, _resolve_database_path
+from bill_analyser.core.database.time import utc_now
 
 
 class DummyRuntime(DatabaseRuntimeMixin):

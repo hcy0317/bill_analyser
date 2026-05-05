@@ -98,6 +98,7 @@ describe('rule center UX source guards', () => {
 
     test('category recognition table keeps selection/filter/pagination controls stable', () => {
         const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+        const filterSource = readSource('src/views/desktop/pairingcenter/components/ruleCenterFilters.ts');
 
         expect(source).toContain('v-if="showTabSwitcher"');
         expect(source).toContain(':open-delay="1500"');
@@ -106,10 +107,10 @@ describe('rule center UX source guards', () => {
         expect(source).toContain('const ruleTableColumnCount = 7');
         expect(source).toContain('rule-center-category-filter-menu');
         expect(source).toContain('max-height: min(500px, calc(100vh - 160px))');
-        expect(source).toContain('const primaryCategoryFilterTypeOrder');
-        const filterOrder = source.slice(
-            source.indexOf('const primaryCategoryFilterTypeOrder'),
-            source.indexOf('const primaryCategoryFilterGroups')
+        expect(filterSource).toContain('export const primaryCategoryFilterTypeOrder');
+        const filterOrder = filterSource.slice(
+            filterSource.indexOf('export const primaryCategoryFilterTypeOrder'),
+            filterSource.indexOf('];', filterSource.indexOf('export const primaryCategoryFilterTypeOrder'))
         );
         expect(filterOrder.indexOf('CategoryType.Income')).toBeLessThan(filterOrder.indexOf('CategoryType.Expense'));
         expect(filterOrder.indexOf('CategoryType.Expense')).toBeLessThan(filterOrder.indexOf('CategoryType.Transfer'));
@@ -155,9 +156,11 @@ describe('rule center UX source guards', () => {
     });
 
     test('rule expression display splits pairing groups on startsExpression only', () => {
-        const source = readSource('src/views/desktop/pairingcenter/components/RuleCenterPanel.vue');
+        const source = readSource('src/views/desktop/pairingcenter/components/ruleExpressionDisplay.ts');
+        const display = readSource('src/views/desktop/pairingcenter/components/RuleExpressionDisplay.vue');
 
         expect(source).toContain('clause.startsExpression');
+        expect(display).toContain('getHiddenExpressionTermCount');
         expect(source).not.toContain('parenthesisDepth');
         expect(source).not.toContain("clause.joiner === 'OR' && parenthesisDepth === 0");
     });

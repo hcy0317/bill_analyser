@@ -15,7 +15,7 @@ from bill_analyser.api.routes.request_context_helpers import (
 from bill_analyser.api.routes.request_context_helpers import (
     run_async_in_new_loop as _run_async,
 )
-from bill_analyser.core.db_settings_bundle import (
+from bill_analyser.core.database.settings_bundle import (
     SETTINGS_BUNDLE_SCHEMA_VERSION,
     SETTINGS_BUNDLE_SECTION_KEYS,
 )

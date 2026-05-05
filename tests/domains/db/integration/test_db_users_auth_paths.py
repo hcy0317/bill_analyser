@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from bill_analyser.core import db_users_auth as db_users_auth_module
+from bill_analyser.core.database.users import auth as db_users_auth_module
 from bill_analyser.core.db import Database
 
 if TYPE_CHECKING:

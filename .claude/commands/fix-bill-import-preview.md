@@ -44,7 +44,7 @@ argument-hint: '描述导入预览问题，例如"预览表格全空但后端 pr
 - `src/web/src/views/desktop/transactions/import/ImportDialog.vue`
 - `src/web/src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue`
 - `src/web/src/models/transaction.ts`
-- 如有必要，检查 `src/bill_analyser/core/bill_service.py` 和 `src/bill_analyser/api/routes/bills.py`
+- 如有必要，检查 `src/bill_analyser/core/bills/` 和 `src/bill_analyser/api/routes/bills/`
 
 ## 完成标准
 

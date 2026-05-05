@@ -7,7 +7,7 @@ import pytest
 
 from bill_analyser.core import category_engine as category_engine_module
 from bill_analyser.core.category_engine import CategoryEngine, KeywordMatcher
-from bill_analyser.core.db_category_rules import DatabaseCategoryRulesMixin
+from bill_analyser.core.database.category_rules import DatabaseCategoryRulesMixin
 from bill_analyser.utils.constants import TransactionType
 
 

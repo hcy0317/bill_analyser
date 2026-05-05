@@ -1,0 +1,485 @@
+{
+  "version": 1,
+  "description": "Frontend file-size baseline for legacy oversized files. Ratchet only: entries may shrink but must not grow.",
+  "thresholds": {
+    "vue": {
+      "healthyMin": 200,
+      "healthyMax": 400,
+      "warning": 500,
+      "hard": 800,
+      "templateWarning": 250,
+      "scriptWarning": 500,
+      "styleWarning": 300
+    },
+    "ts": {
+      "warning": 600,
+      "hard": 1000
+    },
+    "js": {
+      "warning": 600,
+      "hard": 1000
+    },
+    "style": {
+      "warning": 600,
+      "hard": 1000
+    }
+  },
+  "generatedBy": "scripts/check-frontend-structure.mjs --print-baseline",
+  "files": [
+    {
+      "path": "src/views/desktop/transactions/import/tabs/ImportTransactionCheckDataTab.vue",
+      "kind": "vue",
+      "lines": 5233,
+      "sections": {
+        "template": 462,
+        "script": 4404,
+        "style": 24
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/budgets/ListPage.vue",
+      "kind": "vue",
+      "lines": 3488,
+      "sections": {
+        "template": 194,
+        "script": 2727,
+        "style": 116
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/lib/services.ts",
+      "kind": "ts",
+      "lines": 2538,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/locales/helpers.ts",
+      "kind": "ts",
+      "lines": 2472,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/ListPage.vue",
+      "kind": "vue",
+      "lines": 2122,
+      "sections": {
+        "template": 298,
+        "script": 1240,
+        "style": 188
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/statistics.ts",
+      "kind": "ts",
+      "lines": 2061,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/list/dialogs/EditDialog.vue",
+      "kind": "vue",
+      "lines": 1974,
+      "sections": {
+        "template": 286,
+        "script": 1257,
+        "style": 58
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/pairingcenter/components/RuleCenterPanel.vue",
+      "kind": "vue",
+      "lines": 1969,
+      "sections": {
+        "template": 287,
+        "script": 1144,
+        "style": 168
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/import/ImportDialog.vue",
+      "kind": "vue",
+      "lines": 1841,
+      "sections": {
+        "template": 113,
+        "script": 1423,
+        "style": 20
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/pairingcenter/components/LearningCenterPanel.vue",
+      "kind": "vue",
+      "lines": 1627,
+      "sections": {
+        "template": 424,
+        "script": 699,
+        "style": 179
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/transactions/EditPage.vue",
+      "kind": "vue",
+      "lines": 1602,
+      "sections": {
+        "template": 123,
+        "script": 955,
+        "style": 113
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/transaction.ts",
+      "kind": "ts",
+      "lines": 1557,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/transactions/ListPage.vue",
+      "kind": "vue",
+      "lines": 1490,
+      "sections": {
+        "template": 209,
+        "script": 825,
+        "style": 195
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/statistics/TransactionPage.vue",
+      "kind": "vue",
+      "lines": 1339,
+      "sections": {
+        "template": 108,
+        "script": 841,
+        "style": 45
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/list/dialogs/BatchManualEntryDialog.vue",
+      "kind": "vue",
+      "lines": 1299,
+      "sections": {
+        "template": 18,
+        "script": 690,
+        "style": 309
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/consts/currency.ts",
+      "kind": "ts",
+      "lines": 1288,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/account.ts",
+      "kind": "ts",
+      "lines": 1246,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/lib/datetime.ts",
+      "kind": "ts",
+      "lines": 1098,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/models/transaction.ts",
+      "kind": "ts",
+      "lines": 964,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/import/checkDataMatching.ts",
+      "kind": "ts",
+      "lines": 925,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/statistics/TransactionPage.vue",
+      "kind": "vue",
+      "lines": 909,
+      "sections": {
+        "template": 87,
+        "script": 520,
+        "style": 40
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/consts/icon.ts",
+      "kind": "ts",
+      "lines": 843,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/accounts/ListPage.vue",
+      "kind": "vue",
+      "lines": 829,
+      "sections": {
+        "template": 141,
+        "script": 409,
+        "style": 99
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/index.ts",
+      "kind": "ts",
+      "lines": 824,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/styles/mobile/global.scss",
+      "kind": "style",
+      "lines": 824,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/accounts/EditPage.vue",
+      "kind": "vue",
+      "lines": 779,
+      "sections": {
+        "template": 258,
+        "script": 234,
+        "style": 26
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/users/UserProfilePage.vue",
+      "kind": "vue",
+      "lines": 774,
+      "sections": {
+        "template": 176,
+        "script": 216,
+        "style": 0
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/common/KeywordInput.vue",
+      "kind": "vue",
+      "lines": 744,
+      "sections": {
+        "template": 177,
+        "script": 310,
+        "style": 230
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/accounts/ReconciliationStatementPage.vue",
+      "kind": "vue",
+      "lines": 732,
+      "sections": {
+        "template": 105,
+        "script": 355,
+        "style": 40
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/models/account.ts",
+      "kind": "ts",
+      "lines": 705,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/user/settings/tabs/UserBasicSettingTab.vue",
+      "kind": "vue",
+      "lines": 702,
+      "sections": {
+        "template": 13,
+        "script": 237,
+        "style": 25
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/pairingcenter/ListPage.vue",
+      "kind": "vue",
+      "lines": 689,
+      "sections": {
+        "template": 133,
+        "script": 438,
+        "style": 56
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/common/keywordExpression.ts",
+      "kind": "ts",
+      "lines": 673,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/core/datetime.ts",
+      "kind": "ts",
+      "lines": 670,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/categories/list/dialogs/EditDialog.vue",
+      "kind": "vue",
+      "lines": 655,
+      "sections": {
+        "template": 26,
+        "script": 535,
+        "style": 0
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/user.ts",
+      "kind": "ts",
+      "lines": 650,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/BudgetManagementDialog.vue",
+      "kind": "vue",
+      "lines": 635,
+      "sections": {
+        "template": 93,
+        "script": 299,
+        "style": 9
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/desktop/TrendsChart.vue",
+      "kind": "vue",
+      "lines": 634,
+      "sections": {
+        "template": 4,
+        "script": 615,
+        "style": 13
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/budget.ts",
+      "kind": "ts",
+      "lines": 621,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/accounts/list/dialogs/ReconciliationStatementDialog.vue",
+      "kind": "vue",
+      "lines": 619,
+      "sections": {
+        "template": 100,
+        "script": 359,
+        "style": 0
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/transactions/import/tabs/ImportTransactionDefineColumnTab.vue",
+      "kind": "vue",
+      "lines": 619,
+      "sections": {
+        "template": 220,
+        "script": 358,
+        "style": 35
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/stores/transactionCategory.ts",
+      "kind": "ts",
+      "lines": 609,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/consts/timezone.ts",
+      "kind": "ts",
+      "lines": 602,
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/mobile/accounts/ListPage.vue",
+      "kind": "vue",
+      "lines": 585,
+      "sections": {
+        "template": 112,
+        "script": 327,
+        "style": 38
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/budgets/list/dialogs/EditDialog.vue",
+      "kind": "vue",
+      "lines": 563,
+      "sections": {
+        "template": 27,
+        "script": 337,
+        "style": 12
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/user/settings/tabs/UserSecuritySettingTab.vue",
+      "kind": "vue",
+      "lines": 541,
+      "sections": {
+        "template": 85,
+        "script": 344,
+        "style": 0
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/tags/ListPage.vue",
+      "kind": "vue",
+      "lines": 526,
+      "sections": {
+        "template": 74,
+        "script": 245,
+        "style": 48
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/categories/ListPage.vue",
+      "kind": "vue",
+      "lines": 523,
+      "sections": {
+        "template": 87,
+        "script": 304,
+        "style": 14
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/components/desktop/DateTimeSelect.vue",
+      "kind": "vue",
+      "lines": 516,
+      "sections": {
+        "template": 90,
+        "script": 350,
+        "style": 69
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    },
+    {
+      "path": "src/views/desktop/app/settings/tabs/AppBasicSettingTab.vue",
+      "kind": "vue",
+      "lines": 408,
+      "sections": {
+        "template": 292,
+        "script": 115,
+        "style": 0
+      },
+      "reason": "legacy oversized file tracked by the frontend structure ratchet"
+    }
+  ]
+}

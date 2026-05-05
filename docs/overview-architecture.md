@@ -6,9 +6,10 @@
   - 通过事件循环桥接调用异步服务
 - **业务层（Core）**：`src/bill_analyser/core/`
   - 账单导入编排、去重、分类、统计、汇率等核心逻辑
-- **数据层（Database）**：`src/bill_analyser/core/db.py` + `src/bill_analyser/core/db_*.py`
+- **数据层（Database）**：`src/bill_analyser/core/db.py` + `src/bill_analyser/core/database/`
   - `db.py` 只暴露公共 `Database` façade
-  - 真实持久化能力按 runtime / schema / 业务域 mixin 拆分到多个 `db_*.py` 模块
+  - 真实持久化能力按 runtime / schema / 业务域 mixin 拆分；实现模块统一收口到 `core/database/**`，业务域使用无 `db_` 前缀的语义 package
+  - `database/runtime.py`、`database/shared.py`、`database/time.py`、`database/encryption.py` 与 `database/schema/` 维护连接生命周期、共享协议、时间、加密和 schema 编排内核
   - 底层仍保持基于 `aiosqlite` 的异步数据库访问
 - **前端层（Vue3 + TS）**：`src/web/src/`
   - 视图、状态管理（Pinia stores）、服务层（axios）

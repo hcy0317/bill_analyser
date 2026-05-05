@@ -16,8 +16,8 @@ from io import BytesIO
 
 import pytest
 
-from bill_analyser.core.ocr_provider import OcrRawResult
-from bill_analyser.core.ocr_service import OcrRateLimiter, OcrService
+from bill_analyser.core.ai.ocr.provider import OcrRawResult
+from bill_analyser.core.ai.ocr.service import OcrRateLimiter, OcrService
 
 
 class _StubProvider:

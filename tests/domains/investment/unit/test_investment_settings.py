@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from bill_analyser.core import investment_settings as investment_settings_module
+from bill_analyser.core.investment import settings as investment_settings_module
 
 
 

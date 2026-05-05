@@ -8,8 +8,8 @@ import asyncio
 
 import pytest
 
-from bill_analyser.core.ocr_provider import OcrRawResult
-from bill_analyser.core.ocr_service import (
+from bill_analyser.core.ai.ocr.provider import OcrRawResult
+from bill_analyser.core.ai.ocr.service import (
     ERR_CANCELLED,
     ERR_PARSE_ERROR,
     ERR_PROVIDER_UNCONFIGURED,
@@ -214,21 +214,21 @@ def test_service_success_payload_shape():
 
 
 def test_service_from_environment_disabled_default(monkeypatch):
-    from bill_analyser.core import ocr_provider as op
+    from bill_analyser.core.ai.ocr import provider as op
     monkeypatch.delenv(op.DEFAULT_PROVIDER_ENV, raising=False)
     service = OcrService.from_environment()
     assert service.provider is None
 
 
 def test_service_from_environment_unknown_provider_falls_back(monkeypatch):
-    from bill_analyser.core import ocr_provider as op
+    from bill_analyser.core.ai.ocr import provider as op
     monkeypatch.setenv(op.DEFAULT_PROVIDER_ENV, "totally_made_up")
     service = OcrService.from_environment()
     assert service.provider is None
 
 
 def test_service_from_environment_cloud_stub(monkeypatch):
-    from bill_analyser.core import ocr_provider as op
+    from bill_analyser.core.ai.ocr import provider as op
     monkeypatch.setenv(op.DEFAULT_PROVIDER_ENV, "cloud_stub")
     service = OcrService.from_environment()
     # cloud_stub 可被构造，但 recognize 时会被 service 翻译为 provider_unconfigured

@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from bill_analyser.core.db_shared import BudgetExecutionRequest, BudgetForecastRequest, DatabaseFacadeBase
+from bill_analyser.core.database.shared import BudgetExecutionRequest, BudgetForecastRequest, DatabaseFacadeBase
 
 
 class _ProbeFacade(DatabaseFacadeBase):

@@ -2,7 +2,13 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     collectImportPreviewIndexAnnotationIssues,
+    isImportPreviewServerPagedSortableColumn,
+    mapImportPreviewIndexResponseItem,
     matchesImportPreviewIndexItemFilters,
+    normalizePreviewPage,
+    normalizePreviewPageSize,
+    normalizePreviewTableSortDirection,
+    normalizePreviewTableSortItems,
     resolveImportPreviewIndexPage,
     sortImportPreviewIndexItems,
     type ImportPreviewIndexItem,
@@ -126,5 +132,67 @@ describe('import preview index helpers', () => {
         expect(page.totalPages).toBe(2);
         expect(page.page).toBe(2);
         expect(page.previewIds).toStrictEqual([3]);
+    });
+
+    test('maps server-paged index responses into the table filter model', () => {
+        const item = mapImportPreviewIndexResponseItem({
+            id: 42,
+            preview_date: '2026-05-01T00:00:00Z',
+            type: 3,
+            source_amount: 1288,
+            category_id: 'c-food',
+            actual_category_name: '餐饮',
+            source_account_id: 'acc-1',
+            actual_source_account_name: '支付宝',
+            comment: '早餐',
+            selected: true,
+            parser_source: 'alipay',
+            parser_tags: ['parser:alipay'],
+            transfer_status: 'accepted',
+            recurring_candidate_count: 2
+        });
+
+        expect(item).toMatchObject({
+            id: 42,
+            time: new Date('2026-05-01T00:00:00Z').getTime() / 1000,
+            type: 3,
+            sourceAmount: 1288,
+            categoryId: 'c-food',
+            actualCategoryName: '餐饮',
+            sourceAccountId: 'acc-1',
+            actualSourceAccountName: '支付宝',
+            comment: '早餐',
+            selected: true,
+            parserSource: 'alipay',
+            parserTags: ['parser:alipay'],
+            transferStatus: 'accepted',
+            recurringCandidateCount: 2
+        });
+    });
+
+    test('normalizes server-paged table page and sort request state', () => {
+        expect(normalizePreviewPage('2.9')).toBe(2);
+        expect(normalizePreviewPage(0)).toBe(1);
+        expect(normalizePreviewPageSize(-1, { serverPaged: false })).toBe(-1);
+        expect(normalizePreviewPageSize(-1, { serverPaged: true })).toBe(1);
+        expect(normalizePreviewTableSortDirection('DESC')).toBe('desc');
+        expect(normalizePreviewTableSortDirection(true)).toBe('asc');
+        expect(isImportPreviewServerPagedSortableColumn('time')).toBe(true);
+        expect(isImportPreviewServerPagedSortableColumn('actualCategoryName')).toBe(false);
+
+        expect(normalizePreviewTableSortItems([
+            { key: 'actualCategoryName', order: 'desc' },
+            { key: 'time', order: 'desc' }
+        ], { serverPaged: true })).toStrictEqual([
+            { key: 'time', order: 'desc' }
+        ]);
+
+        expect(normalizePreviewTableSortItems([
+            { key: 'actualCategoryName', order: 'desc' },
+            { value: 'time', order: 'desc' }
+        ], { serverPaged: false })).toStrictEqual([
+            { key: 'actualCategoryName', order: 'desc' },
+            { key: 'time', order: 'desc' }
+        ]);
     });
 });

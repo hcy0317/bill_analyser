@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.db import Database
-from bill_analyser.core.db_time import utc_now_iso
+from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.core.matching import build_transfer_pair_candidates
 from bill_analyser.core.matching.candidate_ids import parse_matching_candidate_id
 from bill_analyser.core.smart_dedup import SmartDeduplicationEngine

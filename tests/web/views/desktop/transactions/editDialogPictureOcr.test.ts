@@ -6,6 +6,7 @@ function readSource(relativePath: string): string {
 }
 
 const EDIT_DIALOG_PATH = 'src/views/desktop/transactions/list/dialogs/EditDialog.vue';
+const PICTURES_PANEL_PATH = 'src/views/desktop/transactions/list/dialogs/TransactionPicturesPanel.vue';
 
 describe('EditDialog picture OCR wiring', () => {
     test('add-mode picture uploads call OCR and keep the uploaded picture in the same client session', () => {
@@ -31,5 +32,20 @@ describe('EditDialog picture OCR wiring', () => {
         expect(source).toContain("if (errorCode === 'provider_unconfigured')");
         expect(source).toContain("snackbar.value?.showError('Receipt recognition is not configured');");
         expect(source).toContain("snackbar.value?.showError('Unable to recognize image');");
+    });
+
+    test('extracted picture panel keeps the parent upload and view/remove contract', () => {
+        const editDialogSource = readSource(EDIT_DIALOG_PATH);
+        const panelSource = readSource(PICTURES_PANEL_PATH);
+
+        expect(editDialogSource).toContain('<transaction-pictures-panel');
+        expect(editDialogSource).toContain(':get-picture-url="getTransactionPictureUrl"');
+        expect(editDialogSource).toContain('@upload="uploadPicture"');
+        expect(editDialogSource).toContain('@view-or-remove="viewOrRemovePicture"');
+        expect(panelSource).toContain(':accept="SUPPORTED_IMAGE_EXTENSIONS"');
+        expect(panelSource).toContain('@change="emit(\'upload\', $event)"');
+        expect(panelSource).toContain('@click="emit(\'view-or-remove\', pictureInfo)"');
+        expect(panelSource).toContain('if (!props.canAddPicture || props.submitting || props.recognizingPicture)');
+        expect(panelSource).toContain('props.mode === TransactionEditPageMode.Add || props.mode === TransactionEditPageMode.Edit');
     });
 });

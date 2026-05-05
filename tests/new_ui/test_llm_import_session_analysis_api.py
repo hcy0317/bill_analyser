@@ -7,7 +7,7 @@ import json
 import time
 from typing import Any
 
-from bill_analyser.core.llm_provider import LLMResponse
+from bill_analyser.core.ai.llm.provider import LLMResponse
 from tests.new_ui.test_bills_api import (
     _build_isolated_auth_headers,
     _ensure_test_expense_category,
@@ -119,7 +119,7 @@ def _list_llm_candidates_for_user(*, user_id: int) -> list[dict]:
 
 
 def _reset_llm_rate_limit_state() -> None:
-    from bill_analyser.core import llm_learning_service
+    from bill_analyser.core.ai.llm import learning_service as llm_learning_service
 
     llm_learning_service._RATE_LIMIT_BUCKETS.clear()  # pylint: disable=protected-access
 
@@ -398,7 +398,7 @@ class TestLLMImportSessionAnalysisAPI:
     """LLM analyze-transactions should support import-session preview inputs."""
 
     def test_llm_advanced_settings_normalizer_ignores_json_scalars(self):
-        from bill_analyser.core.db_llm_config import normalize_llm_advanced_settings
+        from bill_analyser.core.database.llm.config import normalize_llm_advanced_settings
 
         assert normalize_llm_advanced_settings("[]") == {}
         assert normalize_llm_advanced_settings('"plain"') == {}

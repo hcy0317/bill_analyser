@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from src.core.db import Database
-from src.core.budget import BudgetManager, BudgetStatus
+from bill_analyser.core.budgets.manager import BudgetManager, BudgetStatus
 
 
 @pytest.fixture

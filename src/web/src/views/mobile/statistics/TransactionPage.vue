@@ -311,88 +311,38 @@
             </f7-link>
         </f7-toolbar>
 
-        <f7-popover class="date-popover-menu"
-                    v-model:opened="showDatePopover"
-                    @popover:open="scrollPopoverToSelectedItem">
-            <f7-list dividers>
-                <f7-list-item :title="dateRange.displayName"
-                              :class="{ 'list-item-selected': queryDateType === dateRange.type }"
-                              :key="dateRange.type"
-                              v-for="dateRange in allDateRanges"
-                              @click="setDateFilter(dateRange.type)">
-                    <template #after>
-                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="queryDateType === dateRange.type"></f7-icon>
-                    </template>
-                    <template #footer>
-                        <div v-if="dateRange.isUserCustomRange && canShowCustomDateRange(dateRange.type)">
-                            <span>{{ queryStartTime }}</span>
-                            <span>&nbsp;-&nbsp;</span>
-                            <br/>
-                            <span>{{ queryEndTime }}</span>
-                        </div>
-                    </template>
-                </f7-list-item>
-            </f7-list>
-        </f7-popover>
-
-        <f7-popover class="date-aggregation-popover-menu"
-                    v-model:opened="showDateAggregationPopover"
-                    @popover:open="scrollPopoverToSelectedItem">
-            <f7-list dividers v-if="analysisType === StatisticsAnalysisType.TrendAnalysis">
-                <f7-list-item :title="aggregationType.displayName"
-                              :class="{ 'list-item-selected': trendDateAggregationType === aggregationType.type }"
-                              :key="aggregationType.type"
-                              v-for="aggregationType in allTrendAnalysisDateAggregationTypes"
-                              @click="setTrendDateAggregationType(aggregationType.type)">
-                    <template #after>
-                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="trendDateAggregationType === aggregationType.type"></f7-icon>
-                    </template>
-                </f7-list-item>
-            </f7-list>
-            <f7-list dividers v-else-if="analysisType === StatisticsAnalysisType.AssetTrends">
-                <f7-list-item :title="aggregationType.displayName"
-                              :class="{ 'list-item-selected': assetTrendsDateAggregationType === aggregationType.type }"
-                              :key="aggregationType.type"
-                              v-for="aggregationType in allAssetTrendsDateAggregationTypes"
-                              @click="setAssetTrendsDateAggregationType(aggregationType.type)">
-                    <template #after>
-                        <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="assetTrendsDateAggregationType === aggregationType.type"></f7-icon>
-                    </template>
-                </f7-list-item>
-            </f7-list>
-        </f7-popover>
-
-        <date-range-selection-sheet :title="tt('Custom Date Range')"
-                                    :min-time="query.categoricalChartStartTime"
-                                    :max-time="query.categoricalChartEndTime"
-                                    v-model:show="showCustomDateRangeSheet"
-                                    @dateRange:change="setCustomDateFilter">
-        </date-range-selection-sheet>
-
-        <month-range-selection-sheet :title="tt('Custom Date Range')"
-                                     :min-time="query.trendChartStartYearMonth"
-                                     :max-time="query.trendChartEndYearMonth"
-                                     v-model:show="showCustomMonthRangeSheet"
-                                     @dateRange:change="setCustomDateFilter">
-        </month-range-selection-sheet>
-
-        <f7-actions close-by-outside-click close-on-escape :opened="showMoreActionSheet" @actions:closed="showMoreActionSheet = false">
-            <f7-actions-group>
-                <f7-actions-button :class="{ 'disabled': reloading }" @click="filterAccounts">{{ tt('Filter Accounts') }}</f7-actions-button>
-                <f7-actions-button :class="{ 'disabled': reloading }" @click="filterCategories" v-if="canUseCategoryFilter">{{ tt('Filter Transaction Categories') }}</f7-actions-button>
-                <f7-actions-button :class="{ 'disabled': reloading }" @click="filterTags" v-if="canUseTagFilter">{{ tt('Filter Transaction Tags') }}</f7-actions-button>
-            </f7-actions-group>
-            <f7-actions-group v-if="canUseKeywordFilter">
-                <f7-actions-label v-if="query.keyword">{{ query.keyword }}</f7-actions-label>
-                <f7-actions-button :class="{ 'disabled': reloading }" @click="filterDescription">{{ tt('Filter transaction description') }}</f7-actions-button>
-            </f7-actions-group>
-            <f7-actions-group>
-                <f7-actions-button @click="settings">{{ tt('Settings') }}</f7-actions-button>
-            </f7-actions-group>
-            <f7-actions-group>
-                <f7-actions-button bold close>{{ tt('Cancel') }}</f7-actions-button>
-            </f7-actions-group>
-        </f7-actions>
+        <mobile-statistics-date-controls
+            v-model:show-date-popover="showDatePopover"
+            v-model:show-date-aggregation-popover="showDateAggregationPopover"
+            v-model:show-custom-date-range-sheet="showCustomDateRangeSheet"
+            v-model:show-custom-month-range-sheet="showCustomMonthRangeSheet"
+            v-model:show-more-action-sheet="showMoreActionSheet"
+            :analysis-type="analysisType"
+            :reloading="reloading"
+            :query="query"
+            :query-date-type="queryDateType"
+            :query-start-time="queryStartTime"
+            :query-end-time="queryEndTime"
+            :all-date-ranges="allDateRanges"
+            :trend-date-aggregation-type="trendDateAggregationType"
+            :asset-trends-date-aggregation-type="assetTrendsDateAggregationType"
+            :all-trend-analysis-date-aggregation-types="allTrendAnalysisDateAggregationTypes"
+            :all-asset-trends-date-aggregation-types="allAssetTrendsDateAggregationTypes"
+            :can-use-category-filter="canUseCategoryFilter"
+            :can-use-tag-filter="canUseTagFilter"
+            :can-use-keyword-filter="canUseKeywordFilter"
+            :can-show-custom-date-range="canShowCustomDateRange"
+            @popover-open="scrollPopoverToSelectedItem"
+            @date-filter="setDateFilter"
+            @trend-date-aggregation-type="setTrendDateAggregationType"
+            @asset-trends-date-aggregation-type="setAssetTrendsDateAggregationType"
+            @custom-date-filter="setCustomDateFilter"
+            @filter-accounts="filterAccounts"
+            @filter-categories="filterCategories"
+            @filter-tags="filterTags"
+            @filter-description="filterDescription"
+            @settings="settings"
+        />
     </f7-page>
 </template>
 
@@ -402,7 +352,7 @@ import type { Router } from 'framework7/types';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useStatisticsTransactionPageBase } from '@/views/base/statistics/StatisticsTransactionPageBase.ts';
-
+import MobileStatisticsDateControls from './components/MobileStatisticsDateControls.vue';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useStatisticsStore } from '@/stores/statistics.ts';

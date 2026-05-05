@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.matching import build_matching_session_candidates
 
 

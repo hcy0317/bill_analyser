@@ -1,7 +1,10 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { DateRange } from '@/core/datetime.ts';
+import { TransactionType } from '@/core/transaction.ts';
+import type { ImportTransaction } from '@/models/imported_transaction.ts';
 import { buildImportPreviewSignalViewModel } from '@/views/desktop/transactions/import/checkDataMatching.ts';
+import { collectImportTransactionSelectionSummary } from '@/views/desktop/transactions/import/checkDataSelection.ts';
 import {
     getImportCheckVisibleTransactions,
     IMPORT_CHECK_FILTER_MENU_ORDER,
@@ -40,6 +43,21 @@ function matches(row: TestRow, filters: Partial<ImportCheckDataFilterLike> = {})
         isEditing: () => false,
         signalViewModelFor: transaction => buildImportPreviewSignalViewModel(transaction.signalState || {})
     });
+}
+
+function selectionRow(
+    index: number,
+    type: TransactionType,
+    selected: boolean,
+    options: { valid?: boolean; recurring?: boolean } = {}
+): ImportTransaction {
+    return {
+        index,
+        type,
+        selected,
+        valid: options.valid ?? true,
+        hasRecurringMatch: () => !!options.recurring
+    } as ImportTransaction;
 }
 
 describe('checkDataFilters helpers', () => {
@@ -153,5 +171,37 @@ describe('checkDataFilters helpers', () => {
             }
         );
         expect(annotatedRows.map(row => row.id)).toStrictEqual([3]);
+    });
+
+    test('summarizes selected check-data rows and annotation reasons', () => {
+        const rows = [
+            selectionRow(1, TransactionType.Expense, true, { recurring: true }),
+            selectionRow(2, TransactionType.Income, true, { valid: false }),
+            selectionRow(3, TransactionType.Transfer, false)
+        ];
+        const issuesByIndex: Record<number, string[]> = {
+            1: ['Missing Category'],
+            2: ['Missing Category', 'Missing Source Account'],
+            3: ['Missing Destination Account']
+        };
+
+        const summary = collectImportTransactionSelectionSummary(
+            rows,
+            transaction => issuesByIndex[transaction.index] || []
+        );
+
+        expect(summary.selectedCount).toBe(2);
+        expect(summary.selectedExpenseCount).toBe(1);
+        expect(summary.selectedIncomeCount).toBe(1);
+        expect(summary.selectedTransferCount).toBe(0);
+        expect(summary.selectedRecurringMatchCount).toBe(1);
+        expect(summary.selectedInvalidCount).toBe(1);
+        expect(summary.annotationCount).toBe(3);
+        expect(summary.selectedAnnotationCount).toBe(2);
+        expect(summary.selectedAnnotationTransactions.map(transaction => transaction.index)).toStrictEqual([1, 2]);
+        expect(summary.annotationReasonSummaries).toStrictEqual([
+            { key: 'Missing Category', label: 'Missing Category', count: 2 },
+            { key: 'Missing Source Account', label: 'Missing Source Account', count: 1 }
+        ]);
     });
 });

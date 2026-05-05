@@ -4,8 +4,8 @@ from typing import Any, cast
 
 import pytest
 
-from bill_analyser.core import budget as budget_module
-from bill_analyser.core.budget import BudgetManager, BudgetStatus
+from bill_analyser.core.budgets import manager as budget_module
+from bill_analyser.core.budgets.manager import BudgetManager, BudgetStatus
 
 
 class LoggerRecorder:

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.db import Database
 
 

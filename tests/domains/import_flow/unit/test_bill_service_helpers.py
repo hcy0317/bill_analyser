@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.import_learning.model import ImportLearningPrediction
 from bill_analyser.utils.constants import TransactionType
 
@@ -2000,7 +2000,7 @@ def test_learning_model_signal_suppresses_missing_category_or_account_references
         },
     }
     monkeypatch.setattr(
-        "bill_analyser.core.bill_service_parts.import_learning_signals.predict_dual_head",
+        "bill_analyser.core.bills.service_parts.import_learning_signals.predict_dual_head",
         lambda *_args, **_kwargs: ImportLearningPrediction(
             semantic_label="type=支出|category=999",
             route_label="source=888|destination=0",

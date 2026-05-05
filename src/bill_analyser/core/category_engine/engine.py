@@ -4,7 +4,7 @@ from typing import Any
 
 from ...utils.constants import TransactionType
 from ...utils.logger import get_logger, log_method, log_step
-from ..investment_matching import is_ordinary_bank_interest_income
+from bill_analyser.core.investment.matching import is_ordinary_bank_interest_income
 from .matcher import CompiledRule, KeywordMatcher
 
 

@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from bill_analyser.core import ocr_provider as op
+from bill_analyser.core.ai.ocr import provider as op
 
 
 def test_factory_disabled_default(monkeypatch):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from bill_analyser.core.payment_screenshot_parser import parse_payment_screenshot_text
+from bill_analyser.core.ai.ocr.payment_screenshot_parser import parse_payment_screenshot_text
 
 
 def test_parse_wechat_pay_detail_text():

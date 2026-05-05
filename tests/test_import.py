@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from src.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 
 
 @pytest.fixture

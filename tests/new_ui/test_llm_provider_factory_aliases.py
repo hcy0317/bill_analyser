@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bill_analyser.core.llm_provider import ClaudeProvider, OpenAIProvider, ProviderFactory
+from bill_analyser.core.ai.llm.provider import ClaudeProvider, OpenAIProvider, ProviderFactory
 
 
 def test_provider_factory_supports_frontend_provider_values() -> None:

@@ -375,67 +375,13 @@
                                             </div>
                                         </td>
                                         <td class="rule-center-column-expression">
-                                            <div class="rule-expression-stack">
-                                                <div
-                                                    v-for="(expressionGroup, expressionIndex) in getRuleExpressionGroups(item)"
-                                                    :key="`${item.id}-${expressionIndex}`"
-                                                    class="rule-expression-line"
-                                                >
-                                                    <template
-                                                        v-for="(clause, clauseIndex) in expressionGroup.clauses"
-                                                        :key="`${item.id}-${expressionIndex}-${clauseIndex}`"
-                                                    >
-                                                        <span
-                                                            v-if="clause.connectorLabel"
-                                                            class="rule-expression-connector"
-                                                        >
-                                                            {{ clause.connectorLabel }}
-                                                        </span>
-                                                        <span
-                                                            v-if="clause.openParenLabel"
-                                                            class="rule-expression-paren rule-expression-paren--open"
-                                                        >
-                                                            {{ clause.openParenLabel }}
-                                                        </span>
-                                                        <v-chip
-                                                            class="rule-expression-operator"
-                                                            size="x-small"
-                                                            label
-                                                            variant="tonal"
-                                                            :color="getRuleExpressionDisplayOperatorColor(clause)"
-                                                        >
-                                                            {{ clause.label }}
-                                                        </v-chip>
-                                                        <v-chip
-                                                            v-for="term in getVisibleExpressionTerms(item.id, expressionIndex, clauseIndex, clause.terms)"
-                                                            :key="term"
-                                                            size="x-small"
-                                                            variant="tonal"
-                                                            color="primary"
-                                                            class="rule-expression-term"
-                                                            :title="term"
-                                                        >
-                                                            {{ term }}
-                                                        </v-chip>
-                                                        <v-chip
-                                                            v-if="getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) > 0"
-                                                            size="x-small"
-                                                            label
-                                                            variant="outlined"
-                                                            class="rule-expression-more"
-                                                            @click="toggleExpressionClauseExpanded(item.id, expressionIndex, clauseIndex)"
-                                                        >
-                                                            +{{ getHiddenExpressionTermCount(item.id, expressionIndex, clauseIndex, clause.terms) }}
-                                                        </v-chip>
-                                                        <span
-                                                            v-if="clause.closeParenLabel"
-                                                            class="rule-expression-paren rule-expression-paren--close"
-                                                        >
-                                                            {{ clause.closeParenLabel }}
-                                                        </span>
-                                                    </template>
-                                                </div>
-                                            </div>
+                                            <rule-expression-display
+                                                :rule-id="item.id"
+                                                :groups="getRuleExpressionGroups(item)"
+                                                :expanded-clause-keys="expandedExpressionClauseKeys"
+                                                :max-collapsed-terms="maxCollapsedExpressionTerms"
+                                                @update:expanded-clause-keys="expandedExpressionClauseKeys = $event"
+                                            />
                                         </td>
                                         <td class="rule-center-column-regex text-no-wrap">
                                             <v-icon
@@ -722,46 +668,32 @@ import services from '@/lib/services.ts';
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { CategoryType } from '@/core/category.ts';
-import {
-    getRuleExpressionDisplayOperatorColor,
-    parseExpression,
-    toExpressionDisplayClause,
-} from '@/components/common/keywordExpression.ts';
-import type { RuleExpressionDisplayClause } from '@/components/common/keywordExpression.ts';
 import CategoryRuleBuilderFields from '@/components/common/CategoryRuleBuilderFields.vue';
 import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import SettingsJsonImportExportButton from '@/components/desktop/SettingsJsonImportExportButton.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
+import RuleExpressionDisplay from './RuleExpressionDisplay.vue';
+import {
+    buildRuleExpressionDisplayGroups,
+} from './ruleExpressionDisplay.ts';
+import type { RuleExpressionDisplayGroup } from './ruleExpressionDisplay.ts';
+import {
+    matchesRuleExpressionFilterText,
+    parseRuleExpressionFilterQuery,
+    primaryCategoryFilterTypeOrder,
+} from './ruleCenterFilters.ts';
+import type {
+    PrimaryCategoryDisplayInfo,
+    PrimaryCategoryFilterGroup,
+    RuleBooleanFilter,
+    RuleFilterOption,
+} from './ruleCenterFilters.ts';
 
 const categoryStore = useTransactionCategoriesStore();
 const { tt, getAllTransactionDefaultCategories, getCurrentLanguageTag } = useI18n();
 type SnackBarType = InstanceType<typeof SnackBar>;
 type RuleCenterPanelTab = 'rules' | 'learning' | 'recurring';
-type RuleBooleanFilter = 'all' | 'yes' | 'no';
-
-interface RuleFilterOption<T extends string> {
-    title: string;
-    value: T;
-}
-
-interface PrimaryCategoryFilterOption extends RuleFilterOption<string> {
-    icon: string;
-    color: string;
-}
-
-interface PrimaryCategoryFilterGroup {
-    type: CategoryType;
-    title: string;
-    options: PrimaryCategoryFilterOption[];
-}
-
-interface PrimaryCategoryDisplayInfo {
-    id?: string;
-    name: string;
-    icon: string;
-    color: string;
-}
 
 const props = defineProps<{
     initTab?: string;
@@ -919,15 +851,6 @@ interface CategoryKeywordMigrationResult {
     skipped_count?: number | string | null;
 }
 
-interface RuleExpressionDisplayGroup {
-    clauses: RuleExpressionDisplayClause[];
-}
-
-interface ParsedRuleExpressionFilter {
-    includeGroups: string[][];
-    excludeGroups: string[][];
-}
-
 const categoryRules = ref<CategoryRuleItem[]>([]);
 const togglingRuleIds = ref<number[]>([]);
 const expandedExpressionClauseKeys = ref<string[]>([]);
@@ -1073,13 +996,6 @@ const localizedPresetPrimaryCategoryMap = computed<Map<string, PrimaryCategoryDi
 
     return metadataByName;
 });
-
-const primaryCategoryFilterTypeOrder: CategoryType[] = [
-    CategoryType.Income,
-    CategoryType.Expense,
-    CategoryType.Transfer,
-    CategoryType.Investment,
-];
 
 const primaryCategoryFilterGroups = computed<PrimaryCategoryFilterGroup[]>(() => (
     primaryCategoryFilterTypeOrder.map(type => ({
@@ -1255,121 +1171,12 @@ function compareDisplayCategoryRuleOrder(
         || compareDisplayCategoryRules(firstRule, secondRule);
 }
 
-function normalizeRuleFilterQuery(value: string): string {
-    return value
-        .replace(/！/g, '!')
-        .replace(/（/g, '(')
-        .replace(/）/g, ')')
-        .replace(/｜/g, '|')
-        .trim();
-}
-
-function splitRuleFilterAlternatives(value: string): string[] {
-    return value
-        .split('|')
-        .map(item => item.trim())
-        .filter(item => item.length > 0);
-}
-
-function parseRuleExpressionFilterQuery(query: string): ParsedRuleExpressionFilter {
-    const normalizedQuery = normalizeRuleFilterQuery(query);
-    const includeGroups: string[][] = [];
-    const excludeGroups: string[][] = [];
-    let index = 0;
-
-    while (index < normalizedQuery.length) {
-        while (index < normalizedQuery.length && /\s/.test(normalizedQuery[index] ?? '')) {
-            index += 1;
-        }
-
-        if (index >= normalizedQuery.length) {
-            break;
-        }
-
-        let exclude = false;
-        if (normalizedQuery[index] === '!') {
-            exclude = true;
-            index += 1;
-        } else {
-            const notMatch = normalizedQuery.slice(index).match(/^NOT(?=\s|=|\(|!|$)/i);
-            if (notMatch) {
-                exclude = true;
-                index += notMatch[0].length;
-            }
-        }
-
-        while (index < normalizedQuery.length && /[\s=]/.test(normalizedQuery[index] ?? '')) {
-            index += 1;
-        }
-
-        let token = '';
-        if (normalizedQuery[index] === '(') {
-            index += 1;
-            const tokenStart = index;
-            while (index < normalizedQuery.length && normalizedQuery[index] !== ')') {
-                index += 1;
-            }
-            token = normalizedQuery.slice(tokenStart, index);
-            if (normalizedQuery[index] === ')') {
-                index += 1;
-            }
-        } else {
-            const tokenStart = index;
-            while (
-                index < normalizedQuery.length
-                && !/\s/.test(normalizedQuery[index] ?? '')
-                && normalizedQuery[index] !== '!'
-                && normalizedQuery[index] !== '('
-                && normalizedQuery[index] !== ')'
-            ) {
-                index += 1;
-            }
-            token = normalizedQuery.slice(tokenStart, index);
-        }
-
-        const alternatives = splitRuleFilterAlternatives(token);
-        if (alternatives.length < 1) {
-            continue;
-        }
-
-        if (exclude) {
-            excludeGroups.push(alternatives);
-        } else {
-            includeGroups.push(alternatives);
-        }
-    }
-
-    return { includeGroups, excludeGroups };
-}
-
-function matchesRuleFilterTerm(text: string, term: string, useRegex: boolean): boolean {
-    if (useRegex) {
-        try {
-            return new RegExp(term, 'i').test(text);
-        } catch {
-            return false;
-        }
-    }
-
-    return text.toLocaleLowerCase().includes(term.toLocaleLowerCase());
-}
-
-function matchesAnyRuleFilterTerm(text: string, terms: string[], useRegex: boolean): boolean {
-    return terms.some(term => matchesRuleFilterTerm(text, term, useRegex));
-}
-
 function matchesRuleExpressionFilter(expression: string): boolean {
-    const parsedFilter = parsedRuleExpressionFilter.value;
-    if (parsedFilter.includeGroups.length < 1 && parsedFilter.excludeGroups.length < 1) {
-        return true;
-    }
-
-    const searchableExpression = String(expression || '');
-    return parsedFilter.includeGroups.every(terms => (
-        matchesAnyRuleFilterTerm(searchableExpression, terms, ruleExpressionFilterUseRegex.value)
-    )) && !parsedFilter.excludeGroups.some(terms => (
-        matchesAnyRuleFilterTerm(searchableExpression, terms, ruleExpressionFilterUseRegex.value)
-    ));
+    return matchesRuleExpressionFilterText(
+        expression,
+        parsedRuleExpressionFilter.value,
+        ruleExpressionFilterUseRegex.value
+    );
 }
 
 function isCategoryGroupCollapsed(groupKey: string): boolean {
@@ -1486,85 +1293,10 @@ function clearExpressionFilter(): void {
 }
 
 function getRuleExpressionGroups(rule: CategoryRuleItem): RuleExpressionDisplayGroup[] {
-    const expression = String(rule.rule_expression || '').trim();
-    const parsedExpression = parseExpression(expression, { format: 'composite' });
-
-    if (parsedExpression.clauses.length < 1) {
-        return [{
-            clauses: [{
-                label: parsedExpression.sourceFormat === 'empty' ? tt('Empty') : tt('Raw'),
-                operator: 'RAW',
-                negated: false,
-                terms: [parsedExpression.rawExpression || expression || tt('Empty')],
-            }],
-        }];
-    }
-
-    const groups: RuleExpressionDisplayGroup[] = [];
-    let currentClauses: RuleExpressionDisplayClause[] = [];
-
-    parsedExpression.clauses.forEach((clause, index) => {
-        if (
-            index > 0
-            && clause.startsExpression
-            && currentClauses.length > 0
-        ) {
-            groups.push({ clauses: currentClauses });
-            currentClauses = [];
-        }
-
-        currentClauses.push(toExpressionDisplayClause(clause, {
-            isFirstClause: currentClauses.length === 0,
-            emptyLabel: tt('Empty'),
-        }));
+    return buildRuleExpressionDisplayGroups(rule.rule_expression, {
+        empty: tt('Empty'),
+        raw: tt('Raw'),
     });
-
-    if (currentClauses.length > 0) {
-        groups.push({ clauses: currentClauses });
-    }
-
-    return groups;
-}
-
-function makeExpressionClauseKey(ruleId: number, expressionIndex: number, clauseIndex: number): string {
-    return `${ruleId}:${expressionIndex}:${clauseIndex}`;
-}
-
-function isExpressionClauseExpanded(ruleId: number, expressionIndex: number, clauseIndex: number): boolean {
-    return expandedExpressionClauseKeys.value.includes(makeExpressionClauseKey(ruleId, expressionIndex, clauseIndex));
-}
-
-function toggleExpressionClauseExpanded(ruleId: number, expressionIndex: number, clauseIndex: number): void {
-    const key = makeExpressionClauseKey(ruleId, expressionIndex, clauseIndex);
-    expandedExpressionClauseKeys.value = expandedExpressionClauseKeys.value.includes(key)
-        ? expandedExpressionClauseKeys.value.filter(item => item !== key)
-        : [...expandedExpressionClauseKeys.value, key];
-}
-
-function getVisibleExpressionTerms(
-    ruleId: number,
-    expressionIndex: number,
-    clauseIndex: number,
-    terms: string[]
-): string[] {
-    if (isExpressionClauseExpanded(ruleId, expressionIndex, clauseIndex)) {
-        return terms;
-    }
-
-    return terms.slice(0, maxCollapsedExpressionTerms);
-}
-
-function getHiddenExpressionTermCount(
-    ruleId: number,
-    expressionIndex: number,
-    clauseIndex: number,
-    terms: string[]
-): number {
-    if (isExpressionClauseExpanded(ruleId, expressionIndex, clauseIndex)) {
-        return 0;
-    }
-
-    return Math.max(0, terms.length - maxCollapsedExpressionTerms);
 }
 
 const ruleBuilderModel = computed({
@@ -2227,70 +1959,6 @@ defineExpose({
 
 .rule-center-pagination {
     border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-}
-
-.rule-expression-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding-block: 6px;
-}
-
-.rule-expression-line {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: fit-content;
-    max-width: 100%;
-    padding: 4px 6px;
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
-    border-radius: 8px;
-    background: rgba(var(--v-theme-surface), 1);
-    overflow: hidden;
-}
-
-.rule-expression-connector,
-.rule-expression-paren {
-    flex: 0 0 auto;
-    font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
-    font-size: 0.78rem;
-    font-weight: 700;
-    line-height: 1;
-    color: rgba(var(--v-theme-primary), 0.86);
-}
-
-.rule-expression-connector {
-    min-width: 12px;
-    text-align: center;
-}
-
-.rule-expression-paren {
-    letter-spacing: 1px;
-}
-
-.rule-expression-operator {
-    flex: 0 0 auto;
-}
-
-.rule-expression-term {
-    flex: 0 1 auto;
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    border: 1px solid rgba(var(--v-theme-primary), 0.18);
-}
-
-.rule-expression-term :deep(.v-chip__content) {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.rule-expression-more {
-    cursor: pointer;
-    flex: 0 0 auto;
 }
 
 @media (max-width: 960px) {

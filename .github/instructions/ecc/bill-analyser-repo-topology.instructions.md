@@ -76,8 +76,9 @@ applyTo: 'AGENTS.md,CLAUDE.md,README.md,pyproject.toml,pytest.ini,*.ps1,*.bat,do
 
 - External callers should continue importing `Database` from `src/bill_analyser/core/db.py`.
 - Keep `db.py` thin: it is the public async facade, not the place to re-expand all domain logic.
-- Keep persistence split by domain/runtime/schema in `db_*.py`.
-- Keep schema orchestration in `db_schema.py` plus the `db_schema_*.py` shards.
+- Keep persistence split by domain/runtime/schema under `src/bill_analyser/core/database/**`.
+- Keep schema orchestration in `src/bill_analyser/core/database/schema/` plus its `core/`, `templates_imports/`, and `users_security.py` shards.
+- Do not add new root-level `src/bill_analyser/core/db_*` implementation modules or packages.
 - Do not bypass the façade by teaching routes or services to assemble mixins directly.
 - When refactoring persistence, preserve the façade-plus-shards structure instead of collapsing multiple domains back into one large module.
 

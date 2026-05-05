@@ -4,7 +4,7 @@ Encryption Status Route - 数据库加密状态查询
 
 from flask import Blueprint, jsonify
 
-from bill_analyser.core.db_encryption import get_encryption_config, is_sqlcipher_available
+from bill_analyser.core.database.encryption import get_encryption_config, is_sqlcipher_available
 
 bp = Blueprint("encryption", __name__)
 

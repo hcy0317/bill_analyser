@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from bill_analyser.core.db_bills import DatabaseBillsMixin
+from bill_analyser.core.database.bills import DatabaseBillsMixin
 
 
 class _ProbeBillsMixin(DatabaseBillsMixin):

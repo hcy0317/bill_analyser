@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from bill_analyser.core import db_user_data as db_user_data_module
+from bill_analyser.core.database.users import data as db_user_data_module
 from bill_analyser.core.db import Database
 
 

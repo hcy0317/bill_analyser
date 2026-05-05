@@ -7,6 +7,8 @@ import pytest
 from bill_analyser.parsers import factory as factory_module
 from bill_analyser.parsers.base import ParserBase, StandardBill
 from bill_analyser.parsers.factory import ParserFactory
+from bill_analyser.import_contracts import parser_tags as contract_parser_tags
+from bill_analyser.parsers import parser_tags as parser_tags_facade
 from tests.parser_test_support import sample_path
 
 
@@ -36,6 +38,21 @@ def test_standard_bill_round_trip_and_type_hints() -> None:
     assert bill.amount == 12.34
     assert bill.to_dict()["description"] == "早餐"
     assert bill.to_dict()["parser_tags"] == ["parser:wechat", "channel:wallet"]
+
+
+def test_parser_tags_contract_and_compat_facade_share_behavior() -> None:
+    assert parser_tags_facade.resolve_parser_tags is contract_parser_tags.resolve_parser_tags
+    assert contract_parser_tags.resolve_parser_tags(
+        '["parser:WeChat", "channel:wallet", "parser:wechat"]'
+    ) == ["parser:wechat", "channel:wallet"]
+    assert parser_tags_facade.resolve_parser_tags(
+        None,
+        parser_id="cmbc",
+        payment_method="",
+    ) == ["parser:cmbc", "channel:bank"]
+    assert parser_tags_facade.serialize_parser_tags(
+        "parser:alipay, channel:wallet",
+    ) == '["parser:alipay", "channel:wallet"]'
 
 
 def test_parser_base_helpers_and_post_process(tmp_path: Path) -> None:

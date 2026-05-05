@@ -12,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from bill_analyser.core.analyzer import Analyzer
-from bill_analyser.core.bill_service import BillService
-from bill_analyser.core.budget_execution_summary import (
+from bill_analyser.core.bills import BillService
+from bill_analyser.core.budgets.execution_summary import (
     build_budget_execution_summary,
     select_budget_detail_items,
 )

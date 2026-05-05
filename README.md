@@ -175,9 +175,9 @@ npm run build
 
 核心模块：
 
-- `src/bill_analyser/core/bill_service.py`
-- `src/bill_analyser/core/smart_dedup.py`
-- `src/bill_analyser/core/category_engine.py`
+- `src/bill_analyser/core/bills/`
+- `src/bill_analyser/core/smart_dedup/`
+- `src/bill_analyser/core/category_engine/`
 
 ## 重要开发约束
 

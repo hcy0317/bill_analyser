@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 from pathlib import Path
 
 import pytest
 
 from bill_analyser.core.db import Database
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _build_user_payload(username: str) -> dict[str, object]:
@@ -53,6 +57,56 @@ def _build_budget_payload() -> dict[str, object]:
         "created_at": "2026-03-01 00:00:00",
         "updated_at": "2026-03-01 00:00:00",
     }
+
+
+@pytest.mark.parametrize(
+    ("module_name", "export_name"),
+    [
+        ("bill_analyser.core.database.audit_backup", "DatabaseAuditBackupMixin"),
+        ("bill_analyser.core.database.accounts", "DatabaseAccountsMixin"),
+        ("bill_analyser.core.database.bills", "DatabaseBillsMixin"),
+        ("bill_analyser.core.database.budgets.core", "DatabaseBudgetsCoreMixin"),
+        ("bill_analyser.core.database.budgets.execution", "DatabaseBudgetExecutionHistoryMixin"),
+        ("bill_analyser.core.database.budgets.forecast", "DatabaseBudgetForecastMixin"),
+        ("bill_analyser.core.database.budgets.reporting", "DatabaseBudgetsReportingMixin"),
+        ("bill_analyser.core.database.categories", "DatabaseCategoriesMixin"),
+        ("bill_analyser.core.database.category_rules", "DatabaseCategoryRulesMixin"),
+        ("bill_analyser.core.database.imports.configs", "DatabaseImportConfigsMixin"),
+        ("bill_analyser.core.database.imports.learning", "DatabaseImportLearningMixin"),
+        ("bill_analyser.core.database.imports.preview", "DatabaseImportPreviewMixin"),
+        ("bill_analyser.core.database.imports.sessions", "DatabaseImportSessionsMixin"),
+        ("bill_analyser.core.database.llm.candidates", "DatabaseLLMCandidatesMixin"),
+        ("bill_analyser.core.database.llm.config", "DatabaseLLMConfigMixin"),
+        ("bill_analyser.core.database.matching", "DatabaseMatchingMixin"),
+        ("bill_analyser.core.database.reconciliation", "DatabaseReconciliationMixin"),
+        ("bill_analyser.core.database.recurring_suggestions", "DatabaseRecurringSuggestionsMixin"),
+        ("bill_analyser.core.database.settings_bundle", "DatabaseSettingsBundleMixin"),
+        ("bill_analyser.core.database.tags", "DatabaseTagsMixin"),
+        ("bill_analyser.core.database.templates", "DatabaseTemplatesMixin"),
+        ("bill_analyser.core.database.users.data", "DatabaseUserDataMixin"),
+        ("bill_analyser.core.database.users.auth", "DatabaseUsersAuthMixin"),
+    ],
+)
+def test_database_domain_packages_export_public_mixins(
+    module_name: str,
+    export_name: str,
+) -> None:
+    """数据库实现包应通过 core.database 导出公共 mixin。"""
+    module = importlib.import_module(module_name)
+
+    assert hasattr(module, export_name)
+
+
+def test_core_root_has_no_db_prefixed_implementation_artifacts() -> None:
+    """core 根目录只保留 db.py 门面，不再散落 db_* 实现模块。"""
+    core_root = REPO_ROOT / "src" / "bill_analyser" / "core"
+    stale_artifacts = sorted(
+        path.name
+        for path in core_root.iterdir()
+        if path.name.startswith("db_") and path.name != "db.py"
+    )
+
+    assert stale_artifacts == []
 
 
 def test_database_facade_preserves_selected_surface_and_keyword_parameters() -> None:

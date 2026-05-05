@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const LIST_PAGE_PATH = 'src/views/mobile/transactions/ListPage.vue';
+const MONTH_BLOCK_PATH = 'src/views/mobile/transactions/components/MobileTransactionMonthBlock.vue';
 const AMOUNT_FILTER_PAGE_PATH = 'src/views/mobile/transactions/AmountFilterPage.vue';
 
 function readSource(relativePath: string): string {
@@ -10,7 +11,7 @@ function readSource(relativePath: string): string {
 
 describe('mobile ListPage.vue Investment parity (S3)', () => {
     test('category icon renderer is type-agnostic and resolves icon/color from transaction.category', () => {
-        const source = readSource(LIST_PAGE_PATH);
+        const source = readSource(MONTH_BLOCK_PATH);
         // Single ItemIcon binding driven by transaction.category — covers Income, Expense, Transfer
         // and Investment alike. There is no per-type case statement that would silently drop Investment.
         expect(source).toContain('icon-type="category"');
@@ -20,7 +21,7 @@ describe('mobile ListPage.vue Investment parity (S3)', () => {
     });
 
     test('destination account row treats Investment like Transfer (parity with desktop)', () => {
-        const source = readSource(LIST_PAGE_PATH);
+        const source = readSource(MONTH_BLOCK_PATH);
         // Both the arrow icon and the destination account name must show for Investment, not just Transfer.
         expect(source).toMatch(
             /transaction\.type === TransactionType\.Transfer \|\| transaction\.type === TransactionType\.Investment[\s\S]+?transaction\.destinationAccount\.name/
@@ -37,7 +38,7 @@ describe('mobile ListPage.vue Investment parity (S3)', () => {
     });
 
     test('TransactionType is imported so the Investment comparison resolves at runtime', () => {
-        const source = readSource(LIST_PAGE_PATH);
+        const source = readSource(MONTH_BLOCK_PATH);
         expect(source).toMatch(/import\s*\{[^}]*TransactionType[^}]*\}\s*from\s*'@\/core\/transaction\.ts'/);
     });
 });

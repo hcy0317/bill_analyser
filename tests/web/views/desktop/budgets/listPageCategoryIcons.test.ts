@@ -8,6 +8,11 @@ describe('desktop budget category icon loading', () => {
         'utf-8'
     );
 
+    const readBudgetListTableSource = () => fs.readFileSync(
+        path.resolve(process.cwd(), 'src/views/desktop/budgets/components/BudgetListTable.vue'),
+        'utf-8'
+    );
+
     function getReloadSource(source: string): string {
         const startIndex = source.indexOf('async function reload(force: boolean): Promise<void>');
         const endIndex = source.indexOf('async function loadForecast(): Promise<void>', startIndex);
@@ -40,11 +45,7 @@ describe('desktop budget category icon loading', () => {
     });
 
     test('budget list rows always render ItemIcon through the shared category resolver', () => {
-        const source = readListPageSource();
-        const budgetTableSource = source.slice(
-            source.indexOf('v-for="(group, gIdx) in groupedBudgets"'),
-            source.indexOf('<v-window-item value="history"')
-        );
+        const budgetTableSource = readBudgetListTableSource();
 
         expect(budgetTableSource).toContain(':icon-id="group.categoryIcon"');
         expect(budgetTableSource).toContain(':icon-id="getBudgetCategoryIcon(budget, group)"');

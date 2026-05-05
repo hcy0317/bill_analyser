@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
-from bill_analyser.core.investment_matching import (
+from bill_analyser.core.bills import BillService
+from bill_analyser.core.investment.matching import (
     classify_investment_pnl_change,
     extract_investment_profile,
     is_ordinary_bank_interest_income,

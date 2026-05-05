@@ -44,6 +44,168 @@ export interface ImportPreviewIndexPageResult {
     previewIds: number[];
 }
 
+export type PreviewTableSortDirection = 'asc' | 'desc';
+
+export interface PreviewTableSortInputItem {
+    key?: string;
+    value?: string;
+    order?: PreviewTableSortDirection | boolean | string | null;
+}
+
+export interface PreviewTableSortItem {
+    key: string;
+    order?: PreviewTableSortDirection | boolean;
+}
+
+export interface ImportPreviewIndexResponseItem {
+    id: number;
+    preview_date?: string;
+    type?: number;
+    source_amount?: number;
+    category_id?: string;
+    actual_category_name?: string;
+    source_account_id?: string;
+    destination_account_id?: string;
+    actual_source_account_name?: string;
+    actual_destination_account_name?: string;
+    comment?: string;
+    counterparty?: string;
+    payment_method?: string;
+    selected?: boolean;
+    is_manually_annotated?: boolean;
+    parser_source?: string;
+    parser_tags?: string[];
+    dedup_type?: string;
+    dedup_source_ids?: Array<number | string>;
+    transfer_status?: ImportPreviewSignalStatus | null;
+    transfer_title?: string;
+    learning_status?: ImportPreviewSignalStatus | null;
+    learning_title?: string;
+    learning_summary?: string;
+    learning_mode?: string;
+    recurring_template_id?: string;
+    recurring_candidate_count?: number;
+    recurring_match_reasons?: string;
+    recurring_matched_date?: string;
+}
+
+export const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([
+    'time',
+    'type',
+    'sourceAmount',
+    'counterparty',
+    'paymentMethod',
+    'comment'
+]);
+
+export function isImportPreviewServerPagedSortableColumn(columnKey: string): boolean {
+    return SERVER_PAGED_SORTABLE_COLUMNS.has(columnKey);
+}
+
+export function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexResponseItem): ImportPreviewIndexItem {
+    const time = new Date(item.preview_date || '').getTime() / 1000;
+    return {
+        id: Number(item.id || 0),
+        time: Number.isFinite(time) ? time : Date.now() / 1000,
+        type: Number(item.type || TransactionType.ModifyBalance),
+        actualCategoryName: item.actual_category_name || '',
+        categoryId: item.category_id || '',
+        actualSourceAccountName: item.actual_source_account_name || '',
+        actualDestinationAccountName: item.actual_destination_account_name || '',
+        sourceAccountId: item.source_account_id || '',
+        destinationAccountId: item.destination_account_id || '',
+        tagIds: [],
+        originalTagNames: [],
+        comment: item.comment || '',
+        isManuallyAnnotated: !!item.is_manually_annotated,
+        selected: !!item.selected,
+        sourceAmount: Number(item.source_amount || 0),
+        counterparty: item.counterparty || '',
+        paymentMethod: item.payment_method || '',
+        parserSource: item.parser_source || '',
+        parserTags: item.parser_tags || [],
+        dedupType: item.dedup_type || '',
+        dedupSourceIds: item.dedup_source_ids || [],
+        transferStatus: item.transfer_status ?? null,
+        transferTitle: item.transfer_title || '',
+        learningStatus: item.learning_status ?? null,
+        learningTitle: item.learning_title || '',
+        learningSummary: item.learning_summary || '',
+        learningMode: item.learning_mode || '',
+        recurringTemplateId: item.recurring_template_id || '',
+        recurringCandidateCount: Number(item.recurring_candidate_count || 0),
+        recurringMatchReasons: item.recurring_match_reasons || '',
+        recurringMatchedDate: item.recurring_matched_date || '',
+    };
+}
+
+export function normalizePreviewPage(value: number | string | null | undefined): number {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 1) {
+        return 1;
+    }
+
+    return Math.floor(normalizedValue);
+}
+
+export function normalizePreviewPageSize(
+    value: number | string | null | undefined,
+    options: { serverPaged?: boolean } = {}
+): number {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue)) {
+        return 10;
+    }
+
+    if (!options.serverPaged && normalizedValue === -1) {
+        return -1;
+    }
+
+    return Math.max(Math.floor(normalizedValue), 1);
+}
+
+export function normalizePreviewTableSortDirection(
+    value: string | boolean | null | undefined
+): PreviewTableSortDirection {
+    return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
+}
+
+export function normalizeServerPagedSortKey(value: string | null | undefined): string {
+    const normalizedValue = String(value || '').trim();
+    return SERVER_PAGED_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
+}
+
+export function normalizePreviewTableSortItems(
+    sortBy: PreviewTableSortInputItem[] | null | undefined,
+    options: { serverPaged?: boolean } = {}
+): PreviewTableSortItem[] {
+    if (!Array.isArray(sortBy) || sortBy.length < 1) {
+        return [];
+    }
+
+    const normalizedItems: PreviewTableSortItem[] = [];
+    for (const item of sortBy) {
+        const rawKey = item?.key ?? item?.value;
+        const key = String(rawKey || '').trim();
+
+        if (!key) {
+            continue;
+        }
+
+        normalizedItems.push({
+            key,
+            order: normalizePreviewTableSortDirection(item?.order)
+        });
+    }
+
+    if (!options.serverPaged) {
+        return normalizedItems;
+    }
+
+    const primarySortableItem = normalizedItems.find(item => normalizeServerPagedSortKey(item.key));
+    return primarySortableItem ? [primarySortableItem] : [];
+}
+
 function getPrimaryRecurringReason(item: ImportPreviewIndexItem): string {
     if (!item.recurringMatchReasons) {
         return '';

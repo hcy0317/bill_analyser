@@ -427,7 +427,7 @@ async def test_update_composite_learning_rule_recomputes_runtime_match_fields(tm
             '"parser_id": "alipay", "payment_method": "支付宝"}'
         )
 
-        from bill_analyser.core.bill_service import BillService
+        from bill_analyser.core.bills import BillService
 
         service = BillService(db)
         old_bill = {

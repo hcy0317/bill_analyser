@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from bill_analyser.core.bill_service import BillService
+from bill_analyser.core.bills import BillService
 from bill_analyser.core.smart_dedup import DeduplicationType
 from bill_analyser.utils.constants import TransactionType
 

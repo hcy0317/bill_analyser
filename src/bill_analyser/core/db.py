@@ -2,29 +2,29 @@
 
 from __future__ import annotations
 
-from .db_accounts import DatabaseAccountsMixin
-from .db_audit_backup import DatabaseAuditBackupMixin
-from .db_bills import DatabaseBillsMixin
-from .db_budgets_reporting import DatabaseBudgetsReportingMixin
-from .db_categories import DatabaseCategoriesMixin
-from .db_category_rules import DatabaseCategoryRulesMixin
-from .db_llm_candidates import DatabaseLLMCandidatesMixin
-from .db_llm_config import DatabaseLLMConfigMixin
-from .db_import_configs import DatabaseImportConfigsMixin
-from .db_import_learning import DatabaseImportLearningMixin
-from .db_import_preview import DatabaseImportPreviewMixin
-from .db_import_sessions import DatabaseImportSessionsMixin
-from .db_matching import DatabaseMatchingMixin
-from .db_reconciliation import DatabaseReconciliationMixin
-from .db_recurring_suggestions import DatabaseRecurringSuggestionsMixin
-from .db_runtime import DatabaseRuntimeMixin
-from .db_schema import DatabaseSchemaMixin
-from .db_shared import BudgetExecutionRequest, BudgetForecastRequest, BudgetGroupKey
-from .db_settings_bundle import DatabaseSettingsBundleMixin
-from .db_tags import DatabaseTagsMixin
-from .db_templates import DatabaseTemplatesMixin
-from .db_user_data import DatabaseUserDataMixin
-from .db_users_auth import DatabaseUsersAuthMixin
+from .database.accounts import DatabaseAccountsMixin
+from .database.audit_backup import DatabaseAuditBackupMixin
+from .database.bills import DatabaseBillsMixin
+from .database.budgets.reporting import DatabaseBudgetsReportingMixin
+from .database.categories import DatabaseCategoriesMixin
+from .database.category_rules import DatabaseCategoryRulesMixin
+from .database.llm.candidates import DatabaseLLMCandidatesMixin
+from .database.llm.config import DatabaseLLMConfigMixin
+from .database.imports.configs import DatabaseImportConfigsMixin
+from .database.imports.learning import DatabaseImportLearningMixin
+from .database.imports.preview import DatabaseImportPreviewMixin
+from .database.imports.sessions import DatabaseImportSessionsMixin
+from .database.matching import DatabaseMatchingMixin
+from .database.reconciliation import DatabaseReconciliationMixin
+from .database.recurring_suggestions import DatabaseRecurringSuggestionsMixin
+from .database.runtime import DatabaseRuntimeMixin
+from .database.schema import DatabaseSchemaMixin
+from .database.shared import BudgetExecutionRequest, BudgetForecastRequest, BudgetGroupKey
+from .database.settings_bundle import DatabaseSettingsBundleMixin
+from .database.tags import DatabaseTagsMixin
+from .database.templates import DatabaseTemplatesMixin
+from .database.users.data import DatabaseUserDataMixin
+from .database.users.auth import DatabaseUsersAuthMixin
 
 
 class DatabaseBudgetImportMixin(  # pylint: disable=too-many-ancestors

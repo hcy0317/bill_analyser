@@ -13,6 +13,7 @@
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
 - 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
 - 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件
+- 领域持久化代码统一位于 `core/database/**`：runtime/shared/time/encryption 维护基础层，`schema/` 维护 schema 编排，accounts/bills/budgets/imports/llm/users 等语义 package 继续导出原 mixin 名称；`core/` 根层只保留 `db.py` 作为公共 Database façade
 
 ## 6.1.1 模板域当前漂移清单
 - 前端期望字段：`templateType/categoryId/sourceAccountId/destinationAccountId/sourceAmount/destinationAmount/hideAmount/tagIds/displayOrder/hidden/scheduled*`。

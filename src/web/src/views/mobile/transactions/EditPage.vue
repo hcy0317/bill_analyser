@@ -457,41 +457,20 @@
                 </template>
             </f7-list-item>
 
-            <f7-list-item
-                link="#" no-chevron
-                :header="tt('Pictures')"
-                v-if="showTransactionPictures || (transaction.pictures && transaction.pictures.length > 0)"
-            >
-                <template #footer>
-                    <f7-block class="margin-top-half no-padding no-margin" :class="{ 'readonly': submitting || uploadingPicture || recognizingPicture || removingPictureId }">
-                        <swiper-container
-                            :pagination="false"
-                            :space-between="10"
-                            :slides-per-view="'auto'"
-                            class="transaction-pictures"
-                        >
-                            <swiper-slide class="transaction-picture-container" :key="picIdx"
-                                          v-for="(pictureInfo, picIdx) in transaction.pictures"
-                                          @click="viewOrRemovePicture(pictureInfo)">
-                                <div class="transaction-picture">
-                                    <div class="display-flex justify-content-center align-items-center transaction-picture-control-backdrop"
-                                         v-if="mode === TransactionEditPageMode.Add || mode === TransactionEditPageMode.Edit">
-                                        <f7-icon class="picture-control-icon picture-remove-icon" f7="trash" v-if="pictureInfo.pictureId !== removingPictureId"></f7-icon>
-                                        <f7-preloader color="white" :size="28" v-if="pictureInfo.pictureId === removingPictureId" />
-                                    </div>
-                                    <img alt="picture" :src="getTransactionPictureUrl(pictureInfo)"/>
-                                </div>
-                            </swiper-slide>
-                            <swiper-slide @click="showOpenPictureDialog" v-if="canAddTransactionPicture">
-                                <div class="display-flex justify-content-center align-items-center transaction-picture transaction-picture-add">
-                                    <f7-icon class="picture-control-icon" f7="plus" v-if="!uploadingPicture && !recognizingPicture"></f7-icon>
-                                    <f7-preloader :size="28" v-if="uploadingPicture || recognizingPicture" />
-                                </div>
-                            </swiper-slide>
-                        </swiper-container>
-                    </f7-block>
-                </template>
-            </f7-list-item>
+            <mobile-transaction-pictures-panel
+                :show="showTransactionPictures || !!(transaction.pictures && transaction.pictures.length > 0)"
+                :pictures="transaction.pictures || []"
+                :mode="mode"
+                :submitting="submitting"
+                :uploading-picture="uploadingPicture"
+                :recognizing-picture="recognizingPicture"
+                :removing-picture-id="removingPictureId"
+                :can-add-transaction-picture="canAddTransactionPicture"
+                :tt="tt"
+                :get-transaction-picture-url="getTransactionPictureUrl"
+                @view-or-remove-picture="viewOrRemovePicture"
+                @open-picture-dialog="showOpenPictureDialog"
+            />
 
             <f7-list-input
                 type="textarea"
@@ -564,7 +543,7 @@ import {
     GeoLocationStatus,
     useTransactionEditPageBase
 } from '@/views/base/transactions/TransactionEditPageBase.ts';
-
+import MobileTransactionPicturesPanel from './components/MobileTransactionPicturesPanel.vue';
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useEnvironmentsStore } from '@/stores/environment.ts';
 import { useUserStore } from '@/stores/user.ts';

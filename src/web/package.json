@@ -13,6 +13,7 @@
     "serve": "cross-env NODE_ENV=development vite --host 127.0.0.1 --port 8081",
     "build": "cross-env NODE_ENV=production vite build",
     "serve:dist": "vite preview",
+    "structure:check": "node ./scripts/check-frontend-structure.mjs",
     "lint": "vue-tsc --noEmit && eslint . --fix",
     "lint:ci": "vue-tsc --noEmit && eslint .",
     "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand",

@@ -1,15 +1,9 @@
 import moment from 'moment-timezone';
 import { type unitOfTime } from 'moment/moment';
 
-import jalaali, { type JalaaliDateObject } from 'jalaali-js';
-
 import {
     itemAndIndex
 } from '@/core/base.ts';
-import {
-    type ChineseCalendarLocaleData,
-    CalendarType
-} from '@/core/calendar.ts';
 import {
     type DateTime,
     type DateTimeFormatOptions,
@@ -33,7 +27,6 @@ import {
     YearQuarterUnixTime,
     YearMonthUnixTime,
     YearMonthDayUnixTime,
-    WeekDay,
     MeridiemIndicator,
     KnownDateTimeFormat,
     DateRangeScene,
@@ -49,358 +42,36 @@ import {
 } from '@/core/numeral.ts';
 
 import {
-    isFunction,
-    isDefined,
     isObject,
     isString,
-    isNumber,
-    ofObject
+    isNumber
 } from './common.ts';
 
 import {
-    type ChineseYearMonthDayInfo,
-    getChineseYearMonthDayInfo
-} from '@/lib/calendar/chinese_calendar.ts';
+    MomentDateTime,
+    getHourIn12HourFormat,
+    getUtcOffsetByUtcOffsetMinutes
+} from './datetime/moment_datetime.ts';
+import {
+    getFiscalYearFromUnixTime,
+    getFiscalYearStartUnixTime,
+    getFiscalYearEndUnixTime,
+    getCurrentFiscalYear,
+    getFiscalYearTimeRangeFromUnixTime,
+    getFiscalYearTimeRangeFromYear
+} from './datetime/fiscal_year.ts';
+
+export {
+    getHourIn12HourFormat,
+    getUtcOffsetByUtcOffsetMinutes,
+    getFiscalYearFromUnixTime,
+    getFiscalYearStartUnixTime,
+    getFiscalYearEndUnixTime,
+    getCurrentFiscalYear,
+    getFiscalYearTimeRangeFromUnixTime,
+    getFiscalYearTimeRangeFromYear
+};
 
-interface DateTimeFormatResult {
-    value: number | string;
-    minNumeralLength?: number;
-    maxLength?: number;
-    hasNumeral?: boolean;
-}
-
-type DateTimeTokenFormatFunction = (d: MomentDateTime, options: DateTimeFormatOptions) => DateTimeFormatResult
-
-class MomentDateTime implements DateTime {
-    private static readonly tokenFormatFuncs: Record<string, DateTimeTokenFormatFunction> = {
-        'YY': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarYear(options), hasNumeral: true, minNumeralLength: 2, maxLength: 2 }),
-        'YYYY': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarYear(options), hasNumeral: true, minNumeralLength: 4 }),
-        'M': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarMonth(options), hasNumeral: true }),
-        'MM': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarMonth(options), hasNumeral: true, minNumeralLength: 2 }),
-        'MMM': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarMonthDisplayShortName(options) }),
-        'MMMM': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarMonthDisplayName(options) }),
-        'D': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarDay(options), hasNumeral: true }),
-        'DD': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getLocalizedCalendarDay(options), hasNumeral: true, minNumeralLength: 2 }),
-        'dd': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getWeekDayDisplayMinName(options) }),
-        'ddd': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getWeekDayDisplayShortName(options) }),
-        'dddd': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getWeekDayDisplayName(options) }),
-        'H': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getHour() }),
-        'HH': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getHour(), minNumeralLength: 2 }),
-        'h': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: getHourIn12HourFormat(d.getHour()) }),
-        'hh': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: getHourIn12HourFormat(d.getHour()), minNumeralLength: 2 }),
-        'm': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getMinute() }),
-        'mm': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getMinute(), minNumeralLength: 2 }),
-        's': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getSecond() }),
-        'ss': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: d.getSecond(), minNumeralLength: 2 }),
-        'A': (d: MomentDateTime, options: DateTimeFormatOptions) => ofObject<DateTimeFormatResult>({ value: d.getDisplayAMPM(options) }),
-        'Z': (d: MomentDateTime) => ofObject<DateTimeFormatResult>({ value: getUtcOffsetByUtcOffsetMinutes(d.getTimezoneUtcOffsetMinutes()), hasNumeral: true }),
-    };
-
-    private readonly instance: moment.Moment;
-    private chineseDateInfo?: ChineseYearMonthDayInfo | undefined = undefined;
-    private persianDateInfo?: JalaaliDateObject | undefined = undefined;
-
-    private constructor(instance: moment.Moment) {
-        this.instance = instance;
-    }
-
-    public getUnixTime(): number {
-        return this.instance.unix();
-    }
-
-    public getLocalizedCalendarYear(options: DateTimeFormatOptions): string {
-        if (options && options.calendarType === CalendarType.Buddhist) {
-            return (this.instance.year() + 543).toString();
-        } else if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.displayYear ?? '';
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return this.getPersianDateInfo().jy.toString();
-        }
-
-        return this.instance.year().toString();
-    }
-
-    public getGregorianCalendarYear(): number {
-        return this.instance.year();
-    }
-
-    public getGregorianCalendarQuarter(): number {
-        return this.instance.quarter();
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    public getLocalizedCalendarQuarter(options: DateTimeFormatOptions): number {
-        return this.instance.quarter();
-    }
-
-    public getGregorianCalendarMonth(): number {
-        return this.instance.month() + 1;
-    }
-
-    public getGregorianCalendarMonthDisplayName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        const names = options.localeData.months();
-        return names[this.getGregorianCalendarMonth() - 1] || '';
-    }
-
-    public getGregorianCalendarMonthDisplayShortName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        const names = options.localeData.monthsShort();
-        return names[this.getGregorianCalendarMonth() - 1] || '';
-    }
-
-    public getLocalizedCalendarMonth(options: DateTimeFormatOptions): string {
-        if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.displayMonth ?? '';
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return this.getPersianDateInfo().jm.toString();
-        }
-
-        return (this.instance.month() + 1).toString();
-    }
-
-    public getLocalizedCalendarMonthDisplayName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.displayMonth ?? '';
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return options.persianCalendarLocaleData.monthNames[this.getPersianDateInfo().jm - 1] ?? '';
-        }
-
-        const names = options.localeData.months();
-        return names[this.instance.month()] || '';
-    }
-
-    public getLocalizedCalendarMonthDisplayShortName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.displayMonth ?? '';
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return options.persianCalendarLocaleData.monthShortNames[this.getPersianDateInfo().jm - 1] ?? '';
-        }
-
-        const names = options.localeData.monthsShort();
-        return names[this.instance.month()] || '';
-    }
-
-    public getGregorianCalendarDay(): number {
-        return this.instance.date();
-    }
-
-    public getLocalizedCalendarDay(options: DateTimeFormatOptions): string {
-        if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.displayDay ?? '';
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return this.getPersianDateInfo().jd.toString();
-        }
-
-        return this.instance.date().toString();
-    }
-
-    public isLocalizedCalendarFirstDayOfMonth(options: DateTimeFormatOptions): boolean {
-        if (options && options.calendarType === CalendarType.Chinese) {
-            return this.getChineseDateInfo(options.chineseCalendarLocaleData)?.day === 1;
-        } else if (options && options.calendarType === CalendarType.Persian) {
-            return this.getPersianDateInfo().jd === 1;
-        }
-
-        return this.instance.date() === 1;
-    }
-
-    public getGregorianCalendarYearDashMonthDashDay(): TextualYearMonthDay {
-        return (this.instance.year() + '-' + (this.instance.month() + 1).toString().padStart(2, NumeralSystem.WesternArabicNumerals.digitZero) + '-' + this.instance.date().toString().padStart(2, NumeralSystem.WesternArabicNumerals.digitZero)) as TextualYearMonthDay;
-    }
-
-    public getGregorianCalendarYearDashMonth(): TextualYearMonth {
-        return (this.instance.year() + '-' + (this.instance.month() + 1).toString().padStart(2, NumeralSystem.WesternArabicNumerals.digitZero)) as TextualYearMonth;
-    }
-
-    public getWeekDay(): WeekDay {
-        return WeekDay.valueOf(this.instance.day()) as WeekDay;
-    }
-
-    public getWeekDayDisplayName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        const names = options.localeData.weekdays();
-        return names[this.instance.day()] || '';
-    }
-
-    public getWeekDayDisplayShortName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        const names = options.localeData.weekdaysShort();
-        return names[this.instance.day()] || '';
-    }
-
-    public getWeekDayDisplayMinName(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        const names = options.localeData.weekdaysMin();
-        return names[this.instance.day()] || '';
-    }
-
-    public getHour(): number {
-        return this.instance.hour();
-    }
-
-    public getMinute(): number {
-        return this.instance.minute();
-    }
-
-    public getSecond(): number {
-        return this.instance.second();
-    }
-
-    public getDisplayAMPM(options: DateTimeFormatOptions): string {
-        if (!options || !options.localeData) {
-            return '';
-        }
-
-        return options.localeData.meridiem(this.getHour(), this.getMinute(), false);
-    }
-
-    public getTimezoneUtcOffsetMinutes(): number {
-        return this.instance.utcOffset();
-    }
-
-    public getDateTimeAfterDays(days: number): DateTime {
-        return MomentDateTime.of(this.instance.clone().add(days, 'days'));
-    }
-
-    public toGregorianCalendarYearMonthDay(): YearMonthDay {
-        return {
-            year: this.instance.year(),
-            month: this.instance.month() + 1,
-            day: this.instance.date()
-        };
-    }
-
-    public toGregorianCalendarYear0BasedMonth(): Year0BasedMonth {
-        return {
-            year: this.instance.year(),
-            month0base: this.instance.month()
-        };
-    }
-
-    public format(format: string, options: DateTimeFormatOptions): string {
-        let result = '';
-        let i = 0;
-
-        while (i < format.length) {
-            let matched = false;
-            for (let len = 4; len > 0; len--) {
-                const token = format.substring(i, i + len);
-                const formatFunc = MomentDateTime.tokenFormatFuncs[token];
-
-                if (isFunction(formatFunc)) {
-                    const formattedResult: DateTimeFormatResult = formatFunc(this, options);
-                    let formattedValue: string = formattedResult.value.toString();
-
-                    if (isDefined(formattedResult.minNumeralLength)) {
-                        formattedValue = formattedValue.padStart(formattedResult.minNumeralLength, NumeralSystem.WesternArabicNumerals.digitZero);
-                    }
-
-                    if (isDefined(formattedResult.maxLength) && formattedValue.length > formattedResult.maxLength) {
-                        formattedValue = formattedValue.substring(formattedValue.length - formattedResult.maxLength);
-                    }
-
-                    if (isNumber(formattedResult.value)) {
-                        if (options && options.numeralSystem) {
-                            formattedValue = options.numeralSystem.replaceWesternArabicDigitsToLocalizedDigits(formattedValue);
-                        }
-                    } else if (isString(formattedValue)) {
-                        if (formattedResult.hasNumeral && options && options.numeralSystem) {
-                            formattedValue = options.numeralSystem.replaceWesternArabicDigitsToLocalizedDigits(formattedValue);
-                        }
-                    }
-
-                    result += formattedValue;
-                    i += len;
-                    matched = true;
-                    break;
-                }
-            }
-
-            if (!matched) {
-                result += format[i];
-                i++;
-            }
-        }
-
-        return result;
-    }
-
-    public static of(instance: moment.Moment): DateTime {
-        return new MomentDateTime(instance);
-    }
-
-    public static now(): DateTime {
-        return new MomentDateTime(moment());
-    }
-
-    private getChineseDateInfo(localeData: ChineseCalendarLocaleData): ChineseYearMonthDayInfo | undefined {
-        if (!this.chineseDateInfo) {
-            this.chineseDateInfo = getChineseYearMonthDayInfo({
-                year: this.instance.year(),
-                month: this.instance.month() + 1,
-                day: this.instance.date()
-            }, localeData);
-        }
-
-        return this.chineseDateInfo;
-    }
-
-    private getPersianDateInfo(): JalaaliDateObject {
-        if (!this.persianDateInfo) {
-            this.persianDateInfo = jalaali.toJalaali(this.instance.year(), this.instance.month() + 1, this.instance.date());
-        }
-
-        return this.persianDateInfo;
-    }
-
-    static isGregorianCalendarYearFirstTime(dateTime: MomentDateTime): boolean {
-        const currentUnixTime = dateTime.instance.clone().set({ millisecond: 0 }).unix();
-        const expectedUnxTime = dateTime.instance.clone().set({ millisecond: 0 }).startOf('year').unix();
-        return currentUnixTime === expectedUnxTime;
-    }
-
-    static isGregorianCalendarYearLastTime(dateTime: MomentDateTime): boolean {
-        const currentUnixTime = dateTime.instance.clone().set({ millisecond: 999 }).unix();
-        const expectedUnxTime = dateTime.instance.clone().set({ millisecond: 999 }).endOf('year').unix();
-        return currentUnixTime === expectedUnxTime;
-    }
-
-    static isGregorianCalendarMonthFirstTime(dateTime: MomentDateTime): boolean {
-        const currentUnixTime = dateTime.instance.clone().set({ millisecond: 0 }).unix();
-        const expectedUnxTime = dateTime.instance.clone().set({ millisecond: 0 }).startOf('month').unix();
-        return currentUnixTime === expectedUnxTime;
-    }
-
-    static isGregorianCalendarMonthLastTime(dateTime: MomentDateTime): boolean {
-        const currentUnixTime = dateTime.instance.clone().set({ millisecond: 999 }).unix();
-        const expectedUnxTime = dateTime.instance.clone().set({ millisecond: 999 }).endOf('month').unix();
-        return currentUnixTime === expectedUnxTime;
-    }
-}
 
 export function getAllowedYearRange(): number[] {
     // 年份范围：从2000年到今年+5年（支持预算的长期规划）
@@ -456,16 +127,6 @@ export function getYearMonthStringFromYear0BasedMonthObject(yearMonth: Year0Base
     return (`${yearMonth.year}-${yearMonth.month0base + 1}`) as TextualYearMonth;
 }
 
-export function getHourIn12HourFormat(hour: number): number {
-    hour = hour % 12;
-
-    if (hour === 0) {
-        hour = 12;
-    }
-
-    return hour;
-}
-
 export function isPM(hour: number): boolean {
     if (hour > 11) {
         return true;
@@ -486,20 +147,6 @@ export function isUnixTimeYearMonthDayHourEquals(unixTime1: number, unixTime2: n
     const date2 = moment.unix(unixTime2);
 
     return date1.year() === date2.year() && date1.month() === date2.month() && date1.date() === date2.date() && date1.hour() === date2.hour();
-}
-
-export function getUtcOffsetByUtcOffsetMinutes(utcOffsetMinutes: number): string {
-    const offsetHours = Math.trunc(Math.abs(utcOffsetMinutes) / 60);
-    const offsetMinutes = Math.abs(utcOffsetMinutes) - offsetHours * 60;
-
-    const finalOffsetHours = offsetHours.toString().padStart(2, NumeralSystem.WesternArabicNumerals.digitZero);
-    const finalOffsetMinutes = offsetMinutes.toString().padStart(2, NumeralSystem.WesternArabicNumerals.digitZero);
-
-    if (utcOffsetMinutes >= 0) {
-        return `+${finalOffsetHours}:${finalOffsetMinutes}`;
-    } else {
-        return `-${finalOffsetHours}:${finalOffsetMinutes}`;
-    }
 }
 
 export function getTimezoneOffset(timezone?: string): string {
@@ -1448,129 +1095,4 @@ export function isDateRangeMatchOneMonth(minTime: number, maxTime: number): bool
     }
 
     return isDateRangeMatchFullMonths(minTime, maxTime);
-}
-
-export function getFiscalYearFromUnixTime(unixTime: number, fiscalYearStartValue: number): number {
-    const date = moment.unix(unixTime);
-
-    // 若财年从 1 月 1 日开始，则财年与公历年一致
-    if (fiscalYearStartValue === FiscalYearStart.JanuaryFirstDay.value) {
-        return date.year();
-    }
-
-    // 获取日期组成部分
-    const month = date.month() + 1; // 从 1 开始计数
-    const day = date.date();
-    const year = date.year();
-
-    let fiscalYearStart = FiscalYearStart.valueOf(fiscalYearStartValue);
-
-    if (!fiscalYearStart) {
-        fiscalYearStart = FiscalYearStart.Default;
-    }
-
-    // 对于其他财年起始日：
-    // 如果输入时间早于该公历年的财年起始日，
-    // 则它属于在当前公历年结束的那个财年
-    if (month < fiscalYearStart.month || (month === fiscalYearStart.month && day < fiscalYearStart.day)) {
-        return year;
-    }
-
-    // 如果输入时间在该公历年的财年起始日当天或之后，
-    // 则它属于在下一公历年结束的那个财年
-    return year + 1;
-}
-
-export function getFiscalYearStartUnixTime(unixTime: number, fiscalYearStartValue: number): number {
-    const date = moment.unix(unixTime);
-
-    // 若财年从 1 月 1 日开始，则财年起点总是输入公历年的 1 月 1 日
-    // 注意：这里使用宽松相等，以兼容潜在的类型不匹配（string vs number）
-
-    if (fiscalYearStartValue == FiscalYearStart.JanuaryFirstDay.value) {
-        return moment().year(date.year()).month(0).date(1).hour(0).minute(0).second(0).millisecond(0).unix();
-    }
-
-    let fiscalYearStart = FiscalYearStart.valueOf(fiscalYearStartValue);
-
-    if (!fiscalYearStart) {
-        fiscalYearStart = FiscalYearStart.Default;
-    }
-
-    const month = date.month() + 1; // 从 1 开始计数
-    const day = date.date();
-    const year = date.year();
-
-    // 对于其他财年起始日：
-    // 如果输入时间早于该公历年的财年起始日，
-    // 则对应财年的开始日期位于“输入年份”，结束日期位于“输入年份 + 1”。
-    // 如果输入时间在该公历年的财年起始日当天或之后，
-    // 则对应财年的开始日期位于“输入年份 - 1”，结束日期位于“输入年份”。
-    let startYear = year - 1;
-    if (month > fiscalYearStart.month || (month === fiscalYearStart.month && day >= fiscalYearStart.day)) {
-        startYear = year;
-    }
-
-    return moment().set({
-        year: startYear,
-        month: fiscalYearStart.month - 1, // 从 0 开始计数
-        date: fiscalYearStart.day,
-        hour: 0,
-        minute: 0,
-        second: 0,
-        millisecond: 0,
-    }).unix();
-}
-
-export function getFiscalYearEndUnixTime(unixTime: number, fiscalYearStart: number): number {
-    const fiscalYearStartTime = moment.unix(getFiscalYearStartUnixTime(unixTime, fiscalYearStart));
-    return fiscalYearStartTime.add(1, 'years').subtract(1, 'seconds').unix();
-}
-
-export function getCurrentFiscalYear(fiscalYearStart: number): number {
-    const date = moment();
-    return getFiscalYearFromUnixTime(date.unix(), fiscalYearStart);
-}
-
-export function getFiscalYearTimeRangeFromUnixTime(unixTime: number, fiscalYearStart: number): FiscalYearUnixTime {
-    const start = getFiscalYearStartUnixTime(unixTime, fiscalYearStart);
-    const end = getFiscalYearEndUnixTime(unixTime, fiscalYearStart);
-    return {
-        year: getFiscalYearFromUnixTime(unixTime, fiscalYearStart),
-        minUnixTime: start,
-        maxUnixTime: end,
-    };
-}
-
-export function getFiscalYearTimeRangeFromYear(year: number, fiscalYearStartValue: number): FiscalYearUnixTime {
-    const fiscalYear = year;
-    let fiscalYearStart = FiscalYearStart.valueOf(fiscalYearStartValue);
-
-    if (!fiscalYearStart) {
-        fiscalYearStart = FiscalYearStart.Default;
-    }
-
-    // 对于指定财年（例如 2023），其开始日期位于前一个公历年，
-    // 除非财年起始日就是 1 月 1 日
-    const calendarStartYear = fiscalYearStartValue === FiscalYearStart.JanuaryFirstDay.value ? fiscalYear : fiscalYear - 1;
-
-    // 生成财年起始时刻的时间戳
-    const fiscalYearStartUnixTime = moment().set({
-        year: calendarStartYear,
-        month: fiscalYearStart.month - 1, // 从 0 开始计数
-        date: fiscalYearStart.day,
-        hour: 0,
-        minute: 0,
-        second: 0,
-        millisecond: 0,
-    }).unix();
-
-    // 财年结束时刻 = 财年开始后一年再减 1 秒
-    const fiscalYearEndUnixTime = moment.unix(fiscalYearStartUnixTime).add(1, 'years').subtract(1, 'seconds').unix();
-
-    return {
-        year: fiscalYear,
-        minUnixTime: fiscalYearStartUnixTime,
-        maxUnixTime: fiscalYearEndUnixTime,
-    };
 }

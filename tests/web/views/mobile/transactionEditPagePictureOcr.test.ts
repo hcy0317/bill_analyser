@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, test } from '@jest/globals';
 
 const EDIT_PAGE_PATH = 'src/views/mobile/transactions/EditPage.vue';
+const PICTURES_PANEL_PATH = 'src/views/mobile/transactions/components/MobileTransactionPicturesPanel.vue';
 
 function readSource(relativePath: string): string {
     return fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf-8');
@@ -30,8 +31,11 @@ describe('mobile transaction EditPage picture OCR source contract', () => {
     });
 
     test('keeps upload and OCR busy states on the picture control', () => {
+        const picturesPanelSource = readSource(PICTURES_PANEL_PATH);
         expect(source).toContain('recognizingPicture');
-        expect(source).toMatch(/submitting \|\| uploadingPicture \|\| recognizingPicture \|\| removingPictureId/);
-        expect(source).toMatch(/uploadingPicture \|\| recognizingPicture/);
+        expect(source).toContain(':uploading-picture="uploadingPicture"');
+        expect(source).toContain(':recognizing-picture="recognizingPicture"');
+        expect(picturesPanelSource).toMatch(/submitting \|\| uploadingPicture \|\| recognizingPicture \|\| removingPictureId/);
+        expect(picturesPanelSource).toMatch(/uploadingPicture \|\| recognizingPicture/);
     });
 });

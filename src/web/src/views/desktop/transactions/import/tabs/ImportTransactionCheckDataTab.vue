@@ -818,11 +818,35 @@ import {
 import { cloneImportPreviewDraftTransaction } from '../importPreviewDrafts.ts';
 import {
     collectImportPreviewIndexAnnotationIssues,
+    isImportPreviewServerPagedSortableColumn,
+    mapImportPreviewIndexResponseItem,
     matchesImportPreviewIndexItemFilters,
+    normalizePreviewPage,
+    normalizePreviewPageSize,
+    normalizePreviewTableSortDirection,
+    normalizePreviewTableSortItems,
+    normalizeServerPagedSortKey,
     resolveImportPreviewIndexPage,
     sortImportPreviewIndexItems,
-    type ImportPreviewIndexItem
+    type ImportPreviewIndexItem,
+    type PreviewTableSortDirection,
+    type PreviewTableSortInputItem,
+    type PreviewTableSortItem
 } from '../importPreviewIndex.ts';
+import {
+    collectImportTransactionSelectionSummary,
+    type AnnotationReasonSummary,
+    type ImportTransactionSelectionSummary
+} from '../checkDataSelection.ts';
+import {
+    type ImportTransactionCheckDataFilter,
+    type ImportTransactionCheckDataMenu,
+    type ImportTransactionCheckDataMenuGroup,
+    type ImportTransactionWithPreviewState,
+    type MatchingSessionCandidateItem,
+    type RecurringCandidateItem,
+    type TransferDecisionPreviewBaseline
+} from '../checkDataTypes.ts';
 // v6.34: 导入分类和账户编辑对话框
 import CategoryEditDialog from '@/views/desktop/categories/list/dialogs/EditDialog.vue';
 import AccountEditDialog from '@/views/desktop/accounts/list/dialogs/EditDialog.vue';
@@ -831,13 +855,9 @@ import { ref, computed, useTemplateRef, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import {
-    type ImportCheckAnnotationFilterValue
-} from '../checkDataAnnotation.ts';
-import {
     buildImportPreviewSignalViewModel,
     type ImportCheckMatchingSourceContext,
     type ImportPreviewSignalStatus,
-    type ImportPreviewVisibleSignalFilterValue,
     type ImportPreviewSignalViewModel,
     type ImportPreviewSignalViewModelOptions
 } from '../checkDataMatching.ts';
@@ -936,155 +956,6 @@ type ImportLearningSuggestionDialogType = InstanceType<typeof ImportLearningSugg
 // v6.34: 分类和账户编辑对话框类型
 type CategoryEditDialogType = InstanceType<typeof CategoryEditDialog>;
 type AccountEditDialogType = InstanceType<typeof AccountEditDialog>;
-
-interface ImportTransactionCheckDataFilter {
-    minDatetime: number | null; // minDatetime or maxDatetime is null for 'All Date Range', all are not null for 'Custom Date Range'
-    maxDatetime: number | null;
-    transactionType: TransactionType | null; // null for 'All Transaction Type'
-    category: string | null | undefined; // null for 'All Category', undefined for 'Invalid Category'
-    account: string | null | undefined; // null for 'All Account', undefined for 'Invalid Account'
-    tag: string | null | undefined; // null for 'All Tag', undefined for 'Invalid Tag'
-    signal: ImportPreviewVisibleSignalFilterValue | null; // null for 'All Signals'
-    annotation: ImportCheckAnnotationFilterValue; // null=all, 'needs-review'=needs annotation or manually annotated, 'no-issues'=no issues
-    description: string | null; // null for 'All Description'
-}
-
-interface ImportTransactionCheckDataMenuGroup {
-    title: string;
-    summary?: string;
-    items: ImportTransactionCheckDataMenu[];
-}
-
-interface ImportTransactionCheckDataMenu {
-    prependIcon?: string;
-    title: string;
-    subTitle?: string;
-    appendIcon?: string;
-    disabled?: boolean;
-    divider?: boolean;
-    onClick: () => void;
-}
-
-interface AnnotationReasonSummary {
-    key: string;
-    label: string;
-    count: number;
-}
-
-interface ImportTransactionSelectionSummary {
-    annotationIssuesByIndex: Record<number, string[]>;
-    selectedCount: number;
-    selectedExpenseCount: number;
-    selectedIncomeCount: number;
-    selectedTransferCount: number;
-    selectedRecurringMatchCount: number;
-    selectedInvalidCount: number;
-    annotationCount: number;
-    selectedAnnotationCount: number;
-    selectedAnnotationTransactions: ImportTransaction[];
-    annotationReasonSummaries: AnnotationReasonSummary[];
-}
-
-interface RecurringCandidateItem {
-    id: string;
-    name?: string;
-    matchScore?: number;
-    matchReasons?: string[];
-    matchedOccurrenceDate?: string;
-}
-
-interface MatchingSessionCandidateItem {
-    candidate_id?: string;
-    details?: {
-        rule_id?: number | null;
-        score?: number;
-        level?: string;
-        reason?: string;
-        recommended_type?: string;
-        summary?: string;
-        review_status?: string;
-        suppressed?: boolean;
-        source?: string;
-        mode?: string;
-        auto_apply?: boolean;
-        model_version?: string;
-    };
-}
-
-interface TransferDecisionPreviewBaseline {
-    type: number;
-    categoryId: string;
-    recurringTemplateId: string;
-    recurringTemplateName: string;
-    recurringCandidateCount: number;
-    recurringMatchScore: number;
-    recurringMatchReasons: string;
-    recurringMatchedDate: string;
-    reviewStatus: string;
-    reviewedType: string;
-    suppressed: boolean;
-}
-
-type ImportTransactionWithPreviewState = ImportTransaction & {
-    _previewId?: number;
-    _previewDecisionBaseline?: TransferDecisionPreviewBaseline;
-    _shouldClearTransferDecision?: boolean;
-    _learningDecisionBaseline?: ImportCheckLearningDecisionBaseline;
-};
-
-type PreviewTableSortDirection = 'asc' | 'desc';
-
-interface PreviewTableSortInputItem {
-    key?: string;
-    value?: string;
-    order?: PreviewTableSortDirection | boolean | string | null;
-}
-
-interface PreviewTableSortItem {
-    key: string;
-    order?: PreviewTableSortDirection | boolean;
-}
-
-interface ImportPreviewIndexResponseItem {
-    id: number;
-    preview_date?: string;
-    type?: number;
-    source_amount?: number;
-    category_id?: string;
-    actual_category_name?: string;
-    source_account_id?: string;
-    destination_account_id?: string;
-    actual_source_account_name?: string;
-    actual_destination_account_name?: string;
-    comment?: string;
-    counterparty?: string;
-    payment_method?: string;
-    selected?: boolean;
-    is_manually_annotated?: boolean;
-    parser_source?: string;
-    parser_tags?: string[];
-    dedup_type?: string;
-    dedup_source_ids?: Array<number | string>;
-    transfer_status?: ImportPreviewSignalStatus | null;
-    transfer_title?: string;
-    learning_status?: ImportPreviewSignalStatus | null;
-    learning_title?: string;
-    learning_summary?: string;
-    learning_mode?: string;
-    recurring_template_id?: string;
-    recurring_candidate_count?: number;
-    recurring_match_reasons?: string;
-    recurring_matched_date?: string;
-}
-
-const SERVER_PAGED_SORTABLE_COLUMNS = new Set<string>([
-    'time',
-    'type',
-    'sourceAmount',
-    'counterparty',
-    'paymentMethod',
-    'comment'
-]);
 
 const props = defineProps<{
     importTransactions?: ImportTransaction[]
@@ -2849,84 +2720,9 @@ function collectAnnotationIssues(item: ImportTransaction): string[] {
     return reasons;
 }
 
-const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => {
-    const annotationIssuesByIndex: Record<number, string[]> = {};
-    const annotationReasonSummaryMap: Record<string, AnnotationReasonSummary> = {};
-    const selectedAnnotationTransactions: ImportTransaction[] = [];
-    let selectedCount = 0;
-    let selectedExpenseCount = 0;
-    let selectedIncomeCount = 0;
-    let selectedTransferCount = 0;
-    let selectedRecurringMatchCount = 0;
-    let selectedInvalidCount = 0;
-    let annotationCount = 0;
-    let selectedAnnotationCount = 0;
-
-    for (const transaction of getTrackedTransactionsForSelection()) {
-        const annotationIssues = collectAnnotationIssues(transaction);
-        annotationIssuesByIndex[transaction.index] = annotationIssues;
-        const hasAnnotationIssues = annotationIssues.length > 0;
-
-        if (hasAnnotationIssues) {
-            annotationCount++;
-        }
-
-        if (!transaction.selected) {
-            continue;
-        }
-
-        selectedCount++;
-
-        if (transaction.type === TransactionType.Expense) {
-            selectedExpenseCount++;
-        } else if (transaction.type === TransactionType.Income) {
-            selectedIncomeCount++;
-        } else if (transaction.type === TransactionType.Transfer) {
-            selectedTransferCount++;
-        }
-
-        if (transaction.hasRecurringMatch()) {
-            selectedRecurringMatchCount++;
-        }
-
-        if (!transaction.valid) {
-            selectedInvalidCount++;
-        }
-
-        if (!hasAnnotationIssues) {
-            continue;
-        }
-
-        selectedAnnotationCount++;
-        selectedAnnotationTransactions.push(transaction);
-
-        for (const reason of annotationIssues) {
-            if (!annotationReasonSummaryMap[reason]) {
-                annotationReasonSummaryMap[reason] = {
-                    key: reason,
-                    label: reason,
-                    count: 0
-                };
-            }
-
-            annotationReasonSummaryMap[reason].count++;
-        }
-    }
-
-    return {
-        annotationIssuesByIndex,
-        selectedCount,
-        selectedExpenseCount,
-        selectedIncomeCount,
-        selectedTransferCount,
-        selectedRecurringMatchCount,
-        selectedInvalidCount,
-        annotationCount,
-        selectedAnnotationCount,
-        selectedAnnotationTransactions,
-        annotationReasonSummaries: Object.values(annotationReasonSummaryMap).sort((left, right) => right.count - left.count)
-    };
-});
+const importTransactionSelectionSummary = computed<ImportTransactionSelectionSummary>(() => (
+    collectImportTransactionSelectionSummary(getTrackedTransactionsForSelection(), collectAnnotationIssues)
+));
 
 function getAnnotationIssues(item: ImportTransaction): string[] {
     return importTransactionSelectionSummary.value.annotationIssuesByIndex[item.index] || collectAnnotationIssues(item);
@@ -3511,43 +3307,6 @@ function applyBatchAccount(): void {
 const isEditing = computed<boolean>(() => !!editingTransaction.value);
 const canImport = computed<boolean>(() => selectedImportTransactionCount.value > 0 && selectedInvalidTransactionCount.value < 1);
 
-function mapImportPreviewIndexResponseItem(item: ImportPreviewIndexResponseItem): ImportPreviewIndexItem {
-    const time = new Date(item.preview_date || '').getTime() / 1000;
-    return {
-        id: Number(item.id || 0),
-        time: Number.isFinite(time) ? time : Date.now() / 1000,
-        type: Number(item.type || TransactionType.ModifyBalance),
-        actualCategoryName: item.actual_category_name || '',
-        categoryId: item.category_id || '',
-        actualSourceAccountName: item.actual_source_account_name || '',
-        actualDestinationAccountName: item.actual_destination_account_name || '',
-        sourceAccountId: item.source_account_id || '',
-        destinationAccountId: item.destination_account_id || '',
-        tagIds: [],
-        originalTagNames: [],
-        comment: item.comment || '',
-        isManuallyAnnotated: !!item.is_manually_annotated,
-        selected: !!item.selected,
-        sourceAmount: Number(item.source_amount || 0),
-        counterparty: item.counterparty || '',
-        paymentMethod: item.payment_method || '',
-        parserSource: item.parser_source || '',
-        parserTags: item.parser_tags || [],
-        dedupType: item.dedup_type || '',
-        dedupSourceIds: item.dedup_source_ids || [],
-        transferStatus: item.transfer_status ?? null,
-        transferTitle: item.transfer_title || '',
-        learningStatus: item.learning_status ?? null,
-        learningTitle: item.learning_title || '',
-        learningSummary: item.learning_summary || '',
-        learningMode: item.learning_mode || '',
-        recurringTemplateId: item.recurring_template_id || '',
-        recurringCandidateCount: Number(item.recurring_candidate_count || 0),
-        recurringMatchReasons: item.recurring_match_reasons || '',
-        recurringMatchedDate: item.recurring_matched_date || '',
-    };
-}
-
 async function loadServerPagedPreviewIndex(): Promise<void> {
     if (!serverPagedMode.value || !props.sessionId) {
         serverPagedPreviewIndex.value = [];
@@ -3579,9 +3338,7 @@ async function loadServerPagedPreviewIndex(): Promise<void> {
         throw new Error(result.error || '获取预览筛选索引失败');
     }
 
-    const items = Array.isArray(result.data?.items)
-        ? result.data.items as ImportPreviewIndexResponseItem[]
-        : [];
+    const items = Array.isArray(result.data?.items) ? result.data.items : [];
     serverPagedPreviewIndex.value = items.map(mapImportPreviewIndexResponseItem);
     serverPagedPreviewIndexLoaded.value = true;
 }
@@ -3691,67 +3448,6 @@ function getTrackedTransactionsForSelection(): ImportTransaction[] {
     return Array.from(trackedTransactions.values());
 }
 
-function normalizePreviewPage(value: number | string | null | undefined): number {
-    const normalizedValue = Number(value);
-    if (!Number.isFinite(normalizedValue) || normalizedValue < 1) {
-        return 1;
-    }
-
-    return Math.floor(normalizedValue);
-}
-
-function normalizePreviewPageSize(value: number | string | null | undefined): number {
-    const normalizedValue = Number(value);
-    if (!Number.isFinite(normalizedValue)) {
-        return 10;
-    }
-
-    if (!serverPagedMode.value && normalizedValue === -1) {
-        return -1;
-    }
-
-    return Math.max(Math.floor(normalizedValue), 1);
-}
-
-function normalizePreviewTableSortDirection(
-    value: string | boolean | null | undefined
-): PreviewTableSortDirection {
-    return String(value || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
-}
-
-function normalizeServerPagedSortKey(value: string | null | undefined): string {
-    const normalizedValue = String(value || '').trim();
-    return SERVER_PAGED_SORTABLE_COLUMNS.has(normalizedValue) ? normalizedValue : '';
-}
-
-function normalizePreviewTableSortItems(sortBy: PreviewTableSortInputItem[] | null | undefined): PreviewTableSortItem[] {
-    if (!Array.isArray(sortBy) || sortBy.length < 1) {
-        return [];
-    }
-
-    const normalizedItems: PreviewTableSortItem[] = [];
-    for (const item of sortBy) {
-        const rawKey = item?.key ?? item?.value;
-        const key = String(rawKey || '').trim();
-
-        if (!key) {
-            continue;
-        }
-
-        normalizedItems.push({
-            key,
-            order: normalizePreviewTableSortDirection(item?.order)
-        });
-    }
-
-    if (!serverPagedMode.value) {
-        return normalizedItems;
-    }
-
-    const primarySortableItem = normalizedItems.find(item => normalizeServerPagedSortKey(item.key));
-    return primarySortableItem ? [primarySortableItem] : [];
-}
-
 function getCurrentServerPagedSortRequest(): {
     sortBy: string | null;
     sortDirection: PreviewTableSortDirection | null;
@@ -3773,7 +3469,7 @@ function emitServerPagedRequest(
     } = {}
 ): void {
     const normalizedPage = normalizePreviewPage(page);
-    const normalizedPageSize = normalizePreviewPageSize(pageSize);
+    const normalizedPageSize = normalizePreviewPageSize(pageSize, { serverPaged: serverPagedMode.value });
     const normalizedSortKey = normalizeServerPagedSortKey(options.sortKey ?? currentSortKey.value);
     const normalizedSortDirection = normalizePreviewTableSortDirection(
         options.sortDirection ?? currentSortDirection.value
@@ -3827,7 +3523,7 @@ function updatePreviewTablePage(page: number): void {
 }
 
 function updatePreviewTablePageSize(pageSize: number): void {
-    const normalizedPageSize = normalizePreviewPageSize(pageSize);
+    const normalizedPageSize = normalizePreviewPageSize(pageSize, { serverPaged: serverPagedMode.value });
 
     if (serverPagedMode.value) {
         emitServerPagedRequest(1, normalizedPageSize);
@@ -3839,7 +3535,7 @@ function updatePreviewTablePageSize(pageSize: number): void {
 }
 
 function updatePreviewTableSort(sortBy: PreviewTableSortInputItem[] = []): void {
-    tableSortBy.value = normalizePreviewTableSortItems(sortBy);
+    tableSortBy.value = normalizePreviewTableSortItems(sortBy, { serverPaged: serverPagedMode.value });
 
     if (!serverPagedMode.value) {
         return;
@@ -3894,7 +3590,7 @@ watch(
             return;
         }
 
-        tableSortBy.value = normalizePreviewTableSortItems(tableSortBy.value);
+        tableSortBy.value = normalizePreviewTableSortItems(tableSortBy.value, { serverPaged: serverPagedMode.value });
         const activeSort = tableSortBy.value[0];
         currentSortKey.value = normalizeServerPagedSortKey(activeSort?.key ?? '');
         currentSortDirection.value = normalizePreviewTableSortDirection(activeSort?.order);
@@ -4407,7 +4103,7 @@ const importTransactionsTableHeight = computed<number | undefined>(() => {
 });
 
 function isImportTransactionColumnSortable(columnKey: string): boolean {
-    return !serverPagedMode.value || SERVER_PAGED_SORTABLE_COLUMNS.has(columnKey);
+    return !serverPagedMode.value || isImportPreviewServerPagedSortableColumn(columnKey);
 }
 
 const importTransactionHeaders = computed<object[]>(() => {

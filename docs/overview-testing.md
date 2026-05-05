@@ -10,5 +10,8 @@
 ## 8.2 推荐验证命令
 - 单元/集成：
   - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pytest tests/ -v`
+- 后端结构门禁：
+  - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe scripts/backend_structure_gate.py`
+  - 该 gate 扫描 `src/bill_analyser/**/*.py`，对新增未知超大文件/函数直接失败，并用 `scripts/backend_structure_baseline.json` 约束历史热点不能继续膨胀。
 - 代码质量：
-  - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py`
+  - `C:/Users/hcy/OneDrive/Github/bill_analyser/.venv/Scripts/python.exe -m pylint src/bill_analyser/core src/bill_analyser/api/routes`

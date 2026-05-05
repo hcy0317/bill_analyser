@@ -165,6 +165,8 @@ def build_verification_steps(paths: Sequence[str]) -> tuple[str, ...]:
     if any(
         "statistics" in path
         or "budget" in path
+        or path.startswith("src/bill_analyser/core/bills/")
+        or path.startswith("src/bill_analyser/core/investment/")
         or path.endswith("bill_service.py")
         or path.endswith("smart_dedup.py")
         or path.endswith("category_engine.py")
