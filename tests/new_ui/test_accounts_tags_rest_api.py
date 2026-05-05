@@ -62,6 +62,7 @@ def test_tag_rest_lifecycle(client, auth_headers):
     assert second_tag_id
 
     update_response = client.put(f"/api/tags/{tag_id}", json={
+        "id": str(tag_id),
         "name": "REST标签A-已更新"
     }, headers=auth_headers)
     assert update_response.status_code == 200
@@ -70,6 +71,7 @@ def test_tag_rest_lifecycle(client, auth_headers):
     assert update_data["result"]["name"] == "REST标签A-已更新"
 
     hide_response = client.put(f"/api/tags/{tag_id}", json={
+        "id": str(tag_id),
         "hidden": True
     }, headers=auth_headers)
     assert hide_response.status_code == 200

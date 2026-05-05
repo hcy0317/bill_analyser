@@ -5,9 +5,10 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from bill_analyser.utils.logger import log_method
+from bill_analyser.core import tag_rust_bridge
 from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
+from bill_analyser.utils.logger import log_method
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -26,9 +27,23 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
         """Convert a single row into a dictionary when present."""
         return dict(row) if row else None
 
+    def _should_use_rust_tag_bridge(self) -> bool:
+        """Use Rust tag CRUD only for regular file DBs that share the same SQLite file."""
+        db_path_text = str(self.db_path)
+        if db_path_text in {":memory:", "file::memory:?cache=shared"}:
+            return False
+        encryption_config = getattr(self, "_encryption_config", None)
+        return not bool(getattr(encryption_config, "enabled", False))
+
     @log_method
     async def get_all_tags(self, user_id: int = 1) -> list[dict[str, Any]]:
         """List all tags for the specified user."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.list_tags(self.db_path, user_id=user_id)
+        return await self._get_all_tags_python(user_id=user_id)
+
+    async def _get_all_tags_python(self, user_id: int = 1) -> list[dict[str, Any]]:
+        """List tags through the aiosqlite fallback path."""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM tags WHERE user_id = ? ORDER BY display_order, created_at DESC",
@@ -40,6 +55,12 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
     @log_method
     async def get_tag_by_id(self, tag_id: int, user_id: int = 1) -> dict[str, Any] | None:
         """Fetch one tag row by identifier and user."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.get_tag(self.db_path, tag_id, user_id=user_id)
+        return await self._get_tag_by_id_python(tag_id, user_id=user_id)
+
+    async def _get_tag_by_id_python(self, tag_id: int, user_id: int = 1) -> dict[str, Any] | None:
+        """Fetch a tag through the aiosqlite fallback path."""
         conn = await self._get_connection()
         async with conn.execute(
             "SELECT * FROM tags WHERE id = ? AND user_id = ?",
@@ -51,6 +72,12 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
     @log_method
     async def create_tag(self, data: dict[str, Any], user_id: int = 1) -> int:
         """Create a tag for the specified user."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.create_tag(self.db_path, data, user_id=user_id)
+        return await self._create_tag_python(data, user_id=user_id)
+
+    async def _create_tag_python(self, data: dict[str, Any], user_id: int = 1) -> int:
+        """Create a tag through the aiosqlite fallback path."""
         conn = await self._get_connection()
         now = utc_now_iso()
         cursor = await conn.execute(
@@ -74,6 +101,12 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
     @log_method
     async def update_tag(self, tag_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
         """Update one tag row with partial field changes."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.update_tag(self.db_path, tag_id, data, user_id=user_id)
+        return await self._update_tag_python(tag_id, data, user_id=user_id)
+
+    async def _update_tag_python(self, tag_id: int, data: dict[str, Any], user_id: int = 1) -> bool:
+        """Update one tag through the aiosqlite fallback path."""
         if not data:
             return False
 
@@ -91,6 +124,12 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
     @log_method
     async def delete_tag(self, tag_id: int, user_id: int = 1) -> bool:
         """Delete one tag row for the specified user."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.delete_tag(self.db_path, tag_id, user_id=user_id)
+        return await self._delete_tag_python(tag_id, user_id=user_id)
+
+    async def _delete_tag_python(self, tag_id: int, user_id: int = 1) -> bool:
+        """Delete a tag through the aiosqlite fallback path."""
         conn = await self._get_connection()
         cursor = await conn.execute(
             "DELETE FROM tags WHERE id = ? AND user_id = ?",
@@ -106,6 +145,16 @@ class DatabaseTagsMixin(DatabaseFacadeBase):
         user_id: int = 1,
     ) -> bool:
         """Persist a batch of tag display-order updates."""
+        if self._should_use_rust_tag_bridge():
+            return tag_rust_bridge.update_display_orders(self.db_path, orders, user_id=user_id)
+        return await self._update_tag_display_orders_python(orders, user_id=user_id)
+
+    async def _update_tag_display_orders_python(
+        self,
+        orders: list[tuple],
+        user_id: int = 1,
+    ) -> bool:
+        """Persist display-order updates through the aiosqlite fallback path."""
         if not orders:
             self.logger.warning("[update_tag_display_orders] 订单列表为空")
             return True

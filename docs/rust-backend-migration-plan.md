@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 314
-- Current Rust backend files: 32 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 315
+- Current Rust backend files: 35 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -83,6 +83,22 @@ S4b uses a Rust CLI bridge instead of PyO3 or C FFI: the repository still uses `
 
 Explicit S4b deferrals: full login/register/logout takeover, password verification, JWT signing/verification, API/MCP token writes, refresh session creation semantics, 2FA/step-up/profile/cloud-settings/external-auth/user-data routes, auth DB helpers, audit log writes, and Python business cleanup remain deferred. No compatibility shell is removed because Python remains the auth runtime owner outside the selected validation function.
 
+## S5a Tags Master Data Runtime Bridge
+
+S5a migrates only tag master-data CRUD and display-order persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns batch orchestration, request validation, response envelopes, SQLCipher setup, in-memory databases, settings bundle import/export, and all `bill_tags` relationship helpers.
+
+| Python responsibility | Rust S5a mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/tags/__init__.py` `get_all_tags`, `get_tag_by_id`, `create_tag`, `update_tag`, `delete_tag`, `update_tag_display_orders` for file DBs | `crates/bill-analyser-db/src/taxonomy/tags.rs` implements user-scoped repository methods with `ORDER BY display_order, created_at DESC`; `crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs` exposes stdin/stdout JSON commands; `src/bill_analyser/core/tag_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
+| `src/bill_analyser/core/database/tags/__init__.py` `:memory:` and SQLCipher tag CRUD/display-order behavior | Python aiosqlite fallback remains active because a Rust subprocess opens a separate connection and cannot share in-memory state or SQLCipher pragmas | retained |
+| `src/bill_analyser/core/database/tags/__init__.py` `add_tags_to_bill`, `get_tags_for_bill`, `get_tags_for_bills`, `update_bill_tags` | Python remains the owner; relationship table semantics are explicitly deferred to the later bill/tag relationship slice | retained |
+| `src/bill_analyser/api/routes/tags.py` list/get/create/update/delete/batch/display-orders REST contract | Route code remains unchanged; existing REST status/error/envelope behavior is exercised through the same DB facade methods | facade retained |
+| Settings bundle transaction tag export/import | Export reads tag master data through the public `get_all_tags()` façade, so file DB export now observes the Rust-backed list path; import/upsert remains direct Python SQL and is deferred to the settings-bundle/taxonomy integration slice | mixed: export via façade, import retained |
+
+Runtime startup via `start_backend.ps1` and backend CI now build `bill_taxonomy_bridge` alongside `bill_auth_bridge`. Package-style deployments that do not use this startup path must provide `BILL_ANALYSER_RUST_TAXONOMY_BRIDGE` pointing at a prebuilt bridge executable.
+
+Explicit S5a deferrals: `bill_tags` relationship read/write helpers, settings bundle tag import/upsert, accounts/categories/templates taxonomy domains, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5a because the route shell, in-memory fallback, SQLCipher fallback, batch orchestration, settings import, and relationship helpers remain active owners.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -108,7 +124,7 @@ Explicit S4b deferrals: full login/register/logout takeover, password verificati
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
-| tags-templates | 8 | 1 | 0 |
+| tags-templates | 9 | 1 | 0 |
 
 ## Review Contract
 

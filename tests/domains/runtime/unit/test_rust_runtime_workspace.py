@@ -42,9 +42,14 @@ def test_auth_bridge_runtime_is_built_before_backend_pytest_and_startup() -> Non
     start_backend = (REPO_ROOT / "start_backend.ps1").read_text(encoding="utf-8")
     gitea_ci = (REPO_ROOT / ".gitea/workflows/ci.yml").read_text(encoding="utf-8")
 
-    assert "cargo build -p bill-analyser-core --bin bill_auth_bridge" in start_backend
+    assert 'Package = "bill-analyser-core"' in start_backend
+    assert 'Bin = "bill_auth_bridge"' in start_backend
     assert "$env:BILL_ANALYSER_RUST_AUTH_BRIDGE" in start_backend
+    assert 'Package = "bill-analyser-db"' in start_backend
+    assert 'Bin = "bill_taxonomy_bridge"' in start_backend
+    assert "$env:BILL_ANALYSER_RUST_TAXONOMY_BRIDGE" in start_backend
     assert "Error: Rust toolchain not found" in start_backend
-    assert "Configured Rust auth bridge not found" in start_backend
+    assert "Configured Rust $($BridgeSpec.DisplayName) bridge not found" in start_backend
     assert "https://github.com/dtolnay/rust-toolchain@stable" in gitea_ci
     assert "cargo build -p bill-analyser-core --bin bill_auth_bridge" in gitea_ci
+    assert "cargo build -p bill-analyser-db --bin bill_taxonomy_bridge" in gitea_ci

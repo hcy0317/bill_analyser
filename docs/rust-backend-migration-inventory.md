@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 314
-- Rust backend files: 32
+- Python backend files: 315
+- Rust backend files: 35
 - Migration domains: 22
-- Files marked port: 251
+- Files marked port: 252
 - Files marked facade: 63
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -38,7 +38,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
-| tags-templates | 8 | 1 | 0 |
+| tags-templates | 9 | 1 | 0 |
 
 ## Python File Matrix
 
@@ -282,7 +282,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/settings_bundle/shared.py | settings-bundle | database-access | port | 118 |
 | src/bill_analyser/core/database/settings_bundle/templates.py | settings-bundle | database-access | port | 315 |
 | src/bill_analyser/core/database/shared.py | database-facade | database-access | port | 224 |
-| src/bill_analyser/core/database/tags/__init__.py | tags-templates | package-implementation | port | 247 |
+| src/bill_analyser/core/database/tags/__init__.py | tags-templates | package-implementation | port | 296 |
 | src/bill_analyser/core/database/templates/__init__.py | tags-templates | package-marker | facade | 7 |
 | src/bill_analyser/core/database/templates/crud.py | tags-templates | database-access | port | 287 |
 | src/bill_analyser/core/database/templates/mixin.py | tags-templates | database-access | port | 75 |
@@ -327,6 +327,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/smart_dedup/reconciliation.py | smart-dedup | core-service | port | 298 |
 | src/bill_analyser/core/smart_dedup/transfers.py | smart-dedup | core-service | port | 343 |
 | src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 402 |
+| src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port | 154 |
 | src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 17 |
 | src/bill_analyser/import_contracts/parser_tags.py | import-contracts | import-contract | facade | 142 |
 | src/bill_analyser/parsers/__init__.py | import-parsers | package-marker | facade | 6 |
@@ -385,11 +386,14 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/tests/response_contract.rs
 - crates/bill-analyser-core/tests/runtime_contract.rs
 - crates/bill-analyser-core/tests/shared_primitives.rs
+- crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs
 - crates/bill-analyser-db/src/connection.rs
 - crates/bill-analyser-db/src/error.rs
 - crates/bill-analyser-db/src/lib.rs
 - crates/bill-analyser-db/src/path.rs
 - crates/bill-analyser-db/src/schema.rs
+- crates/bill-analyser-db/src/taxonomy/mod.rs
+- crates/bill-analyser-db/src/taxonomy/tags.rs
 - crates/bill-analyser-db/src/transaction.rs
 - crates/bill-analyser-db/src/user_scope.rs
 - crates/bill-analyser-db/tests/sqlite_runtime.rs

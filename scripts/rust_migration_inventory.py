@@ -5,6 +5,8 @@ file, gives it an initial migration domain, and keeps ``verified_dead`` empty
 until a later slice produces direct evidence.
 """
 
+# pylint: disable=line-too-long,missing-class-docstring,missing-function-docstring,too-many-return-statements
+
 from __future__ import annotations
 
 import argparse
@@ -22,6 +24,7 @@ PLAN_DOC = Path("docs/rust-backend-migration-plan.md")
 EXCLUDED_RUST_DIRS = {
     ".git",
     ".mypy_cache",
+    ".omx",
     ".pytest_cache",
     ".ruff_cache",
     ".venv",
@@ -116,6 +119,7 @@ CORE_DOMAIN_BY_FILE = {
     "recurring_detection.py": "recurring-calendar",
     "report.py": "statistics-reporting",
     "sync.py": "sync-runtime",
+    "tag_rust_bridge.py": "tags-templates",
 }
 
 UTILS_DOMAIN_BY_SEGMENT = {

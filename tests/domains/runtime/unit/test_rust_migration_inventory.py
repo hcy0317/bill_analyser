@@ -18,12 +18,13 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 314
-    assert inventory.summary["python_backend_files"] == 314
+    assert len(expected_python_paths) == 315
+    assert inventory.summary["python_backend_files"] == 315
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 32
+    assert inventory.summary["rust_backend_files"] == 35
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/lib.rs" in inventory.rust_files
+    assert "crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in inventory.rust_files
 
 
 def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo_root: Path) -> None:
@@ -46,6 +47,7 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert records["src/bill_analyser/core/database/bills/__init__.py"].role == "package-implementation"
     assert records["src/bill_analyser/core/category_engine/engine.py"].domain == "classification-rules"
     assert records["src/bill_analyser/core/auth_rust_bridge.py"].domain == "auth-security"
+    assert records["src/bill_analyser/core/tag_rust_bridge.py"].domain == "tags-templates"
     assert records["src/bill_analyser/parsers/wechat.py"].domain == "import-parsers"
 
 
@@ -57,12 +59,14 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 314" in first_render
-    assert "- Rust backend files: 32" in first_render
+    assert "- Python backend files: 315" in first_render
+    assert "- Rust backend files: 35" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade |" in first_render
+    assert "| src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port |" in first_render
     assert "- crates/bill-analyser-core/src/lib.rs" in first_render
     assert "- crates/bill-analyser-db/src/lib.rs" in first_render
+    assert "- crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in first_render
 
 
 def test_migration_plan_markdown_is_deterministic_and_keeps_s0_non_runtime(repo_root: Path) -> None:

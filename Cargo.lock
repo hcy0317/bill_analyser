@@ -41,7 +41,10 @@ name = "bill-analyser-db"
 version = "0.1.0"
 dependencies = [
  "bill-analyser-core",
+ "chrono",
  "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]

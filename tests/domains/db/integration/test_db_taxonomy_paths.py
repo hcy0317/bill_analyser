@@ -214,5 +214,8 @@ async def test_tag_crud_display_order_and_bill_relations_round_trip(tmp_path: Pa
 
         assert await db.delete_tag(first_tag_id, user_id=user_id) is True
         assert await db.get_tag_by_id(first_tag_id, user_id=user_id) is None
+        assert [tag["name"] for tag in await db.get_tags_for_bill(bill_id, user_id=user_id)] == [
+            "通勤"
+        ]
     finally:
         await db.close()

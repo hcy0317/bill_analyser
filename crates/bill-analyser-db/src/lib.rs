@@ -7,6 +7,7 @@ pub mod connection;
 pub mod error;
 pub mod path;
 pub mod schema;
+pub mod taxonomy;
 pub mod transaction;
 pub mod user_scope;
 
