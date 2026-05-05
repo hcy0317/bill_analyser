@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 313
-- Rust backend files: 0
+- Python backend files: 314
+- Rust backend files: 32
 - Migration domains: 22
-- Files marked port: 250
+- Files marked port: 251
 - Files marked facade: 63
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -22,7 +22,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
 | api-runtime-shell | 3 | 8 | 0 |
-| auth-security | 18 | 2 | 0 |
+| auth-security | 19 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
@@ -71,7 +71,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/auth/step_up.py | auth-security | api-route | port | 97 |
 | src/bill_analyser/api/routes/auth/support.py | auth-security | api-route | port | 335 |
 | src/bill_analyser/api/routes/auth/system.py | auth-security | api-route | port | 15 |
-| src/bill_analyser/api/routes/auth/tokens.py | auth-security | api-route | port | 401 |
+| src/bill_analyser/api/routes/auth/tokens.py | auth-security | api-route | port | 421 |
 | src/bill_analyser/api/routes/auth/two_factor.py | auth-security | api-route | port | 279 |
 | src/bill_analyser/api/routes/auth/two_factor_login.py | auth-security | api-route | port | 174 |
 | src/bill_analyser/api/routes/auth/two_factor_support.py | auth-security | api-route | port | 106 |
@@ -166,6 +166,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/ai/ocr/provider.py | ai-ocr | core-service | port | 181 |
 | src/bill_analyser/core/ai/ocr/service.py | ai-ocr | core-service | port | 340 |
 | src/bill_analyser/core/analyzer.py | statistics-reporting | core-service | port | 683 |
+| src/bill_analyser/core/auth_rust_bridge.py | auth-security | core-service | port | 148 |
 | src/bill_analyser/core/bill_date_utils.py | shared-primitives | core-service | port | 51 |
 | src/bill_analyser/core/bills/__init__.py | bills-import | package-marker | facade | 5 |
 | src/bill_analyser/core/bills/service_parts/__init__.py | bills-import | package-marker | facade | 5 |
@@ -360,7 +361,38 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Rust Backend Files
 
-- None detected in S0.
+- crates/bill-analyser-core/src/adapters/account.rs
+- crates/bill-analyser-core/src/adapters/api.rs
+- crates/bill-analyser-core/src/adapters/category.rs
+- crates/bill-analyser-core/src/adapters/mod.rs
+- crates/bill-analyser-core/src/adapters/transaction.rs
+- crates/bill-analyser-core/src/auth/mod.rs
+- crates/bill-analyser-core/src/bin/bill_auth_bridge.rs
+- crates/bill-analyser-core/src/error.rs
+- crates/bill-analyser-core/src/lib.rs
+- crates/bill-analyser-core/src/primitives/auth.rs
+- crates/bill-analyser-core/src/primitives/currency.rs
+- crates/bill-analyser-core/src/primitives/date_time.rs
+- crates/bill-analyser-core/src/primitives/ids.rs
+- crates/bill-analyser-core/src/primitives/mod.rs
+- crates/bill-analyser-core/src/primitives/money.rs
+- crates/bill-analyser-core/src/primitives/pagination.rs
+- crates/bill-analyser-core/src/primitives/sorting.rs
+- crates/bill-analyser-core/src/primitives/transaction_type.rs
+- crates/bill-analyser-core/src/response.rs
+- crates/bill-analyser-core/src/runtime.rs
+- crates/bill-analyser-core/tests/auth_security_contracts.rs
+- crates/bill-analyser-core/tests/response_contract.rs
+- crates/bill-analyser-core/tests/runtime_contract.rs
+- crates/bill-analyser-core/tests/shared_primitives.rs
+- crates/bill-analyser-db/src/connection.rs
+- crates/bill-analyser-db/src/error.rs
+- crates/bill-analyser-db/src/lib.rs
+- crates/bill-analyser-db/src/path.rs
+- crates/bill-analyser-db/src/schema.rs
+- crates/bill-analyser-db/src/transaction.rs
+- crates/bill-analyser-db/src/user_scope.rs
+- crates/bill-analyser-db/tests/sqlite_runtime.rs
 
 ## Verified Dead Baseline
 

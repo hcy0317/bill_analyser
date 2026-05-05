@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
+# pylint: disable=line-too-long,mixed-line-endings,broad-exception-caught
+# pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
+
+from bill_analyser.core.auth_rust_bridge import (
+    AuthRustBridgeUnavailable,
+    AuthRustValidationError,
+    validate_refresh_token_claims as rust_validate_refresh_token_claims,
+)
+
 from .support import *  # noqa: F403
 from .cloud_settings import _load_application_cloud_settings
 from .profile import _build_user_profile_info
@@ -64,21 +74,31 @@ def refresh_token():
         try:
             payload = jwt.decode(refresh_token_str, jwt_secret, algorithms=[jwt_algorithm])
 
-            if payload.get("type") != "refresh":
-                return jsonify({"success": False, "error": "Invalid token", "message": "Not a refresh token"}), 400
-
-            user_id = payload.get("user_id")
-            username = payload.get("username")
-
-            if not isinstance(user_id, int) or not isinstance(username, str) or not username:
+            try:
+                refresh_claims = rust_validate_refresh_token_claims(payload)
+            except AuthRustValidationError as validation_error:
                 return jsonify(
-                    {"success": False, "error": "Invalid token", "message": "Invalid refresh token"},
-                ), 401
+                    {"success": False, "error": validation_error.error, "message": validation_error.message},
+                ), validation_error.status
+
+            user_id = refresh_claims.user_id
+            username = refresh_claims.username
 
         except jwt.ExpiredSignatureError:
             return jsonify({"success": False, "error": "Token expired", "message": "Refresh token has expired"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"success": False, "error": "Invalid token", "message": "Invalid refresh token"}), 401
+        except AuthRustBridgeUnavailable:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Service Unavailable",
+                        "message": "Authentication temporarily unavailable",
+                    }
+                ),
+                503,
+            )
 
         # 生成新的访问令牌
         logger.info("生成新令牌: user_id=%s", user_id)

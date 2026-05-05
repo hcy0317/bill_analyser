@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 313
-- Current Rust backend files: S1 introduces the `bill-analyser-core` internal runtime shell crate only.
+- Python backend files to track: 314
+- Current Rust backend files: 32 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -70,6 +70,19 @@ S4 starts the auth-security migration with pure Rust contract helpers only. Flas
 
 Explicit S4 deferrals: login/register/logout route takeover, bcrypt password verification, JWT signing/verification, API/MCP token creation, refresh session creation, 2FA enable/disable/recovery writes, step-up token signing, profile/cloud-settings/external-auth/user-data routes, auth/session SQLite helpers, auth/audit log writes, Python bridge wiring, and Python business cleanup remain deferred. This slice intentionally avoids half-migrated runtime paths.
 
+## S4b Auth Runtime Bridge
+
+S4b establishes the first Python-to-Rust auth runtime bridge while preserving the Flask REST shell. Python still decodes the refresh JWT and keeps all token/session/database writes; only the decoded refresh-claim shape validation in `POST /api/tokens/refresh` is delegated to Rust.
+
+| Python responsibility | Rust S4b mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/auth/tokens.py` post-decode refresh claim validation for `type`, `user_id`, and `username` | `bill_auth_bridge` calls `bill_analyser_core::auth::validate_refresh_token_claims`; `src/bill_analyser/core/auth_rust_bridge.py` invokes the bridge through stdin/stdout JSON and maps Rust validation errors back to the existing REST status/message contract | runtime bridge |
+| `src/bill_analyser/api/routes/auth/tokens.py` refresh JWT decode, token signing, user lookup, session creation, cloud settings projection, and response envelope | Python remains the runtime owner; Rust receives only decoded claims and never sees token secrets or writes the database | retained |
+
+S4b uses a Rust CLI bridge instead of PyO3 or C FFI: the repository still uses `uv_build`, earlier runtime tests require the core/db crates to stay internal library boundaries, and the workspace forbids unsafe code. The CLI bridge avoids Python packaging backend changes and unsafe FFI while giving normal Python route tests a real Rust execution path. Runtime startup via `start_backend.ps1` and backend CI build `bill_auth_bridge` before Python serves the auth route; package-style deployments that do not use this startup path must provide `BILL_ANALYSER_RUST_AUTH_BRIDGE` pointing at a prebuilt bridge executable.
+
+Explicit S4b deferrals: full login/register/logout takeover, password verification, JWT signing/verification, API/MCP token writes, refresh session creation semantics, 2FA/step-up/profile/cloud-settings/external-auth/user-data routes, auth DB helpers, audit log writes, and Python business cleanup remain deferred. No compatibility shell is removed because Python remains the auth runtime owner outside the selected validation function.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -79,7 +92,7 @@ Explicit S4 deferrals: login/register/logout route takeover, bcrypt password ver
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
 | api-runtime-shell | 3 | 8 | 0 |
-| auth-security | 18 | 2 | 0 |
+| auth-security | 19 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |

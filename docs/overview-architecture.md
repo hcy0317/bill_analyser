@@ -22,7 +22,7 @@
 - **异步桥接模式**：Flask 路由内创建独立事件循环调用 async 逻辑
 - **REST 主链模式**：当前运行态主链统一收口到 REST（`/api/...`）
 - **适配器/转换模式**：前后端字段、时间、金额单位统一转换
-- **Rust 内部库边界**：Rust 迁移第一阶段新增 `bill-analyser-core` 内部 crate，只提供 runtime identity、health、error 与 API response envelope 基础类型；Flask REST 外壳仍是运行时入口，Rust 当前不接管任何业务 API。
+- **Rust 内部库边界**：Rust 迁移当前保持 Flask REST 外壳作为运行时入口；`bill-analyser-core` 提供 runtime identity、health、error、API response envelope、共享 primitives 与 auth/security foundation，`bill-analyser-db` 提供 SQLite runtime foundation；`POST /api/tokens/refresh` 仅将 decoded refresh claims 形状校验委托给预构建的 `bill_auth_bridge`，其余业务 API 与数据库写入仍由 Python 拥有。
 
 补充说明（2026-03-07）：
 - 当前运行态已无 `/api/v1/*` 路由，也无 WSGI 级 URL rewrite 中间件。
