@@ -7,6 +7,9 @@ use bill_analyser_db::taxonomy::categories::{open_categories_connection, Categor
 use bill_analyser_db::taxonomy::tags::{
     open_tags_connection, parse_display_orders, TagsRepository,
 };
+use bill_analyser_db::taxonomy::templates::{
+    open_templates_connection, parse_template_display_orders, TemplatesRepository,
+};
 use bill_analyser_db::{DbError, DbResult};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -164,6 +167,64 @@ fn run() -> Result<(), String> {
                 )
             },
         )),
+        "list-templates" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                repository.list_templates(user_id, optional_i64(&payload, "template_type")?)
+            },
+        )),
+        "get-template" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                repository.get_template_by_id(
+                    required_i64(&payload, "template_id")?,
+                    user_id,
+                    optional_i64(&payload, "template_type")?,
+                )
+            },
+        )),
+        "list-enabled-recurring-templates" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| repository.list_enabled_recurring_templates(user_id),
+        )),
+        "create-template" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                repository.create_template(required_value(&payload, "payload")?, user_id)
+            },
+        )),
+        "update-template" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                repository.update_template(
+                    required_i64(&payload, "template_id")?,
+                    required_value(&payload, "payload")?,
+                    user_id,
+                    optional_i64(&payload, "template_type")?,
+                )
+            },
+        )),
+        "delete-template" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                repository.delete_template(
+                    required_i64(&payload, "template_id")?,
+                    user_id,
+                    optional_i64(&payload, "template_type")?,
+                )
+            },
+        )),
+        "update-template-display-orders" => result_response(with_templates_repository(
+            &payload,
+            |repository, user_id| {
+                let orders = parse_template_display_orders(required_value(&payload, "orders")?)?;
+                repository.update_display_orders(
+                    &orders,
+                    required_i64(&payload, "template_type")?,
+                    user_id,
+                )
+            },
+        )),
         _ => return Err("unknown taxonomy bridge command".to_string()),
     };
 
@@ -204,6 +265,17 @@ fn with_categories_repository<T>(
     operation(&mut repository, user_id)
 }
 
+fn with_templates_repository<T>(
+    payload: &Value,
+    operation: impl FnOnce(&mut TemplatesRepository<'_>, i64) -> DbResult<T>,
+) -> DbResult<T> {
+    let db_path = required_str(payload, "db_path")?;
+    let user_id = required_i64(payload, "user_id")?;
+    let mut connection = open_templates_connection(db_path)?;
+    let mut repository = TemplatesRepository::new(&mut connection);
+    operation(&mut repository, user_id)
+}
+
 fn result_response<T: Serialize>(result: DbResult<T>) -> Value {
     match result {
         Ok(result) => json!({"success": true, "result": result}),
@@ -237,6 +309,16 @@ fn required_i64(payload: &Value, key: &str) -> DbResult<i64> {
     required_value(payload, key)?
         .as_i64()
         .ok_or_else(|| DbError::InvalidOperation(format!("{key} must be integer")))
+}
+
+fn optional_i64(payload: &Value, key: &str) -> DbResult<Option<i64>> {
+    match payload.get(key) {
+        Some(Value::Null) | None => Ok(None),
+        Some(value) => value
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| DbError::InvalidOperation(format!("{key} must be integer"))),
+    }
 }
 
 fn db_error_message(error: &DbError) -> String {

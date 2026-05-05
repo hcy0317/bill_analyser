@@ -39,9 +39,13 @@ FACADE_PATHS = {
     "src/bill_analyser/__init__.py",
     "src/bill_analyser/api/__init__.py",
     "src/bill_analyser/api/app.py",
+    "src/bill_analyser/api/routes/templates.py",
     "src/bill_analyser/core/__init__.py",
     "src/bill_analyser/core/db.py",
     "src/bill_analyser/core/report.py",
+    "src/bill_analyser/core/database/templates/recurring.py",
+    "src/bill_analyser/core/database/templates/schedule.py",
+    "src/bill_analyser/core/database/templates/serialization.py",
     "src/bill_analyser/import_contracts/__init__.py",
     "src/bill_analyser/parsers/__init__.py",
     "src/bill_analyser/parsers/parser_tags.py",
@@ -122,6 +126,7 @@ CORE_DOMAIN_BY_FILE = {
     "report.py": "statistics-reporting",
     "sync.py": "sync-runtime",
     "tag_rust_bridge.py": "tags-templates",
+    "template_rust_bridge.py": "tags-templates",
 }
 
 UTILS_DOMAIN_BY_SEGMENT = {

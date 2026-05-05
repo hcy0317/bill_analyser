@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from bill_analyser.core import template_rust_bridge
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.utils.logger import log_method
 
@@ -13,6 +14,13 @@ from bill_analyser.utils.logger import log_method
 @log_method
 async def get_all_templates(self, user_id: int = 1, template_type: int | None = None) -> list[dict[str, Any]]:
     """获取所有模板（按模板类型统一返回前端 DTO 结构）。"""
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.list_templates(
+            self.db_path,
+            user_id=user_id,
+            template_type=template_type,
+        )
+
     conn = await self._get_connection()
     templates: list[dict[str, Any]] = []
 
@@ -51,6 +59,14 @@ async def get_template_by_id(
     template_type: int | None = None,
 ) -> dict[str, Any] | None:
     """根据 ID 获取模板。"""
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.get_template(
+            self.db_path,
+            template_id,
+            user_id=user_id,
+            template_type=template_type,
+        )
+
     conn = await self._get_connection()
 
     if template_type == 1:
@@ -75,6 +91,9 @@ async def get_template_by_id(
 @log_method
 async def create_template(self, data: dict[str, Any], user_id: int = 1) -> int:
     """创建模板。"""
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.create_template(self.db_path, data, user_id=user_id)
+
     conn = await self._get_connection()
     now = utc_now_iso()
 
@@ -167,6 +186,15 @@ async def update_template(
     if not data:
         return False
 
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.update_template(
+            self.db_path,
+            template_id,
+            data,
+            user_id=user_id,
+            template_type=template_type,
+        )
+
     conn = await self._get_connection()
     normalized = self._build_template_update_payload(data, template_type)
     normalized["updated_at"] = utc_now_iso()
@@ -182,6 +210,14 @@ async def update_template(
 @log_method
 async def delete_template(self, template_id: int, user_id: int = 1, template_type: int | None = None) -> bool:
     """删除模板。"""
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.delete_template(
+            self.db_path,
+            template_id,
+            user_id=user_id,
+            template_type=template_type,
+        )
+
     conn = await self._get_connection()
     table_name = self._get_template_table(template_type)
     cursor = await conn.execute(f"DELETE FROM {table_name} WHERE id = ? AND user_id = ?", (template_id, user_id))
@@ -194,6 +230,14 @@ async def update_template_display_orders(self, orders: list[tuple], template_typ
     """批量更新模板显示顺序。"""
     if not orders:
         return True
+
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.update_display_orders(
+            self.db_path,
+            orders,
+            template_type=template_type,
+            user_id=user_id,
+        )
 
     conn = await self._get_connection()
     table_name = self._get_template_table(template_type)
@@ -217,6 +261,15 @@ async def update_template_display_orders(self, orders: list[tuple], template_typ
 def _get_template_table(self, template_type: int | None) -> str:
     """根据模板类型返回表名。"""
     return "recurring_bills" if int(template_type or 1) == 2 else "bill_templates"
+
+
+def _should_use_rust_template_bridge(self) -> bool:
+    """Use Rust template CRUD only for regular file DBs that share the same SQLite file."""
+    db_path_text = str(self.db_path)
+    if db_path_text in {":memory:", "file::memory:?cache=shared"}:
+        return False
+    encryption_config = getattr(self, "_encryption_config", None)
+    return not bool(getattr(encryption_config, "enabled", False))
 
 
 async def _get_next_template_display_order(self, conn, template_type: int, user_id: int) -> int:

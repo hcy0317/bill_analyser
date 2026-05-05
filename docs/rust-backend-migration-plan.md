@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 317
-- Current Rust backend files: 37 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 318
+- Current Rust backend files: 38 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -128,6 +128,21 @@ S5c migrates category master-data persistence to Rust for regular file-backed SQ
 
 Explicit S5c deferrals: category rules and matcher, category statistics, settings bundle category import/upsert, SQLCipher Rust access, route-shell cleanup, and Python seed/rule orchestration remain deferred. No Python business code is deleted in S5c except now-unused private seed/rule lookup helpers removed after replacing them with batch category payload generation and rule-name preloading; all retained paths are still active owners.
 
+## S5d Templates Master Data Runtime Bridge
+
+S5d migrates transaction-template and scheduled-template master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns route validation/envelopes, `:memory:` and SQLCipher paths, recurring candidate matching, bill bind/unbind next-date recalculation, settings bundle template import/upsert, recurring suggestions, and import-flow side effects. Template DTO serialization for the migrated facade read path now comes from Rust so file-backed REST lifecycle tests exercise the same response shape through `bill_taxonomy_bridge`.
+
+| Python responsibility | Rust S5d mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/templates/crud.py` `get_all_templates`, `get_template_by_id`, `create_template`, `update_template`, `delete_template`, and `update_template_display_orders` for regular file DBs | `crates/bill-analyser-db/src/taxonomy/templates.rs` implements user-scoped `bill_templates` / `recurring_bills` CRUD, display-order batch updates, default display-order allocation, existing DTO field projection, tag CSV serialization, type normalization, `scheduledStartDate -> next_date` update parity, and ordinary/recurring list ordering; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/template_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
+| `src/bill_analyser/core/database/templates/recurring.py` `get_enabled_recurring_templates` for file DBs | Rust returns raw enabled recurring rows ordered by display order/name so Python recurring candidate matching continues over the same row contract | runtime bridge read |
+| `src/bill_analyser/core/database/templates/**` `:memory:` and SQLCipher behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
+| Recurring candidate matching, bind/rebind/unbind, and schedule helper algorithms | Python remains the owner for matching scores, Sunday-first schedule semantics, bill side effects, and old-recurring next-date recalculation | retained |
+| Settings bundle template export/import and recurring suggestions/import-flow writes | Settings bundle import/upsert, recurring suggestion accept/reject, and import preview confirmation remain Python-owned because they include reference resolution or cross-domain side effects beyond template master-data CRUD | retained |
+| `src/bill_analyser/api/routes/templates.py` REST contract | Route shell, URL/status/envelope, `templateType` parsing, auth user injection, and response handling remain Python and are exercised through the same Database facade methods | facade retained |
+
+Explicit S5d deferrals: recurring matching/bind/unbind side effects, schedule algorithms, settings bundle template import/upsert, recurring suggestion flows, import preview recurring confirmation, SQLCipher Rust access, and route-shell cleanup remain deferred. No Python business code is deleted in S5d because the route shell, in-memory fallback, SQLCipher fallback, recurring side-effect helpers, and settings/suggestion/import writers remain active owners.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -153,7 +168,7 @@ Explicit S5c deferrals: category rules and matcher, category statistics, setting
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
-| tags-templates | 9 | 1 | 0 |
+| tags-templates | 6 | 5 | 0 |
 
 ## Review Contract
 

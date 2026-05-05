@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from bill_analyser.core import template_rust_bridge
 from bill_analyser.core.db import Database
 
 if TYPE_CHECKING:
@@ -203,6 +204,55 @@ async def test_recurring_template_round_trip_updates_schedule_and_tag_ids(tmp_pa
         assert refreshed["hidden"] is False
         assert await _get_raw_next_date(db, recurring_id=recurring_id, user_id=user_id) == "2026-04-07"
         assert len(await db.get_all_templates(user_id=user_id, template_type=2)) == 1
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_template_crud_keeps_python_fallback_for_in_memory_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In-memory databases must not invoke the Rust subprocess bridge."""
+    db = Database(":memory:")
+    await db.init_db()
+    try:
+        user_id = await _create_user(db, "db_template_memory_fallback")
+
+        def _fail_bridge(*_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError("template Rust bridge should not be called for in-memory DBs")
+
+        monkeypatch.setattr(template_rust_bridge, "create_template", _fail_bridge)
+        monkeypatch.setattr(template_rust_bridge, "list_templates", _fail_bridge)
+        monkeypatch.setattr(template_rust_bridge, "get_template", _fail_bridge)
+        monkeypatch.setattr(template_rust_bridge, "update_template", _fail_bridge)
+        monkeypatch.setattr(template_rust_bridge, "delete_template", _fail_bridge)
+        monkeypatch.setattr(template_rust_bridge, "update_display_orders", _fail_bridge)
+
+        template_id = await db.create_template(
+            {
+                "templateType": 1,
+                "name": "内存模板",
+                "type": 3,
+                "categoryId": "101",
+                "sourceAccountId": "11",
+                "sourceAmount": 123,
+            },
+            user_id=user_id,
+        )
+        assert await db.get_template_by_id(template_id, user_id=user_id, template_type=1)
+        assert len(await db.get_all_templates(user_id=user_id, template_type=1)) == 1
+        assert await db.update_template(
+            template_id,
+            {"name": "内存模板更新"},
+            user_id=user_id,
+            template_type=1,
+        )
+        assert await db.update_template_display_orders(
+            [(template_id, 1)],
+            template_type=1,
+            user_id=user_id,
+        )
+        assert await db.delete_template(template_id, user_id=user_id, template_type=1)
     finally:
         await db.close()
 

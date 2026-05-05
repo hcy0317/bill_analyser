@@ -7,6 +7,7 @@
 - 账户域：`accounts`、`account_types`、`account_transfers`
 - 标签域：`tags`、`bill_tags`
 - 模板域：`bill_templates`、`recurring_bills`
+  - 普通文件库上的模板主数据 CRUD、排序、DTO 列表/详情和启用周期模板读取由 `core/template_rust_bridge.py` 调用 Rust `bill_taxonomy_bridge` 的 templates repository；`:memory:`、SQLCipher、settings bundle template import/upsert、recurring suggestion/import-flow 写路径，以及 recurring 匹配/绑定推进仍走 Python。
 - 预算域：`budgets`、`budget_history`
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`

@@ -10,6 +10,7 @@ from .crud import (
     _build_template_update_payload,
     _get_next_template_display_order,
     _get_template_table,
+    _should_use_rust_template_bridge,
     create_template,
     delete_template,
     get_all_templates,
@@ -60,6 +61,7 @@ class DatabaseTemplatesMixin(DatabaseFacadeBase):
     unbind_bill_from_recurring = unbind_bill_from_recurring
     _get_first_recurring_occurrence = _get_first_recurring_occurrence
     _get_template_table = _get_template_table
+    _should_use_rust_template_bridge = _should_use_rust_template_bridge
     _get_next_template_display_order = _get_next_template_display_order
     _serialize_template_tag_ids = _serialize_template_tag_ids
     _deserialize_template_tag_ids = _deserialize_template_tag_ids

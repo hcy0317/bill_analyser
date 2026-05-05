@@ -5,11 +5,11 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 317
-- Rust backend files: 37
+- Python backend files: 318
+- Rust backend files: 38
 - Migration domains: 22
-- Files marked port: 254
-- Files marked facade: 63
+- Files marked port: 251
+- Files marked facade: 67
 - Files marked deferred: 0
 - Verified dead files: 0
 
@@ -38,7 +38,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
 | sync-runtime | 1 | 0 | 0 |
-| tags-templates | 9 | 1 | 0 |
+| tags-templates | 6 | 5 | 0 |
 
 ## Python File Matrix
 
@@ -143,7 +143,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/statistics/support.py | statistics-reporting | api-route | port | 140 |
 | src/bill_analyser/api/routes/statistics/trend_analysis.py | statistics-reporting | api-route | port | 363 |
 | src/bill_analyser/api/routes/tags.py | tags-templates | api-route | port | 237 |
-| src/bill_analyser/api/routes/templates.py | tags-templates | api-route | port | 239 |
+| src/bill_analyser/api/routes/templates.py | tags-templates | api-route | facade | 239 |
 | src/bill_analyser/constants.py | shared-primitives | backend-module | port | 17 |
 | src/bill_analyser/core/__init__.py | shared-primitives | package-marker | facade | 6 |
 | src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port | 176 |
@@ -286,11 +286,11 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/shared.py | database-facade | database-access | port | 224 |
 | src/bill_analyser/core/database/tags/__init__.py | tags-templates | package-implementation | port | 296 |
 | src/bill_analyser/core/database/templates/__init__.py | tags-templates | package-marker | facade | 7 |
-| src/bill_analyser/core/database/templates/crud.py | tags-templates | database-access | port | 287 |
-| src/bill_analyser/core/database/templates/mixin.py | tags-templates | database-access | port | 75 |
-| src/bill_analyser/core/database/templates/recurring.py | tags-templates | database-access | port | 247 |
-| src/bill_analyser/core/database/templates/schedule.py | tags-templates | database-access | port | 145 |
-| src/bill_analyser/core/database/templates/serialization.py | tags-templates | database-access | port | 80 |
+| src/bill_analyser/core/database/templates/crud.py | tags-templates | database-access | port | 340 |
+| src/bill_analyser/core/database/templates/mixin.py | tags-templates | database-access | port | 77 |
+| src/bill_analyser/core/database/templates/recurring.py | tags-templates | database-access | facade | 251 |
+| src/bill_analyser/core/database/templates/schedule.py | tags-templates | database-access | facade | 145 |
+| src/bill_analyser/core/database/templates/serialization.py | tags-templates | database-access | facade | 80 |
 | src/bill_analyser/core/database/time.py | database-facade | database-access | port | 15 |
 | src/bill_analyser/core/database/users/__init__.py | auth-security | package-marker | facade | 2 |
 | src/bill_analyser/core/database/users/auth/__init__.py | auth-security | package-implementation | port | 578 |
@@ -330,6 +330,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/smart_dedup/transfers.py | smart-dedup | core-service | port | 343 |
 | src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 402 |
 | src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port | 154 |
+| src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port | 211 |
 | src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 17 |
 | src/bill_analyser/import_contracts/parser_tags.py | import-contracts | import-contract | facade | 142 |
 | src/bill_analyser/parsers/__init__.py | import-parsers | package-marker | facade | 6 |
@@ -398,6 +399,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/taxonomy/categories.rs
 - crates/bill-analyser-db/src/taxonomy/mod.rs
 - crates/bill-analyser-db/src/taxonomy/tags.rs
+- crates/bill-analyser-db/src/taxonomy/templates.rs
 - crates/bill-analyser-db/src/transaction.rs
 - crates/bill-analyser-db/src/user_scope.rs
 - crates/bill-analyser-db/tests/sqlite_runtime.rs

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from bill_analyser.core import template_rust_bridge
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.utils.logger import log_method
 
@@ -52,6 +53,9 @@ async def get_recurring_candidates_for_bill(
 @log_method
 async def get_enabled_recurring_templates(self, user_id: int = 1) -> list[dict[str, Any]]:
     """获取当前用户启用中的定时交易模板。"""
+    if self._should_use_rust_template_bridge():
+        return template_rust_bridge.list_enabled_recurring_templates(self.db_path, user_id=user_id)
+
     conn = await self._get_connection()
     async with conn.execute(
         """
