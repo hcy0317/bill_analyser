@@ -16,4 +16,5 @@
 - OAuth2 callback authorize 已收口到 `POST /api/auth/oauth2/authorize`；旧 `/api/oauth2/authorize.json` 已停止使用，并由 legacy 404 回归保护。当前后端仅提供 disabled-safe / not-implemented 语义，待后续真实 OAuth2 provider exchange 主链补齐
 - token 会话主链已切到认证域 REST：`GET|DELETE /api/tokens`、`POST /api/tokens/api`、`POST /api/tokens/mcp`、`POST /api/tokens/refresh`、`DELETE /api/tokens/<id>`；旧 `v1/tokens/generate*.json`、`v1/tokens/revoke*.json` 与 `v1/tokens/refresh.json` 已收口到新主链，并由 legacy 回归保护
 - 认证错误契约已补齐：`POST /api/auth/login` 与 `POST /api/tokens/refresh` 在请求体为空、`null` 或其他非对象 JSON 时返回 `400 Invalid request`，不再落入 `500`。
+- Rust 迁移当前已具备认证安全核心 foundation：`bill-analyser-core::auth` 覆盖 Bearer header 解析、refresh token decoded claims 形状校验、API/MCP/session token 类型投影、UA 设备名投影、注册密码策略校验与 2FA 恢复码规范化。Flask/Python 仍是认证运行时主链，密码哈希、JWT 编解码、session/2FA/profile/token DB 写入与审计写入尚未切到 Rust。
 - 统计时间范围契约已收紧：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends` 在起始时间/年月晚于结束时间时返回 `400`，避免把反向区间静默视为空结果。

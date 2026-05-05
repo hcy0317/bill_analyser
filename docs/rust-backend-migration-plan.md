@@ -55,6 +55,21 @@ S3 uses `rusqlite` with the bundled SQLite feature rather than `sqlx`: this keep
 
 Explicit S3 deferrals: full Python schema DDL porting, SQLCipher parity, aiosqlite async lifecycle parity, all business CRUD helpers, and any Python database cleanup remain with later domain slices. S3 does not delete or replace Python runtime files and does not introduce Rust-primary writes.
 
+## S4 Auth/Security Core Foundation
+
+S4 starts the auth-security migration with pure Rust contract helpers only. Flask/Python still owns every runtime auth route, password hash check, JWT encode/decode, 2FA write path, session DB write, and audit-log write. No auth endpoint is Rust-primary in this slice.
+
+| Python responsibility | Rust S4 mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/api/middleware/auth.py` required/optional Bearer header format checks | `crates/bill-analyser-core/src/auth/mod.rs` provides `parse_bearer_authorization_header` and `extract_bearer_token_or_empty` with the existing missing/malformed header error messages | foundational port |
+| `src/bill_analyser/api/routes/auth/tokens.py` token kind user-agent markers and token type inference | Rust `TokenKind`, token type constants, and `infer_token_type_from_user_agent` preserve session/API/MCP marker semantics | foundational port |
+| `src/bill_analyser/api/routes/auth/tokens.py` refresh-token decoded claim shape checks | Rust `validate_refresh_token_claims` records the existing `Not a refresh token` vs `Invalid refresh token` REST error contract after Python JWT decode | foundational port |
+| `src/bill_analyser/api/routes/auth/tokens.py` token list device-name projection | Rust `parse_user_agent_device_name` mirrors the existing Windows/iOS/macOS/Android/Linux and browser display fallback rules | foundational port |
+| `src/bill_analyser/api/routes/auth/registration.py` password policy validation messages | Rust `PasswordPolicy` mirrors configured length, uppercase, lowercase, digit, and special-character validation messages | foundational port |
+| `src/bill_analyser/core/database/users/auth/__init__.py` persistent 2FA recovery-code normalization pre-hash contract | Rust `normalize_recovery_code` and `recovery_code_hash_input` preserve uppercase whitespace-insensitive canonical input for a later hashing/DB takeover | foundational port |
+
+Explicit S4 deferrals: login/register/logout route takeover, bcrypt password verification, JWT signing/verification, API/MCP token creation, refresh session creation, 2FA enable/disable/recovery writes, step-up token signing, profile/cloud-settings/external-auth/user-data routes, auth/session SQLite helpers, auth/audit log writes, Python bridge wiring, and Python business cleanup remain deferred. This slice intentionally avoids half-migrated runtime paths.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
