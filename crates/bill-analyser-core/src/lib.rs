@@ -9,6 +9,7 @@ pub mod category_rules;
 pub mod error;
 pub mod import_learning;
 pub mod import_pipeline;
+pub mod matching;
 pub mod parsers;
 pub mod primitives;
 pub mod response;
@@ -60,6 +61,31 @@ pub use import_pipeline::{
     ParserMatchingPayload, ReconciliationMatchingPayload, RecurringMatchingPayload,
     TransferMatchingPayload, BILLS_PREVIEW_CONTRACT_FIELDS, IMPORT_PREVIEW_SELECTION_KEYS,
     IMPORT_PREVIEW_SORT_KEYS, IMPORT_STAGING_TABLES, IMPORT_V2_PIPELINE_STEPS,
+};
+pub use matching::{
+    bill_pair_feedback_payload_is_related, build_bill_pair_feedback_payload,
+    build_formal_investment_candidate_id, build_formal_learning_candidate_id,
+    build_formal_transfer_candidate_id, build_investment_pair_candidate,
+    build_investment_pair_candidates, build_learning_candidate_for_bill,
+    build_learning_candidates_for_bill, build_learning_rule_result_summary,
+    build_learning_rule_revision, build_matching_candidate_action_payload,
+    build_matching_session_candidates, build_transfer_pair_candidate,
+    build_transfer_pair_candidates, build_user_investment_keyword_settings,
+    classify_investment_pnl_change, compute_recurring_pattern_hash,
+    deserialize_learning_match_features, detect_recurring_frequency, detect_recurring_patterns,
+    detect_recurring_patterns_with_today, estimate_next_recurring_date, extract_investment_profile,
+    is_ordinary_bank_interest_income, normalize_keyword_list, normalize_learning_rule_revision,
+    normalize_reconcile_history_families, normalize_transfer_pair_bill_ids,
+    parse_manual_pair_request, parse_matching_candidate_id, parse_reconciliation_candidates_query,
+    parse_recurring_date, score_investment_candidate, score_learning_rule_similarity,
+    serialize_keyword_list, serialize_recurring_suggestion, serialize_recurring_suggestions,
+    FrequencyDetection, InvestmentProfile, InvestmentSignal, ManualPairRequest,
+    MatchingCandidateDescriptor, RecurringPattern, CANDIDATE_KIND_ORDER,
+    DEFAULT_INVESTMENT_EXCLUDE_KEYWORDS, DEFAULT_INVESTMENT_PLATFORM_KEYWORDS,
+    DEFAULT_INVESTMENT_PRODUCT_KEYWORDS, EXPLICIT_INVESTMENT_TYPES, INVESTMENT_PAIR_LOOKBACK_DAYS,
+    INVESTMENT_PAIR_TYPE, LEGACY_SUMMARY_KIND_ORDER, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
+    MAX_RECURRING_INTERVAL_VARIATION, MIN_RECURRING_OCCURRENCES, MIN_RECURRING_PATTERN_CONFIDENCE,
+    TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
 };
 pub use parsers::{
     aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,

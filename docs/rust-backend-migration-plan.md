@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 50
+- Current Rust backend files: 52
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -178,3 +178,18 @@ S11 starts the import-learning / LLM preview memory domain in Rust without switc
 | `tests/domains/import_flow/unit/test_import_learning_model_loop.py`, `tests/new_ui/test_bills_learning_suggestions_api.py`, `tests/new_ui/test_learning_suggestion_center_api.py`, and `tests/new_ui/test_llm_import_session_analysis_api.py` | `crates/bill-analyser-core/tests/import_learning_contracts.rs` | Golden contract cases for learning features, policy, model metadata, route envelopes, and LLM preview memory behavior |
 
 No Python import-learning database, corpus writes, active model training/prediction, suggestion writeback, LLM provider prompt/generation, or live preview apply/reject implementation is removed in S11. Runtime takeover remains deferred until a later bridge slice can verify model/persistence parity against the same session and memory fixtures.
+
+## S12 Matching, Investment, and Recurring Contracts
+
+S12 starts the matching / investment / recurring domain in Rust without switching Flask routes, aiosqlite persistence, manual-pair writes, suppression writes, investment user settings storage, recurring suggestion persistence, or preview mutation runtime. It pins candidate id families, preview session candidate projection, manual pair request validation, reconciliation query normalization, matching action payload envelopes, transfer pair scoring, bill-pair feedback payload relationship filtering, investment keyword normalization/profile/scoring/PnL guards, and recurring pattern hash/frequency/suggestion calculations.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/core/matching/candidate_ids.py` | `crates/bill-analyser-core/src/matching.rs` | Preview/formal/reconciliation candidate id builders and parsers |
+| `src/bill_analyser/api/routes/matching/support.py` and `src/bill_analyser/core/matching/session_candidates.py` | `crates/bill-analyser-core/src/matching.rs` | Matching candidate session projection, manual pair request validation, action payload, query normalization, and feedback payload contract |
+| `src/bill_analyser/core/matching/transfer_candidates.py` and `src/bill_analyser/core/database/matching/**` | `crates/bill-analyser-core/src/matching.rs` | Transfer pair direction, amount/date/account eligibility, candidate id, score, suppression key, and manual pair DTO contract |
+| `src/bill_analyser/core/investment/settings.py` and `src/bill_analyser/core/investment/matching.py` | `crates/bill-analyser-core/src/matching.rs` | User keyword normalization, deterministic investment profile/scoring, generic-service-fee guard, bank-interest guard, and PnL classification contract |
+| `src/bill_analyser/core/recurring_detection.py`, `src/bill_analyser/api/routes/recurring.py`, and `src/bill_analyser/core/database/recurring_suggestions/**` | `crates/bill-analyser-core/src/matching.rs` | Recurring hash, frequency, next-date, confidence, and suggestion DTO contract |
+| `tests/domains/import_flow/**`, `tests/domains/investment/**`, and `tests/domains/analytics/**` | `crates/bill-analyser-core/tests/matching_contracts.rs` | Golden contract cases for candidate ids, session projection, pair requests, transfer candidates, investment recognition, PnL, bank interest, and recurring detection |
+
+No Python matching, investment, recurring route, database, or preview-action implementation is removed in S12. The old `/api/matching/investment-settings` write surface remains gone; S12 records deterministic keyword/settings behavior only. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same matching sessions, manual pair, suppression, investment, and recurring fixtures.
