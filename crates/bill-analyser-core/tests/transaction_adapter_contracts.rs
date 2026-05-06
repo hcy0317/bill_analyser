@@ -7,16 +7,26 @@ use bill_analyser_core::adapters::transaction::{
     batch_update_balance_sync_account_ids, batch_update_response,
     calculate_account_balance_from_bills, delete_bill_success_payload,
     frontend_transaction_from_backend, frontend_transaction_mutation_to_backend,
+    invalid_transaction_picture_file_response, is_allowed_transaction_picture_filename,
     is_formula_like_export_cell, legacy_delete_bill_success_payload,
-    legacy_modify_bill_success_payload, month_date_range, normalize_bill_create_aliases,
+    legacy_modify_bill_success_payload, missing_transaction_picture_file_response,
+    missing_unused_transaction_picture_id_response, month_date_range,
+    normalize_bill_create_aliases, remove_unused_transaction_picture_success_payload,
+    remove_unused_transaction_picture_success_response, secure_picture_file_name,
     serialize_export_cell, serialize_optional_export_cell, sync_account_ids_for_batch_delete,
     sync_account_ids_for_bill, sync_account_ids_for_update, transaction_list_type_filter,
+    transaction_picture_data_url_from_base64, transaction_picture_delete_path,
+    transaction_picture_extension, transaction_picture_internal_error_response,
+    transaction_picture_mime_type, transaction_picture_upload_id,
+    transaction_picture_upload_success_payload, transaction_picture_upload_success_response,
+    unsupported_transaction_picture_type_message, unsupported_transaction_picture_type_response,
     validate_batch_route_update_fields, validate_bill_create_fields, validate_bill_update_fields,
     AccountBalanceBill, BackendBillUpdateSnapshot, BackendTransactionView, BillAccountSyncSnapshot,
     FrontendTransactionTag,
 };
 use bill_analyser_core::primitives::{Money, TransactionType, UtcOffsetMinutes};
 use serde_json::json;
+use std::path::Path;
 
 fn money(yuan: &str) -> Money {
     Money::from_yuan_str(yuan).unwrap()
@@ -581,5 +591,144 @@ fn account_sync_ids_and_balance_formula_cover_crud_update_delete_paths() {
         .unwrap()
         .to_yuan_string(),
         "1600.00"
+    );
+}
+
+#[test]
+fn transaction_picture_upload_contract_matches_rest_route_envelope_and_validation() {
+    assert!(is_allowed_transaction_picture_filename("avatar.png"));
+    assert!(is_allowed_transaction_picture_filename("avatar.JPG"));
+    assert!(is_allowed_transaction_picture_filename(
+        "avatar.with.dots.webp"
+    ));
+    assert!(is_allowed_transaction_picture_filename(
+        "C:\\temp\\avatar.bmp"
+    ));
+    assert!(!is_allowed_transaction_picture_filename("avatar"));
+    assert!(!is_allowed_transaction_picture_filename("avatar.txt"));
+    assert!(is_allowed_transaction_picture_filename(".png"));
+    assert!(!is_allowed_transaction_picture_filename(""));
+    assert_eq!(
+        transaction_picture_extension("avatar.JPEG").as_deref(),
+        Some("jpeg")
+    );
+
+    let message = unsupported_transaction_picture_type_message();
+    assert_eq!(
+        message,
+        "Picture type not allowed. Supported: bmp, gif, jpeg, jpg, png, webp"
+    );
+
+    assert_eq!(
+        transaction_picture_upload_id("0123456789abcdef0123456789ABCDEF", "receipt.PNG").unwrap(),
+        "0123456789abcdef0123456789abcdef.png"
+    );
+    assert_eq!(
+        transaction_picture_upload_id("0123456789abcdef0123456789abcdef", "ümlaut.png").unwrap(),
+        "0123456789abcdef0123456789abcdef.png"
+    );
+    assert_eq!(
+        transaction_picture_upload_id("abcdefabcdefabcdefabcdefabcdefab", "../测试.PNG").unwrap(),
+        "abcdefabcdefabcdefabcdefabcdefab"
+    );
+    assert_eq!(
+        transaction_picture_upload_id("bad-uuid", "receipt.png")
+            .unwrap_err()
+            .message,
+        "invalid picture uuid"
+    );
+    assert_eq!(
+        transaction_picture_upload_id("0123456789abcdef0123456789abcdef", "receipt.exe")
+            .unwrap_err()
+            .message,
+        message
+    );
+
+    assert_eq!(secure_picture_file_name("../../evil.png"), "evil.png");
+    assert_eq!(secure_picture_file_name("my receipt.png"), "my_receipt.png");
+    assert_eq!(secure_picture_file_name("ümlaut.png"), "umlaut.png");
+    assert_eq!(secure_picture_file_name("CON.png"), "_CON.png");
+    assert_eq!(secure_picture_file_name("NUL.jpg"), "_NUL.jpg");
+    assert_eq!(transaction_picture_mime_type("receipt.png"), "image/png");
+    assert_eq!(
+        transaction_picture_mime_type("receipt.unknown"),
+        "application/octet-stream"
+    );
+    assert_eq!(
+        transaction_picture_data_url_from_base64("receipt.png", "YWJj"),
+        "data:image/png;base64,YWJj"
+    );
+
+    let success = transaction_picture_upload_success_response(
+        "pic.png",
+        transaction_picture_data_url_from_base64("pic.png", "YWJj"),
+    );
+    assert_eq!(success.status_code, 200);
+    assert_eq!(
+        success.body,
+        json!({"success": true, "result": {"pictureId": "pic.png", "originalUrl": "data:image/png;base64,YWJj"}})
+    );
+    assert_eq!(
+        transaction_picture_upload_success_payload("pic.webp", "data:image/webp;base64,abc"),
+        json!({"success": true, "result": {"pictureId": "pic.webp", "originalUrl": "data:image/webp;base64,abc"}})
+    );
+
+    let missing = missing_transaction_picture_file_response();
+    assert_eq!(missing.status_code, 400);
+    assert_eq!(
+        missing.body,
+        json!({"success": false, "error": "Missing picture file"})
+    );
+    assert_eq!(
+        invalid_transaction_picture_file_response().body,
+        json!({"success": false, "error": "Invalid picture file"})
+    );
+    assert_eq!(
+        unsupported_transaction_picture_type_response().status_code,
+        400
+    );
+    assert_eq!(
+        unsupported_transaction_picture_type_response().body,
+        json!({"success": false, "error": message})
+    );
+    assert_eq!(
+        transaction_picture_internal_error_response("picture boom").body,
+        json!({"success": false, "error": "picture boom"})
+    );
+    assert_eq!(
+        transaction_picture_internal_error_response("picture boom").status_code,
+        500
+    );
+}
+
+#[test]
+fn unused_transaction_picture_delete_contract_is_best_effort_and_filename_sanitized() {
+    let upload_root = Path::new("data/uploads");
+    assert_eq!(
+        transaction_picture_delete_path(upload_root, "../stale.png"),
+        upload_root.join("stale.png")
+    );
+    assert_eq!(
+        transaction_picture_delete_path(upload_root, "nested\\stale.webp"),
+        upload_root.join("nested_stale.webp")
+    );
+    assert_eq!(
+        transaction_picture_delete_path(upload_root, "LPT1.webp"),
+        upload_root.join("_LPT1.webp")
+    );
+
+    let missing = missing_unused_transaction_picture_id_response();
+    assert_eq!(missing.status_code, 400);
+    assert_eq!(
+        missing.body,
+        json!({"success": false, "error": "Missing picture id"})
+    );
+
+    let success = remove_unused_transaction_picture_success_response();
+    assert_eq!(success.status_code, 200);
+    assert_eq!(success.body, json!({"success": true, "result": true}));
+    assert_eq!(
+        remove_unused_transaction_picture_success_payload(),
+        json!({"success": true, "result": true})
     );
 }

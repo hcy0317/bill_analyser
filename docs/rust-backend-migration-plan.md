@@ -121,3 +121,16 @@ S9b extends the Rust bills contract to the write-side adapter and account balanc
 | `tests/new_ui/test_bills_api.py`, `tests/domains/db/**`, and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden write/batch/balance contract cases for later bridge replacement |
 
 No Python bills write, delete, batch, or account balance implementation is removed in S9b. Pictures/media and reconciliation statement runtime behavior remain deferred to later S9 sub-slices.
+
+## S9c Bills Picture Media Contracts
+
+S9c extends the Rust bills contract to transaction-picture upload and unused-picture deletion without switching the Python runtime. It preserves the current REST-only picture surface: upload accepts multipart field `picture`, validates only the original filename extension allowlist, derives the saved suffix from Werkzeug-style `secure_filename(original_filename)`, stores the file under the fixed uploads directory as `<uuid4hex><derived lowercase suffix>` when a suffix remains, and returns an inline `originalUrl` data URL for preview. Unused-picture delete remains best-effort by sanitized picture id and returns success even when the file is already absent.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/config/bills.py` and `src/bill_analyser/api/routes/bills/support.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Transaction-picture extension allowlist and unsupported-type error message contract |
+| `src/bill_analyser/api/routes/bills/crud_query.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Upload/delete REST status codes, success/error envelopes, UUID-based picture id suffix handling, and unused-delete best-effort response contract |
+| `src/bill_analyser/api/routes/bills/import_review.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Data URL MIME projection and `application/octet-stream` fallback contract |
+| `tests/new_ui/test_transaction_pictures_rest_api.py` and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden picture API cases for upload/delete success, validation failures, 500 error envelopes, data URL projection, and filename sanitization |
+
+No Python picture route or file-storage implementation is removed in S9c. Current Python does not persist `pictureIds` into bill DB rows and does not enforce per-bill picture ownership; S9c records that behavior instead of inventing attachment persistence. Legacy `/api/v1/transaction/pictures/*` 404 behavior stays Python routing-runtime owned and is not part of the Rust adapter contract. Import-session uploads, OCR receipt recognition, parse-import temp files, and reconciliation statements remain deferred to later dedicated slices.
