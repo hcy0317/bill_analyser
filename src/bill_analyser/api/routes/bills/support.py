@@ -74,6 +74,7 @@ from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.constants import UPLOADS_DIR
 from bill_analyser.core.bill_date_utils import parse_bill_datetime
 from bill_analyser.import_contracts.parser_tags import resolve_parser_tags
+from bill_analyser.import_contracts.preview_selection import preview_update_is_selected
 from bill_analyser.utils.constants import BACKEND_TO_FRONTEND_TYPE
 from bill_analyser.utils.currency import yuan_to_cents  # 金额单位转换工具
 from bill_analyser.utils.logger import get_logger, log_method

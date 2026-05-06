@@ -109,7 +109,12 @@ class ImportPreviewConfirmationMixin(object):
                 )
 
             await conn.commit()
-            await self.update_import_session_status(session_id, "completed", total_confirmed=result["confirmed_count"])
+            await self.update_import_session_status(
+                session_id,
+                "completed",
+                total_confirmed=result["confirmed_count"],
+                user_id=user_id,
+            )
             return result
 
         @log_method

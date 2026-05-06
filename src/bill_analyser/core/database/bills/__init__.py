@@ -17,6 +17,46 @@ from bill_analyser.core.database.time import utc_now, utc_now_iso
 class DatabaseBillsMixin(DatabaseFacadeBase):
     """Bill CRUD, filtering, deduplication, and saved-filter helpers."""
 
+    BILL_CREATE_COLUMNS = (
+        "user_id",
+        "date",
+        "type",
+        "amount",
+        "counterparty",
+        "description",
+        "payment_method",
+        "main_category",
+        "sub_category",
+        "batch_id",
+        "hash",
+        "created_at",
+        "updated_at",
+        "source_account_id",
+        "destination_account_id",
+        "destination_amount",
+        "created_from_template",
+        "created_from_recurring",
+        "import_history_id",
+    )
+    BILL_UPDATE_COLUMNS = (
+        "date",
+        "type",
+        "amount",
+        "counterparty",
+        "description",
+        "payment_method",
+        "main_category",
+        "sub_category",
+        "batch_id",
+        "hash",
+        "source_account_id",
+        "destination_account_id",
+        "destination_amount",
+        "created_from_template",
+        "created_from_recurring",
+        "import_history_id",
+    )
+
     def _calculate_hash(self, bill: dict[str, Any]) -> str:
         """根据账单稳定字段生成去重哈希。"""
         parts = [
@@ -296,13 +336,16 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
             bill_payload.setdefault("created_at", now)
             bill_payload.setdefault("updated_at", now)
             bill_payload.setdefault("user_id", user_id)
+            invalid_columns = sorted(set(bill_payload) - set(self.BILL_CREATE_COLUMNS))
+            if invalid_columns:
+                raise ValueError(f"unsupported bill create fields: {', '.join(invalid_columns)}")
 
             for field in ["date", "type", "amount", "description"]:
                 if field not in bill_payload:
                     self.logger.error("缺少必填字段: %s", field)
                     return None
 
-            columns = list(bill_payload)
+            columns = [column for column in self.BILL_CREATE_COLUMNS if column in bill_payload]
             placeholders = ", ".join(["?" for _ in columns])
             values = [bill_payload[column] for column in columns]
             cursor = await conn.execute(
@@ -338,9 +381,17 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         """更新账单。"""
         if not updates:
             return False
+        invalid_update_fields = sorted(set(updates) - set(self.BILL_UPDATE_COLUMNS))
+        if invalid_update_fields:
+            raise ValueError(f"unsupported bill update fields: {', '.join(invalid_update_fields)}")
         conn = await self._get_connection()
         try:
-            update_payload = {**updates, "updated_at": utc_now_iso()}
+            update_payload = {
+                column: updates[column]
+                for column in self.BILL_UPDATE_COLUMNS
+                if column in updates
+            }
+            update_payload["updated_at"] = utc_now_iso()
             set_clause = ", ".join(f"{key} = ?" for key in update_payload)
             values = [*update_payload.values(), bill_id, user_id]
             cursor = await conn.execute(
@@ -415,27 +466,19 @@ class DatabaseBillsMixin(DatabaseFacadeBase):
         if not bill_ids or not updates:
             return {"success_count": 0, "failed_count": 0, "failed_ids": []}
 
-        allowed_update_fields = {
-            "date",
-            "type",
-            "amount",
-            "counterparty",
-            "description",
-            "payment_method",
-            "main_category",
-            "sub_category",
-            "source_account_id",
-            "destination_account_id",
-            "destination_amount",
-        }
-        invalid_update_fields = sorted(set(updates) - allowed_update_fields)
+        invalid_update_fields = sorted(set(updates) - set(self.BILL_UPDATE_COLUMNS))
         if invalid_update_fields:
             raise ValueError(f"unsupported batch update fields: {', '.join(invalid_update_fields)}")
 
         conn = await self._get_connection()
         success_count = 0
         failed_ids: list[int] = []
-        update_payload = {**updates, "updated_at": utc_now_iso()}
+        update_payload = {
+            column: updates[column]
+            for column in self.BILL_UPDATE_COLUMNS
+            if column in updates
+        }
+        update_payload["updated_at"] = utc_now_iso()
         set_clause = ", ".join(f"{key} = ?" for key in update_payload)
 
         for bill_id in bill_ids:

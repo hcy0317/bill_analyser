@@ -1,9 +1,27 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 from .import_detection import *  # noqa: F403
 from .import_rows import *  # noqa: F403
 from .import_mapping import *  # noqa: F403
 from .import_review import *  # noqa: F403
+
+
+def _session_upload_folder(user_id: int, session_id: str) -> Path:
+    session_path_part = secure_filename(str(session_id))
+    if not session_path_part:
+        raise ValueError("Invalid session_id")
+    return UPLOAD_FOLDER / f"user_{int(user_id)}" / session_path_part
+
+
+def _resolve_session_temp_file(temp_path: str, session_id: str, user_id: int) -> Path | None:
+    temp_file_path = Path(temp_path).resolve()
+    session_folder = _session_upload_folder(user_id, session_id).resolve()
+    try:
+        temp_file_path.relative_to(session_folder)
+    except ValueError:
+        return None
+    return temp_file_path
+
 
 @bp.route("/import/v2/parse", methods=["POST"])
 @log_method
@@ -29,6 +47,12 @@ def import_stage1_parse():
         _, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
 
+        # 生成session_id并将临时文件隔离到 user/session 目录，后续通用解析只能读取该目录。
+        session_id = str(uuid.uuid4())
+        logger.info("[阶段1-解析] 生成会话ID: %s", session_id)
+        session_upload_folder = _session_upload_folder(user_id, session_id)
+        session_upload_folder.mkdir(parents=True, exist_ok=True)
+
         # 保存文件到临时目录
         saved_files = []
         for file in files:
@@ -36,7 +60,7 @@ def import_stage1_parse():
                 filename = secure_filename(file.filename)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 unique_filename = f"{timestamp}_{filename}"
-                file_path = UPLOAD_FOLDER / unique_filename
+                file_path = session_upload_folder / unique_filename
                 file.save(str(file_path))
                 saved_files.append({"path": str(file_path), "original_name": file.filename})
                 logger.info("[阶段1-解析] 文件已保存: %s", file_path)
@@ -46,10 +70,6 @@ def import_stage1_parse():
         if not saved_files:
             logger.error("[阶段1-解析] 没有有效的文件")
             return jsonify({"success": False, "error": "No valid files to process"}), 400
-
-        # 生成session_id
-        session_id = str(uuid.uuid4())
-        logger.info("[阶段1-解析] 生成会话ID: %s", session_id)
 
         # 调用阶段1解析（仅处理特定解析器能识别的文件）
         loop = asyncio.new_event_loop()
@@ -103,7 +123,7 @@ def import_stage1_parse():
                 {
                     "success": success,
                     "data": {
-                        "session_id": result.get("session_id"),
+                        "session_id": session_id,
                         "parsed_count": result.get("total_parsed", 0),
                         "files": file_results,
                         "unmatched_files": unmatched_files,
@@ -160,44 +180,48 @@ def import_parse_generic_into_session():
         if not temp_path:
             return jsonify({"success": False, "error": "Missing temp_path"}), 400
 
-        # 安全校验: 临时文件必须位于 UPLOAD_FOLDER 内
-        temp_file_path = Path(temp_path).resolve()
-        upload_folder_resolved = UPLOAD_FOLDER.resolve()
-        if not str(temp_file_path).startswith(str(upload_folder_resolved)):
-            logger.warning("[阶段1-通用解析] 路径安全校验失败: %s", temp_path)
-            return jsonify({"success": False, "error": "Invalid file path"}), 400
-        if not temp_file_path.exists():
-            return jsonify({"success": False, "error": "Temp file not found"}), 404
-
-        # 使用列映射解析
-        bills, _actual_encoding, _actual_delimiter = _parse_import_file_with_column_mapping(
-            temp_file_path,
-            column_mapping=column_mapping,
-            transaction_type_mapping=transaction_type_mapping,
-            has_header_line=has_header_line,
-            time_format=time_format,
-            amount_decimal_separator=amount_decimal_separator,
-            amount_digit_grouping_symbol=amount_digit_grouping_symbol,
-            tag_separator=tag_separator,
-            file_encoding=file_encoding,
-            delimiter=delimiter,
-        )
-
-        if not bills:
-            # 清理临时文件
-            try:
-                os.remove(str(temp_file_path))
-            except OSError:
-                pass
-            return jsonify({"success": True, "data": {"parsed_count": 0}})
-
         # 获取服务实例
-        _, bill_service, _ = get_app_context()
+        db, bill_service, _ = get_app_context()
         user_id = getattr(request, "user_id", 1)
 
+        temp_file_path: Path | None = None
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            import_session = loop.run_until_complete(db.get_import_session(session_id, user_id=user_id))
+            if not import_session:
+                return jsonify({"success": False, "error": "Import session not found"}), 404
+
+            # 安全校验: 临时文件必须位于当前 user/session 目录内。
+            temp_file_path = _resolve_session_temp_file(temp_path, session_id, user_id)
+            if temp_file_path is None:
+                logger.warning("[阶段1-通用解析] 路径安全校验失败: %s", temp_path)
+                return jsonify({"success": False, "error": "Invalid file path"}), 400
+            if not temp_file_path.exists():
+                return jsonify({"success": False, "error": "Temp file not found"}), 404
+
+            # 使用列映射解析
+            bills, _actual_encoding, _actual_delimiter = _parse_import_file_with_column_mapping(
+                temp_file_path,
+                column_mapping=column_mapping,
+                transaction_type_mapping=transaction_type_mapping,
+                has_header_line=has_header_line,
+                time_format=time_format,
+                amount_decimal_separator=amount_decimal_separator,
+                amount_digit_grouping_symbol=amount_digit_grouping_symbol,
+                tag_separator=tag_separator,
+                file_encoding=file_encoding,
+                delimiter=delimiter,
+            )
+
+            if not bills:
+                # 清理临时文件
+                try:
+                    os.remove(str(temp_file_path))
+                except OSError:
+                    pass
+                return jsonify({"success": True, "data": {"parsed_count": 0}})
+
             # 验证
             for bill in bills:
                 if not bill.get("date") and bill.get("trade_time"):
@@ -217,10 +241,11 @@ def import_parse_generic_into_session():
         finally:
             loop.close()
             # 清理临时文件
-            try:
-                os.remove(str(temp_file_path))
-            except OSError:
-                pass
+            if temp_file_path is not None:
+                try:
+                    os.remove(str(temp_file_path))
+                except OSError:
+                    pass
 
     except Exception as e:
         logger.error("[阶段1-通用解析] 失败: %s", e, exc_info=True)
@@ -388,7 +413,7 @@ def import_stage3_confirm():
                 logger.info("[阶段3-确认] 更新 %s 条预览数据", len(preview_updates))
                 loop.run_until_complete(db.update_preview_bills_batch(session_id, preview_updates, user_id))
                 # 从preview_updates中提取选中的ID
-                selected_ids = [u["id"] for u in preview_updates if u.get("selected", True) and u.get("id")]
+                selected_ids = [u["id"] for u in preview_updates if preview_update_is_selected(u) and u.get("id")]
                 logger.info("[阶段3-确认] 选中的账单ID数: %s", len(selected_ids))
 
             result = loop.run_until_complete(bill_service.import_stage3_confirm(session_id, user_id, selected_ids))

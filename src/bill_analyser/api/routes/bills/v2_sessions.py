@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 
 @bp.route("/import/v2/session/<session_id>", methods=["GET"])

@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 from .import_review import *  # noqa: F403
 

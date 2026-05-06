@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 
 def _read_text_with_fallback(file_path: Path, requested_encoding: str = "") -> tuple[str, str]:

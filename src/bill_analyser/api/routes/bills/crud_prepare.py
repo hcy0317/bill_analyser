@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 
 @bp.route("/modify", methods=["POST"])
@@ -98,6 +98,10 @@ def modify_bill():
             return jsonify({"success": True, "result": {"id": str(bill_id)}})
         else:
             return jsonify({"success": False, "error": "Failed to update bill"}), 500
+
+    except ValueError as e:
+        logger.error("修改账单参数错误: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 400
 
     except Exception as e:
         logger.error("修改账单失败: %s", e, exc_info=True)

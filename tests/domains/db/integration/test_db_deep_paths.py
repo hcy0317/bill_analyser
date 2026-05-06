@@ -170,6 +170,8 @@ async def test_bill_crud_and_query_filters_cover_account_category_keyword_and_am
         refreshed_bill = await db.get_bill_by_id(matched_bill_id, user_id=user_id)
         assert refreshed_bill is not None
         assert refreshed_bill["description"] == "已更新描述"
+        with pytest.raises(ValueError, match="unsupported bill update fields: user_id"):
+            await db.update_bill(matched_bill_id, {"user_id": other_account_id}, user_id=user_id)
 
         assert await db.delete_bill(other_bill_id, user_id=user_id) is True
         assert await db.get_bill_by_id(other_bill_id, user_id=user_id) is None

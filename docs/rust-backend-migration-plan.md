@@ -12,163 +12,9 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 320
-- Current Rust backend files: 41 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 321
+- Current Rust backend files: 41
 - Initial verified-dead files: 0
-
-## S1 Rust Runtime Shell
-
-- `bill-analyser-core` 是 Rust 内部库边界，当前只包含 runtime identity、health check、统一错误结构、serde JSON 和 API response envelope 基础类型。
-- Flask REST 外壳继续作为运行时入口；S1 不接管任何业务 API，不新增 `/api/v1/*`，不迁移任何业务域。
-- S1 的 `ApiResponse` 只代表 Rust runtime shell foundation；后续业务 API 迁移必须为对应 endpoint 增加现有 Flask envelope parity adapter 或测试，不能把 S1 envelope 直接当成全站业务响应替代品。
-- 后续功能域切片必须在各自 feature-gap review 中逐项声明 Python business item 的 `ported`、`facade_only`、`verified_dead` 或 `deferred_with_reason` 状态；S1 的 `business_migration` 保持 `none`。
-
-## S2 Shared Primitives Mapping
-
-S2 adds foundational Rust primitives and adapter helpers only. Flask REST remains the runtime shell, and no Python business route or service is retired in this slice.
-
-| Python responsibility | Rust S2 mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/utils/currency.py` cents/yuan conversion, symbols, amount validation baseline | `crates/bill-analyser-core/src/primitives/money.rs` and `crates/bill-analyser-core/src/primitives/currency.rs` provide exact cent storage, explicit yuan text conversion, half-up rounding, transaction amount range validation, default `CNY`, and symbol lookup | foundational port |
-| `src/bill_analyser/utils/constants.py` transaction IDs, default currency, default/max pagination, sort field/order constants | `crates/bill-analyser-core/src/primitives/transaction_type.rs`, `pagination.rs`, `sorting.rs`, `ids.rs`, and `currency.rs` define typed reusable constants and parsers | foundational port |
-| `src/bill_analyser/core/bill_date_utils.py` supported bill date parsing and normalized `YYYY-MM-DD HH:MM:SS` text | `crates/bill-analyser-core/src/primitives/date_time.rs` supports existing dash, slash, Chinese, date-only, minute, second, and ISO-prefix inputs | foundational port |
-| `src/bill_analyser/api/adapters/account_adapter.py` alias parsing and hierarchy constants | `crates/bill-analyser-core/src/adapters/account.rs` and `category.rs` provide shared alias parsing and `0`/`virtual_*` helpers | foundational port |
-| `src/bill_analyser/api/adapters/category_adapter.py` category virtual parent conventions | `crates/bill-analyser-core/src/adapters/category.rs` records the `virtual_<main>` parent ID convention | foundational port |
-| `src/bill_analyser/api/adapters/transaction_adapter.py` type-name mapping, sign convention, timestamp normalization, and page response shape | `crates/bill-analyser-core/src/adapters/transaction.rs`, `adapters/api.rs`, and `primitives/date_time.rs` provide typed mappings and response pagination helpers | foundational port |
-| `src/bill_analyser/api/routes/request_context_helpers.py` positive `user_id` request context expectation | `crates/bill-analyser-core/src/primitives/ids.rs` and `auth.rs` provide positive `UserId` parsing plus camelCase serialized `AuthContext` | foundational port |
-
-Explicit S2 deferrals: account category/type display maps, category type maps, tag filters, amount filter operators, error-code message localization, and historical dedup mode constants remain with their owning future business/API domains; `format_currency_display` UI formatting remains in Python until a display/reporting slice needs it; full account/category/transaction object projection, database-backed enrichment, `run_async_in_new_loop`, route status/envelope parity per endpoint, and any Python runtime cleanup are also deferred.
-
-## S3 SQLite Schema Runtime Foundation
-
-S3 adds `crates/bill-analyser-db` as an internal Rust DB runtime foundation only. Flask/Python remains the Database façade and no business DB write path is Rust-primary in this slice.
-
-| Python responsibility | Rust S3 mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/runtime.py` database path resolution and connection lifecycle guardrails | `crates/bill-analyser-db/src/path.rs` and `connection.rs` provide explicit temp/copy DB path guards, `data/bills.db` rejection, WAL/foreign_keys/synchronous/cache/temp-store PRAGMA setup, and busy timeout configuration for Rust-side dry-run use | foundational port |
-| `src/bill_analyser/core/database/shared.py` default positive `user_id` contract | `crates/bill-analyser-db/src/user_scope.rs` wraps core `UserId` into parameterized `user_id = ?` SQL scope helpers without inline values | foundational port |
-| `src/bill_analyser/core/database/schema/__init__.py` schema orchestration boundary | `crates/bill-analyser-db/src/schema.rs` records schema responsibility mapping and supports copied-fixture schema validation dry-runs | foundational port |
-| `src/bill_analyser/core/database/schema/core/*`, `templates_imports/*`, `users_security.py` table DDL and legacy migrations | Rust records these as deferred; Python schema initialization remains the runtime owner until the corresponding business/auth/import slices migrate table ownership with parity tests | deferred |
-| `src/bill_analyser/core/database/encryption.py` SQLCipher opt-in behavior | Deferred; Python remains the only SQLCipher runtime owner in S3 | deferred |
-
-S3 uses `rusqlite` with the bundled SQLite feature rather than `sqlx`: this keeps the first DB layer synchronous, small, and internal while avoiding a Tokio runtime or Python bridge before any business write path is ready. The crate is tested only against temporary/copy databases and refuses the repository `data/bills.db` path.
-
-Explicit S3 deferrals: full Python schema DDL porting, SQLCipher parity, aiosqlite async lifecycle parity, all business CRUD helpers, and any Python database cleanup remain with later domain slices. S3 does not delete or replace Python runtime files and does not introduce Rust-primary writes.
-
-## S4 Auth/Security Core Foundation
-
-S4 starts the auth-security migration with pure Rust contract helpers only. Flask/Python still owns every runtime auth route, password hash check, JWT encode/decode, 2FA write path, session DB write, and audit-log write. No auth endpoint is Rust-primary in this slice.
-
-| Python responsibility | Rust S4 mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/api/middleware/auth.py` required/optional Bearer header format checks | `crates/bill-analyser-core/src/auth/mod.rs` provides `parse_bearer_authorization_header` and `extract_bearer_token_or_empty` with the existing missing/malformed header error messages | foundational port |
-| `src/bill_analyser/api/routes/auth/tokens.py` token kind user-agent markers and token type inference | Rust `TokenKind`, token type constants, and `infer_token_type_from_user_agent` preserve session/API/MCP marker semantics | foundational port |
-| `src/bill_analyser/api/routes/auth/tokens.py` refresh-token decoded claim shape checks | Rust `validate_refresh_token_claims` records the existing `Not a refresh token` vs `Invalid refresh token` REST error contract after Python JWT decode | foundational port |
-| `src/bill_analyser/api/routes/auth/tokens.py` token list device-name projection | Rust `parse_user_agent_device_name` mirrors the existing Windows/iOS/macOS/Android/Linux and browser display fallback rules | foundational port |
-| `src/bill_analyser/api/routes/auth/registration.py` password policy validation messages | Rust `PasswordPolicy` mirrors configured length, uppercase, lowercase, digit, and special-character validation messages | foundational port |
-| `src/bill_analyser/core/database/users/auth/__init__.py` persistent 2FA recovery-code normalization pre-hash contract | Rust `normalize_recovery_code` and `recovery_code_hash_input` preserve uppercase whitespace-insensitive canonical input for a later hashing/DB takeover | foundational port |
-
-Explicit S4 deferrals: login/register/logout route takeover, bcrypt password verification, JWT signing/verification, API/MCP token creation, refresh session creation, 2FA enable/disable/recovery writes, step-up token signing, profile/cloud-settings/external-auth/user-data routes, auth/session SQLite helpers, auth/audit log writes, Python bridge wiring, and Python business cleanup remain deferred. This slice intentionally avoids half-migrated runtime paths.
-
-## S4b Auth Runtime Bridge
-
-S4b establishes the first Python-to-Rust auth runtime bridge while preserving the Flask REST shell. Python still decodes the refresh JWT and keeps all token/session/database writes; only the decoded refresh-claim shape validation in `POST /api/tokens/refresh` is delegated to Rust.
-
-| Python responsibility | Rust S4b mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/auth/tokens.py` post-decode refresh claim validation for `type`, `user_id`, and `username` | `bill_auth_bridge` calls `bill_analyser_core::auth::validate_refresh_token_claims`; `src/bill_analyser/core/auth_rust_bridge.py` invokes the bridge through stdin/stdout JSON and maps Rust validation errors back to the existing REST status/message contract | runtime bridge |
-| `src/bill_analyser/api/routes/auth/tokens.py` refresh JWT decode, token signing, user lookup, session creation, cloud settings projection, and response envelope | Python remains the runtime owner; Rust receives only decoded claims and never sees token secrets or writes the database | retained |
-
-S4b uses a Rust CLI bridge instead of PyO3 or C FFI: the repository still uses `uv_build`, earlier runtime tests require the core/db crates to stay internal library boundaries, and the workspace forbids unsafe code. The CLI bridge avoids Python packaging backend changes and unsafe FFI while giving normal Python route tests a real Rust execution path. Runtime startup via `start_backend.ps1` and backend CI build `bill_auth_bridge` before Python serves the auth route; package-style deployments that do not use this startup path must provide `BILL_ANALYSER_RUST_AUTH_BRIDGE` pointing at a prebuilt bridge executable.
-
-Explicit S4b deferrals: full login/register/logout takeover, password verification, JWT signing/verification, API/MCP token writes, refresh session creation semantics, 2FA/step-up/profile/cloud-settings/external-auth/user-data routes, auth DB helpers, audit log writes, and Python business cleanup remain deferred. No compatibility shell is removed because Python remains the auth runtime owner outside the selected validation function.
-
-## S5a Tags Master Data Runtime Bridge
-
-S5a migrates only tag master-data CRUD and display-order persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns batch orchestration, request validation, response envelopes, SQLCipher setup, in-memory databases, settings bundle import/export, and all `bill_tags` relationship helpers.
-
-| Python responsibility | Rust S5a mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/tags/__init__.py` `get_all_tags`, `get_tag_by_id`, `create_tag`, `update_tag`, `delete_tag`, `update_tag_display_orders` for file DBs | `crates/bill-analyser-db/src/taxonomy/tags.rs` implements user-scoped repository methods with `ORDER BY display_order, created_at DESC`; `crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs` exposes stdin/stdout JSON commands; `src/bill_analyser/core/tag_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
-| `src/bill_analyser/core/database/tags/__init__.py` `:memory:` and SQLCipher tag CRUD/display-order behavior | Python aiosqlite fallback remains active because a Rust subprocess opens a separate connection and cannot share in-memory state or SQLCipher pragmas | retained |
-| `src/bill_analyser/core/database/tags/__init__.py` `add_tags_to_bill`, `get_tags_for_bill`, `get_tags_for_bills`, `update_bill_tags` | Python remains the owner; relationship table semantics are explicitly deferred to the later bill/tag relationship slice | retained |
-| `src/bill_analyser/api/routes/tags.py` list/get/create/update/delete/batch/display-orders REST contract | Route code remains unchanged; existing REST status/error/envelope behavior is exercised through the same DB facade methods | facade retained |
-| Settings bundle transaction tag export/import | Export reads tag master data through the public `get_all_tags()` façade, so file DB export now observes the Rust-backed list path; import/upsert remains direct Python SQL and is deferred to the settings-bundle/taxonomy integration slice | mixed: export via façade, import retained |
-
-Runtime startup via `start_backend.ps1` and backend CI now build `bill_taxonomy_bridge` alongside `bill_auth_bridge`. Package-style deployments that do not use this startup path must provide `BILL_ANALYSER_RUST_TAXONOMY_BRIDGE` pointing at a prebuilt bridge executable.
-
-Explicit S5a deferrals: `bill_tags` relationship read/write helpers, settings bundle tag import/upsert, accounts/categories/templates taxonomy domains, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5a because the route shell, in-memory fallback, SQLCipher fallback, batch orchestration, settings import, and relationship helpers remain active owners.
-
-## S5b Accounts Master Data Runtime Bridge
-
-S5b migrates only account master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns account balance synchronization, account transaction move/clear operations, audit/password side effects, SQLCipher setup, in-memory databases, and settings bundle account import/upsert; settings bundle account export reads accounts through the Database façade, so file-backed export observes the Rust-backed list path.
-
-| Python responsibility | Rust S5b mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/accounts/reads.py` `get_all_accounts`, `get_account_by_id`, `get_sub_accounts` for file DBs | `crates/bill-analyser-db/src/taxonomy/accounts.rs` implements user-scoped list/get/subaccount reads with existing account table fields and list ordering; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/account_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
-| `src/bill_analyser/core/database/accounts/mutations.py` `create_account`, `update_account`, `delete_account`, `update_account_display_orders` for file DBs | Rust repository writes the same `accounts` columns, preserves parent_id/subAccounts creation, hidden/display_order, aliases JSON, balance/initial_balance, currency/icon/color/comment/category/type, and user_id-scoped mutations | runtime bridge |
-| `src/bill_analyser/core/database/accounts/**` `:memory:` and SQLCipher account CRUD/display-order behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
-| Legacy file-backed databases and tests that hold account rows before matching user rows | Rust account connection keeps Python's account-path foreign-key PRAGMA behavior instead of making S5b stricter than the previous aiosqlite account connection | retained parity |
-| Account balance synchronization, account transaction move/clear, operation password checks, audit logs, and settings bundle account import/upsert | Python remains the owner; these side-effecting operation paths are deferred to later accounts-operations or settings-bundle taxonomy slices. Settings bundle account export uses the façade read path and therefore uses Rust-backed list on file DBs | retained / export via façade |
-| `src/bill_analyser/api/routes/accounts/**` REST contract | Route shell, URL/status/envelope, and frontend camelCase/snake_case compatibility remain in Python; display-order REST orchestration now calls the same Database façade batch method that bridges to Rust on file DBs | facade retained |
-
-Explicit S5b deferrals: account balance sync, account transaction move/clear, audit/security password actions, alias-learning helpers, historical account suggestions, settings bundle account import/upsert, SQLCipher Rust access, and any Python route-shell cleanup remain deferred. No Python business code is deleted in S5b because the route shell, in-memory fallback, SQLCipher fallback, balance/operation helpers, audit side effects, account-learning helpers, and settings import/upsert remain active owners.
-
-## S5c Categories Master Data Runtime Bridge
-
-S5c migrates category master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns category route validation/envelopes, category statistics, category rule CRUD/matching, settings bundle category import/upsert, SQLCipher setup, and in-memory databases. Default category seed category creation now uses a batch `ensure_categories()` façade call so file-backed registration/default-seed flows cross the Rust taxonomy runtime once per seed run instead of once per category; default category-rule creation remains Python-owned until S6.
-
-| Python responsibility | Rust S5c mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/categories/__init__.py` `get_all_categories`, `get_category_by_id`, `get_category_by_name`, `create_category`, `ensure_categories`, `update_category`, `delete_category`, `delete_categories_by_main_category`, and `update_main_category_name` for file DBs | `crates/bill-analyser-db/src/taxonomy/categories.rs` implements user-scoped CRUD, batch missing-category ensure, parent delete cascade by `main_category`, main-category bulk rename, unique-conflict parity, bills-derived fallback when `categories` is empty, and stable `ORDER BY priority ASC, main_category, sub_category`; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/category_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
-| `src/bill_analyser/core/database/categories/__init__.py` `:memory:` and SQLCipher category CRUD/tree behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
-| `src/bill_analyser/core/default_category_seed.py` default category master data | Category seed constants/orchestration remain Python, but file-backed `db.ensure_categories()` persists missing default category rows through one Rust bridge process; default category-rule creation stays Python and now preloads category/rule maps to avoid per-rule taxonomy bridge calls | mixed: master data via façade, rules retained |
-| Settings bundle transaction category export/import | Export reads categories through `get_all_categories()`, so file DB export observes the Rust-backed list path; import/upsert remains direct Python SQL and is deferred to S5e settings-bundle taxonomy integration | mixed: export via façade, import retained |
-| `src/bill_analyser/api/routes/categories/**` REST contract | Route shell, URL/status/envelope, virtual parent IDs, tree/list formatting, import/export route orchestration, and category rule route behavior remain in Python and are exercised through the same Database façade methods | facade retained |
-
-Explicit S5c deferrals: category rules and matcher, category statistics, settings bundle category import/upsert, SQLCipher Rust access, route-shell cleanup, and Python seed/rule orchestration remain deferred. No Python business code is deleted in S5c except now-unused private seed/rule lookup helpers removed after replacing them with batch category payload generation and rule-name preloading; all retained paths are still active owners.
-
-## S5d Templates Master Data Runtime Bridge
-
-S5d migrates transaction-template and scheduled-template master-data persistence to Rust for regular file-backed SQLite databases. Flask REST remains the route shell, and Python still owns route validation/envelopes, `:memory:` and SQLCipher paths, recurring candidate matching, bill bind/unbind next-date recalculation, settings bundle template import/upsert, recurring suggestions, and import-flow side effects. Template DTO serialization for the migrated facade read path now comes from Rust so file-backed REST lifecycle tests exercise the same response shape through `bill_taxonomy_bridge`.
-
-| Python responsibility | Rust S5d mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/templates/crud.py` `get_all_templates`, `get_template_by_id`, `create_template`, `update_template`, `delete_template`, and `update_template_display_orders` for regular file DBs | `crates/bill-analyser-db/src/taxonomy/templates.rs` implements user-scoped `bill_templates` / `recurring_bills` CRUD, display-order batch updates, default display-order allocation, existing DTO field projection, tag CSV serialization, type normalization, `scheduledStartDate -> next_date` update parity, and ordinary/recurring list ordering; `bill_taxonomy_bridge` exposes stdin/stdout JSON commands; `core/template_rust_bridge.py` invokes the prebuilt bridge | runtime bridge |
-| `src/bill_analyser/core/database/templates/recurring.py` `get_enabled_recurring_templates` for file DBs | Rust returns raw enabled recurring rows ordered by display order/name so Python recurring candidate matching continues over the same row contract | runtime bridge read |
-| `src/bill_analyser/core/database/templates/**` `:memory:` and SQLCipher behavior | Python aiosqlite fallback remains active because a Rust subprocess cannot share in-memory state or SQLCipher pragmas safely | retained |
-| Recurring candidate matching, bind/rebind/unbind, and schedule helper algorithms | Python remains the owner for matching scores, Sunday-first schedule semantics, bill side effects, and old-recurring next-date recalculation | retained |
-| Settings bundle template export/import and recurring suggestions/import-flow writes | Settings bundle import/upsert, recurring suggestion accept/reject, and import preview confirmation remain Python-owned because they include reference resolution or cross-domain side effects beyond template master-data CRUD | retained |
-| `src/bill_analyser/api/routes/templates.py` REST contract | Route shell, URL/status/envelope, `templateType` parsing, auth user injection, and response handling remain Python and are exercised through the same Database facade methods | facade retained |
-
-Explicit S5d deferrals: recurring matching/bind/unbind side effects, schedule algorithms, settings bundle template import/upsert, recurring suggestion flows, import preview recurring confirmation, SQLCipher Rust access, and route-shell cleanup remain deferred. No Python business code is deleted in S5d because the route shell, in-memory fallback, SQLCipher fallback, recurring side-effect helpers, and settings/suggestion/import writers remain active owners.
-
-## S5e Settings Bundle Taxonomy Sections
-
-S5e moves settings-bundle taxonomy section normalization, export DTO construction, and template import reference resolution into Rust while preserving Python as the single transaction coordinator for imports. A Rust subprocess cannot share the active `aiosqlite` transaction used for preview rollback and full-bundle atomic import, so S5e deliberately keeps final SQL execution in Python and uses Rust for deterministic pure computations.
-
-| Python responsibility | Rust S5e mapping | Status |
-| --- | --- | --- |
-| `SettingsBundleBaseMixin._normalize_settings_bundle_sections` schema/section normalization | `crates/bill-analyser-db/src/taxonomy/settings_bundle.rs` validates `schemaVersion == 1`, normalizes every known section to a list of dict-like items, and returns the canonical section object through `settings-normalize-sections`; Python maps Rust domain errors back to `ValueError` for existing route handling | runtime helper bridge |
-| Taxonomy section export DTOs for `accounts`, `transactionCategories`, `transactionTags`, `transactionTemplates`, and `scheduledTransactions` | Rust `export_taxonomy_sections` builds external refs, parent/category/account/tag names, aliases, hidden flags, and template refs from the existing facade/raw template rows; Python still merges retained category rules, LLM configs, and OCR config into the final bundle | runtime helper bridge |
-| Settings bundle account/category/tag import value normalization | Rust normalizes account parent IDs from the current ref map, account/category/tag field defaults, booleans, aliases JSON, display order, and hidden flags; Python keeps ordered upsert loops and SQL execution inside the current transaction | runtime helper bridge; SQL retained |
-| Settings bundle template import reference resolution and payload construction | Rust resolves category/account/tag refs, local legacy IDs, name fallback, tag-ref warnings, unresolved template skip rules, recurring schedule payload fields, and amount/comment/display fields; Python keeps `bill_templates` / `recurring_bills` inserts and updates inside the current transaction | runtime helper bridge; SQL retained |
-| Full settings import transaction, dry-run rollback, category-rule import, LLM config import, OCR config import, and route shell | Python remains owner because these cross taxonomy, classification rules, AI/LLM, OCR, auth/password-gated section routes, cache invalidation, and `OCR_SERVICE` invalidation | retained |
-
-Explicit S5e deferrals: category rule import/export remains Python until S6, LLM/OCR settings remain Python until their AI/OCR domain slices, SQLCipher and in-memory behavior continue on Python fallbacks, and no settings-bundle business code is deleted because the Python transaction coordinator remains active.
-
-## S6a Category Rule Expression Runtime Bridge
-
-S6 is split into smaller classification-rule slices. S6a migrates only the pure category-rule expression compiler into Rust while Python keeps runtime state, route shells, database CRUD, settings-bundle rule import/export, default seed orchestration, and import-flow classification loops. This avoids mixing a hot matching path and transactional rule persistence into one review unit.
-
-| Python responsibility | Rust S6a mapping | Status |
-| --- | --- | --- |
-| `src/bill_analyser/core/category_engine/matcher.py` `compile_rule_expression` for new `OR={...}` expression syntax | `crates/bill-analyser-core/src/category_rules/mod.rs` compiles the expression AST, legacy diagnostic fields, escaped terms, slash/pipe OR, plus AND, visible `×`/bare `NOT`, regex-enabled patterns, and fail-closed malformed expressions; `bill_category_rule_bridge` exposes a stdin/stdout JSON command; `core/category_rule_rust_bridge.py` converts the Rust DTO back to the existing Python `CompiledRule` / `RuleExpressionNode` dataclasses | runtime helper bridge |
-| Backend startup and CI bridge availability | `start_backend.ps1` builds/exports `BILL_ANALYSER_RUST_CATEGORY_RULE_BRIDGE`; Gitea backend CI builds `bill_category_rule_bridge` before pytest so the Rust compile path is available in normal runtime and CI | runtime wiring |
-| Legacy `OR:a|b&AND:c&NOT:d` compilation, `match_compiled`, `_match_expression_node`, `_match_pattern`, matcher caches, and batch classification | Python remains owner in S6a; Rust-backed compiled ASTs are evaluated by the existing Python matcher so hot import-preview classification does not spawn a subprocess per bill | retained |
-| `DatabaseCategoryRulesMixin` SQL CRUD/reorder/migrate, default category seed rule creation, settings-bundle `categoryRecognitionRules` import/export, and `/api/category-rules` reload behavior | Python remains owner until S6b/S6c because these paths carry transactions, engine cache invalidation, user-scoped DB writes, and cross-domain import/seed side effects | retained |
-
-Explicit S6a deferrals: category_rules table CRUD/reorder/read bridge, runtime batch classifier bridge, rule center aggregation changes, settings-bundle rule SQL, default seed rule writes, and Python route-shell cleanup remain deferred. No Python classification business code is deleted in S6a because Python still owns cache lifecycle, matching evaluation, and persistence.
 
 ## Domain Review Baseline
 
@@ -186,7 +32,7 @@ Explicit S6a deferrals: category_rules table CRUD/reorder/read bridge, runtime b
 | classification-rules | 18 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
-| import-contracts | 0 | 2 | 0 |
+| import-contracts | 0 | 3 | 0 |
 | import-parsers | 8 | 2 | 0 |
 | matching-reconciliation | 22 | 5 | 0 |
 | recurring-calendar | 4 | 0 | 0 |
@@ -202,3 +48,21 @@ Explicit S6a deferrals: category_rules table CRUD/reorder/read bridge, runtime b
 - Code-bug reviews compare changed inventory tooling and docs against this deterministic scan.
 - Feature-gap reviews use the Python File Matrix to prove each backend item is ported, facade-only, deferred with reason, or verified-dead with evidence.
 - A later slice cannot claim a domain complete while any file in that domain is unmapped.
+
+## S1 Rust Runtime Shell
+
+S1 added the internal Rust workspace boundary while keeping Flask REST as the runtime shell. The workspace contains `crates/bill-analyser-core` and `crates/bill-analyser-db`; Rust remains an internal library / bridge surface and 不接管任何业务 API.
+
+## S2 Shared Primitives Mapping
+
+S2 maps shared Python primitives to Rust primitives without changing the public REST contract:
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/utils/currency.py` | `crates/bill-analyser-core/src/primitives/money.rs` | Explicit yuan / cents conversion and no float-backed money primitive |
+| `src/bill_analyser/core/bill_date_utils.py` | `crates/bill-analyser-core/src/primitives/date_time.rs` | Date/time parsing and serialization helpers |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transactions.rs` | REST adapter parity for amount/time/category/account fields |
+
+## S3 SQLite Schema Runtime Foundation
+
+S3 added `crates/bill-analyser-db` as the Rust DB runtime foundation for schema/path checks and database guard logic. It is not Rust-primary for business writes: the Flask/Python Database façade remains the primary runtime write path until later domain slices prove and switch a specific business surface.

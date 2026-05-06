@@ -5,11 +5,11 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 320
+- Python backend files: 321
 - Rust backend files: 41
 - Migration domains: 22
 - Files marked port: 253
-- Files marked facade: 67
+- Files marked facade: 68
 - Files marked deferred: 0
 - Verified dead files: 0
 
@@ -29,7 +29,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | classification-rules | 18 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
-| import-contracts | 0 | 2 | 0 |
+| import-contracts | 0 | 3 | 0 |
 | import-parsers | 8 | 2 | 0 |
 | matching-reconciliation | 22 | 5 | 0 |
 | recurring-calendar | 4 | 0 | 0 |
@@ -81,11 +81,11 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/backup/files.py | backup-operations | api-route | port | 320 |
 | src/bill_analyser/api/routes/backup/jobs.py | backup-operations | api-route | port | 93 |
 | src/bill_analyser/api/routes/backup/support.py | backup-operations | api-route | port | 364 |
-| src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 76 |
+| src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 77 |
 | src/bill_analyser/api/routes/bills/category_actions.py | bills-import | api-route | port | 212 |
-| src/bill_analyser/api/routes/bills/crud_create_update.py | bills-import | api-route | port | 309 |
-| src/bill_analyser/api/routes/bills/crud_prepare.py | bills-import | api-route | port | 297 |
-| src/bill_analyser/api/routes/bills/crud_query.py | bills-import | api-route | port | 339 |
+| src/bill_analyser/api/routes/bills/crud_create_update.py | bills-import | api-route | port | 311 |
+| src/bill_analyser/api/routes/bills/crud_prepare.py | bills-import | api-route | port | 301 |
+| src/bill_analyser/api/routes/bills/crud_query.py | bills-import | api-route | port | 455 |
 | src/bill_analyser/api/routes/bills/import_config.py | bills-import | api-route | port | 339 |
 | src/bill_analyser/api/routes/bills/import_detection.py | bills-import | api-route | port | 284 |
 | src/bill_analyser/api/routes/bills/import_learning.py | bills-import | api-route | port | 410 |
@@ -94,9 +94,9 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/bills/import_review.py | bills-import | api-route | port | 394 |
 | src/bill_analyser/api/routes/bills/import_rows.py | bills-import | api-route | port | 316 |
 | src/bill_analyser/api/routes/bills/parse_import.py | bills-import | api-route | port | 198 |
-| src/bill_analyser/api/routes/bills/reconciliation.py | bills-import | api-route | port | 253 |
-| src/bill_analyser/api/routes/bills/support.py | bills-import | api-route | port | 322 |
-| src/bill_analyser/api/routes/bills/v2_pipeline.py | bills-import | api-route | port | 416 |
+| src/bill_analyser/api/routes/bills/reconciliation.py | bills-import | api-route | port | 284 |
+| src/bill_analyser/api/routes/bills/support.py | bills-import | api-route | port | 323 |
+| src/bill_analyser/api/routes/bills/v2_pipeline.py | bills-import | api-route | port | 441 |
 | src/bill_analyser/api/routes/bills/v2_preview_actions.py | bills-import | api-route | port | 316 |
 | src/bill_analyser/api/routes/bills/v2_sessions.py | bills-import | api-route | port | 194 |
 | src/bill_analyser/api/routes/budgets/__init__.py | budgets | package-marker | facade | 40 |
@@ -181,7 +181,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/bills/service_parts/import_preview_paging.py | bills-import | core-service | port | 313 |
 | src/bill_analyser/core/bills/service_parts/import_preview_projection.py | bills-import | core-service | port | 423 |
 | src/bill_analyser/core/bills/service_parts/import_reclassify.py | bills-import | core-service | port | 230 |
-| src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py | bills-import | core-service | port | 576 |
+| src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py | bills-import | core-service | port | 627 |
 | src/bill_analyser/core/bills/service_parts/investment_helpers.py | bills-import | core-service | port | 171 |
 | src/bill_analyser/core/bills/service_parts/matching_actions.py | bills-import | core-service | port | 569 |
 | src/bill_analyser/core/bills/service_parts/matching_preview_accept.py | bills-import | core-service | port | 302 |
@@ -196,7 +196,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/category_engine/compiled_rule.py | classification-rules | core-service | port | 28 |
 | src/bill_analyser/core/category_engine/engine.py | classification-rules | core-service | port | 622 |
 | src/bill_analyser/core/category_engine/expression.py | classification-rules | core-service | port | 112 |
-| src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 654 |
+| src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 683 |
 | src/bill_analyser/core/category_rule_rust_bridge.py | classification-rules | core-service | port | 170 |
 | src/bill_analyser/core/category_rust_bridge.py | classification-rules | core-service | port | 249 |
 | src/bill_analyser/core/database/__init__.py | database-facade | package-marker | facade | 2 |
@@ -205,7 +205,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/accounts/mutations.py | accounts | database-access | port | 302 |
 | src/bill_analyser/core/database/accounts/reads.py | accounts | database-access | port | 305 |
 | src/bill_analyser/core/database/audit_backup/__init__.py | backup-operations | package-implementation | port | 269 |
-| src/bill_analyser/core/database/bills/__init__.py | bills-import | package-implementation | port | 692 |
+| src/bill_analyser/core/database/bills/__init__.py | bills-import | package-implementation | port | 735 |
 | src/bill_analyser/core/database/budgets/__init__.py | budgets | package-marker | facade | 2 |
 | src/bill_analyser/core/database/budgets/core/__init__.py | budgets | package-marker | facade | 22 |
 | src/bill_analyser/core/database/budgets/core/hierarchy.py | budgets | database-access | port | 400 |
@@ -233,12 +233,12 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/imports/learning/suggestion_center.py | bills-import | database-access | port | 421 |
 | src/bill_analyser/core/database/imports/preview/__init__.py | bills-import | package-marker | facade | 28 |
 | src/bill_analyser/core/database/imports/preview/base.py | bills-import | database-access | port | 258 |
-| src/bill_analyser/core/database/imports/preview/confirmation.py | bills-import | database-access | port | 135 |
+| src/bill_analyser/core/database/imports/preview/confirmation.py | bills-import | database-access | port | 140 |
 | src/bill_analyser/core/database/imports/preview/decisions.py | bills-import | database-access | port | 435 |
 | src/bill_analyser/core/database/imports/preview/inserts.py | bills-import | database-access | port | 162 |
 | src/bill_analyser/core/database/imports/preview/reads.py | bills-import | database-access | port | 256 |
-| src/bill_analyser/core/database/imports/preview/updates.py | bills-import | database-access | port | 207 |
-| src/bill_analyser/core/database/imports/sessions/__init__.py | bills-import | package-implementation | port | 213 |
+| src/bill_analyser/core/database/imports/preview/updates.py | bills-import | database-access | port | 208 |
+| src/bill_analyser/core/database/imports/sessions/__init__.py | bills-import | package-implementation | port | 227 |
 | src/bill_analyser/core/database/llm/__init__.py | ai-learning-llm | package-marker | facade | 2 |
 | src/bill_analyser/core/database/llm/candidates/__init__.py | ai-learning-llm | package-marker | facade | 24 |
 | src/bill_analyser/core/database/llm/candidates/crud.py | ai-learning-llm | database-access | port | 208 |
@@ -333,8 +333,9 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 402 |
 | src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port | 154 |
 | src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port | 214 |
-| src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 17 |
+| src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 23 |
 | src/bill_analyser/import_contracts/parser_tags.py | import-contracts | import-contract | facade | 142 |
+| src/bill_analyser/import_contracts/preview_selection.py | import-contracts | import-contract | facade | 34 |
 | src/bill_analyser/parsers/__init__.py | import-parsers | package-marker | facade | 6 |
 | src/bill_analyser/parsers/abc.py | import-parsers | import-parser | port | 336 |
 | src/bill_analyser/parsers/alipay.py | import-parsers | import-parser | port | 153 |

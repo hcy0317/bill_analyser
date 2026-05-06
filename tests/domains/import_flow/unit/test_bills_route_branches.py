@@ -707,6 +707,45 @@ def _set_request_user_id(user_id: int = 9) -> None:
     request_obj.user_id = user_id
 
 
+def _write_session_temp_file(
+    upload_root: Path,
+    user_id: int,
+    session_id: str,
+    filename: str,
+    content: str = "交易时间,金额\n2026-03-01,12.34\n",
+) -> Path:
+    session_dir = upload_root / f"user_{user_id}" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    temp_file = session_dir / filename
+    temp_file.write_text(content, encoding="utf-8")
+    return temp_file
+
+
+def test_bills_export_helpers_escape_formula_like_text_cells() -> None:
+    """导出文本字段应避免被 CSV/Excel 客户端解释为公式。"""
+    bill = {
+        "date": "2026-03-01",
+        "type": "支出",
+        "amount": -12.5,
+        "counterparty": "=cmd",
+        "description": "+SUM(1,1)",
+        "payment_method": "@pay",
+        "main_category": "-category",
+        "sub_category": " normal",
+    }
+
+    assert bills_module._serialize_bill_value(bill, "counterparty") == "'=cmd"
+    assert bills_module._serialize_bill_value(bill, "description") == "'+SUM(1,1)"
+    assert bills_module._serialize_bill_value(bill, "payment_method") == "'@pay"
+    assert bills_module._serialize_bill_value(bill, "main_category") == "'-category"
+    assert bills_module._serialize_bill_value(bill, "amount") == "-12.5"
+
+    csv_text = bills_module._build_csv_export([bill]).get_data(as_text=True)
+    assert "'=cmd" in csv_text
+    assert "'+SUM(1,1)" in csv_text
+    assert "'@pay" in csv_text
+
+
 def test_bills_misc_routes_cover_parser_and_import_config_branches(
     bills_route_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
@@ -2181,8 +2220,7 @@ def test_bills_parse_import_file_and_stage1_routes_cover_remaining_parser_and_cl
         temp_path.unlink()
 
     service.validator = type("Validator", (), {"validate_bills": staticmethod(lambda bills: ([], bills))})()
-    invalid_only_temp = tmp_path / "invalid_only_generic.csv"
-    invalid_only_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    invalid_only_temp = _write_session_temp_file(tmp_path, 1, "sess-invalid-only", "invalid_only_generic.csv")
     monkeypatch.setattr(
         bills_module,
         "_parse_import_file_with_column_mapping",
@@ -2528,7 +2566,7 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         _set_request_user_id(4)
         payload = stage1_route().get_json() or {}
         assert payload["success"] is True
-        assert payload["data"]["session_id"] == "sess-stage1"
+        assert payload["data"]["session_id"] == service.stage1_calls[-1][1]
         assert payload["data"]["parsed_count"] == 1
         assert service.stage1_calls[-1][2] == 4
 
@@ -2552,6 +2590,19 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         assert status == 400
         assert response.get_json()["error"] == "Missing temp_path"
 
+    missing_session_temp = _write_session_temp_file(tmp_path, 1, "missing-session", "will_not_parse.csv")
+    db.import_session_result = None
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse_generic",
+        method="POST",
+        json={"session_id": "missing-session", "temp_path": str(missing_session_temp)},
+    ):
+        response, status = _unwrap_response(parse_generic_route())
+        assert status == 404
+        assert response.get_json()["error"] == "Import session not found"
+        assert missing_session_temp.exists()
+    db.import_session_result = {"session_id": "sess", "status": "parsed"}
+
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/parse_generic",
         method="POST",
@@ -2561,10 +2612,11 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         assert status == 400
         assert response.get_json()["error"] == "Invalid file path"
 
+    missing_temp = tmp_path / "user_1" / "sess" / "missing.csv"
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/parse_generic",
         method="POST",
-        json={"session_id": "sess", "temp_path": str(tmp_path / "missing.csv")},
+        json={"session_id": "sess", "temp_path": str(missing_temp)},
     ):
         response, status = _unwrap_response(parse_generic_route())
         assert status == 404
@@ -2575,8 +2627,7 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         "_parse_import_file_with_column_mapping",
         lambda *args, **kwargs: ([], "utf-8", ","),
     )
-    empty_temp = tmp_path / "empty_generic.csv"
-    empty_temp.write_text("交易时间,金额\n", encoding="utf-8")
+    empty_temp = _write_session_temp_file(tmp_path, 1, "sess-empty", "empty_generic.csv", "交易时间,金额\n")
     with bills_route_app.test_request_context(
         "/api/bills/import/v2/parse_generic",
         method="POST",
@@ -2586,8 +2637,7 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         assert payload == {"success": True, "data": {"parsed_count": 0}}
         assert not empty_temp.exists()
 
-    valid_temp = tmp_path / "valid_generic.csv"
-    valid_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    valid_temp = _write_session_temp_file(tmp_path, 5, "sess-generic", "valid_generic.csv")
     monkeypatch.setattr(
         bills_module,
         "_parse_import_file_with_column_mapping",
@@ -2603,8 +2653,7 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
         assert payload == {"success": True, "data": {"parsed_count": 1}}
         assert not valid_temp.exists()
 
-    broken_temp = tmp_path / "broken_generic.csv"
-    broken_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    broken_temp = _write_session_temp_file(tmp_path, 1, "sess-error", "broken_generic.csv")
 
     def _raise_generic_error(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("generic boom")
@@ -2696,6 +2745,9 @@ def test_bills_import_stage_routes_cover_validation_and_lightweight_success_path
             "preview_updates": [
                 {"id": 1, "selected": True},
                 {"id": 2, "selected": False},
+                {"id": 3, "isSelected": False},
+                {"id": 4, "is_selected": "false"},
+                {"id": 5, "preview_selected": 0},
             ],
         },
     ):
@@ -3312,7 +3364,7 @@ def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remainin
         assert payload["result"]["createdCount"] == 2
         assert payload["result"]["ids"] == ["101", "102"]
 
-    with bills_route_app.test_request_context("/api/bills/batch", method="POST", json={}):
+    with bills_route_app.test_request_context("/api/bills/import/batch", method="POST", json={}):
         _set_request_user_id()
         response, status = _unwrap_response(import_batch_route())
         assert status == 400
@@ -3320,7 +3372,7 @@ def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remainin
 
     service.import_bills_result = {"success": True, "inserted": 2, "duplicates": 1}
     with bills_route_app.test_request_context(
-        "/api/bills/batch",
+        "/api/bills/import/batch",
         method="POST",
         json={"file_path": "demo.csv"},
     ):
@@ -3333,7 +3385,7 @@ def test_bills_legacy_delete_batch_create_and_import_batch_routes_cover_remainin
 
     monkeypatch.setattr(service, "import_bills", _raise_import_batch_error)
     with bills_route_app.test_request_context(
-        "/api/bills/batch",
+        "/api/bills/import/batch",
         method="POST",
         json={"file_path": "demo.csv"},
     ):
@@ -3460,6 +3512,8 @@ def test_bills_upload_and_reconciliation_routes_cover_remaining_heavy_paths(
         assert status == 500
         assert response.get_json()["error"] == "upload boom"
 
+    reconciliation_filters: list[dict[str, Any]] = []
+
     async def _query_reconciliation_bills(
         *,
         page: int,
@@ -3468,6 +3522,7 @@ def test_bills_upload_and_reconciliation_routes_cover_remaining_heavy_paths(
         user_id: int,
     ) -> tuple[list[dict[str, Any]], int]:
         _ = (page, page_size, user_id)
+        reconciliation_filters.append(dict(filters))
         if page_size == 1 and filters.get("end_date") == "2026-03-01":
             return ([{"account_balance": 55.0}], 1)
 
@@ -3511,6 +3566,10 @@ def test_bills_upload_and_reconciliation_routes_cover_remaining_heavy_paths(
         assert payload["result"]["netFlow"] == 900
         assert payload["result"]["itemCount"] == 4
         assert payload["result"]["transactions"][0]["accountOpeningBalance"] >= 0
+        assert reconciliation_filters[-1]["categories"] == [
+            {"main": "餐饮", "sub": "早餐"},
+            {"main": "学习", "sub": "课本"},
+        ]
 
     start_time = int(bills_module.datetime.strptime("2026-03-01", "%Y-%m-%d").timestamp())
     end_time = int(bills_module.datetime.strptime("2026-03-31", "%Y-%m-%d").timestamp())
@@ -4331,8 +4390,21 @@ def test_bills_batch_delete_reconciliation_and_stage1_generic_cleanup_cover_more
         assert payload["result"]["totalOutflows"] == 500
         assert payload["result"]["netFlow"] == -500
 
-    empty_temp = tmp_path / "parse_generic_empty.csv"
-    empty_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    sibling_upload_dir = tmp_path.parent / f"{tmp_path.name}_sibling"
+    sibling_upload_dir.mkdir(exist_ok=True)
+    sibling_temp = sibling_upload_dir / "parse_generic_outside.csv"
+    sibling_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    with bills_route_app.test_request_context(
+        "/api/bills/import/v2/parse_generic",
+        method="POST",
+        json={"session_id": "sess-outside", "temp_path": str(sibling_temp), "column_mapping": {"1": 0}},
+    ):
+        _set_request_user_id()
+        response, status = _unwrap_response(parse_generic_route())
+        assert status == 400
+        assert response.get_json()["error"] == "Invalid file path"
+
+    empty_temp = _write_session_temp_file(tmp_path, 9, "sess-empty", "parse_generic_empty.csv")
     remove_calls: list[str] = []
     original_remove = bills_module.os.remove
 
@@ -4355,8 +4427,7 @@ def test_bills_batch_delete_reconciliation_and_stage1_generic_cleanup_cover_more
         payload = parse_generic_route().get_json() or {}
         assert payload == {"success": True, "data": {"parsed_count": 0}}
 
-    parsed_temp = tmp_path / "parse_generic_ok.csv"
-    parsed_temp.write_text("交易时间,金额\n2026-03-01,12.34\n", encoding="utf-8")
+    parsed_temp = _write_session_temp_file(tmp_path, 9, "sess-ok", "parse_generic_ok.csv")
     monkeypatch.setattr(
         bills_module,
         "_parse_import_file_with_column_mapping",
@@ -4504,7 +4575,7 @@ def test_bills_reconciliation_statements_cover_opening_balance_no_history_branch
                     "id": 1,
                     "date": "2026-03-01 08:00:00",
                     "type": "支出",
-                    "amount": 12.5,
+                    "amount": -12.5,
                     "source_account_id": 11,
                     "destination_account_id": 0,
                 }

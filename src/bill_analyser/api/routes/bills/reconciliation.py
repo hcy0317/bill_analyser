@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 
 def _log_reconciliation_entry() -> None:
@@ -50,16 +50,43 @@ def _parse_reconciliation_query():
     }, None, None
 
 
-def _build_reconciliation_filters(params: dict[str, Any]) -> dict[str, Any]:
+def _load_reconciliation_category_filters(loop, db, raw_category_ids: str | None) -> list[dict[str, Any]]:
+    if not raw_category_ids:
+        return []
+
+    try:
+        category_ids = set(_parse_int_list(raw_category_ids))
+    except ValueError:
+        logger.warning("[get_reconciliation_statements] 无效的分类筛选: %s", raw_category_ids)
+        return []
+    if not category_ids:
+        return []
+
+    categories = loop.run_until_complete(db.get_all_categories(user_id=request.user_id))
+    category_filters: list[dict[str, Any]] = []
+    for category in categories:
+        try:
+            category_id = int(category.get("id", 0))
+        except (TypeError, ValueError):
+            continue
+        if category_id in category_ids:
+            category_filters.append(
+                {"main": category.get("main_category", ""), "sub": category.get("sub_category", "")}
+            )
+    return category_filters
+
+
+def _build_reconciliation_filters(
+    params: dict[str, Any],
+    category_filters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     filters: dict[str, Any] = {"account_ids": [params["account_id_int"]]}
     if params["start_date"] is not None and params["end_date"] is not None:
         filters["start_date"] = params["start_date"]
         filters["end_date"] = params["end_date"]
-    if params["category_ids"]:
-        category_id_list = [cid.strip() for cid in params["category_ids"].split(",") if cid.strip()]
-        if category_id_list:
-            filters["category_ids"] = category_id_list
-            logger.info("[get_reconciliation_statements] 分类筛选: %s", category_id_list)
+    if category_filters:
+        filters["categories"] = category_filters
+        logger.info("[get_reconciliation_statements] 分类筛选: %s", category_filters)
     if params["trans_type"]:
         type_map = {1: "收入", 2: "支出", 3: "转账", 4: "投资"}
         if params["trans_type"] in type_map:
@@ -120,18 +147,21 @@ def _calculate_reconciliation_summary(
         transaction_opening_balance = current_balance
 
         if bill_type == "收入":
-            total_inflows += amount
-            current_balance += amount
+            inflow = abs(amount)
+            total_inflows += inflow
+            current_balance += inflow
         elif bill_type == "支出":
-            total_outflows += amount
-            current_balance -= amount
+            outflow = abs(amount)
+            total_outflows += outflow
+            current_balance -= outflow
         elif bill_type in {"转账", "投资"}:
+            transfer_amount = abs(amount)
             if dest_acc_id and dest_acc_id == account_id_int:
-                total_inflows += amount
-                current_balance += amount
+                total_inflows += transfer_amount
+                current_balance += transfer_amount
             elif source_acc_id and source_acc_id == account_id_int:
-                total_outflows += amount
-                current_balance -= amount
+                total_outflows += transfer_amount
+                current_balance -= transfer_amount
             elif bill_type == "转账":
                 logger.warning("[get_reconciliation_statements] 转账账单但账户ID不匹配: bill_id=%s", bill.get("id"))
                 continue
@@ -220,7 +250,8 @@ def get_reconciliation_statements():
 
             account_name = account["name"]
             logger.info("[get_reconciliation_statements] 查询账户: %s (ID=%s)", account_name, params["account_id_int"])
-            filters = _build_reconciliation_filters(params)
+            category_filters = _load_reconciliation_category_filters(loop, db, params["category_ids"])
+            filters = _build_reconciliation_filters(params, category_filters=category_filters)
             logger.info("[get_reconciliation_statements] 查询筛选条件: %s", filters)
             bills, total = loop.run_until_complete(
                 db.query_bills(page=1, page_size=10000, filters=filters, user_id=request.user_id)

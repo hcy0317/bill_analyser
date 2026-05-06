@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from datetime import date
 
 from bill_analyser.import_contracts.parser_tags import resolve_parser_tags, serialize_parser_tags
+from bill_analyser.import_contracts.preview_selection import coerce_preview_selected
 from bill_analyser.utils.logger import log_method
 from bill_analyser.core.bill_date_utils import normalize_bill_date_text
 from bill_analyser.core.database.shared import DatabaseFacadeBase
@@ -168,7 +169,7 @@ class ImportPreviewUpdatesMixin(object):
                         value = update_item[key]
                         if column == "preview_selected":
                             update_parts.append("preview_selected = ?")
-                            params.append(1 if value else 0)
+                            params.append(1 if coerce_preview_selected(value) else 0)
                         else:
                             update_parts.append(f"{column} = ?")
                             params.append(value)

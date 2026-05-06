@@ -41,6 +41,7 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
         total_parsed: int | None = None,
         total_preview: int | None = None,
         total_confirmed: int | None = None,
+        user_id: int | None = None,
     ) -> bool:
         conn = await self._get_connection()
         now = utc_now_iso()
@@ -56,12 +57,16 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
             update_parts.append("total_confirmed = ?")
             params.append(total_confirmed)
         params.append(session_id)
-        await conn.execute(
-            f"UPDATE import_sessions SET {', '.join(update_parts)} WHERE session_id = ?",
+        where_clause = "session_id = ?"
+        if user_id is not None:
+            where_clause += " AND user_id = ?"
+            params.append(user_id)
+        cursor = await conn.execute(
+            f"UPDATE import_sessions SET {', '.join(update_parts)} WHERE {where_clause}",
             tuple(params),
         )
         await conn.commit()
-        return True
+        return int(cursor.rowcount or 0) > 0
 
     @log_method
     async def get_import_session(
@@ -164,10 +169,14 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
         self,
         session_id: str,
         processed_only: bool | None = None,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         conn = await self._get_connection()
         query = "SELECT * FROM bills_parser_template WHERE session_id = ?"
         params: list[Any] = [session_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
         if processed_only is True:
             query += " AND parser_is_processed = '1'"
         elif processed_only is False:
@@ -193,6 +202,7 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
         template_ids: list[int],
         processed: bool = True,
         account_id: str | None = None,
+        user_id: int | None = None,
     ) -> int:
         if not template_ids:
             return 0
@@ -205,9 +215,13 @@ class DatabaseImportSessionsMixin(DatabaseFacadeBase):
             params.append(account_id)
         placeholders = ",".join(["?" for _ in template_ids])
         params.extend(template_ids)
-        await conn.execute(
-            f"UPDATE bills_parser_template SET {', '.join(update_parts)} WHERE id IN ({placeholders})",
+        user_filter = ""
+        if user_id is not None:
+            user_filter = " AND user_id = ?"
+            params.append(user_id)
+        cursor = await conn.execute(
+            f"UPDATE bills_parser_template SET {', '.join(update_parts)} WHERE id IN ({placeholders}){user_filter}",
             tuple(params),
         )
         await conn.commit()
-        return len(template_ids)
+        return int(cursor.rowcount or 0)

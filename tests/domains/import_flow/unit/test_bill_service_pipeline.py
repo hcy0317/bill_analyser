@@ -77,6 +77,11 @@ class FakeStageImportDB(FakePipelineDB):
         self.updated_template_statuses: list[tuple[list[int], bool]] = []
         self.confirm_result: dict[str, Any] = {"confirmed_count": 0, "duplicate_count": 0, "errors": []}
         self.clear_result: dict[str, Any] = {"parser_count": 0, "preview_count": 0}
+        self.reset_preview_selection_calls: list[tuple[str, int]] = []
+        self.preview_selection_updates: list[tuple[list[int], bool, int]] = []
+        self.import_sessions: dict[tuple[str, int], dict[str, Any]] = {}
+        self.template_queries: list[tuple[str, int]] = []
+        self.default_import_session_exists = True
 
     async def create_import_session(self, session_id: str, user_id: int, file_count: int) -> None:
         self.created_sessions.append((session_id, user_id, file_count))
@@ -96,12 +101,26 @@ class FakeStageImportDB(FakePipelineDB):
         session_id: str,
         status: str,
         total_parsed: int = 0,
+        user_id: int | None = None,
         **extra_counts: Any,
     ) -> None:
-        _ = extra_counts
+        _ = (user_id, extra_counts)
         self.updated_statuses.append((session_id, status, total_parsed))
 
-    async def get_unprocessed_templates_for_dedup(self, _session_id: str) -> list[dict[str, Any]]:
+    async def get_import_session(self, session_id: str, user_id: int = 1) -> dict[str, Any] | None:
+        session = self.import_sessions.get((session_id, user_id))
+        if session is not None:
+            return dict(session)
+        if not self.default_import_session_exists:
+            return None
+        return {"session_id": session_id, "user_id": user_id}
+
+    async def get_unprocessed_templates_for_dedup(
+        self,
+        _session_id: str,
+        user_id: int = 1,
+    ) -> list[dict[str, Any]]:
+        self.template_queries.append((_session_id, user_id))
         return list(self.unprocessed_templates)
 
     async def get_enabled_recurring_templates(self, user_id: int = 1) -> list[dict[str, Any]]:
@@ -127,11 +146,25 @@ class FakeStageImportDB(FakePipelineDB):
         self.preview_batches.append((session_id, list(preview_list), user_id))
         return len(preview_list)
 
-    async def update_parser_template_status(self, template_ids: list[int], processed: bool = False) -> None:
+    async def update_parser_template_status(
+        self,
+        template_ids: list[int],
+        processed: bool = False,
+        user_id: int | None = None,
+    ) -> None:
+        _ = user_id
         self.updated_template_statuses.append((list(template_ids), processed))
 
     async def confirm_preview_to_bills(self, _session_id: str, _user_id: int) -> dict[str, Any]:
         return dict(self.confirm_result)
+
+    async def reset_session_preview_selection(self, session_id: str, user_id: int = 1) -> int:
+        self.reset_preview_selection_calls.append((session_id, user_id))
+        return 0
+
+    async def update_preview_selection(self, preview_ids: list[int], selected: bool, user_id: int = 1) -> int:
+        self.preview_selection_updates.append((list(preview_ids), selected, user_id))
+        return len(preview_ids)
 
     async def clear_session_data(self, _session_id: str) -> dict[str, Any]:
         return dict(self.clear_result)
@@ -561,6 +594,23 @@ async def test_import_stage1_parse_handles_mixed_file_outcomes(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_import_stage2_dedup_rejects_missing_user_session() -> None:
+    """阶段2不应处理当前用户不可见的导入会话。"""
+    fake_db = FakeStageImportDB()
+    fake_db.default_import_session_exists = False
+    fake_db.unprocessed_templates = [{"id": 11, "parser_amount": -18.8}]
+    service = BillService(db=cast(Any, fake_db))
+    service._initialized = True
+
+    result = await service.import_stage2_dedup("other-user-session", user_id=3)
+
+    assert result["success"] is False
+    assert result["errors"] == ["Import session not found"]
+    assert fake_db.template_queries == []
+    assert fake_db.preview_batches == []
+
+
+@pytest.mark.asyncio
 async def test_import_stage2_dedup_handles_empty_templates_and_success_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """阶段2 应覆盖无模板早退与成功生成预览两条主分支。"""
     fake_db = FakeStageImportDB()
@@ -723,3 +773,5 @@ async def test_import_stage3_confirm_writes_result_and_cleans_session() -> None:
         "errors": ["duplicate preview"],
         "imported_count": 2,
     }
+    assert fake_db.reset_preview_selection_calls == [("session-stage3", 1)]
+    assert fake_db.preview_selection_updates == [([1, 2], True, 1)]

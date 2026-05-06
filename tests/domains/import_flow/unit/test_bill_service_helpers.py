@@ -52,6 +52,7 @@ class FakeBillServiceDB:
         self.promoted_annotation_sessions: list[tuple[str, list[int] | None, int]] = []
         self.preview_rows: list[dict[str, Any]] = []
         self.annotation_samples: list[dict[str, Any]] = []
+        self.reset_preview_selection_calls: list[tuple[str, int]] = []
         self.preview_selection_updates: list[tuple[list[int], bool]] = []
         self.cleared_sessions: list[str] = []
         self.cleared_session_calls: list[tuple[str, int]] = []
@@ -275,6 +276,10 @@ class FakeBillServiceDB:
     async def update_preview_selection(self, preview_ids: list[int], selected: bool) -> int:
         self.preview_selection_updates.append((list(preview_ids), selected))
         return len(preview_ids)
+
+    async def reset_session_preview_selection(self, session_id: str, user_id: int = 1) -> int:
+        self.reset_preview_selection_calls.append((session_id, user_id))
+        return 0
 
     async def clear_session_data(self, session_id: str, user_id: int = 1) -> int:
         self.cleared_sessions.append(session_id)
@@ -1686,6 +1691,8 @@ async def test_preview_reclassify_and_session_cleanup_respect_non_default_user_i
             }
         ]
     ]
+    assert fake_db.reset_preview_selection_calls == [("session-user-7", 7)]
+    assert fake_db.preview_selection_updates == [([11], True)]
     assert fake_db.cleared_session_calls == [
         ("session-user-7", 7),
         ("session-user-7", 7),

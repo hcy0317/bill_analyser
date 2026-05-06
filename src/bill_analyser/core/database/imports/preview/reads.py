@@ -209,15 +209,15 @@ class ImportPreviewReadsMixin(object):
             }
 
         @log_method
-        async def get_unprocessed_templates_for_dedup(self, session_id: str) -> list[dict[str, Any]]:
+        async def get_unprocessed_templates_for_dedup(self, session_id: str, user_id: int = 1) -> list[dict[str, Any]]:
             conn = await self._get_connection()
             async with conn.execute(
                 """
                 SELECT * FROM bills_parser_template
-                WHERE session_id = ? AND parser_is_processed = '0'
+                WHERE session_id = ? AND user_id = ? AND parser_is_processed = '0'
                 ORDER BY parser_date ASC, id ASC
                 """,
-                (session_id,),
+                (session_id, user_id),
             ) as cursor:
                 rows = await cursor.fetchall()
             templates: list[dict[str, Any]] = []

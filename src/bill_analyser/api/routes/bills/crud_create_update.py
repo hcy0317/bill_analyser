@@ -1,4 +1,4 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
 from .support import *  # noqa: F403
 from .crud_prepare import *  # noqa: F403
 
@@ -187,8 +187,6 @@ def update_bill(bill_id: int):
                     backend_data["main_category"] = main_cat
                     backend_data["sub_category"] = sub_cat
 
-        backend_data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         logger.info("准备更新的后端数据: %s", backend_data)
 
         # 更新账单
@@ -234,6 +232,10 @@ def update_bill(bill_id: int):
 
         loop.close()
         return jsonify({"success": False, "error": "Bill not found or update failed"}), 404
+
+    except ValueError as e:
+        logger.error("更新账单参数错误: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 400
 
     except Exception as e:
         logger.error("更新账单失败: %s", e, exc_info=True)
@@ -283,7 +285,7 @@ def delete_bill(bill_id: int):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@bp.route("/batch", methods=["POST"])
+@bp.route("/import/batch", methods=["POST"])
 @log_method
 @require_auth
 def import_bills_batch():

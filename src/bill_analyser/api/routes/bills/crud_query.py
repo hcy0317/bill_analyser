@@ -1,6 +1,122 @@
-# pylint: disable=wildcard-import,unused-wildcard-import
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
+import io
+
+from flask import Response, send_file
+
 from .support import *  # noqa: F403
 from .import_review import *  # noqa: F403
+
+EXPORT_COLUMNS = [
+    ("date", "date"),
+    ("type", "type"),
+    ("amount", "amount"),
+    ("counterparty", "counterparty"),
+    ("description", "description"),
+    ("payment_method", "payment_method"),
+    ("main_category", "main_category"),
+    ("sub_category", "sub_category"),
+    ("source_account_id", "source_account_id"),
+    ("destination_account_id", "destination_account_id"),
+    ("destination_amount", "destination_amount"),
+]
+EXPORT_TEXT_KEYS = {
+    "date",
+    "type",
+    "counterparty",
+    "description",
+    "payment_method",
+    "main_category",
+    "sub_category",
+}
+FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _export_filename(file_format: str) -> str:
+    return f"bills_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_format}"
+
+
+def _serialize_bill_value(bill: dict[str, Any], key: str) -> str:
+    value = bill.get(key, "")
+    serialized = "" if value is None else str(value)
+    if key in EXPORT_TEXT_KEYS and _is_formula_like_cell(serialized):
+        return "'" + serialized
+    return serialized
+
+
+def _is_formula_like_cell(value: str) -> bool:
+    stripped = value.lstrip()
+    return bool(stripped) and stripped[0] in FORMULA_PREFIXES
+
+
+def _build_csv_export(bills: list[dict[str, Any]]) -> Response:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([label for label, _key in EXPORT_COLUMNS])
+    for bill in bills:
+        writer.writerow([_serialize_bill_value(bill, key) for _label, key in EXPORT_COLUMNS])
+
+    return Response(
+        "\ufeff" + buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={_export_filename('csv')}"},
+    )
+
+
+def _build_excel_export(bills: list[dict[str, Any]]):
+    if openpyxl is None:
+        return jsonify({"success": False, "error": "Excel export is not supported"}), 501
+
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Bills"
+    worksheet.append([label for label, _key in EXPORT_COLUMNS])
+    for bill in bills:
+        worksheet.append([_serialize_bill_value(bill, key) for _label, key in EXPORT_COLUMNS])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=_export_filename("xlsx"),
+    )
+
+
+@bp.route("/export", methods=["GET"])
+@log_method
+@require_auth
+def export_bills():
+    """Export current user's bills as CSV or Excel."""
+    try:
+        file_format = str(request.args.get("format", "csv") or "csv").strip().lower()
+        if file_format in {"xlsx", "xls"}:
+            file_format = "excel"
+        if file_format not in {"csv", "excel"}:
+            return jsonify({"success": False, "error": "Unsupported export format"}), 400
+
+        db, _, _ = get_app_context()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            bills, total = loop.run_until_complete(
+                db.query_bills(page=1, page_size=100000, filters={}, user_id=request.user_id)
+            )
+        finally:
+            loop.close()
+
+        if total == 0:
+            return jsonify({"success": False, "error": "No bills to export"}), 404
+
+        if file_format == "csv":
+            return _build_csv_export(bills)
+        return _build_excel_export(bills)
+
+    except Exception as e:
+        logger.error("导出账单失败: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @bp.route("/", methods=["GET"])
 @log_method

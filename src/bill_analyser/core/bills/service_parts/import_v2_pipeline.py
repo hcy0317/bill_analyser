@@ -15,6 +15,67 @@ from .common import (
 class ImportV2PipelineMixin:
     """Three-stage v2 import pipeline and session-level selection/cancel helpers."""
 
+    async def _update_import_session_status_for_user(
+        self,
+        session_id: str,
+        status: str,
+        user_id: int,
+        **counts: Any,
+    ) -> Any:
+        status_params = inspect.signature(self.db.update_import_session_status).parameters
+        if "user_id" in status_params:
+            return await self.db.update_import_session_status(session_id, status, user_id=user_id, **counts)
+        return await self.db.update_import_session_status(session_id, status, **counts)
+
+    async def _set_import_stage1_completion_status(
+        self,
+        session_id: str,
+        user_id: int,
+        total_parsed: int,
+    ) -> Any:
+        status = "deduping" if total_parsed > 0 else "failed"
+        return await self._update_import_session_status_for_user(
+            session_id,
+            status,
+            user_id,
+            total_parsed=total_parsed,
+        )
+
+    def _new_import_stage2_result(self, session_id: str) -> dict[str, Any]:
+        return {
+            "success": False,
+            "session_id": session_id,
+            "template_count": 0,
+            "preview_count": 0,
+            "dedup_stats": {},
+            "match_stats": {},
+            "errors": [],
+        }
+
+    async def _get_user_import_session(self, session_id: str, user_id: int) -> dict[str, Any] | None:
+        session_params = inspect.signature(self.db.get_import_session).parameters
+        if "user_id" in session_params:
+            return await self.db.get_import_session(session_id, user_id=user_id)
+        return await self.db.get_import_session(session_id)
+
+    async def _get_unprocessed_templates_for_user(self, session_id: str, user_id: int) -> list[dict[str, Any]]:
+        template_params = inspect.signature(self.db.get_unprocessed_templates_for_dedup).parameters
+        if "user_id" in template_params:
+            return await self.db.get_unprocessed_templates_for_dedup(session_id, user_id=user_id)
+        return await self.db.get_unprocessed_templates_for_dedup(session_id)
+
+    async def _mark_parser_templates_processed_for_user(
+        self,
+        templates: list[dict[str, Any]],
+        user_id: int,
+    ) -> None:
+        template_ids = [int(template["id"]) for template in templates if template.get("id") is not None]
+        update_params = inspect.signature(self.db.update_parser_template_status).parameters
+        if "user_id" in update_params:
+            await self.db.update_parser_template_status(template_ids, processed=True, user_id=user_id)
+        else:
+            await self.db.update_parser_template_status(template_ids, processed=True)
+
     @log_method
     @log_step("阶段1: 多文件并行解析")
     async def import_stage1_parse(self, file_paths: list[str], session_id: str, user_id: int = 1) -> dict[str, Any]:
@@ -130,9 +191,7 @@ class ImportV2PipelineMixin:
                     result["errors"].append(f"{file_result['file']}: {file_result['error']}")
 
         # 更新会话状态
-        await self.db.update_import_session_status(
-            session_id, "deduping" if result["total_parsed"] > 0 else "failed", total_parsed=result["total_parsed"]
-        )
+        await self._set_import_stage1_completion_status(session_id, user_id, result["total_parsed"])
 
         result["success"] = result["total_parsed"] > 0
         self.logger.info(
@@ -167,26 +226,22 @@ class ImportV2PipelineMixin:
         if not self._initialized:
             await self.initialize()
 
-        result = {
-            "success": False,
-            "session_id": session_id,
-            "template_count": 0,
-            "preview_count": 0,
-            "dedup_stats": {},
-            "match_stats": {},
-            "errors": [],
-        }
+        result = self._new_import_stage2_result(session_id)
 
         self.logger.info("[阶段2] 开始去重和匹配, session_id=%s", session_id)
 
         try:
+            if not await self._get_user_import_session(session_id, user_id):
+                result["errors"].append("Import session not found")
+                return result
+
             # 1. 获取未处理的解析模板
-            templates = await self.db.get_unprocessed_templates_for_dedup(session_id)
+            templates = await self._get_unprocessed_templates_for_user(session_id, user_id)
             result["template_count"] = len(templates)
 
             if not templates:
                 result["errors"].append("没有待处理的解析数据")
-                await self.db.update_import_session_status(session_id, "failed")
+                await self._update_import_session_status_for_user(session_id, "failed", user_id)
                 return result
 
             self.logger.info("[阶段2] 获取解析模板: %d 条", len(templates))
@@ -421,15 +476,15 @@ class ImportV2PipelineMixin:
             }
 
             # 标记模板为已处理
-            template_ids: list[int] = []
-            for t in templates:
-                t_id = t.get("id")
-                if t_id is not None:
-                    template_ids.append(int(t_id))
-            await self.db.update_parser_template_status(template_ids, processed=True)
+            await self._mark_parser_templates_processed_for_user(templates, user_id)
 
             # 更新会话状态
-            await self.db.update_import_session_status(session_id, "previewing", total_preview=preview_count)
+            await self._update_import_session_status_for_user(
+                session_id,
+                "previewing",
+                user_id,
+                total_preview=preview_count,
+            )
 
             result["success"] = True
             self.logger.info(
@@ -443,7 +498,7 @@ class ImportV2PipelineMixin:
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("[阶段2] 处理失败: %s", e, exc_info=True)
             result["errors"].append(str(e))
-            await self.db.update_import_session_status(session_id, "failed")
+            await self._update_import_session_status_for_user(session_id, "failed", user_id)
 
         return result
 
@@ -465,7 +520,7 @@ class ImportV2PipelineMixin:
         Args:
             session_id: 导入会话ID
             user_id: 用户ID
-            selected_ids: 可选，用户选中的预览账单ID列表（用于日志记录，实际过滤在 db 层）
+            selected_ids: 可选，用户选中的预览账单ID列表；传入时先同步预览选中状态，再由 db 层确认
 
         Returns:
             Dict: 确认结果
@@ -489,8 +544,22 @@ class ImportV2PipelineMixin:
         )
 
         try:
-            # v6.56: 预览表更新已在 API 层完成，这里直接确认写入正式表
-            # confirm_preview_to_bills 会自动只处理 preview_is_selected=1 的账单
+            if selected_ids is not None:
+                normalized_selected_ids = [int(preview_id) for preview_id in selected_ids]
+                reset_params = inspect.signature(self.db.reset_session_preview_selection).parameters
+                if "user_id" in reset_params:
+                    await self.db.reset_session_preview_selection(session_id, user_id=user_id)
+                else:
+                    await self.db.reset_session_preview_selection(session_id)
+
+                if normalized_selected_ids:
+                    update_selection_params = inspect.signature(self.db.update_preview_selection).parameters
+                    if "user_id" in update_selection_params:
+                        await self.db.update_preview_selection(normalized_selected_ids, True, user_id=user_id)
+                    else:
+                        await self.db.update_preview_selection(normalized_selected_ids, True)
+
+            # confirm_preview_to_bills 会自动只处理 preview_selected=1 的账单
             confirm_result = await self.db.confirm_preview_to_bills(session_id, user_id)
 
             result["imported_count"] = confirm_result.get("confirmed_count", 0)
@@ -520,7 +589,7 @@ class ImportV2PipelineMixin:
         except Exception as e:  # pylint: disable=broad-except
             self.logger.error("[阶段3] 确认失败: %s", e, exc_info=True)
             result["errors"].append(str(e))
-            await self.db.update_import_session_status(session_id, "failed")
+            await self._update_import_session_status_for_user(session_id, "failed", user_id)
 
         return result
 
@@ -571,6 +640,6 @@ class ImportV2PipelineMixin:
             clear_result = await self.db.clear_session_data(session_id)
 
         # 更新会话状态
-        await self.db.update_import_session_status(session_id, "cancelled")
+        await self._update_import_session_status_for_user(session_id, "cancelled", user_id)
 
         return {"success": True, "session_id": session_id, "cleared": clear_result}

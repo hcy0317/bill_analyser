@@ -46,6 +46,7 @@ async def test_import_session_roundtrip_covers_type_inference_and_status_filters
         user_id = await _create_user(db, "import_session_roundtrip")
         other_user_id = await _create_user(db, "import_session_roundtrip_other")
         session_id = "import-session-roundtrip"
+        other_session_id = "import-session-roundtrip-other-session"
 
         created_id = await db.create_import_session(session_id, user_id=user_id, file_count=3)
         assert created_id > 0
@@ -68,6 +69,12 @@ async def test_import_session_roundtrip_covers_type_inference_and_status_filters
         assert int(session["total_preview"]) == 2
         assert int(session["total_confirmed"]) == 1
         assert await db.get_import_session(session_id, user_id=other_user_id) is None
+
+        await db.create_import_session(other_session_id, user_id=other_user_id, file_count=1)
+        assert await db.update_import_session_status(other_session_id, "previewing", user_id=user_id) is False
+        other_session = await db.get_import_session(other_session_id, user_id=other_user_id)
+        assert other_session is not None
+        assert other_session["status"] != "previewing"
 
         inserted = await db.insert_parser_templates(
             session_id,
@@ -95,6 +102,21 @@ async def test_import_session_roundtrip_covers_type_inference_and_status_filters
             user_id=user_id,
         )
         assert inserted == 3
+        other_inserted = await db.insert_parser_templates(
+            other_session_id,
+            [
+                {
+                    "date": "2026-04-01 11:00:00",
+                    "amount": 9.0,
+                    "description": "other user parser template",
+                    "counterparty": "商户D",
+                }
+            ],
+            parser_id="pytest-parser",
+            user_id=other_user_id,
+        )
+        assert other_inserted == 1
+        assert await db.get_unprocessed_templates_for_dedup(other_session_id, user_id=user_id) == []
 
         all_templates = await db.get_parser_templates_by_session(session_id)
         assert [template["parser_type"] for template in all_templates] == ["收入", "支出", "其他"]
@@ -110,6 +132,17 @@ async def test_import_session_roundtrip_covers_type_inference_and_status_filters
             account_id="acct-42",
         )
         assert updated_count == 2
+        other_templates = await db.get_parser_templates_by_session(other_session_id, user_id=other_user_id)
+        assert len(other_templates) == 1
+        assert (
+            await db.update_parser_template_status(
+                [int(other_templates[0]["id"])],
+                processed=True,
+                user_id=user_id,
+            )
+            == 0
+        )
+        assert await db.get_parser_templates_by_session(other_session_id, processed_only=True, user_id=other_user_id) == []
 
         processed_templates = await db.get_parser_templates_by_session(
             session_id,

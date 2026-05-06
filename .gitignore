@@ -484,8 +484,9 @@ static/
 .tmp/
 .sisyphus/
 .docs/superpowers/
-bills/
+/bills/
 .VSCodeCounter/
 output/*
 uploads/*
 tests/.runtime/
+.omx/
