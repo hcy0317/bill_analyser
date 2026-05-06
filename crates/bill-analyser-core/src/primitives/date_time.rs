@@ -12,10 +12,12 @@ const BILL_DATE_TIME_FORMATS: &[&str] = &[
     "%Y-%m-%dT%H:%M:%S",
     "%Y/%m/%d %H:%M:%S",
     "%Y/%m/%d %H:%M",
+    "%Y.%m.%d %H:%M:%S",
+    "%Y.%m.%d %H:%M",
     "%Y年%m月%d日 %H:%M:%S",
     "%Y年%m月%d日 %H:%M",
 ];
-const BILL_DATE_FORMATS: &[&str] = &["%Y-%m-%d", "%Y/%m/%d", "%Y年%m月%d日"];
+const BILL_DATE_FORMATS: &[&str] = &["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BillDateTime {

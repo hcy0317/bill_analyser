@@ -6,7 +6,7 @@ It does not change runtime behavior and does not mark any Python business file a
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 41
+- Rust backend files: 43
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -181,7 +181,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/bills/service_parts/import_preview_paging.py | bills-import | core-service | port | 313 |
 | src/bill_analyser/core/bills/service_parts/import_preview_projection.py | bills-import | core-service | port | 423 |
 | src/bill_analyser/core/bills/service_parts/import_reclassify.py | bills-import | core-service | port | 230 |
-| src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py | bills-import | core-service | port | 627 |
+| src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py | bills-import | core-service | port | 645 |
 | src/bill_analyser/core/bills/service_parts/investment_helpers.py | bills-import | core-service | port | 171 |
 | src/bill_analyser/core/bills/service_parts/matching_actions.py | bills-import | core-service | port | 569 |
 | src/bill_analyser/core/bills/service_parts/matching_preview_accept.py | bills-import | core-service | port | 302 |
@@ -379,6 +379,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/category_rules/mod.rs
 - crates/bill-analyser-core/src/error.rs
 - crates/bill-analyser-core/src/lib.rs
+- crates/bill-analyser-core/src/parsers.rs
 - crates/bill-analyser-core/src/primitives/auth.rs
 - crates/bill-analyser-core/src/primitives/currency.rs
 - crates/bill-analyser-core/src/primitives/date_time.rs
@@ -391,6 +392,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/response.rs
 - crates/bill-analyser-core/src/runtime.rs
 - crates/bill-analyser-core/tests/auth_security_contracts.rs
+- crates/bill-analyser-core/tests/parser_contracts.rs
 - crates/bill-analyser-core/tests/response_contract.rs
 - crates/bill-analyser-core/tests/runtime_contract.rs
 - crates/bill-analyser-core/tests/shared_primitives.rs

@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 41
+- Current Rust backend files: 43
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -66,3 +66,16 @@ S2 maps shared Python primitives to Rust primitives without changing the public 
 ## S3 SQLite Schema Runtime Foundation
 
 S3 added `crates/bill-analyser-db` as the Rust DB runtime foundation for schema/path checks and database guard logic. It is not Rust-primary for business writes: the Flask/Python Database façade remains the primary runtime write path until later domain slices prove and switch a specific business surface.
+
+## S7 Parser Import Contracts
+
+S7 starts the import parser domain in Rust without switching parser runtime ownership. It preserves the Python parser detection order (`wechat -> alipay -> icbc -> cmbc -> abc -> ccb`), parser metadata, source labels, parser tag normalization, generic raw-bill post-processing, and the JSON `StandardBill` key shape used by the existing Python import staging path.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/parsers/factory.py` | `crates/bill-analyser-core/src/parsers.rs` | Parser registry order and metadata contract |
+| `src/bill_analyser/import_contracts/parser_tags.py` | `crates/bill-analyser-core/src/parsers.rs` | Parser/channel tag normalization and serialization |
+| `src/bill_analyser/parsers/base.py` | `crates/bill-analyser-core/src/parsers.rs` | Raw parser output post-processing into StandardBill-shaped data |
+| `tests/fixtures/import_samples/**` parser families | `crates/bill-analyser-core/tests/fixtures/parser_golden_contracts.json` | Deterministic golden contract cases for six parser families |
+
+No Python parser implementation is removed in S7. The Rust parser module is an internal contract/oracle surface: Python parser tests continue to parse real CSV/XLS/XLSX samples, while Rust golden contract tests pin the normalized StandardBill, parser tag, and source-label output expected from each dedicated parser family.
