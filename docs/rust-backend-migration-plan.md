@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 45
+- Current Rust backend files: 46
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -95,3 +95,15 @@ S8 starts the smart-dedup domain in Rust without switching the Python import run
 | `src/bill_analyser/core/smart_dedup/reconciliation.py` and `src/bill_analyser/core/database/reconciliation/**` | `crates/bill-analyser-core/src/smart_dedup.rs` | Import reconciliation candidate classification/key/group contract; persistence remains the existing Python DB boundary |
 
 No Python smart-dedup implementation is removed in S8. The Rust module uses `Money` cents and shared bill datetime parsing to avoid float drift while Rust contract tests pin Python-shaped `_parser_id` / `_template_id` / `_parser_tags` JSON, dedup source IDs, kept/removed indices, transfer destination hints, split groups, database duplicate markers, cross-batch transfer markers, and import reconciliation candidates. Runtime DB querying/persistence remains Python-owned until the import pipeline slice takes over that boundary.
+
+## S9a Bills Read Adapter Contracts
+
+S9a starts the bills CRUD/media/reconciliation domain by pinning the read/list/export adapter contract in Rust without switching the Python runtime. It covers transaction-list JSON shape, amount yuan-to-cents presentation, transaction type codes, local bill date to Unix seconds conversion, by-month date ranges, type query filters, and CSV/Excel formula-cell escaping.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Backend bill to frontend transaction JSON contract |
+| `src/bill_analyser/api/routes/bills/crud_query.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | List type filter, by-month range, and export cell serialization contract |
+| `tests/new_ui/test_transaction_list_rest_api.py` and `tests/new_ui/test_bills_api.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden read/list adapter cases for cents/yuan, type codes, account ids, date fields, and formula escaping |
+
+No Python bills route or database implementation is removed in S9a. Python remains the runtime owner for DB reads, writes, media, account balance sync, and reconciliation statements until later S9 sub-slices verify and switch those boundaries.

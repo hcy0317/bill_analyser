@@ -21,7 +21,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 321
     assert inventory.summary["python_backend_files"] == 321
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 45
+    assert inventory.summary["rust_backend_files"] == 46
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/parsers.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/smart_dedup.rs" in inventory.rust_files
@@ -29,6 +29,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-core/src/category_rules/mod.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/tests/parser_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/tests/smart_dedup_contracts.rs" in inventory.rust_files
+    assert "crates/bill-analyser-core/tests/transaction_adapter_contracts.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in inventory.rust_files
 
@@ -77,7 +78,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 321" in first_render
-    assert "- Rust backend files: 45" in first_render
+    assert "- Rust backend files: 46" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade |" in first_render
     assert "| src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port |" in first_render
@@ -101,6 +102,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-core/src/category_rules/mod.rs" in first_render
     assert "- crates/bill-analyser-core/tests/parser_contracts.rs" in first_render
     assert "- crates/bill-analyser-core/tests/smart_dedup_contracts.rs" in first_render
+    assert "- crates/bill-analyser-core/tests/transaction_adapter_contracts.rs" in first_render
     assert "- crates/bill-analyser-db/src/lib.rs" in first_render
     assert "- crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in first_render
 
