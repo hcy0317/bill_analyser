@@ -134,3 +134,16 @@ S9c extends the Rust bills contract to transaction-picture upload and unused-pic
 | `tests/new_ui/test_transaction_pictures_rest_api.py` and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden picture API cases for upload/delete success, validation failures, 500 error envelopes, data URL projection, and filename sanitization |
 
 No Python picture route or file-storage implementation is removed in S9c. Current Python does not persist `pictureIds` into bill DB rows and does not enforce per-bill picture ownership; S9c records that behavior instead of inventing attachment persistence. Legacy `/api/v1/transaction/pictures/*` 404 behavior stays Python routing-runtime owned and is not part of the Rust adapter contract. Import-session uploads, OCR receipt recognition, parse-import temp files, and reconciliation statements remain deferred to later dedicated slices.
+
+## S9d Bills Reconciliation Statement Contracts
+
+S9d completes the bills CRUD/media/reconciliation contract split by pinning the reconciliation statement route behavior in Rust without switching the Python runtime. It preserves the `GET /api/bills/reconciliation_statements` query contract, route envelopes, all-time versus filtered opening-balance fallback, local timestamp-to-date filters, category/type/keyword filter projection, ascending balance-trace calculation, descending transaction output, and cents-based API result fields.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/bills/reconciliation.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Required query parameters, `1..4` reconciliation type-code mapping, all-time/date-range filter projection, and 400/404/500 route envelopes |
+| `src/bill_analyser/core/database/bills/__init__.py` and account reads/mappings | `crates/bill-analyser-core/src/adapters/transaction.rs` | Account-id filter shape, category filter materialization, historical opening-balance snapshot selection, and all-time initial-balance fallback |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Frontend transaction projection extension with `accountOpeningBalance` and `accountClosingBalance`, sorted by frontend `time` descending |
+| `tests/domains/import_flow/unit/test_bills_route_branches.py`, `tests/test_reconciliation_fields.py`, `tests/test_reconciliation_amount_fix.py`, `tests/test_v6_1_fixes.py`, and `tests/test_v6_2_comprehensive.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden reconciliation cases for missing/invalid account parameters, account-not-found/500 envelopes, opening balance, amount-unit conversion, inflow/outflow direction, skipped unknown/foreign transfers, and result payload shape |
+
+No Python reconciliation route, adapter, or database implementation is removed in S9d. The Rust layer is a contract and calculation surface only; Flask remains the route owner, Python still performs DB reads and adapter hydration, and later runtime-bridge slices must re-run API parity before replacing the live path.
