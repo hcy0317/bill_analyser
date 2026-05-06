@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 319
-- Rust backend files: 39
+- Python backend files: 320
+- Rust backend files: 41
 - Migration domains: 22
-- Files marked port: 252
+- Files marked port: 253
 - Files marked facade: 67
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -26,7 +26,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
-| classification-rules | 17 | 2 | 0 |
+| classification-rules | 18 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 2 | 0 |
@@ -196,7 +196,8 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/category_engine/compiled_rule.py | classification-rules | core-service | port | 28 |
 | src/bill_analyser/core/category_engine/engine.py | classification-rules | core-service | port | 622 |
 | src/bill_analyser/core/category_engine/expression.py | classification-rules | core-service | port | 112 |
-| src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 642 |
+| src/bill_analyser/core/category_engine/matcher.py | classification-rules | core-service | port | 654 |
+| src/bill_analyser/core/category_rule_rust_bridge.py | classification-rules | core-service | port | 170 |
 | src/bill_analyser/core/category_rust_bridge.py | classification-rules | core-service | port | 249 |
 | src/bill_analyser/core/database/__init__.py | database-facade | package-marker | facade | 2 |
 | src/bill_analyser/core/database/accounts/__init__.py | accounts | package-marker | facade | 28 |
@@ -276,13 +277,13 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/schema/templates_imports/templates.py | database-schema | database-schema | port | 95 |
 | src/bill_analyser/core/database/schema/users_security.py | database-schema | database-schema | port | 345 |
 | src/bill_analyser/core/database/settings_bundle/__init__.py | settings-bundle | package-marker | facade | 36 |
-| src/bill_analyser/core/database/settings_bundle/accounts_categories_tags.py | settings-bundle | database-access | port | 386 |
-| src/bill_analyser/core/database/settings_bundle/base.py | settings-bundle | database-access | port | 216 |
-| src/bill_analyser/core/database/settings_bundle/exporters.py | settings-bundle | database-access | port | 199 |
+| src/bill_analyser/core/database/settings_bundle/accounts_categories_tags.py | settings-bundle | database-access | port | 425 |
+| src/bill_analyser/core/database/settings_bundle/base.py | settings-bundle | database-access | port | 219 |
+| src/bill_analyser/core/database/settings_bundle/exporters.py | settings-bundle | database-access | port | 265 |
 | src/bill_analyser/core/database/settings_bundle/resolution.py | settings-bundle | database-access | port | 106 |
 | src/bill_analyser/core/database/settings_bundle/rules_llm_ocr.py | settings-bundle | database-access | port | 259 |
 | src/bill_analyser/core/database/settings_bundle/shared.py | settings-bundle | database-access | port | 118 |
-| src/bill_analyser/core/database/settings_bundle/templates.py | settings-bundle | database-access | port | 315 |
+| src/bill_analyser/core/database/settings_bundle/templates.py | settings-bundle | database-access | port | 350 |
 | src/bill_analyser/core/database/shared.py | database-facade | database-access | port | 224 |
 | src/bill_analyser/core/database/tags/__init__.py | tags-templates | package-implementation | port | 296 |
 | src/bill_analyser/core/database/templates/__init__.py | tags-templates | package-marker | facade | 7 |
@@ -331,7 +332,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/smart_dedup/transfers.py | smart-dedup | core-service | port | 343 |
 | src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 402 |
 | src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port | 154 |
-| src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port | 211 |
+| src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port | 214 |
 | src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 17 |
 | src/bill_analyser/import_contracts/parser_tags.py | import-contracts | import-contract | facade | 142 |
 | src/bill_analyser/parsers/__init__.py | import-parsers | package-marker | facade | 6 |
@@ -373,6 +374,8 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/adapters/transaction.rs
 - crates/bill-analyser-core/src/auth/mod.rs
 - crates/bill-analyser-core/src/bin/bill_auth_bridge.rs
+- crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs
+- crates/bill-analyser-core/src/category_rules/mod.rs
 - crates/bill-analyser-core/src/error.rs
 - crates/bill-analyser-core/src/lib.rs
 - crates/bill-analyser-core/src/primitives/auth.rs

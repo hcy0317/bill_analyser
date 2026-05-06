@@ -118,6 +118,7 @@ CORE_DOMAIN_BY_FILE = {
     "account_rust_bridge.py": "accounts",
     "auth_rust_bridge.py": "auth-security",
     "bill_date_utils.py": "shared-primitives",
+    "category_rule_rust_bridge.py": "classification-rules",
     "category_rust_bridge.py": "classification-rules",
     "constants.py": "shared-primitives",
     "db.py": "database-facade",

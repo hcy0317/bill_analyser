@@ -17,6 +17,9 @@ $AuthBridgeReleasePath = Join-Path $ProjectRoot "target\release\$AuthBridgeName"
 $TaxonomyBridgeName = "bill_taxonomy_bridge.exe"
 $TaxonomyBridgeDebugPath = Join-Path $ProjectRoot "target\debug\$TaxonomyBridgeName"
 $TaxonomyBridgeReleasePath = Join-Path $ProjectRoot "target\release\$TaxonomyBridgeName"
+$CategoryRuleBridgeName = "bill_category_rule_bridge.exe"
+$CategoryRuleBridgeDebugPath = Join-Path $ProjectRoot "target\debug\$CategoryRuleBridgeName"
+$CategoryRuleBridgeReleasePath = Join-Path $ProjectRoot "target\release\$CategoryRuleBridgeName"
 
 Set-Location $ProjectRoot
 
@@ -62,6 +65,14 @@ if (Test-Path $CargoToml) {
             Bin = "bill_taxonomy_bridge"
             DebugPath = $TaxonomyBridgeDebugPath
             ReleasePath = $TaxonomyBridgeReleasePath
+        },
+        @{
+            DisplayName = "category rule"
+            EnvName = "BILL_ANALYSER_RUST_CATEGORY_RULE_BRIDGE"
+            Package = "bill-analyser-core"
+            Bin = "bill_category_rule_bridge"
+            DebugPath = $CategoryRuleBridgeDebugPath
+            ReleasePath = $CategoryRuleBridgeReleasePath
         }
     )
 
@@ -105,6 +116,7 @@ Write-Host "Python: $PythonExe" -ForegroundColor Gray
 Write-Host "PYTHONPATH: $SrcRoot" -ForegroundColor Gray
 Write-Host "Rust auth bridge: $env:BILL_ANALYSER_RUST_AUTH_BRIDGE" -ForegroundColor Gray
 Write-Host "Rust taxonomy bridge: $env:BILL_ANALYSER_RUST_TAXONOMY_BRIDGE" -ForegroundColor Gray
+Write-Host "Rust category rule bridge: $env:BILL_ANALYSER_RUST_CATEGORY_RULE_BRIDGE" -ForegroundColor Gray
 Write-Host "Command: .\.venv\Scripts\python.exe -m bill_analyser.api.app" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Starting backend server..." -ForegroundColor Green

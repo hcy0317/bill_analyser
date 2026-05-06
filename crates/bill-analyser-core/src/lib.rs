@@ -5,6 +5,7 @@
 
 pub mod adapters;
 pub mod auth;
+pub mod category_rules;
 pub mod error;
 pub mod primitives;
 pub mod response;

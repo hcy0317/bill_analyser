@@ -90,6 +90,9 @@ jobs:
       - name: Build Rust auth bridge
         run: cargo build -p bill-analyser-core --bin bill_auth_bridge
 
+      - name: Build Rust category rule bridge
+        run: cargo build -p bill-analyser-core --bin bill_category_rule_bridge
+
       - name: Build Rust taxonomy bridge
         run: cargo build -p bill-analyser-db --bin bill_taxonomy_bridge
 

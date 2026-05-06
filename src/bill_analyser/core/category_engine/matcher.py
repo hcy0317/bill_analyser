@@ -1,4 +1,5 @@
 """Keyword and rule-expression matcher implementation."""
+# pylint: disable=mixed-line-endings
 
 import re
 
@@ -277,6 +278,18 @@ class KeywordMatcher:
         if cache_key in self._compiled_rules_cache:
             return self._compiled_rules_cache[cache_key]
 
+        from bill_analyser.core import category_rule_rust_bridge  # pylint: disable=import-outside-toplevel
+
+        try:
+            compiled = category_rule_rust_bridge.compile_rule_expression(
+                expr,
+                regex_enabled=regex_enabled,
+            )
+            self._compiled_rules_cache[cache_key] = compiled
+            return compiled
+        except category_rule_rust_bridge.CategoryRuleRustBridgeUnavailable:
+            pass
+
         try:
             expression_ast, index = self._parse_rule_or_expression(expr, 0, regex_enabled)
             index = self._skip_expression_space(expr, index)
@@ -324,10 +337,14 @@ class KeywordMatcher:
             index = self._skip_expression_space(expr, index)
             if index >= len(expr) or expr[index] not in _RULE_EXPRESSION_OR_CONNECTORS:
                 break
+            connector_index = index
             index += 1
             right, index = self._parse_rule_and_expression(expr, index, regex_enabled)
-            if right is not None:
-                children.append(right)
+            if right is None:
+                raise ValueError(
+                    f"missing expression after OR connector at offset {connector_index}"
+                )
+            children.append(right)
 
         if not children:
             return None, index
@@ -335,6 +352,7 @@ class KeywordMatcher:
             return children[0], index
         return RuleExpressionNode(kind="any", children=tuple(children)), index
 
+    # pylint: disable-next=too-many-branches
     def _parse_rule_and_expression(
         self,
         expr: str,
@@ -344,6 +362,7 @@ class KeywordMatcher:
         """Parse ``+``-joined chains and visible block-level negation."""
         children: list[RuleExpressionNode] = []
         pending_negated_connector = False
+        pending_connector = False
 
         while True:
             index = self._skip_expression_space(expr, index)
@@ -352,6 +371,10 @@ class KeywordMatcher:
                 or expr[index] == ")"
                 or expr[index] in _RULE_EXPRESSION_OR_CONNECTORS
             ):
+                if pending_connector:
+                    raise ValueError(
+                        f"missing expression after AND/NOT connector at offset {index}"
+                    )
                 break
 
             connector = self._read_rule_and_connector(
@@ -360,15 +383,28 @@ class KeywordMatcher:
                 allow_word_not=bool(children),
             )
             if connector is not None:
+                if pending_connector:
+                    raise ValueError(
+                        f"missing expression after AND/NOT connector at offset {index}"
+                    )
                 pending_negated_connector, index = connector
+                pending_connector = True
                 continue
+            if not children and self._read_rule_not_connector(expr, index) is not None:
+                raise ValueError(f"unexpected leading NOT connector at offset {index}")
 
             child, index = self._parse_rule_factor(expr, index, regex_enabled)
             if child is not None:
                 if pending_negated_connector:
                     child = self._apply_not_connector(child)
-                    pending_negated_connector = False
+                pending_connector = False
                 children.append(child)
+            elif pending_connector:
+                raise ValueError(
+                    f"missing expression after AND/NOT connector at offset {index}"
+                )
+            else:
+                raise ValueError(f"expected rule expression factor at offset {index}")
 
             index = self._skip_expression_space(expr, index)
             if (
@@ -379,7 +415,12 @@ class KeywordMatcher:
                 break
             connector = self._read_rule_and_connector(expr, index)
             if connector is not None:
+                if pending_connector:
+                    raise ValueError(
+                        f"missing expression after AND/NOT connector at offset {index}"
+                    )
                 pending_negated_connector, index = connector
+                pending_connector = True
                 continue
             raise ValueError(f"expected AND/OR connector at offset {index}")
 
@@ -499,9 +540,9 @@ class KeywordMatcher:
     ) -> tuple[bool, int] | None:
         """Read an AND or visible NOT connector from an AND-expression."""
         if expr[index] in _RULE_EXPRESSION_AND_CONNECTORS:
-            return False, index + 1
+            return (False, index + 1) if allow_word_not else None
         if expr[index] in _RULE_EXPRESSION_NOT_CONNECTORS:
-            return True, index + 1
+            return (True, index + 1) if allow_word_not else None
         if allow_word_not:
             not_connector_index = self._read_rule_not_connector(expr, index)
             if not_connector_index is not None:

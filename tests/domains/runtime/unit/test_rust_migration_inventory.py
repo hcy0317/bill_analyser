@@ -18,11 +18,13 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 319
-    assert inventory.summary["python_backend_files"] == 319
+    assert len(expected_python_paths) == 320
+    assert inventory.summary["python_backend_files"] == 320
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 39
+    assert inventory.summary["rust_backend_files"] == 41
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
+    assert "crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs" in inventory.rust_files
+    assert "crates/bill-analyser-core/src/category_rules/mod.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in inventory.rust_files
 
@@ -48,6 +50,7 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert records["src/bill_analyser/core/category_engine/engine.py"].domain == "classification-rules"
     assert records["src/bill_analyser/core/account_rust_bridge.py"].domain == "accounts"
     assert records["src/bill_analyser/core/auth_rust_bridge.py"].domain == "auth-security"
+    assert records["src/bill_analyser/core/category_rule_rust_bridge.py"].domain == "classification-rules"
     assert records["src/bill_analyser/core/category_rust_bridge.py"].domain == "classification-rules"
     assert records["src/bill_analyser/core/settings_bundle_rust_bridge.py"].domain == "settings-bundle"
     assert records["src/bill_analyser/core/tag_rust_bridge.py"].domain == "tags-templates"
@@ -67,11 +70,15 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 319" in first_render
-    assert "- Rust backend files: 39" in first_render
+    assert "- Python backend files: 320" in first_render
+    assert "- Rust backend files: 41" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade |" in first_render
     assert "| src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port |" in first_render
+    assert (
+        "| src/bill_analyser/core/category_rule_rust_bridge.py | classification-rules | core-service | port |"
+        in first_render
+    )
     assert "| src/bill_analyser/core/category_rust_bridge.py | classification-rules | core-service | port |" in first_render
     assert "| src/bill_analyser/core/settings_bundle_rust_bridge.py | settings-bundle | core-service | port |" in first_render
     assert "| src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port |" in first_render
@@ -82,6 +89,8 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
         in first_render
     )
     assert "- crates/bill-analyser-core/src/lib.rs" in first_render
+    assert "- crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs" in first_render
+    assert "- crates/bill-analyser-core/src/category_rules/mod.rs" in first_render
     assert "- crates/bill-analyser-db/src/lib.rs" in first_render
     assert "- crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs" in first_render
 

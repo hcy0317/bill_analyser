@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 319
-- Current Rust backend files: 39 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 320
+- Current Rust backend files: 41 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -157,6 +157,19 @@ S5e moves settings-bundle taxonomy section normalization, export DTO constructio
 
 Explicit S5e deferrals: category rule import/export remains Python until S6, LLM/OCR settings remain Python until their AI/OCR domain slices, SQLCipher and in-memory behavior continue on Python fallbacks, and no settings-bundle business code is deleted because the Python transaction coordinator remains active.
 
+## S6a Category Rule Expression Runtime Bridge
+
+S6 is split into smaller classification-rule slices. S6a migrates only the pure category-rule expression compiler into Rust while Python keeps runtime state, route shells, database CRUD, settings-bundle rule import/export, default seed orchestration, and import-flow classification loops. This avoids mixing a hot matching path and transactional rule persistence into one review unit.
+
+| Python responsibility | Rust S6a mapping | Status |
+| --- | --- | --- |
+| `src/bill_analyser/core/category_engine/matcher.py` `compile_rule_expression` for new `OR={...}` expression syntax | `crates/bill-analyser-core/src/category_rules/mod.rs` compiles the expression AST, legacy diagnostic fields, escaped terms, slash/pipe OR, plus AND, visible `×`/bare `NOT`, regex-enabled patterns, and fail-closed malformed expressions; `bill_category_rule_bridge` exposes a stdin/stdout JSON command; `core/category_rule_rust_bridge.py` converts the Rust DTO back to the existing Python `CompiledRule` / `RuleExpressionNode` dataclasses | runtime helper bridge |
+| Backend startup and CI bridge availability | `start_backend.ps1` builds/exports `BILL_ANALYSER_RUST_CATEGORY_RULE_BRIDGE`; Gitea backend CI builds `bill_category_rule_bridge` before pytest so the Rust compile path is available in normal runtime and CI | runtime wiring |
+| Legacy `OR:a|b&AND:c&NOT:d` compilation, `match_compiled`, `_match_expression_node`, `_match_pattern`, matcher caches, and batch classification | Python remains owner in S6a; Rust-backed compiled ASTs are evaluated by the existing Python matcher so hot import-preview classification does not spawn a subprocess per bill | retained |
+| `DatabaseCategoryRulesMixin` SQL CRUD/reorder/migrate, default category seed rule creation, settings-bundle `categoryRecognitionRules` import/export, and `/api/category-rules` reload behavior | Python remains owner until S6b/S6c because these paths carry transactions, engine cache invalidation, user-scoped DB writes, and cross-domain import/seed side effects | retained |
+
+Explicit S6a deferrals: category_rules table CRUD/reorder/read bridge, runtime batch classifier bridge, rule center aggregation changes, settings-bundle rule SQL, default seed rule writes, and Python route-shell cleanup remain deferred. No Python classification business code is deleted in S6a because Python still owns cache lifecycle, matching evaluation, and persistence.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -170,7 +183,7 @@ Explicit S5e deferrals: category rule import/export remains Python until S6, LLM
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
-| classification-rules | 17 | 2 | 0 |
+| classification-rules | 18 | 2 | 0 |
 | database-facade | 3 | 2 | 0 |
 | database-schema | 11 | 3 | 0 |
 | import-contracts | 0 | 2 | 0 |

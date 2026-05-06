@@ -6,7 +6,10 @@ from typing import Any
 import pytest
 
 from bill_analyser.core import category_engine as category_engine_module
+from bill_analyser.core import category_rule_rust_bridge
 from bill_analyser.core.category_engine import CategoryEngine, KeywordMatcher
+from bill_analyser.core.category_engine.compiled_rule import CompiledRule
+from bill_analyser.core.category_engine.expression import RuleExpressionNode
 from bill_analyser.core.database.category_rules import DatabaseCategoryRulesMixin
 from bill_analyser.utils.constants import TransactionType
 
@@ -137,6 +140,96 @@ def test_keyword_matcher_rule_expression_ast_preserves_old_and_new_semantics() -
     malformed_nested = matcher.compile_rule_expression("(OR={早餐}/AND={咖啡}")
     assert malformed_nested.is_empty is True
     assert matcher.match_compiled("早餐咖啡", malformed_nested) is False
+
+    for dangling_expr in (
+        "OR={早餐}+",
+        "OR={早餐}|",
+        "OR={早餐}/",
+        "OR={早餐}×",
+        "OR={早餐} NOT",
+        "+OR={早餐}",
+        "×OR={早餐}",
+        "NOT OR={早餐}",
+        "OR={早餐}++AND={咖啡}",
+    ):
+        dangling = matcher.compile_rule_expression(dangling_expr)
+        assert dangling.is_empty is True, dangling_expr
+        assert matcher.match_compiled("早餐套餐", dangling) is False
+
+
+def test_keyword_matcher_uses_rust_expression_compiler_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New rule-expression syntax should use the Rust compiler when available."""
+    calls: list[tuple[str, bool]] = []
+
+    def _compile_with_rust(expr: str, regex_enabled: bool = False) -> CompiledRule:
+        calls.append((expr, regex_enabled))
+        return CompiledRule(
+            or_blocks=[["rust-only"]],
+            is_empty=False,
+            expression_ast=RuleExpressionNode(
+                kind="clause",
+                operator="OR",
+                patterns=("rust-only",),
+            ),
+        )
+
+    monkeypatch.setattr(
+        category_rule_rust_bridge,
+        "compile_rule_expression",
+        _compile_with_rust,
+    )
+    matcher = KeywordMatcher()
+
+    compiled = matcher.compile_rule_expression("OR={rust-only}", regex_enabled=True)
+
+    assert calls == [("OR={rust-only}", True)]
+    assert compiled.or_blocks == [["rust-only"]]
+    assert matcher.match_compiled("paid by rust-only merchant", compiled) is True
+
+
+def test_keyword_matcher_falls_back_to_python_when_rust_compiler_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing Python expression compiler remains the safety fallback."""
+
+    def _unavailable(*_args: object, **_kwargs: object) -> CompiledRule:
+        raise category_rule_rust_bridge.CategoryRuleRustBridgeUnavailable("missing")
+
+    monkeypatch.setattr(
+        category_rule_rust_bridge,
+        "compile_rule_expression",
+        _unavailable,
+    )
+    matcher = KeywordMatcher()
+
+    compiled = matcher.compile_rule_expression("OR={早餐,早饭}+NOT={退款}")
+
+    assert compiled.or_blocks == [["早餐", "早饭"]]
+    assert compiled.not_patterns == ["退款"]
+    assert matcher.match_compiled("早餐套餐", compiled) is True
+    assert matcher.match_compiled("早饭退款", compiled) is False
+
+    fallback_or = matcher.compile_rule_expression("OR={早餐}|OR={午餐}")
+    assert matcher.match_compiled("早餐套餐", fallback_or) is True
+    assert matcher.match_compiled("午餐套餐", fallback_or) is True
+    assert matcher.match_compiled("咖啡套餐", fallback_or) is False
+
+    for dangling_expr in (
+        "OR={早餐}+",
+        "OR={早餐}|",
+        "OR={早餐}/",
+        "OR={早餐}×",
+        "OR={早餐} NOT",
+        "+OR={早餐}",
+        "×OR={早餐}",
+        "NOT OR={早餐}",
+        "OR={早餐}++AND={咖啡}",
+    ):
+        dangling = matcher.compile_rule_expression(dangling_expr)
+        assert dangling.is_empty is True, dangling_expr
+        assert matcher.match_compiled("早餐套餐", dangling) is False
 
 
 def test_keyword_matcher_rule_expression_regex_switch_and_regex_clause() -> None:

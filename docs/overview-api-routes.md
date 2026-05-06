@@ -50,4 +50,5 @@
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `accounts/` / `categories/` / `bills/` 已统一改从中性适配器模块导入。
 - 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；普通文件 SQLite 库的分类 list/tree/get/create/update/delete/import/export/default seed master-data 持久化经 Python Database façade 桥接到 Rust taxonomy runtime，其中 default seed 使用批量 `ensure_categories` 避免逐条启动 bridge；分类统计、分类规则/matcher、`:memory:`、SQLCipher 和设置包分类 import/upsert 仍由 Python 路径处理。
+- 分类规则 REST URL、状态码、engine reload 和 `category_rules` SQL 仍由 Python 维护；新语法 `rule_expression` 的表达式编译优先通过 Rust `bill_category_rule_bridge` 生成既有 AST DTO，匹配执行和批量分类仍在 Python `CategoryEngine` / `KeywordMatcher` 内完成。
 - 主要 REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`accounts/`、`categories/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分。
