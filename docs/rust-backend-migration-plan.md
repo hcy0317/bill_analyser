@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 46
+- Current Rust backend files: 48
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -65,7 +65,7 @@ S2 maps shared Python primitives to Rust primitives without changing the public 
 
 ## S3 SQLite Schema Runtime Foundation
 
-S3 added `crates/bill-analyser-db` as the Rust DB runtime foundation for schema/path checks and database guard logic. It is not Rust-primary for business writes: the Flask/Python Database façade remains the primary runtime write path until later domain slices prove and switch a specific business surface.
+S3 added `crates/bill-analyser-db` as the Rust DB runtime foundation for schema/path checks and database guard logic. It is not Rust-primary for business writes: the Flask/Python Database facade remains the primary runtime write path until later domain slices prove and switch a specific business surface.
 
 ## S7 Parser Import Contracts
 
@@ -147,3 +147,18 @@ S9d completes the bills CRUD/media/reconciliation contract split by pinning the 
 | `tests/domains/import_flow/unit/test_bills_route_branches.py`, `tests/test_reconciliation_fields.py`, `tests/test_reconciliation_amount_fix.py`, `tests/test_v6_1_fixes.py`, and `tests/test_v6_2_comprehensive.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden reconciliation cases for missing/invalid account parameters, account-not-found/500 envelopes, opening balance, amount-unit conversion, inflow/outflow direction, skipped unknown/foreign transfers, and result payload shape |
 
 No Python reconciliation route, adapter, or database implementation is removed in S9d. The Rust layer is a contract and calculation surface only; Flask remains the route owner, Python still performs DB reads and adapter hydration, and later runtime-bridge slices must re-run API parity before replacing the live path.
+
+## S10 Import V2 Pipeline Contracts
+
+S10 starts the import-v2 pipeline domain in Rust without switching Flask routes, Python parser execution, aiosqlite staging writes, or BillService orchestration. It pins route envelope DTOs, import pipeline step ordering, staging table/field names, server-paged preview query normalization, `preview_ids` order-preserving selection, preview selected-flag coercion, lightweight preview filter-index projection, nested matching payload families, and `expectedState` conflict/error response semantics.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/bills/v2_pipeline.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Stage parse/dedup/confirm success and error envelope contracts |
+| `src/bill_analyser/api/routes/bills/v2_sessions.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Session summary, cancel message, preview page/index envelope contracts |
+| `src/bill_analyser/api/routes/bills/v2_preview_actions.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | `Invalid request`, stale preview conflict, and `expectedState` object contract |
+| `src/bill_analyser/core/bills/service_parts/import_preview_paging.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Sort key allowlist, page/page_size clamp, `preview_ids` normalization, and preview filter index projection |
+| `src/bill_analyser/import_contracts/preview_selection.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Confirm/update selected-key precedence and bool coercion contract |
+| `tests/domains/import_flow/**` and `tests/new_ui/test_import_*.py` | `crates/bill-analyser-core/tests/import_pipeline_contracts.rs` | Golden contract cases for preview paging, stage envelopes, matching payload, expected state, and selection semantics |
+
+No Python import-v2 route, staging database, parser factory, category/account matching, recurring lookup, learning replay, or confirm-to-bills cleanup implementation is removed in S10. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same imported sample/session fixtures.
