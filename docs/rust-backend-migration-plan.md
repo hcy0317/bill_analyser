@@ -107,3 +107,17 @@ S9a starts the bills CRUD/media/reconciliation domain by pinning the read/list/e
 | `tests/new_ui/test_transaction_list_rest_api.py` and `tests/new_ui/test_bills_api.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden read/list adapter cases for cents/yuan, type codes, account ids, date fields, and formula escaping |
 
 No Python bills route or database implementation is removed in S9a. Python remains the runtime owner for DB reads, writes, media, account balance sync, and reconciliation statements until later S9 sub-slices verify and switch those boundaries.
+
+## S9b Bills Write and Balance Contracts
+
+S9b extends the Rust bills contract to the write-side adapter and account balance synchronization rules without switching the Python runtime. It covers frontend mutation payload conversion, manual create fallback fields, category resolution/defaulting contracts, batch-create payload and route-envelope shapes, create/update field guards, batch-update response projection, affected account collection for create/update/delete/batch-delete, and the raw account balance formula used by the existing Python database layer.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Frontend write payload to backend bill field conversion, including cents-to-yuan, type mapping, tag IDs, account IDs, and local timestamp normalization |
+| `src/bill_analyser/api/routes/bills/crud_prepare.py` and `src/bill_analyser/api/routes/bills/crud_create_update.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Manual-create description/counterparty/source-account fallbacks, legacy modify/delete response shapes, and batch-create request/response validation contract |
+| `src/bill_analyser/api/routes/bills/category_actions.py` and `src/bill_analyser/core/database/bills/__init__.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Route-level and DB-level update field allowlists, batch-update response shape, create aliases, and the current no-immediate-balance-sync batch-update policy |
+| `src/bill_analyser/api/routes/bills/support.py` and `src/bill_analyser/core/database/accounts/balances.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Affected account ID collection for create/update/delete/batch-delete and raw DB balance formula contract, including the frontend-signed outgoing amount convention |
+| `tests/new_ui/test_bills_api.py`, `tests/domains/db/**`, and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden write/batch/balance contract cases for later bridge replacement |
+
+No Python bills write, delete, batch, or account balance implementation is removed in S9b. Pictures/media and reconciliation statement runtime behavior remain deferred to later S9 sub-slices.
