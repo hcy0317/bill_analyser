@@ -2,6 +2,8 @@
 
 # pylint: disable=line-too-long,too-many-lines,too-many-locals,too-many-branches,too-many-statements
 # pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=bad-indentation,missing-class-docstring,useless-object-inheritance
+# pylint: disable=unused-import,duplicate-code
 
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.core.database.llm.config import normalize_llm_advanced_settings
 from bill_analyser.core.ai.ocr.service import normalize_ocr_config
+from bill_analyser.core import settings_bundle_rust_bridge
 
 from .shared import (
     LOCAL_REF_NAMESPACE,
@@ -58,27 +61,21 @@ class SettingsBundleBaseMixin(object):
             tag_refs = {int(item["id"]): f"tag:{item['id']}" for item in tags}
             tag_names = {int(item["id"]): _safe_text(item.get("name")) for item in tags}
 
+            taxonomy_sections = self._export_settings_taxonomy_sections(
+                accounts=accounts,
+                categories=categories,
+                tags=tags,
+                templates=templates,
+                scheduled=scheduled,
+                account_refs=account_refs,
+                account_names=account_names,
+                category_refs=category_refs,
+                category_names=category_names,
+                tag_refs=tag_refs,
+                tag_names=tag_names,
+            )
             sections = {
-                "accounts": [
-                    self._export_settings_account(item, account_refs, account_names)
-                    for item in accounts
-                ],
-                "transactionCategories": [
-                    self._export_settings_category(item, category_refs)
-                    for item in categories
-                ],
-                "transactionTags": [
-                    self._export_settings_tag(item, tag_refs)
-                    for item in tags
-                ],
-                "transactionTemplates": [
-                    self._export_settings_template(item, category_refs, category_names, account_refs, account_names, tag_refs, tag_names)
-                    for item in templates
-                ],
-                "scheduledTransactions": [
-                    self._export_settings_template(item, category_refs, category_names, account_refs, account_names, tag_refs, tag_names)
-                    for item in scheduled
-                ],
+                **taxonomy_sections,
                 "categoryRecognitionRules": [
                     self._export_settings_category_rule(item, category_refs)
                     for item in rules
@@ -193,6 +190,12 @@ class SettingsBundleBaseMixin(object):
 
         @staticmethod
         def _normalize_settings_bundle_sections(bundle: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+            try:
+                return settings_bundle_rust_bridge.normalize_sections(bundle)
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeOperationError as exc:
+                raise ValueError(str(exc)) from exc
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                pass
             if not isinstance(bundle, dict):
                 raise ValueError("Settings bundle must be a JSON object")
             schema_version = bundle.get("schemaVersion")

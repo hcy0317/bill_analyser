@@ -124,6 +124,7 @@ CORE_DOMAIN_BY_FILE = {
     "default_category_seed.py": "classification-rules",
     "recurring_detection.py": "recurring-calendar",
     "report.py": "statistics-reporting",
+    "settings_bundle_rust_bridge.py": "settings-bundle",
     "sync.py": "sync-runtime",
     "tag_rust_bridge.py": "tags-templates",
     "template_rust_bridge.py": "tags-templates",

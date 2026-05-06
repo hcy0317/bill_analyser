@@ -2,6 +2,8 @@
 
 # pylint: disable=line-too-long,too-many-lines,too-many-locals,too-many-branches,too-many-statements
 # pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=bad-indentation,missing-class-docstring,useless-object-inheritance
+# pylint: disable=too-few-public-methods,unused-import,duplicate-code
 
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.core.database.llm.config import normalize_llm_advanced_settings
 from bill_analyser.core.ai.ocr.service import normalize_ocr_config
+from bill_analyser.core import settings_bundle_rust_bridge
 
 from .shared import (
     LOCAL_REF_NAMESPACE,
@@ -35,6 +38,69 @@ from .shared import (
 
 
 class SettingsBundleExportersMixin(object):
+        def _export_settings_taxonomy_sections(
+            self,
+            *,
+            accounts: list[dict[str, Any]],
+            categories: list[dict[str, Any]],
+            tags: list[dict[str, Any]],
+            templates: list[dict[str, Any]],
+            scheduled: list[dict[str, Any]],
+            account_refs: dict[int, str],
+            account_names: dict[int, str],
+            category_refs: dict[int, str],
+            category_names: dict[int, str],
+            tag_refs: dict[int, str],
+            tag_names: dict[int, str],
+        ) -> dict[str, list[dict[str, Any]]]:
+            try:
+                return settings_bundle_rust_bridge.export_taxonomy_sections(
+                    accounts=accounts,
+                    categories=categories,
+                    tags=tags,
+                    templates=templates,
+                    scheduled=scheduled,
+                )
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                return {
+                    "accounts": [
+                        self._export_settings_account(item, account_refs, account_names)
+                        for item in accounts
+                    ],
+                    "transactionCategories": [
+                        self._export_settings_category(item, category_refs)
+                        for item in categories
+                    ],
+                    "transactionTags": [
+                        self._export_settings_tag(item, tag_refs)
+                        for item in tags
+                    ],
+                    "transactionTemplates": [
+                        self._export_settings_template(
+                            item,
+                            category_refs,
+                            category_names,
+                            account_refs,
+                            account_names,
+                            tag_refs,
+                            tag_names,
+                        )
+                        for item in templates
+                    ],
+                    "scheduledTransactions": [
+                        self._export_settings_template(
+                            item,
+                            category_refs,
+                            category_names,
+                            account_refs,
+                            account_names,
+                            tag_refs,
+                            tag_names,
+                        )
+                        for item in scheduled
+                    ],
+                }
+
         async def _export_settings_templates(
             self,
             conn: Any,

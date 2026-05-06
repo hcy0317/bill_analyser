@@ -30,7 +30,7 @@
 - 模板域已完成契约梳理，但被重新评估为非低风险域：
   - 该域已完成首轮收口：前端模板调用统一走 REST，后端补齐 `templateType` 过滤、双表 DTO 映射、隐藏/排序与 `user_id` 收口；
   - 模板 rewrite 映射、`templates.bp_v1` 注册与实现均已移除；
-  - 模板域当前保留 REST 主链路；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Database facade 进入 Rust `bill_taxonomy_bridge`，route envelope、`:memory:`、SQLCipher、recurring 匹配/绑定、settings/suggestion/import 写路径仍由 Python 维护。
+  - 模板域当前保留 REST 主链路；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Database facade 进入 Rust `bill_taxonomy_bridge`，settings bundle taxonomy sections 的 normalization、导出 DTO 和模板引用解析也通过 Rust helper；route envelope、`:memory:`、SQLCipher、recurring 匹配/绑定、settings bundle 最终导入事务、category-rule/LLM/OCR sections、suggestion/import 写路径仍由 Python 维护。
 - 预算域主链已完成 REST 收口：
   - 前端 `services.ts` 已将列表/详情/创建/更新/删除/执行统计/预测/导入导出统一切换到 `/api/budgets/*`；
   - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；

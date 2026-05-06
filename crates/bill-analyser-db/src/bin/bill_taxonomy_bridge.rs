@@ -4,6 +4,10 @@ use bill_analyser_db::taxonomy::accounts::{
     open_accounts_connection, parse_account_display_orders, AccountsRepository,
 };
 use bill_analyser_db::taxonomy::categories::{open_categories_connection, CategoriesRepository};
+use bill_analyser_db::taxonomy::settings_bundle::{
+    export_taxonomy_sections, normalize_account_import, normalize_category_import,
+    normalize_settings_bundle_sections, normalize_tag_import, resolve_template_payload,
+};
 use bill_analyser_db::taxonomy::tags::{
     open_tags_connection, parse_display_orders, TagsRepository,
 };
@@ -225,6 +229,28 @@ fn run() -> Result<(), String> {
                 )
             },
         )),
+        "settings-normalize-sections" => result_response(
+            required_value(&payload, "bundle").and_then(normalize_settings_bundle_sections),
+        ),
+        "settings-export-taxonomy-sections" => {
+            result_response(required_value(&payload, "payload").and_then(export_taxonomy_sections))
+        }
+        "settings-normalize-account-import" => json!({
+            "success": true,
+            "result": normalize_account_import(payload.get("payload").unwrap_or(&Value::Null)),
+        }),
+        "settings-normalize-category-import" => json!({
+            "success": true,
+            "result": normalize_category_import(payload.get("payload").unwrap_or(&Value::Null)),
+        }),
+        "settings-normalize-tag-import" => json!({
+            "success": true,
+            "result": normalize_tag_import(payload.get("payload").unwrap_or(&Value::Null)),
+        }),
+        "settings-resolve-template-payload" => json!({
+            "success": true,
+            "result": resolve_template_payload(payload.get("payload").unwrap_or(&Value::Null)),
+        }),
         _ => return Err("unknown taxonomy bridge command".to_string()),
     };
 

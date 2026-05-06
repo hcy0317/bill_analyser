@@ -2,6 +2,8 @@
 
 # pylint: disable=line-too-long,too-many-lines,too-many-locals,too-many-branches,too-many-statements
 # pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=bad-indentation,missing-class-docstring,useless-object-inheritance
+# pylint: disable=too-few-public-methods,unused-import,duplicate-code
 
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.core.database.llm.config import normalize_llm_advanced_settings
 from bill_analyser.core.ai.ocr.service import normalize_ocr_config
+from bill_analyser.core import settings_bundle_rust_bridge
 
 from .shared import (
     LOCAL_REF_NAMESPACE,
@@ -116,21 +119,7 @@ class SettingsBundleAccountsCategoriesTagsMixin(object):
             parent_id = _safe_int(ref_map.get(_safe_text(_get_any(item, "parentRef", "parent_ref"))))
             row = existing["by_key"].get((name, parent_id))
             now = utc_now_iso()
-            values = {
-                "name": name,
-                "type": _safe_int(item.get("type"), 1),
-                "category": _get_any(item, "category", default=None),
-                "currency": _safe_text(item.get("currency"), "CNY"),
-                "icon": _safe_text(item.get("icon")),
-                "color": _safe_text(item.get("color")),
-                "balance": _safe_float(item.get("balance")),
-                "initial_balance": _safe_float(_get_any(item, "initialBalance", "initial_balance")),
-                "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
-                "display_order": _safe_int(_get_any(item, "displayOrder", "display_order")),
-                "comment": _safe_text(item.get("comment")),
-                "aliases": _dump_json_list(item.get("aliases")),
-                "parent_id": parent_id,
-            }
+            values = self._settings_account_import_values(item, ref_map)
             if row:
                 columns = [key for key in values if key != "name"]
                 await conn.execute(
@@ -237,17 +226,7 @@ class SettingsBundleAccountsCategoriesTagsMixin(object):
                 return None
             row = existing["by_key"].get((main, sub))
             now = utc_now_iso()
-            values = {
-                "type": _safe_int(item.get("type"), 3),
-                "main_category": main,
-                "sub_category": sub,
-                "description": _safe_text(item.get("description")),
-                "priority": _safe_int(item.get("priority")),
-                "keywords": _safe_text(item.get("keywords")),
-                "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
-                "icon": _safe_text(item.get("icon")),
-                "color": _safe_text(item.get("color")),
-            }
+            values = self._settings_category_import_values(item)
             if row:
                 update_columns = [key for key in values if key not in {"main_category", "sub_category"}]
                 await conn.execute(
@@ -335,13 +314,7 @@ class SettingsBundleAccountsCategoriesTagsMixin(object):
                 return None
             row = existing["by_name"].get(name)
             now = utc_now_iso()
-            values = {
-                "name": name,
-                "color": _safe_text(item.get("color")),
-                "icon": _safe_text(item.get("icon")),
-                "display_order": _safe_int(_get_any(item, "displayOrder", "display_order")),
-                "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
-            }
+            values = self._settings_tag_import_values(item)
             if row:
                 await conn.execute(
                     """
@@ -384,3 +357,69 @@ class SettingsBundleAccountsCategoriesTagsMixin(object):
             existing["by_name"][name] = existing["by_id"][tag_id]
             section["created"] += 1
             return tag_id
+
+        @staticmethod
+        def _settings_account_import_values(
+            item: dict[str, Any],
+            ref_map: dict[str, int],
+        ) -> dict[str, Any]:
+            try:
+                return settings_bundle_rust_bridge.normalize_account_import(item, ref_map)
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                return {
+                    "name": _safe_text(item.get("name")),
+                    "type": _safe_int(item.get("type"), 1),
+                    "category": _get_any(item, "category", default=None),
+                    "currency": _safe_text(item.get("currency"), "CNY"),
+                    "icon": _safe_text(item.get("icon")),
+                    "color": _safe_text(item.get("color")),
+                    "balance": _safe_float(item.get("balance")),
+                    "initial_balance": _safe_float(
+                        _get_any(item, "initialBalance", "initial_balance")
+                    ),
+                    "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
+                    "display_order": _safe_int(
+                        _get_any(item, "displayOrder", "display_order")
+                    ),
+                    "comment": _safe_text(item.get("comment")),
+                    "aliases": _dump_json_list(item.get("aliases")),
+                    "parent_id": _safe_int(
+                        ref_map.get(_safe_text(_get_any(item, "parentRef", "parent_ref")))
+                    ),
+                }
+
+        @staticmethod
+        def _settings_category_import_values(item: dict[str, Any]) -> dict[str, Any]:
+            try:
+                return settings_bundle_rust_bridge.normalize_category_import(item)
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                return {
+                    "type": _safe_int(item.get("type"), 3),
+                    "main_category": _safe_text(
+                        _get_any(item, "mainCategory", "main_category")
+                    ),
+                    "sub_category": _safe_text(
+                        _get_any(item, "subCategory", "sub_category")
+                    ),
+                    "description": _safe_text(item.get("description")),
+                    "priority": _safe_int(item.get("priority")),
+                    "keywords": _safe_text(item.get("keywords")),
+                    "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
+                    "icon": _safe_text(item.get("icon")),
+                    "color": _safe_text(item.get("color")),
+                }
+
+        @staticmethod
+        def _settings_tag_import_values(item: dict[str, Any]) -> dict[str, Any]:
+            try:
+                return settings_bundle_rust_bridge.normalize_tag_import(item)
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                return {
+                    "name": _safe_text(item.get("name")),
+                    "color": _safe_text(item.get("color")),
+                    "icon": _safe_text(item.get("icon")),
+                    "display_order": _safe_int(
+                        _get_any(item, "displayOrder", "display_order")
+                    ),
+                    "hidden": 1 if _safe_bool(item.get("hidden")) else 0,
+                }

@@ -2,6 +2,8 @@
 
 # pylint: disable=line-too-long,too-many-lines,too-many-locals,too-many-branches,too-many-statements
 # pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=bad-indentation,missing-class-docstring,useless-object-inheritance
+# pylint: disable=too-few-public-methods,unused-import,duplicate-code
 
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from bill_analyser.core.database.shared import DatabaseFacadeBase
 from bill_analyser.core.database.time import utc_now_iso
 from bill_analyser.core.database.llm.config import normalize_llm_advanced_settings
 from bill_analyser.core.ai.ocr.service import normalize_ocr_config
+from bill_analyser.core import settings_bundle_rust_bridge
 
 from .shared import (
     LOCAL_REF_NAMESPACE,
@@ -93,10 +96,14 @@ class SettingsBundleTemplatesMixin(object):
                 warnings.append("Skipped template without name")
                 return
             table_name = "recurring_bills" if template_type == 2 else "bill_templates"
-            payload = self._settings_template_payload(
-                item, account_ref_map, category_ref_map, tag_ref_map, warnings
+            payload, has_unresolved = self._settings_template_resolved_payload(
+                item,
+                account_ref_map,
+                category_ref_map,
+                tag_ref_map,
+                warnings,
             )
-            if self._settings_template_has_unresolved_references(item, payload, warnings):
+            if has_unresolved:
                 section["skipped"] += 1
                 return
             update_payload = self._settings_template_update_payload(payload, template_type)
@@ -256,6 +263,34 @@ class SettingsBundleTemplatesMixin(object):
                 "enabled": 1 if _safe_bool(_get_any(item, "enabled", default=True)) else 0,
                 "auto_create": 1 if _safe_bool(_get_any(item, "autoCreate", "auto_create")) else 0,
             }
+
+        def _settings_template_resolved_payload(
+            self,
+            item: dict[str, Any],
+            account_ref_map: dict[str, int],
+            category_ref_map: dict[str, int],
+            tag_ref_map: dict[str, int],
+            warnings: list[str],
+        ) -> tuple[dict[str, Any], bool]:
+            try:
+                resolved = settings_bundle_rust_bridge.resolve_template_payload(
+                    item,
+                    account_ref_map=account_ref_map,
+                    category_ref_map=category_ref_map,
+                    tag_ref_map=tag_ref_map,
+                )
+            except settings_bundle_rust_bridge.SettingsBundleRustBridgeUnavailable:
+                payload = self._settings_template_payload(
+                    item, account_ref_map, category_ref_map, tag_ref_map, warnings
+                )
+                return (
+                    payload,
+                    self._settings_template_has_unresolved_references(
+                        item, payload, warnings
+                    ),
+                )
+            warnings.extend(resolved["warnings"])
+            return resolved["payload"], bool(resolved["unresolved"])
 
         @staticmethod
         def _has_template_ref_value(item: dict[str, Any], *keys: str) -> bool:

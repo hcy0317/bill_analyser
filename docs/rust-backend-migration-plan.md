@@ -12,8 +12,8 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## Initial Migration Surface
 
-- Python backend files to track: 318
-- Current Rust backend files: 38 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
+- Python backend files to track: 319
+- Current Rust backend files: 39 across the `bill-analyser-core` and `bill-analyser-db` internal crates.
 - Initial verified-dead files: 0
 
 ## S1 Rust Runtime Shell
@@ -143,6 +143,20 @@ S5d migrates transaction-template and scheduled-template master-data persistence
 
 Explicit S5d deferrals: recurring matching/bind/unbind side effects, schedule algorithms, settings bundle template import/upsert, recurring suggestion flows, import preview recurring confirmation, SQLCipher Rust access, and route-shell cleanup remain deferred. No Python business code is deleted in S5d because the route shell, in-memory fallback, SQLCipher fallback, recurring side-effect helpers, and settings/suggestion/import writers remain active owners.
 
+## S5e Settings Bundle Taxonomy Sections
+
+S5e moves settings-bundle taxonomy section normalization, export DTO construction, and template import reference resolution into Rust while preserving Python as the single transaction coordinator for imports. A Rust subprocess cannot share the active `aiosqlite` transaction used for preview rollback and full-bundle atomic import, so S5e deliberately keeps final SQL execution in Python and uses Rust for deterministic pure computations.
+
+| Python responsibility | Rust S5e mapping | Status |
+| --- | --- | --- |
+| `SettingsBundleBaseMixin._normalize_settings_bundle_sections` schema/section normalization | `crates/bill-analyser-db/src/taxonomy/settings_bundle.rs` validates `schemaVersion == 1`, normalizes every known section to a list of dict-like items, and returns the canonical section object through `settings-normalize-sections`; Python maps Rust domain errors back to `ValueError` for existing route handling | runtime helper bridge |
+| Taxonomy section export DTOs for `accounts`, `transactionCategories`, `transactionTags`, `transactionTemplates`, and `scheduledTransactions` | Rust `export_taxonomy_sections` builds external refs, parent/category/account/tag names, aliases, hidden flags, and template refs from the existing facade/raw template rows; Python still merges retained category rules, LLM configs, and OCR config into the final bundle | runtime helper bridge |
+| Settings bundle account/category/tag import value normalization | Rust normalizes account parent IDs from the current ref map, account/category/tag field defaults, booleans, aliases JSON, display order, and hidden flags; Python keeps ordered upsert loops and SQL execution inside the current transaction | runtime helper bridge; SQL retained |
+| Settings bundle template import reference resolution and payload construction | Rust resolves category/account/tag refs, local legacy IDs, name fallback, tag-ref warnings, unresolved template skip rules, recurring schedule payload fields, and amount/comment/display fields; Python keeps `bill_templates` / `recurring_bills` inserts and updates inside the current transaction | runtime helper bridge; SQL retained |
+| Full settings import transaction, dry-run rollback, category-rule import, LLM config import, OCR config import, and route shell | Python remains owner because these cross taxonomy, classification rules, AI/LLM, OCR, auth/password-gated section routes, cache invalidation, and `OCR_SERVICE` invalidation | retained |
+
+Explicit S5e deferrals: category rule import/export remains Python until S6, LLM/OCR settings remain Python until their AI/OCR domain slices, SQLCipher and in-memory behavior continue on Python fallbacks, and no settings-bundle business code is deleted because the Python transaction coordinator remains active.
+
 ## Domain Review Baseline
 
 | Domain | Port | Facade | Deferred |
@@ -163,7 +177,7 @@ Explicit S5d deferrals: recurring matching/bind/unbind side effects, schedule al
 | import-parsers | 8 | 2 | 0 |
 | matching-reconciliation | 22 | 5 | 0 |
 | recurring-calendar | 4 | 0 | 0 |
-| settings-bundle | 8 | 1 | 0 |
+| settings-bundle | 9 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |

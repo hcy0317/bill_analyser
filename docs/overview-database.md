@@ -7,7 +7,7 @@
 - 账户域：`accounts`、`account_types`、`account_transfers`
 - 标签域：`tags`、`bill_tags`
 - 模板域：`bill_templates`、`recurring_bills`
-  - 普通文件库上的模板主数据 CRUD、排序、DTO 列表/详情和启用周期模板读取由 `core/template_rust_bridge.py` 调用 Rust `bill_taxonomy_bridge` 的 templates repository；`:memory:`、SQLCipher、settings bundle template import/upsert、recurring suggestion/import-flow 写路径，以及 recurring 匹配/绑定推进仍走 Python。
+  - 普通文件库上的模板主数据 CRUD、排序、DTO 列表/详情和启用周期模板读取由 `core/template_rust_bridge.py` 调用 Rust `bill_taxonomy_bridge` 的 templates repository；settings bundle taxonomy sections 的 normalization、导出 DTO 构建和模板引用解析由 `core/settings_bundle_rust_bridge.py` 调用 Rust helper，最终 import SQL 仍留在 Python 的同一个 `aiosqlite` 事务里以保留 preview rollback / full import atomicity；`:memory:`、SQLCipher、settings bundle category-rule/LLM/OCR import、recurring suggestion/import-flow 写路径，以及 recurring 匹配/绑定推进仍走 Python。
 - 预算域：`budgets`、`budget_history`
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
@@ -15,7 +15,7 @@
 - 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
 - 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件
 - 领域持久化代码统一位于 `core/database/**`：runtime/shared/time/encryption 维护基础层，`schema/` 维护 schema 编排，accounts/bills/budgets/imports/llm/users 等语义 package 继续导出原 mixin 名称；`core/` 根层只保留 `db.py` 作为公共 Database façade
-- Rust DB runtime foundation 位于 `crates/bill-analyser-db`，提供 SQLite 连接 guard、WAL/foreign_keys PRAGMA 初始化、事务 helper、schema dry-run scaffold 与 user_id 参数化 scope；Flask/Python Database façade 仍是业务运行时入口。账户 master-data 的 list/get/create/update/delete/subAccounts/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::accounts`，`:memory:`、SQLCipher 加密库、余额同步、账户交易迁移/清空和账户审计动作继续使用 Python 路径。标签 master-data 的 list/get/create/update/delete/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::tags`，`:memory:` 与 SQLCipher 加密库继续使用 Python aiosqlite 路径，`bill_tags` 账单关联读写仍由 Python 标签 mixin 维护。分类 master-data 的 list/get/create/batch-ensure/update/delete/按主分类删除/按主分类批量改名在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::categories`，并保留 categories 为空时从 bills 派生分类的旧 fallback；`:memory:`、SQLCipher、分类统计、分类规则/匹配和设置包分类 import/upsert 继续使用 Python 路径。
+- Rust DB runtime foundation 位于 `crates/bill-analyser-db`，提供 SQLite 连接 guard、WAL/foreign_keys PRAGMA 初始化、事务 helper、schema dry-run scaffold 与 user_id 参数化 scope；Flask/Python Database façade 仍是业务运行时入口。账户 master-data 的 list/get/create/update/delete/subAccounts/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::accounts`，`:memory:`、SQLCipher 加密库、余额同步、账户交易迁移/清空和账户审计动作继续使用 Python 路径。标签 master-data 的 list/get/create/update/delete/display-order 在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::tags`，`:memory:` 与 SQLCipher 加密库继续使用 Python aiosqlite 路径，`bill_tags` 账单关联读写仍由 Python 标签 mixin 维护。分类 master-data 的 list/get/create/batch-ensure/update/delete/按主分类删除/按主分类批量改名在普通文件 SQLite 库上通过 `bill_taxonomy_bridge` 调用 Rust `taxonomy::categories`，并保留 categories 为空时从 bills 派生分类的旧 fallback；settings bundle taxonomy section helper 位于 Rust `taxonomy::settings_bundle`，提供纯 JSON 规范化/引用解析/导出投影，不直接提交设置包导入事务；`:memory:`、SQLCipher、分类统计、分类规则/匹配和设置包非 taxonomy import/upsert 继续使用 Python 路径。
 
 ## 6.1.1 模板域当前漂移清单
 - 前端期望字段：`templateType/categoryId/sourceAccountId/destinationAccountId/sourceAmount/destinationAmount/hideAmount/tagIds/displayOrder/hidden/scheduled*`。

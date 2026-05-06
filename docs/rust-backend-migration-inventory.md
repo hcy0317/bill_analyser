@@ -5,10 +5,10 @@ It does not change runtime behavior and does not mark any Python business file a
 
 ## Summary
 
-- Python backend files: 318
-- Rust backend files: 38
+- Python backend files: 319
+- Rust backend files: 39
 - Migration domains: 22
-- Files marked port: 251
+- Files marked port: 252
 - Files marked facade: 67
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -33,7 +33,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | import-parsers | 8 | 2 | 0 |
 | matching-reconciliation | 22 | 5 | 0 |
 | recurring-calendar | 4 | 0 | 0 |
-| settings-bundle | 8 | 1 | 0 |
+| settings-bundle | 9 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
@@ -318,6 +318,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/matching/transfer_candidates.py | matching-reconciliation | core-service | port | 176 |
 | src/bill_analyser/core/recurring_detection.py | recurring-calendar | core-service | port | 270 |
 | src/bill_analyser/core/report.py | statistics-reporting | core-service | facade | 23 |
+| src/bill_analyser/core/settings_bundle_rust_bridge.py | settings-bundle | core-service | port | 221 |
 | src/bill_analyser/core/smart_dedup/__init__.py | smart-dedup | package-marker | facade | 52 |
 | src/bill_analyser/core/smart_dedup/database.py | smart-dedup | core-service | port | 195 |
 | src/bill_analyser/core/smart_dedup/engine.py | smart-dedup | core-service | port | 252 |
@@ -398,6 +399,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/taxonomy/accounts.rs
 - crates/bill-analyser-db/src/taxonomy/categories.rs
 - crates/bill-analyser-db/src/taxonomy/mod.rs
+- crates/bill-analyser-db/src/taxonomy/settings_bundle.rs
 - crates/bill-analyser-db/src/taxonomy/tags.rs
 - crates/bill-analyser-db/src/taxonomy/templates.rs
 - crates/bill-analyser-db/src/transaction.rs
