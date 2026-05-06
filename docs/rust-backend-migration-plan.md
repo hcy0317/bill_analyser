@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 48
+- Current Rust backend files: 50
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -162,3 +162,19 @@ S10 starts the import-v2 pipeline domain in Rust without switching Flask routes,
 | `tests/domains/import_flow/**` and `tests/new_ui/test_import_*.py` | `crates/bill-analyser-core/tests/import_pipeline_contracts.rs` | Golden contract cases for preview paging, stage envelopes, matching payload, expected state, and selection semantics |
 
 No Python import-v2 route, staging database, parser factory, category/account matching, recurring lookup, learning replay, or confirm-to-bills cleanup implementation is removed in S10. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same imported sample/session fixtures.
+
+## S11 Import Learning and LLM Preview Contracts
+
+S11 starts the import-learning / LLM preview memory domain in Rust without switching Flask routes, aiosqlite persistence, numpy model training, provider calls, or preview mutation runtime. It pins composite match hash normalization, feature payload and labels, token generation, green/blue policy thresholds, model registry/snapshot metadata, session-learning route envelopes, Learning Center paging/error envelopes, LLM stable error envelopes, preview memory event shape, blank-only LLM apply behavior, and reject-restore snapshot guards.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/core/database/imports/learning/base.py` | `crates/bill-analyser-core/src/import_learning.rs` | Composite match feature normalization, alias parsing, hash ordering, and preview id validation contract |
+| `src/bill_analyser/core/import_learning/features.py` | `crates/bill-analyser-core/src/import_learning.rs` | Feature schema, labels, amount buckets, sample filtering, token generation, and confirmation-count keys |
+| `src/bill_analyser/core/import_learning/model.py` and `src/bill_analyser/core/database/imports/learning/model.py` | `crates/bill-analyser-core/src/import_learning.rs` | Model key/family/dimensions, snapshot payload, active model version, metrics payload, and archive/active metadata contract |
+| `src/bill_analyser/core/import_learning/policy.py` | `crates/bill-analyser-core/src/import_learning.rs` | Green/blue confidence, margin, confirmation, conflict, score, level, and auto-apply policy contract |
+| `src/bill_analyser/api/routes/bills/import_learning.py` and `src/bill_analyser/api/routes/learning.py` | `crates/bill-analyser-core/src/import_learning.rs` | Session suggestions/promote errors, legacy rule page envelope, Learning Center page envelope, and batch validation surfaces |
+| `src/bill_analyser/core/database/llm/candidates/preview_apply.py`, `preview_review.py`, and `src/bill_analyser/api/routes/llm/support.py` | `crates/bill-analyser-core/src/import_learning.rs` | LLM memory event DTO, blank-field-only apply semantics, reject restore guard, and stable `code`/`error_code` envelope |
+| `tests/domains/import_flow/unit/test_import_learning_model_loop.py`, `tests/new_ui/test_bills_learning_suggestions_api.py`, `tests/new_ui/test_learning_suggestion_center_api.py`, and `tests/new_ui/test_llm_import_session_analysis_api.py` | `crates/bill-analyser-core/tests/import_learning_contracts.rs` | Golden contract cases for learning features, policy, model metadata, route envelopes, and LLM preview memory behavior |
+
+No Python import-learning database, corpus writes, active model training/prediction, suggestion writeback, LLM provider prompt/generation, or live preview apply/reject implementation is removed in S11. Runtime takeover remains deferred until a later bridge slice can verify model/persistence parity against the same session and memory fixtures.
