@@ -11,6 +11,7 @@ pub mod parsers;
 pub mod primitives;
 pub mod response;
 pub mod runtime;
+pub mod smart_dedup;
 
 pub use adapters::{account, api, category, transaction};
 pub use error::{ErrorCode, RuntimeError};
@@ -27,4 +28,11 @@ pub use primitives::{
 pub use response::{ApiError, ApiResponse};
 pub use runtime::{
     runtime_health, runtime_identity_json, RuntimeHealth, RuntimeIdentity, RuntimeStatus,
+};
+pub use smart_dedup::{
+    find_cross_batch_transfer_pairs, find_database_duplicates,
+    find_import_reconciliation_candidates, CrossBatchTransferMatch, DedupBill, DeduplicationResult,
+    DeduplicationType, DuplicateGroup, ImportReconciliationCandidate, MergedBillSource,
+    ReconciliationCandidateType, SmartDeduplicationEngine, SplitGroup, TransferPair,
+    TransferSourceSnapshot,
 };

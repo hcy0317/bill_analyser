@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 43
+- Current Rust backend files: 45
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -79,3 +79,19 @@ S7 starts the import parser domain in Rust without switching parser runtime owne
 | `tests/fixtures/import_samples/**` parser families | `crates/bill-analyser-core/tests/fixtures/parser_golden_contracts.json` | Deterministic golden contract cases for six parser families |
 
 No Python parser implementation is removed in S7. The Rust parser module is an internal contract/oracle surface: Python parser tests continue to parse real CSV/XLS/XLSX samples, while Rust golden contract tests pin the normalized StandardBill, parser tag, and source-label output expected from each dedicated parser family.
+
+## S8 Smart Dedup Contracts
+
+S8 starts the smart-dedup domain in Rust without switching the Python import runtime. It preserves the current Python ordering for exact duplicate, platform-bank duplicate, same-batch transfer, similar duplicate, split bill, database duplicate, and cross-batch transfer semantics as a pure Rust contract layer.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/core/smart_dedup/models.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Deduplication type/result/group data contracts and Python hidden-field serde aliases |
+| `src/bill_analyser/core/smart_dedup/exact.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Exact duplicate grouping and source-priority keep rule |
+| `src/bill_analyser/core/smart_dedup/platform_bank.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Platform-bank amount/time/source, transfer-intent guard, merged fields, parser tags, and source-id provenance |
+| `src/bill_analyser/core/smart_dedup/transfers.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Same-batch transfer pair mutation contract and cross-batch transfer marker contract |
+| `src/bill_analyser/core/smart_dedup/grouping.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Similar duplicate merged-field/source-id contract and split bill grouping contract |
+| `src/bill_analyser/core/smart_dedup/database.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Database duplicate marker contract without DB query ownership |
+| `src/bill_analyser/core/smart_dedup/reconciliation.py` and `src/bill_analyser/core/database/reconciliation/**` | `crates/bill-analyser-core/src/smart_dedup.rs` | Import reconciliation candidate classification/key/group contract; persistence remains the existing Python DB boundary |
+
+No Python smart-dedup implementation is removed in S8. The Rust module uses `Money` cents and shared bill datetime parsing to avoid float drift while Rust contract tests pin Python-shaped `_parser_id` / `_template_id` / `_parser_tags` JSON, dedup source IDs, kept/removed indices, transfer destination hints, split groups, database duplicate markers, cross-batch transfer markers, and import reconciliation candidates. Runtime DB querying/persistence remains Python-owned until the import pipeline slice takes over that boundary.
