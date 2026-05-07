@@ -236,9 +236,13 @@ def main() -> int:
         _ = sys.stdin.read()
     source, changed_files, diff_text = _get_diff_snapshot()
     if not source or not changed_files:
+        sys.stdout.write("{}\n")
         return 0
 
-    sys.stdout.write("\n".join(build_stop_messages(source, changed_files, diff_text)) + "\n")
+    messages = build_stop_messages(source, changed_files, diff_text)
+    if messages:
+        sys.stderr.write("\n".join(messages) + "\n")
+    sys.stdout.write("{}\n")
     return 0
 
 

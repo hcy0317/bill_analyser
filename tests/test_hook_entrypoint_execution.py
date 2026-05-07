@@ -50,6 +50,8 @@ def test_stop_commit_title_hint_can_run_as_a_script() -> None:
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert "ModuleNotFoundError" not in result.stderr
+    assert json.loads(result.stdout) == {}
+    assert "中文 Conventional Commit 标题建议" not in result.stdout
 
 
 def test_task_state_can_run_as_a_script() -> None:
@@ -215,3 +217,25 @@ def test_execute_stage_denies_pre_tool_timeout(monkeypatch, tmp_path: Path) -> N
     assert result.exit_code == 0
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "timed out" in payload["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_execute_stage_stop_keeps_native_stdout_json(monkeypatch, tmp_path: Path) -> None:
+    from scripts.hooks import copilot_global_hook_bridge as bridge
+
+    runner_path = tmp_path / "run-with-flags.js"
+    runner_path.write_text("// stub\n", encoding="utf-8")
+    timeout_invocation = bridge.HookInvocation(
+        exit_code=bridge.GLOBAL_HOOK_TIMEOUT_EXIT_CODE,
+        stdout="",
+        stderr="Global hook `stop:session-persist` timed out after 5s.",
+    )
+
+    monkeypatch.setattr(bridge, "locate_runner", lambda: runner_path)
+    monkeypatch.setattr(bridge, "locate_node", lambda: "node")
+    monkeypatch.setattr(bridge, "invoke_global_hook", lambda *_args, **_kwargs: timeout_invocation)
+
+    result = bridge.execute_stage("stop", "{}")
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {}
+    assert "timed out" in result.stderr

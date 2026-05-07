@@ -351,6 +351,13 @@ def execute_stage(stage: str, payload_raw: str) -> StageResult:
             stderr=_merge_messages(stderr_parts + stdout_parts),
         )
 
+    if normalized_stage == "stop":
+        return StageResult(
+            exit_code=0,
+            stdout="{}",
+            stderr=_merge_messages(stdout_parts + stderr_parts),
+        )
+
     return StageResult(
         exit_code=0,
         stdout=_merge_messages(stdout_parts + stderr_parts),
