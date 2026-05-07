@@ -9,6 +9,7 @@
 - 模板域：`bill_templates`、`recurring_bills`
   - 普通文件库上的模板主数据 CRUD、排序、DTO 列表/详情和启用周期模板读取由 `core/template_rust_bridge.py` 调用 Rust `bill_taxonomy_bridge` 的 templates repository；settings bundle taxonomy sections 的 normalization、导出 DTO 构建和模板引用解析由 `core/settings_bundle_rust_bridge.py` 调用 Rust helper，最终 import SQL 仍留在 Python 的同一个 `aiosqlite` 事务里以保留 preview rollback / full import atomicity；`:memory:`、SQLCipher、settings bundle category-rule/LLM/OCR import、recurring suggestion/import-flow 写路径，以及 recurring 匹配/绑定推进仍走 Python。
 - 预算域：`budgets`、`budget_history`
+  - 预算 CRUD、execution/history/snapshot/forecast/import/export 的运行时 SQL 仍由 Python `core/database/budgets/**` 在同一 aiosqlite 边界维护；Rust `crates/bill-analyser-core/src/budgets.rs` 只固定期间、金额口径、父子预算、历史过滤和预测计算合同。
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`

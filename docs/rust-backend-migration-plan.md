@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 52
+- Current Rust backend files: 54
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -193,3 +193,18 @@ S12 starts the matching / investment / recurring domain in Rust without switchin
 | `tests/domains/import_flow/**`, `tests/domains/investment/**`, and `tests/domains/analytics/**` | `crates/bill-analyser-core/tests/matching_contracts.rs` | Golden contract cases for candidate ids, session projection, pair requests, transfer candidates, investment recognition, PnL, bank interest, and recurring detection |
 
 No Python matching, investment, recurring route, database, or preview-action implementation is removed in S12. The old `/api/matching/investment-settings` write surface remains gone; S12 records deterministic keyword/settings behavior only. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same matching sessions, manual pair, suppression, investment, and recurring fixtures.
+
+## S13 Budget Contracts
+
+S13 starts the budgets / execution / forecast / history domain in Rust without switching Flask routes, aiosqlite budget persistence, snapshot writes, import/export SQL, or reporting runtime. It pins route parsing and period-scope helpers, import/export validation shape, execution detail/summary row selection, category type normalization, expense/investment isolation, parent-period rollup semantics, on-demand history windows, filter-summary serialization, and forecast amount/MAPE/confidence/trend calculations.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/budgets/support.py` and `io.py` | `crates/bill-analyser-core/src/budgets.rs` | Route filter parsing, period/date scope, progress days, import item validation, avg MAPE, and export envelope contracts |
+| `src/bill_analyser/core/budgets/execution_summary.py` | `crates/bill-analyser-core/src/budgets.rs` | Detail/summary item selection that avoids double-counting synchronized primary budgets |
+| `src/bill_analyser/core/database/budgets/core/shared.py` and `hierarchy.py` | `crates/bill-analyser-core/src/budgets.rs` | Legacy `categories.type=1` normalization, expense/investment category resolution, parent period resolution, and rollup amount contract |
+| `src/bill_analyser/core/database/budgets/execution/on_demand.py`, `history.py`, and `snapshots.py` | `crates/bill-analyser-core/src/budgets.rs` | On-demand history ranges, overlap checks, stable filter summary JSON, and history item status shape |
+| `src/bill_analyser/core/database/budgets/forecast/__init__.py` | `crates/bill-analyser-core/src/budgets.rs` | Forecast period windows, period keys, historical/moving average, backtest MAPE, confidence, trend, and primary-vs-sub budget amount precedence |
+| `tests/domains/budgeting/**`, `tests/domains/db/**`, and `tests/new_ui/test_budgets_rest_api.py` | `crates/bill-analyser-core/tests/budget_contracts.rs` | Golden budget contract cases for period scopes, import/export, summary de-duplication, type isolation, rollups, history, and forecast helpers |
+
+No Python budget route, database, snapshot, forecast, import/export, or CLI implementation is removed in S13. Budget amounts in the existing Python path remain yuan-style numeric values; S13 records that boundary explicitly and does not introduce cents conversion into the budget contract layer. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same budget CRUD, execution, history, forecast, import, and export fixtures.
