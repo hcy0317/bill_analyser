@@ -61,6 +61,26 @@ def _write_data_file(base_dir: Path, relative_path: str, content: str) -> Path:
     return file_path
 
 
+def test_sync_backup_archive_member_path_safety_contract() -> None:
+    """同步恢复归档成员路径必须限制为恢复根目录内的相对路径。"""
+    assert sync_module.SyncManager._is_safe_backup_archive_member("data/restored.txt") is True
+    assert sync_module.SyncManager._is_safe_backup_archive_member("") is False
+    assert sync_module.SyncManager._is_safe_backup_archive_member("/escape.txt") is False
+    assert sync_module.SyncManager._is_safe_backup_archive_member("C:/escape.txt") is False
+    assert sync_module.SyncManager._is_safe_backup_archive_member("safe/../escape.txt") is False
+
+
+def test_backup_sync_prefix_validation_contract() -> None:
+    """云同步对象前缀必须规整为安全相对路径。"""
+    assert sync_module.normalize_backup_sync_prefix(None) == "bill_analyser_backups/"
+    assert sync_module.normalize_backup_sync_prefix("") == "bill_analyser_backups/"
+    assert sync_module.normalize_backup_sync_prefix("prefix") == "prefix/"
+    assert sync_module.normalize_backup_sync_prefix("nested/prefix/") == "nested/prefix/"
+
+    for unsafe_prefix in ["/abs", "///", "C:/abs", "nested\\prefix", "safe/../escape", "bad\u0007prefix"]:
+        assert sync_module.normalize_backup_sync_prefix(unsafe_prefix) is None
+
+
 def _install_fake_oss(
     monkeypatch: pytest.MonkeyPatch,
     calls: list[tuple[Any, ...]],
@@ -253,6 +273,9 @@ async def test_sync_to_cloud_handles_missing_provider_shortcuts_and_exceptions(
     assert await manager.sync_to_cloud({"provider": "unknown"}) is False
 
     monkeypatch.setattr(manager, "backup_local", exploding_backup)
+    assert await manager.sync_to_cloud({"provider": "s3", "prefix": "../escape"}) is False
+
+    monkeypatch.setattr(manager, "backup_local", exploding_backup)
     assert await manager.sync_to_cloud({"provider": "s3"}) is False
     assert logger.error_messages
 
@@ -430,17 +453,182 @@ async def test_restore_from_backup_handles_missing_and_successful_restore(
     assert not (manager.data_dir.parent / "temp_restore").exists()
 
 
+@pytest.mark.asyncio
+async def test_restore_from_backup_rejects_unsafe_zip_members(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+) -> None:
+    manager, logger = sync_manager
+    original_file = _write_data_file(manager.data_dir, "old.txt", "old")
+
+    unsafe_backup = manager.backup_dir / "unsafe.zip"
+    with zipfile.ZipFile(unsafe_backup, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("../escape.txt", "escape")
+        backup_zip.writestr("C:/escape.txt", "drive-escape")
+
+    assert await manager.restore_from_backup(str(unsafe_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir.parent / "escape.txt").exists()
+    assert not (manager.data_dir.parent / "C:" / "escape.txt").exists()
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+    assert any("备份文件包含不安全路径" in message for message in logger.error_messages)
+
+
+@pytest.mark.asyncio
+async def test_restore_from_backup_rejects_empty_and_flat_zip_before_mutation(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+) -> None:
+    manager, logger = sync_manager
+    original_file = _write_data_file(manager.data_dir, "old.txt", "old")
+
+    empty_backup = manager.backup_dir / "empty.zip"
+    with zipfile.ZipFile(empty_backup, "w", zipfile.ZIP_DEFLATED):
+        pass
+
+    flat_backup = manager.backup_dir / "flat.zip"
+    with zipfile.ZipFile(flat_backup, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("flat.txt", "flat")
+
+    data_dir_only_backup = manager.backup_dir / "data_dir_only.zip"
+    with zipfile.ZipFile(data_dir_only_backup, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("data/", "")
+
+    assert await manager.restore_from_backup(str(empty_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+
+    assert await manager.restore_from_backup(str(flat_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir / "flat.txt").exists()
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+    assert any("备份文件缺少 data/ 目录" in message for message in logger.error_messages)
+
+
 def test_cleanup_old_backups_keeps_latest_files_only(
     sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
 ) -> None:
-    manager, _logger = sync_manager
-    for name in ["backup_20260101_010101.zip", "backup_20260102_010101.zip", "backup_20260103_010101.zip"]:
+    manager, logger = sync_manager
+    for name in [
+        "backup_20260101_010101.zip",
+        "backup_20260102_010101.zip.enc",
+        "backup_20260103_010101.zip",
+    ]:
         (manager.backup_dir / name).write_bytes(name.encode("utf-8"))
 
     manager.cleanup_old_backups(keep_count=2)
 
-    remaining = sorted(path.name for path in manager.backup_dir.glob("backup_*.zip"))
-    assert remaining == ["backup_20260102_010101.zip", "backup_20260103_010101.zip"]
+    remaining = sorted(path.name for path in manager.backup_dir.glob("backup_*.zip*"))
+    assert remaining == ["backup_20260102_010101.zip.enc", "backup_20260103_010101.zip"]
 
     manager.cleanup_old_backups(keep_count=5)
-    assert sorted(path.name for path in manager.backup_dir.glob("backup_*.zip")) == remaining
+    assert sorted(path.name for path in manager.backup_dir.glob("backup_*.zip*")) == remaining
+
+    with pytest.raises(ValueError, match="keep_count must be greater than or equal to 0"):
+        manager.cleanup_old_backups(keep_count=-1)
+    assert sorted(path.name for path in manager.backup_dir.glob("backup_*.zip*")) == remaining
+    assert any("keep_count 必须大于等于 0" in message for message in logger.error_messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "installer"),
+    [
+        ("_upload_to_aliyun_oss", _install_fake_oss),
+        ("_upload_to_aws_s3", _install_fake_boto3),
+        ("_upload_to_tencent_cos", _install_fake_qcloud_cos),
+        ("_upload_to_azure_blob", _install_fake_azure_blob),
+        ("_upload_to_webdav", _install_fake_webdav),
+    ],
+)
+async def test_direct_cloud_upload_methods_reject_invalid_prefix_after_sdk_setup(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    installer: Any,
+) -> None:
+    """各云上传实现创建 SDK 客户端后，仍应在非法 prefix 上短路返回 False。"""
+    manager, logger = sync_manager
+    backup_file = manager.backup_dir / f"{method_name}.zip"
+    backup_file.write_bytes(b"cloud")
+    calls: list[tuple[Any, ...]] = []
+    installer(monkeypatch, calls)
+    config = {
+        "endpoint": "https://cos.ap-shanghai.myqcloud.com",
+        "bucket": "bucket",
+        "access_key": "ak",
+        "secret_key": "sk",
+        "prefix": "safe/../escape",
+    }
+
+    upload = getattr(manager, method_name)
+
+    assert await upload(backup_file, config) is False
+    assert any("云同步前缀无效" in message for message in logger.error_messages)
+    assert not any(call[0] in {"put", "upload", "blob", "mkdir"} for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_restore_from_backup_removes_stale_temp_restore_before_success(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+) -> None:
+    """成功恢复前如果存在旧 temp_restore，应先清理再重建。"""
+    manager, _logger = sync_manager
+    stale_temp_dir = manager.data_dir.parent / "temp_restore"
+    stale_file = stale_temp_dir / "stale.txt"
+    stale_temp_dir.mkdir(parents=True)
+    stale_file.write_text("stale", encoding="utf-8")
+    _write_data_file(manager.data_dir, "old.txt", "old")
+
+    backup_path = manager.backup_dir / "restore_stale_temp.zip"
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("data/restored.txt", "restored")
+
+    assert await manager.restore_from_backup(str(backup_path)) is True
+    assert (manager.data_dir / "restored.txt").read_text(encoding="utf-8") == "restored"
+    assert not stale_file.exists()
+    assert not stale_temp_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_restore_from_backup_inner_missing_data_dir_after_validation_boundary_passes(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """归档 ready 校验边界被放行后，内层仍拒绝缺少 data 目录的恢复结果。"""
+    manager, logger = sync_manager
+    original_file = _write_data_file(manager.data_dir, "old.txt", "old")
+    flat_backup = manager.backup_dir / "flat_after_boundary.zip"
+    with zipfile.ZipFile(flat_backup, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("flat.txt", "flat")
+
+    monkeypatch.setattr(sync_module.SyncManager, "_validate_backup_archive_ready", lambda _self, _zip_file: None)
+
+    assert await manager.restore_from_backup(str(flat_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir / "flat.txt").exists()
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+    assert any("备份文件缺少 data/ 目录" in message for message in logger.error_messages)
+
+
+@pytest.mark.asyncio
+async def test_restore_from_backup_inner_rejects_data_dir_only_after_validation_boundary_passes(
+    sync_manager: tuple[sync_module.SyncManager, LoggerRecorder],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """归档 ready 校验边界被放行后，内层仍拒绝 data/ 空目录恢复结果。"""
+    manager, logger = sync_manager
+    original_file = _write_data_file(manager.data_dir, "old.txt", "old")
+    data_dir_only_backup = manager.backup_dir / "data_only_after_boundary.zip"
+    with zipfile.ZipFile(data_dir_only_backup, "w", zipfile.ZIP_DEFLATED) as backup_zip:
+        backup_zip.writestr("data/", "")
+
+    monkeypatch.setattr(sync_module.SyncManager, "_validate_backup_archive_ready", lambda _self, _zip_file: None)
+
+    assert await manager.restore_from_backup(str(data_dir_only_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+    assert any("备份文件缺少可恢复的 data/ 文件" in message for message in logger.error_messages)
+
+    assert await manager.restore_from_backup(str(data_dir_only_backup)) is False
+    assert original_file.read_text(encoding="utf-8") == "old"
+    assert not (manager.data_dir.parent / "temp_restore").exists()
+    assert any("备份文件缺少可恢复的 data/ 文件" in message for message in logger.error_messages)

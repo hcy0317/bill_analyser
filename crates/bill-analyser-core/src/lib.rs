@@ -12,6 +12,7 @@ pub mod error;
 pub mod import_learning;
 pub mod import_pipeline;
 pub mod matching;
+pub mod ops;
 pub mod parsers;
 pub mod primitives;
 pub mod response;
@@ -89,6 +90,24 @@ pub use matching::{
     INVESTMENT_PAIR_TYPE, LEGACY_SUMMARY_KIND_ORDER, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
     MAX_RECURRING_INTERVAL_VARIATION, MIN_RECURRING_OCCURRENCES, MIN_RECURRING_PATTERN_CONFIDENCE,
     TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
+};
+pub use ops::{
+    backup_archive_summary_from_entries, backup_encryption_secret_configured,
+    backup_restore_verify_response, build_backup_file_info, build_cloud_backup_object_key,
+    build_sync_config_contract, build_user_data_audit_contract, derive_backup_fernet_key,
+    encryption_status_response, invalid_backup_archive_summary, is_allowed_backup_filename,
+    is_safe_backup_archive_member, normalize_backup_job_payload, normalize_report_export_format,
+    normalize_sqlcipher_status, normalize_sync_provider, normalize_user_data_statistics,
+    parse_comma_separated_ints, parse_export_timestamp_millis, plan_backup_cleanup,
+    resolve_backup_filename, resolve_sensitive_auth_mode, secure_backup_filename,
+    secure_report_filename, user_data_statistics_response, BackupArchiveSummary,
+    BackupCleanupDecision, BackupCleanupPlan, BackupFileCandidate, BackupFileInfoContract,
+    BackupFileInfoInput, BackupFilenameResolution, BackupJobContract, BackupRecordContract,
+    OpsContractError, ReportExportContract, SensitiveAuthMode, SqlcipherStatusContract,
+    SyncConfigContract, UserDataAuditContract, UserDataClearKind, UserDataStatisticsContract,
+    BACKUP_DEFAULT_RETENTION_COUNT, BACKUP_DEFAULT_RETENTION_DAYS, BACKUP_ENCRYPTED_SUFFIX,
+    BACKUP_PREFIX, BACKUP_ZIP_SUFFIX, DEFAULT_BACKUP_SYNC_PREFIX, DEFAULT_SQLCIPHER_KDF_ITER,
+    DEFAULT_SQLCIPHER_PAGE_SIZE, SUPPORTED_SYNC_PROVIDERS, VALID_REPORT_EXPORT_FORMATS,
 };
 pub use parsers::{
     aggregate_description, build_parser_tags, normalize_amount_text, normalize_parser_tags,

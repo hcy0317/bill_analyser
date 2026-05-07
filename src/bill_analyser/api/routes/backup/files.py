@@ -1,5 +1,7 @@
 """backup files route handlers."""
 
+# pylint: disable=wildcard-import,undefined-variable,unused-wildcard-import,broad-exception-caught,line-too-long,too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
+
 from __future__ import annotations
 
 from .support import *  # noqa: F403
@@ -7,6 +9,7 @@ from .support import *  # noqa: F403
 
 @bp.route("/", methods=["GET"])
 @log_method
+@require_backup_auth
 def get_backups():
     """
     获取备份列表
@@ -33,6 +36,7 @@ def get_backups():
 
 @bp.route("/create", methods=["POST"])
 @log_method
+@require_backup_auth
 async def create_backup():
     """
     创建新备份
@@ -55,6 +59,16 @@ async def create_backup():
         if encryption_secret:
             file_path = _encrypt_backup_file(file_path, encryption_secret)
         backup_info = _build_backup_info(file_path)
+        if not (backup_info["valid_zip"] and backup_info["ready_to_restore"]):
+            error_message = backup_info.get("error") or "backup archive is not ready to restore"
+            await _write_backup_audit_log_async(
+                "backup_created",
+                details={"filename": file_path.name, "path": str(file_path)},
+                status="failed",
+                error_message=error_message,
+            )
+            return jsonify({"success": False, "error": error_message}), 500
+
         await _upsert_backup_record_async(backup_info)
 
         await _write_backup_audit_log_async(
@@ -85,24 +99,45 @@ async def create_backup():
 
 @bp.route("/restore/verify", methods=["POST"])
 @log_method
+@require_backup_auth
 def verify_backup_restore():
     """恢复前校验备份文件结构与校验值。"""
     try:
         data = request.get_json(silent=True) or {}
         filename = str(data.get("filename", "") or "").strip()
         if not filename:
+            _write_backup_audit_log_sync(
+                "backup_restore_verified",
+                details={"filename": _audit_safe_input(data.get("filename", ""))},
+                status="failed",
+                error_message="filename is required",
+            )
             return jsonify({"success": False, "error": "filename is required"}), 400
 
         backup_dir = get_backup_dir()
         file_path = _resolve_backup_path_in_dir(backup_dir, filename)
         if file_path is None:
+            _write_backup_audit_log_sync(
+                "backup_restore_verified",
+                details={"filename": _audit_safe_input(filename)},
+                status="failed",
+                error_message="invalid backup filename",
+            )
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
         safe_filename = file_path.name
         if not file_path.exists():
+            _write_backup_audit_log_sync(
+                "backup_restore_verified",
+                details={"filename": safe_filename},
+                status="failed",
+                error_message="backup file does not exist",
+            )
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
         backup_info = _build_backup_info(file_path)
+        restore_ready = bool(backup_info["valid_zip"] and backup_info["ready_to_restore"])
+        restore_error = backup_info.get("error") or "backup archive is not ready to restore"
         _write_backup_audit_log_sync(
             "backup_restore_verified",
             details={
@@ -112,17 +147,18 @@ def verify_backup_restore():
                 "ready_to_restore": backup_info["ready_to_restore"],
                 "metadata_checksum_matched": backup_info["metadata_checksum_matched"],
             },
-            status="success" if backup_info["valid_zip"] else "failed",
-            error_message=None if backup_info["valid_zip"] else backup_info.get("error") or "invalid backup archive",
+            status="success" if restore_ready else "failed",
+            error_message=None if restore_ready else restore_error,
         )
-        status_code = 200 if backup_info["valid_zip"] else 400
-        return jsonify({"success": backup_info["valid_zip"], "data": backup_info}), status_code
+        status_code = 200 if restore_ready else 400
+        return jsonify({"success": restore_ready, "data": backup_info}), status_code
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/download/<filename>", methods=["GET"])
 @log_method
+@require_backup_auth
 def download_backup(filename):
     """
     下载备份文件
@@ -138,20 +174,44 @@ def download_backup(filename):
         backup_dir = get_backup_dir()
         file_path = _resolve_backup_path_in_dir(backup_dir, filename)
         if file_path is None:
+            _write_backup_audit_log_sync(
+                "backup_downloaded",
+                details={"filename": str(filename or "")},
+                status="failed",
+                error_message="invalid backup filename",
+            )
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
         safe_filename = file_path.name
 
         if not file_path.exists():
+            _write_backup_audit_log_sync(
+                "backup_downloaded",
+                details={"filename": safe_filename},
+                status="failed",
+                error_message="backup file does not exist",
+            )
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
+        _write_backup_audit_log_sync(
+            "backup_downloaded",
+            details={"filename": safe_filename, "path": str(file_path)},
+            affected_count=1,
+        )
         return send_file(file_path, as_attachment=True, download_name=safe_filename)
     except Exception as e:
+        _write_backup_audit_log_sync(
+            "backup_downloaded",
+            details={"filename": str(filename or "")},
+            status="failed",
+            error_message=str(e),
+        )
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/delete/<filename>", methods=["DELETE"])
 @log_method
+@require_backup_auth
 def delete_backup(filename):
     """
     删除备份文件
@@ -167,11 +227,23 @@ def delete_backup(filename):
         backup_dir = get_backup_dir()
         file_path = _resolve_backup_path_in_dir(backup_dir, filename)
         if file_path is None:
+            _write_backup_audit_log_sync(
+                "backup_deleted",
+                details={"filename": _audit_safe_input(filename)},
+                status="failed",
+                error_message="invalid backup filename",
+            )
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
         safe_filename = file_path.name
 
         if not file_path.exists():
+            _write_backup_audit_log_sync(
+                "backup_deleted",
+                details={"filename": safe_filename},
+                status="failed",
+                error_message="backup file does not exist",
+            )
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
         file_path.unlink()
@@ -207,8 +279,87 @@ def delete_backup(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+async def _prepare_restore_source(file_path, safe_filename):
+    restore_source_path = file_path
+    temp_decrypted_path: Path | None = None
+    if file_path.suffix != ".enc":
+        return restore_source_path, temp_decrypted_path, None
+
+    encryption_secret = _get_backup_encryption_secret()
+    if not encryption_secret:
+        await _write_backup_audit_log_async(
+            "backup_restored",
+            details={"filename": safe_filename},
+            status="failed",
+            error_message="backup encryption key is not configured",
+        )
+        return (
+            restore_source_path,
+            temp_decrypted_path,
+            (jsonify({"success": False, "error": "备份加密密钥未配置"}), 400),
+        )
+
+    try:
+        temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, encryption_secret)
+    except (InvalidToken, OSError, ValueError):
+        await _write_backup_audit_log_async(
+            "backup_restored",
+            details={"filename": safe_filename},
+            status="failed",
+            error_message="backup decrypt failed",
+        )
+        return (
+            restore_source_path,
+            temp_decrypted_path,
+            (jsonify({"success": False, "error": "备份解密失败"}), 400),
+        )
+    return temp_decrypted_path, temp_decrypted_path, None
+
+
+async def _precheck_restore_archive(restore_source_path, safe_filename, temp_decrypted_path):
+    archive_summary = _inspect_backup_archive(restore_source_path)
+    if archive_summary["valid_zip"] and archive_summary["ready_to_restore"]:
+        return None
+
+    restore_error = archive_summary.get("error") or "backup archive is not ready to restore"
+    await _write_backup_audit_log_async(
+        "backup_restored",
+        details={"filename": safe_filename},
+        status="failed",
+        error_message=restore_error,
+    )
+    if temp_decrypted_path and temp_decrypted_path.exists():
+        temp_decrypted_path.unlink()
+    return jsonify({"success": False, "error": restore_error}), 400
+
+
+def _restore_data_dir_from_archive(restore_source_path, temp_restore_dir, data_dir, backup_dir):
+    """Extract a validated archive and replace DATA_DIR from its data/ payload."""
+    # pylint: disable=import-outside-toplevel
+    import shutil
+
+    with ZipFile(restore_source_path, "r") as zipf:
+        _validate_backup_archive_members(zipf)
+        zipf.extractall(temp_restore_dir)
+
+    extracted_data_dir = temp_restore_dir / "data"
+    if not extracted_data_dir.exists():
+        raise BackupArchiveValidationError("备份文件缺少 data/ 目录")
+    if not _directory_contains_file(extracted_data_dir):
+        raise BackupArchiveValidationError("备份文件缺少可恢复的 data/ 文件")
+
+    if data_dir.exists():
+        backup_current = backup_dir / f"before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        shutil.copytree(data_dir, backup_current)
+
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+    shutil.copytree(extracted_data_dir, data_dir)
+
+
 @bp.route("/restore/<filename>", methods=["POST"])
 @log_method
+@require_backup_auth
 async def restore_backup(filename):
     """
     恢复备份
@@ -222,66 +373,59 @@ async def restore_backup(filename):
     try:
         # pylint: disable=import-outside-toplevel
         import shutil
+
         # 安全文件名检查
         backup_dir = get_backup_dir()
         file_path = _resolve_backup_path_in_dir(backup_dir, filename)
         if file_path is None:
+            await _write_backup_audit_log_async(
+                "backup_restored",
+                details={"filename": _audit_safe_input(filename)},
+                status="failed",
+                error_message="invalid backup filename",
+            )
             return jsonify({"success": False, "error": "无效的文件名"}), 400
 
         safe_filename = file_path.name
 
         if not file_path.exists():
+            await _write_backup_audit_log_async(
+                "backup_restored",
+                details={"filename": safe_filename},
+                status="failed",
+                error_message="backup file does not exist",
+            )
             return jsonify({"success": False, "error": "文件不存在"}), 404
 
-        restore_source_path = file_path
-        temp_decrypted_path: Path | None = None
-        if file_path.suffix == ".enc":
-            encryption_secret = _get_backup_encryption_secret()
-            if not encryption_secret:
-                return jsonify({"success": False, "error": "备份加密密钥未配置"}), 400
-            try:
-                temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, encryption_secret)
-            except (InvalidToken, OSError, ValueError):
-                await _write_backup_audit_log_async(
-                    "backup_restored",
-                    details={"filename": safe_filename},
-                    status="failed",
-                    error_message="backup decrypt failed",
-                )
-                return jsonify({"success": False, "error": "备份解密失败"}), 400
-            restore_source_path = temp_decrypted_path
+        restore_source_path, temp_decrypted_path, restore_error_response = await _prepare_restore_source(
+            file_path,
+            safe_filename,
+        )
+        if restore_error_response is not None:
+            return restore_error_response
+
+        archive_error_response = await _precheck_restore_archive(
+            restore_source_path,
+            safe_filename,
+            temp_decrypted_path,
+        )
+        if archive_error_response is not None:
+            return archive_error_response
 
         # 获取数据目录 - 固定为 data 文件夹
         data_dir = DATA_DIR
 
-        # 创建临时恢复目录
-        temp_restore_dir = backup_dir / f"restore_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        temp_restore_dir.mkdir(parents=True, exist_ok=True)
-
+        temp_restore_dir: Path | None = None
         try:
+            # 创建临时恢复目录
+            temp_restore_dir = Path(tempfile.mkdtemp(prefix="restore_temp_", dir=backup_dir))
+
             # 解压备份文件
-            with ZipFile(restore_source_path, "r") as zipf:
-                zipf.extractall(temp_restore_dir)
-
-            # 备份当前数据
-            if data_dir.exists():
-                backup_current = backup_dir / f"before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                shutil.copytree(data_dir, backup_current)
-
-            # 恢复数据
-            extracted_data_dir = temp_restore_dir / "data"
-            if extracted_data_dir.exists():
-                if data_dir.exists():
-                    shutil.rmtree(data_dir)
-                shutil.copytree(extracted_data_dir, data_dir)
-            else:
-                # 如果解压后直接是数据文件，移动整个目录
-                if data_dir.exists():
-                    shutil.rmtree(data_dir)
-                shutil.copytree(temp_restore_dir, data_dir)
+            _restore_data_dir_from_archive(restore_source_path, temp_restore_dir, data_dir, backup_dir)
 
             # 清理临时目录
-            shutil.rmtree(temp_restore_dir)
+            if temp_restore_dir.exists():
+                shutil.rmtree(temp_restore_dir)
 
             restored_at = datetime.now().isoformat()
             update_backup_record = cast("Any", getattr(get_app_context(), "update_backup_record_by_filename", None))
@@ -301,9 +445,19 @@ async def restore_backup(filename):
 
             return jsonify({"success": True, "data": {"filename": safe_filename, "restored_at": restored_at}})
 
+        except BackupArchiveValidationError as e:
+            if temp_restore_dir and temp_restore_dir.exists():
+                shutil.rmtree(temp_restore_dir)
+            await _write_backup_audit_log_async(
+                "backup_restored",
+                details={"filename": safe_filename},
+                status="failed",
+                error_message=str(e),
+            )
+            return jsonify({"success": False, "error": str(e)}), 400
         except Exception as e:
             # 清理临时目录
-            if temp_restore_dir.exists():
+            if temp_restore_dir and temp_restore_dir.exists():
                 shutil.rmtree(temp_restore_dir)
             raise e
         finally:

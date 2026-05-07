@@ -2,7 +2,7 @@
 Backup Routes - 备份和恢复API路由
 """
 
-# pylint: disable=line-too-long,broad-exception-caught,too-many-locals,too-many-branches,too-many-statements
+# pylint: disable=line-too-long,broad-exception-caught,too-many-locals,too-many-branches,too-many-statements,unused-import,duplicate-code
 
 import asyncio
 import hashlib
@@ -11,7 +11,9 @@ import os
 import tempfile
 from base64 import urlsafe_b64encode
 from datetime import datetime
-from pathlib import Path
+from functools import wraps
+from inspect import iscoroutinefunction
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 from zipfile import BadZipFile, ZipFile
 
@@ -20,10 +22,38 @@ from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 # pylint: disable=import-error
+from bill_analyser.api.middleware.auth import require_auth
 from bill_analyser.constants import BACKUP_DIR, DATA_DIR
 from bill_analyser.utils.logger import log_method
 
 bp = Blueprint("backup", __name__)
+
+
+class BackupArchiveValidationError(ValueError):
+    """Raised when a backup archive is structurally unsafe or not restorable."""
+
+
+def _run_backup_route_async(coroutine):
+    """Run an async backup route body after synchronous auth has succeeded."""
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
+
+
+def require_backup_auth(func):
+    """Apply the existing auth gate while preserving async backup route execution."""
+    if iscoroutinefunction(func):
+
+        @wraps(func)
+        def sync_view(*args, **kwargs):
+            return _run_backup_route_async(func(*args, **kwargs))
+
+        return require_auth(sync_view)
+
+    return require_auth(func)
 
 
 def get_app_context():
@@ -137,6 +167,27 @@ def _calculate_file_checksum(file_path: Path) -> str:
     return hasher.hexdigest()
 
 
+def _is_safe_backup_archive_member(member_name: str) -> bool:
+    """Return whether a zip member can be extracted under the restore root."""
+    normalized = str(member_name or "").replace("\\", "/").strip()
+    if not normalized:
+        return False
+
+    posix_path = PurePosixPath(normalized)
+    windows_path = PureWindowsPath(member_name)
+    if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        return False
+
+    return ".." not in posix_path.parts
+
+
+def _validate_backup_archive_members(zip_file: ZipFile) -> None:
+    """Reject backup archives that would extract outside the restore root."""
+    for member_name in zip_file.namelist():
+        if not _is_safe_backup_archive_member(member_name):
+            raise BackupArchiveValidationError(f"备份文件包含不安全路径: {member_name}")
+
+
 def _inspect_backup_archive(backup_path: Path) -> dict:
     """检查备份压缩包结构并返回预验证摘要。"""
     summary = {
@@ -150,14 +201,18 @@ def _inspect_backup_archive(backup_path: Path) -> dict:
 
     try:
         with ZipFile(backup_path, "r") as zip_file:
-            names = zip_file.namelist()
+            _validate_backup_archive_members(zip_file)
+            infos = zip_file.infolist()
+            names = [info.filename for info in infos]
             summary["valid_zip"] = True
             summary["entry_count"] = len(names)
             summary["contains_data_dir"] = any(name.startswith("data/") for name in names)
             summary["top_level_entries"] = sorted({name.split("/", 1)[0] for name in names if name})
-            summary["ready_to_restore"] = summary["contains_data_dir"] or bool(names)
+            summary["ready_to_restore"] = any(
+                info.filename.startswith("data/") and not info.is_dir() for info in infos
+            )
             return summary
-    except (BadZipFile, OSError) as exc:
+    except (BadZipFile, OSError, BackupArchiveValidationError) as exc:
         summary["error"] = str(exc)
         return summary
 
@@ -202,60 +257,62 @@ def _build_backup_info(file_path: Path) -> dict:
     inspection_target = file_path
     temp_decrypted_path: Path | None = None
 
-    if is_encrypted:
-        secret = _get_backup_encryption_secret()
-        if secret:
-            try:
-                temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, secret)
-                inspection_target = temp_decrypted_path
-            except (InvalidToken, OSError, ValueError) as exc:
+    try:
+        if is_encrypted:
+            secret = _get_backup_encryption_secret()
+            if secret:
+                try:
+                    temp_decrypted_path = _decrypt_backup_file_to_temp(file_path, secret)
+                    inspection_target = temp_decrypted_path
+                except (InvalidToken, OSError, ValueError) as exc:
+                    archive_summary = {
+                        "valid_zip": False,
+                        "contains_data_dir": False,
+                        "entry_count": 0,
+                        "top_level_entries": [],
+                        "error": str(exc),
+                        "ready_to_restore": False,
+                    }
+                else:
+                    archive_summary = _inspect_backup_archive(inspection_target)
+            else:
                 archive_summary = {
                     "valid_zip": False,
                     "contains_data_dir": False,
                     "entry_count": 0,
                     "top_level_entries": [],
-                    "error": str(exc),
+                    "error": "backup encryption key is not configured",
                     "ready_to_restore": False,
                 }
-            else:
-                archive_summary = _inspect_backup_archive(inspection_target)
         else:
-            archive_summary = {
-                "valid_zip": False,
-                "contains_data_dir": False,
-                "entry_count": 0,
-                "top_level_entries": [],
-                "error": "backup encryption key is not configured",
-                "ready_to_restore": False,
-            }
-    else:
-        archive_summary = _inspect_backup_archive(inspection_target)
+            archive_summary = _inspect_backup_archive(inspection_target)
 
-    checksum = _calculate_file_checksum(file_path)
-    metadata = _read_backup_metadata(file_path)
-    metadata_checksum = str(metadata.get("checksum", "") or "")
+        checksum = _calculate_file_checksum(file_path)
+        metadata = _read_backup_metadata(file_path)
+        metadata_checksum = str(metadata.get("checksum", "") or "")
 
-    if not metadata or metadata.get("size") != stat.st_size:
-        metadata = _persist_backup_metadata(file_path)
-        metadata_checksum = metadata["checksum"]
+        if not metadata or metadata.get("size") != stat.st_size:
+            metadata = _persist_backup_metadata(file_path)
+            metadata_checksum = metadata["checksum"]
 
-    result = {
-        "filename": file_path.name,
-        "size": stat.st_size,
-        "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-        "path": str(file_path),
-        "checksum": checksum,
-        "encrypted": is_encrypted,
-        "valid_zip": archive_summary["valid_zip"],
-        "contains_data_dir": archive_summary["contains_data_dir"],
-        "entry_count": archive_summary["entry_count"],
-        "top_level_entries": archive_summary["top_level_entries"],
-        "ready_to_restore": archive_summary["ready_to_restore"],
-        "metadata_checksum_matched": bool(metadata_checksum) and metadata_checksum == checksum,
-    }
-    if temp_decrypted_path and temp_decrypted_path.exists():
-        temp_decrypted_path.unlink()
-    return result
+        return {
+            "filename": file_path.name,
+            "size": stat.st_size,
+            "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "path": str(file_path),
+            "checksum": checksum,
+            "encrypted": is_encrypted,
+            "valid_zip": archive_summary["valid_zip"],
+            "contains_data_dir": archive_summary["contains_data_dir"],
+            "entry_count": archive_summary["entry_count"],
+            "top_level_entries": archive_summary["top_level_entries"],
+            "error": archive_summary.get("error", ""),
+            "ready_to_restore": archive_summary["ready_to_restore"],
+            "metadata_checksum_matched": bool(metadata_checksum) and metadata_checksum == checksum,
+        }
+    finally:
+        if temp_decrypted_path and temp_decrypted_path.exists():
+            temp_decrypted_path.unlink()
 
 
 async def _upsert_backup_record_async(backup_info: dict) -> None:
@@ -324,7 +381,25 @@ def _iter_local_backup_files(backup_dir: Path) -> list[Path]:
 
 def _resolve_backup_path_in_dir(backup_dir: Path, filename: str) -> Path | None:
     """基于备份目录安全解析备份文件路径。"""
-    safe_filename = secure_filename(filename)
+    raw_filename = str(filename or "").strip()
+    if (
+        not raw_filename
+        or "/" in raw_filename
+        or "\\" in raw_filename
+        or ":" in raw_filename
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_filename)
+    ):
+        return None
+
+    posix_path = PurePosixPath(raw_filename)
+    windows_path = PureWindowsPath(raw_filename)
+    if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        return None
+
+    safe_filename = secure_filename(raw_filename)
+    if raw_filename != safe_filename:
+        return None
+
     if not safe_filename.startswith("backup_") or not (
         safe_filename.endswith(".zip") or safe_filename.endswith(".zip.enc")
     ):
@@ -338,6 +413,16 @@ def _resolve_backup_path_in_dir(backup_dir: Path, filename: str) -> Path | None:
         return None
 
     return resolved_path
+
+
+def _audit_safe_input(value: object, limit: int = 128) -> str:
+    """Return a trimmed and bounded request value for failed audit details."""
+    return str(value or "").strip()[:limit]
+
+
+def _directory_contains_file(directory: Path) -> bool:
+    """Return whether a restored data directory contains at least one file."""
+    return directory.exists() and any(path.is_file() for path in directory.rglob("*"))
 
 
 def _update_backup_record_sync(filename: str, updates: dict[str, object]) -> bool:

@@ -1,12 +1,43 @@
 """backup cleanup route handlers."""
 
+# pylint: disable=wildcard-import,undefined-variable,unused-wildcard-import,broad-exception-caught,line-too-long,too-many-locals,too-many-return-statements,too-many-branches,too-many-statements,duplicate-code
+
 from __future__ import annotations
 
 from .support import *  # noqa: F403
 
 
+def _write_cleanup_audit(
+    keep_count: int,
+    deleted_count: int,
+    *,
+    status: str = "success",
+    error_message: str | None = None,
+) -> None:
+    """Write the cleanup audit entry with the shared payload shape."""
+    _write_backup_audit_log_sync(
+        "backup_cleanup",
+        details={"keep_count": keep_count, "deleted_count": deleted_count},
+        affected_count=deleted_count,
+        status=status,
+        error_message=error_message,
+    )
+
+
+def _write_cleanup_validation_failure(keep_count: object, error_message: str) -> None:
+    """Write failed cleanup audit for invalid request payloads."""
+    _write_backup_audit_log_sync(
+        "backup_cleanup",
+        details={"keep_count": _audit_safe_input(keep_count), "deleted_count": 0},
+        affected_count=0,
+        status="failed",
+        error_message=error_message,
+    )
+
+
 @bp.route("/cleanup", methods=["POST"])
 @log_method
+@require_backup_auth
 def cleanup_old_backups():
     """
     清理旧备份
@@ -19,19 +50,22 @@ def cleanup_old_backups():
     Returns:
         JSON响应，包含删除的备份数量
     """
+    keep_count = 10
+    deleted_count = 0
     try:
         data = request.get_json() or {}
         keep_count = data.get("keep_count", 10)
         try:
             keep_count = int(keep_count)
         except (TypeError, ValueError):
+            _write_cleanup_validation_failure(data.get("keep_count", ""), "keep_count must be an integer")
             return jsonify({"success": False, "error": "keep_count must be an integer"}), 400
 
         if keep_count < 0:
+            _write_cleanup_validation_failure(keep_count, "keep_count must be greater than or equal to 0")
             return jsonify({"success": False, "error": "keep_count must be greater than or equal to 0"}), 400
 
         backup_dir = get_backup_dir()
-        deleted_count = 0
         db = get_app_context()
         get_backup_records = cast("Any", getattr(db, "get_backup_records", None))
 
@@ -137,14 +171,11 @@ def cleanup_old_backups():
                 deleted_count += 1
             kept_count = min(len(backups), keep_count)
 
-        _write_backup_audit_log_sync(
-            "backup_cleanup",
-            details={"keep_count": keep_count, "deleted_count": deleted_count},
-            affected_count=deleted_count,
-        )
+        _write_cleanup_audit(keep_count, deleted_count)
 
         return jsonify(
             {"success": True, "data": {"deleted_count": deleted_count, "kept_count": kept_count}}
         )
     except Exception as e:
+        _write_cleanup_audit(keep_count, deleted_count, status="failed", error_message=str(e))
         return jsonify({"success": False, "error": str(e)}), 500

@@ -12,6 +12,7 @@
   - 预算 CRUD、execution/history/snapshot/forecast/import/export 的运行时 SQL 仍由 Python `core/database/budgets/**` 在同一 aiosqlite 边界维护；Rust `crates/bill-analyser-core/src/budgets.rs` 只固定期间、金额口径、父子预算、历史过滤和预测计算合同。
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
+  - `audit_logs`、`backup_records`、`backup_jobs` 的实际写入仍由 Python `core/database/audit_backup/` 在 `aiosqlite` 事务中执行；Rust `ops.rs` 固定备份记录投影、cleanup record-first 决策、用户数据清理审计 payload 和 backup job 默认值/校验合同。
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
 - 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
 - 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件

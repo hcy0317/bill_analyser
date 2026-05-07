@@ -4,18 +4,46 @@
 提供本地备份与云同步功能。
 """
 
-# pylint: disable=import-outside-toplevel
+# pylint: disable=import-outside-toplevel,duplicate-code
 
 import asyncio
 import hashlib
 import shutil
 import zipfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from bill_analyser.constants import BACKUP_DIR, DATA_DIR
 
 from ..utils.logger import get_logger, log_method, log_step
+
+DEFAULT_BACKUP_SYNC_PREFIX = "bill_analyser_backups/"
+
+
+class BackupArchiveValidationError(ValueError):
+    """Raised when a backup archive is structurally unsafe or not restorable."""
+
+
+def normalize_backup_sync_prefix(prefix: object | None) -> str | None:
+    """Normalize a cloud backup object prefix, returning None for unsafe values."""
+    raw_prefix = str(prefix or "").strip()
+    if not raw_prefix:
+        return DEFAULT_BACKUP_SYNC_PREFIX
+
+    if "\\" in raw_prefix or any(ord(char) < 32 or ord(char) == 127 for char in raw_prefix):
+        return None
+
+    posix_path = PurePosixPath(raw_prefix)
+    windows_path = PureWindowsPath(raw_prefix)
+    if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        return None
+
+    normalized = raw_prefix.strip("/")
+    parts = normalized.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+
+    return f"{normalized}/"
 
 
 class SyncManager:
@@ -93,6 +121,50 @@ class SyncManager:
                     arcname = file_path.relative_to(self.data_dir.parent)
                     zipf.write(file_path, arcname)
 
+    @staticmethod
+    def _is_safe_backup_archive_member(member_name: str) -> bool:
+        """Return whether a zip member can be extracted under the restore root."""
+        normalized = str(member_name or "").replace("\\", "/").strip()
+        if not normalized:
+            return False
+
+        posix_path = PurePosixPath(normalized)
+        windows_path = PureWindowsPath(member_name)
+        if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+            return False
+
+        return ".." not in posix_path.parts
+
+    @classmethod
+    def _validate_backup_archive_members(cls, zip_file: zipfile.ZipFile) -> None:
+        """Reject backup archives that would extract outside the restore root."""
+        for member_name in zip_file.namelist():
+            if not cls._is_safe_backup_archive_member(member_name):
+                raise BackupArchiveValidationError(f"备份文件包含不安全路径: {member_name}")
+
+    @classmethod
+    def _validate_backup_archive_ready(cls, zip_file: zipfile.ZipFile) -> None:
+        """Validate that a safe backup archive contains a restorable data directory."""
+        cls._validate_backup_archive_members(zip_file)
+        infos = zip_file.infolist()
+        if not any(info.filename.startswith("data/") for info in infos):
+            raise BackupArchiveValidationError("备份文件缺少 data/ 目录")
+        if not any(info.filename.startswith("data/") and not info.is_dir() for info in infos):
+            raise BackupArchiveValidationError("备份文件缺少可恢复的 data/ 文件")
+
+    @staticmethod
+    def _directory_contains_file(directory: Path) -> bool:
+        """Return whether the extracted data directory contains restorable files."""
+        return directory.exists() and any(path.is_file() for path in directory.rglob("*"))
+
+    def _build_cloud_object_key(self, config: dict, filename: str) -> str | None:
+        """Build a cloud object key from a validated sync prefix."""
+        prefix = normalize_backup_sync_prefix(config.get("prefix"))
+        if prefix is None:
+            self.logger.error("云同步前缀无效: %s", config.get("prefix"))
+            return None
+        return f"{prefix}{filename}"
+
     @log_method
     @log_step("云同步")
     async def sync_to_cloud(self, cloud_config: dict) -> bool:
@@ -116,6 +188,12 @@ class SyncManager:
         if not provider:
             self.logger.error("未指定云服务商")
             return False
+
+        normalized_prefix = normalize_backup_sync_prefix(cloud_config.get("prefix"))
+        if normalized_prefix is None:
+            self.logger.error("云同步前缀无效: %s", cloud_config.get("prefix"))
+            return False
+        cloud_config = {**cloud_config, "prefix": normalized_prefix}
 
         self.logger.info("开始同步到云端: %s", provider)
 
@@ -168,8 +246,9 @@ class SyncManager:
             bucket = oss2.Bucket(auth, config.get("endpoint"), config.get("bucket"))
 
             # 生成对象 key
-            prefix = config.get("prefix", "bill_analyser_backups/")
-            object_key = f"{prefix}{file_path.name}"
+            object_key = self._build_cloud_object_key(config, file_path.name)
+            if object_key is None:
+                return False
 
             # 上传文件
             self.logger.debug("上传文件: %s", object_key)
@@ -201,8 +280,9 @@ class SyncManager:
             )
 
             # 生成对象 key
-            prefix = config.get("prefix", "bill_analyser_backups/")
-            object_key = f"{prefix}{file_path.name}"
+            object_key = self._build_cloud_object_key(config, file_path.name)
+            if object_key is None:
+                return False
 
             # 上传文件
             self.logger.debug("上传文件: %s", object_key)
@@ -242,8 +322,9 @@ class SyncManager:
             client = CosS3Client(cos_config)
 
             # 生成对象 key
-            prefix = config.get("prefix", "bill_analyser_backups/")
-            object_key = f"{prefix}{file_path.name}"
+            object_key = self._build_cloud_object_key(config, file_path.name)
+            if object_key is None:
+                return False
 
             # 上传文件
             self.logger.debug("上传文件: %s", object_key)
@@ -280,8 +361,9 @@ class SyncManager:
             container_client = blob_service_client.get_container_client(config.get("bucket"))
 
             # 生成 Blob 名称
-            prefix = config.get("prefix", "bill_analyser_backups/")
-            blob_name = f"{prefix}{file_path.name}"
+            blob_name = self._build_cloud_object_key(config, file_path.name)
+            if blob_name is None:
+                return False
 
             # 上传文件
             self.logger.debug("上传文件: %s", blob_name)
@@ -315,7 +397,10 @@ class SyncManager:
             client = Client(options)
 
             # 生成远程路径
-            prefix = config.get("prefix", "bill_analyser_backups/")
+            prefix = normalize_backup_sync_prefix(config.get("prefix"))
+            if prefix is None:
+                self.logger.error("云同步前缀无效: %s", config.get("prefix"))
+                return False
             remote_path = f"{prefix}{file_path.name}"
 
             # 确保目录存在
@@ -352,22 +437,30 @@ class SyncManager:
             self.logger.error("备份文件不存在: %s", backup_path)
             return False
 
+        temp_dir: Path | None = None
         try:
             # 创建临时目录
             temp_dir = self.data_dir.parent / "temp_restore"
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
             temp_dir.mkdir(exist_ok=True)
 
             # 解压备份
             with zipfile.ZipFile(backup_file, "r") as zipf:
+                self._validate_backup_archive_ready(zipf)
                 zipf.extractall(temp_dir)
+
+            restored_data_dir = temp_dir / "data"
+            if not restored_data_dir.exists():
+                raise BackupArchiveValidationError("备份文件缺少 data/ 目录")
+            if not self._directory_contains_file(restored_data_dir):
+                raise BackupArchiveValidationError("备份文件缺少可恢复的 data/ 文件")
 
             # 替换数据目录
             if self.data_dir.exists():
                 shutil.rmtree(self.data_dir)
 
-            restored_data_dir = temp_dir / "data"
-            if restored_data_dir.exists():
-                shutil.move(str(restored_data_dir), str(self.data_dir))
+            shutil.move(str(restored_data_dir), str(self.data_dir))
 
             # 清理临时目录
             shutil.rmtree(temp_dir)
@@ -376,6 +469,8 @@ class SyncManager:
             return True
 
         except Exception as e:  # pylint: disable=broad-except
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
             self.logger.error("恢复备份失败: %s", e)
             return False
 
@@ -387,7 +482,13 @@ class SyncManager:
         参数：
             keep_count: 保留的备份数量
         """
-        backups = sorted(self.backup_dir.glob("backup_*.zip"), reverse=True)
+        if keep_count < 0:
+            self.logger.error("keep_count 必须大于等于 0: %d", keep_count)
+            raise ValueError("keep_count must be greater than or equal to 0")
+
+        backups = list(self.backup_dir.glob("backup_*.zip"))
+        backups.extend(self.backup_dir.glob("backup_*.zip.enc"))
+        backups = sorted(backups, reverse=True)
 
         if len(backups) <= keep_count:
             self.logger.info("备份数量 %d，无需清理", len(backups))

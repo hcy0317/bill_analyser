@@ -42,9 +42,10 @@
 - `ai/llm/provider.py` / `ai/llm/prompts.py` / `ai/llm/learning_service/`：LLM provider、prompt 构造与学习服务的统一实现域；内部按 provider 调用、高级参数、限流、导入会话分析、规则合成与预览推荐拆分，用户级 active config 与高级参数保持实例/请求隔离。LLM provider alias/default、advanced settings、secret redaction 与 preview/candidate review route envelope 合同已由 Rust `crates/bill-analyser-core/src/ai_ocr_llm.rs` 固定，Python 仍负责实际 provider 调用、DB 写入与审核动作。
 - `budgets/manager.py` / `budgets/execution_summary.py`：预算核心域包；保留 `BudgetManager` / `BudgetStatus` 供 CLI、API 与测试复用，预算执行汇总 helper 独立维护；当前 CLI 预算报告主链直接走 `Database.get_budget_execution_details()`，Rust 预算合同层只做纯函数 oracle，不改变 CLI/API 调用入口。
 - `investment/matching.py` / `investment/settings.py`：投资识别与投资关键词设置核心域包；matching、导入预览与分类规则迁移共享同一套评分、默认关键词与序列化 helper。
-- `sync.py`：同步相关编排
+- `sync.py`：同步相关编排；OSS/S3/COS/Azure/WebDAV 上传仍由 Python SDK 路径执行，Rust `ops.rs` 只固定 provider 白名单、对象 key 前缀和配置脱敏合同。
 - `analyzer.py`：统计分析、聚合与图表/报表数据生成主服务，仍是统计域的活跃运行时代码；图表生成公共入口继续由 `utils/charts.py` 导出 `ChartGenerator` / `generate_all_charts`，真实实现按趋势、分类、对比、排行、预算、热力图和 dashboard 拆分到 `utils/charting/`。
-- `report.py` / `utils/report_export.py`：`core.report` 保留旧导入路径兼容壳，真实 PDF / Excel / HTML 报告导出实现已归并到 `utils.report_export`
+- `report.py` / `utils/report_export.py`：`core.report` 保留旧导入路径兼容壳，真实 PDF / Excel / HTML 报告导出实现已归并到 `utils.report_export`；导出文件名会收敛为 `output_dir` 下的叶子文件名，Rust `ops.rs` 固定导出格式、扩展名和 MIME 合同，文件生成仍由 Python 运行时负责。
+- `api/routes/backup/`、`api/routes/encryption.py`、`api/routes/auth/user_data.py`：备份/恢复、SQLCipher 状态与用户数据清理仍由 Flask route shell + Python 文件/DB 操作执行；备份恢复会拒绝包含绝对路径或 `..` 段的 zip member，Rust `ops.rs` 已固定安全文件名、备份摘要、cleanup 计划、Fernet key 派生、SQLCipher 状态、用户数据统计/审计 payload 与 sync/report 格式合同。
 - `smart_dedup_v641_backup.py` 等历史版本备份文件已从运行时代码树移除
 
 ## 3.2.1 Database façade 关系

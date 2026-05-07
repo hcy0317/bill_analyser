@@ -147,6 +147,37 @@ async def test_export_report_generates_default_filename_when_omitted(
 
 
 @pytest.mark.asyncio
+async def test_export_report_sanitizes_user_supplied_filename(
+    tmp_path: Path,
+    sample_report_data: dict[str, Any],
+) -> None:
+    """导出报告应将用户传入的文件名限制在输出目录内。"""
+    generator = ReportGenerator(output_dir=str(tmp_path))
+
+    html_path = await generator.export_report(sample_report_data, format_type="html", filename="../escape")
+
+    exported_path = Path(html_path)
+    assert exported_path == tmp_path / "escape.html"
+    assert exported_path.exists() is True
+    assert not (tmp_path.parent / "escape.html").exists()
+
+
+def test_report_filename_sanitizer_falls_back_for_empty_leaf_names() -> None:
+    """报告文件名清理应拒绝空文件名和目录回退符。"""
+    assert ReportGenerator._sanitize_report_filename("").startswith("report_")
+    assert ReportGenerator._sanitize_report_filename("..").startswith("report_")
+
+
+def test_report_filename_sanitizer_replaces_windows_unsafe_leaf_names() -> None:
+    """报告文件名清理应替换 Windows ADS、通配符和控制字符。"""
+    assert ReportGenerator._sanitize_report_filename("evil:ads") == "evil_ads"
+    assert ReportGenerator._sanitize_report_filename("report?.html") == "report_.html"
+    assert ReportGenerator._sanitize_report_filename("report\u0007name") == "report_name"
+    assert ReportGenerator._sanitize_report_filename("CON").startswith("report_")
+    assert ReportGenerator._sanitize_report_filename("LPT1.txt").startswith("report_")
+
+
+@pytest.mark.asyncio
 async def test_export_pdf_writes_report_file(tmp_path: Path, sample_report_data: dict[str, Any]) -> None:
     """PDF 导出应产出实际文件。"""
     generator = ReportGenerator(output_dir=str(tmp_path))

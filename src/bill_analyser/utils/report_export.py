@@ -1,9 +1,12 @@
 """Report export utilities for PDF, Excel, and HTML outputs."""
 
+# pylint: disable=duplicate-code
+
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
 from typing import Any
 
 import matplotlib
@@ -14,6 +17,16 @@ from ..constants import OUTPUT_DIR
 from .logger import get_logger, log_method, log_step
 
 matplotlib.use("Agg")
+
+_INVALID_REPORT_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]+')
+_WINDOWS_RESERVED_REPORT_NAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
 
 
 class ReportExporter:  # pylint: disable=too-few-public-methods
@@ -31,6 +44,33 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
         plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial Unicode MS"]
         plt.rcParams["axes.unicode_minus"] = False
         plt.rcParams["figure.figsize"] = (12, 8)
+
+    @staticmethod
+    def _sanitize_report_filename(filename: str) -> str:
+        """Return a safe leaf filename so exports cannot escape output_dir."""
+        fallback = f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        raw_filename = str(filename or "").strip()
+        if not raw_filename:
+            return fallback
+
+        leaf = PurePosixPath(PureWindowsPath(raw_filename).name).name.strip()
+        cleaned = _INVALID_REPORT_FILENAME_CHARS.sub("_", leaf)
+        cleaned = re.sub(r"_+", "_", cleaned).strip(" ._")
+        reserved_name = cleaned.split(".", maxsplit=1)[0].rstrip(" .").lower()
+        if cleaned in {"", ".", ".."} or reserved_name in _WINDOWS_RESERVED_REPORT_NAMES:
+            return fallback
+        return cleaned
+
+    def _resolve_export_path(self, filename: str, extension: str) -> Path:
+        """Resolve an export path and keep it inside the configured output dir."""
+        safe_filename = self._sanitize_report_filename(filename)
+        output_dir = self.output_dir.resolve()
+        output_path = (self.output_dir / f"{safe_filename}.{extension}").resolve()
+        try:
+            output_path.relative_to(output_dir)
+        except ValueError as exc:
+            raise ValueError("导出路径必须位于输出目录内") from exc
+        return output_path
 
     @log_method
     @log_step("生成收支趋势图")
@@ -114,7 +154,9 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
         filename: str | None = None,
     ) -> str:
         """Export analyzer data to the selected report format."""
-        resolved_filename = filename or f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        resolved_filename = self._sanitize_report_filename(
+            filename or f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
 
         if format_type == "pdf":
             return await self._export_pdf(data, resolved_filename)
@@ -128,7 +170,7 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
 
     async def _export_pdf(self, data: dict[str, Any], filename: str) -> str:
         """Export the report payload as a PDF file."""
-        output_path = self.output_dir / f"{filename}.pdf"
+        output_path = self._resolve_export_path(filename, "pdf")
 
         figure, axes = plt.subplots(2, 2, figsize=(16, 12))
         figure.suptitle(f"账单分析报告 - {data.get('period', '')}", fontsize=20, fontweight="bold")
@@ -161,7 +203,7 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
 
     async def _export_excel(self, data: dict[str, Any], filename: str) -> str:
         """Export the report payload as an Excel workbook."""
-        output_path = self.output_dir / f"{filename}.xlsx"
+        output_path = self._resolve_export_path(filename, "xlsx")
 
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             summary_dataframe = pd.DataFrame([data.get("summary", {})])
@@ -188,7 +230,11 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
 
     async def _export_html(self, data: dict[str, Any], filename: str) -> str:
         """Export the report payload as a lightweight HTML summary."""
-        output_path = self.output_dir / f"{filename}.html"
+        output_path = self._resolve_export_path(filename, "html")
+        summary = data.get("summary", {})
+        total_income = summary.get("total_income", 0)
+        total_expense = summary.get("total_expense", 0)
+        net_income = summary.get("net_income", 0)
 
         html = f"""
         <!DOCTYPE html>
@@ -209,9 +255,9 @@ class ReportExporter:  # pylint: disable=too-few-public-methods
             <h2>统计摘要</h2>
             <table>
                 <tr><th>项目</th><th>金额</th></tr>
-                <tr><td>总收入</td><td>¥{data.get('summary', {}).get('total_income', 0):,.2f}</td></tr>
-                <tr><td>总支出</td><td>¥{data.get('summary', {}).get('total_expense', 0):,.2f}</td></tr>
-                <tr><td>净收入</td><td>¥{data.get('summary', {}).get('net_income', 0):,.2f}</td></tr>
+                <tr><td>总收入</td><td>¥{total_income:,.2f}</td></tr>
+                <tr><td>总支出</td><td>¥{total_expense:,.2f}</td></tr>
+                <tr><td>净收入</td><td>¥{net_income:,.2f}</td></tr>
             </table>
             <p>生成时间: {data.get('generated_at', '')}</p>
         </body>
