@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 54
+- Current Rust backend files: 56
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -208,3 +208,17 @@ S13 starts the budgets / execution / forecast / history domain in Rust without s
 | `tests/domains/budgeting/**`, `tests/domains/db/**`, and `tests/new_ui/test_budgets_rest_api.py` | `crates/bill-analyser-core/tests/budget_contracts.rs` | Golden budget contract cases for period scopes, import/export, summary de-duplication, type isolation, rollups, history, and forecast helpers |
 
 No Python budget route, database, snapshot, forecast, import/export, or CLI implementation is removed in S13. Budget amounts in the existing Python path remain yuan-style numeric values; S13 records that boundary explicitly and does not introduce cents conversion into the budget contract layer. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same budget CRUD, execution, history, forecast, import, and export fixtures.
+
+## S14 Statistics, Exchange, Net Worth, Insights, and Calendar Contracts
+
+S14 starts the statistics / exchange rates / net worth / insights / calendar domain in Rust without switching Flask routes, aiosqlite reads, external provider fetches, chart rendering, report export, or recurring-template persistence. It pins timestamp and year-month reverse-range errors, category/trend/account aggregation shapes, asset-trend balance math and empty-account legend filtering, exchange provider ordering/custom/fallback/cross-rate semantics, analyzer overview/chart plan DTOs, net worth snapshot grouping, anomaly payload shapes, and calendar event/projection shapes.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/statistics/category_analysis.py`, `trend_analysis.py`, and `asset_trends.py` | `crates/bill-analyser-core/src/statistics.rs` | Reverse range 400 contracts, cents conversion, category/account aggregation, monthly empty buckets, asset balance trace, and empty account legend filtering |
+| `src/bill_analyser/api/routes/statistics/exchange_rates.py` and `src/bill_analyser/core/exchange_rate_providers/**` | `crates/bill-analyser-core/src/statistics.rs` | Provider options/order, requested-provider fallback flag, user custom short-circuit shape, built-in fallback rates, CNY quote conversion, and base-currency conversion |
+| `src/bill_analyser/core/analyzer.py`, `src/bill_analyser/utils/charting/**`, and `src/bill_analyser/utils/report_export.py` | `crates/bill-analyser-core/src/statistics.rs` | Overview result projection and report chart-generation plan shape |
+| `src/bill_analyser/api/routes/networth.py`, `insights.py`, and `calendar.py` | `crates/bill-analyser-core/src/statistics.rs` | Net worth asset/liability grouping, anomaly DTOs, calendar daily events, and recurring projection DTOs |
+| `tests/domains/statistics/**` and `tests/new_ui/test_statistics_api.py` | `crates/bill-analyser-core/tests/statistics_contracts.rs` | Golden contract cases for statistics, exchange, net worth, insights, calendar, and report/chart helper behavior |
+
+No Python statistics, exchange provider, net worth, insights, calendar, charting, report-export, or recurring runtime implementation is removed in S14. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route and provider owner until a later bridge slice can compare live Python and Rust paths against shared account, bill, exchange, chart, and recurring fixtures.

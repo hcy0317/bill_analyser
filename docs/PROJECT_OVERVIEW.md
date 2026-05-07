@@ -1,6 +1,6 @@
 # Bill Analyser 项目总览
 
-多来源账单导入 + 智能去重 + 自动分类 + 多维统计分析全栈系统。后端运行入口仍是 Python/Flask/aiosqlite，账户/标签/分类/模板、设置包 taxonomy helper 与分类规则表达式编译等路径已逐步通过内部 Rust crates/bridge 接管，导入/学习/matching/recurring/budgets 等路径也在 Rust crate 中固定合同层；前端 Vue 3/TypeScript/Vite，数据库 SQLite WAL 模式。
+多来源账单导入 + 智能去重 + 自动分类 + 多维统计分析全栈系统。后端运行入口仍是 Python/Flask/aiosqlite，账户/标签/分类/模板、设置包 taxonomy helper 与分类规则表达式编译等路径已逐步通过内部 Rust crates/bridge 接管，导入/学习/matching/recurring/budgets/statistics 等路径也在 Rust crate 中固定合同层；前端 Vue 3/TypeScript/Vite，数据库 SQLite WAL 模式。
 
 ## 目录
 

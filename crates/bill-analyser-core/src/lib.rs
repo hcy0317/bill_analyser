@@ -16,6 +16,7 @@ pub mod primitives;
 pub mod response;
 pub mod runtime;
 pub mod smart_dedup;
+pub mod statistics;
 
 pub use adapters::{account, api, category, transaction};
 pub use error::{ErrorCode, RuntimeError};

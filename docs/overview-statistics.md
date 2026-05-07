@@ -6,6 +6,7 @@
   - `GET /api/statistics/category-statistics`
   - `GET /api/statistics/category-statistics/trends`
   - `GET /api/statistics/asset-trends`
+- `crates/bill-analyser-core/src/statistics.rs` 当前固定统计/汇率/净值/洞察/日历的 Rust 合同层，覆盖反向区间 400、分/元换算、分类/账户聚合、资产趋势余额、空账户图例过滤、汇率 provider/custom/fallback、净值分组、洞察异常和日历 projection shape；运行时仍由 Python Flask/aiosqlite 与现有 provider/chart/report 模块负责。
 - 移动端统计分析页使用移动专用 ECharts 饼图组件展示分类占比，容器和饼图半径按手机视口放大，避免沿用桌面或旧 SVG 尺寸导致图表过小。
 - 旧 `transaction-statistics*` 兼容子路径已删除，当前通过 legacy 404 回归测试防止恢复
 - 汇率主链已切到 `GET /api/statistics/exchange-rates`
