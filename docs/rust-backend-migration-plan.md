@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 58
+- Current Rust backend files: 66
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -52,6 +52,10 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## S1 Rust Runtime Shell
 
 S1 added the internal Rust workspace boundary while keeping Flask REST as the runtime shell. The workspace contains `crates/bill-analyser-core` and `crates/bill-analyser-db`; Rust remains an internal library / bridge surface and 不接管任何业务 API.
+
+## S1b Opt-in Rust HTTP Ingress
+
+S1b adds `crates/bill-analyser-http` as an opt-in `rust-http-shell:proxy-only` ingress for migration verification. Default startup still uses Python/Flask, proxied Python routes are not Rust business-owned, and the crate reports `api_takeover=false` with `business_migration=none`. The crate owns only health/runtime metadata routes plus catch-all reverse proxy behavior for unowned routes; it does not delete Python code, write the database, or take over import business handlers.
 
 ## S2 Shared Primitives Mapping
 

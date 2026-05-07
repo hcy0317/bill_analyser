@@ -6,7 +6,7 @@ It does not change runtime behavior and does not mark any Python business file a
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 58
+- Rust backend files: 66
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -384,6 +384,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/import_pipeline.rs
 - crates/bill-analyser-core/src/lib.rs
 - crates/bill-analyser-core/src/matching.rs
+- crates/bill-analyser-core/src/ops.rs
 - crates/bill-analyser-core/src/parsers.rs
 - crates/bill-analyser-core/src/primitives/auth.rs
 - crates/bill-analyser-core/src/primitives/currency.rs
@@ -404,6 +405,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/tests/import_learning_contracts.rs
 - crates/bill-analyser-core/tests/import_pipeline_contracts.rs
 - crates/bill-analyser-core/tests/matching_contracts.rs
+- crates/bill-analyser-core/tests/ops_contracts.rs
 - crates/bill-analyser-core/tests/parser_contracts.rs
 - crates/bill-analyser-core/tests/response_contract.rs
 - crates/bill-analyser-core/tests/runtime_contract.rs
@@ -426,6 +428,12 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/transaction.rs
 - crates/bill-analyser-db/src/user_scope.rs
 - crates/bill-analyser-db/tests/sqlite_runtime.rs
+- crates/bill-analyser-http/src/config.rs
+- crates/bill-analyser-http/src/lib.rs
+- crates/bill-analyser-http/src/proxy.rs
+- crates/bill-analyser-http/src/router.rs
+- crates/bill-analyser-http/src/runtime.rs
+- crates/bill-analyser-http/tests/proxy_contract.rs
 
 ## Verified Dead Baseline
 

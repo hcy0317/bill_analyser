@@ -1,9 +1,12 @@
 # Bill Analyser 总体架构
 
 ## 2.1 分层结构
-- **API 层（Flask）**：`src/bill_analyser/api/`
+- **API 层（Flask 默认运行入口）**：`src/bill_analyser/api/`
   - 同步路由处理 HTTP 请求
   - 通过事件循环桥接调用异步服务
+- **Rust HTTP ingress（可选迁移入口）**：`crates/bill-analyser-http/`
+  - 提供 opt-in HTTP 壳、健康/运行时元数据与未迁移路由反向代理
+  - 默认启动链仍不切到 Rust；被代理的 Python 路由不计为 Rust 业务接管
 - **业务层（Core）**：`src/bill_analyser/core/`
   - 账单导入编排、去重、分类、统计、汇率等核心逻辑
 - **数据层（Database）**：`src/bill_analyser/core/db.py` + `src/bill_analyser/core/database/`
@@ -22,7 +25,7 @@
 - **异步桥接模式**：Flask 路由内创建独立事件循环调用 async 逻辑
 - **REST 主链模式**：当前运行态主链统一收口到 REST（`/api/...`）
 - **适配器/转换模式**：前后端字段、时间、金额单位统一转换
-- **Rust 内部库边界**：Rust 迁移当前保持 Flask REST 外壳作为运行时入口；`bill-analyser-core` 提供 runtime identity、health、error、API response envelope、共享 primitives、auth/security foundation、分类规则表达式 AST 编译、AI/OCR/LLM 合同层以及 backup/ops 安全合同层，`bill-analyser-db` 提供 SQLite runtime foundation；`POST /api/tokens/refresh` 将 decoded refresh claims 形状校验委托给预构建的 `bill_auth_bridge`，新分类规则表达式编译委托给 `bill_category_rule_bridge`，其余业务 API、备份文件操作、云 SDK 上传与数据库写入仍由 Python 拥有。
+- **Rust 内部库与可选 ingress 边界**：Rust 迁移当前默认仍保持 Flask REST 外壳作为运行时入口；`bill-analyser-core` 提供 runtime identity、health、error、API response envelope、共享 primitives、auth/security foundation、分类规则表达式 AST 编译、AI/OCR/LLM 合同层以及 backup/ops 安全合同层，`bill-analyser-db` 提供 SQLite runtime foundation；`bill-analyser-http` 提供 opt-in `rust-http-shell:proxy-only` 入口，只拥有自身健康/运行时元数据路由与未迁移路由反向代理，`api_takeover=false`、`business_migration=none`。`POST /api/tokens/refresh` 将 decoded refresh claims 形状校验委托给预构建的 `bill_auth_bridge`，新分类规则表达式编译委托给 `bill_category_rule_bridge`，其余业务 API、备份文件操作、云 SDK 上传与数据库写入仍由 Python 拥有。
 
 补充说明（2026-03-07）：
 - 当前运行态已无 `/api/v1/*` 路由，也无 WSGI 级 URL rewrite 中间件。

@@ -1,0 +1,28 @@
+[package]
+name = "bill-analyser-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Opt-in Rust HTTP ingress and proxy shell for Bill Analyser."
+publish = false
+
+[lib]
+name = "bill_analyser_http"
+path = "src/lib.rs"
+
+[dependencies]
+axum.workspace = true
+bill-analyser-core = { path = "../bill-analyser-core" }
+bytes.workspace = true
+http.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+
+[lints]
+workspace = true
