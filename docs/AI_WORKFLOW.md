@@ -149,10 +149,12 @@
 
 ### PreToolUse
 
-仓库 guard 会阻止明显危险或越界的操作，例如：
+仓库 guard 只阻止极端破坏性操作，例如：
 
-- `taskkill /f /im python.exe`
-- 改动受保护的第三方/参考目录
+- 删除整盘或文件系统根目录
+- 清空当前仓库、删除 `.git`、或执行强制工作区清理
+- 删除 `data/bills.db*` / `data/config`，或对运行库执行显式清库 SQL
+- 普通仓库外文件写入不再由 repo guard 拦截
 - 如果当前机器存在 `~/.copilot/hooks/`，仓库还会通过 `scripts/hooks/copilot_global_hook_bridge.py` 额外桥接用户级 Copilot hooks（例如 config-protection / secret-scan / danger-guard）
 
 ### PostToolUse
