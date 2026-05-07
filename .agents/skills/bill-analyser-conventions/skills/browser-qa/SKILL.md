@@ -1,3 +1,9 @@
+---
+name: browser-qa
+description: Automated browser QA workflow for visual testing, interaction checks, responsive screenshots, and accessibility audits.
+origin: community
+---
+
 # Browser QA — Automated Visual Testing & Interaction
 
 ## When to Use
