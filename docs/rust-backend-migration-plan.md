@@ -235,3 +235,32 @@ S15 starts the AI OCR / LLM provider/config domain in Rust without switching Fla
 | `tests/test_ocr_*.py`, `tests/new_ui/test_ai_receipt_recognition_rest_api.py`, and `tests/new_ui/test_llm_*.py` | `crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs` | Golden contract cases for OCR config/errors/parser, LLM provider aliases, secret redaction, advanced settings, and review endpoint provider boundaries |
 
 No Python OCR, LLM route, provider, database config, candidate review, or preview recommendation implementation is removed in S15. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route owner and external provider caller until a later bridge slice can compare live Python and Rust paths against shared OCR/LLM fixtures.
+
+## S16 Backup, Encryption, User Data, and Ops Contracts
+
+S16 starts the backup / encryption / user-data operations / sync / report-export safety domain in Rust without switching Flask routes, Python file I/O, SQLCipher connection handling, cloud SDK sync, audit DB writes, or report file generation. It pins backup filename/archive safety, encrypted backup recognition, restore preflight summary, record-first cleanup retention, backup job payload normalization, Fernet key derivation, SQLCipher status projection, sensitive user-data audit payloads, sync provider/prefix/secret-redaction rules, and report export format/filename contracts.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/backup/**` and `src/bill_analyser/core/database/audit_backup/**` | `crates/bill-analyser-core/src/ops.rs` | Backup file naming, archive safety, verify/list payload, cleanup retention, and job normalization contracts |
+| `src/bill_analyser/api/routes/encryption.py` and `src/bill_analyser/core/database/encryption.py` | `crates/bill-analyser-core/src/ops.rs` | SQLCipher status and backup encryption key derivation contracts |
+| `src/bill_analyser/api/routes/auth/user_data.py` and user-data DB helpers | `crates/bill-analyser-core/src/ops.rs` | Sensitive action mode, user-data statistics, and audit payload contracts |
+| `src/bill_analyser/core/sync.py` | `crates/bill-analyser-core/src/ops.rs` | Sync provider allowlist, safe object prefixes, and recursive secret redaction contract |
+| `src/bill_analyser/utils/report_export.py` and `src/bill_analyser/core/report.py` | `crates/bill-analyser-core/src/ops.rs` | Report format, MIME, extension, and safe filename contracts |
+| `tests/domains/backup/**`, `tests/domains/runtime/**`, `tests/domains/reporting/**`, and `tests/new_ui/test_data_management_rest_api.py` | `crates/bill-analyser-core/tests/ops_contracts.rs` | Golden backup, encryption, sync, user-data, and report-export safety cases |
+
+No Python backup, encryption, user-data, sync, report-export, route shell, file-system, cloud SDK, or audit persistence implementation is removed in S16. The Rust layer is a contract/oracle surface only; Flask/Python remains the live owner until a later bridge/runtime takeover slice can compare live Python and Rust paths against shared backup, encryption, sync, audit, and report fixtures.
+
+## S17 Route Cleanup and Python Retirement Audit
+
+S17 audited the accumulated S0-S16 migration evidence before any deletion. The S0 inventory still has no `verified_dead` Python backend files, and the later domain records either describe contract/oracle Rust coverage or a limited bridge while explicitly retaining the Python route/runtime owner. Therefore this slice does not remove Python business code.
+
+| Candidate group | Decision | Evidence |
+| --- | --- | --- |
+| Flask route shell and route packages (`src/bill_analyser/api/app.py`, `src/bill_analyser/api/routes/**`) | Retain | Current REST blueprints, sync Flask-to-async bridge, auth middleware, and legacy-404 behavior are still Python-owned; S17 did not prove route-free replacement. |
+| Active import and bills compatibility routes (`src/bill_analyser/api/routes/bills/import_legacy.py`, bills split package exports) | Retain | `/api/bills/import/upload` and `/api/bills/import/parsers` are still frontend-called; package-level compatibility propagation is still used by route tests and monkeypatch coverage. |
+| Rust bridge modules (`core/*_rust_bridge.py`, `core/settings_bundle_rust_bridge.py`) | Retain | They are the accepted thin bridge boundary for the file-backed taxonomy/auth/category-rule/settings helpers and are not dead code. |
+| Python domain runtimes (`core/bills/**`, `core/smart_dedup/**`, `core/category_engine/**`, `core/database/**`, `parsers/**`, AI/OCR/LLM, statistics, budgets, matching, backup, sync, report export) | Retain | Rust slices pin contracts or pure helpers, but live DB writes, provider calls, parser execution, matching/classification execution, file I/O, and route envelopes remain Python-owned. |
+| Historical legacy artifacts already removed (`parsers_old/`, `csv_parser.py`, `excel_parser.py`, `utils.logic`, `smart_dedup_v641_backup.py`, legacy `v1_*` adapter wrappers) | No action | These are already absent from runtime source and guarded by no-regression tests; S17 has no tracked file to delete. |
+
+Deletion remains blocked for any Python path that cannot satisfy every verified-dead condition: no route, no import, no frontend call, no test/docs runtime reference, and a replacement/retention mapping. Any future retirement slice must first switch a concrete live runtime boundary to Rust, run parity against the same fixtures, update the inventory status, and only then remove the proven-dead Python path.
