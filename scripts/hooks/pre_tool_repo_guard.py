@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 import shlex
@@ -18,8 +20,16 @@ PATH_KEYS = ("file_path", "path", "filePath")
 
 DELETE_VERBS = {"rm", "del", "erase", "rd", "rmdir", "ri", "remove-item", "unlink"}
 DELETE_PATH_FLAGS = {"-path", "-literalpath"}
-INLINE_COMMAND_WRAPPERS = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
-INLINE_COMMAND_FLAGS = {"-c", "-command"}
+POWERSHELL_INLINE_WRAPPERS = {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+POWERSHELL_INLINE_COMMAND_SHORT_PARAMETERS = {"c"}
+POWERSHELL_INLINE_COMMAND_FULL_FLAG = "-command"
+POWERSHELL_ENCODED_COMMAND_SHORT_PARAMETERS = {"e", "ec"}
+POWERSHELL_ENCODED_COMMAND_FULL_FLAG = "-encodedcommand"
+POSIX_INLINE_WRAPPERS = {"bash", "bash.exe", "sh", "sh.exe"}
+POSIX_INLINE_COMMAND_FLAGS = {"-c", "-lc"}
+CMD_INLINE_WRAPPERS = {"cmd", "cmd.exe"}
+CMD_INLINE_COMMAND_FLAGS = {"/c", "/k"}
+OPAQUE_INLINE_COMMAND = "__OPAQUE_INLINE_COMMAND__"
 FLAGS_WITH_VALUES = {
     "-exclude",
     "-filter",
@@ -146,7 +156,7 @@ def is_option_token(token: str) -> bool:
 def split_option_value(token: str) -> tuple[str, str | None]:
     """Split PowerShell-style `-Name:value` or `--name=value` option tokens."""
     text = strip_wrapping_quotes(token).strip()
-    if not text.startswith("-"):
+    if not text.startswith(("-", "/")):
         return text.lower(), None
     for separator in (":", "="):
         if separator in text:
@@ -156,25 +166,96 @@ def split_option_value(token: str) -> tuple[str, str | None]:
     return text.lower(), None
 
 
+def decode_powershell_encoded_command(value: str) -> str | None:
+    """Decode a PowerShell EncodedCommand token when it is inspectable."""
+    try:
+        raw_bytes = base64.b64decode(strip_wrapping_quotes(value), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    for encoding in ("utf-16le", "utf-8"):
+        try:
+            decoded = raw_bytes.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+        if decoded:
+            return decoded
+    return None
+
+
+def append_inline_command_argument(
+    commands: list[str],
+    tokens: tuple[str, ...],
+    index: int,
+    flag_value: str | None,
+) -> None:
+    """Append inline command text from either `-Flag:value` or following token."""
+    if flag_value is not None:
+        commands.append(flag_value)
+    elif index + 1 < len(tokens):
+        commands.append(strip_wrapping_quotes(tokens[index + 1]))
+
+
+def is_powershell_encoded_command_flag(flag_name: str) -> bool:
+    """Return whether a token is a PowerShell EncodedCommand flag or prefix."""
+    normalized = flag_name.lower()
+    if normalized.startswith("/"):
+        normalized = f"-{normalized[1:]}"
+    if not normalized.startswith("-"):
+        return False
+    parameter = normalized[1:]
+    return parameter in POWERSHELL_ENCODED_COMMAND_SHORT_PARAMETERS or (
+        bool(parameter) and POWERSHELL_ENCODED_COMMAND_FULL_FLAG[1:].startswith(parameter)
+    )
+
+
+def is_powershell_command_flag(flag_name: str) -> bool:
+    """Return whether a token is a PowerShell Command flag or prefix."""
+    normalized = flag_name.lower()
+    if normalized.startswith("/"):
+        normalized = f"-{normalized[1:]}"
+    if not normalized.startswith("-"):
+        return False
+    parameter = normalized[1:]
+    return parameter in POWERSHELL_INLINE_COMMAND_SHORT_PARAMETERS or (
+        bool(parameter) and POWERSHELL_INLINE_COMMAND_FULL_FLAG[1:].startswith(parameter)
+    )
+
+
 def extract_inline_command_texts(command_text: str) -> tuple[str, ...]:
-    """Extract nested PowerShell command strings that can contain delete verbs."""
+    """Extract nested shell command strings that can contain delete verbs."""
     tokens = tokenize_command_text(command_text)
     commands: list[str] = []
     index = 0
     while index < len(tokens):
         wrapper = normalize_command_verb(tokens[index])
-        if wrapper not in INLINE_COMMAND_WRAPPERS:
+        if wrapper not in (
+            POWERSHELL_INLINE_WRAPPERS | POSIX_INLINE_WRAPPERS | CMD_INLINE_WRAPPERS
+        ):
             index += 1
             continue
 
         next_index = index + 1
         while next_index < len(tokens):
             flag_name, flag_value = split_option_value(tokens[next_index])
-            if flag_name in INLINE_COMMAND_FLAGS:
-                if flag_value is not None:
-                    commands.append(flag_value)
-                elif next_index + 1 < len(tokens):
-                    commands.append(strip_wrapping_quotes(tokens[next_index + 1]))
+            if wrapper in POWERSHELL_INLINE_WRAPPERS and is_powershell_command_flag(flag_name):
+                append_inline_command_argument(commands, tokens, next_index, flag_value)
+                break
+            if wrapper in POWERSHELL_INLINE_WRAPPERS and is_powershell_encoded_command_flag(flag_name):
+                encoded_value = flag_value
+                if encoded_value is None and next_index + 1 < len(tokens):
+                    encoded_value = tokens[next_index + 1]
+                decoded = (
+                    decode_powershell_encoded_command(encoded_value)
+                    if encoded_value is not None
+                    else None
+                )
+                commands.append(decoded or OPAQUE_INLINE_COMMAND)
+                break
+            if wrapper in POSIX_INLINE_WRAPPERS and flag_name in POSIX_INLINE_COMMAND_FLAGS:
+                append_inline_command_argument(commands, tokens, next_index, flag_value)
+                break
+            if wrapper in CMD_INLINE_WRAPPERS and flag_name in CMD_INLINE_COMMAND_FLAGS:
+                append_inline_command_argument(commands, tokens, next_index, flag_value)
                 break
             next_index += 1
         index = next_index + 1
@@ -394,13 +475,21 @@ def git_flag_letters(token: str) -> str:
     return text.lstrip("-").lower()
 
 
+def is_git_worktree_root_pathspec(token: str) -> bool:
+    """Return whether a git pathspec targets the whole worktree root."""
+    text = strip_wrapping_quotes(token).replace("\\", "/").strip().lower()
+    return text in {".", "./", ":/"} or text.rstrip("/") == "."
+
+
 def is_dangerous_git_command(command_text: str) -> bool:
     """Return whether tokenized git usage would wipe repo state."""
     for subcommand, args in iter_git_commands(command_text):
         lower_args = tuple(strip_wrapping_quotes(arg).lower() for arg in args)
         if subcommand == "reset" and "--hard" in lower_args:
             return True
-        if subcommand in {"checkout", "restore"} and "." in lower_args:
+        if subcommand in {"checkout", "restore"} and any(
+            is_git_worktree_root_pathspec(arg) for arg in lower_args
+        ):
             return True
         if subcommand == "clean":
             has_force = any(
@@ -418,6 +507,13 @@ def is_dangerous_git_command(command_text: str) -> bool:
 
 def command_denial_reason(command_text: str, cwd_value: Any = None) -> str | None:
     """Return a denial reason for extreme destructive shell commands."""
+    for inline_command in extract_inline_command_texts(command_text):
+        if inline_command == OPAQUE_INLINE_COMMAND:
+            return "repo guard 阻止不透明内联 PowerShell 命令；请改用可审计的明文命令。"
+        nested_reason = command_denial_reason(inline_command, cwd_value)
+        if nested_reason is not None:
+            return nested_reason
+
     if is_dangerous_git_command(command_text):
         return "repo guard 阻止危险 git 清库命令；请改用精确文件级操作。"
 

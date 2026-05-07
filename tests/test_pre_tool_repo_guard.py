@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib
 import json
 import subprocess
@@ -10,6 +11,10 @@ from pathlib import Path
 
 
 guard = importlib.import_module("scripts.hooks.pre_tool_repo_guard")
+
+
+def powershell_encoded(command: str) -> str:
+    return base64.b64encode(command.encode("utf-16le")).decode("ascii")
 
 
 def command_payload(command: str) -> dict[str, object]:
@@ -38,13 +43,67 @@ def test_denies_windows_drive_root_delete() -> None:
 
 
 def test_denies_nested_powershell_drive_root_delete() -> None:
+    encoded_drive_delete = powershell_encoded("Remove-Item -Recurse -Force C:\\")
     for command in (
         r'powershell -Command "Remove-Item -Recurse -Force C:\"',
+        r'powershell -Co "Remove-Item -Recurse -Force C:\"',
+        r'powershell -Com "Remove-Item -Recurse -Force C:\"',
+        r'pwsh -Comm "Remove-Item -Recurse -Force C:\"',
         r'pwsh -Command "Remove-Item -LiteralPath:C:\"',
+        f"powershell -EncodedCommand {encoded_drive_delete}",
     ):
         reason = guard.evaluate_pre_tool_use(command_payload(command))
         assert reason is not None
         assert "整盘" in reason
+
+
+def test_denies_nested_shell_drive_root_or_posix_root_delete() -> None:
+    for command in (
+        'bash -lc "rm -rf /"',
+        'bash -c "rm -rf /"',
+        'sh -c "rm -rf /"',
+        r'cmd /c "rmdir /s /q C:\"',
+        r'cmd /k "rmdir /s /q C:\"',
+    ):
+        reason = guard.evaluate_pre_tool_use(command_payload(command))
+        assert reason is not None
+
+
+def test_denies_opaque_powershell_encoded_command() -> None:
+    for command in (
+        "powershell -EncodedCommand not-valid-base64",
+        "pwsh -e not-valid-base64",
+        "pwsh -ec not-valid-base64",
+        "powershell -Encoded not-valid-base64",
+        "powershell -en not-valid-base64",
+        "powershell -enco not-valid-base64",
+        "powershell -encod not-valid-base64",
+        "powershell -encode not-valid-base64",
+        "powershell -EncodedC not-valid-base64",
+        "powershell -EncodedCo not-valid-base64",
+        "powershell /e not-valid-base64",
+        "powershell /ec not-valid-base64",
+        "powershell /encodedcommand not-valid-base64",
+        'bash -lc "pwsh -EncodedCommand not-valid-base64"',
+    ):
+        reason = guard.evaluate_pre_tool_use(command_payload(command))
+        assert reason is not None
+        assert "不透明" in reason
+
+
+def test_decoded_powershell_encoded_command_uses_common_denial_pipeline() -> None:
+    encoded_git_reset = powershell_encoded("git reset --hard HEAD")
+    encoded_sql_wipe = powershell_encoded('sqlite3 data/bills.db "DELETE FROM transactions"')
+
+    for command, expected in (
+        (f"pwsh -EncodedCommand {encoded_git_reset}", "git"),
+        (f"powershell -en {encoded_git_reset}", "git"),
+        (f"powershell /encodedcommand {encoded_git_reset}", "git"),
+        (f"powershell -EncodedCommand {encoded_sql_wipe}", "数据库清库"),
+    ):
+        reason = guard.evaluate_pre_tool_use(command_payload(command))
+        assert reason is not None
+        assert expected in reason
 
 
 def test_denies_posix_root_delete() -> None:
@@ -66,9 +125,14 @@ def test_denies_dangerous_git_cleanup() -> None:
         "git reset --hard HEAD",
         "git clean -fdx",
         "git restore -- .",
+        "git checkout -- ./",
+        "git restore ./",
+        "git restore -- ./",
+        "git restore :/",
         "git -C . clean -fdx",
         "git -C . reset --hard HEAD",
         "git -C . restore -- .",
+        "git -C . restore ./",
     ):
         reason = guard.evaluate_pre_tool_use(command_payload(command))
         assert reason is not None
