@@ -4,6 +4,7 @@
 //! foundations and shared primitives only; no business API is migrated here.
 
 pub mod adapters;
+pub mod ai_ocr_llm;
 pub mod auth;
 pub mod budgets;
 pub mod category_rules;

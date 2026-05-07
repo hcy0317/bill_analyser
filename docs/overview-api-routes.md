@@ -12,7 +12,7 @@
   - `/api/budgets`
   - `/api/backup`
   - `/api/settings/bundle`
-- 小票识图入口由 `api/routes/receipt_ocr.py` 提供并在 `app.py` 注册：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用 `core/ai/ocr` 下配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。
+- 小票识图入口由 `api/routes/receipt_ocr.py` 提供并在 `app.py` 注册：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用 `core/ai/ocr` 下配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。该域的 Rust `ai_ocr_llm` 合同层只固定配置、错误 envelope 与解析规则，不接管 Flask route 或 provider 调用。
 
 ## 5.1.1 当前 REST 收口进展（2026-03-06）
 - 账户域首批 legacy action 已收口到 REST：

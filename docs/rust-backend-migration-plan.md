@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 56
+- Current Rust backend files: 58
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -222,3 +222,16 @@ S14 starts the statistics / exchange rates / net worth / insights / calendar dom
 | `tests/domains/statistics/**` and `tests/new_ui/test_statistics_api.py` | `crates/bill-analyser-core/tests/statistics_contracts.rs` | Golden contract cases for statistics, exchange, net worth, insights, calendar, and report/chart helper behavior |
 
 No Python statistics, exchange provider, net worth, insights, calendar, charting, report-export, or recurring runtime implementation is removed in S14. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route and provider owner until a later bridge slice can compare live Python and Rust paths against shared account, bill, exchange, chart, and recurring fixtures.
+
+## S15 AI OCR and LLM Provider Contracts
+
+S15 starts the AI OCR / LLM provider/config domain in Rust without switching Flask routes, OCR provider calls, aiosqlite LLM config persistence, or live LLM provider execution. It pins OCR disabled-safe 501 and provider config response shapes, payment screenshot parsing fields, LLM provider aliases and OpenAI-compatible defaults, advanced settings normalization, runtime/user config isolation, API key redaction, and the rule that preview/candidate accept/reject review endpoints do not require a live provider after recommendation generation.
+
+| Python source | Rust source | Boundary |
+| --- | --- | --- |
+| `src/bill_analyser/api/routes/receipt_ocr.py` and `src/bill_analyser/core/ai/ocr/**` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | OCR provider config normalization, disabled-safe typed errors, response payloads, and payment screenshot text parsing contract |
+| `src/bill_analyser/core/ai/llm/provider.py` and `src/bill_analyser/core/database/llm/config/__init__.py` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | Provider alias/default mapping, advanced settings normalization, request-local runtime config construction, and API key redaction contract |
+| `src/bill_analyser/api/routes/llm/{analysis,candidates,configs,preview,support}.py` and `src/bill_analyser/core/database/llm/candidates/**` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | Stable `code/error_code` envelopes, preview recommendation response shape, candidate list/reject envelopes, and live-provider requirement boundary |
+| `tests/test_ocr_*.py`, `tests/new_ui/test_ai_receipt_recognition_rest_api.py`, and `tests/new_ui/test_llm_*.py` | `crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs` | Golden contract cases for OCR config/errors/parser, LLM provider aliases, secret redaction, advanced settings, and review endpoint provider boundaries |
+
+No Python OCR, LLM route, provider, database config, candidate review, or preview recommendation implementation is removed in S15. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route owner and external provider caller until a later bridge slice can compare live Python and Rust paths against shared OCR/LLM fixtures.

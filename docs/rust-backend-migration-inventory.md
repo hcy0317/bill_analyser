@@ -6,7 +6,7 @@ It does not change runtime behavior and does not mark any Python business file a
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 56
+- Rust backend files: 58
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -373,6 +373,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/adapters/category.rs
 - crates/bill-analyser-core/src/adapters/mod.rs
 - crates/bill-analyser-core/src/adapters/transaction.rs
+- crates/bill-analyser-core/src/ai_ocr_llm.rs
 - crates/bill-analyser-core/src/auth/mod.rs
 - crates/bill-analyser-core/src/bin/bill_auth_bridge.rs
 - crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs
@@ -397,6 +398,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/runtime.rs
 - crates/bill-analyser-core/src/smart_dedup.rs
 - crates/bill-analyser-core/src/statistics.rs
+- crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs
 - crates/bill-analyser-core/tests/auth_security_contracts.rs
 - crates/bill-analyser-core/tests/budget_contracts.rs
 - crates/bill-analyser-core/tests/import_learning_contracts.rs
