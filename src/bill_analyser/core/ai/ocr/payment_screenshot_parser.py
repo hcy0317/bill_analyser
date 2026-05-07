@@ -28,6 +28,11 @@ _AMOUNT_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.IGNORECASE,
     ),
     re.compile(r"[¥￥]\s*(?P<amount>[+-]?\d+(?:\.\d{1,2})?)"),
+    re.compile(
+        r"\b(?:CNY|RMB)\b\s*[:：¥￥]?\s*"
+        r"(?P<amount>[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?P<amount>[+-]?\d+\.\d{2})\s*(?:元|CNY|RMB)", re.IGNORECASE),
 )
 

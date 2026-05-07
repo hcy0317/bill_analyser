@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -247,10 +248,6 @@ class ProviderFactory:
             "base_url": "https://api.openai.com/v1",
             "model": "gpt-4o-mini",
         },
-        "azure": {
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
-        },
     }
 
     @classmethod
@@ -281,6 +278,7 @@ class ProviderFactory:
             "openai-compatible",
             "azure",
             "azure_openai",
+            "azure-openai",
         ]
 
     @classmethod
@@ -295,12 +293,42 @@ class ProviderFactory:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         provider_config = dict(config)
+        if normalized_name == "azure":
+            provider_config["base_url"] = cls._validate_azure_base_url(
+                provider_config.get("base_url")
+            )
+            provider_config["model"] = provider_config.get("model") or "gpt-4o-mini"
+            provider_config["provider_name"] = normalized_name
+            return provider_config
+
         defaults = cls._OPENAI_COMPATIBLE_DEFAULTS.get(normalized_name)
         if defaults:
             provider_config["base_url"] = provider_config.get("base_url") or defaults["base_url"]
             provider_config["model"] = provider_config.get("model") or defaults["model"]
             provider_config["provider_name"] = normalized_name
         return provider_config
+
+    @staticmethod
+    def _validate_azure_base_url(base_url: Any) -> str:
+        raw_base_url = str(base_url or "")
+        if "\\" in raw_base_url or any(not char.isprintable() for char in raw_base_url):
+            raise ValueError(
+                "Azure provider base_url must not contain backslashes or non-printable characters"
+            )
+
+        normalized_base_url = raw_base_url.strip()
+        if not normalized_base_url:
+            raise ValueError("Azure provider requires explicit base_url")
+
+        parsed = urlparse(normalized_base_url)
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme.lower() != "https":
+            raise ValueError("Azure provider base_url must use https")
+        if parsed.username or parsed.password:
+            raise ValueError("Azure provider base_url must use an Azure OpenAI host")
+        if not hostname.endswith(".openai.azure.com"):
+            raise ValueError("Azure provider base_url must use an Azure OpenAI host")
+        return normalized_base_url
 
 
 async def _request_with_retries(

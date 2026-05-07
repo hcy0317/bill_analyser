@@ -404,6 +404,95 @@ class TestLLMImportSessionAnalysisAPI:
         assert normalize_llm_advanced_settings('"plain"') == {}
         assert normalize_llm_advanced_settings("1") == {}
 
+    def test_safe_llm_config_payload_recursively_redacts_nested_secrets(self):
+        from bill_analyser.api.routes.llm.support import _safe_llm_config_payload
+
+        payload = _safe_llm_config_payload(
+            {
+                "provider": "openai",
+                "api_key": "sk-top-level-secret",
+                "advanced_settings": {"reasoning_depth": "low"},
+                "provider_config": {
+                    "apiKey": "sk-camel-secret",
+                    "credential": "nested-credential",
+                    "credentials": {"tenant": "nested-credentials-object"},
+                    "proxy_authorization": "nested-proxy-auth",
+                    "subscription_key": "nested-subscription-key",
+                    "access_token": "nested-access-token",
+                    "api_secret": "nested-api-secret",
+                    "bearer_token": "nested-bearer-token",
+                    "id_token": "nested-id-token",
+                    "private_key": "nested-private-key",
+                    "azure_api_key": "nested-azure-api-key",
+                    "client_secret_key": "nested-client-secret-key",
+                    "proxy_authorization_header": "nested-proxy-auth-header",
+                    "ocp_apim_subscription_key": "nested-ocp-apim-underscore-key",
+                    "headers": {
+                        "Authorization": "Bearer nested-auth-header",
+                        "x-api-key": "nested-x-api-key",
+                        "Ocp-Apim-Subscription-Key": "nested-ocp-apim-key",
+                        "safe_header": "kept-visible",
+                    },
+                    "max_tokens": 1024,
+                    "tokens_used": 17,
+                    "fallbacks": [
+                        {"client_secret": "nested-client-secret"},
+                        {"safe_header": "kept-visible"},
+                    ],
+                },
+            }
+        )
+
+        payload_text = json.dumps(payload, ensure_ascii=False)
+        for secret in [
+            "sk-top-level-secret",
+            "sk-camel-secret",
+            "nested-credential",
+            "nested-credentials-object",
+            "nested-proxy-auth",
+            "nested-subscription-key",
+            "nested-access-token",
+            "nested-api-secret",
+            "nested-bearer-token",
+            "nested-id-token",
+            "nested-private-key",
+            "nested-azure-api-key",
+            "nested-client-secret-key",
+            "nested-proxy-auth-header",
+            "nested-ocp-apim-underscore-key",
+            "nested-auth-header",
+            "nested-x-api-key",
+            "nested-ocp-apim-key",
+            "nested-client-secret",
+        ]:
+            assert secret not in payload_text
+
+        assert payload["api_key"] == "********"
+        assert payload["has_api_key"] is True
+        assert payload["advanced_settings"]["reasoning_depth"] == "low"
+        assert payload["provider_config"]["apiKey"] == "********"
+        assert payload["provider_config"]["credential"] == "********"
+        assert payload["provider_config"]["credentials"] == "********"
+        assert payload["provider_config"]["proxy_authorization"] == "********"
+        assert payload["provider_config"]["subscription_key"] == "********"
+        assert payload["provider_config"]["azure_api_key"] == "********"
+        assert payload["provider_config"]["client_secret_key"] == "********"
+        assert (
+            payload["provider_config"]["proxy_authorization_header"] == "********"
+        )
+        assert payload["provider_config"]["ocp_apim_subscription_key"] == "********"
+        assert payload["provider_config"]["headers"]["Authorization"] == "********"
+        assert payload["provider_config"]["headers"]["x-api-key"] == "********"
+        assert (
+            payload["provider_config"]["headers"]["Ocp-Apim-Subscription-Key"]
+            == "********"
+        )
+        assert payload["provider_config"]["headers"]["safe_header"] == "kept-visible"
+        assert payload["provider_config"]["max_tokens"] == 1024
+        assert payload["provider_config"]["tokens_used"] == 17
+        assert payload["provider_config"]["fallbacks"][0]["client_secret"] == "********"
+        assert payload["provider_config"]["fallbacks"][1]["safe_header"] == "kept-visible"
+
     def test_saved_llm_config_persists_advanced_settings_and_redacts_api_keys(
         self,
         client,

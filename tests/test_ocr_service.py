@@ -98,6 +98,23 @@ def test_parse_receipt_text_amount_via_currency():
     assert out["amount"] == pytest.approx(99.50)
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_amount"),
+    [
+        ("2026-05-04 CNY 12.34 便利店", 12.34),
+        ("2026-05-04 RMB 56.78 便利店", 56.78),
+        ("2026-05-04 便利店 12.34元", 12.34),
+    ],
+)
+def test_parse_receipt_text_amount_next_to_ascii_currency_marker(
+    text: str,
+    expected_amount: float,
+):
+    out = parse_receipt_text(text)
+    assert out["amount"] == pytest.approx(expected_amount)
+    assert out["trade_time"] == "2026-05-04"
+
+
 def test_parse_receipt_text_time():
     out = parse_receipt_text("2025-01-02 10:30:00 拿铁")
     assert out["trade_time"] == "2025-01-02 10:30:00"

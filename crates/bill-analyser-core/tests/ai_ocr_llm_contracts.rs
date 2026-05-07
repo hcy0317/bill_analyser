@@ -89,6 +89,11 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
     assert_eq!(wechat.description.as_deref(), Some("瑞幸咖啡"));
     assert_eq!(wechat.payment_platform.as_deref(), Some("wechat_pay"));
     assert_eq!(wechat.confidence, 1.0);
+    let serialized_wechat = serde_json::to_value(&wechat).expect("payment OCR JSON");
+    assert_eq!(serialized_wechat["trade_time"], "2026-05-04 08:09:10");
+    assert_eq!(serialized_wechat["payment_platform"], "wechat_pay");
+    assert!(serialized_wechat.get("tradeTime").is_none());
+    assert!(serialized_wechat.get("paymentPlatform").is_none());
 
     let alipay =
         parse_payment_screenshot_text("支付宝\n商品: 拿铁咖啡\n付款金额 12.34\n2025-01-02 10:30");
@@ -97,6 +102,18 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
     assert_eq!(alipay.description.as_deref(), Some("拿铁咖啡"));
     assert_eq!(alipay.payment_platform.as_deref(), Some("alipay"));
     assert_eq!(alipay.confidence, 1.0);
+
+    let dated_yuan_text = parse_payment_screenshot_text("2026-05-04 便利店 12.34元");
+    assert_eq!(dated_yuan_text.amount, Some(12.34));
+    assert_eq!(dated_yuan_text.trade_time.as_deref(), Some("2026-05-04"));
+
+    let cny_after_date = parse_payment_screenshot_text("2026-05-04 CNY 12.34 便利店");
+    assert_eq!(cny_after_date.amount, Some(12.34));
+    assert_eq!(cny_after_date.trade_time.as_deref(), Some("2026-05-04"));
+
+    let rmb_after_date = parse_payment_screenshot_text("2026-05-04 RMB 56.78 便利店");
+    assert_eq!(rmb_after_date.amount, Some(56.78));
+    assert_eq!(rmb_after_date.trade_time.as_deref(), Some("2026-05-04"));
 
     let empty = parse_payment_screenshot_text("");
     assert_eq!(empty.amount, None);
@@ -110,12 +127,14 @@ fn payment_screenshot_parser_extracts_wechat_and_alipay_contract_fields() {
 fn llm_provider_alias_defaults_match_python_factory() {
     assert!(llm_available_providers().contains(&"anthropic".to_string()));
     assert!(llm_available_providers().contains(&"openai-compatible".to_string()));
+    assert!(llm_available_providers().contains(&"azure-openai".to_string()));
     assert_eq!(normalize_llm_provider_name("anthropic"), "claude");
     assert_eq!(
         normalize_llm_provider_name("openai-compatible"),
         "openai_compatible"
     );
     assert_eq!(normalize_llm_provider_name("azure_openai"), "azure");
+    assert_eq!(normalize_llm_provider_name("azure-openai"), "azure");
 
     let anthropic = build_llm_provider_config("anthropic", Some(&json!({"api_key": "secret"})))
         .expect("anthropic alias");
@@ -161,6 +180,41 @@ fn llm_provider_alias_defaults_match_python_factory() {
     assert_eq!(custom.base_url, "https://llm.example.test/v1");
     assert_eq!(custom.model, "custom-chat");
     assert_eq!(custom.provider_name, "openai_compatible");
+    assert!(build_llm_provider_config("azure", None).is_err());
+    assert!(build_llm_provider_config("azure", Some(&json!({"base_url": ""}))).is_err());
+    let azure = build_llm_provider_config(
+        "azure_openai",
+        Some(&json!({
+            "base_url": "https://example-resource.openai.azure.com/openai/deployments/chat",
+            "model": "gpt-4o-mini",
+        })),
+    )
+    .expect("azure requires explicit endpoint");
+    assert_eq!(azure.normalized_provider, "azure");
+    assert_eq!(
+        azure.base_url,
+        "https://example-resource.openai.azure.com/openai/deployments/chat"
+    );
+    for unsafe_base_url in [
+        "http://127.0.0.1",
+        "http://169.254.169.254",
+        "https://api.openai.com/v1",
+        "https://llm.example.test/v1",
+        "https://example-resource.openai.azure.com.evil.test/openai/deployments/chat",
+        "https://evil.test\\example-resource.openai.azure.com/openai/deployments/chat",
+        "https://example-resource.openai.azure.com\\@evil.test/openai/deployments/chat",
+        "https://example-resource.openai.azure.com\u{0008}.evil.test/openai/deployments/chat",
+        "https://evil\u{007f}.openai.azure.com/openai/deployments/chat",
+    ] {
+        assert!(
+            build_llm_provider_config(
+                "azure",
+                Some(&json!({"base_url": unsafe_base_url, "model": "gpt-4o-mini"})),
+            )
+            .is_err(),
+            "unsafe Azure endpoint should fail closed: {unsafe_base_url}"
+        );
+    }
     assert!(build_llm_provider_config("not-a-provider", None).is_err());
 }
 
@@ -203,6 +257,133 @@ fn llm_advanced_settings_runtime_isolation_and_secret_redaction_are_pinned() {
     assert_eq!(safe["has_api_key"], true);
     assert_eq!(safe["advanced_settings"]["reasoning_depth"], "low");
 
+    let runtime_shaped_safe = safe_llm_config_payload(&json!({
+        "provider": "openai",
+            "provider_config": {
+                "api_key": "sk-secret-should-not-leak",
+                "apiKey": "sk-alias-should-not-leak",
+                "credential": "credential-should-not-leak",
+                "credentials": {
+                    "tenant": "credentials-object-should-not-leak"
+                },
+                "proxy_authorization": "proxy-auth-should-not-leak",
+                "subscription_key": "subscription-key-should-not-leak",
+                "access_token": "token-should-not-leak",
+                "api_secret": "api-secret-should-not-leak",
+                "bearer_token": "bearer-token-should-not-leak",
+                "id_token": "id-token-should-not-leak",
+                "private_key": "private-key-should-not-leak",
+                "azure_api_key": "azure-api-key-should-not-leak",
+                "client_secret_key": "client-secret-key-should-not-leak",
+                "proxy_authorization_header": "proxy-auth-header-should-not-leak",
+                "ocp_apim_subscription_key": "ocp-apim-underscore-should-not-leak",
+                "headers": {
+                    "Authorization": "Bearer auth-header-should-not-leak",
+                    "x-api-key": "x-api-key-should-not-leak",
+                    "Ocp-Apim-Subscription-Key": "ocp-apim-should-not-leak",
+                    "safe_header": "kept-visible"
+                },
+                "max_tokens": 1024,
+                "tokens_used": 17,
+                "model": "gpt-test",
+            },
+    }));
+    let runtime_shaped_safe_text =
+        serde_json::to_string(&runtime_shaped_safe).expect("runtime safe JSON");
+    assert!(!runtime_shaped_safe_text.contains("sk-secret-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("sk-alias-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("credential-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("credentials-object-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("proxy-auth-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("subscription-key-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("token-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("api-secret-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("bearer-token-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("id-token-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("private-key-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("azure-api-key-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("client-secret-key-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("proxy-auth-header-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("ocp-apim-underscore-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("auth-header-should-not-leak"));
+    assert!(!runtime_shaped_safe_text.contains("x-api-key-should-not-leak"));
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["api_key"],
+        "********"
+    );
+    assert_eq!(runtime_shaped_safe["provider_config"]["apiKey"], "********");
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["access_token"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["credential"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["credentials"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["proxy_authorization"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["subscription_key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["api_secret"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["bearer_token"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["id_token"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["private_key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["azure_api_key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["client_secret_key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["proxy_authorization_header"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["ocp_apim_subscription_key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["headers"]["Authorization"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["headers"]["x-api-key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["headers"]["Ocp-Apim-Subscription-Key"],
+        "********"
+    );
+    assert_eq!(
+        runtime_shaped_safe["provider_config"]["headers"]["safe_header"],
+        "kept-visible"
+    );
+    assert_eq!(runtime_shaped_safe["provider_config"]["max_tokens"], 1024);
+    assert_eq!(runtime_shaped_safe["provider_config"]["tokens_used"], 17);
+    assert_eq!(runtime_shaped_safe["has_api_key"], true);
+
     let runtime = build_runtime_llm_config_from_saved_config(&saved);
     assert_eq!(runtime["enabled"], true);
     assert_eq!(
@@ -214,6 +395,7 @@ fn llm_advanced_settings_runtime_isolation_and_secret_redaction_are_pinned() {
     let copied = copy_runtime_llm_config(&json!({
         "enabled": false,
         "provider": "openai",
+        "advanced_settings": {},
         "provider_config": {
             "model": "disabled-global",
             "advanced_settings": {"system_prompt": "provider-local"},
@@ -275,6 +457,12 @@ fn llm_preview_and_candidate_review_route_envelopes_preserve_live_provider_bound
     ));
     assert!(!llm_review_endpoint_requires_live_provider(
         "candidates/reject"
+    ));
+    assert!(!llm_review_endpoint_requires_live_provider(
+        "candidates/123/accept"
+    ));
+    assert!(!llm_review_endpoint_requires_live_provider(
+        "candidates/123/reject"
     ));
 
     let import_session = build_llm_analysis_response(

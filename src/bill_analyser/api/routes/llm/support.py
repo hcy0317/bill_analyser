@@ -25,6 +25,47 @@ logger = get_logger("LLM_API")
 
 bp = Blueprint("llm", __name__)
 
+_LLM_SECRET_KEY_ALIASES = frozenset(
+    {
+        "apikey",
+        "authorization",
+        "xapikey",
+        "apisecret",
+        "secretkey",
+        "credential",
+        "credentials",
+        "proxyauthorization",
+        "subscriptionkey",
+        "ocpapimsubscriptionkey",
+        "accesstoken",
+        "refreshtoken",
+        "bearertoken",
+        "idtoken",
+        "privatekey",
+        "token",
+        "password",
+        "clientsecret",
+    }
+)
+
+_LLM_SECRET_KEY_SUFFIXES = (
+    "apikey",
+    "xapikey",
+    "apisecret",
+    "secretkey",
+    "authorizationheader",
+    "proxyauthorization",
+    "subscriptionkey",
+    "accesstoken",
+    "refreshtoken",
+    "bearertoken",
+    "idtoken",
+    "privatekey",
+    "password",
+    "clientsecret",
+    "credentials",
+)
+
 
 def _get_request_user_id() -> int:
     return get_required_request_int("user_id")
@@ -129,15 +170,67 @@ def _error_response(message: str, code: str, status_code: int):
 
 
 def _safe_llm_config_payload(config: dict[str, Any]) -> dict[str, Any]:
-    """Return a saved LLM config without exposing a cleartext API key."""
+    """Return a saved LLM config without exposing cleartext secrets."""
     safe_config = dict(config)
-    api_key = str(safe_config.pop("api_key", "") or "")
-    safe_config["has_api_key"] = bool(api_key)
-    safe_config["api_key"] = "********" if api_key else ""
     safe_config["advanced_settings"] = normalize_llm_advanced_settings(
         safe_config.get("advanced_settings")
     )
-    return safe_config
+    has_api_key = _llm_value_has_non_empty_secret(safe_config)
+    redacted_config = cast("dict[str, Any]", _redact_llm_secrets(safe_config))
+    redacted_config["has_api_key"] = has_api_key
+    redacted_config.setdefault("api_key", "")
+    return redacted_config
+
+
+def _redact_llm_secrets(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            if _is_llm_secret_key(str(key)):
+                redacted[key] = "********" if _llm_secret_value_present(item) else ""
+            else:
+                redacted[key] = _redact_llm_secrets(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_llm_secrets(item) for item in value]
+    return value
+
+
+def _llm_value_has_non_empty_secret(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (
+                _is_llm_secret_key(str(key))
+                and _llm_secret_value_present(item)
+            )
+            or _llm_value_has_non_empty_secret(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_llm_value_has_non_empty_secret(item) for item in value)
+    return False
+
+
+def _llm_secret_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (dict, list, tuple, set)):
+        return bool(value)
+    return True
+
+
+def _is_llm_secret_key(key: str) -> bool:
+    normalized = "".join(
+        ch.lower() for ch in key if ch.isascii() and ch.isalnum()
+    )
+    if normalized in _LLM_SECRET_KEY_ALIASES:
+        return True
+    return any(
+        len(normalized) > len(suffix) and normalized.endswith(suffix)
+        for suffix in _LLM_SECRET_KEY_SUFFIXES
+    )
 
 
 # ------------------------------------------------------------------

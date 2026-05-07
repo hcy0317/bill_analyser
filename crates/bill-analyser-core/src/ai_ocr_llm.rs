@@ -6,7 +6,7 @@ use unicode_normalization::UnicodeNormalization;
 pub const OCR_DISABLED_PROVIDER_NAME: &str = "disabled";
 pub const OCR_DEFAULT_LANG: &str = "chi_sim+eng";
 pub const OCR_AVAILABLE_PROVIDERS: [&str; 2] = ["cloud_stub", "tesseract"];
-pub const LLM_AVAILABLE_PROVIDERS: [&str; 12] = [
+pub const LLM_AVAILABLE_PROVIDERS: [&str; 13] = [
     "openai",
     "claude",
     "anthropic",
@@ -19,6 +19,7 @@ pub const LLM_AVAILABLE_PROVIDERS: [&str; 12] = [
     "openai-compatible",
     "azure",
     "azure_openai",
+    "azure-openai",
 ];
 
 const LLM_PROMPT_TEXT_LIMIT: usize = 12_000;
@@ -35,8 +36,8 @@ pub struct OcrConfigContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PaymentScreenshotParseContract {
+    /// Yuan-unit OCR extraction for Python API parity; storage conversions to cents happen later.
     pub amount: Option<f64>,
     pub trade_time: Option<String>,
     pub description: Option<String>,
@@ -240,9 +241,17 @@ pub fn build_llm_provider_config(
     }
 
     let config = provider_config.and_then(Value::as_object);
-    let base_url = first_non_empty_field(config, "base_url")
-        .or_else(|| default_llm_base_url(&normalized_provider).map(str::to_string))
-        .unwrap_or_default();
+    let explicit_base_url = first_non_empty_field(config, "base_url");
+    let base_url = if normalized_provider == "azure" {
+        let base_url = explicit_base_url
+            .ok_or_else(|| "Azure provider requires explicit base_url".to_string())?;
+        validate_azure_base_url(&base_url)?;
+        base_url
+    } else {
+        explicit_base_url
+            .or_else(|| default_llm_base_url(&normalized_provider).map(str::to_string))
+            .unwrap_or_default()
+    };
     let model = first_non_empty_field(config, "model")
         .or_else(|| default_llm_model(&normalized_provider).map(str::to_string))
         .unwrap_or_default();
@@ -311,21 +320,18 @@ pub fn normalize_llm_advanced_settings(settings: Option<&Value>) -> Map<String, 
 
 pub fn safe_llm_config_payload(config: &Value) -> Value {
     let mut safe_config = config.as_object().cloned().unwrap_or_default();
-    let api_key = safe_config
-        .remove("api_key")
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default();
-    safe_config.insert("has_api_key".to_string(), json!(!api_key.is_empty()));
-    safe_config.insert(
-        "api_key".to_string(),
-        json!(if api_key.is_empty() { "" } else { "********" }),
-    );
     safe_config.insert(
         "advanced_settings".to_string(),
         Value::Object(normalize_llm_advanced_settings(
             safe_config.get("advanced_settings"),
         )),
     );
+    let has_api_key = object_has_non_empty_secret(&safe_config);
+    redact_secrets_in_map(&mut safe_config);
+    safe_config.insert("has_api_key".to_string(), json!(has_api_key));
+    safe_config
+        .entry("api_key".to_string())
+        .or_insert_with(|| json!(""));
     Value::Object(safe_config)
 }
 
@@ -354,6 +360,7 @@ pub fn copy_runtime_llm_config(config: &Value) -> Value {
         .unwrap_or_default();
     let advanced_source = object
         .and_then(|item| item.get("advanced_settings"))
+        .filter(|value| !is_falsy_settings_value(value))
         .or_else(|| provider_config.get("advanced_settings"));
 
     json!({
@@ -439,12 +446,24 @@ pub fn build_llm_candidate_reject_response(rejected: bool) -> Value {
 }
 
 pub fn llm_review_endpoint_requires_live_provider(endpoint: &str) -> bool {
-    !matches!(
-        endpoint,
+    let normalized = endpoint.trim_matches('/');
+    if matches!(
+        normalized,
         "preview-recommend/accept"
             | "preview-recommend/reject"
             | "candidates/accept"
             | "candidates/reject"
+    ) {
+        return false;
+    }
+
+    let endpoint_parts = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    !matches!(
+        endpoint_parts.as_slice(),
+        ["candidates", _, "accept"] | ["candidates", _, "reject"]
     )
 }
 
@@ -549,7 +568,7 @@ fn parse_amount(text: &str) -> Option<f64> {
     }
 
     if contains_any_case_insensitive(text, &["元", "CNY", "RMB"]) {
-        first_number(text).map(f64::abs)
+        parse_currency_adjacent_amount(text).map(f64::abs)
     } else {
         None
     }
@@ -569,15 +588,59 @@ fn parse_number_after_prefix(text: &str, start: usize) -> Option<f64> {
     number_start.and_then(|index| parse_number_at(text, index))
 }
 
-fn first_number(text: &str) -> Option<f64> {
-    for (index, ch) in text.char_indices() {
-        if ch.is_ascii_digit() || matches!(ch, '+' | '-') {
-            if let Some(value) = parse_number_at(text, index) {
-                return Some(value);
+fn parse_currency_adjacent_amount(text: &str) -> Option<f64> {
+    for marker in ["CNY", "cny", "RMB", "rmb"] {
+        for (index, _) in text.match_indices(marker) {
+            if let Some(amount) = parse_number_after_prefix(text, index + marker.len())
+                .or_else(|| parse_number_before_index(text, index))
+            {
+                return Some(amount);
             }
         }
     }
+
+    for (index, _) in text.match_indices("元") {
+        if let Some(amount) = parse_number_before_index(text, index)
+            .or_else(|| parse_number_after_prefix(text, index + "元".len()))
+        {
+            return Some(amount);
+        }
+    }
+
     None
+}
+
+fn parse_number_before_index(text: &str, end: usize) -> Option<f64> {
+    let mut trimmed_end = end;
+    while let Some((index, ch)) = text[..trimmed_end].char_indices().next_back() {
+        if ch.is_whitespace() {
+            trimmed_end = index;
+        } else {
+            break;
+        }
+    }
+
+    let mut start = trimmed_end;
+    let mut has_digit = false;
+    let mut has_decimal = false;
+    for (index, ch) in text[..trimmed_end].char_indices().rev() {
+        if ch.is_ascii_digit() {
+            start = index;
+            has_digit = true;
+        } else if ch == '.' && !has_decimal {
+            start = index;
+            has_decimal = true;
+        } else if ch == ',' {
+            start = index;
+        } else if matches!(ch, '+' | '-') {
+            start = index;
+            break;
+        } else {
+            break;
+        }
+    }
+
+    has_digit.then(|| parse_number_at(text, start)).flatten()
 }
 
 fn parse_number_at(text: &str, start: usize) -> Option<f64> {
@@ -884,7 +947,7 @@ fn is_llm_provider_creatable(provider: &str) -> bool {
 
 fn default_llm_base_url(provider: &str) -> Option<&'static str> {
     match provider {
-        "openai" | "openai_compatible" | "azure" => Some("https://api.openai.com/v1"),
+        "openai" | "openai_compatible" => Some("https://api.openai.com/v1"),
         "claude" => Some("https://api.anthropic.com/v1"),
         "ollama" => Some("http://localhost:11434"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
@@ -893,6 +956,29 @@ fn default_llm_base_url(provider: &str) -> Option<&'static str> {
         "openrouter" => Some("https://openrouter.ai/api/v1"),
         _ => None,
     }
+}
+
+fn validate_azure_base_url(base_url: &str) -> Result<(), String> {
+    let trimmed = base_url.trim();
+    if trimmed.contains('\\') || trimmed.chars().any(char::is_control) {
+        return Err("Azure provider base_url must use an Azure OpenAI host".to_string());
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .ok_or_else(|| "Azure provider base_url must use https".to_string())?;
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if authority.is_empty() || authority.contains('@') {
+        return Err("Azure provider base_url must use an Azure OpenAI host".to_string());
+    }
+    let host = authority.split(':').next().unwrap_or_default();
+    if !host.ends_with(".openai.azure.com") {
+        return Err("Azure provider base_url must use an Azure OpenAI host".to_string());
+    }
+    Ok(())
 }
 
 fn default_llm_model(provider: &str) -> Option<&'static str> {
@@ -932,6 +1018,17 @@ fn decode_settings_object(settings: Option<&Value>) -> Map<String, Value> {
     }
 }
 
+fn is_falsy_settings_value(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(false) => true,
+        Value::String(text) => text.trim().is_empty(),
+        Value::Array(items) => items.is_empty(),
+        Value::Object(object) => object.is_empty(),
+        _ => false,
+    }
+}
+
 fn normalize_float_setting(value: Option<&Value>, minimum: f64, maximum: f64) -> Option<f64> {
     let parsed = match value {
         Some(Value::Number(number)) => number.as_f64(),
@@ -952,4 +1049,110 @@ fn normalize_int_setting(value: Option<&Value>, minimum: i64, maximum: i64) -> O
 
 fn normalize_prompt_text(value: &str) -> String {
     value.trim().chars().take(LLM_PROMPT_TEXT_LIMIT).collect()
+}
+
+fn object_has_non_empty_secret(object: &Map<String, Value>) -> bool {
+    object.iter().any(|(key, value)| {
+        let current_key_has_secret = is_secret_key(key) && secret_value_present(value);
+        current_key_has_secret || value_has_non_empty_secret(value)
+    })
+}
+
+fn value_has_non_empty_secret(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object_has_non_empty_secret(object),
+        Value::Array(items) => items.iter().any(value_has_non_empty_secret),
+        _ => false,
+    }
+}
+
+fn redact_secrets_in_map(object: &mut Map<String, Value>) {
+    for (key, value) in object.iter_mut() {
+        if is_secret_key(key) {
+            let replacement = if secret_value_present(value) {
+                "********"
+            } else {
+                ""
+            };
+            *value = json!(replacement);
+        } else {
+            redact_secrets_in_value(value);
+        }
+    }
+}
+
+fn redact_secrets_in_value(value: &mut Value) {
+    match value {
+        Value::Object(object) => redact_secrets_in_map(object),
+        Value::Array(items) => {
+            for item in items {
+                redact_secrets_in_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn secret_value_present(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(object) => !object.is_empty(),
+        _ => true,
+    }
+}
+
+fn is_secret_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let exact_alias = matches!(
+        normalized.as_str(),
+        "apikey"
+            | "authorization"
+            | "xapikey"
+            | "apisecret"
+            | "secretkey"
+            | "credential"
+            | "credentials"
+            | "proxyauthorization"
+            | "subscriptionkey"
+            | "ocpapimsubscriptionkey"
+            | "accesstoken"
+            | "refreshtoken"
+            | "bearertoken"
+            | "idtoken"
+            | "privatekey"
+            | "token"
+            | "password"
+            | "clientsecret"
+    );
+    if exact_alias {
+        return true;
+    }
+
+    const SECRET_KEY_SUFFIXES: [&str; 15] = [
+        "apikey",
+        "xapikey",
+        "apisecret",
+        "secretkey",
+        "authorizationheader",
+        "proxyauthorization",
+        "subscriptionkey",
+        "accesstoken",
+        "refreshtoken",
+        "bearertoken",
+        "idtoken",
+        "privatekey",
+        "password",
+        "clientsecret",
+        "credentials",
+    ];
+
+    SECRET_KEY_SUFFIXES
+        .iter()
+        .any(|suffix| normalized.len() > suffix.len() && normalized.ends_with(suffix))
 }
