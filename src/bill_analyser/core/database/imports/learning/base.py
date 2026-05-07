@@ -4,11 +4,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
-
+from typing import Any
 
 _UNSET: Any = object()
 
@@ -22,7 +18,7 @@ class ImportLearningBaseMixin:
             return None
         try:
             normalized_value = int(raw_value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         return normalized_value if normalized_value > 0 else None
 

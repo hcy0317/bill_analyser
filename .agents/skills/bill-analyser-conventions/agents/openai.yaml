@@ -1,6 +1,0 @@
-﻿interface:
-  display_name: "Bill Analyser Conventions"
-  short_description: "Repository-specific architecture and workflow guidance for Bill Analyser"
-  default_prompt: "Use the Bill Analyser conventions skill to follow repository-specific architecture, testing, and money-unit rules."
-policy:
-  allow_implicit_invocation: true
