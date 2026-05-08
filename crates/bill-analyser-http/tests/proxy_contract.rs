@@ -248,6 +248,133 @@ async fn rust_owned_routes_take_precedence_over_proxy() {
 }
 
 #[tokio::test]
+async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
+    let upstream = spawn_fake_upstream().await;
+    let app = test_router_with_mode(
+        upstream.url(),
+        Duration::from_secs(5),
+        ImportRouteMode::ImportDbRuntime,
+    );
+
+    let proxied_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/statistics/exchange-rates?base=CNY")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(proxied_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(proxied_response).await["path"],
+        "/api/statistics/exchange-rates"
+    );
+
+    for (method, path) in [
+        (Method::GET, "/api/accounts/"),
+        (Method::GET, "/api/accounts/123"),
+        (Method::OPTIONS, "/api/auth/login"),
+        (Method::GET, "/api/categories/virtual_food"),
+        (Method::PUT, "/api/categories/virtual_food"),
+        (Method::DELETE, "/api/categories/virtual_food"),
+        (Method::GET, "/api/categories/tree"),
+        (Method::GET, "/api/settings/bundle/export"),
+        (Method::GET, "/api/llm/config"),
+        (Method::GET, "/api/data/export.json"),
+        (Method::POST, "/api/matching/candidates/session/12/accept"),
+        (Method::DELETE, "/api/bills/123/recurring-match"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            read_json(response).await["path"],
+            path.split('?').next().unwrap_or(path),
+            "{path}"
+        );
+    }
+
+    let unknown_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/not-in-migration-manifest")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(unknown_response.status(), StatusCode::NOT_FOUND);
+    let unknown_body = read_json(unknown_response).await;
+    assert_eq!(
+        unknown_body["error"]["code"],
+        "route_not_manifest_python_proxied"
+    );
+
+    let wrong_method_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/bills/category/quick-add-keyword")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(wrong_method_response.status(), StatusCode::NOT_FOUND);
+
+    let overmatched_wildcard_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/pictureship/unused")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        overmatched_wildcard_response.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    for (method, path) in [
+        (Method::POST, "/api/bills/pictures/unused/extra"),
+        (Method::POST, "/api/bills/category"),
+        (Method::POST, "/api/bills/category/not-real"),
+        (Method::GET, "/api/accounts/display-orders"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn health_route_reports_proxy_only_runtime_boundary() {
     let upstream = spawn_fake_upstream().await;
     let app = test_router(upstream.url(), Duration::from_secs(5));
@@ -453,6 +580,22 @@ async fn proxy_wraps_body_limit_overflow_as_infrastructure_error() {
 
 fn test_router(upstream: String, timeout: Duration) -> Router {
     let config = HttpShellConfig::new(upstream, timeout, 1024 * 1024).expect("config");
+    let state = ProxyState::new(config).expect("proxy state");
+    build_router(state)
+}
+
+fn test_router_with_mode(
+    upstream: String,
+    timeout: Duration,
+    import_route_mode: ImportRouteMode,
+) -> Router {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        upstream,
+        timeout,
+        1024 * 1024,
+        import_route_mode,
+    )
+    .expect("config");
     let state = ProxyState::new(config).expect("proxy state");
     build_router(state)
 }

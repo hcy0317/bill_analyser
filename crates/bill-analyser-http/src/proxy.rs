@@ -12,11 +12,13 @@ use axum::{
     http::{header, HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode},
     response::IntoResponse,
 };
-use bill_analyser_core::{ApiResponse, ErrorCode, RuntimeError};
+use bill_analyser_core::{
+    endpoints_by_owner, ApiResponse, ErrorCode, MigrationState, RuntimeError,
+};
 use bytes::Bytes;
 use serde::Serialize;
 
-use crate::config::HttpShellConfig;
+use crate::config::{HttpShellConfig, ImportRouteMode};
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
@@ -67,6 +69,36 @@ pub async fn proxy_handler(
     request: Request<Body>,
 ) -> Response<Body> {
     proxy_request(state, request).await
+}
+
+pub async fn ownership_aware_proxy_handler(
+    State(state): State<ProxyState>,
+    request: Request<Body>,
+) -> Response<Body> {
+    let method = request.method().as_str();
+    let path = request.uri().path();
+    if proxy_allowed_for_request(&state, method, path) {
+        return proxy_request(state, request).await;
+    }
+
+    let mut response = ProxyErrorBody::not_manifest_python_proxied(method, path).into_response();
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
+}
+
+pub fn proxy_allowed_for_request(state: &ProxyState, method: &str, path: &str) -> bool {
+    if state.config.import_route_mode == ImportRouteMode::ProxyOnly {
+        return true;
+    }
+    is_manifest_python_proxied_route(method, path)
+}
+
+pub fn is_manifest_python_proxied_route(method: &str, path: &str) -> bool {
+    endpoints_by_owner(MigrationState::PythonProxied)
+        .iter()
+        .any(|endpoint| {
+            method_matches(endpoint.method, method) && route_pattern_matches(endpoint.pattern, path)
+        })
 }
 
 async fn forward_request(
@@ -219,6 +251,15 @@ impl ProxyErrorBody {
             },
         }
     }
+
+    pub fn not_manifest_python_proxied(method: &str, path: &str) -> Self {
+        Self::gateway(
+            "route_not_manifest_python_proxied",
+            format!(
+                "{method} {path} is not declared as PythonProxied in the Rust migration manifest"
+            ),
+        )
+    }
 }
 
 impl IntoResponse for ProxyErrorBody {
@@ -238,4 +279,105 @@ impl IntoResponse for ProxyErrorBody {
         );
         response
     }
+}
+
+fn method_matches(manifest_method: &str, request_method: &str) -> bool {
+    manifest_method.eq_ignore_ascii_case(request_method)
+        || request_method.eq_ignore_ascii_case("OPTIONS")
+        || (manifest_method.eq_ignore_ascii_case("GET")
+            && request_method.eq_ignore_ascii_case("HEAD"))
+}
+
+fn route_pattern_matches(pattern: &str, path: &str) -> bool {
+    if !pattern.starts_with("/api/") {
+        return false;
+    }
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        return path == prefix || path.starts_with(&format!("{prefix}/"));
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return path == prefix || path.starts_with(&format!("{}/", prefix.trim_end_matches('/')));
+    }
+
+    let pattern_segments = pattern.trim_matches('/').split('/').collect::<Vec<_>>();
+    let path_segments = path.trim_matches('/').split('/').collect::<Vec<_>>();
+    route_segments_match(&pattern_segments, &path_segments)
+}
+
+fn route_segments_match(pattern_segments: &[&str], path_segments: &[&str]) -> bool {
+    match pattern_segments.split_first() {
+        None => path_segments.is_empty(),
+        Some((pattern_segment, remaining_pattern)) => {
+            if is_rest_placeholder(pattern_segment) {
+                if remaining_pattern.is_empty() {
+                    return !path_segments.is_empty();
+                }
+                return (1..=path_segments.len())
+                    .any(|count| route_segments_match(remaining_pattern, &path_segments[count..]));
+            }
+
+            path_segments
+                .split_first()
+                .is_some_and(|(path_segment, remaining_path)| {
+                    route_segment_matches(pattern_segment, path_segment)
+                        && route_segments_match(remaining_pattern, remaining_path)
+                })
+        }
+    }
+}
+
+fn route_segment_matches(pattern_segment: &str, path_segment: &str) -> bool {
+    if pattern_segment == path_segment {
+        return true;
+    }
+    if let Some(parameter_name) = single_segment_placeholder_name(pattern_segment) {
+        return !path_segment.is_empty()
+            && (!is_numeric_route_parameter(parameter_name)
+                || path_segment.bytes().all(|byte| byte.is_ascii_digit()));
+    }
+    embedded_placeholder_bounds(pattern_segment).is_some_and(|(prefix, suffix)| {
+        path_segment.starts_with(prefix)
+            && path_segment.ends_with(suffix)
+            && path_segment.len() > prefix.len() + suffix.len()
+    })
+}
+
+fn is_rest_placeholder(pattern_segment: &str) -> bool {
+    pattern_segment.starts_with("{*") && pattern_segment.ends_with('}')
+}
+
+fn single_segment_placeholder_name(pattern_segment: &str) -> Option<&str> {
+    if pattern_segment.starts_with('{')
+        && pattern_segment.ends_with('}')
+        && !is_rest_placeholder(pattern_segment)
+    {
+        return Some(&pattern_segment[1..pattern_segment.len() - 1]);
+    }
+    None
+}
+
+fn is_numeric_route_parameter(parameter_name: &str) -> bool {
+    matches!(
+        parameter_name,
+        "account_id"
+            | "bill_id"
+            | "budget_id"
+            | "candidate_id"
+            | "config_id"
+            | "pair_id"
+            | "preview_id"
+            | "rule_id"
+            | "suggestion_id"
+            | "tag_id"
+            | "template_id"
+    )
+}
+
+fn embedded_placeholder_bounds(pattern_segment: &str) -> Option<(&str, &str)> {
+    let start = pattern_segment.find('{')?;
+    let end = pattern_segment[start..].find('}')? + start;
+    if end == pattern_segment.len() - 1 && start == 0 {
+        return None;
+    }
+    Some((&pattern_segment[..start], &pattern_segment[end + 1..]))
 }

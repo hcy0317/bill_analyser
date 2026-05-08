@@ -70,7 +70,14 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
             "/api/health,/api/runtime".to_string()
         },
     );
-    details.insert("proxied_routes".to_string(), "unowned /api/*".to_string());
+    details.insert(
+        "proxied_routes".to_string(),
+        if config.import_route_mode == ImportRouteMode::ProxyOnly {
+            "unowned /api/*".to_string()
+        } else {
+            "manifest PythonProxied endpoints only".to_string()
+        },
+    );
     details.insert(
         "import_route_mode".to_string(),
         config.import_route_mode.as_str().to_string(),

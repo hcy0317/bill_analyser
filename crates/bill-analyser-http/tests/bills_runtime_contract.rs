@@ -318,7 +318,10 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
 async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("ANY", "/api/bills/pictures*")));
+        .any(|route| route == &("POST", "/api/bills/pictures/unused")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("DELETE", "/api/bills/{bill_id}/recurring-match")));
     let upstream = spawn_fake_upstream().await;
     let fixture = RuntimeFixture::new_with_upstream(upstream.url())?;
     let app = runtime_router(&fixture);
@@ -330,7 +333,9 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
         (Method::GET, "/api/bills/reconciliation_statements"),
         (Method::GET, "/api/bills/123/recurring-candidates"),
         (Method::PUT, "/api/bills/123/recurring-match"),
-        (Method::POST, "/api/bills/category/add-keyword"),
+        (Method::DELETE, "/api/bills/123/recurring-match"),
+        (Method::POST, "/api/bills/category/quick-add-keyword"),
+        (Method::POST, "/api/bills/category/refresh"),
     ] {
         let response = app
             .clone()

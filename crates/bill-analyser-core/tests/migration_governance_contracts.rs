@@ -99,11 +99,14 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 
     for (method, pattern) in [
         ("GET", "/api/bills/export"),
-        ("POST", "/api/bills/pictures*"),
+        ("POST", "/api/bills/pictures"),
+        ("POST", "/api/bills/pictures/unused"),
         ("GET", "/api/bills/reconciliation_statements"),
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
-        ("POST", "/api/bills/category/*"),
+        ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+        ("POST", "/api/bills/category/quick-add-keyword"),
+        ("POST", "/api/bills/category/refresh"),
         ("GET", "/api/statistics/overview"),
         ("GET", "/api/statistics/trends"),
         ("GET", "/api/statistics/comparison"),
@@ -130,6 +133,36 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         assert_eq!(endpoint.state, MigrationState::PythonProxied);
         assert!(endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
+    }
+}
+
+#[test]
+fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
+    for (method, pattern, domain) in [
+        ("GET", "/api/accounts/", "taxonomy-rules-settings"),
+        ("GET", "/api/categories/tree", "taxonomy-rules-settings"),
+        (
+            "GET",
+            "/api/settings/bundle/export",
+            "taxonomy-rules-settings",
+        ),
+        ("GET", "/api/llm/config", "ai-learning-llm"),
+        (
+            "POST",
+            "/api/matching/candidates/{*candidate_id}/accept",
+            "matching-recurring-calendar-networth",
+        ),
+        (
+            "GET",
+            "/api/data/export.{file_type}",
+            "auth-security-user-data",
+        ),
+        ("GET", "/api/backup/jobs", "backup-ops"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::PythonProxied);
+        assert_eq!(endpoint.domain, domain);
     }
 }
 
@@ -213,6 +246,7 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
             ResponseEnvelopeFamily::ProxyInfrastructureError,
             ResponseEnvelopeFamily::FlaskSuccessData,
             ResponseEnvelopeFamily::FlaskSuccessResult,
+            ResponseEnvelopeFamily::FlaskRawPassthrough,
             ResponseEnvelopeFamily::BillsCrud,
             ResponseEnvelopeFamily::BudgetsCrud,
             ResponseEnvelopeFamily::StatisticsRead,
@@ -258,6 +292,12 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         assert!(policy.applies_to_owner(MigrationState::RustOwnedVerified));
         assert!(policy.applies_to_owner(MigrationState::PythonProxied));
     }
+
+    let raw_passthrough = response_envelope_policy(ResponseEnvelopeFamily::FlaskRawPassthrough)
+        .expect("raw passthrough envelope policy exists");
+    assert!(raw_passthrough.applies_to_owner(MigrationState::PythonProxied));
+    assert!(!raw_passthrough.applies_to_owner(MigrationState::RustImplemented));
+    assert!(!raw_passthrough.applies_to_owner(MigrationState::RustOwnedVerified));
 }
 
 #[test]
@@ -365,6 +405,24 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert!(ocr_provider
         .deletion_blockers
         .contains(&"provider_execution_parity"));
+
+    let settings_export = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/settings/bundle/export")
+        .expect("settings bundle export route is present");
+    assert_eq!(
+        settings_export.envelope,
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    );
+
+    let bills_export = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/bills/export")
+        .expect("bills export route is present");
+    assert_eq!(
+        bills_export.envelope,
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    );
 }
 
 #[test]

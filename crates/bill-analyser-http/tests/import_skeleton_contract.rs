@@ -55,6 +55,23 @@ async fn import_route_skeleton_intercepts_every_first_phase_route_without_proxy(
 }
 
 #[tokio::test]
+async fn import_route_skeleton_keeps_non_import_routes_on_python_proxy() {
+    let app = skeleton_router(unavailable_upstream().await);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/bills")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+}
+
+#[tokio::test]
 async fn import_skeleton_parse_reports_no_business_ownership_db_writes_or_deletion() {
     let app = skeleton_router(unavailable_upstream().await);
 

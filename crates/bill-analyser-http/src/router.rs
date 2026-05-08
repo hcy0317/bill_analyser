@@ -10,7 +10,7 @@ use crate::{
     budget_routes::budget_runtime_router,
     config::ImportRouteMode,
     import_routes::{import_runtime_router, import_skeleton_router},
-    proxy::{proxy_handler, ProxyState},
+    proxy::{ownership_aware_proxy_handler, proxy_handler, ProxyState},
     runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity},
     statistics_routes::statistics_runtime_router,
 };
@@ -30,7 +30,12 @@ pub fn build_router(state: ProxyState) -> Router {
         ImportRouteMode::ProxyOnly => router,
     };
 
-    router.fallback(any(proxy_handler)).with_state(state)
+    let fallback = match import_route_mode {
+        ImportRouteMode::ImportDbRuntime => any(ownership_aware_proxy_handler),
+        ImportRouteMode::ImportRouteSkeleton | ImportRouteMode::ProxyOnly => any(proxy_handler),
+    };
+
+    router.fallback(fallback).with_state(state)
 }
 
 pub async fn health_handler(State(state): State<ProxyState>) -> Json<HttpShellHealth> {

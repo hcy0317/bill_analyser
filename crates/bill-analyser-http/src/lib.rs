@@ -28,7 +28,8 @@ pub use import_routes::{
 };
 pub use proxy::{
     build_upstream_url, filter_proxy_request_headers, filter_proxy_response_headers,
-    is_hop_by_hop_header, ProxyErrorBody, ProxyState, REQUEST_ID_HEADER,
+    is_hop_by_hop_header, is_manifest_python_proxied_route, ownership_aware_proxy_handler,
+    proxy_allowed_for_request, ProxyErrorBody, ProxyState, REQUEST_ID_HEADER,
 };
 pub use router::{build_router, health_handler, metadata_handler};
 pub use runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity, ProxyFallback};

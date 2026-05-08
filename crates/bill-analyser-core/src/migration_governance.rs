@@ -89,6 +89,8 @@ pub enum RouteHandlerId {
         rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
     )]
     StatisticsExchangeProxyPassthrough,
+    #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
+    LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
     DatabaseFacadeContractOracle,
 }
@@ -139,6 +141,9 @@ impl RouteHandlerId {
             Self::StatisticsExchangeProxyPassthrough => {
                 "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
             }
+            Self::LegacyPythonProxyPassthrough => {
+                "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
+            }
             Self::DatabaseFacadeContractOracle => {
                 "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle"
             }
@@ -164,6 +169,7 @@ pub enum ResponseEnvelopeFamily {
     ProxyInfrastructureError,
     FlaskSuccessData,
     FlaskSuccessResult,
+    FlaskRawPassthrough,
     ImportV2Stage,
     ImportPreviewAction,
     ImportPreviewItemDecision,
@@ -344,6 +350,28 @@ const MANIFEST_STATES: [MigrationState; 6] = [
     MigrationState::Planned,
 ];
 
+macro_rules! python_proxy_route {
+    ($method:literal, $pattern:literal, $domain:literal) => {
+        python_proxy_route!(
+            $method,
+            $pattern,
+            $domain,
+            ResponseEnvelopeFamily::FlaskSuccessResult
+        )
+    };
+    ($method:literal, $pattern:literal, $domain:literal, $envelope:expr) => {
+        EndpointOwnership {
+            method: $method,
+            pattern: $pattern,
+            domain: $domain,
+            state: MigrationState::PythonProxied,
+            envelope: $envelope,
+            deletion_blocked_until_all_import_gates: false,
+            notes: "Live Python sidecar route remains explicitly proxied until its functional domain is ported.",
+        }
+    };
+}
+
 const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     EndpointOwnership {
         method: "GET",
@@ -494,18 +522,27 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         pattern: "/api/bills/export",
         domain: "bills-crud-adjacent",
         state: MigrationState::PythonProxied,
-        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes: "Bills export remains Python-proxied until the export/media/reconciliation slice owns streaming response semantics.",
     },
     EndpointOwnership {
         method: "POST",
-        pattern: "/api/bills/pictures*",
+        pattern: "/api/bills/pictures",
         domain: "bills-crud-adjacent",
         state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Transaction picture upload/remove remains Python-proxied.",
+        notes: "Transaction picture upload remains Python-proxied.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/bills/pictures/unused",
+        domain: "bills-crud-adjacent",
+        state: MigrationState::PythonProxied,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Unused transaction picture cleanup remains Python-proxied.",
     },
     EndpointOwnership {
         method: "GET",
@@ -536,12 +573,21 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     },
     EndpointOwnership {
         method: "POST",
-        pattern: "/api/bills/category/*",
+        pattern: "/api/bills/category/quick-add-keyword",
         domain: "bills-category-actions",
         state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Category action helpers remain Python-proxied until matching/category-rule runtime migrates.",
+        notes: "Category quick keyword helper remains Python-proxied until matching/category-rule runtime migrates.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/bills/category/refresh",
+        domain: "bills-category-actions",
+        state: MigrationState::PythonProxied,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Category refresh helper remains Python-proxied until matching/category-rule runtime migrates.",
     },
     EndpointOwnership {
         method: "GET",
@@ -1236,6 +1282,418 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns OCR config; true receipt recognition remains Python-proxied.",
     },
+    python_proxy_route!("POST", "/api/2fa/disable", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/2fa/enable/confirm", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/2fa/enable/request", "auth-security-user-data"),
+    python_proxy_route!(
+        "POST",
+        "/api/2fa/recovery/regenerate",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!("POST", "/api/2fa/recovery/verify", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/2fa/status", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/2fa/verify", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/accounts/", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/accounts/", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/accounts/{account_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/accounts/{account_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/accounts/{account_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/accounts/{account_id}/transactions/clear",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/accounts/{account_id}/transactions/move",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/accounts/display-orders",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/accounts/sync-balances",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/auth/email/resend-verification",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!("POST", "/api/auth/email/verify", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/auth/login", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/auth/logout", "auth-security-user-data"),
+    python_proxy_route!(
+        "POST",
+        "/api/auth/oauth2/authorize",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/auth/password/forgot",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/auth/password/reset",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!("POST", "/api/auth/register", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/backup/", "backup-ops"),
+    python_proxy_route!("POST", "/api/backup/cleanup", "backup-ops"),
+    python_proxy_route!("POST", "/api/backup/create", "backup-ops"),
+    python_proxy_route!("DELETE", "/api/backup/delete/{filename}", "backup-ops"),
+    python_proxy_route!(
+        "GET",
+        "/api/backup/download/{filename}",
+        "backup-ops",
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    ),
+    python_proxy_route!("GET", "/api/backup/jobs", "backup-ops"),
+    python_proxy_route!("POST", "/api/backup/jobs", "backup-ops"),
+    python_proxy_route!("POST", "/api/backup/restore/{filename}", "backup-ops"),
+    python_proxy_route!("POST", "/api/backup/restore/verify", "backup-ops"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/bills/{bill_id}/recurring-match",
+        "bills-recurring"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/calendar/events",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!("GET", "/api/categories/", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/categories/", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/categories/{category_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/categories/{category_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/categories/{category_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!("GET", "/api/categories/all", "taxonomy-rules-settings"),
+    python_proxy_route!("PUT", "/api/categories/all", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/categories/batch", "taxonomy-rules-settings"),
+    python_proxy_route!("GET", "/api/categories/export", "taxonomy-rules-settings"),
+    python_proxy_route!("GET", "/api/categories/flat", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/categories/import", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/categories/move", "taxonomy-rules-settings"),
+    python_proxy_route!("GET", "/api/categories/rules", "taxonomy-rules-settings"),
+    python_proxy_route!("PUT", "/api/categories/rules", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "GET",
+        "/api/categories/statistics",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!("GET", "/api/categories/tree", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "POST",
+        "/api/categories/update-all",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!("GET", "/api/category-rules/", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/category-rules/", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/category-rules/{rule_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/category-rules/{rule_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/category-rules/{rule_id}/test",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/category-rules/defaults",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/category-rules/migrate",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/category-rules/reorder",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/data/clear/all",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/data/clear/transactions",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/data/export.{file_type}",
+        "auth-security-user-data",
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    ),
+    python_proxy_route!("GET", "/api/data/statistics", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/insights/anomalies", "statistics-analyzer"),
+    python_proxy_route!("GET", "/api/llm/candidates", "ai-learning-llm"),
+    python_proxy_route!("GET", "/api/llm/candidates/{candidate_id}", "ai-learning-llm"),
+    python_proxy_route!(
+        "POST",
+        "/api/llm/candidates/{candidate_id}/accept",
+        "ai-learning-llm"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/llm/candidates/{candidate_id}/reject",
+        "ai-learning-llm"
+    ),
+    python_proxy_route!("GET", "/api/llm/config", "ai-learning-llm"),
+    python_proxy_route!("POST", "/api/llm/config", "ai-learning-llm"),
+    python_proxy_route!("GET", "/api/llm/configs", "ai-learning-llm"),
+    python_proxy_route!("POST", "/api/llm/configs", "ai-learning-llm"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/llm/configs/{config_id}",
+        "ai-learning-llm"
+    ),
+    python_proxy_route!("PUT", "/api/llm/configs/{config_id}", "ai-learning-llm"),
+    python_proxy_route!(
+        "POST",
+        "/api/llm/configs/{config_id}/activate",
+        "ai-learning-llm"
+    ),
+    python_proxy_route!("POST", "/api/llm/induce-rules", "ai-learning-llm"),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/bills/{bill_id}/candidates",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/bills/{bill_id}/feedback",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/candidates",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/matching/candidates/{*candidate_id}/accept",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/matching/candidates/{*candidate_id}/clear",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/matching/candidates/{*candidate_id}/reject",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/investment-settings",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/matching/investment-settings",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/matching/manual-pair",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/pairs",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "DELETE",
+        "/api/matching/pairs/{pair_id}",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/matching/reconcile-history",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/reconciliation-candidates",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/matching/sessions/{session_id}/candidates",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/networth/snapshot",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!("GET", "/api/profile", "auth-security-user-data"),
+    python_proxy_route!("PUT", "/api/profile", "auth-security-user-data"),
+    python_proxy_route!("DELETE", "/api/profile/avatar", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/profile/avatar", "auth-security-user-data"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/profile/cloud-settings",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!("GET", "/api/profile/cloud-settings", "auth-security-user-data"),
+    python_proxy_route!("PUT", "/api/profile/cloud-settings", "auth-security-user-data"),
+    python_proxy_route!(
+        "POST",
+        "/api/profile/email/resend-verification",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!("GET", "/api/profile/external-auths", "auth-security-user-data"),
+    python_proxy_route!(
+        "POST",
+        "/api/profile/external-auths/unlink",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/recurring/suggestions",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/recurring/suggestions/{suggestion_id}/accept",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/recurring/suggestions/{suggestion_id}/reject",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/recurring/suggestions/detect",
+        "matching-recurring-calendar-networth"
+    ),
+    python_proxy_route!("GET", "/api/rules/overview", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "POST",
+        "/api/security/step-up/verify",
+        "auth-security-user-data"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/settings/bundle/export",
+        "taxonomy-rules-settings",
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/settings/bundle/import",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/settings/bundle/import/preview",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/settings/bundle/sections/{section_key}/export",
+        "taxonomy-rules-settings",
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/settings/bundle/sections/{section_key}/export",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/settings/bundle/sections/{section_key}/import",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "POST",
+        "/api/settings/bundle/sections/{section_key}/import/preview",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/settings/encryption/status",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!("GET", "/api/system/version", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/tags/", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/tags/", "taxonomy-rules-settings"),
+    python_proxy_route!("DELETE", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
+    python_proxy_route!("GET", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
+    python_proxy_route!("PUT", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/tags/batch", "taxonomy-rules-settings"),
+    python_proxy_route!("PUT", "/api/tags/display-orders", "taxonomy-rules-settings"),
+    python_proxy_route!("GET", "/api/templates/", "taxonomy-rules-settings"),
+    python_proxy_route!("POST", "/api/templates/", "taxonomy-rules-settings"),
+    python_proxy_route!(
+        "DELETE",
+        "/api/templates/{template_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "GET",
+        "/api/templates/{template_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/templates/{template_id}",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!(
+        "PUT",
+        "/api/templates/display-orders",
+        "taxonomy-rules-settings"
+    ),
+    python_proxy_route!("DELETE", "/api/tokens", "auth-security-user-data"),
+    python_proxy_route!("GET", "/api/tokens", "auth-security-user-data"),
+    python_proxy_route!("DELETE", "/api/tokens/{token_id}", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/tokens/api", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/tokens/mcp", "auth-security-user-data"),
+    python_proxy_route!("POST", "/api/tokens/refresh", "auth-security-user-data"),
     EndpointOwnership {
         method: "CONTRACT",
         pattern: "contract://import-v2-envelope-oracle",
@@ -1698,6 +2156,103 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         transition_evidence: PROVIDER_ROUTE_EVIDENCE,
     },
     DomainGovernancePolicy {
+        domain: "auth-security-user-data",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/auth",
+            "src/bill_analyser/core/security",
+            "src/bill_analyser/core/user_data.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/proxy.rs",
+            "crates/bill-analyser-core/src/auth/mod.rs",
+        ],
+        tests_migrated: &["crates/bill-analyser-core/tests/auth_security_contracts.rs"],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: EMPTY_STRINGS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Auth, session, profile, token, and user-data routes remain Python-proxied until the P3 domain cutover ports runtime handlers.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "taxonomy-rules-settings",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/accounts",
+            "src/bill_analyser/api/routes/categories",
+            "src/bill_analyser/api/routes/category_rules.py",
+            "src/bill_analyser/api/routes/tags.py",
+            "src/bill_analyser/api/routes/templates.py",
+            "src/bill_analyser/api/routes/settings_bundle.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/proxy.rs",
+            "crates/bill-analyser-core/src/adapters/category.rs",
+            "crates/bill-analyser-db/src/taxonomy",
+        ],
+        tests_migrated: &["crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs"],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: EMPTY_STRINGS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["taxonomy_crud_parity", "settings_bundle_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Accounts, categories, tags, templates, category rules, and settings bundle routes remain Python-proxied until the P4 domain cutover ports runtime handlers.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "matching-recurring-calendar-networth",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/matching",
+            "src/bill_analyser/api/routes/recurring.py",
+            "src/bill_analyser/api/routes/calendar.py",
+            "src/bill_analyser/api/routes/networth.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/proxy.rs",
+            "crates/bill-analyser-core/src/matching.rs",
+        ],
+        tests_migrated: &["crates/bill-analyser-core/tests/matching_contracts.rs"],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: EMPTY_STRINGS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["matching_runtime_parity", "recurring_calendar_networth_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Formal matching, recurring suggestions, calendar, and net worth runtime routes remain Python-proxied until the P8 domain cutover ports handlers.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "backup-ops",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/backup",
+            "src/bill_analyser/core/backup",
+            "src/bill_analyser/core/ops",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/proxy.rs",
+            "crates/bill-analyser-core/src/ops.rs",
+        ],
+        tests_migrated: &["crates/bill-analyser-core/tests/ops_contracts.rs"],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: EMPTY_STRINGS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["backup_restore_parity", "ops_runtime_config_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Backup, restore, cleanup, jobs, and operational runtime routes remain Python-proxied until the P12 domain cutover ports handlers.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+    },
+    DomainGovernancePolicy {
         domain: "database-facade",
         python_owner_files: &[
             "src/bill_analyser/core/db.py",
@@ -1766,6 +2321,13 @@ const ENVELOPE_POLICIES: &[ResponseEnvelopePolicy] = &[
         route_contexts: PYTHON_PROXIED_ENVELOPE_CONTEXT,
         success_shape: "success=true result/message",
         error_shape: "success=false error/code/message as emitted by Flask route",
+        proxy_may_wrap: false,
+    },
+    ResponseEnvelopePolicy {
+        family: ResponseEnvelopeFamily::FlaskRawPassthrough,
+        route_contexts: PYTHON_PROXIED_ENVELOPE_CONTEXT,
+        success_shape: "raw Flask passthrough response, including send_file/download bodies and headers",
+        error_shape: "raw Flask error response for passthrough routes",
         proxy_may_wrap: false,
     },
     ResponseEnvelopePolicy {
@@ -1941,6 +2503,10 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         "statistics-read" => RouteHandlerId::StatisticsReadRuntime,
         "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerProxyPassthrough,
         "statistics-exchange" => RouteHandlerId::StatisticsExchangeProxyPassthrough,
+        "auth-security-user-data"
+        | "taxonomy-rules-settings"
+        | "matching-recurring-calendar-networth"
+        | "backup-ops" => RouteHandlerId::LegacyPythonProxyPassthrough,
         "database-facade" => RouteHandlerId::DatabaseFacadeContractOracle,
         _ => panic!("missing handler mapping for migration governance domain {domain}"),
     }

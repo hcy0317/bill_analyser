@@ -32,7 +32,7 @@ use serde_json::{json, Map, Number, Value};
 use crate::{
     auth::resolve_user_id_from_headers,
     config::HttpShellConfig,
-    proxy::{proxy_handler, ProxyState},
+    proxy::{ownership_aware_proxy_handler, ProxyState},
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -58,26 +58,42 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
 ];
 
 pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("ANY", "/api/bills/export"),
-    ("ANY", "/api/bills/pictures*"),
-    ("ANY", "/api/bills/reconciliation_statements"),
-    ("ANY", "/api/bills/{bill_id}/recurring-candidates"),
-    ("ANY", "/api/bills/{bill_id}/recurring-match"),
-    ("ANY", "/api/bills/category/*"),
+    ("GET", "/api/bills/export"),
+    ("POST", "/api/bills/pictures"),
+    ("POST", "/api/bills/pictures/unused"),
+    ("GET", "/api/bills/reconciliation_statements"),
+    ("GET", "/api/bills/{bill_id}/recurring-candidates"),
+    ("PUT", "/api/bills/{bill_id}/recurring-match"),
+    ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+    ("POST", "/api/bills/category/quick-add-keyword"),
+    ("POST", "/api/bills/category/refresh"),
 ];
 
 pub fn bill_runtime_router() -> Router<ProxyState> {
     Router::new()
-        .route("/api/bills/export", any(proxy_handler))
-        .route("/api/bills/pictures", any(proxy_handler))
-        .route("/api/bills/pictures/*path", any(proxy_handler))
-        .route("/api/bills/reconciliation_statements", any(proxy_handler))
+        .route("/api/bills/export", any(ownership_aware_proxy_handler))
+        .route("/api/bills/pictures", any(ownership_aware_proxy_handler))
+        .route(
+            "/api/bills/pictures/*path",
+            any(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/bills/reconciliation_statements",
+            any(ownership_aware_proxy_handler),
+        )
         .route(
             "/api/bills/:bill_id/recurring-candidates",
-            any(proxy_handler),
+            any(ownership_aware_proxy_handler),
         )
-        .route("/api/bills/:bill_id/recurring-match", any(proxy_handler))
-        .route("/api/bills/category/*path", any(proxy_handler))
+        .route(
+            "/api/bills/:bill_id/recurring-match",
+            any(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/bills/category/*path",
+            any(ownership_aware_proxy_handler),
+        )
+        .route("/api/bills/category", any(ownership_aware_proxy_handler))
         .route(
             "/api/bills",
             get(list_bills_handler).post(create_bill_handler),
