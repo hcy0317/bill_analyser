@@ -6,7 +6,7 @@ It does not change runtime behavior and does not mark any Python business file a
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 66
+- Rust backend files: 91
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -77,10 +77,10 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/auth/two_factor_support.py | auth-security | api-route | port | 106 |
 | src/bill_analyser/api/routes/auth/user_data.py | auth-security | api-route | port | 361 |
 | src/bill_analyser/api/routes/backup/__init__.py | backup-operations | package-marker | facade | 37 |
-| src/bill_analyser/api/routes/backup/cleanup.py | backup-operations | api-route | port | 150 |
-| src/bill_analyser/api/routes/backup/files.py | backup-operations | api-route | port | 320 |
-| src/bill_analyser/api/routes/backup/jobs.py | backup-operations | api-route | port | 93 |
-| src/bill_analyser/api/routes/backup/support.py | backup-operations | api-route | port | 364 |
+| src/bill_analyser/api/routes/backup/cleanup.py | backup-operations | api-route | port | 181 |
+| src/bill_analyser/api/routes/backup/files.py | backup-operations | api-route | port | 474 |
+| src/bill_analyser/api/routes/backup/jobs.py | backup-operations | api-route | port | 149 |
+| src/bill_analyser/api/routes/backup/support.py | backup-operations | api-route | port | 449 |
 | src/bill_analyser/api/routes/bills/__init__.py | bills-import | package-marker | facade | 77 |
 | src/bill_analyser/api/routes/bills/category_actions.py | bills-import | api-route | port | 212 |
 | src/bill_analyser/api/routes/bills/crud_create_update.py | bills-import | api-route | port | 311 |
@@ -123,7 +123,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/api/routes/llm/candidates.py | ai-learning-llm | api-route | port | 97 |
 | src/bill_analyser/api/routes/llm/configs.py | ai-learning-llm | api-route | port | 174 |
 | src/bill_analyser/api/routes/llm/preview.py | ai-learning-llm | api-route | port | 178 |
-| src/bill_analyser/api/routes/llm/support.py | ai-learning-llm | api-route | port | 225 |
+| src/bill_analyser/api/routes/llm/support.py | ai-learning-llm | api-route | port | 318 |
 | src/bill_analyser/api/routes/matching/__init__.py | matching-reconciliation | package-marker | facade | 37 |
 | src/bill_analyser/api/routes/matching/actions.py | matching-reconciliation | api-route | port | 161 |
 | src/bill_analyser/api/routes/matching/pairs.py | matching-reconciliation | api-route | port | 114 |
@@ -161,9 +161,9 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/ai/llm/learning_service/service.py | ai-learning-llm | core-service | port | 34 |
 | src/bill_analyser/core/ai/llm/learning_service/session_analysis.py | ai-learning-llm | core-service | port | 324 |
 | src/bill_analyser/core/ai/llm/prompts.py | ai-learning-llm | core-service | port | 253 |
-| src/bill_analyser/core/ai/llm/provider.py | ai-learning-llm | core-service | port | 346 |
+| src/bill_analyser/core/ai/llm/provider.py | ai-learning-llm | core-service | port | 374 |
 | src/bill_analyser/core/ai/ocr/__init__.py | ai-ocr | package-marker | facade | 1 |
-| src/bill_analyser/core/ai/ocr/payment_screenshot_parser.py | ai-ocr | core-service | port | 245 |
+| src/bill_analyser/core/ai/ocr/payment_screenshot_parser.py | ai-ocr | core-service | port | 250 |
 | src/bill_analyser/core/ai/ocr/provider.py | ai-ocr | core-service | port | 181 |
 | src/bill_analyser/core/ai/ocr/service.py | ai-ocr | core-service | port | 340 |
 | src/bill_analyser/core/analyzer.py | statistics-reporting | core-service | port | 683 |
@@ -225,7 +225,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/database/imports/__init__.py | bills-import | package-marker | facade | 2 |
 | src/bill_analyser/core/database/imports/configs/__init__.py | bills-import | package-implementation | port | 419 |
 | src/bill_analyser/core/database/imports/learning/__init__.py | bills-import | package-marker | facade | 28 |
-| src/bill_analyser/core/database/imports/learning/base.py | bills-import | database-access | port | 157 |
+| src/bill_analyser/core/database/imports/learning/base.py | bills-import | database-access | port | 153 |
 | src/bill_analyser/core/database/imports/learning/corpus.py | bills-import | database-access | port | 226 |
 | src/bill_analyser/core/database/imports/learning/events.py | bills-import | database-access | port | 151 |
 | src/bill_analyser/core/database/imports/learning/model.py | bills-import | database-access | port | 274 |
@@ -330,7 +330,7 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/core/smart_dedup/platform_bank.py | smart-dedup | core-service | port | 268 |
 | src/bill_analyser/core/smart_dedup/reconciliation.py | smart-dedup | core-service | port | 298 |
 | src/bill_analyser/core/smart_dedup/transfers.py | smart-dedup | core-service | port | 343 |
-| src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 402 |
+| src/bill_analyser/core/sync.py | sync-runtime | core-service | port | 503 |
 | src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port | 154 |
 | src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port | 214 |
 | src/bill_analyser/import_contracts/__init__.py | import-contracts | package-marker | facade | 23 |
@@ -359,11 +359,11 @@ It does not change runtime behavior and does not mark any Python business file a
 | src/bill_analyser/utils/charting/ranking.py | statistics-reporting | utility | port | 95 |
 | src/bill_analyser/utils/charting/trends.py | statistics-reporting | utility | port | 110 |
 | src/bill_analyser/utils/charts.py | statistics-reporting | utility | port | 12 |
-| src/bill_analyser/utils/config.py | api-runtime-shell | utility | port | 585 |
+| src/bill_analyser/utils/config.py | api-runtime-shell | utility | port | 628 |
 | src/bill_analyser/utils/constants.py | shared-primitives | utility | port | 231 |
 | src/bill_analyser/utils/currency.py | shared-primitives | utility | port | 160 |
 | src/bill_analyser/utils/logger.py | api-runtime-shell | utility | port | 491 |
-| src/bill_analyser/utils/report_export.py | statistics-reporting | utility | port | 225 |
+| src/bill_analyser/utils/report_export.py | statistics-reporting | utility | port | 271 |
 | src/bill_analyser/utils/validator.py | shared-primitives | utility | port | 278 |
 
 ## Rust Backend Files
@@ -384,6 +384,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/import_pipeline.rs
 - crates/bill-analyser-core/src/lib.rs
 - crates/bill-analyser-core/src/matching.rs
+- crates/bill-analyser-core/src/migration_governance.rs
 - crates/bill-analyser-core/src/ops.rs
 - crates/bill-analyser-core/src/parsers.rs
 - crates/bill-analyser-core/src/primitives/auth.rs
@@ -401,10 +402,12 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/statistics.rs
 - crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs
 - crates/bill-analyser-core/tests/auth_security_contracts.rs
+- crates/bill-analyser-core/tests/bridge_cli_contracts.rs
 - crates/bill-analyser-core/tests/budget_contracts.rs
 - crates/bill-analyser-core/tests/import_learning_contracts.rs
 - crates/bill-analyser-core/tests/import_pipeline_contracts.rs
 - crates/bill-analyser-core/tests/matching_contracts.rs
+- crates/bill-analyser-core/tests/migration_governance_contracts.rs
 - crates/bill-analyser-core/tests/ops_contracts.rs
 - crates/bill-analyser-core/tests/parser_contracts.rs
 - crates/bill-analyser-core/tests/response_contract.rs
@@ -413,12 +416,17 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/tests/smart_dedup_contracts.rs
 - crates/bill-analyser-core/tests/statistics_contracts.rs
 - crates/bill-analyser-core/tests/transaction_adapter_contracts.rs
+- crates/bill-analyser-db/src/app_settings.rs
+- crates/bill-analyser-db/src/bills.rs
 - crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs
+- crates/bill-analyser-db/src/budgets.rs
 - crates/bill-analyser-db/src/connection.rs
 - crates/bill-analyser-db/src/error.rs
+- crates/bill-analyser-db/src/import_staging.rs
 - crates/bill-analyser-db/src/lib.rs
 - crates/bill-analyser-db/src/path.rs
 - crates/bill-analyser-db/src/schema.rs
+- crates/bill-analyser-db/src/statistics.rs
 - crates/bill-analyser-db/src/taxonomy/accounts.rs
 - crates/bill-analyser-db/src/taxonomy/categories.rs
 - crates/bill-analyser-db/src/taxonomy/mod.rs
@@ -427,13 +435,30 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-db/src/taxonomy/templates.rs
 - crates/bill-analyser-db/src/transaction.rs
 - crates/bill-analyser-db/src/user_scope.rs
+- crates/bill-analyser-db/tests/app_settings.rs
+- crates/bill-analyser-db/tests/bills_runtime.rs
+- crates/bill-analyser-db/tests/budgets_runtime.rs
+- crates/bill-analyser-db/tests/import_staging.rs
 - crates/bill-analyser-db/tests/sqlite_runtime.rs
+- crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs
+- crates/bill-analyser-http/src/auth.rs
+- crates/bill-analyser-http/src/bill_routes.rs
+- crates/bill-analyser-http/src/bin/bill_http_server.rs
+- crates/bill-analyser-http/src/budget_routes.rs
 - crates/bill-analyser-http/src/config.rs
+- crates/bill-analyser-http/src/import_routes.rs
 - crates/bill-analyser-http/src/lib.rs
 - crates/bill-analyser-http/src/proxy.rs
 - crates/bill-analyser-http/src/router.rs
 - crates/bill-analyser-http/src/runtime.rs
+- crates/bill-analyser-http/src/server.rs
+- crates/bill-analyser-http/src/statistics_routes.rs
+- crates/bill-analyser-http/tests/bills_runtime_contract.rs
+- crates/bill-analyser-http/tests/budget_runtime_contract.rs
+- crates/bill-analyser-http/tests/import_runtime_contract.rs
+- crates/bill-analyser-http/tests/import_skeleton_contract.rs
 - crates/bill-analyser-http/tests/proxy_contract.rs
+- crates/bill-analyser-http/tests/statistics_runtime_contract.rs
 
 ## Verified Dead Baseline
 

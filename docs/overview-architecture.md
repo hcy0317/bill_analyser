@@ -1,12 +1,19 @@
 # Bill Analyser 总体架构
 
 ## 2.1 分层结构
-- **API 层（Flask 默认运行入口）**：`src/bill_analyser/api/`
-  - 同步路由处理 HTTP 请求
-  - 通过事件循环桥接调用异步服务
-- **Rust HTTP ingress（可选迁移入口）**：`crates/bill-analyser-http/`
-  - 提供 opt-in HTTP 壳、健康/运行时元数据与未迁移路由反向代理
-  - 默认启动链仍不切到 Rust；被代理的 Python 路由不计为 Rust 业务接管
+- **Rust HTTP 主入口**：`crates/bill-analyser-http/`
+  - `bill_http_server` 默认监听 `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`
+  - 默认通过 `import_db_runtime` 接管第一阶段导入/预览旁路、账单 CRUD、预算 CRUD/export/execution/forecast/history/import 与统计读取运行时，未迁移 `/api/*` 域反向代理到 Python/Flask sidecar
+  - runtime metadata 声明 `api_takeover=true`；被代理的 Python 路由仍不计为 Rust 业务迁移完成
+- **Python/Flask sidecar**：`src/bill_analyser/api/`
+  - `start_backend.ps1` 默认以 `BILL_ANALYSER_API_HOST=127.0.0.1`、`BILL_ANALYSER_API_PORT=5001` 启动 sidecar
+  - 同步路由继续处理未迁移 HTTP 请求，并通过事件循环桥接调用异步服务
+- **Rust HTTP proxy fallback**：`BILL_ANALYSER_PYTHON_UPSTREAM=http://127.0.0.1:5001`
+  - 未迁移域继续原样转发到 Python sidecar，代理基础设施错误由 Rust 包装，Python 业务 envelope 原样保留
+- **Rust migration governance（迁移治理合同）**：`crates/bill-analyser-core/src/migration_governance.rs`
+  - 固定路由 ownership matrix、响应 envelope oracle、导入 DB writer policy 与 Python import 删除五证据门禁
+  - Rust DB writer policy 为 `RustDomainOwned`，导入、账单、预算和统计读取 runtime 只能在明确 Rust-owned 路由内直接访问 SQLite
+  - 当前治理矩阵把第一阶段导入与预览决策旁路、核心账单 CRUD、预算 CRUD/export/execution/forecast/history/import、DB-backed statistics read routes 标为 Rust-owned，同时把统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成与全局 Learning Center suggestion/rules 决策标为 Python-proxied，并继续把 Python import 删除视为五门禁阻塞面；显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 统计读取。`POST /api/llm/preview-recommend`、`POST /api/llm/analyze-transactions`、`POST /api/llm/rule-synthesis`、全局 `/api/learning/suggestions*`、全局 `/api/learning/rules*` 与 `POST /api/ml/receipt-recognition` 仍是 Python-proxied，避免在 Rust 尚未拥有真实 provider/Learning Center 语义时截断生成和决策能力。
 - **业务层（Core）**：`src/bill_analyser/core/`
   - 账单导入编排、去重、分类、统计、汇率等核心逻辑
 - **数据层（Database）**：`src/bill_analyser/core/db.py` + `src/bill_analyser/core/database/`
@@ -14,6 +21,9 @@
   - 真实持久化能力按 runtime / schema / 业务域 mixin 拆分；实现模块统一收口到 `core/database/**`，业务域使用无 `db_` 前缀的语义 package
   - `database/runtime.py`、`database/shared.py`、`database/time.py`、`database/encryption.py` 与 `database/schema/` 维护连接生命周期、共享协议、时间、加密和 schema 编排内核
   - 底层仍保持基于 `aiosqlite` 的异步数据库访问
+- **Rust SQLite runtime primitives（迁移期 DB 原语）**：`crates/bill-analyser-db/src/import_staging.rs`、`crates/bill-analyser-db/src/app_settings.rs`、`crates/bill-analyser-db/src/bills.rs`、`crates/bill-analyser-db/src/budgets.rs`、`crates/bill-analyser-db/src/statistics.rs`
+  - 提供导入 session/preview/parser template staging 的 Rust DDL、写入、分页读取、选择状态、processed 标记、StandardBill-to-parser-template adapter、parser-template-to-preview staging adapter、selected preview confirm-to-bills、preview update/reclassify、preview-item transfer/recurring/learning decision、learning promotion、preview LLM recommendation/memory event、OCR config app_settings、annotation sample upsert/read、账单 CRUD、预算 CRUD/export/execution/forecast/history/import 与统计读取聚合原语
+  - 当前通过显式 `import_db_runtime` 暴露 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、预算 CRUD/export/execution/forecast/history/import 与统计读取；运行时 DB path 使用应用文件 guard 打开 `BILL_ANALYSER_SQLITE_DB_PATH`，原 `temporary_file` guard 仅用于测试/复制库安全边界。parser-specific Excel/XLSX、完整 Python parser parity、自动 recurring 候选生成、统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、模型生成、真实 LLM provider 推荐、全局 Learning Center suggestions/rules 循环、OCR 图片识别以及自动分类式 reclassify 编排仍未迁移并继续反代到 Python，Python import 删除门禁仍保持阻塞
 - **前端层（Vue3 + TS）**：`src/web/src/`
   - 视图、状态管理（Pinia stores）、服务层（axios）
 
@@ -25,7 +35,7 @@
 - **异步桥接模式**：Flask 路由内创建独立事件循环调用 async 逻辑
 - **REST 主链模式**：当前运行态主链统一收口到 REST（`/api/...`）
 - **适配器/转换模式**：前后端字段、时间、金额单位统一转换
-- **Rust 内部库与可选 ingress 边界**：Rust 迁移当前默认仍保持 Flask REST 外壳作为运行时入口；`bill-analyser-core` 提供 runtime identity、health、error、API response envelope、共享 primitives、auth/security foundation、分类规则表达式 AST 编译、AI/OCR/LLM 合同层以及 backup/ops 安全合同层，`bill-analyser-db` 提供 SQLite runtime foundation；`bill-analyser-http` 提供 opt-in `rust-http-shell:proxy-only` 入口，只拥有自身健康/运行时元数据路由与未迁移路由反向代理，`api_takeover=false`、`business_migration=none`。`POST /api/tokens/refresh` 将 decoded refresh claims 形状校验委托给预构建的 `bill_auth_bridge`，新分类规则表达式编译委托给 `bill_category_rule_bridge`，其余业务 API、备份文件操作、云 SDK 上传与数据库写入仍由 Python 拥有。
+- **Rust 主 HTTP + 反向代理边界**：Rust 迁移当前以 `bill-analyser-http` 作为主 HTTP 入口；`bill-analyser-core` 提供 runtime identity、health、error、API response envelope、共享 primitives、auth/security foundation、分类规则表达式 AST 编译、AI/OCR/LLM 合同层、backup/ops 安全合同层以及 migration governance oracle，`bill-analyser-db` 提供 SQLite runtime foundation 和导入 session/preview/parser template staging、StandardBill-to-parser-template adapter、parser-template-to-preview staging adapter、selected preview confirm-to-bills、preview update/reclassify、preview-item transfer/recurring/learning decision、learning promotion、preview LLM recommendation/memory event、OCR config app_settings、annotation sample、账单 CRUD、预算 CRUD/export/execution/forecast/history/import 与统计读取聚合原语；`bill-analyser-http` 默认是 Rust-primary ingress，`api_takeover=true`，未迁移业务域通过 `BILL_ANALYSER_PYTHON_UPSTREAM` 反向代理到 Python sidecar。显式设置 `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_route_skeleton` 时，Rust 会优先注册导入/预览旁路骨架路由并返回无 DB 写入的安全响应；默认 `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime` 且提供 `BILL_ANALYSER_SQLITE_DB_PATH` 时，Rust 用应用文件 guard 打开该 SQLite 路径并接管 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、import session 读/清理、preview 分页读取、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、预算 CRUD/export/execution/forecast/history/import 与统计读取，`business_migration=import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`。Rust import DB runtime 可校验前端 Bearer access token：读取 `BILL_ANALYSER_AUTH_JWT_SECRET` / `JWT_SECRET_KEY` 与 `BILL_ANALYSER_AUTH_JWT_ALGORITHM`，验证 HS256/HS384/HS512 HMAC access JWT、`sessions.token_hash`、用户启用状态和 session 过期时间；内部测试/sidecar 调用仍可使用受 secret 保护的 trusted user header。`POST /api/llm/preview-recommend`、`POST /api/llm/analyze-transactions`、`POST /api/llm/rule-synthesis`、全局 `/api/learning/suggestions*`、全局 `/api/learning/rules*`、`POST /api/ml/receipt-recognition`、parser-specific Excel/XLSX、统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 调用、Learning Center 全局建议/规则循环、备份文件操作、云 SDK 上传与尚未迁移业务域继续由 Python sidecar 保留。Python import 删除仍必须同时满足 Rust route runtime、DB 写入语义、前端导入流程、全量 coverage、无残留引用五项门禁。
 
 补充说明（2026-03-07）：
 - 当前运行态已无 `/api/v1/*` 路由，也无 WSGI 级 URL rewrite 中间件。

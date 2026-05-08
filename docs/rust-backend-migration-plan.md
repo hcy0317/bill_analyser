@@ -13,7 +13,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 66
+- Current Rust backend files: 91
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline
@@ -51,11 +51,11 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 
 ## S1 Rust Runtime Shell
 
-S1 added the internal Rust workspace boundary while keeping Flask REST as the runtime shell. The workspace contains `crates/bill-analyser-core` and `crates/bill-analyser-db`; Rust remains an internal library / bridge surface and 不接管任何业务 API.
+S1 added the internal Rust workspace boundary while keeping Flask REST as the original runtime shell. The workspace contains `crates/bill-analyser-core`, `crates/bill-analyser-db`, and `crates/bill-analyser-http`; early Rust crates remain internal library / bridge surfaces and 不接管任何业务 API.
 
 ## S1b Opt-in Rust HTTP Ingress
 
-S1b adds `crates/bill-analyser-http` as an opt-in `rust-http-shell:proxy-only` ingress for migration verification. Default startup still uses Python/Flask, proxied Python routes are not Rust business-owned, and the crate reports `api_takeover=false` with `business_migration=none`. The crate owns only health/runtime metadata routes plus catch-all reverse proxy behavior for unowned routes; it does not delete Python code, write the database, or take over import business handlers.
+S1b adds `crates/bill-analyser-http` as an opt-in `rust-http-shell:proxy-only` ingress for migration verification. In proxy-only mode, proxied Python routes are not Rust business-owned, and the crate reports `api_takeover=false` with `business_migration=none`. The crate owns only health/runtime metadata routes plus catch-all reverse proxy behavior for unowned routes; it does not delete Python code, write the database, or take over import business handlers.
 
 ## S2 Shared Primitives Mapping
 
@@ -65,206 +65,110 @@ S2 maps shared Python primitives to Rust primitives without changing the public 
 | --- | --- | --- |
 | `src/bill_analyser/utils/currency.py` | `crates/bill-analyser-core/src/primitives/money.rs` | Explicit yuan / cents conversion and no float-backed money primitive |
 | `src/bill_analyser/core/bill_date_utils.py` | `crates/bill-analyser-core/src/primitives/date_time.rs` | Date/time parsing and serialization helpers |
-| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transactions.rs` | REST adapter parity for amount/time/category/account fields |
+| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | REST adapter parity for amount/time/category/account fields |
+
+## S2a Ownership Matrix, Envelope Oracle, and DB Writer Policy
+
+S2a records the migration governance oracle that separates Rust-owned runtime endpoints from Python-proxied domains. It pins response envelope families, proxy infrastructure error wrapping, and DB writer policy so a route cannot claim Rust ownership without an explicit runtime and persistence contract.
 
 ## S3 SQLite Schema Runtime Foundation
 
 S3 added `crates/bill-analyser-db` as the Rust DB runtime foundation for schema/path checks and database guard logic. It is not Rust-primary for business writes: the Flask/Python Database facade remains the primary runtime write path until later domain slices prove and switch a specific business surface.
 
-## S7 Parser Import Contracts
+## S3a Import Route Skeleton
 
-S7 starts the import parser domain in Rust without switching parser runtime ownership. It preserves the Python parser detection order (`wechat -> alipay -> icbc -> cmbc -> abc -> ccb`), parser metadata, source labels, parser tag normalization, generic raw-bill post-processing, and the JSON `StandardBill` key shape used by the existing Python import staging path.
+S3a introduced `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_route_skeleton` to intercept first-phase import routes without claiming DB writes. The skeleton reported `business_migration=import-route-skeleton-no-db` and kept Python import route disabling/deletion blocked unless all five evidence gates pass.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/parsers/factory.py` | `crates/bill-analyser-core/src/parsers.rs` | Parser registry order and metadata contract |
-| `src/bill_analyser/import_contracts/parser_tags.py` | `crates/bill-analyser-core/src/parsers.rs` | Parser/channel tag normalization and serialization |
-| `src/bill_analyser/parsers/base.py` | `crates/bill-analyser-core/src/parsers.rs` | Raw parser output post-processing into StandardBill-shaped data |
-| `tests/fixtures/import_samples/**` parser families | `crates/bill-analyser-core/tests/fixtures/parser_golden_contracts.json` | Deterministic golden contract cases for six parser families |
+## S4a Import Staging DB Primitives
 
-No Python parser implementation is removed in S7. The Rust parser module is an internal contract/oracle surface: Python parser tests continue to parse real CSV/XLS/XLSX samples, while Rust golden contract tests pin the normalized StandardBill, parser tag, and source-label output expected from each dedicated parser family.
+S4a moved import session and preview staging persistence contracts into Rust SQLite primitives while keeping route runtime deletion blocked. The DB writer policy for the staged import runtime is Rust-owned only when the explicit runtime mode is enabled.
 
-## S8 Smart Dedup Contracts
+## S5a Parser Template Staging DB Primitives
 
-S8 starts the smart-dedup domain in Rust without switching the Python import runtime. It preserves the current Python ordering for exact duplicate, platform-bank duplicate, same-batch transfer, similar duplicate, split bill, database duplicate, and cross-batch transfer semantics as a pure Rust contract layer.
+S5a added parser-template staging primitives for import sessions, preserving user scope, processed status, rollback semantics, and Python-compatible staging field names.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/core/smart_dedup/models.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Deduplication type/result/group data contracts and Python hidden-field serde aliases |
-| `src/bill_analyser/core/smart_dedup/exact.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Exact duplicate grouping and source-priority keep rule |
-| `src/bill_analyser/core/smart_dedup/platform_bank.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Platform-bank amount/time/source, transfer-intent guard, merged fields, parser tags, and source-id provenance |
-| `src/bill_analyser/core/smart_dedup/transfers.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Same-batch transfer pair mutation contract and cross-batch transfer marker contract |
-| `src/bill_analyser/core/smart_dedup/grouping.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Similar duplicate merged-field/source-id contract and split bill grouping contract |
-| `src/bill_analyser/core/smart_dedup/database.py` | `crates/bill-analyser-core/src/smart_dedup.rs` | Database duplicate marker contract without DB query ownership |
-| `src/bill_analyser/core/smart_dedup/reconciliation.py` and `src/bill_analyser/core/database/reconciliation/**` | `crates/bill-analyser-core/src/smart_dedup.rs` | Import reconciliation candidate classification/key/group contract; persistence remains the existing Python DB boundary |
+## S5b Confirm Preview-to-Bills DB Primitive
 
-No Python smart-dedup implementation is removed in S8. The Rust module uses `Money` cents and shared bill datetime parsing to avoid float drift while Rust contract tests pin Python-shaped `_parser_id` / `_template_id` / `_parser_tags` JSON, dedup source IDs, kept/removed indices, transfer destination hints, split groups, database duplicate markers, cross-batch transfer markers, and import reconciliation candidates. Runtime DB querying/persistence remains Python-owned until the import pipeline slice takes over that boundary.
+S5b added selected preview confirm-to-bills DB semantics, including duplicate counting, idempotent completed-session behavior, transaction rollback, and bill insertion semantics shared with the Rust bills runtime.
 
-## S9a Bills Read Adapter Contracts
+## S5c StandardBill-to-Parser-Template Staging Adapter
 
-S9a starts the bills CRUD/media/reconciliation domain by pinning the read/list/export adapter contract in Rust without switching the Python runtime. It covers transaction-list JSON shape, amount yuan-to-cents presentation, transaction type codes, local bill date to Unix seconds conversion, by-month date ranges, type query filters, and CSV/Excel formula-cell escaping.
+S5c pins the StandardBill-to-parser-template adapter that keeps parser output shape stable before preview generation.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Backend bill to frontend transaction JSON contract |
-| `src/bill_analyser/api/routes/bills/crud_query.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | List type filter, by-month range, and export cell serialization contract |
-| `tests/new_ui/test_transaction_list_rest_api.py` and `tests/new_ui/test_bills_api.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden read/list adapter cases for cents/yuan, type codes, account ids, date fields, and formula escaping |
+## S5d Parser-Template to Preview Staging Adapter
 
-No Python bills route or database implementation is removed in S9a. Python remains the runtime owner for DB reads, writes, media, account balance sync, and reconciliation statements until later S9 sub-slices verify and switch those boundaries.
+S5d pins parser-template to preview staging, keeping smart-dedup metadata, parser tags, source ids, and selection keys compatible with the Python import flow.
 
-## S9b Bills Write and Balance Contracts
+## S6a Preview Update, Reclassify, and Annotation DB Semantics
 
-S9b extends the Rust bills contract to the write-side adapter and account balance synchronization rules without switching the Python runtime. It covers frontend mutation payload conversion, manual create fallback fields, category resolution/defaulting contracts, batch-create payload and route-envelope shapes, create/update field guards, batch-update response projection, affected account collection for create/update/delete/batch-delete, and the raw account balance formula used by the existing Python database layer.
+S6a adds Rust DB primitives for preview update/reclassify and annotation sample read/write. These are part of the import DB runtime but do not by themselves permit Python deletion.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Frontend write payload to backend bill field conversion, including cents-to-yuan, type mapping, tag IDs, account IDs, and local timestamp normalization |
-| `src/bill_analyser/api/routes/bills/crud_prepare.py` and `src/bill_analyser/api/routes/bills/crud_create_update.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Manual-create description/counterparty/source-account fallbacks, legacy modify/delete response shapes, and batch-create request/response validation contract |
-| `src/bill_analyser/api/routes/bills/category_actions.py` and `src/bill_analyser/core/database/bills/__init__.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Route-level and DB-level update field allowlists, batch-update response shape, create aliases, and the current no-immediate-balance-sync batch-update policy |
-| `src/bill_analyser/api/routes/bills/support.py` and `src/bill_analyser/core/database/accounts/balances.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Affected account ID collection for create/update/delete/batch-delete and raw DB balance formula contract, including the frontend-signed outgoing amount convention |
-| `tests/new_ui/test_bills_api.py`, `tests/domains/db/**`, and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden write/batch/balance contract cases for later bridge replacement |
+## S7a Preview-Item Transfer and Recurring Decision DB Semantics
 
-No Python bills write, delete, batch, or account balance implementation is removed in S9b. Pictures/media and reconciliation statement runtime behavior remain deferred to later S9 sub-slices.
+S7a adds preview-item transfer and recurring decision DB semantics with expected-state guards, snapshot restore, candidate-field mutation, and user/session scope.
 
-## S9c Bills Picture Media Contracts
+## S8a Preview Learning Decision DB Semantics
 
-S9c extends the Rust bills contract to transaction-picture upload and unused-picture deletion without switching the Python runtime. It preserves the current REST-only picture surface: upload accepts multipart field `picture`, validates only the original filename extension allowlist, derives the saved suffix from Werkzeug-style `secure_filename(original_filename)`, stores the file under the fixed uploads directory as `<uuid4hex><derived lowercase suffix>` when a suffix remains, and returns an inline `originalUrl` data URL for preview. Unused-picture delete remains best-effort by sanitized picture id and returns success even when the file is already absent.
+S8a adds preview learning decision DB semantics for session-scoped accept/reject/clear decisions and learning promotion.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/config/bills.py` and `src/bill_analyser/api/routes/bills/support.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Transaction-picture extension allowlist and unsupported-type error message contract |
-| `src/bill_analyser/api/routes/bills/crud_query.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Upload/delete REST status codes, success/error envelopes, UUID-based picture id suffix handling, and unused-delete best-effort response contract |
-| `src/bill_analyser/api/routes/bills/import_review.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Data URL MIME projection and `application/octet-stream` fallback contract |
-| `tests/new_ui/test_transaction_pictures_rest_api.py` and `tests/domains/import_flow/unit/test_bills_route_branches.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden picture API cases for upload/delete success, validation failures, 500 error envelopes, data URL projection, and filename sanitization |
+## S8b Preview LLM Recommendation and Memory DB Semantics
 
-No Python picture route or file-storage implementation is removed in S9c. Current Python does not persist `pictureIds` into bill DB rows and does not enforce per-bill picture ownership; S9c records that behavior instead of inventing attachment persistence. Legacy `/api/v1/transaction/pictures/*` 404 behavior stays Python routing-runtime owned and is not part of the Rust adapter contract. Import-session uploads, OCR receipt recognition, parse-import temp files, and reconciliation statements remain deferred to later dedicated slices.
+S8b adds preview LLM recommendation review and memory event DB semantics, including accept/reject replay and memory-only blank-field behavior.
 
-## S9d Bills Reconciliation Statement Contracts
+## S8c OCR Config App Settings DB Semantics
 
-S9d completes the bills CRUD/media/reconciliation contract split by pinning the reconciliation statement route behavior in Rust without switching the Python runtime. It preserves the `GET /api/bills/reconciliation_statements` query contract, route envelopes, all-time versus filtered opening-balance fallback, local timestamp-to-date filters, category/type/keyword filter projection, ascending balance-trace calculation, descending transaction output, and cents-based API result fields.
+S8c stores OCR config in Rust `app_settings` primitives and keeps real OCR image recognition proxied to Python until provider runtime is migrated.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/bills/reconciliation.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Required query parameters, `1..4` reconciliation type-code mapping, all-time/date-range filter projection, and 400/404/500 route envelopes |
-| `src/bill_analyser/core/database/bills/__init__.py` and account reads/mappings | `crates/bill-analyser-core/src/adapters/transaction.rs` | Account-id filter shape, category filter materialization, historical opening-balance snapshot selection, and all-time initial-balance fallback |
-| `src/bill_analyser/api/adapters/transaction_adapter.py` | `crates/bill-analyser-core/src/adapters/transaction.rs` | Frontend transaction projection extension with `accountOpeningBalance` and `accountClosingBalance`, sorted by frontend `time` descending |
-| `tests/domains/import_flow/unit/test_bills_route_branches.py`, `tests/test_reconciliation_fields.py`, `tests/test_reconciliation_amount_fix.py`, `tests/test_v6_1_fixes.py`, and `tests/test_v6_2_comprehensive.py` | `crates/bill-analyser-core/tests/transaction_adapter_contracts.rs` | Golden reconciliation cases for missing/invalid account parameters, account-not-found/500 envelopes, opening balance, amount-unit conversion, inflow/outflow direction, skipped unknown/foreign transfers, and result payload shape |
+## S9a Rust Import Route Runtime Wiring
 
-No Python reconciliation route, adapter, or database implementation is removed in S9d. The Rust layer is a contract and calculation surface only; Flask remains the route owner, Python still performs DB reads and adapter hydration, and later runtime-bridge slices must re-run API parity before replacing the live path.
+S9a wires `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime` so Rust can serve import v2 JSON parse/parse_generic/dedup/confirm, session/preview reads, and DB-backed staging routes. It reports `business_migration=import-db-runtime-partial` while Python deletion remains blocked by residual references.
 
-## S10 Import V2 Pipeline Contracts
+## S9b Preview Update and Reclassify Runtime Wiring
 
-S10 starts the import-v2 pipeline domain in Rust without switching Flask routes, Python parser execution, aiosqlite staging writes, or BillService orchestration. It pins route envelope DTOs, import pipeline step ordering, staging table/field names, server-paged preview query normalization, `preview_ids` order-preserving selection, preview selected-flag coercion, lightweight preview filter-index projection, nested matching payload families, and `expectedState` conflict/error response semantics.
+S9b wires preview update and reclassify HTTP routes to the Rust DB primitives. The S9b HTTP tests cover single preview-row edit persistence and batch update rollback semantics.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/bills/v2_pipeline.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Stage parse/dedup/confirm success and error envelope contracts |
-| `src/bill_analyser/api/routes/bills/v2_sessions.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Session summary, cancel message, preview page/index envelope contracts |
-| `src/bill_analyser/api/routes/bills/v2_preview_actions.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | `Invalid request`, stale preview conflict, and `expectedState` object contract |
-| `src/bill_analyser/core/bills/service_parts/import_preview_paging.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Sort key allowlist, page/page_size clamp, `preview_ids` normalization, and preview filter index projection |
-| `src/bill_analyser/import_contracts/preview_selection.py` | `crates/bill-analyser-core/src/import_pipeline.rs` | Confirm/update selected-key precedence and bool coercion contract |
-| `tests/domains/import_flow/**` and `tests/new_ui/test_import_*.py` | `crates/bill-analyser-core/tests/import_pipeline_contracts.rs` | Golden contract cases for preview paging, stage envelopes, matching payload, expected state, and selection semantics |
+## S9c Preview-Item, Learning, and LLM Runtime Wiring
 
-No Python import-v2 route, staging database, parser factory, category/account matching, recurring lookup, learning replay, or confirm-to-bills cleanup implementation is removed in S10. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same imported sample/session fixtures.
+S9c wires preview-item transfer/recurring decisions, session learning bypass/promotion, and LLM review/memory routes. The S9c HTTP tests cover transfer accept projection, recurring match updates, learning promotion, and LLM memory writes. Python-proxied provider generation routes, and Python-proxied global Learning Center suggestion/rule routes remain outside this Rust-owned import-session boundary.
 
-## S11 Import Learning and LLM Preview Contracts
+## S9d Import Parse, Dedup, Confirm, and Frontend Upload Runtime Wiring
 
-S11 starts the import-learning / LLM preview memory domain in Rust without switching Flask routes, aiosqlite persistence, numpy model training, provider calls, or preview mutation runtime. It pins composite match hash normalization, feature payload and labels, token generation, green/blue policy thresholds, model registry/snapshot metadata, session-learning route envelopes, Learning Center paging/error envelopes, LLM stable error envelopes, preview memory event shape, blank-only LLM apply behavior, and reject-restore snapshot guards.
+S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData upload parsing through Rust, while parser-specific Excel/XLSX/provider generation remains proxied where not yet migrated. The S9d HTTP tests cover JSON parse -> parse_generic -> dedup -> confirm DB writes.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/core/database/imports/learning/base.py` | `crates/bill-analyser-core/src/import_learning.rs` | Composite match feature normalization, alias parsing, hash ordering, and preview id validation contract |
-| `src/bill_analyser/core/import_learning/features.py` | `crates/bill-analyser-core/src/import_learning.rs` | Feature schema, labels, amount buckets, sample filtering, token generation, and confirmation-count keys |
-| `src/bill_analyser/core/import_learning/model.py` and `src/bill_analyser/core/database/imports/learning/model.py` | `crates/bill-analyser-core/src/import_learning.rs` | Model key/family/dimensions, snapshot payload, active model version, metrics payload, and archive/active metadata contract |
-| `src/bill_analyser/core/import_learning/policy.py` | `crates/bill-analyser-core/src/import_learning.rs` | Green/blue confidence, margin, confirmation, conflict, score, level, and auto-apply policy contract |
-| `src/bill_analyser/api/routes/bills/import_learning.py` and `src/bill_analyser/api/routes/learning.py` | `crates/bill-analyser-core/src/import_learning.rs` | Session suggestions/promote errors, legacy rule page envelope, Learning Center page envelope, and batch validation surfaces |
-| `src/bill_analyser/core/database/llm/candidates/preview_apply.py`, `preview_review.py`, and `src/bill_analyser/api/routes/llm/support.py` | `crates/bill-analyser-core/src/import_learning.rs` | LLM memory event DTO, blank-field-only apply semantics, reject restore guard, and stable `code`/`error_code` envelope |
-| `tests/domains/import_flow/unit/test_import_learning_model_loop.py`, `tests/new_ui/test_bills_learning_suggestions_api.py`, `tests/new_ui/test_learning_suggestion_center_api.py`, and `tests/new_ui/test_llm_import_session_analysis_api.py` | `crates/bill-analyser-core/tests/import_learning_contracts.rs` | Golden contract cases for learning features, policy, model metadata, route envelopes, and LLM preview memory behavior |
+## S9e Bills and Transactions CRUD Runtime
 
-No Python import-learning database, corpus writes, active model training/prediction, suggestion writeback, LLM provider prompt/generation, or live preview apply/reject implementation is removed in S11. Runtime takeover remains deferred until a later bridge slice can verify model/persistence parity against the same session and memory fixtures.
+S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Bills export, pictures, reconciliation statements, recurring candidates/match, and category actions stay Python-proxied. Python bills CRUD/import deletion remains blocked because residual route, frontend, test, and docs references still exist.
 
-## S12 Matching, Investment, and Recurring Contracts
+## S10 Rust Primary HTTP Runtime and Frontend Auth Bridge
 
-S12 starts the matching / investment / recurring domain in Rust without switching Flask routes, aiosqlite persistence, manual-pair writes, suppression writes, investment user settings storage, recurring suggestion persistence, or preview mutation runtime. It pins candidate id families, preview session candidate projection, manual pair request validation, reconciliation query normalization, matching action payload envelopes, transfer pair scoring, bill-pair feedback payload relationship filtering, investment keyword normalization/profile/scoring/PnL guards, and recurring pattern hash/frequency/suggestion calculations.
+S10 switches the local startup boundary from Python-primary to Rust-primary HTTP. `bill_http_server` binds `BILL_ANALYSER_HTTP_BIND=127.0.0.1:5000`, Python sidecar runs on port 5001, and Rust proxies unmigrated domains through `BILL_ANALYSER_PYTHON_UPSTREAM=http://127.0.0.1:5001`. The runtime accepts frontend `Authorization: Bearer` access tokens and validates HS256/HS384/HS512 HMAC JWT plus session state before using the trusted user context for Rust-owned routes.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/core/matching/candidate_ids.py` | `crates/bill-analyser-core/src/matching.rs` | Preview/formal/reconciliation candidate id builders and parsers |
-| `src/bill_analyser/api/routes/matching/support.py` and `src/bill_analyser/core/matching/session_candidates.py` | `crates/bill-analyser-core/src/matching.rs` | Matching candidate session projection, manual pair request validation, action payload, query normalization, and feedback payload contract |
-| `src/bill_analyser/core/matching/transfer_candidates.py` and `src/bill_analyser/core/database/matching/**` | `crates/bill-analyser-core/src/matching.rs` | Transfer pair direction, amount/date/account eligibility, candidate id, score, suppression key, and manual pair DTO contract |
-| `src/bill_analyser/core/investment/settings.py` and `src/bill_analyser/core/investment/matching.py` | `crates/bill-analyser-core/src/matching.rs` | User keyword normalization, deterministic investment profile/scoring, generic-service-fee guard, bank-interest guard, and PnL classification contract |
-| `src/bill_analyser/core/recurring_detection.py`, `src/bill_analyser/api/routes/recurring.py`, and `src/bill_analyser/core/database/recurring_suggestions/**` | `crates/bill-analyser-core/src/matching.rs` | Recurring hash, frequency, next-date, confidence, and suggestion DTO contract |
-| `tests/domains/import_flow/**`, `tests/domains/investment/**`, and `tests/domains/analytics/**` | `crates/bill-analyser-core/tests/matching_contracts.rs` | Golden contract cases for candidate ids, session projection, pair requests, transfer candidates, investment recognition, PnL, bank interest, and recurring detection |
+## S13e Budget CRUD Runtime
 
-No Python matching, investment, recurring route, database, or preview-action implementation is removed in S12. The old `/api/matching/investment-settings` write surface remains gone; S12 records deterministic keyword/settings behavior only. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same matching sessions, manual pair, suppression, investment, and recurring fixtures.
+S13e makes Rust the runtime owner for budget CRUD/export routes in `import_db_runtime`: `GET/POST /api/budgets`, `GET/PUT/DELETE /api/budgets/{id}`, and `GET /api/budgets/export`. Follow-up budget runtime slices S13f-S13i now also own execution, forecast, history/snapshot, and import. Python budget deletion remains blocked because no-residual-reference evidence has not passed.
 
-## S13 Budget Contracts
+## S13f Budget Execution Runtime
 
-S13 starts the budgets / execution / forecast / history domain in Rust without switching Flask routes, aiosqlite budget persistence, snapshot writes, import/export SQL, or reporting runtime. It pins route parsing and period-scope helpers, import/export validation shape, execution detail/summary row selection, category type normalization, expense/investment isolation, parent-period rollup semantics, on-demand history windows, filter-summary serialization, and forecast amount/MAPE/confidence/trend calculations.
+S13f makes Rust the runtime owner for `GET /api/budgets/execution` in `import_db_runtime`. The Rust path reads `budgets`, `bills`, `bill_tags`, and `categories` directly through `crates/bill-analyser-db/src/budgets.rs`, preserving `user_id` scope, period overlap, date end-of-day normalization, category-id filtering, account/tag filters, legacy `categories.type=1` expense normalization, `abs(sum(amount))`, and the shared execution summary de-duplication contract. Budget import is Rust-owned after S13i.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/budgets/support.py` and `io.py` | `crates/bill-analyser-core/src/budgets.rs` | Route filter parsing, period/date scope, progress days, import item validation, avg MAPE, and export envelope contracts |
-| `src/bill_analyser/core/budgets/execution_summary.py` | `crates/bill-analyser-core/src/budgets.rs` | Detail/summary item selection that avoids double-counting synchronized primary budgets |
-| `src/bill_analyser/core/database/budgets/core/shared.py` and `hierarchy.py` | `crates/bill-analyser-core/src/budgets.rs` | Legacy `categories.type=1` normalization, expense/investment category resolution, parent period resolution, and rollup amount contract |
-| `src/bill_analyser/core/database/budgets/execution/on_demand.py`, `history.py`, and `snapshots.py` | `crates/bill-analyser-core/src/budgets.rs` | On-demand history ranges, overlap checks, stable filter summary JSON, and history item status shape |
-| `src/bill_analyser/core/database/budgets/forecast/__init__.py` | `crates/bill-analyser-core/src/budgets.rs` | Forecast period windows, period keys, historical/moving average, backtest MAPE, confidence, trend, and primary-vs-sub budget amount precedence |
-| `tests/domains/budgeting/**`, `tests/domains/db/**`, and `tests/new_ui/test_budgets_rest_api.py` | `crates/bill-analyser-core/tests/budget_contracts.rs` | Golden budget contract cases for period scopes, import/export, summary de-duplication, type isolation, rollups, history, and forecast helpers |
+## S13g Budget Forecast Runtime
 
-No Python budget route, database, snapshot, forecast, import/export, or CLI implementation is removed in S13. Budget amounts in the existing Python path remain yuan-style numeric values; S13 records that boundary explicitly and does not introduce cents conversion into the budget contract layer. Runtime takeover remains deferred until a later bridge slice can compare live Python and Rust paths against the same budget CRUD, execution, history, forecast, import, and export fixtures.
+S13g makes Rust the runtime owner for `GET /api/budgets/forecast` in `import_db_runtime`. The Rust path reads historical `bills`, enabled `budgets`, and `categories` through `crates/bill-analyser-db/src/budgets.rs`, preserving user scope, budget type filtering, history-window expansion, daily/weekly/monthly/quarterly/yearly grouping, current-period spend lookup, primary-budget-versus-sub-budget amount selection, forecast strategy, backtest MAPE, trend/confidence labels, period progress fields, and the Flask-compatible `success/result` envelope. Budget import is Rust-owned after S13i.
 
-## S14 Statistics, Exchange, Net Worth, Insights, and Calendar Contracts
+## S13h Budget History And Snapshot Runtime
 
-S14 starts the statistics / exchange rates / net worth / insights / calendar domain in Rust without switching Flask routes, aiosqlite reads, external provider fetches, chart rendering, report export, or recurring-template persistence. It pins timestamp and year-month reverse-range errors, category/trend/account aggregation shapes, asset-trend balance math and empty-account legend filtering, exchange provider ordering/custom/fallback/cross-rate semantics, analyzer overview/chart plan DTOs, net worth snapshot grouping, anomaly payload shapes, and calendar event/projection shapes.
+S13h makes Rust the runtime owner for `GET /api/budgets/history` and `POST /api/budgets/history/snapshot` in `import_db_runtime`. The Rust path preserves canonical sorted `filter_summary`, user-scoped persisted `budget_history` lookup, exact-period snapshot preference, on-demand daily/weekly/monthly/quarterly/yearly fallback, category/type enrichment, snapshot replacement by `(user_id,budget_id,period_start,period_end,filter_summary)`, and Flask-compatible `success/result` envelopes. Budget import is Rust-owned after S13i.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/statistics/category_analysis.py`, `trend_analysis.py`, and `asset_trends.py` | `crates/bill-analyser-core/src/statistics.rs` | Reverse range 400 contracts, cents conversion, category/account aggregation, monthly empty buckets, asset balance trace, and empty account legend filtering |
-| `src/bill_analyser/api/routes/statistics/exchange_rates.py` and `src/bill_analyser/core/exchange_rate_providers/**` | `crates/bill-analyser-core/src/statistics.rs` | Provider options/order, requested-provider fallback flag, user custom short-circuit shape, built-in fallback rates, CNY quote conversion, and base-currency conversion |
-| `src/bill_analyser/core/analyzer.py`, `src/bill_analyser/utils/charting/**`, and `src/bill_analyser/utils/report_export.py` | `crates/bill-analyser-core/src/statistics.rs` | Overview result projection and report chart-generation plan shape |
-| `src/bill_analyser/api/routes/networth.py`, `insights.py`, and `calendar.py` | `crates/bill-analyser-core/src/statistics.rs` | Net worth asset/liability grouping, anomaly DTOs, calendar daily events, and recurring projection DTOs |
-| `tests/domains/statistics/**` and `tests/new_ui/test_statistics_api.py` | `crates/bill-analyser-core/tests/statistics_contracts.rs` | Golden contract cases for statistics, exchange, net worth, insights, calendar, and report/chart helper behavior |
+## S13i Budget Import Runtime
 
-No Python statistics, exchange provider, net worth, insights, calendar, charting, report-export, or recurring runtime implementation is removed in S14. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route and provider owner until a later bridge slice can compare live Python and Rust paths against shared account, bill, exchange, chart, and recurring fixtures.
+S13i makes Rust the runtime owner for `POST /api/budgets/import` in `import_db_runtime`. The Rust path preserves Flask-compatible array payload validation, required `period_type/amount/start_date/category` checks, invalid item error messages, single-transaction import, per-row `error_details`, and upsert-by-`name + user_id` writes with Python-compatible default `period_type`, `alert_threshold`, and `enabled` handling. No route in the budget route set remains Python-proxied, but Python budget deletion remains blocked until residual Python/frontend/test/docs references are cleared and full gates pass.
 
-## S15 AI OCR and LLM Provider Contracts
+## S14a Statistics Read Runtime
 
-S15 starts the AI OCR / LLM provider/config domain in Rust without switching Flask routes, OCR provider calls, aiosqlite LLM config persistence, or live LLM provider execution. It pins OCR disabled-safe 501 and provider config response shapes, payment screenshot parsing fields, LLM provider aliases and OpenAI-compatible defaults, advanced settings normalization, runtime/user config isolation, API key redaction, and the rule that preview/candidate accept/reject review endpoints do not require a live provider after recommendation generation.
+S14a makes Rust the runtime owner for DB-backed statistics read routes in `import_db_runtime`: `GET /api/statistics/category-statistics`, `GET /api/statistics/category-statistics/trends`, `GET /api/statistics/asset-trends`, `GET /api/statistics/category-pie`, `GET /api/statistics/top-merchants`, and `GET /api/statistics/amounts`. The Rust path reads `bills/accounts/categories` directly, keeps `user_id` scope, timestamp/year-month/all-mode parsing, keyword/date/type filters, asset-trends 365-day guard, category-statistics and amounts cents output, and category-pie/top-merchants yuan output. Analyzer overview/trends/comparison/category/trend plus live exchange-rate provider/custom-rate routes remain Python-proxied until the Analyzer/provider execution boundary is ported as a complete follow-up.
 
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/receipt_ocr.py` and `src/bill_analyser/core/ai/ocr/**` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | OCR provider config normalization, disabled-safe typed errors, response payloads, and payment screenshot text parsing contract |
-| `src/bill_analyser/core/ai/llm/provider.py` and `src/bill_analyser/core/database/llm/config/__init__.py` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | Provider alias/default mapping, advanced settings normalization, request-local runtime config construction, and API key redaction contract |
-| `src/bill_analyser/api/routes/llm/{analysis,candidates,configs,preview,support}.py` and `src/bill_analyser/core/database/llm/candidates/**` | `crates/bill-analyser-core/src/ai_ocr_llm.rs` | Stable `code/error_code` envelopes, preview recommendation response shape, candidate list/reject envelopes, and live-provider requirement boundary |
-| `tests/test_ocr_*.py`, `tests/new_ui/test_ai_receipt_recognition_rest_api.py`, and `tests/new_ui/test_llm_*.py` | `crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs` | Golden contract cases for OCR config/errors/parser, LLM provider aliases, secret redaction, advanced settings, and review endpoint provider boundaries |
+Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`; the `partial` suffix remains because Analyzer and exchange-rate provider/custom-rate routes are still Python-proxied.
 
-No Python OCR, LLM route, provider, database config, candidate review, or preview recommendation implementation is removed in S15. The Rust layer is a contract/oracle surface only; Flask/Python remains the live route owner and external provider caller until a later bridge slice can compare live Python and Rust paths against shared OCR/LLM fixtures.
+## Deletion Gate
 
-## S16 Backup, Encryption, User Data, and Ops Contracts
-
-S16 starts the backup / encryption / user-data operations / sync / report-export safety domain in Rust without switching Flask routes, Python file I/O, SQLCipher connection handling, cloud SDK sync, audit DB writes, or report file generation. It pins backup filename/archive safety, encrypted backup recognition, restore preflight summary, record-first cleanup retention, backup job payload normalization, Fernet key derivation, SQLCipher status projection, sensitive user-data audit payloads, sync provider/prefix/secret-redaction rules, and report export format/filename contracts.
-
-| Python source | Rust source | Boundary |
-| --- | --- | --- |
-| `src/bill_analyser/api/routes/backup/**` and `src/bill_analyser/core/database/audit_backup/**` | `crates/bill-analyser-core/src/ops.rs` | Backup file naming, archive safety, verify/list payload, cleanup retention, and job normalization contracts |
-| `src/bill_analyser/api/routes/encryption.py` and `src/bill_analyser/core/database/encryption.py` | `crates/bill-analyser-core/src/ops.rs` | SQLCipher status and backup encryption key derivation contracts |
-| `src/bill_analyser/api/routes/auth/user_data.py` and user-data DB helpers | `crates/bill-analyser-core/src/ops.rs` | Sensitive action mode, user-data statistics, and audit payload contracts |
-| `src/bill_analyser/core/sync.py` | `crates/bill-analyser-core/src/ops.rs` | Sync provider allowlist, safe object prefixes, and recursive secret redaction contract |
-| `src/bill_analyser/utils/report_export.py` and `src/bill_analyser/core/report.py` | `crates/bill-analyser-core/src/ops.rs` | Report format, MIME, extension, and safe filename contracts |
-| `tests/domains/backup/**`, `tests/domains/runtime/**`, `tests/domains/reporting/**`, and `tests/new_ui/test_data_management_rest_api.py` | `crates/bill-analyser-core/tests/ops_contracts.rs` | Golden backup, encryption, sync, user-data, and report-export safety cases |
-
-No Python backup, encryption, user-data, sync, report-export, route shell, file-system, cloud SDK, or audit persistence implementation is removed in S16. The Rust layer is a contract/oracle surface only; Flask/Python remains the live owner until a later bridge/runtime takeover slice can compare live Python and Rust paths against shared backup, encryption, sync, audit, and report fixtures.
-
-## S17 Route Cleanup and Python Retirement Audit
-
-S17 audited the accumulated S0-S16 migration evidence before any deletion. The S0 inventory still has no `verified_dead` Python backend files, and the later domain records either describe contract/oracle Rust coverage or a limited bridge while explicitly retaining the Python route/runtime owner. Therefore this slice does not remove Python business code.
-
-| Candidate group | Decision | Evidence |
-| --- | --- | --- |
-| Flask route shell and route packages (`src/bill_analyser/api/app.py`, `src/bill_analyser/api/routes/**`) | Retain | Current REST blueprints, sync Flask-to-async bridge, auth middleware, and legacy-404 behavior are still Python-owned; S17 did not prove route-free replacement. |
-| Active import and bills compatibility routes (`src/bill_analyser/api/routes/bills/import_legacy.py`, bills split package exports) | Retain | `/api/bills/import/upload` and `/api/bills/import/parsers` are still frontend-called; package-level compatibility propagation is still used by route tests and monkeypatch coverage. |
-| Rust bridge modules (`core/*_rust_bridge.py`, `core/settings_bundle_rust_bridge.py`) | Retain | They are the accepted thin bridge boundary for the file-backed taxonomy/auth/category-rule/settings helpers and are not dead code. |
-| Python domain runtimes (`core/bills/**`, `core/smart_dedup/**`, `core/category_engine/**`, `core/database/**`, `parsers/**`, AI/OCR/LLM, statistics, budgets, matching, backup, sync, report export) | Retain | Rust slices pin contracts or pure helpers, but live DB writes, provider calls, parser execution, matching/classification execution, file I/O, and route envelopes remain Python-owned. |
-| Historical legacy artifacts already removed (`parsers_old/`, `csv_parser.py`, `excel_parser.py`, `utils.logic`, `smart_dedup_v641_backup.py`, legacy `v1_*` adapter wrappers) | No action | These are already absent from runtime source and guarded by no-regression tests; S17 has no tracked file to delete. |
-
-Deletion remains blocked for any Python path that cannot satisfy every verified-dead condition: no route, no import, no frontend call, no test/docs runtime reference, and a replacement/retention mapping. Any future retirement slice must first switch a concrete live runtime boundary to Rust, run parity against the same fixtures, update the inventory status, and only then remove the proven-dead Python path.
+Python import route disabling/deletion is blocked unless all five evidence gates pass together: Rust route runtime, DB write semantics, frontend import flow, full coverage, and no residual references. Current import and budget runtime slices pass the Rust route/runtime and DB evidence for their owned endpoints, but deletion stays blocked where residual Python route imports, frontend calls, tests, or docs still reference the Python path.

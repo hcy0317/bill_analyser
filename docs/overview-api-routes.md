@@ -49,6 +49,18 @@
 - 账单/分类/账户路由层已完成一轮适配器收敛：
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `accounts/` / `categories/` / `bills/` 已统一改从中性适配器模块导入。
-- 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；普通文件 SQLite 库的分类 list/tree/get/create/update/delete/import/export/default seed master-data 持久化经 Python Database façade 桥接到 Rust taxonomy runtime，其中 default seed 使用批量 `ensure_categories` 避免逐条启动 bridge；分类统计、分类规则/matcher、`:memory:`、SQLCipher 和设置包分类 import/upsert 仍由 Python 路径处理。
+- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管核心账单/交易 CRUD 写入口：
+  - Rust-owned：`GET/POST /api/bills`、`GET/POST /api/bills/`、`GET /api/bills/by-month`、`GET /api/bills/get`、`GET/PUT/DELETE /api/bills/<id>`、`POST /api/bills/modify`、`POST /api/bills/delete`、`POST /api/bills/batch`、`PUT /api/bills/batch/update`、`DELETE /api/bills/batch/delete`；
+  - Python-proxied：`GET /api/bills/export`、`/api/bills/pictures*`、`/api/bills/reconciliation_statements`、`/api/bills/<id>/recurring-candidates`、`/api/bills/<id>/recurring-match`、`/api/bills/category/*`；
+  - CRUD 响应保持前端交易 DTO 与 Flask-compatible `success/result` envelope，frontend cents 与 DB yuan 的转换在 Rust adapter 边界完成。
+- Rust 主 HTTP 服务在 `import_db_runtime` 模式下也接管预算 CRUD/export/execution/forecast/history/snapshot/import 入口：
+  - Rust-owned：`GET/POST /api/budgets`、`GET/POST /api/budgets/`、`GET/PUT/DELETE /api/budgets/<id>`、`GET /api/budgets/export`、`GET /api/budgets/execution`、`GET /api/budgets/forecast`、`GET /api/budgets/history`、`POST /api/budgets/history/snapshot`、`POST /api/budgets/import`；
+  - Python-proxied：无预算 route set 内剩余代理项；
+  - 预算金额继续使用 Python 既有 yuan-style numeric 合同，Rust DB 写入保持 `user_id` 隔离、父子预算自动上卷、旧 `categories.type=1` 支出归一；execution 只读聚合保持用户隔离、日期窗口交集、账户/标签过滤、`abs(sum(amount))`；forecast 只读聚合保持历史窗口扩展、period grouping、当前周期花费、预算 primary/sub-total 映射、backtest MAPE；history/snapshot 保持 canonical `filter_summary`、精确快照优先、on-demand fallback、`budget_history` replacement 写入；import 保持 Flask-compatible array payload 校验、按 `name + user_id` upsert、单事务提交和逐项 `error_details` 计数 envelope。
+- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管无外部 provider 依赖的统计读取入口：
+  - Rust-owned：`GET /api/statistics/category-statistics`、`GET /api/statistics/category-statistics/trends`、`GET /api/statistics/asset-trends`、`GET /api/statistics/category-pie`、`GET /api/statistics/top-merchants`、`GET /api/statistics/amounts`；
+  - Python-proxied：`GET /api/statistics/overview`、`GET /api/statistics/trends`、`GET /api/statistics/comparison`、`GET /api/statistics/category`、`GET /api/statistics/trend`、`GET /api/statistics/exchange-rates`、`PUT/DELETE /api/statistics/exchange-rates/custom*`；
+  - 统计读取路径直接读 `bills/accounts/categories`，保持 `user_id` 隔离、timestamp/year-month/all-mode 范围解析、关键词过滤、资产趋势 365 天边界、category/amounts 响应分单位，以及 category-pie/top-merchants 响应元单位。
+- 分类主数据 REST URL、状态码与响应 envelope 保持 Flask 外壳不变；普通文件 SQLite 库的分类 list/tree/get/create/update/delete/import/export/default seed master-data 持久化经 Python Database façade 桥接到 Rust taxonomy runtime，其中 default seed 使用批量 `ensure_categories` 避免逐条启动 bridge；分类规则/matcher、`:memory:`、SQLCipher 和设置包分类 import/upsert 仍由 Python 路径处理。
 - 分类规则 REST URL、状态码、engine reload 和 `category_rules` SQL 仍由 Python 维护；新语法 `rule_expression` 的表达式编译优先通过 Rust `bill_category_rule_bridge` 生成既有 AST DTO，匹配执行和批量分类仍在 Python `CategoryEngine` / `KeywordMatcher` 内完成。
 - 主要 REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`accounts/`、`categories/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分。
