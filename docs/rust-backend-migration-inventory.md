@@ -2,16 +2,19 @@
 
 This S0 baseline is generated from a deterministic filesystem scan.
 It does not change runtime behavior and does not mark any Python business file as dead.
+Route/domain cutover state lives separately in the Rust governance manifest and must not be inferred from `port/facade/deferred` inventory labels.
 
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 91
+- Rust backend files: 92
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
 - Files marked deferred: 0
 - Verified dead files: 0
+- Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`
+- Dependency gate tool: `python scripts/check_rust_workspace_dependencies.py --json`
 
 ## Domain Counts
 
@@ -377,6 +380,7 @@ It does not change runtime behavior and does not mark any Python business file a
 - crates/bill-analyser-core/src/auth/mod.rs
 - crates/bill-analyser-core/src/bin/bill_auth_bridge.rs
 - crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs
+- crates/bill-analyser-core/src/bin/bill_migration_manifest.rs
 - crates/bill-analyser-core/src/budgets.rs
 - crates/bill-analyser-core/src/category_rules/mod.rs
 - crates/bill-analyser-core/src/error.rs

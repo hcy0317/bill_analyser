@@ -1,18 +1,160 @@
-//! Migration ownership contracts for the Python-to-Rust backend replacement.
+//! Migration governance contracts for the Python-to-Rust backend replacement.
 //!
-//! These contracts are deliberately conservative: they record what Rust owns
-//! now, what is still proxied to Python, and which evidence is required before
-//! a Python import path may be disabled or deleted.
+//! These contracts are deliberately conservative: they encode the cutover state
+//! machine, route/domain manifests, and the evidence required before a Python
+//! path may be disabled or deleted.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RouteOwner {
-    RustOwned,
+pub enum MigrationState {
     PythonProxied,
+    RustImplemented,
+    RustOwnedVerified,
+    PythonDeleted,
     ContractOnly,
-    Deleted,
+    Planned,
+}
+
+impl MigrationState {
+    pub fn is_rust_runtime_state(self) -> bool {
+        matches!(
+            self,
+            Self::RustImplemented | Self::RustOwnedVerified | Self::PythonDeleted
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MigrationBlockedStatus {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "blocked:user_choice_required")]
+    BlockedUserChoiceRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionRequired {
+    None,
+    Port,
+    Remove,
+    Defer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RouteHandlerId {
+    #[serde(rename = "crates/bill-analyser-http/src/router.rs::build_router")]
+    RouterBuildRouter,
+    #[serde(rename = "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime")]
+    BillsCrudRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_adjacent"
+    )]
+    BillsAdjacentProxyPassthrough,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_recurring"
+    )]
+    BillsRecurringProxyPassthrough,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_category_actions"
+    )]
+    BillsCategoryActionsProxyPassthrough,
+    #[serde(rename = "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime")]
+    ImportDbRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/import_routes.rs::llm_learning_runtime_boundary"
+    )]
+    LlmLearningRuntimeBoundary,
+    #[serde(rename = "crates/bill-analyser-http/src/import_routes.rs::ocr_runtime_boundary")]
+    OcrRuntimeBoundary,
+    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_crud_runtime")]
+    BudgetsCrudRuntime,
+    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_analysis_runtime")]
+    BudgetsAnalysisRuntime,
+    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_history_runtime")]
+    BudgetsHistoryRuntime,
+    #[serde(rename = "crates/bill-analyser-http/src/budget_routes.rs::budgets_import_runtime")]
+    BudgetsImportRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_read_runtime"
+    )]
+    StatisticsReadRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_analyzer"
+    )]
+    StatisticsAnalyzerProxyPassthrough,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
+    )]
+    StatisticsExchangeProxyPassthrough,
+    #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
+    DatabaseFacadeContractOracle,
+}
+
+impl RouteHandlerId {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RouterBuildRouter => "crates/bill-analyser-http/src/router.rs::build_router",
+            Self::BillsCrudRuntime => {
+                "crates/bill-analyser-http/src/bill_routes.rs::bills_crud_runtime"
+            }
+            Self::BillsAdjacentProxyPassthrough => {
+                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_adjacent"
+            }
+            Self::BillsRecurringProxyPassthrough => {
+                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_bills_recurring"
+            }
+            Self::BillsCategoryActionsProxyPassthrough => {
+                "crates/bill-analyser-http/src/bill_routes.rs::python_proxy_passthrough_category_actions"
+            }
+            Self::ImportDbRuntime => {
+                "crates/bill-analyser-http/src/import_routes.rs::import_db_runtime"
+            }
+            Self::LlmLearningRuntimeBoundary => {
+                "crates/bill-analyser-http/src/import_routes.rs::llm_learning_runtime_boundary"
+            }
+            Self::OcrRuntimeBoundary => {
+                "crates/bill-analyser-http/src/import_routes.rs::ocr_runtime_boundary"
+            }
+            Self::BudgetsCrudRuntime => {
+                "crates/bill-analyser-http/src/budget_routes.rs::budgets_crud_runtime"
+            }
+            Self::BudgetsAnalysisRuntime => {
+                "crates/bill-analyser-http/src/budget_routes.rs::budgets_analysis_runtime"
+            }
+            Self::BudgetsHistoryRuntime => {
+                "crates/bill-analyser-http/src/budget_routes.rs::budgets_history_runtime"
+            }
+            Self::BudgetsImportRuntime => {
+                "crates/bill-analyser-http/src/budget_routes.rs::budgets_import_runtime"
+            }
+            Self::StatisticsReadRuntime => {
+                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_read_runtime"
+            }
+            Self::StatisticsAnalyzerProxyPassthrough => {
+                "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_analyzer"
+            }
+            Self::StatisticsExchangeProxyPassthrough => {
+                "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
+            }
+            Self::DatabaseFacadeContractOracle => {
+                "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RouteContractDetails {
+    handler: RouteHandlerId,
+    deletion_blockers: &'static [&'static str],
+    blocked_status: MigrationBlockedStatus,
+    unsupported_behavior: &'static str,
+    decision_required: DecisionRequired,
+    decision_owner: &'static str,
+    transition_evidence: &'static [&'static str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -39,7 +181,7 @@ pub struct EndpointOwnership {
     pub method: &'static str,
     pub pattern: &'static str,
     pub domain: &'static str,
-    pub owner: RouteOwner,
+    pub state: MigrationState,
     pub envelope: ResponseEnvelopeFamily,
     pub deletion_blocked_until_all_import_gates: bool,
     pub notes: &'static str,
@@ -51,22 +193,71 @@ impl EndpointOwnership {
     }
 
     pub fn is_python_runtime_owner(&self) -> bool {
-        self.owner == RouteOwner::PythonProxied
+        self.state == MigrationState::PythonProxied
     }
+
+    pub fn is_rust_owned_verified(&self) -> bool {
+        self.state == MigrationState::RustOwnedVerified
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DomainGovernancePolicy {
+    pub domain: &'static str,
+    pub python_owner_files: &'static [&'static str],
+    pub rust_owner_files: &'static [&'static str],
+    pub tests_migrated: &'static [&'static str],
+    pub fixtures: &'static [&'static str],
+    pub db_invariant_ids: &'static [&'static str],
+    pub coverage_evidence: &'static str,
+    pub deletion_blockers: &'static [&'static str],
+    pub blocked_status: MigrationBlockedStatus,
+    pub unsupported_behavior: &'static str,
+    pub decision_required: DecisionRequired,
+    pub decision_owner: &'static str,
+    pub transition_evidence: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExpandedRouteManifestEntry {
+    pub domain: &'static str,
+    pub domain_policy_ref: &'static str,
+    pub endpoint: String,
+    pub method: &'static str,
+    pub pattern: &'static str,
+    pub state: MigrationState,
+    pub handler: RouteHandlerId,
+    pub deletion_blockers: &'static [&'static str],
+    pub blocked_status: MigrationBlockedStatus,
+    pub unsupported_behavior: &'static str,
+    pub decision_required: DecisionRequired,
+    pub decision_owner: &'static str,
+    pub transition_evidence: &'static [&'static str],
+    pub envelope: ResponseEnvelopeFamily,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GovernanceManifestSnapshot {
+    pub cutover_state_machine: &'static [MigrationState],
+    pub manifest_states: &'static [MigrationState],
+    pub coverage_evidence_contract: &'static str,
+    pub domains: &'static [DomainGovernancePolicy],
+    pub routes: Vec<ExpandedRouteManifestEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResponseEnvelopePolicy {
     pub family: ResponseEnvelopeFamily,
-    pub route_contexts: &'static [RouteOwner],
+    pub route_contexts: &'static [MigrationState],
     pub success_shape: &'static str,
     pub error_shape: &'static str,
     pub proxy_may_wrap: bool,
 }
 
 impl ResponseEnvelopePolicy {
-    pub fn applies_to_owner(&self, owner: RouteOwner) -> bool {
-        self.route_contexts.contains(&owner)
+    pub fn applies_to_owner(&self, state: MigrationState) -> bool {
+        self.route_contexts.contains(&state)
     }
 }
 
@@ -138,12 +329,27 @@ const IMPORT_DELETION_GATES: [ImportDeletionGate; 5] = [
     ImportDeletionGate::NoResidualReferences,
 ];
 
+const CUTOVER_STATE_MACHINE: [MigrationState; 4] = [
+    MigrationState::PythonProxied,
+    MigrationState::RustImplemented,
+    MigrationState::RustOwnedVerified,
+    MigrationState::PythonDeleted,
+];
+const MANIFEST_STATES: [MigrationState; 6] = [
+    MigrationState::PythonProxied,
+    MigrationState::RustImplemented,
+    MigrationState::RustOwnedVerified,
+    MigrationState::PythonDeleted,
+    MigrationState::ContractOnly,
+    MigrationState::Planned,
+];
+
 const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     EndpointOwnership {
         method: "GET",
         pattern: "/api/health",
         domain: "api-runtime-shell",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::RustHttpShell,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust HTTP shell health route.",
@@ -152,7 +358,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/runtime",
         domain: "api-runtime-shell",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::RustHttpShell,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust HTTP shell metadata route.",
@@ -161,7 +367,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns core list route; Python CRUD deletion remains blocked by the S9e residual-reference review, not by the import skeleton registry.",
@@ -170,7 +376,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns trailing-slash list route.",
@@ -179,7 +385,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns core create route with cents-to-yuan adapter semantics.",
@@ -188,7 +394,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns trailing-slash create route.",
@@ -197,7 +403,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/by-month",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns month list route.",
@@ -206,7 +412,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/get",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns legacy get-by-query route.",
@@ -215,7 +421,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/{bill_id}",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns REST get route.",
@@ -224,7 +430,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/{bill_id}",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns REST update route.",
@@ -233,7 +439,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/{bill_id}",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns REST delete route.",
@@ -242,7 +448,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/modify",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns legacy modify route.",
@@ -251,7 +457,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/delete",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns legacy delete route.",
@@ -260,7 +466,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/batch",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns batch create route with a single SQLite transaction.",
@@ -269,7 +475,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/batch/update",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns batch update route.",
@@ -278,7 +484,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/batch/delete",
         domain: "bills-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BillsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust bills_crud_runtime owns batch delete route.",
@@ -287,7 +493,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/export",
         domain: "bills-crud-adjacent",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Bills export remains Python-proxied until the export/media/reconciliation slice owns streaming response semantics.",
@@ -296,7 +502,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/pictures*",
         domain: "bills-crud-adjacent",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Transaction picture upload/remove remains Python-proxied.",
@@ -305,7 +511,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/reconciliation_statements",
         domain: "bills-crud-adjacent",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Reconciliation statements remain Python-proxied until reconciliation runtime migrates.",
@@ -314,7 +520,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/{bill_id}/recurring-candidates",
         domain: "bills-recurring",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Recurring candidate generation remains Python-proxied.",
@@ -323,7 +529,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/{bill_id}/recurring-match",
         domain: "bills-recurring",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Recurring match decisions remain Python-proxied.",
@@ -332,7 +538,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/category/*",
         domain: "bills-category-actions",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Category action helpers remain Python-proxied until matching/category-rule runtime migrates.",
@@ -341,7 +547,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns core list route; execution, forecast, history, and import are Rust-owned.",
@@ -350,7 +556,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns trailing-slash list route.",
@@ -359,7 +565,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/budgets",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns core create route with yuan-style budget amount semantics.",
@@ -368,7 +574,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/budgets/",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns trailing-slash create route.",
@@ -377,7 +583,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/{budget_id}",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns REST get route.",
@@ -386,7 +592,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/budgets/{budget_id}",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns REST update route.",
@@ -395,7 +601,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/budgets/{budget_id}",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns REST delete route.",
@@ -404,7 +610,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/export",
         domain: "budgets-crud",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_crud_runtime owns JSON export for budget rows.",
@@ -413,7 +619,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/execution",
         domain: "budgets-analysis",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_execution_runtime owns budget execution aggregation.",
@@ -422,7 +628,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/forecast",
         domain: "budgets-analysis",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_forecast_runtime owns historical bill aggregation, budget-map projection, forecast summary, and period-progress shape.",
@@ -431,7 +637,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/budgets/history",
         domain: "budgets-history",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_history_runtime owns persisted snapshot lookup, exact-period preference, category enrichment, and on-demand fallback.",
@@ -440,7 +646,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/budgets/history/snapshot",
         domain: "budgets-history",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_history_runtime owns budget_history replacement writes with canonical filter_summary and user scope.",
@@ -449,7 +655,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/budgets/import",
         domain: "budgets-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::BudgetsCrud,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust budgets_import_runtime owns Flask-compatible array validation, per-item error accounting, and user-scoped upsert-by-name writes.",
@@ -458,7 +664,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/category-statistics",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns DB-backed category/account cents aggregation with timestamp range and keyword filtering.",
@@ -467,7 +673,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/category-statistics/trends",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns monthly category/account trend buckets for bounded and all-mode ranges.",
@@ -476,7 +682,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/asset-trends",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns DB-backed daily asset trend balances with 365-day bounded-range guard.",
@@ -485,7 +691,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/category-pie",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns category pie aggregation for bill type/date filters.",
@@ -494,7 +700,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/top-merchants",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns top merchant aggregation for date filters.",
@@ -503,7 +709,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/amounts",
         domain: "statistics-read",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::StatisticsRead,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust statistics_read_runtime owns transaction amount period aggregation with CNY cents response semantics.",
@@ -512,7 +718,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/overview",
         domain: "statistics-analyzer",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Analyzer overview remains Python-proxied until the full Analyzer report runtime is Rust-owned.",
@@ -521,7 +727,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/trends",
         domain: "statistics-analyzer",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Analyzer trends remain Python-proxied until the full Analyzer trend runtime is Rust-owned.",
@@ -530,7 +736,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/comparison",
         domain: "statistics-analyzer",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Analyzer comparison remains Python-proxied until the full Analyzer comparison runtime is Rust-owned.",
@@ -539,7 +745,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/category",
         domain: "statistics-analyzer",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "Analyzer category route remains Python-proxied until the full Analyzer category runtime is Rust-owned.",
@@ -548,7 +754,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/trend",
         domain: "statistics-analyzer",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "Analyzer trend alias remains Python-proxied until the full Analyzer trend runtime is Rust-owned.",
@@ -557,7 +763,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/exchange-rates",
         domain: "statistics-exchange",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Live exchange provider fetch and custom-rate precedence remain Python-proxied until Rust owns provider execution and custom-rate persistence.",
@@ -566,7 +772,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/statistics/exchange-rates/custom",
         domain: "statistics-exchange",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Custom exchange-rate writes remain Python-proxied until Rust owns provider execution and custom-rate persistence together.",
@@ -575,7 +781,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/statistics/exchange-rates/custom/{currency}",
         domain: "statistics-exchange",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Custom exchange-rate deletion remains Python-proxied until Rust owns provider execution and custom-rate persistence together.",
@@ -584,7 +790,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/parse",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -593,7 +799,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/parse_generic",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -602,7 +808,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/dedup",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -611,7 +817,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/confirm",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -620,7 +826,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/v2/session/{session_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -629,7 +835,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/import/v2/session/{session_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportV2Stage,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -638,7 +844,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/v2/preview/{session_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -647,7 +853,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/v2/preview/{session_id}/index",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -656,7 +862,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/import/v2/preview/{session_id}/update",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -665,7 +871,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/reclassify/{session_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewAction,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -674,7 +880,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/v2/preview-item/{preview_id}/recurring-candidates",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -683,7 +889,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -692,7 +898,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/import/v2/preview-item/{preview_id}/recurring-match",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -701,7 +907,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/preview-item/{preview_id}/transfer-decision",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::ImportPreviewItemDecision,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -710,7 +916,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/learning/{session_id}/suggestions",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this preview-bypass route; it applies supplied preview updates and returns an explicit empty suggestion list without provider/model execution.",
@@ -719,7 +925,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/v2/learning/{session_id}/suggestions",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this preview-bypass route; it validates the session and returns an explicit empty suggestion list without provider/model execution.",
@@ -728,7 +934,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/v2/learning/{session_id}/promote",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this DB-write decision route and promotes stored session suggestions into import learning rules.",
@@ -737,7 +943,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/preview",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -746,7 +952,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/confirm",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -755,7 +961,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/batch",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -764,7 +970,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/parse_import",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -773,7 +979,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/upload",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -782,7 +988,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/parsers",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -791,7 +997,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/reclassify",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -800,7 +1006,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/configs",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -809,7 +1015,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/configs",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -818,7 +1024,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/configs/match",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -827,7 +1033,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/bills/import/configs/suggest",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -836,7 +1042,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/import/configs/{config_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -845,7 +1051,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/bills/import/learning-rules",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -854,7 +1060,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/bills/import/learning-rules/{rule_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -863,7 +1069,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/bills/import/learning-rules/{rule_id}",
         domain: "bills-import",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route; Python import deletion stays blocked until all five gates pass.",
@@ -872,7 +1078,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/llm/preview-recommend",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "True LLM preview recommendation generation is proxied to Python until Rust owns provider execution; Rust keeps accept/reject/memory preview decisions.",
@@ -881,7 +1087,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/llm/preview-recommend/accept",
         domain: "ai-learning-llm",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; Python import deletion stays blocked until all five gates pass.",
@@ -890,7 +1096,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/llm/preview-recommend/reject",
         domain: "ai-learning-llm",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; Python import deletion stays blocked until all five gates pass.",
@@ -899,7 +1105,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/llm/memory",
         domain: "ai-learning-llm",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::LlmPreview,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns this route with provider-bypassed semantics; Python import deletion stays blocked until all five gates pass.",
@@ -908,7 +1114,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/llm/analyze-transactions",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "True LLM transaction analysis and import-session rule induction are proxied to Python until Rust owns provider execution.",
@@ -917,7 +1123,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/llm/rule-synthesis",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "True rule-synthesis provider generation is proxied to Python until Rust owns provider execution.",
@@ -926,7 +1132,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/learning/suggestions",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center listing remains proxied to Python until Rust owns suggestion mining, persistence, and decisions as one loop.",
@@ -935,7 +1141,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/learning/suggestions/generate",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes: "Learning suggestion mining/generation remains proxied to Python until Rust owns the learning model loop.",
@@ -944,7 +1150,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/learning/suggestions/{suggestion_id}/accept",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center decisions remain proxied to Python until Rust owns suggestion mining, persistence, and decisions as one loop.",
@@ -953,7 +1159,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/learning/suggestions/batch-accept",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center decisions remain proxied to Python until Rust owns suggestion mining, persistence, and decisions as one loop.",
@@ -962,7 +1168,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/learning/suggestions/{suggestion_id}/reject",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center decisions remain proxied to Python until Rust owns suggestion mining, persistence, and decisions as one loop.",
@@ -971,7 +1177,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/learning/rules",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center rules remain proxied to Python until Rust owns the full Learning Center rule store contract.",
@@ -980,7 +1186,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/learning/rules/{rule_id}/toggle",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center rules remain proxied to Python until Rust owns the full Learning Center rule store contract.",
@@ -989,7 +1195,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/learning/rules/{rule_id}",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center rules remain proxied to Python until Rust owns the full Learning Center rule store contract.",
@@ -998,7 +1204,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "DELETE",
         pattern: "/api/learning/rules/{rule_id}",
         domain: "ai-learning-llm",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::LearningRoute,
         deletion_blocked_until_all_import_gates: false,
         notes: "Global Learning Center rules remain proxied to Python until Rust owns the full Learning Center rule store contract.",
@@ -1007,7 +1213,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "POST",
         pattern: "/api/ml/receipt-recognition",
         domain: "ai-ocr",
-        owner: RouteOwner::PythonProxied,
+        state: MigrationState::PythonProxied,
         envelope: ResponseEnvelopeFamily::OcrMl,
         deletion_blocked_until_all_import_gates: false,
         notes: "Receipt image recognition is deliberately proxied to Python until Rust owns real OCR provider execution.",
@@ -1016,7 +1222,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/ml/receipt-recognition/config",
         domain: "ai-ocr",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::OcrMl,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns OCR config; true receipt recognition remains Python-proxied.",
@@ -1025,7 +1231,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "PUT",
         pattern: "/api/ml/receipt-recognition/config",
         domain: "ai-ocr",
-        owner: RouteOwner::RustOwned,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::OcrMl,
         deletion_blocked_until_all_import_gates: true,
         notes: "Rust import_db_runtime owns OCR config; true receipt recognition remains Python-proxied.",
@@ -1034,7 +1240,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "CONTRACT",
         pattern: "contract://import-v2-envelope-oracle",
         domain: "bills-import",
-        owner: RouteOwner::ContractOnly,
+        state: MigrationState::ContractOnly,
         envelope: ResponseEnvelopeFamily::ContractOracle,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust core pins import envelope families for Rust-owned import_db_runtime routes.",
@@ -1043,18 +1249,495 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "CONTRACT",
         pattern: "contract://sqlite-import-writer-policy",
         domain: "database-facade",
-        owner: RouteOwner::ContractOnly,
+        state: MigrationState::ContractOnly,
         envelope: ResponseEnvelopeFamily::ContractOracle,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust core pins DB writer invariants for import_db_runtime takeover.",
     },
 ];
 
-const RUST_ENVELOPE_CONTEXT: &[RouteOwner] = &[RouteOwner::RustOwned];
-const PYTHON_PROXIED_ENVELOPE_CONTEXT: &[RouteOwner] = &[RouteOwner::PythonProxied];
-const CONTRACT_ENVELOPE_CONTEXT: &[RouteOwner] = &[RouteOwner::ContractOnly];
-const RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT: &[RouteOwner] =
-    &[RouteOwner::RustOwned, RouteOwner::PythonProxied];
+const COVERAGE_EVIDENCE_CONTRACT: &str = "workspace.lcov";
+const EMPTY_STRINGS: &[&str] = &[];
+const SQLITE_DB_INVARIANT_IDS: &[&str] = &[
+    "wal_mode",
+    "foreign_keys",
+    "rollback_on_error",
+    "positive_user_scope",
+    "amount_units",
+    "time_normalization",
+];
+const IMPORT_DB_INVARIANT_IDS: &[&str] = &[
+    "wal_mode",
+    "foreign_keys",
+    "single_writer",
+    "transactional_staging",
+    "rollback_on_error",
+    "positive_user_scope",
+    "amount_units",
+    "time_normalization",
+];
+const ROUTE_MATRIX_ONLY_EVIDENCE: &[&str] = &["route_matrix"];
+const RUNTIME_METADATA_EVIDENCE: &[&str] = &["route_matrix", "runtime_metadata"];
+const DB_RUNTIME_EVIDENCE: &[&str] = &["route_matrix", "db_smoke"];
+const FRONTEND_DB_EVIDENCE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
+const FULL_ROUTE_EVIDENCE: &[&str] = &[
+    "route_matrix",
+    "golden_fixture",
+    "db_smoke",
+    "frontend_contract",
+];
+const FULL_ROUTE_EVIDENCE_NO_FIXTURE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
+const PROVIDER_ROUTE_EVIDENCE: &[&str] = &["route_matrix", "provider_parity"];
+const IMPORT_DELETION_BLOCKERS: &[&str] = &[
+    "rust_route_runtime",
+    "db_write_semantics",
+    "frontend_import_flow",
+    "full_coverage",
+    "no_residual_references",
+];
+
+const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
+    DomainGovernancePolicy {
+        domain: "api-runtime-shell",
+        python_owner_files: &[
+            "src/bill_analyser/api/app.py",
+            "src/bill_analyser/api/routes/request_context_helpers.py",
+            "src/bill_analyser/utils/config.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/router.rs",
+            "crates/bill-analyser-http/src/server.rs",
+            "crates/bill-analyser-http/src/runtime.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/proxy_contract.rs",
+            "tests/domains/runtime/unit/test_rust_runtime_workspace.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: EMPTY_STRINGS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["proxy_fallback"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Python sidecar startup plus catch-all fallback proxy remain part of the runtime shell until terminal cutover.",
+        decision_required: DecisionRequired::Defer,
+        decision_owner: "migration-program",
+        transition_evidence: RUNTIME_METADATA_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "bills-import",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/bills/v2_pipeline.py",
+            "src/bill_analyser/api/routes/bills/v2_preview_actions.py",
+            "src/bill_analyser/api/routes/bills/import_learning.py",
+            "src/bill_analyser/core/bills/service_parts/import_v2_pipeline.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/import_routes.rs",
+            "crates/bill-analyser-db/src/import_staging.rs",
+            "crates/bill-analyser-core/src/import_pipeline.rs",
+            "crates/bill-analyser-core/src/parsers.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/import_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/import_staging.rs",
+            "tests/domains/import_flow/unit/test_bills_route_branches.py",
+        ],
+        fixtures: &["crates/bill-analyser-core/tests/fixtures/parser_golden_contracts.json"],
+        db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: IMPORT_DELETION_BLOCKERS,
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: FULL_ROUTE_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "ai-learning-llm",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/llm/preview.py",
+            "src/bill_analyser/api/routes/llm/analysis.py",
+            "src/bill_analyser/api/routes/learning.py",
+            "src/bill_analyser/core/ai/llm/provider.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/import_routes.rs",
+            "crates/bill-analyser-core/src/ai_ocr_llm.rs",
+            "crates/bill-analyser-core/src/import_learning.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs",
+            "crates/bill-analyser-core/tests/import_learning_contracts.rs",
+            "tests/new_ui/test_llm_import_session_analysis_api.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["provider_execution_parity", "learning_center_rule_loop"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Live provider-backed preview recommendation generation, transaction analysis, rule synthesis, and the global Learning Center suggestion/rule loop remain Python-owned.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "ai-ocr",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/receipt_ocr.py",
+            "src/bill_analyser/core/ai/ocr/provider.py",
+            "src/bill_analyser/core/ai/ocr/payment_screenshot_parser.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/import_routes.rs",
+            "crates/bill-analyser-core/src/ai_ocr_llm.rs",
+            "crates/bill-analyser-db/src/app_settings.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-core/tests/ai_ocr_llm_contracts.rs",
+            "crates/bill-analyser-db/tests/app_settings.rs",
+            "tests/test_ocr_service.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["provider_execution_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Receipt image recognition provider execution remains Python-owned even though OCR config persistence is Rust-owned.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "bills-crud",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/bills/crud_query.py",
+            "src/bill_analyser/api/routes/bills/crud_create_update.py",
+            "src/bill_analyser/api/routes/bills/crud_prepare.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/bill_routes.rs",
+            "crates/bill-analyser-db/src/bills.rs",
+            "crates/bill-analyser-core/src/adapters/transaction.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/bills_runtime.rs",
+            "tests/domains/import_flow/unit/test_bills_route_branches.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["no_residual_references"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: FRONTEND_DB_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "bills-crud-adjacent",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/bills/reconciliation.py",
+            "src/bill_analyser/api/routes/bills/category_actions.py",
+            "src/bill_analyser/api/routes/bills/support.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/bill_routes.rs",
+            "crates/bill-analyser-core/src/matching.rs",
+            "crates/bill-analyser-core/src/ops.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/matching_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &[
+            "streaming_export_parity",
+            "picture_storage_contract",
+            "reconciliation_contract",
+        ],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Bill export streaming, transaction pictures, and reconciliation statement generation remain Python-proxied.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: DB_RUNTIME_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "bills-recurring",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/bills/reconciliation.py",
+            "src/bill_analyser/core/recurring_detection.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/bill_routes.rs",
+            "crates/bill-analyser-core/src/matching.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/matching_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["recurring_candidate_generation"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "Recurring candidate generation and recurring-match decisions remain Python-proxied.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: DB_RUNTIME_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "bills-category-actions",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/bills/category_actions.py",
+            "src/bill_analyser/core/category_engine/matcher.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/bill_routes.rs",
+            "crates/bill-analyser-core/src/category_rules/mod.rs",
+            "crates/bill-analyser-core/src/matching.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/bills_runtime_contract.rs",
+            "tests/domains/categories/unit/test_category_rule_rust_bridge.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["category_action_helper_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "Bill category action helper routes remain Python-proxied.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: FRONTEND_DB_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "budgets-crud",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/budgets/crud.py",
+            "src/bill_analyser/api/routes/budgets/support.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/budget_routes.rs",
+            "crates/bill-analyser-db/src/budgets.rs",
+            "crates/bill-analyser-core/src/budgets.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["no_residual_references"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: FRONTEND_DB_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "budgets-analysis",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/budgets/execution.py",
+            "src/bill_analyser/api/routes/budgets/support.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/budget_routes.rs",
+            "crates/bill-analyser-db/src/budgets.rs",
+            "crates/bill-analyser-core/src/budgets.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["no_residual_references"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: DB_RUNTIME_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "budgets-history",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/budgets/history.py",
+            "src/bill_analyser/api/routes/budgets/support.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/budget_routes.rs",
+            "crates/bill-analyser-db/src/budgets.rs",
+            "crates/bill-analyser-core/src/budgets.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["no_residual_references"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: DB_RUNTIME_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "budgets-import",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/budgets/io.py",
+            "src/bill_analyser/api/routes/budgets/support.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/budget_routes.rs",
+            "crates/bill-analyser-db/src/budgets.rs",
+            "crates/bill-analyser-core/src/budgets.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/budget_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["no_residual_references"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
+    },
+    DomainGovernancePolicy {
+        domain: "statistics-read",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/statistics/basic.py",
+            "src/bill_analyser/api/routes/statistics/asset_trends.py",
+            "src/bill_analyser/core/analyzer.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/statistics_routes.rs",
+            "crates/bill-analyser-db/src/statistics.rs",
+            "crates/bill-analyser-core/src/statistics.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["analyzer_runtime_followup"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
+        transition_evidence: DB_RUNTIME_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "statistics-analyzer",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/insights.py",
+            "src/bill_analyser/api/routes/networth.py",
+            "src/bill_analyser/api/routes/statistics/trend_analysis.py",
+            "src/bill_analyser/api/routes/statistics/category_analysis.py",
+            "src/bill_analyser/core/analyzer.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/statistics_routes.rs",
+            "crates/bill-analyser-core/src/statistics.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["overview_parity", "trend_projection_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Overview, trends, comparison, category, and trend analyzer endpoints remain Python-proxied.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
+    },
+    DomainGovernancePolicy {
+        domain: "statistics-exchange",
+        python_owner_files: &[
+            "src/bill_analyser/api/routes/statistics/exchange_rates.py",
+            "src/bill_analyser/core/exchange_rate_providers/manager.py",
+            "src/bill_analyser/core/exchange_rate_providers/global_providers.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-http/src/statistics_routes.rs",
+            "crates/bill-analyser-core/src/statistics.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/statistics_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/statistics_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["exchange_provider_parity", "custom_rate_write_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Live exchange-rate provider resolution and custom-rate write/delete routes remain Python-proxied.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "database-facade",
+        python_owner_files: &[
+            "src/bill_analyser/core/db.py",
+            "src/bill_analyser/core/database/runtime.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-core/src/migration_governance.rs",
+            "crates/bill-analyser-db/src/connection.rs",
+            "crates/bill-analyser-db/src/schema.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-db/tests/sqlite_runtime.rs",
+            "crates/bill-analyser-core/tests/migration_governance_contracts.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: IMPORT_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["domain_runtime_takeover"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "The database-facade contract is governance-only and does not, by itself, delete Python runtime entry points.",
+        decision_required: DecisionRequired::Defer,
+        decision_owner: "migration-program",
+        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+    },
+];
+
+const RUST_ENVELOPE_CONTEXT: &[MigrationState] = &[
+    MigrationState::RustImplemented,
+    MigrationState::RustOwnedVerified,
+    MigrationState::PythonDeleted,
+];
+const PYTHON_PROXIED_ENVELOPE_CONTEXT: &[MigrationState] = &[MigrationState::PythonProxied];
+const CONTRACT_ENVELOPE_CONTEXT: &[MigrationState] = &[MigrationState::ContractOnly];
+const RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT: &[MigrationState] = &[
+    MigrationState::RustImplemented,
+    MigrationState::RustOwnedVerified,
+    MigrationState::PythonDeleted,
+    MigrationState::PythonProxied,
+];
 
 const ENVELOPE_POLICIES: &[ResponseEnvelopePolicy] = &[
     ResponseEnvelopePolicy {
@@ -1192,15 +1875,183 @@ const IMPORT_DB_WRITE_INVARIANTS: [DbWriteInvariant; 8] = [
     },
 ];
 
+const CRUD_DB_WRITE_INVARIANTS: [DbWriteInvariant; 6] = [
+    DbWriteInvariant {
+        key: "wal_mode",
+        description: "Rust SQLite connections must use WAL mode before write takeover.",
+    },
+    DbWriteInvariant {
+        key: "foreign_keys",
+        description: "Rust SQLite connections must enable foreign key enforcement.",
+    },
+    DbWriteInvariant {
+        key: "rollback_on_error",
+        description: "Failed runtime writes must roll back partial bill or budget mutations.",
+    },
+    DbWriteInvariant {
+        key: "positive_user_scope",
+        description: "All runtime writes must bind a positive authenticated user id.",
+    },
+    DbWriteInvariant {
+        key: "amount_units",
+        description: "Amount boundaries must state yuan or cents explicitly.",
+    },
+    DbWriteInvariant {
+        key: "time_normalization",
+        description: "Date/time writes must normalize local bill time explicitly.",
+    },
+];
+
 pub fn rust_http_shell_ownership_matrix() -> &'static [EndpointOwnership] {
     OWNERSHIP_MATRIX
 }
 
-pub fn endpoints_by_owner(owner: RouteOwner) -> Vec<&'static EndpointOwnership> {
+pub fn migration_state_machine() -> &'static [MigrationState] {
+    &CUTOVER_STATE_MACHINE
+}
+
+pub fn manifest_states() -> &'static [MigrationState] {
+    &MANIFEST_STATES
+}
+
+pub fn domain_governance_policies() -> &'static [DomainGovernancePolicy] {
+    DOMAIN_GOVERNANCE_POLICIES
+}
+
+pub fn find_domain_policy(domain: &str) -> Option<&'static DomainGovernancePolicy> {
+    DOMAIN_GOVERNANCE_POLICIES
+        .iter()
+        .find(|policy| policy.domain == domain)
+}
+
+fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
+    match domain {
+        "api-runtime-shell" => RouteHandlerId::RouterBuildRouter,
+        "bills-crud" => RouteHandlerId::BillsCrudRuntime,
+        "bills-crud-adjacent" => RouteHandlerId::BillsAdjacentProxyPassthrough,
+        "bills-recurring" => RouteHandlerId::BillsRecurringProxyPassthrough,
+        "bills-category-actions" => RouteHandlerId::BillsCategoryActionsProxyPassthrough,
+        "bills-import" => RouteHandlerId::ImportDbRuntime,
+        "ai-learning-llm" => RouteHandlerId::LlmLearningRuntimeBoundary,
+        "ai-ocr" => RouteHandlerId::OcrRuntimeBoundary,
+        "budgets-crud" => RouteHandlerId::BudgetsCrudRuntime,
+        "budgets-analysis" => RouteHandlerId::BudgetsAnalysisRuntime,
+        "budgets-history" => RouteHandlerId::BudgetsHistoryRuntime,
+        "budgets-import" => RouteHandlerId::BudgetsImportRuntime,
+        "statistics-read" => RouteHandlerId::StatisticsReadRuntime,
+        "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerProxyPassthrough,
+        "statistics-exchange" => RouteHandlerId::StatisticsExchangeProxyPassthrough,
+        "database-facade" => RouteHandlerId::DatabaseFacadeContractOracle,
+        _ => panic!("missing handler mapping for migration governance domain {domain}"),
+    }
+}
+
+fn route_contract_details(
+    route: &EndpointOwnership,
+    policy: &DomainGovernancePolicy,
+) -> RouteContractDetails {
+    match (route.domain, route.state) {
+        ("ai-learning-llm", MigrationState::RustOwnedVerified) => RouteContractDetails {
+            handler: RouteHandlerId::LlmLearningRuntimeBoundary,
+            deletion_blockers: IMPORT_DELETION_BLOCKERS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior: "",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
+            transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
+        },
+        ("ai-learning-llm", MigrationState::PythonProxied) => RouteContractDetails {
+            handler: RouteHandlerId::LlmLearningRuntimeBoundary,
+            deletion_blockers: &["provider_execution_parity", "learning_center_rule_loop"],
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior:
+                "Live provider-backed preview recommendation generation, transaction analysis, rule synthesis, and the global Learning Center suggestion/rule loop remain Python-owned.",
+            decision_required: DecisionRequired::Port,
+            decision_owner: "migration-program",
+            transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+        },
+        ("ai-ocr", MigrationState::RustOwnedVerified) => RouteContractDetails {
+            handler: RouteHandlerId::OcrRuntimeBoundary,
+            deletion_blockers: IMPORT_DELETION_BLOCKERS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior: "",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
+            transition_evidence: FULL_ROUTE_EVIDENCE_NO_FIXTURE,
+        },
+        ("ai-ocr", MigrationState::PythonProxied) => RouteContractDetails {
+            handler: RouteHandlerId::OcrRuntimeBoundary,
+            deletion_blockers: &["provider_execution_parity"],
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior:
+                "Receipt image recognition provider execution remains Python-owned even though OCR config persistence is Rust-owned.",
+            decision_required: DecisionRequired::Port,
+            decision_owner: "migration-program",
+            transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+        },
+        _ => RouteContractDetails {
+            handler: route_handler_for_domain(route.domain),
+            deletion_blockers: policy.deletion_blockers,
+            blocked_status: policy.blocked_status,
+            unsupported_behavior: policy.unsupported_behavior,
+            decision_required: policy.decision_required,
+            decision_owner: policy.decision_owner,
+            transition_evidence: policy.transition_evidence,
+        },
+    }
+}
+
+pub fn expanded_route_manifest() -> Vec<ExpandedRouteManifestEntry> {
     OWNERSHIP_MATRIX
         .iter()
-        .filter(|endpoint| endpoint.owner == owner)
+        .map(|route| {
+            let policy = find_domain_policy(route.domain)
+                .unwrap_or_else(|| panic!("missing domain governance policy for {}", route.domain));
+            let route_contract = route_contract_details(route, policy);
+            ExpandedRouteManifestEntry {
+                domain: route.domain,
+                domain_policy_ref: route.domain,
+                endpoint: format!("{} {}", route.method, route.pattern),
+                method: route.method,
+                pattern: route.pattern,
+                state: route.state,
+                handler: route_contract.handler,
+                deletion_blockers: route_contract.deletion_blockers,
+                blocked_status: route_contract.blocked_status,
+                unsupported_behavior: route_contract.unsupported_behavior,
+                decision_required: route_contract.decision_required,
+                decision_owner: route_contract.decision_owner,
+                transition_evidence: route_contract.transition_evidence,
+                envelope: route.envelope,
+                notes: route.notes,
+            }
+        })
         .collect()
+}
+
+pub fn governance_manifest_snapshot() -> GovernanceManifestSnapshot {
+    GovernanceManifestSnapshot {
+        cutover_state_machine: migration_state_machine(),
+        manifest_states: manifest_states(),
+        coverage_evidence_contract: COVERAGE_EVIDENCE_CONTRACT,
+        domains: domain_governance_policies(),
+        routes: expanded_route_manifest(),
+    }
+}
+
+pub fn contract_oracle() -> &'static str {
+    "contract://migration-governance-oracle"
+}
+
+pub fn routes_by_state(state: MigrationState) -> Vec<&'static EndpointOwnership> {
+    OWNERSHIP_MATRIX
+        .iter()
+        .filter(|endpoint| endpoint.state == state)
+        .collect()
+}
+
+pub fn endpoints_by_owner(state: MigrationState) -> Vec<&'static EndpointOwnership> {
+    routes_by_state(state)
 }
 
 pub fn find_endpoint_ownership(method: &str, pattern: &str) -> Option<&'static EndpointOwnership> {
@@ -1266,7 +2117,7 @@ pub fn bills_crud_db_writer_policy() -> DbWriterPolicy {
         mode: DbWriterMode::RustDomainOwned,
         active_writer: "crates/bill-analyser-http/src/bill_routes.rs + crates/bill-analyser-db/src/bills.rs via Rust bills_crud_runtime",
         rust_write_allowed: true,
-        invariants: &IMPORT_DB_WRITE_INVARIANTS,
+        invariants: &CRUD_DB_WRITE_INVARIANTS,
     }
 }
 
@@ -1276,6 +2127,6 @@ pub fn budgets_crud_db_writer_policy() -> DbWriterPolicy {
         mode: DbWriterMode::RustDomainOwned,
         active_writer: "crates/bill-analyser-http/src/budget_routes.rs + crates/bill-analyser-db/src/budgets.rs via Rust budgets_crud_runtime",
         rust_write_allowed: true,
-        invariants: &IMPORT_DB_WRITE_INVARIANTS,
+        invariants: &CRUD_DB_WRITE_INVARIANTS,
     }
 }

@@ -1,14 +1,17 @@
 use bill_analyser_core::{
     bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_python_import_paths,
-    endpoints_by_owner, find_endpoint_ownership, import_db_writer_policy,
-    import_deletion_blocked_endpoints, import_deletion_gates, missing_import_deletion_gates,
-    response_envelope_policies, response_envelope_policy, rust_http_shell_ownership_matrix,
-    DbWriterMode, ImportDeletionEvidence, ImportDeletionGate, ResponseEnvelopeFamily, RouteOwner,
+    domain_governance_policies, endpoints_by_owner, expanded_route_manifest, find_domain_policy,
+    find_endpoint_ownership, governance_manifest_snapshot, import_db_writer_policy,
+    import_deletion_blocked_endpoints, import_deletion_gates, manifest_states,
+    migration_state_machine, missing_import_deletion_gates, response_envelope_policies,
+    response_envelope_policy, rust_http_shell_ownership_matrix, DbWriterMode, DecisionRequired,
+    ImportDeletionEvidence, ImportDeletionGate, MigrationBlockedStatus, MigrationState,
+    ResponseEnvelopeFamily, RouteHandlerId,
 };
 
 #[test]
-fn rust_owned_runtime_routes_include_health_metadata_and_first_phase_import_runtime() {
-    let rust_owned: Vec<_> = endpoints_by_owner(RouteOwner::RustOwned)
+fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_import_runtime() {
+    let rust_owned: Vec<_> = endpoints_by_owner(MigrationState::RustOwnedVerified)
         .into_iter()
         .filter(|endpoint| endpoint.pattern.starts_with("/api/"))
         .map(|endpoint| (endpoint.method, endpoint.pattern))
@@ -68,7 +71,7 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     let blocked_routes = import_deletion_blocked_endpoints();
     assert!(!blocked_routes.is_empty());
     assert!(blocked_routes.iter().all(|endpoint| {
-        endpoint.owner == RouteOwner::RustOwned && endpoint.is_import_deletion_blocked()
+        endpoint.state == MigrationState::RustOwnedVerified && endpoint.is_import_deletion_blocked()
     }));
 
     for (method, pattern) in [
@@ -83,14 +86,14 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing endpoint ownership for {method} {pattern}"));
-        assert_eq!(endpoint.owner, RouteOwner::RustOwned);
+        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
         assert!(!endpoint.is_python_runtime_owner());
         assert!(endpoint.is_import_deletion_blocked());
     }
 
     let receipt_recognition = find_endpoint_ownership("POST", "/api/ml/receipt-recognition")
         .expect("receipt OCR recognition route is governed");
-    assert_eq!(receipt_recognition.owner, RouteOwner::PythonProxied);
+    assert_eq!(receipt_recognition.state, MigrationState::PythonProxied);
     assert!(receipt_recognition.is_python_runtime_owner());
     assert!(!receipt_recognition.is_import_deletion_blocked());
 
@@ -124,7 +127,7 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("missing provider-owned endpoint {method} {pattern}"));
-        assert_eq!(endpoint.owner, RouteOwner::PythonProxied);
+        assert_eq!(endpoint.state, MigrationState::PythonProxied);
         assert!(endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
     }
@@ -132,7 +135,7 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 
 #[test]
 fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
-    let contract_patterns: Vec<_> = endpoints_by_owner(RouteOwner::ContractOnly)
+    let contract_patterns: Vec<_> = endpoints_by_owner(MigrationState::ContractOnly)
         .into_iter()
         .map(|endpoint| endpoint.pattern)
         .collect();
@@ -145,7 +148,9 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
         ]
     );
 
-    assert!(endpoints_by_owner(RouteOwner::Deleted).is_empty());
+    assert!(endpoints_by_owner(MigrationState::PythonDeleted).is_empty());
+    assert!(endpoints_by_owner(MigrationState::Planned).is_empty());
+    assert!(endpoints_by_owner(MigrationState::RustImplemented).is_empty());
 }
 
 #[test]
@@ -191,7 +196,7 @@ fn import_deletion_gate_requires_runtime_db_frontend_coverage_and_reference_evid
     }));
     assert!(import_deletion_blocked_endpoints()
         .iter()
-        .all(|endpoint| endpoint.owner == RouteOwner::RustOwned));
+        .all(|endpoint| endpoint.state == MigrationState::RustOwnedVerified));
 }
 
 #[test]
@@ -223,8 +228,9 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
     let proxy_error = response_envelope_policy(ResponseEnvelopeFamily::ProxyInfrastructureError)
         .expect("proxy error policy exists");
     assert!(proxy_error.proxy_may_wrap);
-    assert!(proxy_error.applies_to_owner(RouteOwner::RustOwned));
-    assert!(!proxy_error.applies_to_owner(RouteOwner::PythonProxied));
+    assert!(proxy_error.applies_to_owner(MigrationState::RustImplemented));
+    assert!(proxy_error.applies_to_owner(MigrationState::RustOwnedVerified));
+    assert!(!proxy_error.applies_to_owner(MigrationState::PythonProxied));
 
     for family in [
         ResponseEnvelopeFamily::ImportV2Stage,
@@ -238,7 +244,8 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         ResponseEnvelopeFamily::OcrMl,
     ] {
         let policy = response_envelope_policy(family).expect("business envelope policy exists");
-        assert!(policy.applies_to_owner(RouteOwner::RustOwned));
+        assert!(policy.applies_to_owner(MigrationState::RustImplemented));
+        assert!(policy.applies_to_owner(MigrationState::RustOwnedVerified));
         assert!(!policy.proxy_may_wrap);
     }
 
@@ -247,43 +254,165 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
         ResponseEnvelopeFamily::OcrMl,
     ] {
         let policy = response_envelope_policy(family).expect("shared envelope policy exists");
-        assert!(policy.applies_to_owner(RouteOwner::RustOwned));
-        assert!(policy.applies_to_owner(RouteOwner::PythonProxied));
+        assert!(policy.applies_to_owner(MigrationState::RustImplemented));
+        assert!(policy.applies_to_owner(MigrationState::RustOwnedVerified));
+        assert!(policy.applies_to_owner(MigrationState::PythonProxied));
     }
 }
 
 #[test]
 fn db_writer_policies_mark_rust_owned_runtime_domains_and_pin_invariants() {
+    let import_policy = import_db_writer_policy();
+    let bills_policy = bills_crud_db_writer_policy();
+    let budgets_policy = budgets_crud_db_writer_policy();
+
+    for policy in [import_policy, bills_policy, budgets_policy] {
+        assert_eq!(policy.mode, DbWriterMode::RustDomainOwned);
+        assert!(policy.rust_write_allowed);
+    }
+
     for key in [
         "wal_mode",
         "foreign_keys",
-        "single_writer",
-        "transactional_staging",
         "rollback_on_error",
         "positive_user_scope",
         "amount_units",
         "time_normalization",
     ] {
-        for policy in [
-            import_db_writer_policy(),
-            bills_crud_db_writer_policy(),
-            budgets_crud_db_writer_policy(),
-        ] {
-            assert_eq!(policy.mode, DbWriterMode::RustDomainOwned);
-            assert!(policy.rust_write_allowed);
-            assert!(policy.requires_invariant(key), "missing invariant {key}");
-        }
+        assert!(
+            import_policy.requires_invariant(key),
+            "missing import invariant {key}"
+        );
+        assert!(
+            bills_policy.requires_invariant(key),
+            "missing bills invariant {key}"
+        );
+        assert!(
+            budgets_policy.requires_invariant(key),
+            "missing budgets invariant {key}"
+        );
     }
-    assert_eq!(import_db_writer_policy().domain, "bills-import");
-    assert!(import_db_writer_policy()
-        .active_writer
-        .contains("import_routes.rs"));
-    assert_eq!(bills_crud_db_writer_policy().domain, "bills-crud");
-    assert!(bills_crud_db_writer_policy()
-        .active_writer
-        .contains("bill_routes.rs"));
-    assert_eq!(budgets_crud_db_writer_policy().domain, "budgets-crud");
-    assert!(budgets_crud_db_writer_policy()
-        .active_writer
-        .contains("budget_routes.rs"));
+
+    for key in ["single_writer", "transactional_staging"] {
+        assert!(
+            import_policy.requires_invariant(key),
+            "missing import-only invariant {key}"
+        );
+        assert!(!bills_policy.requires_invariant(key));
+        assert!(!budgets_policy.requires_invariant(key));
+    }
+
+    assert_eq!(import_policy.domain, "bills-import");
+    assert!(import_policy.active_writer.contains("import_routes.rs"));
+    assert_eq!(bills_policy.domain, "bills-crud");
+    assert!(bills_policy.active_writer.contains("bill_routes.rs"));
+    assert_eq!(budgets_policy.domain, "budgets-crud");
+    assert!(budgets_policy.active_writer.contains("budget_routes.rs"));
+}
+
+#[test]
+fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
+    assert_eq!(
+        migration_state_machine(),
+        &[
+            MigrationState::PythonProxied,
+            MigrationState::RustImplemented,
+            MigrationState::RustOwnedVerified,
+            MigrationState::PythonDeleted,
+        ]
+    );
+
+    assert!(migration_state_machine()[2].is_rust_runtime_state());
+    assert!(!MigrationState::Planned.is_rust_runtime_state());
+
+    let manifest = expanded_route_manifest();
+    let import_runtime = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "POST /api/bills/import/v2/parse")
+        .expect("expanded manifest keeps import route");
+    assert_eq!(import_runtime.state, MigrationState::RustOwnedVerified);
+    assert_eq!(import_runtime.domain_policy_ref, "bills-import");
+    assert_eq!(import_runtime.handler, RouteHandlerId::ImportDbRuntime);
+    assert!(import_runtime
+        .transition_evidence
+        .contains(&"frontend_contract"));
+    assert!(manifest
+        .iter()
+        .all(|entry| entry.handler.as_str().contains("::")));
+
+    let import_policy = find_domain_policy(import_runtime.domain_policy_ref)
+        .expect("route manifest links back to domain policy");
+    assert_eq!(import_policy.coverage_evidence, "workspace.lcov");
+    assert!(import_policy
+        .db_invariant_ids
+        .contains(&"transactional_staging"));
+
+    let ocr_config = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/ml/receipt-recognition/config")
+        .expect("ocr config route is present");
+    assert_eq!(ocr_config.decision_required, DecisionRequired::None);
+    assert!(ocr_config.deletion_blockers.contains(&"rust_route_runtime"));
+    assert!(!ocr_config
+        .deletion_blockers
+        .contains(&"provider_execution_parity"));
+
+    let ocr_provider = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "POST /api/ml/receipt-recognition")
+        .expect("ocr provider route is present");
+    assert_eq!(ocr_provider.decision_required, DecisionRequired::Port);
+    assert!(ocr_provider
+        .deletion_blockers
+        .contains(&"provider_execution_parity"));
+}
+
+#[test]
+fn domain_policies_record_provider_and_deletion_blockers() {
+    let domains = domain_governance_policies();
+    assert!(!domains.is_empty());
+
+    let ai_learning = find_domain_policy("ai-learning-llm").expect("ai domain policy exists");
+    assert_eq!(ai_learning.decision_required, DecisionRequired::Port);
+    assert_eq!(ai_learning.blocked_status, MigrationBlockedStatus::None);
+    assert!(ai_learning
+        .deletion_blockers
+        .contains(&"provider_execution_parity"));
+    assert!(ai_learning.unsupported_behavior.contains("rule synthesis"));
+
+    let database_facade =
+        find_domain_policy("database-facade").expect("database facade policy exists");
+    assert_eq!(database_facade.decision_required, DecisionRequired::Defer);
+    assert!(database_facade
+        .transition_evidence
+        .contains(&"route_matrix"));
+}
+
+#[test]
+fn domain_db_invariant_ids_match_public_writer_policy_helpers() {
+    for (domain, policy) in [
+        ("bills-import", import_db_writer_policy()),
+        ("bills-crud", bills_crud_db_writer_policy()),
+        ("budgets-crud", budgets_crud_db_writer_policy()),
+    ] {
+        let domain_policy = find_domain_policy(domain).expect("domain policy exists");
+        let policy_keys: Vec<_> = policy.invariants.iter().map(|item| item.key).collect();
+        assert_eq!(domain_policy.db_invariant_ids, policy_keys.as_slice());
+    }
+}
+
+#[test]
+fn governance_snapshot_joins_route_and_domain_manifests() {
+    let snapshot = governance_manifest_snapshot();
+    assert_eq!(snapshot.coverage_evidence_contract, "workspace.lcov");
+    assert_eq!(snapshot.cutover_state_machine, migration_state_machine());
+    assert_eq!(snapshot.manifest_states, manifest_states());
+    assert!(snapshot
+        .manifest_states
+        .contains(&MigrationState::ContractOnly));
+    assert_eq!(
+        snapshot.routes.len(),
+        rust_http_shell_ownership_matrix().len()
+    );
+    assert_eq!(snapshot.domains.len(), domain_governance_policies().len());
 }

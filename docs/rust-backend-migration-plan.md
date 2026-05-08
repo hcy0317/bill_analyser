@@ -2,6 +2,15 @@
 
 S0 establishes the auditable contract used by later Python-to-Rust migration slices.
 S0 does not add a Rust runtime, does not change Flask route behavior, and does not delete Python code.
+The active rewrite program is now governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; the historical S-sections below remain valid migration evidence, not the new governance source of truth.
+
+## P0 Governance Contracts
+
+- Cutover state machine: `PythonProxied -> RustImplemented -> RustOwnedVerified -> PythonDeleted`
+- Machine-checkable route/domain manifest: `cargo run -p bill-analyser-core --bin bill_migration_manifest`
+- Coverage evidence contract: `workspace.lcov`
+- Mechanical dependency gate: `python scripts/check_rust_workspace_dependencies.py --json`
+- Domain policies must carry owner files, migrated tests, fixture references, deletion blockers, and transition evidence before any Python deletion claim.
 
 ## Preservation Rules
 
@@ -13,7 +22,7 @@ S0 does not add a Rust runtime, does not change Flask route behavior, and does n
 ## Initial Migration Surface
 
 - Python backend files to track: 321
-- Current Rust backend files: 91
+- Current Rust backend files: 92
 - Initial verified-dead files: 0
 
 ## Domain Review Baseline

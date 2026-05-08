@@ -187,5 +187,6 @@ def test_auth_bridge_runtime_is_built_before_backend_pytest_and_startup() -> Non
     assert "cargo build -p bill-analyser-core --bin bill_auth_bridge" in gitea_ci
     assert "cargo build -p bill-analyser-db --bin bill_taxonomy_bridge" in gitea_ci
     assert "cargo build -p bill-analyser-http --bin bill_http_server" in gitea_ci
-    assert "cargo llvm-cov --workspace --lcov --output-path target/llvm-cov/lcov.info --fail-under-lines 90" in gitea_ci
+    assert "python scripts/check_rust_workspace_dependencies.py --json" in gitea_ci
+    assert "cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90" in gitea_ci
     assert "python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v" in gitea_ci

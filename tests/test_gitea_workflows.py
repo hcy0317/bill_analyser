@@ -80,8 +80,9 @@ def test_ci_workflow_covers_gitea_contract_regression() -> None:
 def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None:
     text = _read('ci.yml')
 
+    assert 'python scripts/check_rust_workspace_dependencies.py --json' in text
     assert 'cargo install cargo-llvm-cov --locked' in text
-    assert 'cargo llvm-cov --workspace --lcov --output-path target/llvm-cov/lcov.info --fail-under-lines 90' in text
+    assert 'cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90' in text
     assert (
         'python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v'
         in text

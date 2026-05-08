@@ -21,7 +21,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 321
     assert inventory.summary["python_backend_files"] == 321
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 91
+    assert inventory.summary["rust_backend_files"] == 92
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/parsers.rs" in inventory.rust_files
@@ -30,6 +30,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-core/src/import_pipeline.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/matching.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/migration_governance.rs" in inventory.rust_files
+    assert "crates/bill-analyser-core/src/bin/bill_migration_manifest.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/budgets.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/statistics.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/ops.rs" in inventory.rust_files
@@ -120,8 +121,11 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 321" in first_render
-    assert "- Rust backend files: 91" in first_render
+    assert "- Rust backend files: 92" in first_render
     assert "- Verified dead files: 0" in first_render
+    assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
+    assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
+    assert "Dependency gate tool: `python scripts/check_rust_workspace_dependencies.py --json`" in first_render
     assert "| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade |" in first_render
     assert "| src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port |" in first_render
     assert (
@@ -149,6 +153,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-core/src/ops.rs" in first_render
     assert "- crates/bill-analyser-core/src/ai_ocr_llm.rs" in first_render
     assert "- crates/bill-analyser-core/src/bin/bill_category_rule_bridge.rs" in first_render
+    assert "- crates/bill-analyser-core/src/bin/bill_migration_manifest.rs" in first_render
     assert "- crates/bill-analyser-core/src/category_rules/mod.rs" in first_render
     assert "- crates/bill-analyser-core/tests/parser_contracts.rs" in first_render
     assert "- crates/bill-analyser-core/tests/smart_dedup_contracts.rs" in first_render
@@ -199,4 +204,20 @@ def test_migration_plan_markdown_is_deterministic_and_keeps_s0_non_runtime(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Plan Baseline" in first_render
     assert "S0 does not add a Rust runtime, does not change Flask route behavior" in first_render
+    assert "P0-P15 state machine" in first_render
     assert "Every Python backend file remains preserved unless a later slice proves verified-dead" in first_render
+    assert "## P0 Governance Contracts" in first_render
+    assert "PythonProxied -> RustImplemented -> RustOwnedVerified -> PythonDeleted" in first_render
+    assert "cargo run -p bill-analyser-core --bin bill_migration_manifest" in first_render
+    assert "python scripts/check_rust_workspace_dependencies.py --json" in first_render
+    assert "workspace.lcov" in first_render
+
+
+def test_write_docs_leaves_curated_plan_doc_unchanged(repo_root: Path) -> None:
+    plan_path = repo_root / "docs" / "rust-backend-migration-plan.md"
+    before = plan_path.read_text(encoding="utf-8")
+
+    rust_migration_inventory.write_docs(repo_root)
+
+    after = plan_path.read_text(encoding="utf-8")
+    assert after == before

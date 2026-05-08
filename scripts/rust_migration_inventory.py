@@ -53,6 +53,9 @@ FACADE_PATHS = {
 }
 
 PACKAGE_IMPLEMENTATION_LINE_THRESHOLD = 80
+COVERAGE_EVIDENCE_CONTRACT = "workspace.lcov"
+MIGRATION_MANIFEST_COMMAND = "cargo run -p bill-analyser-core --bin bill_migration_manifest"
+DEPENDENCY_POLICY_COMMAND = "python scripts/check_rust_workspace_dependencies.py --json"
 
 ROUTE_DOMAIN_BY_SEGMENT = {
     "accounts": "accounts",
@@ -352,6 +355,7 @@ def render_inventory_markdown(inventory: RustMigrationInventory) -> str:
         "",
         "This S0 baseline is generated from a deterministic filesystem scan.",
         "It does not change runtime behavior and does not mark any Python business file as dead.",
+        "Route/domain cutover state lives separately in the Rust governance manifest and must not be inferred from `port/facade/deferred` inventory labels.",
         "",
         "## Summary",
         "",
@@ -362,6 +366,8 @@ def render_inventory_markdown(inventory: RustMigrationInventory) -> str:
         f"- Files marked facade: {inventory.summary['facade_files']}",
         f"- Files marked deferred: {inventory.summary['deferred_files']}",
         f"- Verified dead files: {inventory.summary['verified_dead_files']}",
+        f"- Governance manifest tool: `{MIGRATION_MANIFEST_COMMAND}`",
+        f"- Dependency gate tool: `{DEPENDENCY_POLICY_COMMAND}`",
         "",
         "## Domain Counts",
         "",
@@ -417,6 +423,7 @@ def render_plan_markdown(inventory: RustMigrationInventory) -> str:
         "",
         "S0 establishes the auditable contract used by later Python-to-Rust migration slices.",
         "S0 does not add a Rust runtime, does not change Flask route behavior, and does not delete Python code.",
+        "The active rewrite program is governed by the `.omx/plans/rust-full-rewrite-total-plan.md` P0-P15 state machine; the S-sections below remain historical evidence, not the new governance source of truth.",
         "",
         "## Preservation Rules",
         "",
@@ -447,6 +454,14 @@ def render_plan_markdown(inventory: RustMigrationInventory) -> str:
             "- Code-bug reviews compare changed inventory tooling and docs against this deterministic scan.",
             "- Feature-gap reviews use the Python File Matrix to prove each backend item is ported, facade-only, deferred with reason, or verified-dead with evidence.",
             "- A later slice cannot claim a domain complete while any file in that domain is unmapped.",
+            "",
+            "## P0 Governance Contracts",
+            "",
+            "- Cutover state machine: `PythonProxied -> RustImplemented -> RustOwnedVerified -> PythonDeleted`.",
+            f"- Machine-checkable route/domain manifest: `{MIGRATION_MANIFEST_COMMAND}`.",
+            f"- Coverage evidence contract: `{COVERAGE_EVIDENCE_CONTRACT}`.",
+            f"- Mechanical dependency gate: `{DEPENDENCY_POLICY_COMMAND}`.",
+            "- Domain policies must carry owner files, migrated tests, fixture references, deletion blockers, and transition evidence before any Python deletion claim.",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -456,14 +471,17 @@ def write_docs(repo_root: Path | str = Path.cwd()) -> RustMigrationInventory:
     root = Path(repo_root).resolve()
     inventory = build_inventory(root)
     (root / INVENTORY_DOC).write_text(render_inventory_markdown(inventory), encoding="utf-8")
-    (root / PLAN_DOC).write_text(render_plan_markdown(inventory), encoding="utf-8")
     return inventory
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Rust backend migration inventory docs.")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument("--write-docs", action="store_true", help="Write migration inventory and plan docs.")
+    parser.add_argument(
+        "--write-docs",
+        action="store_true",
+        help="Write the generated inventory doc. The checked-in migration plan doc remains curated historical evidence.",
+    )
     parser.add_argument("--json", action="store_true", help="Print the inventory as JSON.")
     args = parser.parse_args()
 

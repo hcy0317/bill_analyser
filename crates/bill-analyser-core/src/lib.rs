@@ -107,11 +107,15 @@ pub use matching::{
 };
 pub use migration_governance::{
     bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_python_import_paths,
-    endpoints_by_owner, find_endpoint_ownership, import_db_writer_policy,
-    import_deletion_blocked_endpoints, import_deletion_gates, missing_import_deletion_gates,
-    response_envelope_policies, response_envelope_policy, rust_http_shell_ownership_matrix,
-    DbWriteInvariant, DbWriterMode, DbWriterPolicy, EndpointOwnership, ImportDeletionEvidence,
-    ImportDeletionGate, ResponseEnvelopeFamily, ResponseEnvelopePolicy, RouteOwner,
+    domain_governance_policies, endpoints_by_owner, expanded_route_manifest, find_domain_policy,
+    find_endpoint_ownership, governance_manifest_snapshot, import_db_writer_policy,
+    import_deletion_blocked_endpoints, import_deletion_gates, manifest_states,
+    migration_state_machine, missing_import_deletion_gates, response_envelope_policies,
+    response_envelope_policy, routes_by_state, rust_http_shell_ownership_matrix, DbWriteInvariant,
+    DbWriterMode, DbWriterPolicy, DecisionRequired, DomainGovernancePolicy, EndpointOwnership,
+    ExpandedRouteManifestEntry, GovernanceManifestSnapshot, ImportDeletionEvidence,
+    ImportDeletionGate, MigrationBlockedStatus, MigrationState, ResponseEnvelopeFamily,
+    ResponseEnvelopePolicy, RouteHandlerId,
 };
 pub use ops::{
     backup_archive_summary_from_entries, backup_encryption_secret_configured,

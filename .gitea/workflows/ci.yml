@@ -99,13 +99,16 @@ jobs:
       - name: Build Rust HTTP server
         run: cargo build -p bill-analyser-http --bin bill_http_server
 
+      - name: Check Rust workspace dependency policy
+        run: python scripts/check_rust_workspace_dependencies.py --json
+
       - name: Install Rust coverage tool
         run: |
           rustup component add llvm-tools-preview
           cargo install cargo-llvm-cov --locked
 
       - name: Run Rust coverage
-        run: cargo llvm-cov --workspace --lcov --output-path target/llvm-cov/lcov.info --fail-under-lines 90
+        run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 
       - name: Run pytest coverage
         run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v
