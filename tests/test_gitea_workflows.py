@@ -75,3 +75,15 @@ def test_ci_workflow_covers_gitea_contract_regression() -> None:
         'python -m pytest tests/test_reviewer_agent_diff_contract.py tests/test_agent_stack_health.py tests/test_ai_workflow_docs.py tests/test_task_state.py tests/test_task_state_reader.py tests/test_gitea_workflows.py -v'
         in text
     )
+
+
+def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None:
+    text = _read('ci.yml')
+
+    assert 'cargo install cargo-llvm-cov --locked' in text
+    assert 'cargo llvm-cov --workspace --lcov --output-path target/llvm-cov/lcov.info --fail-under-lines 90' in text
+    assert (
+        'python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v'
+        in text
+    )
+    assert 'npm run test:coverage' in text
