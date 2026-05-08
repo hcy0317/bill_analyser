@@ -34,7 +34,7 @@ impl HttpShellIdentity {
             ),
             ImportRouteMode::ImportDbRuntime => (
                 "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-token-runtime",
-                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-personal-refresh-runtime",
+                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-personal-refresh-logout-runtime",
             ),
         };
 
@@ -62,7 +62,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "owned_routes".to_string(),
         if config.import_route_mode.intercepts_import_routes() {
             if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,auth token session/personal-token/refresh runtime routes".to_string()
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,auth token session/personal-token/refresh/logout runtime routes".to_string()
             } else {
                 "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
             }
@@ -107,7 +107,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "auth_token_runtime".to_string(),
-            "owned token session list/revoke, API/MCP personal token generation, and token refresh routes; login, registration, profile, 2FA, OAuth, and user-data routes proxied".to_string(),
+            "owned token session list/revoke, API/MCP personal token generation, token refresh, and logout routes; login, registration, profile, 2FA, OAuth, and user-data routes proxied".to_string(),
         );
     }
     details.insert(

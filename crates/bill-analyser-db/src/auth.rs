@@ -30,6 +30,13 @@ pub struct AuthRefreshSessionRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthLogoutSessionRow {
+    pub id: i64,
+    pub user_id: UserId,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthUserProfileRow {
     pub id: UserId,
     pub username: String,
@@ -159,6 +166,32 @@ pub fn get_active_refresh_session(
                     username: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     refresh_expires_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                     user_is_active: row.get::<_, i64>(4)? == 1,
+                })
+            },
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn get_active_logout_session_by_token_hash(
+    connection: &Connection,
+    token_hash: &str,
+) -> DbResult<Option<AuthLogoutSessionRow>> {
+    connection
+        .query_row(
+            r#"
+            SELECT s.id, s.user_id, u.username
+            FROM sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.token_hash = ?1 AND s.is_active = 1
+            "#,
+            [token_hash],
+            |row| {
+                let raw_user_id: i64 = row.get(1)?;
+                Ok(AuthLogoutSessionRow {
+                    id: row.get(0)?,
+                    user_id: user_id_from_sql(raw_user_id, 1)?,
+                    username: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 })
             },
         )
@@ -372,6 +405,17 @@ pub fn invalidate_session_by_id(
     let changed = connection.execute(
         "UPDATE sessions SET is_active = 0 WHERE id = ?1 AND user_id = ?2",
         params![session_id, user_id],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn invalidate_session_by_token_hash(
+    connection: &Connection,
+    token_hash: &str,
+) -> DbResult<bool> {
+    let changed = connection.execute(
+        "UPDATE sessions SET is_active = 0 WHERE token_hash = ?1 AND is_active = 1",
+        [token_hash],
     )?;
     Ok(changed > 0)
 }
@@ -613,6 +657,24 @@ mod tests {
             count_recent_token_password_failures(&connection, user_id(42), "2026-01-07T00:00:00")?,
             4
         );
+        connection.execute(
+            "INSERT INTO sessions(id, user_id, token_hash, expires_at, is_active, created_at) VALUES (10, 42, 'logout-token', '2099-01-01T00:00:00', 1, '2026-01-08T00:00:00')",
+            [],
+        )?;
+        let logout_session = get_active_logout_session_by_token_hash(&connection, "logout-token")?
+            .expect("logout session");
+        assert_eq!(logout_session.id, 10);
+        assert_eq!(logout_session.user_id, user_id(42));
+        assert_eq!(logout_session.username, "alice");
+        assert!(invalidate_session_by_token_hash(
+            &connection,
+            "logout-token"
+        )?);
+        assert!(get_active_logout_session_by_token_hash(&connection, "logout-token")?.is_none());
+        assert!(!invalidate_session_by_token_hash(
+            &connection,
+            "logout-token"
+        )?);
         Ok(())
     }
 }

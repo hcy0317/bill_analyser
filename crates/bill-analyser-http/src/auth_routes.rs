@@ -18,8 +18,9 @@ use bill_analyser_core::{
 };
 use bill_analyser_db::{
     cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
-    create_token_session, get_active_refresh_session, get_auth_token_user, get_auth_user_profile,
-    invalidate_other_user_sessions, invalidate_session_by_id, list_application_cloud_settings,
+    create_token_session, get_active_logout_session_by_token_hash, get_active_refresh_session,
+    get_auth_token_user, get_auth_user_profile, invalidate_other_user_sessions,
+    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
     list_user_sessions, rotate_refresh_token_session, ApplicationCloudSettingRow, AuthLogDraft,
     AuthUserProfileRow, CreateTokenSessionDraft, SqliteConnectionConfig, SqliteDbPath,
     SqliteRuntime, TokenSessionRow,
@@ -54,19 +55,18 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/tokens/api"),
     ("POST", "/api/tokens/mcp"),
     ("POST", "/api/tokens/refresh"),
+    ("POST", "/api/auth/logout"),
 ];
 
-pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("POST", "/api/auth/login"),
-    ("POST", "/api/auth/logout"),
-    ("POST", "/api/auth/register"),
-];
+pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] =
+    &[("POST", "/api/auth/login"), ("POST", "/api/auth/register")];
 
 pub fn auth_token_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
         .route("/api/tokens/refresh", post(refresh_token_handler))
+        .route("/api/auth/logout", post(logout_handler))
         .route(
             "/api/tokens",
             get(list_tokens_handler).delete(revoke_other_tokens_handler),
@@ -453,6 +453,90 @@ async fn revoke_token_handler(
         }
         Err(_) => db_error_response(),
     }
+}
+
+async fn logout_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> Response {
+    let token = match parse_logout_bearer_token(&headers) {
+        Ok(value) => value,
+        Err(error) => return auth_rest_error_response(error),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let token_hash = sha256_hex(&token);
+    let session = match get_active_logout_session_by_token_hash(runtime.connection(), &token_hash) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+
+    if let Some(session) = session {
+        if invalidate_session_by_token_hash(runtime.connection(), &token_hash).is_err() {
+            return db_error_response();
+        }
+        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+        let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+        if log_auth_event(
+            runtime.connection(),
+            AuthEvent {
+                user_id: Some(session.user_id),
+                username: &session.username,
+                event_type: "logout",
+                ip_address: &ip_address,
+                user_agent: &request_user_agent,
+                success: true,
+                error_message: None,
+                metadata: None,
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+    } else {
+        emit_logout_session_not_found_warning(&token_hash);
+    }
+
+    json_response(
+        StatusCode::OK,
+        json!({
+            "success": true,
+            "result": true,
+            "message": "Logged out successfully"
+        }),
+    )
+}
+
+fn parse_logout_bearer_token(headers: &HeaderMap) -> Result<String, AuthRestError> {
+    let auth_header = header_value(headers, header::AUTHORIZATION.as_str());
+    if auth_header.is_empty() {
+        return Err(AuthRestError::unauthorized("Missing authorization header"));
+    }
+
+    let mut parts = auth_header.split_whitespace();
+    let scheme = parts.next().unwrap_or_default();
+    let token = parts.next().unwrap_or_default();
+    if parts.next().is_some() || !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
+        return Err(AuthRestError::unauthorized("Invalid authorization header"));
+    }
+    Ok(token.to_string())
+}
+
+fn emit_logout_session_not_found_warning(token_hash: &str) {
+    eprintln!("{}", logout_session_not_found_warning_payload(token_hash));
+}
+
+fn logout_session_not_found_warning_payload(token_hash: &str) -> Value {
+    json!({
+        "level": "warn",
+        "target": "bill_analyser_http::auth_routes",
+        "event": "logout_session_not_found",
+        "token_hash_prefix": token_hash.chars().take(16).collect::<String>(),
+    })
 }
 
 struct IssuedAccessToken {
@@ -1059,6 +1143,11 @@ mod tests {
             Value::String("30".to_string()),
         );
         assert_eq!(parse_expires_in_seconds(&body).expect("string expires"), 30);
+
+        let warning = logout_session_not_found_warning_payload("0123456789abcdefdeadbeefcafebabe");
+        assert_eq!(warning["event"], "logout_session_not_found");
+        assert_eq!(warning["token_hash_prefix"], "0123456789abcdef");
+        assert!(!warning.to_string().contains("deadbeef"));
     }
 
     #[test]

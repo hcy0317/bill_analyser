@@ -37,6 +37,12 @@ async fn auth_token_runtime_lists_and_revokes_user_scoped_sessions() -> Result<(
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/refresh")));
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/auth/logout")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/auth/logout")));
 
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -115,6 +121,72 @@ async fn auth_token_runtime_lists_and_revokes_user_scoped_sessions() -> Result<(
     assert!(!session_is_active(fixture.db_path(), 3)?);
     assert!(session_is_active(fixture.db_path(), 4)?);
     assert!(!session_is_active(fixture.db_path(), 6)?);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_logout_runtime_invalidates_session_and_is_idempotent() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let logout_response = app.clone().oneshot(logout_request(&token)).await?;
+    assert_eq!(logout_response.status(), StatusCode::OK);
+    let logout_body = read_json(logout_response).await;
+    assert_eq!(logout_body["success"], true);
+    assert_eq!(logout_body["result"], true);
+    assert_eq!(logout_body["message"], "Logged out successfully");
+    assert!(!session_is_active(fixture.db_path(), 1)?);
+    assert_auth_log(
+        fixture.db_path(),
+        "logout",
+        true,
+        "Mozilla/5.0 (Logout contract)",
+    )?;
+
+    let repeated_logout_response = app.clone().oneshot(logout_request(&token)).await?;
+    assert_eq!(repeated_logout_response.status(), StatusCode::OK);
+    assert_eq!(read_json(repeated_logout_response).await["result"], true);
+
+    let unknown_token_response = app
+        .clone()
+        .oneshot(logout_request("not-a-known-token"))
+        .await?;
+    assert_eq!(unknown_token_response.status(), StatusCode::OK);
+    assert_eq!(read_json(unknown_token_response).await["result"], true);
+
+    let missing_header_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/logout")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(missing_header_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(missing_header_response).await["message"],
+        "Missing authorization header"
+    );
+
+    let malformed_header_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/logout")
+                .header("authorization", "Basic abc")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(malformed_header_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(malformed_header_response).await["message"],
+        "Invalid authorization header"
+    );
 
     Ok(())
 }
@@ -1118,6 +1190,22 @@ fn refresh_token_request(refresh_token: &str) -> Request<Body> {
         .expect("refresh token request builds");
     request.extensions_mut().insert(ConnectInfo(
         "198.51.100.11:4300"
+            .parse::<SocketAddr>()
+            .expect("test peer addr"),
+    ));
+    request
+}
+
+fn logout_request(token: &str) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/logout")
+        .header("authorization", format!("Bearer {token}"))
+        .header("user-agent", "Mozilla/5.0 (Logout contract)")
+        .body(Body::empty())
+        .expect("logout request builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.12:4300"
             .parse::<SocketAddr>()
             .expect("test peer addr"),
     ));
