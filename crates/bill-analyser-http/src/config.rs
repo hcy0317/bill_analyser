@@ -7,6 +7,10 @@ pub const DEFAULT_PYTHON_UPSTREAM: &str = "http://127.0.0.1:5001";
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 pub const DEFAULT_AUTH_JWT_ALGORITHM: &str = "HS256";
+pub const DEFAULT_AUTH_JWT_EXPIRATION_DAYS: i64 = 7;
+pub const DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 30;
+pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
+pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpShellConfig {
@@ -18,6 +22,8 @@ pub struct HttpShellConfig {
     pub trusted_user_header_secret: Option<String>,
     pub auth_jwt_secret: Option<String>,
     pub auth_jwt_algorithm: String,
+    pub auth_jwt_expiration_days: i64,
+    pub auth_refresh_token_expiration_days: i64,
     pub public_base_url: Option<String>,
 }
 
@@ -55,6 +61,8 @@ impl HttpShellConfig {
             trusted_user_header_secret: None,
             auth_jwt_secret: None,
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
+            auth_jwt_expiration_days: DEFAULT_AUTH_JWT_EXPIRATION_DAYS,
+            auth_refresh_token_expiration_days: DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
             public_base_url: None,
         })
     }
@@ -76,6 +84,16 @@ impl HttpShellConfig {
 
     pub fn with_auth_jwt_algorithm(mut self, algorithm: impl Into<String>) -> Self {
         self.auth_jwt_algorithm = algorithm.into();
+        self
+    }
+
+    pub fn with_auth_jwt_expiration_days(mut self, days: i64) -> Self {
+        self.auth_jwt_expiration_days = days;
+        self
+    }
+
+    pub fn with_auth_refresh_token_expiration_days(mut self, days: i64) -> Self {
+        self.auth_refresh_token_expiration_days = days;
         self
     }
 
@@ -126,6 +144,22 @@ impl HttpShellConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| DEFAULT_AUTH_JWT_ALGORITHM.to_string());
+        let auth_jwt_expiration_days = parse_env_i64_range_value(
+            "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS",
+            lookup("BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS")
+                .or_else(|| lookup("JWT_EXPIRATION_DAYS")),
+            DEFAULT_AUTH_JWT_EXPIRATION_DAYS,
+            1,
+            MAX_AUTH_JWT_EXPIRATION_DAYS,
+        )?;
+        let auth_refresh_token_expiration_days = parse_env_i64_range_value(
+            "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS",
+            lookup("BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS")
+                .or_else(|| lookup("REFRESH_TOKEN_EXPIRATION_DAYS")),
+            DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
+            1,
+            MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
+        )?;
         let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
             .map(normalize_upstream)
             .transpose()?;
@@ -140,6 +174,8 @@ impl HttpShellConfig {
         config.trusted_user_header_secret = trusted_user_header_secret;
         config.auth_jwt_secret = auth_jwt_secret;
         config.auth_jwt_algorithm = auth_jwt_algorithm;
+        config.auth_jwt_expiration_days = auth_jwt_expiration_days;
+        config.auth_refresh_token_expiration_days = auth_refresh_token_expiration_days;
         config.public_base_url = public_base_url;
         Ok(config)
     }
@@ -220,6 +256,27 @@ fn parse_env_usize_value(
         Some(value) => value
             .parse::<usize>()
             .map_err(|_| HttpShellConfigError::InvalidInteger(name)),
+        None => Ok(default_value),
+    }
+}
+
+fn parse_env_i64_range_value(
+    name: &'static str,
+    value: Option<String>,
+    default_value: i64,
+    min_value: i64,
+    max_value: i64,
+) -> Result<i64, HttpShellConfigError> {
+    match value {
+        Some(value) => {
+            let parsed = value
+                .parse::<i64>()
+                .map_err(|_| HttpShellConfigError::InvalidInteger(name))?;
+            if parsed < min_value || parsed > max_value {
+                return Err(HttpShellConfigError::InvalidInteger(name));
+            }
+            Ok(parsed)
+        }
         None => Ok(default_value),
     }
 }

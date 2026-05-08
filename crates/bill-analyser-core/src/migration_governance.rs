@@ -1743,7 +1743,16 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes:
             "Rust auth runtime verifies the current password and issues MCP personal access tokens with session and auth-log writes.",
     },
-    python_proxy_route!("POST", "/api/tokens/refresh", "auth-security-user-data"),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/tokens/refresh",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime verifies refresh token JWT/session state and issues rotated access/refresh sessions with profile/cloud settings response.",
+    },
     EndpointOwnership {
         method: "CONTRACT",
         pattern: "contract://import-v2-envelope-oracle",
@@ -1817,7 +1826,6 @@ const FULL_ROUTE_EVIDENCE: &[&str] = &[
 const FULL_ROUTE_EVIDENCE_NO_FIXTURE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
 const PROVIDER_ROUTE_EVIDENCE: &[&str] = &["route_matrix", "provider_parity"];
 const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
-    "token_refresh_parity",
     "login_registration_parity",
     "profile_user_data_parity",
     "2fa_oauth_parity",
@@ -2254,7 +2262,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Token session list/revoke and API/MCP personal token generation routes are Rust-owned; login, registration, refresh token exchange, profile, 2FA, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Token session list/revoke, API/MCP personal token generation, and refresh token exchange routes are Rust-owned; login, registration, profile, 2FA, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2710,8 +2718,8 @@ fn route_contract_details(
             handler: RouteHandlerId::AuthTokenRuntime,
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior:
-                "Token session list/revoke and API/MCP personal token generation routes are Rust-owned; refresh token exchange, login, registration, profile, 2FA, OAuth, and user-data routes remain Python-owned.",
+            unsupported_behavior:
+                "Token session list/revoke, API/MCP personal token generation, and refresh token exchange routes are Rust-owned; login, registration, profile, 2FA, OAuth, and user-data routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

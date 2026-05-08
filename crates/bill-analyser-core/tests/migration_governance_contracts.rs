@@ -162,7 +162,6 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             "/api/data/export.{file_type}",
             "auth-security-user-data",
         ),
-        ("POST", "/api/tokens/refresh", "auth-security-user-data"),
         ("GET", "/api/backup/jobs", "backup-ops"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
@@ -447,6 +446,20 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert!(auth_tokens
         .deletion_blockers
         .contains(&"profile_user_data_parity"));
+    assert!(!auth_tokens
+        .deletion_blockers
+        .contains(&"token_refresh_parity"));
+
+    let auth_refresh = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "POST /api/tokens/refresh")
+        .expect("auth refresh route is present");
+    assert_eq!(auth_refresh.state, MigrationState::RustOwnedVerified);
+    assert_eq!(auth_refresh.handler, RouteHandlerId::AuthTokenRuntime);
+    assert_eq!(
+        auth_refresh.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessResult
+    );
 }
 
 #[test]

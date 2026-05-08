@@ -5,21 +5,26 @@ use axum::{
     extract::{connect_info::ConnectInfo, Path, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{any, delete, get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use base64::{engine::general_purpose, Engine as _};
-use bill_analyser_core::auth::{
-    infer_token_type_from_user_agent, json_object_or_empty, parse_user_agent_device_name,
-    AuthRestError, TokenKind,
+use bill_analyser_core::{
+    auth::{
+        infer_token_type_from_user_agent, json_object_or_empty, parse_user_agent_device_name,
+        validate_refresh_token_claims, AuthRestError, TokenKind,
+    },
+    build_user_investment_keyword_settings, UserId,
 };
 use bill_analyser_db::{
     cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
-    create_token_session, get_auth_token_user, invalidate_other_user_sessions,
-    invalidate_session_by_id, list_user_sessions, AuthLogDraft, CreateTokenSessionDraft,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime, TokenSessionRow,
+    create_token_session, get_active_refresh_session, get_auth_token_user, get_auth_user_profile,
+    invalidate_other_user_sessions, invalidate_session_by_id, list_application_cloud_settings,
+    list_user_sessions, rotate_refresh_token_session, ApplicationCloudSettingRow, AuthLogDraft,
+    AuthUserProfileRow, CreateTokenSessionDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, TokenSessionRow,
 };
-use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone};
+use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
     hmac,
     rand::{SecureRandom, SystemRandom},
@@ -32,7 +37,7 @@ use crate::{
         jwt_hmac_algorithm, normalize_jwt_algorithm, resolve_authenticated_user_from_headers,
         AuthenticatedUser, RustRouteAuthError,
     },
-    proxy::{ownership_aware_proxy_handler, ProxyState},
+    proxy::ProxyState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
@@ -48,20 +53,20 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/tokens/{token_id}"),
     ("POST", "/api/tokens/api"),
     ("POST", "/api/tokens/mcp"),
+    ("POST", "/api/tokens/refresh"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
     ("POST", "/api/auth/register"),
-    ("POST", "/api/tokens/refresh"),
 ];
 
 pub fn auth_token_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
-        .route("/api/tokens/refresh", any(ownership_aware_proxy_handler))
+        .route("/api/tokens/refresh", post(refresh_token_handler))
         .route(
             "/api/tokens",
             get(list_tokens_handler).delete(revoke_other_tokens_handler),
@@ -99,6 +104,101 @@ async fn generate_mcp_token_handler(
         body,
     )
     .await
+}
+
+async fn refresh_token_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let refresh_token = body
+        .get("refreshToken")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if refresh_token.is_empty() {
+        return auth_rest_error_response(AuthRestError::invalid_request(
+            "Refresh token is required",
+        ));
+    }
+
+    let claims = match validate_refresh_jwt(refresh_token, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let refresh_token_hash = sha256_hex(refresh_token);
+    let refresh_session =
+        match get_active_refresh_session(runtime.connection(), &refresh_token_hash) {
+            Ok(Some(value)) => value,
+            Ok(None) => return invalid_refresh_token_response(),
+            Err(_) => return db_error_response(),
+        };
+    if refresh_session.user_id != claims.user_id || !refresh_session.user_is_active {
+        return invalid_refresh_token_response();
+    }
+    if refresh_session_is_expired(&refresh_session.refresh_expires_at) {
+        return refresh_token_expired_response();
+    }
+
+    let user = match get_auth_user_profile(runtime.connection(), claims.user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User does not exist",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let tokens = match issue_session_tokens(user.id, &user.username, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    let session_id = match rotate_refresh_token_session(
+        runtime.connection(),
+        refresh_session.id,
+        &refresh_token_hash,
+        &CreateTokenSessionDraft {
+            user_id: user.id,
+            token_hash: sha256_hex(&tokens.access_token),
+            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+            expires_at: tokens.expires_at.clone(),
+            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+            user_agent: request_user_agent,
+            ip_address,
+            created_at: now_text(),
+        },
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => return invalid_refresh_token_response(),
+        Err(_) => return db_error_response(),
+    };
+    if session_id <= 0 {
+        return db_error_response();
+    }
+    let cloud_settings = match list_application_cloud_settings(runtime.connection(), user.id) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "newToken": tokens.access_token,
+            "user": user_profile_payload(&user),
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
 }
 
 async fn list_tokens_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -360,6 +460,114 @@ struct IssuedAccessToken {
     expires_at: String,
 }
 
+struct IssuedSessionTokens {
+    access_token: String,
+    refresh_token: String,
+    expires_at: String,
+    refresh_expires_at: String,
+}
+
+fn validate_refresh_jwt(
+    token: &str,
+    state: &ProxyState,
+) -> RouteResult<bill_analyser_core::auth::RefreshTokenClaims> {
+    let secret = state
+        .config
+        .auth_jwt_secret
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            Box::new(auth_rest_error_response(AuthRestError::new(
+                503,
+                "Service Unavailable",
+                "Rust auth token runtime requires BILL_ANALYSER_AUTH_JWT_SECRET or JWT_SECRET_KEY",
+            )))
+        })?;
+    let mut parts = token.split('.');
+    let encoded_header = parts.next().ok_or_else(invalid_refresh_token_box)?;
+    let encoded_payload = parts.next().ok_or_else(invalid_refresh_token_box)?;
+    let encoded_signature = parts.next().ok_or_else(invalid_refresh_token_box)?;
+    if parts.next().is_some() {
+        return Err(invalid_refresh_token_box());
+    }
+
+    let header = decode_jwt_part(encoded_header)?;
+    let payload = decode_jwt_part(encoded_payload)?;
+    let configured_algorithm = normalize_jwt_algorithm(&state.config.auth_jwt_algorithm);
+    let header_algorithm = normalize_jwt_algorithm(
+        header
+            .get("alg")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if header_algorithm != configured_algorithm {
+        return Err(invalid_refresh_token_box());
+    }
+    let hmac_algorithm = jwt_hmac_algorithm(&configured_algorithm).map_err(|error| {
+        Box::new(auth_rest_error_response(AuthRestError::new(
+            503,
+            "Service Unavailable",
+            error.message,
+        )))
+    })?;
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    verify_hmac_signature(
+        secret,
+        hmac_algorithm,
+        signing_input.as_bytes(),
+        encoded_signature,
+    )?;
+    let exp = payload
+        .get("exp")
+        .and_then(Value::as_i64)
+        .ok_or_else(invalid_refresh_token_box)?;
+    if exp <= Utc::now().timestamp() {
+        return Err(Box::new(refresh_token_expired_response()));
+    }
+    validate_refresh_token_claims(&payload)
+        .map_err(|error| Box::new(auth_rest_error_response(error)))
+}
+
+fn issue_session_tokens(
+    user_id: UserId,
+    username: &str,
+    state: &ProxyState,
+) -> RouteResult<IssuedSessionTokens> {
+    let now = Local::now();
+    let access_expires_at = now + ChronoDuration::days(state.config.auth_jwt_expiration_days);
+    let refresh_expires_at =
+        now + ChronoDuration::days(state.config.auth_refresh_token_expiration_days);
+    let access_payload = json!({
+        "user_id": user_id.get(),
+        "username": username,
+        "type": "access",
+        "iat": now.timestamp(),
+        "exp": access_expires_at.timestamp(),
+        "nonce": random_nonce_hex()?,
+    });
+    let refresh_payload = json!({
+        "user_id": user_id.get(),
+        "username": username,
+        "type": "refresh",
+        "iat": now.timestamp(),
+        "exp": refresh_expires_at.timestamp(),
+        "nonce": random_nonce_hex()?,
+    });
+
+    Ok(IssuedSessionTokens {
+        access_token: sign_jwt(&access_payload, state)?,
+        refresh_token: sign_jwt(&refresh_payload, state)?,
+        expires_at: access_expires_at
+            .naive_local()
+            .format("%Y-%m-%dT%H:%M:%S%.f")
+            .to_string(),
+        refresh_expires_at: refresh_expires_at
+            .naive_local()
+            .format("%Y-%m-%dT%H:%M:%S%.f")
+            .to_string(),
+    })
+}
+
 fn issue_access_token(
     user_id: bill_analyser_core::UserId,
     username: &str,
@@ -367,6 +575,32 @@ fn issue_access_token(
     token_kind: TokenKind,
     expires_in_seconds: i64,
 ) -> RouteResult<IssuedAccessToken> {
+    let now = Local::now();
+    let expires_at = if expires_in_seconds > 0 {
+        now + ChronoDuration::seconds(expires_in_seconds)
+    } else {
+        now + ChronoDuration::days(365 * 100)
+    };
+    let nonce = random_nonce_hex()?;
+    let payload = json!({
+        "user_id": user_id.get(),
+        "username": username,
+        "type": "access",
+        "token_kind": token_kind.as_str(),
+        "iat": now.timestamp(),
+        "exp": expires_at.timestamp(),
+        "nonce": nonce,
+    });
+    Ok(IssuedAccessToken {
+        access_token: sign_jwt(&payload, state)?,
+        expires_at: expires_at
+            .naive_local()
+            .format("%Y-%m-%dT%H:%M:%S%.f")
+            .to_string(),
+    })
+}
+
+fn sign_jwt(payload: &Value, state: &ProxyState) -> RouteResult<String> {
     let secret = state
         .config
         .auth_jwt_secret
@@ -387,38 +621,65 @@ fn issue_access_token(
             error.message,
         )))
     })?;
-    let now = Local::now();
-    let expires_at = if expires_in_seconds > 0 {
-        now + ChronoDuration::seconds(expires_in_seconds)
-    } else {
-        now + ChronoDuration::days(365 * 100)
-    };
-    let nonce = random_nonce_hex()?;
     let header = json!({ "alg": algorithm, "typ": "JWT" });
-    let payload = json!({
-        "user_id": user_id.get(),
-        "username": username,
-        "type": "access",
-        "token_kind": token_kind.as_str(),
-        "iat": now.timestamp(),
-        "exp": expires_at.timestamp(),
-        "nonce": nonce,
-    });
     let encoded_header = general_purpose::URL_SAFE_NO_PAD
         .encode(serde_json::to_vec(&header).map_err(|_| Box::new(db_error_response()))?);
     let encoded_payload = general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::to_vec(&payload).map_err(|_| Box::new(db_error_response()))?);
+        .encode(serde_json::to_vec(payload).map_err(|_| Box::new(db_error_response()))?);
     let signing_input = format!("{encoded_header}.{encoded_payload}");
     let key = hmac::Key::new(hmac_algorithm, secret.as_bytes());
     let signature = hmac::sign(&key, signing_input.as_bytes());
     let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
-    Ok(IssuedAccessToken {
-        access_token: format!("{signing_input}.{encoded_signature}"),
-        expires_at: expires_at
-            .naive_local()
-            .format("%Y-%m-%dT%H:%M:%S%.f")
-            .to_string(),
-    })
+    Ok(format!("{signing_input}.{encoded_signature}"))
+}
+
+fn decode_jwt_part(encoded: &str) -> RouteResult<Value> {
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .or_else(|_| general_purpose::URL_SAFE.decode(encoded))
+        .map_err(|_| invalid_refresh_token_box())?;
+    serde_json::from_slice(&decoded).map_err(|_| invalid_refresh_token_box())
+}
+
+fn verify_hmac_signature(
+    secret: &str,
+    algorithm: hmac::Algorithm,
+    signing_input: &[u8],
+    encoded_signature: &str,
+) -> RouteResult<()> {
+    let signature = general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded_signature)
+        .or_else(|_| general_purpose::URL_SAFE.decode(encoded_signature))
+        .map_err(|_| invalid_refresh_token_box())?;
+    let key = hmac::Key::new(algorithm, secret.as_bytes());
+    hmac::verify(&key, signing_input, &signature).map_err(|_| invalid_refresh_token_box())
+}
+
+fn invalid_refresh_token_box() -> Box<Response> {
+    Box::new(invalid_refresh_token_response())
+}
+
+fn invalid_refresh_token_response() -> Response {
+    auth_rest_error_response(AuthRestError::invalid_token(401, "Invalid refresh token"))
+}
+
+fn refresh_token_expired_response() -> Response {
+    auth_rest_error_response(AuthRestError::new(
+        401,
+        "Token expired",
+        "Refresh token has expired",
+    ))
+}
+
+fn refresh_session_is_expired(expires_at: &str) -> bool {
+    let normalized = expires_at.trim();
+    if normalized.is_empty() {
+        return true;
+    }
+    NaiveDateTime::parse_from_str(normalized, "%Y-%m-%dT%H:%M:%S%.f")
+        .or_else(|_| NaiveDateTime::parse_from_str(normalized, "%Y-%m-%d %H:%M:%S%.f"))
+        .map(|datetime| Local::now().naive_local() > datetime)
+        .unwrap_or(true)
 }
 
 fn random_nonce_hex() -> RouteResult<String> {
@@ -595,6 +856,87 @@ fn session_payload(session: TokenSessionRow, current_session_id: Option<i64>) ->
         "isCurrent": is_current,
         "isCurrentToken": is_current
     })
+}
+
+fn user_profile_payload(user: &AuthUserProfileRow) -> Value {
+    let nickname = if user.nickname.is_empty() {
+        user.username.clone()
+    } else {
+        user.nickname.clone()
+    };
+    let mut keyword_source = Map::new();
+    if let Some(value) = user.investment_platform_keywords.as_deref() {
+        keyword_source.insert(
+            "investment_platform_keywords".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = user.investment_product_keywords.as_deref() {
+        keyword_source.insert(
+            "investment_product_keywords".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = user.investment_exclude_keywords.as_deref() {
+        keyword_source.insert(
+            "investment_exclude_keywords".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    let investment_settings = build_user_investment_keyword_settings(Some(&keyword_source));
+    json!({
+        "username": user.username,
+        "email": user.email,
+        "nickname": nickname,
+        "avatar": user.avatar,
+        "avatarProvider": "internal",
+        "defaultAccountId": optional_id_string(user.default_account_id),
+        "transactionEditScope": user.transaction_edit_scope,
+        "language": user.language,
+        "defaultCurrency": user.default_currency,
+        "firstDayOfWeek": user.first_day_of_week,
+        "fiscalYearStart": user.fiscal_year_start,
+        "calendarDisplayType": user.calendar_display_type,
+        "dateDisplayType": user.date_display_type,
+        "longDateFormat": user.long_date_format,
+        "shortDateFormat": user.short_date_format,
+        "longTimeFormat": user.long_time_format,
+        "shortTimeFormat": user.short_time_format,
+        "fiscalYearFormat": user.fiscal_year_format,
+        "currencyDisplayType": user.currency_display_type,
+        "numeralSystem": user.numeral_system,
+        "decimalSeparator": user.decimal_separator,
+        "digitGroupingSymbol": user.digit_grouping_symbol,
+        "digitGrouping": user.digit_grouping,
+        "coordinateDisplayType": user.coordinate_display_type,
+        "expenseAmountColor": user.expense_amount_color,
+        "incomeAmountColor": user.income_amount_color,
+        "cashAccountId": optional_id_string(user.cash_account_id),
+        "cashTransferCategoryId": optional_id_string(user.cash_transfer_category_id),
+        "importLearningEnabled": user.import_learning_enabled,
+        "investmentPlatformKeywords": investment_settings["platform_keywords"].clone(),
+        "investmentProductKeywords": investment_settings["product_keywords"].clone(),
+        "investmentExcludeKeywords": investment_settings["exclude_keywords"].clone(),
+        "emailVerified": user.email_verified,
+    })
+}
+
+fn application_cloud_settings_payload(settings: Vec<ApplicationCloudSettingRow>) -> Value {
+    Value::Array(
+        settings
+            .into_iter()
+            .map(|setting| {
+                json!({
+                    "settingKey": setting.setting_key,
+                    "settingValue": setting.setting_value,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn optional_id_string(value: Option<i64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
 }
 
 fn datetime_to_unix_millis(value: &str) -> i64 {

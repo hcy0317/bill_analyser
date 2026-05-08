@@ -4,7 +4,6 @@ use axum::{
     body::{to_bytes, Body},
     extract::{connect_info::ConnectInfo, Request},
     http::{HeaderValue, Method, StatusCode},
-    routing::any,
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -19,7 +18,6 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "auth-token-route-secret";
@@ -34,6 +32,9 @@ async fn auth_token_runtime_lists_and_revokes_user_scoped_sessions() -> Result<(
         .iter()
         .any(|route| route == &("DELETE", "/api/tokens/{token_id}")));
     assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/tokens/refresh")));
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/refresh")));
 
@@ -166,8 +167,7 @@ async fn auth_token_runtime_preserves_flask_error_shapes() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn auth_token_runtime_generates_personal_tokens_and_keeps_refresh_on_python_proxy(
-) -> Result<(), Box<dyn Error>> {
+async fn auth_token_runtime_generates_personal_and_refresh_tokens() -> Result<(), Box<dyn Error>> {
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/api")));
@@ -177,7 +177,7 @@ async fn auth_token_runtime_generates_personal_tokens_and_keeps_refresh_on_pytho
     assert!(!AUTH_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/api")));
-    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tokens/refresh")));
 
@@ -371,32 +371,113 @@ async fn auth_token_runtime_generates_personal_tokens_and_keeps_refresh_on_pytho
         "Current bearer session is required"
     );
 
-    let upstream = spawn_fake_upstream().await?;
-    let app = proxy_runtime_router(&upstream.url());
-
-    let response = app
+    let refresh_token = test_refresh_token(42, "alice", TEST_AUTH_SECRET, ChronoDuration::days(1));
+    seed_refresh_session(fixture.db_path(), &refresh_token)?;
+    let refresh_response = app
         .clone()
-        .oneshot(
-            Request::builder()
-                .method(Method::POST)
-                .uri("/api/tokens/refresh")
-                .header("content-type", "application/json")
-                .header("authorization", "Bearer still-python-owned")
-                .body(Body::from(
-                    json!({"route": "/api/tokens/refresh"}).to_string(),
-                ))?,
-        )
+        .oneshot(refresh_token_request(&refresh_token))
         .await?;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = read_json(response).await;
-    assert_eq!(body["method"], "POST");
-    assert_eq!(body["path"], "/api/tokens/refresh");
-    assert_eq!(body["authorization"], "Bearer still-python-owned");
-    assert!(body["body"]
+    assert_eq!(refresh_response.status(), StatusCode::OK);
+    let refresh_body = read_json(refresh_response).await;
+    assert_eq!(refresh_body["success"], true);
+    let refresh_result = refresh_body["result"].as_object().expect("refresh result");
+    let new_access = refresh_result["token"].as_str().expect("new access");
+    let new_refresh = refresh_result["refreshToken"]
         .as_str()
-        .unwrap_or_default()
-        .contains("/api/tokens/refresh"));
+        .expect("new refresh");
+    assert_eq!(refresh_result["newToken"], new_access);
+    let new_access_payload = jwt_payload(new_access);
+    let new_refresh_payload = jwt_payload(new_refresh);
+    assert_eq!(new_access_payload["type"], "access");
+    assert_eq!(new_access_payload.get("token_kind"), None);
+    assert_eq!(new_refresh_payload["type"], "refresh");
+    assert_eq!(new_refresh_payload["user_id"], 42);
+    assert_eq!(refresh_result["user"]["username"], "alice");
+    assert_eq!(refresh_result["user"]["nickname"], "Alice A.");
+    assert_eq!(
+        refresh_result["applicationCloudSettings"][0]["settingKey"],
+        "showAmountInHomePage"
+    );
+    assert_session_token_pair(
+        fixture.db_path(),
+        new_access,
+        new_refresh,
+        "Mozilla/5.0 (Refresh contract)",
+        "198.51.100.11",
+    )?;
+    assert_refresh_session_consumed(fixture.db_path(), 1)?;
+
+    let replay_response = app
+        .clone()
+        .oneshot(refresh_token_request(&refresh_token))
+        .await?;
+    assert_eq!(replay_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(replay_response).await["message"],
+        "Invalid refresh token"
+    );
+
+    let access_expired_refresh =
+        test_refresh_token(42, "alice", TEST_AUTH_SECRET, ChronoDuration::days(1));
+    seed_access_expired_refresh_session(fixture.db_path(), &access_expired_refresh)?;
+    let cleanup_trigger_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/tokens",
+            new_access,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(cleanup_trigger_response.status(), StatusCode::OK);
+    let access_expired_response = app
+        .clone()
+        .oneshot(refresh_token_request(&access_expired_refresh))
+        .await?;
+    assert_eq!(access_expired_response.status(), StatusCode::OK);
+
+    let missing_refresh_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            "/api/tokens/refresh",
+            &token,
+            Body::from(json!({}).to_string()),
+        ))
+        .await?;
+    assert_eq!(missing_refresh_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_refresh_response).await["message"],
+        "Refresh token is required"
+    );
+
+    let access_as_refresh_response = app.clone().oneshot(refresh_token_request(&token)).await?;
+    assert_eq!(access_as_refresh_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(access_as_refresh_response).await["message"],
+        "Not a refresh token"
+    );
+
+    let expired_refresh =
+        test_refresh_token(42, "alice", TEST_AUTH_SECRET, -ChronoDuration::hours(1));
+    let expired_response = app
+        .clone()
+        .oneshot(refresh_token_request(&expired_refresh))
+        .await?;
+    assert_eq!(expired_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(read_json(expired_response).await["error"], "Token expired");
+
+    let missing_session_refresh =
+        test_refresh_token(42, "alice", TEST_AUTH_SECRET, ChronoDuration::hours(1));
+    let missing_session_response = app
+        .clone()
+        .oneshot(refresh_token_request(&missing_session_refresh))
+        .await?;
+    assert_eq!(missing_session_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(missing_session_response).await["message"],
+        "Invalid refresh token"
+    );
 
     Ok(())
 }
@@ -571,18 +652,6 @@ fn runtime_router_without_sqlite_path() -> Router {
     build_router(state)
 }
 
-fn proxy_runtime_router(upstream: &str) -> Router {
-    let config = HttpShellConfig::new_with_import_route_mode(
-        upstream,
-        Duration::from_millis(200),
-        1024 * 1024,
-        ImportRouteMode::ImportDbRuntime,
-    )
-    .expect("config");
-    let state = ProxyState::new(config).expect("proxy state");
-    build_router(state)
-}
-
 fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router {
     let mut config = HttpShellConfig::new_with_import_route_mode(
         "http://127.0.0.1:59999",
@@ -610,7 +679,39 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             username TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            is_active INTEGER NOT NULL DEFAULT 1
+            nickname TEXT,
+            avatar TEXT,
+            default_account_id INTEGER,
+            transaction_edit_scope INTEGER DEFAULT 0,
+            language TEXT DEFAULT 'zh_Hans',
+            default_currency TEXT DEFAULT 'CNY',
+            first_day_of_week INTEGER DEFAULT 1,
+            fiscal_year_start INTEGER DEFAULT 1,
+            calendar_display_type INTEGER DEFAULT 0,
+            date_display_type INTEGER DEFAULT 0,
+            long_date_format INTEGER DEFAULT 0,
+            short_date_format INTEGER DEFAULT 0,
+            long_time_format INTEGER DEFAULT 0,
+            short_time_format INTEGER DEFAULT 0,
+            fiscal_year_format INTEGER DEFAULT 0,
+            currency_display_type INTEGER DEFAULT 0,
+            numeral_system INTEGER DEFAULT 0,
+            decimal_separator INTEGER DEFAULT 0,
+            digit_grouping_symbol INTEGER DEFAULT 0,
+            digit_grouping INTEGER DEFAULT 0,
+            coordinate_display_type INTEGER DEFAULT 0,
+            expense_amount_color INTEGER DEFAULT 0,
+            income_amount_color INTEGER DEFAULT 0,
+            cash_account_id INTEGER,
+            cash_transfer_category_id INTEGER,
+            import_learning_enabled INTEGER DEFAULT 1,
+            investment_platform_keywords TEXT,
+            investment_product_keywords TEXT,
+            investment_exclude_keywords TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            email_verified INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00',
+            updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00'
         );
         CREATE TABLE sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -637,12 +738,21 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             metadata TEXT,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE user_application_cloud_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            setting_key TEXT NOT NULL,
+            setting_value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, setting_key)
+        );
         CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
         "#,
     )?;
     let password_hash = hash(TEST_PASSWORD, 4)?;
     connection.execute(
-        "INSERT INTO users(id, username, email, password_hash, is_active) VALUES (42, 'alice', 'alice@example.test', ?1, 1)",
+        "INSERT INTO users(id, username, email, password_hash, nickname, is_active, email_verified) VALUES (42, 'alice', 'alice@example.test', ?1, 'Alice A.', 1, 1)",
         [&password_hash],
     )?;
     connection.execute(
@@ -779,6 +889,52 @@ fn seed_auth_db_missing_list_columns(path: &Path, token: &str) -> Result<(), Box
     Ok(())
 }
 
+fn seed_refresh_session(path: &Path, refresh_token: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let refresh_hash = format!("{:x}", Sha256::digest(refresh_token.as_bytes()));
+    let refresh_expires_at = (Local::now().naive_local() + ChronoDuration::hours(2))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    connection.execute(
+        "UPDATE sessions SET refresh_token_hash = ?1, refresh_expires_at = ?2 WHERE id = 1",
+        (&refresh_hash, &refresh_expires_at),
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO user_application_cloud_settings (
+            user_id, setting_key, setting_value, created_at, updated_at
+        ) VALUES (42, 'showAmountInHomePage', 'true', '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        "#,
+        [],
+    )?;
+    Ok(())
+}
+
+fn seed_access_expired_refresh_session(
+    path: &Path,
+    refresh_token: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let refresh_hash = format!("{:x}", Sha256::digest(refresh_token.as_bytes()));
+    let refresh_expires_at = (Local::now().naive_local() + ChronoDuration::hours(2))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    connection.execute(
+        r#"
+        INSERT INTO sessions (
+            id, user_id, token_hash, refresh_token_hash, expires_at, refresh_expires_at,
+            user_agent, ip_address, is_active, last_activity_at, created_at
+        ) VALUES (
+            88, 42, 'access-expired-refresh-backed', ?1,
+            '2020-01-01T00:00:00', ?2,
+            'Refresh backed', '127.0.0.88', 1, '2020-01-01T00:00:00', '2020-01-01T00:00:00'
+        )
+        "#,
+        (&refresh_hash, &refresh_expires_at),
+    )?;
+    Ok(())
+}
+
 fn install_revoke_failure_trigger(path: &Path) -> Result<(), Box<dyn Error>> {
     Connection::open(path)?.execute_batch(
         r#"
@@ -828,6 +984,45 @@ fn assert_token_session(
     Ok(())
 }
 
+fn assert_session_token_pair(
+    path: &Path,
+    access_token: &str,
+    refresh_token: &str,
+    expected_user_agent: &str,
+    expected_ip_address: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let token_hash = format!("{:x}", Sha256::digest(access_token.as_bytes()));
+    let expected_refresh_hash = format!("{:x}", Sha256::digest(refresh_token.as_bytes()));
+    let (user_agent, ip_address, refresh_hash, is_active): (String, String, String, i64) =
+        connection.query_row(
+            r#"
+            SELECT user_agent, ip_address, refresh_token_hash, is_active
+            FROM sessions
+            WHERE token_hash = ?1
+            "#,
+            [token_hash],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    assert_eq!(user_agent, expected_user_agent);
+    assert_eq!(ip_address, expected_ip_address);
+    assert_eq!(refresh_hash, expected_refresh_hash);
+    assert_eq!(is_active, 1);
+    Ok(())
+}
+
+fn assert_refresh_session_consumed(path: &Path, session_id: i64) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (refresh_hash, is_active): (Option<String>, i64) = connection.query_row(
+        "SELECT refresh_token_hash, is_active FROM sessions WHERE id = ?1",
+        [session_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(refresh_hash, None);
+    assert_eq!(is_active, 0);
+    Ok(())
+}
+
 fn assert_auth_log(
     path: &Path,
     expected_event: &str,
@@ -856,42 +1051,6 @@ fn token_by_id<'a>(tokens: &'a [Value], token_id: &str) -> &'a Value {
         .iter()
         .find(|token| token["tokenId"] == token_id)
         .expect("token id exists")
-}
-
-struct FakeUpstream {
-    addr: SocketAddr,
-}
-
-impl FakeUpstream {
-    fn url(&self) -> String {
-        format!("http://{}", self.addr)
-    }
-}
-
-async fn spawn_fake_upstream() -> Result<FakeUpstream, Box<dyn Error>> {
-    let app = Router::new().fallback(any(echo_handler));
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let addr = listener.local_addr()?;
-
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("fake upstream serves");
-    });
-
-    Ok(FakeUpstream { addr })
-}
-
-async fn echo_handler(request: Request<Body>) -> impl axum::response::IntoResponse {
-    let (parts, body) = request.into_parts();
-    let body = to_bytes(body, 1024 * 1024).await.expect("body bytes");
-    json!({
-        "method": parts.method.as_str(),
-        "path": parts.uri.path(),
-        "authorization": parts.headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or(""),
-        "body": String::from_utf8_lossy(&body).to_string(),
-    })
-    .to_string()
 }
 
 fn personal_token_request(
@@ -947,6 +1106,24 @@ fn personal_token_request_with_peer(
     request
 }
 
+fn refresh_token_request(refresh_token: &str) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/tokens/refresh")
+        .header("content-type", "application/json")
+        .header("user-agent", "Mozilla/5.0 (Refresh contract)")
+        .body(Body::from(
+            json!({ "refreshToken": refresh_token }).to_string(),
+        ))
+        .expect("refresh token request builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.11:4300"
+            .parse::<SocketAddr>()
+            .expect("test peer addr"),
+    ));
+    request
+}
+
 fn bearer_request(method: Method, uri: &str, token: &str, body: Body) -> Request<Body> {
     Request::builder()
         .method(method)
@@ -984,14 +1161,39 @@ fn jwt_payload(token: &str) -> Value {
 }
 
 fn test_access_token(user_id: i64, secret: &str) -> String {
+    test_jwt_token(
+        user_id,
+        &format!("user-{user_id}"),
+        "access",
+        secret,
+        ChronoDuration::hours(1),
+    )
+}
+
+fn test_refresh_token(
+    user_id: i64,
+    username: &str,
+    secret: &str,
+    expires_in: ChronoDuration,
+) -> String {
+    test_jwt_token(user_id, username, "refresh", secret, expires_in)
+}
+
+fn test_jwt_token(
+    user_id: i64,
+    username: &str,
+    token_type: &str,
+    secret: &str,
+    expires_in: ChronoDuration,
+) -> String {
     let now = Local::now();
     let header = json!({"alg": "HS256", "typ": "JWT"});
     let payload = json!({
         "user_id": user_id,
-        "username": format!("user-{user_id}"),
-        "type": "access",
+        "username": username,
+        "type": token_type,
         "iat": now.timestamp(),
-        "exp": (now + ChronoDuration::hours(1)).timestamp(),
+        "exp": (now + expires_in).timestamp(),
         "nonce": "auth-token-route-test"
     });
     let encoded_header =

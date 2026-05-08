@@ -21,6 +21,58 @@ pub struct AuthTokenUserRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthRefreshSessionRow {
+    pub id: i64,
+    pub user_id: UserId,
+    pub username: String,
+    pub refresh_expires_at: String,
+    pub user_is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthUserProfileRow {
+    pub id: UserId,
+    pub username: String,
+    pub email: String,
+    pub nickname: String,
+    pub avatar: String,
+    pub default_account_id: Option<i64>,
+    pub transaction_edit_scope: i64,
+    pub language: String,
+    pub default_currency: String,
+    pub first_day_of_week: i64,
+    pub fiscal_year_start: i64,
+    pub calendar_display_type: i64,
+    pub date_display_type: i64,
+    pub long_date_format: i64,
+    pub short_date_format: i64,
+    pub long_time_format: i64,
+    pub short_time_format: i64,
+    pub fiscal_year_format: i64,
+    pub currency_display_type: i64,
+    pub numeral_system: i64,
+    pub decimal_separator: i64,
+    pub digit_grouping_symbol: i64,
+    pub digit_grouping: i64,
+    pub coordinate_display_type: i64,
+    pub expense_amount_color: i64,
+    pub income_amount_color: i64,
+    pub cash_account_id: Option<i64>,
+    pub cash_transfer_category_id: Option<i64>,
+    pub import_learning_enabled: bool,
+    pub investment_platform_keywords: Option<String>,
+    pub investment_product_keywords: Option<String>,
+    pub investment_exclude_keywords: Option<String>,
+    pub email_verified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationCloudSettingRow {
+    pub setting_key: String,
+    pub setting_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateTokenSessionDraft {
     pub user_id: UserId,
     pub token_hash: String,
@@ -49,7 +101,7 @@ pub fn cleanup_expired_sessions(connection: &Connection, now: &str) -> DbResult<
     Ok(connection.execute(
         r#"
         DELETE FROM sessions
-        WHERE expires_at < ?1
+        WHERE (refresh_expires_at IS NULL AND expires_at < ?1)
            OR (refresh_expires_at IS NOT NULL AND refresh_expires_at < ?1)
         "#,
         [now],
@@ -84,6 +136,86 @@ pub fn get_auth_token_user(
         )
         .optional()
         .map_err(DbError::from)
+}
+
+pub fn get_active_refresh_session(
+    connection: &Connection,
+    refresh_token_hash: &str,
+) -> DbResult<Option<AuthRefreshSessionRow>> {
+    connection
+        .query_row(
+            r#"
+            SELECT s.id, s.user_id, u.username, s.refresh_expires_at, u.is_active
+            FROM sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.refresh_token_hash = ?1 AND s.is_active = 1
+            "#,
+            [refresh_token_hash],
+            |row| {
+                let raw_user_id: i64 = row.get(1)?;
+                Ok(AuthRefreshSessionRow {
+                    id: row.get(0)?,
+                    user_id: user_id_from_sql(raw_user_id, 1)?,
+                    username: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    refresh_expires_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    user_is_active: row.get::<_, i64>(4)? == 1,
+                })
+            },
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn get_auth_user_profile(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Option<AuthUserProfileRow>> {
+    let user_id_sql = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            r#"
+            SELECT
+                id, username, email, nickname, avatar, default_account_id,
+                transaction_edit_scope, language, default_currency, first_day_of_week,
+                fiscal_year_start, calendar_display_type, date_display_type,
+                long_date_format, short_date_format, long_time_format, short_time_format,
+                fiscal_year_format, currency_display_type, numeral_system, decimal_separator,
+                digit_grouping_symbol, digit_grouping, coordinate_display_type,
+                expense_amount_color, income_amount_color, cash_account_id,
+                cash_transfer_category_id, import_learning_enabled,
+                investment_platform_keywords, investment_product_keywords,
+                investment_exclude_keywords, email_verified
+            FROM users
+            WHERE id = ?1
+            "#,
+            [user_id_sql],
+            auth_user_profile_from_row,
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn list_application_cloud_settings(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Vec<ApplicationCloudSettingRow>> {
+    let user_id_sql = user_id_sql(user_id)?;
+    let mut statement = connection.prepare(
+        r#"
+        SELECT setting_key, setting_value
+        FROM user_application_cloud_settings
+        WHERE user_id = ?1
+        ORDER BY created_at ASC, id ASC
+        "#,
+    )?;
+    let rows = statement.query_map([user_id_sql], |row| {
+        Ok(ApplicationCloudSettingRow {
+            setting_key: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            setting_value: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
 pub fn list_user_sessions(
@@ -137,6 +269,52 @@ pub fn create_token_session(
         ],
     )?;
     Ok(connection.last_insert_rowid())
+}
+
+pub fn rotate_refresh_token_session(
+    connection: &Connection,
+    consumed_session_id: i64,
+    consumed_refresh_token_hash: &str,
+    draft: &CreateTokenSessionDraft,
+) -> DbResult<Option<i64>> {
+    let user_id = user_id_sql(draft.user_id)?;
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let consumed = connection.execute(
+            r#"
+            UPDATE sessions
+            SET is_active = 0, refresh_token_hash = NULL
+            WHERE id = ?1
+              AND user_id = ?2
+              AND refresh_token_hash = ?3
+              AND is_active = 1
+            "#,
+            params![consumed_session_id, user_id, consumed_refresh_token_hash],
+        )?;
+        if consumed == 0 {
+            return Ok(None);
+        }
+        create_token_session(connection, draft).map(Some)
+    })();
+
+    match result {
+        Ok(Some(session_id)) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(Some(session_id))
+        }
+        Ok(None) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Ok(None)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
 }
 
 pub fn create_auth_log(connection: &Connection, draft: &AuthLogDraft) -> DbResult<i64> {
@@ -216,6 +394,57 @@ fn user_id_sql(user_id: UserId) -> DbResult<i64> {
     })
 }
 
+fn user_id_from_sql(raw_id: i64, column: usize) -> rusqlite::Result<UserId> {
+    let raw_id = u64::try_from(raw_id)
+        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, raw_id))?;
+    UserId::new(raw_id).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, raw_id as i64))
+}
+
+fn auth_user_profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthUserProfileRow> {
+    let raw_id: i64 = row.get(0)?;
+    Ok(AuthUserProfileRow {
+        id: user_id_from_sql(raw_id, 0)?,
+        username: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        email: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        nickname: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        avatar: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        default_account_id: row.get(5)?,
+        transaction_edit_scope: row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+        language: row
+            .get::<_, Option<String>>(7)?
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "zh_Hans".to_string()),
+        default_currency: row
+            .get::<_, Option<String>>(8)?
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "CNY".to_string()),
+        first_day_of_week: row.get::<_, Option<i64>>(9)?.unwrap_or(1),
+        fiscal_year_start: row.get::<_, Option<i64>>(10)?.unwrap_or(1),
+        calendar_display_type: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
+        date_display_type: row.get::<_, Option<i64>>(12)?.unwrap_or(0),
+        long_date_format: row.get::<_, Option<i64>>(13)?.unwrap_or(0),
+        short_date_format: row.get::<_, Option<i64>>(14)?.unwrap_or(0),
+        long_time_format: row.get::<_, Option<i64>>(15)?.unwrap_or(0),
+        short_time_format: row.get::<_, Option<i64>>(16)?.unwrap_or(0),
+        fiscal_year_format: row.get::<_, Option<i64>>(17)?.unwrap_or(0),
+        currency_display_type: row.get::<_, Option<i64>>(18)?.unwrap_or(0),
+        numeral_system: row.get::<_, Option<i64>>(19)?.unwrap_or(0),
+        decimal_separator: row.get::<_, Option<i64>>(20)?.unwrap_or(0),
+        digit_grouping_symbol: row.get::<_, Option<i64>>(21)?.unwrap_or(0),
+        digit_grouping: row.get::<_, Option<i64>>(22)?.unwrap_or(0),
+        coordinate_display_type: row.get::<_, Option<i64>>(23)?.unwrap_or(0),
+        expense_amount_color: row.get::<_, Option<i64>>(24)?.unwrap_or(0),
+        income_amount_color: row.get::<_, Option<i64>>(25)?.unwrap_or(0),
+        cash_account_id: row.get(26)?,
+        cash_transfer_category_id: row.get(27)?,
+        import_learning_enabled: row.get::<_, Option<i64>>(28)?.unwrap_or(1) != 0,
+        investment_platform_keywords: row.get(29)?,
+        investment_product_keywords: row.get(30)?,
+        investment_exclude_keywords: row.get(31)?,
+        email_verified: row.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,13 +497,15 @@ mod tests {
                 (2, 42, 'api', '2099-01-01T00:00:00', NULL, 'Bill Analyser API Token', '127.0.0.2', 1, '2026-01-03T00:00:00', '2026-01-03T00:00:00'),
                 (3, 42, 'inactive', '2099-01-01T00:00:00', NULL, 'inactive', '127.0.0.3', 0, '2026-01-04T00:00:00', '2026-01-04T00:00:00'),
                 (4, 7, 'other-user', '2099-01-01T00:00:00', NULL, 'other', '127.0.0.4', 1, '2026-01-05T00:00:00', '2026-01-05T00:00:00'),
-                (5, 42, 'expired', '2020-01-01T00:00:00', NULL, 'expired', '127.0.0.5', 1, '2020-01-01T00:00:00', '2020-01-01T00:00:00');
+                (5, 42, 'expired', '2020-01-01T00:00:00', NULL, 'expired', '127.0.0.5', 1, '2020-01-01T00:00:00', '2020-01-01T00:00:00'),
+                (7, 42, 'refresh-backed', '2020-01-01T00:00:00', '2099-01-01T00:00:00', 'refresh', '127.0.0.7', 1, '2020-01-01T00:00:00', '2020-01-01T00:00:00'),
+                (8, 42, 'refresh-expired', '2099-01-01T00:00:00', '2020-01-01T00:00:00', 'refresh expired', '127.0.0.8', 1, '2020-01-01T00:00:00', '2020-01-01T00:00:00');
             "#,
         )?;
 
         assert_eq!(
             cleanup_expired_sessions(&connection, "2026-01-01T00:00:00")?,
-            1
+            2
         );
         let sessions = list_user_sessions(&connection, user_id(42))?;
         assert_eq!(
@@ -282,7 +513,7 @@ mod tests {
                 .iter()
                 .map(|session| session.id)
                 .collect::<Vec<_>>(),
-            vec![2, 1]
+            vec![2, 1, 7]
         );
 
         assert!(invalidate_session_by_id(&connection, 2, user_id(42))?);
@@ -292,7 +523,7 @@ mod tests {
                 .iter()
                 .map(|session| session.id)
                 .collect::<Vec<_>>(),
-            vec![1]
+            vec![1, 7]
         );
 
         connection.execute(
@@ -301,7 +532,7 @@ mod tests {
         )?;
         assert_eq!(
             invalidate_other_user_sessions(&connection, user_id(42), 1)?,
-            1
+            2
         );
         assert_eq!(list_user_sessions(&connection, user_id(42))?.len(), 1);
         assert_eq!(list_user_sessions(&connection, user_id(7))?.len(), 1);

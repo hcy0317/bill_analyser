@@ -66,6 +66,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         "BILL_ANALYSER_TRUSTED_USER_HEADER_SECRET" => Some("  route-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_SECRET" => Some("  jwt-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_ALGORITHM" => Some("HS256".to_string()),
+        "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS" => Some("3".to_string()),
+        "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS" => Some("9".to_string()),
         "BILL_ANALYSER_PUBLIC_BASE_URL" => Some("  https://api.example.test/  ".to_string()),
         _ => None,
     })
@@ -82,6 +84,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     );
     assert_eq!(config.auth_jwt_secret.as_deref(), Some("jwt-secret"));
     assert_eq!(config.auth_jwt_algorithm, "HS256");
+    assert_eq!(config.auth_jwt_expiration_days, 3);
+    assert_eq!(config.auth_refresh_token_expiration_days, 9);
     assert_eq!(
         config.public_base_url.as_deref(),
         Some("https://api.example.test")
@@ -93,12 +97,16 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
     let config = HttpShellConfig::from_env_with(|name| match name {
         "JWT_SECRET_KEY" => Some("  dotenv-secret  ".to_string()),
         "JWT_ALGORITHM" => Some("hs512".to_string()),
+        "JWT_EXPIRATION_DAYS" => Some("5".to_string()),
+        "REFRESH_TOKEN_EXPIRATION_DAYS" => Some("11".to_string()),
         _ => None,
     })
     .expect("env config parses");
 
     assert_eq!(config.auth_jwt_secret.as_deref(), Some("dotenv-secret"));
     assert_eq!(config.auth_jwt_algorithm, "hs512");
+    assert_eq!(config.auth_jwt_expiration_days, 5);
+    assert_eq!(config.auth_refresh_token_expiration_days, 11);
 }
 
 #[test]
@@ -179,6 +187,22 @@ fn config_rejects_invalid_upstream_body_limit_and_env_integer() {
         })
         .unwrap_err(),
         HttpShellConfigError::InvalidInteger("BILL_ANALYSER_HTTP_TIMEOUT_MS")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS" => Some("0".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS" => Some("366".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS")
     );
     assert_eq!(
         HttpShellConfig::from_env_with(|name| match name {

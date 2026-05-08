@@ -371,7 +371,7 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-personal-runtime"
+        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-personal-refresh-runtime"
     );
 
     let health_response = app
