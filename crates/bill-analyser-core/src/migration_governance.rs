@@ -89,6 +89,8 @@ pub enum RouteHandlerId {
         rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
     )]
     StatisticsExchangeProxyPassthrough,
+    #[serde(rename = "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime")]
+    AuthTokenRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
     LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
@@ -140,6 +142,9 @@ impl RouteHandlerId {
             }
             Self::StatisticsExchangeProxyPassthrough => {
                 "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
+            }
+            Self::AuthTokenRuntime => {
+                "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime"
             }
             Self::LegacyPythonProxyPassthrough => {
                 "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
@@ -1688,9 +1693,36 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/templates/display-orders",
         "taxonomy-rules-settings"
     ),
-    python_proxy_route!("DELETE", "/api/tokens", "auth-security-user-data"),
-    python_proxy_route!("GET", "/api/tokens", "auth-security-user-data"),
-    python_proxy_route!("DELETE", "/api/tokens/{token_id}", "auth-security-user-data"),
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/tokens",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime revokes all other token sessions while preserving current bearer session semantics.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/tokens",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime lists active token sessions with Flask-compatible success/result envelope.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/tokens/{token_id}",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime revokes one token session by id with user-scope validation.",
+    },
     python_proxy_route!("POST", "/api/tokens/api", "auth-security-user-data"),
     python_proxy_route!("POST", "/api/tokens/mcp", "auth-security-user-data"),
     python_proxy_route!("POST", "/api/tokens/refresh", "auth-security-user-data"),
@@ -1766,6 +1798,11 @@ const FULL_ROUTE_EVIDENCE: &[&str] = &[
 ];
 const FULL_ROUTE_EVIDENCE_NO_FIXTURE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
 const PROVIDER_ROUTE_EVIDENCE: &[&str] = &["route_matrix", "provider_parity"];
+const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
+    "token_generation_refresh_parity",
+    "profile_user_data_parity",
+    "2fa_oauth_parity",
+];
 const IMPORT_DELETION_BLOCKERS: &[&str] = &[
     "rust_route_runtime",
     "db_write_semantics",
@@ -2183,20 +2220,25 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "src/bill_analyser/core/user_data.py",
         ],
         rust_owner_files: &[
-            "crates/bill-analyser-http/src/proxy.rs",
+            "crates/bill-analyser-http/src/auth_routes.rs",
+            "crates/bill-analyser-db/src/auth.rs",
             "crates/bill-analyser-core/src/auth/mod.rs",
+            "crates/bill-analyser-http/src/proxy.rs",
         ],
-        tests_migrated: &["crates/bill-analyser-core/tests/auth_security_contracts.rs"],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/auth_runtime_contract.rs",
+            "crates/bill-analyser-core/tests/auth_security_contracts.rs",
+        ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Auth, session, profile, token, and user-data routes remain Python-proxied until the P3 domain cutover ports runtime handlers.",
+            "Token session list/revoke routes are Rust-owned; login, registration, token generation/refresh, profile, 2FA, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
-        transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
+        transition_evidence: DB_RUNTIME_EVIDENCE,
     },
     DomainGovernancePolicy {
         domain: "taxonomy-rules-settings",
@@ -2406,9 +2448,9 @@ const ENVELOPE_POLICIES: &[ResponseEnvelopePolicy] = &[
     },
     ResponseEnvelopePolicy {
         family: ResponseEnvelopeFamily::FlaskSuccessResult,
-        route_contexts: PYTHON_PROXIED_ENVELOPE_CONTEXT,
-        success_shape: "success=true result/message",
-        error_shape: "success=false error/code/message as emitted by Flask route",
+        route_contexts: RUST_OR_PYTHON_PROXIED_ENVELOPE_CONTEXT,
+        success_shape: "success=true result/message emitted by Rust-compatible token routes or proxied Flask routes",
+        error_shape: "success=false error/code/message in Flask-compatible shape",
         proxy_may_wrap: false,
     },
     ResponseEnvelopePolicy {
@@ -2644,6 +2686,16 @@ fn route_contract_details(
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: PROVIDER_ROUTE_EVIDENCE,
+        },
+        ("auth-security-user-data", MigrationState::RustOwnedVerified) => RouteContractDetails {
+            handler: RouteHandlerId::AuthTokenRuntime,
+            deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior:
+                "Only token session list/revoke routes are Rust-owned; token generation/refresh, login, registration, profile, 2FA, OAuth, and user-data routes remain Python-owned.",
+            decision_required: DecisionRequired::Port,
+            decision_owner: "migration-program",
+            transition_evidence: DB_RUNTIME_EVIDENCE,
         },
         _ => RouteContractDetails {
             handler: route_handler_for_domain(route.domain),

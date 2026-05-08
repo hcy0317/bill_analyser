@@ -19,6 +19,9 @@ SHADOW_SRC_DIRS = tuple(
 PYTHON_TEST_FILE_PATTERN = re.compile(
     r"^(test_.*|.*_test|check_.*|debug_.*|quick_.*|manual_test_.*|e2e_.*)\.py$"
 )
+ALLOWED_NON_TEST_CHECK_SCRIPTS = {
+    "scripts/check_rust_workspace_dependencies.py",
+}
 FRONTEND_TEST_SUFFIXES = (
     ".test.ts",
     ".spec.ts",
@@ -78,7 +81,9 @@ def test_python_test_like_files_live_under_tests_directory():
         if _is_relative_to(path, TESTS_ROOT):
             continue
         if PYTHON_TEST_FILE_PATTERN.match(path.name):
-            unexpected_files.append(path.relative_to(WORKSPACE_ROOT).as_posix())
+            relative_path = path.relative_to(WORKSPACE_ROOT).as_posix()
+            if relative_path not in ALLOWED_NON_TEST_CHECK_SCRIPTS:
+                unexpected_files.append(relative_path)
 
     assert not unexpected_files, (
         "发现 tests/ 之外的 Python 测试/调试/检查脚本，请统一迁移到 tests/: "

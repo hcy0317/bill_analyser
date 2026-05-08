@@ -5,6 +5,7 @@
 //! Rust runtime handlers.
 
 pub mod auth;
+pub mod auth_routes;
 pub mod bill_routes;
 pub mod budget_routes;
 pub mod config;
@@ -15,7 +16,13 @@ pub mod runtime;
 pub mod server;
 pub mod statistics_routes;
 
-pub use auth::{resolve_user_id_from_headers, AuthenticatedUser, RustRouteAuthError};
+pub use auth::{
+    resolve_authenticated_user_from_headers, resolve_user_id_from_headers, AuthenticatedUser,
+    RustRouteAuthError,
+};
+pub use auth_routes::{
+    auth_token_runtime_router, AUTH_PROXIED_ROUTE_PATTERNS, AUTH_TOKEN_ROUTE_PATTERNS,
+};
 pub use bill_routes::{
     bill_runtime_router, BILL_CRUD_PROXIED_ROUTE_PATTERNS, BILL_CRUD_ROUTE_PATTERNS,
 };

@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AUDIT_ROOT = REPO_ROOT / ".omx" / "audits" / "rust-refactor-readiness"
+
+if not AUDIT_ROOT.exists():
+    pytest.skip(
+        ".omx readiness audit artifacts are local ignored outputs; enforce the contract only when present",
+        allow_module_level=True,
+    )
 
 
 REQUIRED_ARTIFACTS = [

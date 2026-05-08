@@ -38,6 +38,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/statistics/category-pie")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/top-merchants")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/amounts")));
+    assert!(rust_owned.contains(&("GET", "/api/tokens")));
+    assert!(rust_owned.contains(&("DELETE", "/api/tokens")));
+    assert!(rust_owned.contains(&("DELETE", "/api/tokens/{token_id}")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -157,6 +160,8 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             "/api/data/export.{file_type}",
             "auth-security-user-data",
         ),
+        ("POST", "/api/tokens/refresh", "auth-security-user-data"),
+        ("POST", "/api/tokens/api", "auth-security-user-data"),
         ("GET", "/api/backup/jobs", "backup-ops"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
@@ -300,6 +305,11 @@ fn envelope_oracle_wraps_only_proxy_infrastructure_failures() {
     assert!(raw_passthrough.applies_to_owner(MigrationState::PythonProxied));
     assert!(!raw_passthrough.applies_to_owner(MigrationState::RustImplemented));
     assert!(!raw_passthrough.applies_to_owner(MigrationState::RustOwnedVerified));
+
+    let success_result = response_envelope_policy(ResponseEnvelopeFamily::FlaskSuccessResult)
+        .expect("success/result envelope policy exists");
+    assert!(success_result.applies_to_owner(MigrationState::PythonProxied));
+    assert!(success_result.applies_to_owner(MigrationState::RustOwnedVerified));
 }
 
 #[test]
@@ -425,6 +435,17 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         bills_export.envelope,
         ResponseEnvelopeFamily::FlaskRawPassthrough
     );
+
+    let auth_tokens = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/tokens")
+        .expect("auth token route is present");
+    assert_eq!(auth_tokens.state, MigrationState::RustOwnedVerified);
+    assert_eq!(auth_tokens.handler, RouteHandlerId::AuthTokenRuntime);
+    assert_eq!(auth_tokens.decision_required, DecisionRequired::Port);
+    assert!(auth_tokens
+        .deletion_blockers
+        .contains(&"profile_user_data_parity"));
 }
 
 #[test]

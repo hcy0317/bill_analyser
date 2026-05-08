@@ -4,6 +4,7 @@
 //! shell, and no business database write path is Rust-primary here.
 
 pub mod app_settings;
+pub mod auth;
 pub mod bills;
 pub mod budgets;
 pub mod connection;
@@ -20,6 +21,10 @@ pub use app_settings::{
     get_app_setting, get_app_setting_row, init_app_settings_schema, load_ocr_config_setting,
     normalize_ocr_config_for_storage, set_app_setting, store_ocr_config_setting, AppSettingDraft,
     AppSettingRow, OCR_CONFIG_SETTING_KEY,
+};
+pub use auth::{
+    cleanup_expired_sessions, invalidate_other_user_sessions, invalidate_session_by_id,
+    list_user_sessions, TokenSessionRow,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,

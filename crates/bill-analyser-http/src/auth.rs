@@ -13,6 +13,7 @@ use crate::config::HttpShellConfig;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedUser {
     pub user_id: UserId,
+    pub session_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,14 +50,28 @@ pub fn resolve_user_id_from_headers(
     config: &HttpShellConfig,
     trusted_secret_header: &'static str,
 ) -> Result<UserId, RustRouteAuthError> {
+    resolve_authenticated_user_from_headers(headers, config, trusted_secret_header)
+        .map(|user| user.user_id)
+}
+
+pub fn resolve_authenticated_user_from_headers(
+    headers: &HeaderMap,
+    config: &HttpShellConfig,
+    trusted_secret_header: &'static str,
+) -> Result<AuthenticatedUser, RustRouteAuthError> {
     if headers.contains_key(trusted_secret_header)
         || headers.contains_key("x-user-id")
         || headers.contains_key("x-bill-analyser-user-id")
     {
-        return resolve_trusted_header_user_id(headers, config, trusted_secret_header);
+        return resolve_trusted_header_user_id(headers, config, trusted_secret_header).map(
+            |user_id| AuthenticatedUser {
+                user_id,
+                session_id: None,
+            },
+        );
     }
 
-    resolve_bearer_user_id(headers, config)
+    resolve_bearer_user(headers, config)
 }
 
 fn resolve_trusted_header_user_id(
@@ -99,10 +114,10 @@ fn trusted_user_header_value(headers: &HeaderMap) -> Result<UserId, RustRouteAut
     parse_user_id(raw, "Invalid Rust route user id")
 }
 
-fn resolve_bearer_user_id(
+fn resolve_bearer_user(
     headers: &HeaderMap,
     config: &HttpShellConfig,
-) -> Result<UserId, RustRouteAuthError> {
+) -> Result<AuthenticatedUser, RustRouteAuthError> {
     let auth_header = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -116,7 +131,10 @@ fn resolve_bearer_user_id(
             "Invalid or expired session",
         ));
     }
-    Ok(session.user_id)
+    Ok(AuthenticatedUser {
+        user_id: session.user_id,
+        session_id: Some(session.id),
+    })
 }
 
 fn validate_access_jwt(

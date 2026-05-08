@@ -7,7 +7,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 92
+- Rust backend files: 95
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -421,6 +421,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-core/tests/statistics_contracts.rs
 - crates/bill-analyser-core/tests/transaction_adapter_contracts.rs
 - crates/bill-analyser-db/src/app_settings.rs
+- crates/bill-analyser-db/src/auth.rs
 - crates/bill-analyser-db/src/bills.rs
 - crates/bill-analyser-db/src/bin/bill_taxonomy_bridge.rs
 - crates/bill-analyser-db/src/budgets.rs
@@ -446,6 +447,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-db/tests/sqlite_runtime.rs
 - crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs
 - crates/bill-analyser-http/src/auth.rs
+- crates/bill-analyser-http/src/auth_routes.rs
 - crates/bill-analyser-http/src/bill_routes.rs
 - crates/bill-analyser-http/src/bin/bill_http_server.rs
 - crates/bill-analyser-http/src/budget_routes.rs
@@ -457,6 +459,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-http/src/runtime.rs
 - crates/bill-analyser-http/src/server.rs
 - crates/bill-analyser-http/src/statistics_routes.rs
+- crates/bill-analyser-http/tests/auth_runtime_contract.rs
 - crates/bill-analyser-http/tests/bills_runtime_contract.rs
 - crates/bill-analyser-http/tests/budget_runtime_contract.rs
 - crates/bill-analyser-http/tests/import_runtime_contract.rs
