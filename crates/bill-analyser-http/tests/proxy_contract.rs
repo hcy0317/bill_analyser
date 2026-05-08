@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{env, net::SocketAddr, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,9 +8,9 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    bind_addr_from_env_with, build_router, build_upstream_url, filter_proxy_request_headers,
-    http_shell_health, run_http_server, HttpShellConfig, HttpShellConfigError, ImportRouteMode,
-    ProxyState, REQUEST_ID_HEADER,
+    bind_addr_from_env, bind_addr_from_env_with, build_router, build_upstream_url,
+    filter_proxy_request_headers, http_shell_health, run_http_server, HttpShellConfig,
+    HttpShellConfigError, ImportRouteMode, ProxyState, DEFAULT_HTTP_BIND, REQUEST_ID_HEADER,
 };
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -25,6 +25,7 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(config.timeout, Duration::from_millis(30_000));
     assert_eq!(config.body_limit_bytes, 10 * 1024 * 1024);
     assert_eq!(config.import_route_mode, ImportRouteMode::ProxyOnly);
+    assert_eq!(config.public_base_url, None);
     assert_eq!(
         health.identity.runtime_boundary,
         "rust-http-shell:proxy-only"
@@ -65,6 +66,7 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         "BILL_ANALYSER_TRUSTED_USER_HEADER_SECRET" => Some("  route-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_SECRET" => Some("  jwt-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_ALGORITHM" => Some("HS256".to_string()),
+        "BILL_ANALYSER_PUBLIC_BASE_URL" => Some("  https://api.example.test/  ".to_string()),
         _ => None,
     })
     .expect("env config parses");
@@ -80,6 +82,10 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     );
     assert_eq!(config.auth_jwt_secret.as_deref(), Some("jwt-secret"));
     assert_eq!(config.auth_jwt_algorithm, "HS256");
+    assert_eq!(
+        config.public_base_url.as_deref(),
+        Some("https://api.example.test")
+    );
 }
 
 #[test]
@@ -106,6 +112,19 @@ fn server_bind_addr_reads_rust_primary_http_env() {
     })
     .expect("custom bind parses");
     assert_eq!(custom_addr.to_string(), "127.0.0.1:5010");
+}
+
+#[test]
+fn server_bind_addr_reads_process_env_without_mutating_it() {
+    let result = bind_addr_from_env();
+    if let Ok(raw) = env::var("BILL_ANALYSER_HTTP_BIND") {
+        assert_eq!(result.is_ok(), raw.trim().parse::<SocketAddr>().is_ok());
+    } else {
+        assert_eq!(
+            result.expect("default process env bind"),
+            DEFAULT_HTTP_BIND.parse().expect("default bind parses")
+        );
+    }
 }
 
 #[tokio::test]
@@ -168,6 +187,14 @@ fn config_rejects_invalid_upstream_body_limit_and_env_integer() {
         })
         .unwrap_err(),
         HttpShellConfigError::InvalidImportRouteMode
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_PUBLIC_BASE_URL" => Some("api.example.test".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidUpstream
     );
 }
 

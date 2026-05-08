@@ -41,6 +41,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens/{token_id}")));
+    assert!(rust_owned.contains(&("POST", "/api/tokens/api")));
+    assert!(rust_owned.contains(&("POST", "/api/tokens/mcp")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -161,7 +163,6 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             "auth-security-user-data",
         ),
         ("POST", "/api/tokens/refresh", "auth-security-user-data"),
-        ("POST", "/api/tokens/api", "auth-security-user-data"),
         ("GET", "/api/backup/jobs", "backup-ops"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)

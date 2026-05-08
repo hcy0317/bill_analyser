@@ -49,7 +49,7 @@ async fn import_db_runtime_reports_primary_http_import_runtime() -> Result<(), B
     );
     assert_eq!(
         runtime_body["business_migration"],
-        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-runtime"
+        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-token-session-personal-runtime"
     );
     assert_eq!(runtime_body["api_takeover"], true);
 

@@ -25,7 +25,11 @@ pub async fn run_http_server(
     listener: TcpListener,
     state: ProxyState,
 ) -> Result<(), std::io::Error> {
-    serve(listener, build_router(state)).await
+    serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

@@ -23,8 +23,10 @@ pub use app_settings::{
     AppSettingRow, OCR_CONFIG_SETTING_KEY,
 };
 pub use auth::{
-    cleanup_expired_sessions, invalidate_other_user_sessions, invalidate_session_by_id,
-    list_user_sessions, TokenSessionRow,
+    cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
+    create_token_session, get_auth_token_user, invalidate_other_user_sessions,
+    invalidate_session_by_id, list_user_sessions, AuthLogDraft, AuthTokenUserRow,
+    CreateTokenSessionDraft, TokenSessionRow,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,

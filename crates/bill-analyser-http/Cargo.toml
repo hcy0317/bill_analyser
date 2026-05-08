@@ -15,6 +15,7 @@ axum.workspace = true
 bill-analyser-core = { path = "../bill-analyser-core" }
 bill-analyser-db = { path = "../bill-analyser-db" }
 base64.workspace = true
+bcrypt.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 csv.workspace = true

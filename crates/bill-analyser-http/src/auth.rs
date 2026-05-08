@@ -213,11 +213,11 @@ fn decode_jwt_part(encoded: &str) -> Result<Value, RustRouteAuthError> {
     serde_json::from_slice(&decoded).map_err(|_| RustRouteAuthError::unauthorized("Invalid token"))
 }
 
-fn normalize_jwt_algorithm(algorithm: &str) -> String {
+pub(crate) fn normalize_jwt_algorithm(algorithm: &str) -> String {
     algorithm.trim().to_ascii_uppercase()
 }
 
-fn jwt_hmac_algorithm(algorithm: &str) -> Result<hmac::Algorithm, RustRouteAuthError> {
+pub(crate) fn jwt_hmac_algorithm(algorithm: &str) -> Result<hmac::Algorithm, RustRouteAuthError> {
     match normalize_jwt_algorithm(algorithm).as_str() {
         "HS256" => Ok(hmac::HMAC_SHA256),
         "HS384" => Ok(hmac::HMAC_SHA384),

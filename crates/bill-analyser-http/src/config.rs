@@ -18,6 +18,7 @@ pub struct HttpShellConfig {
     pub trusted_user_header_secret: Option<String>,
     pub auth_jwt_secret: Option<String>,
     pub auth_jwt_algorithm: String,
+    pub public_base_url: Option<String>,
 }
 
 impl HttpShellConfig {
@@ -54,6 +55,7 @@ impl HttpShellConfig {
             trusted_user_header_secret: None,
             auth_jwt_secret: None,
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
+            public_base_url: None,
         })
     }
 
@@ -74,6 +76,17 @@ impl HttpShellConfig {
 
     pub fn with_auth_jwt_algorithm(mut self, algorithm: impl Into<String>) -> Self {
         self.auth_jwt_algorithm = algorithm.into();
+        self
+    }
+
+    pub fn with_public_base_url(mut self, public_base_url: impl Into<String>) -> Self {
+        let public_base_url = public_base_url.into();
+        let public_base_url = public_base_url.trim().trim_end_matches('/').to_string();
+        self.public_base_url = if public_base_url.is_empty() {
+            None
+        } else {
+            Some(public_base_url)
+        };
         self
     }
 
@@ -113,6 +126,9 @@ impl HttpShellConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| DEFAULT_AUTH_JWT_ALGORITHM.to_string());
+        let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
+            .map(normalize_upstream)
+            .transpose()?;
 
         let mut config = Self::new_with_import_route_mode(
             upstream,
@@ -124,6 +140,7 @@ impl HttpShellConfig {
         config.trusted_user_header_secret = trusted_user_header_secret;
         config.auth_jwt_secret = auth_jwt_secret;
         config.auth_jwt_algorithm = auth_jwt_algorithm;
+        config.public_base_url = public_base_url;
         Ok(config)
     }
 }
