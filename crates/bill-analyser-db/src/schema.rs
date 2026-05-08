@@ -1,9 +1,9 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
-use crate::{DbResult, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime};
+use crate::{DbError, DbResult, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaResponsibility {
@@ -55,6 +55,752 @@ impl SchemaDryRun {
             pragma_snapshot,
         })
     }
+}
+
+pub fn init_foundational_schema(connection: &Connection) -> DbResult<()> {
+    create_core_tables(connection)?;
+    migrate_core_legacy_columns(connection)?;
+    migrate_core_user_scope_constraints(connection)?;
+    create_core_indexes(connection)?;
+    Ok(())
+}
+
+pub fn migrate_core_user_scope_constraints(connection: &Connection) -> DbResult<()> {
+    for table_name in USER_SCOPED_TABLES {
+        migrate_user_id_field(connection, table_name)?;
+    }
+    migrate_bills_hash_unique_constraint(connection)?;
+    migrate_categories_unique_constraint(connection)?;
+    migrate_user_exchange_rates_unique_constraint(connection)?;
+    Ok(())
+}
+
+pub fn migrate_user_id_field(connection: &Connection, table_name: &str) -> DbResult<()> {
+    ensure_safe_identifier(table_name)?;
+    if !table_exists(connection, table_name)? {
+        return Ok(());
+    }
+
+    let columns = table_column_names(connection, table_name)?;
+    if columns.iter().any(|column| column == "user_id") {
+        return Ok(());
+    }
+
+    connection.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1"),
+        [],
+    )?;
+    connection.execute(
+        &format!("CREATE INDEX IF NOT EXISTS idx_{table_name}_user_id ON {table_name}(user_id)"),
+        [],
+    )?;
+    Ok(())
+}
+
+pub fn migrate_categories_unique_constraint(connection: &Connection) -> DbResult<()> {
+    if !table_exists(connection, "categories")?
+        || !unique_index_exists_on(connection, "categories", &["main_category", "sub_category"])?
+    {
+        return Ok(());
+    }
+    migrate_user_id_field(connection, "categories")?;
+    let column_sql = copy_columns_for_rebuild(connection, "categories", true)?;
+
+    run_schema_rebuild_with_fk_guard(connection, |connection| {
+        connection.execute_batch(
+            "
+        DROP TABLE IF EXISTS categories_new;
+        CREATE TABLE categories_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            type INTEGER DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            priority INTEGER DEFAULT 0,
+            keywords TEXT,
+            hidden BOOLEAN DEFAULT 0,
+            icon TEXT,
+            color TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, main_category, sub_category),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        ",
+        )?;
+        connection.execute(
+            &format!(
+                "INSERT OR IGNORE INTO categories_new ({column_sql}) SELECT {column_sql} FROM categories"
+            ),
+            [],
+        )?;
+        connection.execute_batch(
+            "
+        DROP TABLE categories;
+        ALTER TABLE categories_new RENAME TO categories;
+        CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
+        ",
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+pub fn migrate_bills_hash_unique_constraint(connection: &Connection) -> DbResult<()> {
+    if !table_exists(connection, "bills")?
+        || !unique_index_exists_on(connection, "bills", &["hash"])?
+    {
+        return Ok(());
+    }
+    migrate_user_id_field(connection, "bills")?;
+    let column_sql = copy_columns_for_rebuild(connection, "bills", false)?;
+
+    run_schema_rebuild_with_fk_guard(connection, |connection| {
+        connection.execute_batch(
+            "
+        DROP TABLE IF EXISTS bills_new;
+        CREATE TABLE bills_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            counterparty TEXT NOT NULL,
+            description TEXT NOT NULL,
+            payment_method TEXT DEFAULT '',
+            main_category TEXT,
+            sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source_account_id INTEGER DEFAULT 0,
+            destination_account_id INTEGER DEFAULT 0,
+            destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
+            created_from_recurring INTEGER,
+            import_history_id INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        ",
+        )?;
+        connection.execute(
+            &format!("INSERT INTO bills_new ({column_sql}) SELECT {column_sql} FROM bills"),
+            [],
+        )?;
+        connection.execute_batch(
+            "
+        DROP TABLE bills;
+        ALTER TABLE bills_new RENAME TO bills;
+        CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date);
+        CREATE INDEX IF NOT EXISTS idx_bills_type ON bills(type);
+        CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category);
+        CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash);
+        ",
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+pub fn migrate_user_exchange_rates_unique_constraint(connection: &Connection) -> DbResult<()> {
+    if !table_exists(connection, "user_exchange_rates")?
+        || !unique_index_exists_on(
+            connection,
+            "user_exchange_rates",
+            &["from_currency", "to_currency", "effective_date"],
+        )?
+    {
+        return Ok(());
+    }
+    migrate_user_id_field(connection, "user_exchange_rates")?;
+    let column_sql = copy_columns_for_rebuild(connection, "user_exchange_rates", true)?;
+
+    run_schema_rebuild_with_fk_guard(connection, |connection| {
+        connection.execute_batch(
+            "
+        DROP TABLE IF EXISTS user_exchange_rates_new;
+        CREATE TABLE user_exchange_rates_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            from_currency TEXT NOT NULL,
+            to_currency TEXT NOT NULL,
+            rate REAL NOT NULL,
+            source TEXT DEFAULT 'manual',
+            effective_date TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, from_currency, to_currency, effective_date),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        ",
+        )?;
+        connection.execute(
+            &format!(
+                "INSERT OR IGNORE INTO user_exchange_rates_new ({column_sql}) SELECT {column_sql} FROM user_exchange_rates"
+            ),
+            [],
+        )?;
+        connection.execute_batch(
+            "
+        DROP TABLE user_exchange_rates;
+        ALTER TABLE user_exchange_rates_new RENAME TO user_exchange_rates;
+        CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies
+            ON user_exchange_rates(from_currency, to_currency);
+        CREATE INDEX IF NOT EXISTS idx_exchange_rates_date
+            ON user_exchange_rates(effective_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id);
+        ",
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+const USER_SCOPED_TABLES: &[&str] = &[
+    "bills",
+    "categories",
+    "account_types",
+    "accounts",
+    "account_transfers",
+    "tags",
+    "budgets",
+    "budget_history",
+    "saved_filters",
+    "bill_templates",
+    "recurring_bills",
+    "import_configs",
+    "import_history",
+    "user_exchange_rates",
+];
+
+fn create_core_tables(connection: &Connection) -> DbResult<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            nickname TEXT,
+            avatar TEXT,
+            default_account_id INTEGER,
+            transaction_edit_scope INTEGER DEFAULT 0,
+            language TEXT DEFAULT 'zh_Hans',
+            default_currency TEXT DEFAULT 'CNY',
+            first_day_of_week INTEGER DEFAULT 1,
+            fiscal_year_start INTEGER DEFAULT 1,
+            calendar_display_type INTEGER DEFAULT 0,
+            date_display_type INTEGER DEFAULT 0,
+            long_date_format INTEGER DEFAULT 0,
+            short_date_format INTEGER DEFAULT 0,
+            long_time_format INTEGER DEFAULT 0,
+            short_time_format INTEGER DEFAULT 0,
+            fiscal_year_format INTEGER DEFAULT 0,
+            currency_display_type INTEGER DEFAULT 0,
+            numeral_system INTEGER DEFAULT 0,
+            decimal_separator INTEGER DEFAULT 0,
+            digit_grouping_symbol INTEGER DEFAULT 0,
+            digit_grouping INTEGER DEFAULT 0,
+            coordinate_display_type INTEGER DEFAULT 0,
+            expense_amount_color INTEGER DEFAULT 0,
+            income_amount_color INTEGER DEFAULT 0,
+            cash_account_id INTEGER,
+            cash_transfer_category_id INTEGER,
+            import_learning_enabled BOOLEAN DEFAULT 1,
+            investment_platform_keywords TEXT,
+            investment_product_keywords TEXT,
+            investment_exclude_keywords TEXT,
+            is_active BOOLEAN DEFAULT 1,
+            email_verified BOOLEAN DEFAULT 0,
+            two_factor_enabled BOOLEAN DEFAULT 0,
+            two_factor_secret TEXT,
+            failed_login_attempts INTEGER DEFAULT 0,
+            locked_until TEXT,
+            last_login_at TEXT,
+            last_login_ip TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            type INTEGER DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            priority INTEGER DEFAULT 0,
+            keywords TEXT,
+            hidden BOOLEAN DEFAULT 0,
+            icon TEXT,
+            color TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, main_category, sub_category),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled BOOLEAN DEFAULT 0,
+            enabled BOOLEAN DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS account_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            type INTEGER NOT NULL,
+            icon TEXT,
+            display_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            type INTEGER NOT NULL,
+            category INTEGER,
+            currency TEXT DEFAULT 'CNY',
+            icon TEXT,
+            color TEXT,
+            balance REAL DEFAULT 0,
+            initial_balance REAL DEFAULT 0,
+            hidden BOOLEAN DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            comment TEXT,
+            aliases TEXT,
+            parent_id INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS account_transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            from_account_id INTEGER NOT NULL,
+            to_account_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            transfer_date TEXT NOT NULL,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+            FOREIGN KEY (to_account_id) REFERENCES accounts(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            color TEXT,
+            icon TEXT,
+            display_order INTEGER DEFAULT 0,
+            hidden BOOLEAN DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            counterparty TEXT NOT NULL,
+            description TEXT NOT NULL,
+            payment_method TEXT DEFAULT '',
+            main_category TEXT,
+            sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source_account_id INTEGER DEFAULT 0,
+            destination_account_id INTEGER DEFAULT 0,
+            destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
+            created_from_recurring INTEGER,
+            import_history_id INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS bill_tags (
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bill_id, tag_id),
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            category TEXT,
+            sub_category TEXT,
+            budget_type INTEGER NOT NULL DEFAULT 1,
+            period_type TEXT NOT NULL DEFAULT 'monthly',
+            amount REAL NOT NULL,
+            spent_amount REAL DEFAULT 0,
+            alert_threshold REAL DEFAULT 80,
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            enabled BOOLEAN DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS budget_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            budget_id INTEGER NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            budget_amount REAL DEFAULT 0,
+            spent_amount REAL DEFAULT 0,
+            remaining_amount REAL,
+            execution_rate REAL DEFAULT 0,
+            status TEXT,
+            calculated_at TEXT NOT NULL,
+            filter_summary TEXT DEFAULT '',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (budget_id) REFERENCES budgets(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS saved_filters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            description TEXT,
+            filter_data TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, name),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_exchange_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            from_currency TEXT NOT NULL,
+            to_currency TEXT NOT NULL,
+            rate REAL NOT NULL,
+            source TEXT DEFAULT 'manual',
+            effective_date TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, from_currency, to_currency, effective_date),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn create_core_indexes(connection: &Connection) -> DbResult<()> {
+    if table_exists(connection, "users")? {
+        let user_columns = table_column_names(connection, "users")?;
+        if user_columns.iter().any(|column| column == "username") {
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+                [],
+            )?;
+        }
+        if user_columns.iter().any(|column| column == "email") {
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+                [],
+            )?;
+        }
+        if user_columns.iter().any(|column| column == "is_active") {
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)",
+                [],
+            )?;
+        }
+    }
+    connection.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date);
+        CREATE INDEX IF NOT EXISTS idx_bills_type ON bills(type);
+        CREATE INDEX IF NOT EXISTS idx_bills_category ON bills(main_category, sub_category);
+        CREATE INDEX IF NOT EXISTS idx_bills_batch ON bills(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_hash ON bills(hash);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_user_hash_unique ON bills(user_id, hash);
+        CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
+        CREATE INDEX IF NOT EXISTS idx_category_rules_user_priority
+            ON category_rules(user_id, enabled, priority);
+        CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
+        CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type);
+        CREATE INDEX IF NOT EXISTS idx_accounts_hidden ON accounts(hidden);
+        CREATE INDEX IF NOT EXISTS idx_account_types_user ON account_types(user_id);
+        CREATE INDEX IF NOT EXISTS idx_account_types_type ON account_types(type);
+        CREATE INDEX IF NOT EXISTS idx_account_transfers_from ON account_transfers(from_account_id);
+        CREATE INDEX IF NOT EXISTS idx_account_transfers_to ON account_transfers(to_account_id);
+        CREATE INDEX IF NOT EXISTS idx_account_transfers_date ON account_transfers(transfer_date);
+        CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
+        CREATE INDEX IF NOT EXISTS idx_bill_tags_bill ON bill_tags(bill_id);
+        CREATE INDEX IF NOT EXISTS idx_bill_tags_tag ON bill_tags(tag_id);
+        CREATE INDEX IF NOT EXISTS idx_budgets_period ON budgets(period_type);
+        CREATE INDEX IF NOT EXISTS idx_budgets_category ON budgets(category, sub_category);
+        CREATE INDEX IF NOT EXISTS idx_budgets_dates ON budgets(start_date, end_date);
+        CREATE INDEX IF NOT EXISTS idx_budget_history_budget ON budget_history(budget_id);
+        CREATE INDEX IF NOT EXISTS idx_budget_history_period
+            ON budget_history(period_start, period_end);
+        CREATE INDEX IF NOT EXISTS idx_budget_history_user_period
+            ON budget_history(user_id, period_start, period_end);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_filters_user_name_unique
+            ON saved_filters(user_id, name);
+        CREATE INDEX IF NOT EXISTS idx_exchange_rates_currencies
+            ON user_exchange_rates(from_currency, to_currency);
+        CREATE INDEX IF NOT EXISTS idx_exchange_rates_date
+            ON user_exchange_rates(effective_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_core_legacy_columns(connection: &Connection) -> DbResult<()> {
+    for (table, column, definition) in [
+        ("categories", "type", "INTEGER DEFAULT 1"),
+        ("categories", "priority", "INTEGER DEFAULT 0"),
+        ("categories", "keywords", "TEXT"),
+        ("categories", "hidden", "BOOLEAN DEFAULT 0"),
+        ("categories", "icon", "TEXT"),
+        ("categories", "color", "TEXT"),
+        ("accounts", "currency", "TEXT DEFAULT 'CNY'"),
+        ("accounts", "parent_id", "INTEGER DEFAULT 0"),
+        ("accounts", "aliases", "TEXT"),
+        ("account_transfers", "note", "TEXT"),
+        ("tags", "hidden", "BOOLEAN DEFAULT 0"),
+        ("budget_history", "budget_amount", "REAL DEFAULT 0"),
+        ("budget_history", "execution_rate", "REAL DEFAULT 0"),
+        ("budget_history", "filter_summary", "TEXT DEFAULT ''"),
+        ("saved_filters", "description", "TEXT"),
+        ("saved_filters", "filter_data", "TEXT DEFAULT '{}'"),
+        ("bills", "payment_method", "TEXT DEFAULT ''"),
+        ("bills", "source_account_id", "INTEGER DEFAULT 0"),
+        ("bills", "destination_account_id", "INTEGER DEFAULT 0"),
+        ("bills", "destination_amount", "REAL DEFAULT 0"),
+        ("bills", "created_from_template", "INTEGER"),
+        ("bills", "created_from_recurring", "INTEGER"),
+        ("bills", "import_history_id", "INTEGER"),
+    ] {
+        add_column_if_missing(connection, table, column, definition)?;
+    }
+    connection.execute(
+        "UPDATE categories SET type = 2 WHERE main_category = '收入' AND type = 1",
+        [],
+    )?;
+    connection.execute(
+        "UPDATE categories SET type = 3 WHERE main_category = '转账' AND type = 1",
+        [],
+    )?;
+    Ok(())
+}
+
+fn run_schema_rebuild_with_fk_guard(
+    connection: &Connection,
+    operation: impl FnOnce(&Connection) -> DbResult<()>,
+) -> DbResult<()> {
+    let restore_foreign_keys = foreign_keys_enabled(connection)?;
+    if restore_foreign_keys {
+        connection.pragma_update(None, "foreign_keys", "OFF")?;
+    }
+    if let Err(error) = connection.execute_batch("BEGIN IMMEDIATE") {
+        if restore_foreign_keys {
+            let _ = connection.pragma_update(None, "foreign_keys", "ON");
+        }
+        return Err(error.into());
+    }
+
+    let operation_result = operation(connection);
+    match operation_result {
+        Ok(()) => {
+            let violations = match count_foreign_key_violations(connection) {
+                Ok(violations) => violations,
+                Err(error) => {
+                    let _ = connection.execute_batch("ROLLBACK");
+                    if restore_foreign_keys {
+                        let _ = connection.pragma_update(None, "foreign_keys", "ON");
+                    }
+                    return Err(error);
+                }
+            };
+            if violations > 0 {
+                let _ = connection.execute_batch("ROLLBACK");
+                if restore_foreign_keys {
+                    let _ = connection.pragma_update(None, "foreign_keys", "ON");
+                }
+                return Err(DbError::InvalidOperation(format!(
+                    "foreign_key_check failed during schema rebuild: {violations} violations"
+                )));
+            }
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                if restore_foreign_keys {
+                    let _ = connection.pragma_update(None, "foreign_keys", "ON");
+                }
+                return Err(error.into());
+            }
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            if restore_foreign_keys {
+                let _ = connection.pragma_update(None, "foreign_keys", "ON");
+            }
+            return Err(error);
+        }
+    }
+
+    if restore_foreign_keys {
+        connection.pragma_update(None, "foreign_keys", "ON")?;
+    }
+    let violations = count_foreign_key_violations(connection)?;
+    if violations > 0 {
+        return Err(DbError::InvalidOperation(format!(
+            "foreign_key_check failed after schema rebuild: {violations} violations"
+        )));
+    }
+    Ok(())
+}
+
+fn add_column_if_missing(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    definition: &str,
+) -> DbResult<()> {
+    ensure_safe_identifier(table_name)?;
+    ensure_safe_identifier(column_name)?;
+    if !table_exists(connection, table_name)? {
+        return Ok(());
+    }
+    let columns = table_column_names(connection, table_name)?;
+    if columns.iter().any(|column| column == column_name) {
+        return Ok(());
+    }
+    connection.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn copy_columns_for_rebuild(
+    connection: &Connection,
+    table_name: &str,
+    append_user_id: bool,
+) -> DbResult<String> {
+    let mut columns = table_column_names(connection, table_name)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    if append_user_id && !columns.iter().any(|column| column == "user_id") {
+        columns.push("user_id".to_string());
+    }
+    if columns.is_empty() {
+        return Err(DbError::InvalidOperation(format!(
+            "{table_name} has no copyable columns"
+        )));
+    }
+    Ok(columns.join(", "))
+}
+
+fn foreign_keys_enabled(connection: &Connection) -> DbResult<bool> {
+    let foreign_keys: i64 =
+        connection.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))?;
+    Ok(foreign_keys == 1)
+}
+
+fn unique_index_exists_on(
+    connection: &Connection,
+    table_name: &str,
+    expected_columns: &[&str],
+) -> DbResult<bool> {
+    ensure_safe_identifier(table_name)?;
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table_name})"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? == 1))
+    })?;
+    for row in rows {
+        let (index_name, is_unique) = row?;
+        if is_unique && index_columns(connection, &index_name)? == expected_columns {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn index_columns(connection: &Connection, index_name: &str) -> DbResult<Vec<String>> {
+    ensure_safe_identifier(index_name)?;
+    let mut statement = connection.prepare(&format!("PRAGMA index_info({index_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
+    let mut columns = Vec::new();
+    for row in rows {
+        columns.push(row?);
+    }
+    Ok(columns)
+}
+
+fn table_column_names(connection: &Connection, table_name: &str) -> DbResult<Vec<String>> {
+    ensure_safe_identifier(table_name)?;
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = Vec::new();
+    for row in rows {
+        columns.push(row?);
+    }
+    Ok(columns)
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> DbResult<bool> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            [table_name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    Ok(exists)
+}
+
+fn ensure_safe_identifier(value: &str) -> DbResult<()> {
+    if value.is_empty()
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(DbError::InvalidOperation(format!(
+            "unsafe sqlite identifier: {value}"
+        )));
+    }
+    Ok(())
 }
 
 fn copy_database_files(source: &Path, copy: &Path) -> DbResult<()> {

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
+    init_foundational_schema, migrate_categories_unique_constraint, migrate_user_id_field,
     run_transaction, schema_inventory, SchemaDryRun, SqliteConnectionConfig, SqliteDbPath,
     SqliteRuntime, UserScope,
 };
@@ -70,6 +71,26 @@ fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
 
 fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(format!("{}-{suffix}", path.display()))
+}
+
+fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = Vec::new();
+    for row in rows {
+        columns.push(row?);
+    }
+    Ok(columns)
+}
+
+fn table_indexes(connection: &Connection, table: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut statement = connection.prepare(&format!("PRAGMA index_list({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut indexes = Vec::new();
+    for row in rows {
+        indexes.push(row?);
+    }
+    Ok(indexes)
 }
 
 #[test]
@@ -162,6 +183,318 @@ fn connection_applies_wal_foreign_keys_and_runtime_pragmas() -> Result<(), Box<d
         .connection()
         .execute("INSERT INTO child(parent_id) VALUES (404)", []);
     assert!(foreign_key_error.is_err());
+    Ok(())
+}
+
+#[test]
+fn foundational_schema_initializes_core_tables_indexes_and_runtime_contracts(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("test_foundational_schema.db"))?;
+
+    init_foundational_schema(runtime.connection())?;
+    init_foundational_schema(runtime.connection())?;
+
+    for table in [
+        "users",
+        "bills",
+        "categories",
+        "category_rules",
+        "accounts",
+        "tags",
+        "budgets",
+        "budget_history",
+        "user_exchange_rates",
+    ] {
+        assert!(
+            !table_columns(runtime.connection(), table)?.is_empty(),
+            "{table}"
+        );
+    }
+
+    assert!(
+        table_columns(runtime.connection(), "bills")?.contains(&"destination_amount".to_string())
+    );
+    assert!(table_columns(runtime.connection(), "accounts")?.contains(&"currency".to_string()));
+    assert!(table_columns(runtime.connection(), "account_transfers")?.contains(&"note".to_string()));
+    assert!(!table_columns(runtime.connection(), "account_transfers")?
+        .contains(&"description".to_string()));
+    assert!(table_columns(runtime.connection(), "budget_history")?
+        .contains(&"filter_summary".to_string()));
+    assert!(
+        table_columns(runtime.connection(), "saved_filters")?.contains(&"filter_data".to_string())
+    );
+    assert!(
+        table_columns(runtime.connection(), "saved_filters")?.contains(&"description".to_string())
+    );
+    assert!(
+        !table_columns(runtime.connection(), "saved_filters")?.contains(&"filter_json".to_string())
+    );
+    assert!(table_indexes(runtime.connection(), "bills")?
+        .contains(&"idx_bills_user_hash_unique".to_string()));
+    assert!(table_indexes(runtime.connection(), "categories")?
+        .contains(&"idx_categories_user".to_string()));
+    assert!(table_indexes(runtime.connection(), "saved_filters")?
+        .contains(&"idx_saved_filters_user_name_unique".to_string()));
+    assert!(!table_columns(runtime.connection(), "bill_tags")?.contains(&"id".to_string()));
+    assert!(table_columns(runtime.connection(), "users")?.contains(&"email".to_string()));
+    assert!(table_columns(runtime.connection(), "users")?.contains(&"avatar".to_string()));
+    assert!(table_columns(runtime.connection(), "users")?
+        .contains(&"import_learning_enabled".to_string()));
+    assert!(table_indexes(runtime.connection(), "users")?.contains(&"idx_users_email".to_string()));
+
+    let missing_email_user = runtime.connection().execute(
+        "INSERT INTO users(id, username, password_hash, created_at, updated_at)
+         VALUES (99, 'missing-email-user', 'hash', '2026-05-09T00:00:00', '2026-05-09T00:00:00')",
+        [],
+    );
+    assert!(missing_email_user.is_err());
+
+    runtime.connection().execute(
+        "INSERT INTO users(id, username, email, password_hash, created_at, updated_at)
+         VALUES (1, 'schema-user', 'schema-user@example.test', 'hash',
+                 '2026-05-09T00:00:00', '2026-05-09T00:00:00')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO categories(user_id, type, main_category, sub_category, created_at)
+         VALUES (1, 1, '餐饮', '午餐', '2026-05-09T00:00:00')",
+        [],
+    )?;
+    let foreign_key_error = runtime.connection().execute(
+        "INSERT INTO categories(user_id, type, main_category, sub_category, created_at)
+         VALUES (404, 1, '餐饮', '晚餐', '2026-05-09T00:00:00')",
+        [],
+    );
+    assert!(foreign_key_error.is_err());
+
+    let account_transfer_foreign_key_error = runtime.connection().execute(
+        "INSERT INTO account_transfers(
+             user_id, from_account_id, to_account_id, amount, transfer_date, note, created_at
+         ) VALUES (1, 404, 405, 12.3, '2026-05-09', 'bad account', '2026-05-09T00:00:00')",
+        [],
+    );
+    assert!(account_transfer_foreign_key_error.is_err());
+
+    runtime.connection().execute(
+        "INSERT INTO saved_filters(user_id, name, description, filter_data, created_at, updated_at)
+         VALUES (1, 'recent-food', 'desc', '{}', '2026-05-09T00:00:00', '2026-05-09T00:00:00')",
+        [],
+    )?;
+    let duplicate_filter = runtime.connection().execute(
+        "INSERT INTO saved_filters(user_id, name, description, filter_data, created_at, updated_at)
+         VALUES (1, 'recent-food', 'other', '{}', '2026-05-09T00:01:00', '2026-05-09T00:01:00')",
+        [],
+    );
+    assert!(duplicate_filter.is_err());
+    Ok(())
+}
+
+#[test]
+fn foundational_schema_migrates_legacy_user_scoped_unique_constraints() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("test_foundational_legacy.db"))?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT NOT NULL);
+        INSERT INTO users(id, username, password_hash) VALUES
+            (1, 'legacy-one', 'hash'),
+            (2, 'legacy-two', 'hash');
+
+        CREATE TABLE categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(main_category, sub_category)
+        );
+        INSERT INTO categories(main_category, sub_category, description, created_at)
+            VALUES ('收入', '工资', 'legacy', '2026-05-09T01:00:00');
+
+        CREATE TABLE bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            counterparty TEXT NOT NULL,
+            description TEXT NOT NULL,
+            hash TEXT UNIQUE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO bills(id, date, type, amount, counterparty, description, hash, created_at, updated_at)
+            VALUES
+                (7, '2026-05-09 08:00:00', '支出', -18.5, 'legacy shop', 'legacy bill', 'hash-a',
+                 '2026-05-09T08:00:00', '2026-05-09T08:00:00'),
+                (42, '2026-05-09 08:30:00', '支出', -8.5, 'legacy child shop', 'legacy child bill', 'hash-child',
+                 '2026-05-09T08:30:00', '2026-05-09T08:30:00');
+
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO tags(id, user_id, name, created_at, updated_at)
+            VALUES (5, 1, 'legacy-tag', '2026-05-09T08:00:00', '2026-05-09T08:00:00');
+
+        CREATE TABLE bill_tags (
+            bill_id INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
+            tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bill_id, tag_id)
+        );
+        INSERT INTO bill_tags(bill_id, tag_id, created_at)
+            VALUES (42, 5, '2026-05-09T08:40:00');
+
+        CREATE TABLE user_exchange_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_currency TEXT NOT NULL,
+            to_currency TEXT NOT NULL,
+            rate REAL NOT NULL,
+            source TEXT DEFAULT 'manual',
+            effective_date TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(from_currency, to_currency, effective_date)
+        );
+        INSERT INTO user_exchange_rates(from_currency, to_currency, rate, source, effective_date)
+            VALUES ('CNY', 'USD', 7.21, 'manual', '2026-05-09');
+        ",
+    )?;
+
+    init_foundational_schema(runtime.connection())?;
+
+    assert!(table_columns(runtime.connection(), "categories")?.contains(&"user_id".to_string()));
+    assert!(table_columns(runtime.connection(), "bills")?.contains(&"user_id".to_string()));
+    assert!(table_columns(runtime.connection(), "user_exchange_rates")?
+        .contains(&"user_id".to_string()));
+    assert!(table_columns(runtime.connection(), "bills")?.contains(&"id".to_string()));
+
+    runtime.connection().execute(
+        "INSERT INTO categories(user_id, main_category, sub_category, created_at)
+         VALUES (2, '收入', '工资', '2026-05-09T09:00:00')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO bills(user_id, date, type, amount, counterparty, description, hash, created_at, updated_at)
+         VALUES (2, '2026-05-09 09:00:00', '支出', -25.0, 'second shop', 'second bill', 'hash-a',
+                 '2026-05-09T09:00:00', '2026-05-09T09:00:00')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO user_exchange_rates(user_id, from_currency, to_currency, rate, source, effective_date)
+         VALUES (2, 'CNY', 'USD', 7.19, 'manual', '2026-05-09')",
+        [],
+    )?;
+
+    let category_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM categories WHERE main_category = '收入' AND sub_category = '工资'",
+        [],
+        |row| row.get(0),
+    )?;
+    let bill_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE hash = 'hash-a'",
+        [],
+        |row| row.get(0),
+    )?;
+    let child_bill_tag_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bill_tags WHERE bill_id = 42 AND tag_id = 5",
+        [],
+        |row| row.get(0),
+    )?;
+    let legacy_bill_id_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM bills WHERE id IN (7, 42)",
+        [],
+        |row| row.get(0),
+    )?;
+    let rate_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM user_exchange_rates WHERE from_currency = 'CNY'
+         AND to_currency = 'USD' AND effective_date = '2026-05-09'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(category_count, 2);
+    assert_eq!(bill_count, 2);
+    assert_eq!(child_bill_tag_count, 1);
+    assert_eq!(legacy_bill_id_count, 2);
+    assert_eq!(rate_count, 2);
+    Ok(())
+}
+
+#[test]
+fn schema_rebuild_fk_failure_rolls_back_table_swap() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("test_rebuild_fk_rollback.db"))?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE users(
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO users(id, username, email, password_hash, created_at, updated_at)
+            VALUES (2, 'existing-user', 'existing@example.test', 'hash',
+                    '2026-05-09T00:00:00', '2026-05-09T00:00:00');
+
+        CREATE TABLE categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(main_category, sub_category)
+        );
+        INSERT INTO categories(user_id, main_category, sub_category, description, created_at)
+            VALUES (1, 'orphaned', 'legacy', 'must rollback', '2026-05-09T01:00:00');
+        ",
+    )?;
+
+    let result = migrate_categories_unique_constraint(runtime.connection());
+    assert!(result.is_err());
+
+    let table_sql: String = runtime.connection().query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'categories'",
+        [],
+        |row| row.get(0),
+    )?;
+    let legacy_row_count: i64 = runtime.connection().query_row(
+        "SELECT COUNT(*) FROM categories
+         WHERE user_id = 1 AND main_category = 'orphaned' AND sub_category = 'legacy'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(table_sql.contains("UNIQUE(main_category, sub_category)"));
+    assert!(!table_sql.contains("FOREIGN KEY (user_id)"));
+    assert!(!table_indexes(runtime.connection(), "categories")?
+        .contains(&"idx_categories_user".to_string()));
+    assert_eq!(legacy_row_count, 1);
+    Ok(())
+}
+
+#[test]
+fn migrate_user_id_field_is_idempotent_and_ignores_missing_tables() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("test_user_scope_migration.db"))?;
+    runtime.connection().execute(
+        "CREATE TABLE legacy_items(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)",
+        [],
+    )?;
+
+    migrate_user_id_field(runtime.connection(), "legacy_items")?;
+    migrate_user_id_field(runtime.connection(), "legacy_items")?;
+    migrate_user_id_field(runtime.connection(), "missing_table")?;
+
+    assert!(table_columns(runtime.connection(), "legacy_items")?.contains(&"user_id".to_string()));
+    assert!(table_indexes(runtime.connection(), "legacy_items")?
+        .contains(&"idx_legacy_items_user_id".to_string()));
     Ok(())
 }
 

@@ -1712,6 +1712,24 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust core pins DB writer invariants for import_db_runtime takeover.",
     },
+    EndpointOwnership {
+        method: "CONTRACT",
+        pattern: "contract://sqlite-foundational-schema-policy",
+        domain: "database-schema",
+        state: MigrationState::ContractOnly,
+        envelope: ResponseEnvelopeFamily::ContractOracle,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust DB crate owns foundational schema initialization and legacy user-scoped constraint migrations without deleting the Python facade.",
+    },
+    EndpointOwnership {
+        method: "CONTRACT",
+        pattern: "contract://sqlite-repository-policy",
+        domain: "database-repositories",
+        state: MigrationState::ContractOnly,
+        envelope: ResponseEnvelopeFamily::ContractOracle,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust DB crate records the active repository surfaces for import staging, bills, budgets, statistics, app settings, and taxonomy while deletion remains per business domain.",
+    },
 ];
 
 const COVERAGE_EVIDENCE_CONTRACT: &str = "workspace.lcov";
@@ -1737,6 +1755,8 @@ const IMPORT_DB_INVARIANT_IDS: &[&str] = &[
 const ROUTE_MATRIX_ONLY_EVIDENCE: &[&str] = &["route_matrix"];
 const RUNTIME_METADATA_EVIDENCE: &[&str] = &["route_matrix", "runtime_metadata"];
 const DB_RUNTIME_EVIDENCE: &[&str] = &["route_matrix", "db_smoke"];
+const DB_SCHEMA_EVIDENCE: &[&str] = &["db_smoke", "schema_migration_contract"];
+const DB_REPOSITORY_EVIDENCE: &[&str] = &["db_smoke", "repository_contract"];
 const FRONTEND_DB_EVIDENCE: &[&str] = &["route_matrix", "db_smoke", "frontend_contract"];
 const FULL_ROUTE_EVIDENCE: &[&str] = &[
     "route_matrix",
@@ -2253,6 +2273,74 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
     DomainGovernancePolicy {
+        domain: "database-schema",
+        python_owner_files: &[
+            "src/bill_analyser/core/database/runtime.py",
+            "src/bill_analyser/core/database/schema/__init__.py",
+            "src/bill_analyser/core/database/schema/core/business.py",
+            "src/bill_analyser/core/database/schema/core/indexes.py",
+            "src/bill_analyser/core/database/schema/core/migrations.py",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-db/src/connection.rs",
+            "crates/bill-analyser-db/src/schema.rs",
+            "crates/bill-analyser-db/src/transaction.rs",
+            "crates/bill-analyser-db/src/user_scope.rs",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-db/tests/sqlite_runtime.rs",
+            "tests/domains/db/integration/test_db_schema_core_paths.py",
+            "tests/domains/db/unit/test_db_runtime_helpers.py",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["domain_runtime_takeover", "encryption_schema_parity"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Rust now owns foundational schema initialization and core user-scoped legacy migrations; SQLCipher/encryption and domain-specific table deletion remain deferred to their own cutover phases.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: DB_SCHEMA_EVIDENCE,
+    },
+    DomainGovernancePolicy {
+        domain: "database-repositories",
+        python_owner_files: &[
+            "src/bill_analyser/core/db.py",
+            "src/bill_analyser/core/database/bills",
+            "src/bill_analyser/core/database/budgets",
+            "src/bill_analyser/core/database/imports",
+            "src/bill_analyser/core/database/accounts",
+            "src/bill_analyser/core/database/categories",
+            "src/bill_analyser/core/database/tags",
+        ],
+        rust_owner_files: &[
+            "crates/bill-analyser-db/src/bills.rs",
+            "crates/bill-analyser-db/src/budgets.rs",
+            "crates/bill-analyser-db/src/import_staging.rs",
+            "crates/bill-analyser-db/src/statistics.rs",
+            "crates/bill-analyser-db/src/app_settings.rs",
+            "crates/bill-analyser-db/src/taxonomy",
+        ],
+        tests_migrated: &[
+            "crates/bill-analyser-db/tests/bills_runtime.rs",
+            "crates/bill-analyser-db/tests/budgets_runtime.rs",
+            "crates/bill-analyser-db/tests/import_staging.rs",
+            "crates/bill-analyser-db/tests/app_settings.rs",
+            "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs",
+        ],
+        fixtures: EMPTY_STRINGS,
+        db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
+        coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
+        deletion_blockers: &["business_domain_route_takeover"],
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+            "Repository implementations exist for several Rust-owned or bridge-backed domains, but Python facade deletion remains blocked until each business domain owns its routes and tests.",
+        decision_required: DecisionRequired::Port,
+        decision_owner: "migration-program",
+        transition_evidence: DB_REPOSITORY_EVIDENCE,
+    },
+    DomainGovernancePolicy {
         domain: "database-facade",
         python_owner_files: &[
             "src/bill_analyser/core/db.py",
@@ -2507,7 +2595,9 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         | "taxonomy-rules-settings"
         | "matching-recurring-calendar-networth"
         | "backup-ops" => RouteHandlerId::LegacyPythonProxyPassthrough,
-        "database-facade" => RouteHandlerId::DatabaseFacadeContractOracle,
+        "database-schema" | "database-repositories" | "database-facade" => {
+            RouteHandlerId::DatabaseFacadeContractOracle
+        }
         _ => panic!("missing handler mapping for migration governance domain {domain}"),
     }
 }
@@ -2692,6 +2782,16 @@ pub fn budgets_crud_db_writer_policy() -> DbWriterPolicy {
         domain: "budgets-crud",
         mode: DbWriterMode::RustDomainOwned,
         active_writer: "crates/bill-analyser-http/src/budget_routes.rs + crates/bill-analyser-db/src/budgets.rs via Rust budgets_crud_runtime",
+        rust_write_allowed: true,
+        invariants: &CRUD_DB_WRITE_INVARIANTS,
+    }
+}
+
+pub fn database_schema_db_writer_policy() -> DbWriterPolicy {
+    DbWriterPolicy {
+        domain: "database-schema",
+        mode: DbWriterMode::RustDomainOwned,
+        active_writer: "crates/bill-analyser-db/src/schema.rs::init_foundational_schema",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }

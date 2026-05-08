@@ -1,12 +1,12 @@
 use bill_analyser_core::{
     bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_python_import_paths,
-    domain_governance_policies, endpoints_by_owner, expanded_route_manifest, find_domain_policy,
-    find_endpoint_ownership, governance_manifest_snapshot, import_db_writer_policy,
-    import_deletion_blocked_endpoints, import_deletion_gates, manifest_states,
-    migration_state_machine, missing_import_deletion_gates, response_envelope_policies,
-    response_envelope_policy, rust_http_shell_ownership_matrix, DbWriterMode, DecisionRequired,
-    ImportDeletionEvidence, ImportDeletionGate, MigrationBlockedStatus, MigrationState,
-    ResponseEnvelopeFamily, RouteHandlerId,
+    database_schema_db_writer_policy, domain_governance_policies, endpoints_by_owner,
+    expanded_route_manifest, find_domain_policy, find_endpoint_ownership,
+    governance_manifest_snapshot, import_db_writer_policy, import_deletion_blocked_endpoints,
+    import_deletion_gates, manifest_states, migration_state_machine, missing_import_deletion_gates,
+    response_envelope_policies, response_envelope_policy, rust_http_shell_ownership_matrix,
+    DbWriterMode, DecisionRequired, ImportDeletionEvidence, ImportDeletionGate,
+    MigrationBlockedStatus, MigrationState, ResponseEnvelopeFamily, RouteHandlerId,
 };
 
 #[test]
@@ -177,7 +177,9 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
         contract_patterns,
         vec![
             "contract://import-v2-envelope-oracle",
-            "contract://sqlite-import-writer-policy"
+            "contract://sqlite-import-writer-policy",
+            "contract://sqlite-foundational-schema-policy",
+            "contract://sqlite-repository-policy"
         ]
     );
 
@@ -444,11 +446,38 @@ fn domain_policies_record_provider_and_deletion_blockers() {
     assert!(database_facade
         .transition_evidence
         .contains(&"route_matrix"));
+
+    let database_schema =
+        find_domain_policy("database-schema").expect("database schema policy exists");
+    assert_eq!(database_schema.decision_required, DecisionRequired::Port);
+    assert!(database_schema
+        .rust_owner_files
+        .contains(&"crates/bill-analyser-db/src/schema.rs"));
+    assert!(database_schema
+        .tests_migrated
+        .contains(&"crates/bill-analyser-db/tests/sqlite_runtime.rs"));
+    assert!(database_schema
+        .deletion_blockers
+        .contains(&"encryption_schema_parity"));
+    assert!(database_schema
+        .transition_evidence
+        .contains(&"schema_migration_contract"));
+
+    let database_repositories =
+        find_domain_policy("database-repositories").expect("database repositories policy exists");
+    assert_eq!(
+        database_repositories.deletion_blockers,
+        &["business_domain_route_takeover"]
+    );
+    assert!(database_repositories
+        .transition_evidence
+        .contains(&"repository_contract"));
 }
 
 #[test]
 fn domain_db_invariant_ids_match_public_writer_policy_helpers() {
     for (domain, policy) in [
+        ("database-schema", database_schema_db_writer_policy()),
         ("bills-import", import_db_writer_policy()),
         ("bills-crud", bills_crud_db_writer_policy()),
         ("budgets-crud", budgets_crud_db_writer_policy()),

@@ -65,7 +65,12 @@ pub use import_staging::{
     LlmMemoryEventDraft, LlmMemoryEventRow,
 };
 pub use path::SqliteDbPath;
-pub use schema::{schema_inventory, SchemaDryRun, SchemaDryRunReport, SchemaResponsibility};
+pub use schema::{
+    init_foundational_schema, migrate_bills_hash_unique_constraint,
+    migrate_categories_unique_constraint, migrate_core_user_scope_constraints,
+    migrate_user_exchange_rates_unique_constraint, migrate_user_id_field, schema_inventory,
+    SchemaDryRun, SchemaDryRunReport, SchemaResponsibility,
+};
 pub use statistics::{
     find_statistics_all_date_range, query_asset_trends_payload, query_category_pie_payload,
     query_category_statistics_payload, query_category_trends_payload, query_net_worth_payload,
