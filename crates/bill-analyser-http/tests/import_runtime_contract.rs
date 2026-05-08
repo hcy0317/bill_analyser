@@ -904,7 +904,7 @@ async fn import_db_runtime_previews_temp_file_and_parses_column_mapping(
                 .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"temp_path": "C:\\not-owned\\ledger.csv"}).to_string(),
+                    json!({"temp_path": "../not-owned/ledger.csv"}).to_string(),
                 ))
                 .expect("request builds"),
         )
