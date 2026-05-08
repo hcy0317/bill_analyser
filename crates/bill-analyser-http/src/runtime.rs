@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::HttpShellConfig;
+use crate::config::{HttpShellConfig, ImportRouteMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,12 +22,28 @@ pub struct HttpShellIdentity {
 
 impl HttpShellIdentity {
     pub fn current() -> Self {
+        Self::for_import_route_mode(ImportRouteMode::ProxyOnly)
+    }
+
+    pub fn for_import_route_mode(import_route_mode: ImportRouteMode) -> Self {
+        let (runtime_boundary, business_migration) = match import_route_mode {
+            ImportRouteMode::ProxyOnly => ("rust-http-shell:proxy-only", "none"),
+            ImportRouteMode::ImportRouteSkeleton => (
+                "rust-http-shell:import-route-skeleton",
+                "import-route-skeleton-no-db",
+            ),
+            ImportRouteMode::ImportDbRuntime => (
+                "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime",
+                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial",
+            ),
+        };
+
         Self {
             crate_name: env!("CARGO_PKG_NAME").to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            runtime_boundary: "rust-http-shell:proxy-only".to_string(),
-            business_migration: "none".to_string(),
-            api_takeover: false,
+            runtime_boundary: runtime_boundary.to_string(),
+            business_migration: business_migration.to_string(),
+            api_takeover: true,
             proxy_fallback: ProxyFallback::Python,
         }
     }
@@ -44,18 +60,57 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
     let mut details = BTreeMap::new();
     details.insert(
         "owned_routes".to_string(),
-        "/api/health,/api/runtime".to_string(),
+        if config.import_route_mode.intercepts_import_routes() {
+            if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes".to_string()
+            } else {
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
+            }
+        } else {
+            "/api/health,/api/runtime".to_string()
+        },
     );
     details.insert("proxied_routes".to_string(), "unowned /api/*".to_string());
+    details.insert(
+        "import_route_mode".to_string(),
+        config.import_route_mode.as_str().to_string(),
+    );
+    if config.import_route_mode.intercepts_import_routes() {
+        details.insert(
+            "import_skeleton_routes".to_string(),
+            "first-phase deletion-blocked import/preview-adjacent endpoints".to_string(),
+        );
+    }
+    if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
+        details.insert(
+            "sqlite_db_path_configured".to_string(),
+            config.sqlite_db_path.is_some().to_string(),
+        );
+        details.insert(
+            "bills_crud_runtime".to_string(),
+            "owned core bills/transactions CRUD; export/pictures/reconciliation/recurring/category actions proxied".to_string(),
+        );
+        details.insert(
+            "budgets_crud_runtime".to_string(),
+            "owned budgets CRUD/export/execution/forecast/history/snapshot/import".to_string(),
+        );
+        details.insert(
+            "statistics_read_runtime".to_string(),
+            "owned DB-backed category statistics, category trends, asset trends, category pie, top merchants, and transaction amounts; analyzer overview/comparison and live exchange providers proxied".to_string(),
+        );
+    }
     details.insert(
         "python_upstream".to_string(),
         config.python_upstream.clone(),
     );
-    details.insert("business_api".to_string(), "not-migrated".to_string());
+    details.insert(
+        "business_api".to_string(),
+        "rust-primary-http; unmigrated domains reverse-proxied".to_string(),
+    );
 
     HttpShellHealth {
         status: "ok".to_string(),
-        identity: HttpShellIdentity::current(),
+        identity: HttpShellIdentity::for_import_route_mode(config.import_route_mode),
         details,
     }
 }

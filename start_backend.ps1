@@ -20,6 +20,12 @@ $TaxonomyBridgeReleasePath = Join-Path $ProjectRoot "target\release\$TaxonomyBri
 $CategoryRuleBridgeName = "bill_category_rule_bridge.exe"
 $CategoryRuleBridgeDebugPath = Join-Path $ProjectRoot "target\debug\$CategoryRuleBridgeName"
 $CategoryRuleBridgeReleasePath = Join-Path $ProjectRoot "target\release\$CategoryRuleBridgeName"
+$HttpServerName = "bill_http_server.exe"
+$HttpServerDebugPath = Join-Path $ProjectRoot "target\debug\$HttpServerName"
+$HttpServerReleasePath = Join-Path $ProjectRoot "target\release\$HttpServerName"
+$DefaultDbPath = Join-Path $ProjectRoot "data\bills.db"
+$ServerConfigPath = Join-Path $ProjectRoot "data\config\server_config.json"
+$DotenvPath = Join-Path $ProjectRoot ".env"
 
 Set-Location $ProjectRoot
 
@@ -73,6 +79,14 @@ if (Test-Path $CargoToml) {
             Bin = "bill_category_rule_bridge"
             DebugPath = $CategoryRuleBridgeDebugPath
             ReleasePath = $CategoryRuleBridgeReleasePath
+        },
+        @{
+            DisplayName = "HTTP server"
+            EnvName = "BILL_ANALYSER_RUST_HTTP_SERVER"
+            Package = "bill-analyser-http"
+            Bin = "bill_http_server"
+            DebugPath = $HttpServerDebugPath
+            ReleasePath = $HttpServerReleasePath
         }
     )
 
@@ -112,18 +126,173 @@ if (Test-Path $CargoToml) {
 
 $env:PYTHONPATH = $SrcRoot
 
+function Read-DotenvSettings {
+    param([string]$Path)
+
+    $settings = @{}
+    if (-not (Test-Path $Path)) {
+        return $settings
+    }
+
+    foreach ($line in Get-Content -Path $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) {
+            continue
+        }
+
+        $separator = $trimmed.IndexOf("=")
+        if ($separator -le 0) {
+            continue
+        }
+
+        $key = $trimmed.Substring(0, $separator).Trim()
+        $value = $trimmed.Substring($separator + 1).Trim().Trim('"').Trim("'")
+        if ($key) {
+            $settings[$key] = $value
+        }
+    }
+
+    return $settings
+}
+
+if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
+    $env:BILL_ANALYSER_SQLITE_DB_PATH = $DefaultDbPath
+}
+
+$DotenvSettings = Read-DotenvSettings -Path $DotenvPath
+
+if (-not $env:BILL_ANALYSER_AUTH_JWT_SECRET) {
+    if ($env:JWT_SECRET_KEY) {
+        $env:BILL_ANALYSER_AUTH_JWT_SECRET = $env:JWT_SECRET_KEY
+    } elseif ($DotenvSettings.ContainsKey("JWT_SECRET_KEY")) {
+        $env:BILL_ANALYSER_AUTH_JWT_SECRET = [string]$DotenvSettings["JWT_SECRET_KEY"]
+    }
+}
+
+if (-not $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM) {
+    if ($env:JWT_ALGORITHM) {
+        $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM = $env:JWT_ALGORITHM
+    } elseif ($DotenvSettings.ContainsKey("JWT_ALGORITHM")) {
+        $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM = [string]$DotenvSettings["JWT_ALGORITHM"]
+    }
+}
+
+if (Test-Path $ServerConfigPath) {
+    try {
+        $ServerConfig = Get-Content -Path $ServerConfigPath -Raw | ConvertFrom-Json
+        if (-not $env:BILL_ANALYSER_AUTH_JWT_SECRET -and $ServerConfig.jwt_secret) {
+            $env:BILL_ANALYSER_AUTH_JWT_SECRET = [string]$ServerConfig.jwt_secret
+        }
+        if (-not $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM -and $ServerConfig.jwt_algorithm) {
+            $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM = [string]$ServerConfig.jwt_algorithm
+        }
+    } catch {
+        Write-Host "Warning: Failed to read server_config.json for Rust auth settings: $_" -ForegroundColor Yellow
+    }
+}
+
+if (-not $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE) {
+    $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE = "import_db_runtime"
+}
+if (-not $env:BILL_ANALYSER_HTTP_BIND) {
+    $env:BILL_ANALYSER_HTTP_BIND = "127.0.0.1:5000"
+}
+$PythonFallbackHost = if ($env:BILL_ANALYSER_PYTHON_FALLBACK_HOST) { $env:BILL_ANALYSER_PYTHON_FALLBACK_HOST } else { "127.0.0.1" }
+$PythonFallbackPort = if ($env:BILL_ANALYSER_PYTHON_FALLBACK_PORT) { [int]$env:BILL_ANALYSER_PYTHON_FALLBACK_PORT } else { 5001 }
+$env:BILL_ANALYSER_API_HOST = $PythonFallbackHost
+$env:BILL_ANALYSER_API_PORT = [string]$PythonFallbackPort
+$env:BILL_ANALYSER_PYTHON_UPSTREAM = "http://${PythonFallbackHost}:${PythonFallbackPort}"
+
+function Wait-LocalTcpPort {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$Retries = 60
+    )
+    for ($i = 0; $i -lt $Retries; $i++) {
+        if (Test-LocalTcpPortOpen -HostName $HostName -Port $Port) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    return $false
+}
+
+function Test-LocalTcpPortOpen {
+    param(
+        [string]$HostName,
+        [int]$Port
+    )
+
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $task = $client.ConnectAsync($HostName, $Port)
+        return ($task.Wait(500) -and $client.Connected)
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Test-PythonFallbackHealth {
+    param([string]$Upstream)
+
+    try {
+        $Health = Invoke-RestMethod -Uri "$Upstream/api/health" -Method Get -TimeoutSec 2
+        return ($Health.success -eq $true -and $Health.status -eq "healthy")
+    } catch {
+        return $false
+    }
+}
+
 Write-Host "Python: $PythonExe" -ForegroundColor Gray
 Write-Host "PYTHONPATH: $SrcRoot" -ForegroundColor Gray
 Write-Host "Rust auth bridge: $env:BILL_ANALYSER_RUST_AUTH_BRIDGE" -ForegroundColor Gray
 Write-Host "Rust taxonomy bridge: $env:BILL_ANALYSER_RUST_TAXONOMY_BRIDGE" -ForegroundColor Gray
 Write-Host "Rust category rule bridge: $env:BILL_ANALYSER_RUST_CATEGORY_RULE_BRIDGE" -ForegroundColor Gray
-Write-Host "Command: .\.venv\Scripts\python.exe -m bill_analyser.api.app" -ForegroundColor Gray
+Write-Host "Rust HTTP server: $env:BILL_ANALYSER_RUST_HTTP_SERVER" -ForegroundColor Gray
+Write-Host "Rust import mode: $env:BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" -ForegroundColor Gray
+Write-Host "SQLite DB: $env:BILL_ANALYSER_SQLITE_DB_PATH" -ForegroundColor Gray
+Write-Host "Python fallback: $env:BILL_ANALYSER_PYTHON_UPSTREAM" -ForegroundColor Gray
+Write-Host "Command: $env:BILL_ANALYSER_RUST_HTTP_SERVER" -ForegroundColor Gray
 Write-Host ""
-Write-Host "Starting backend server..." -ForegroundColor Green
-Write-Host "Listening on: http://127.0.0.1:5000" -ForegroundColor Cyan
+Write-Host "Starting Python fallback sidecar..." -ForegroundColor Green
+Write-Host "Python fallback listening on: $env:BILL_ANALYSER_PYTHON_UPSTREAM" -ForegroundColor Cyan
+Write-Host "Starting Rust primary backend server..." -ForegroundColor Green
+Write-Host "Rust listening on: http://$env:BILL_ANALYSER_HTTP_BIND" -ForegroundColor Cyan
 Write-Host "Health check: http://127.0.0.1:5000/api/health" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Press Ctrl+C to stop server" -ForegroundColor Yellow
 Write-Host ""
 
-& $PythonExe -m bill_analyser.api.app
+if (Test-LocalTcpPortOpen -HostName $PythonFallbackHost -Port $PythonFallbackPort) {
+    Write-Host "Error: Python fallback port already in use before sidecar start: $env:BILL_ANALYSER_PYTHON_UPSTREAM" -ForegroundColor Red
+    Write-Host "Stop the process on that port or set BILL_ANALYSER_PYTHON_FALLBACK_PORT." -ForegroundColor Yellow
+    exit 1
+}
+
+$PythonProcess = Start-Process -FilePath $PythonExe `
+    -ArgumentList @("-m", "bill_analyser.api.app") `
+    -WorkingDirectory $ProjectRoot `
+    -PassThru `
+    -WindowStyle Hidden
+
+try {
+    if (-not (Wait-LocalTcpPort -HostName $PythonFallbackHost -Port $PythonFallbackPort)) {
+        Write-Host "Error: Python fallback did not start on $env:BILL_ANALYSER_PYTHON_UPSTREAM" -ForegroundColor Red
+        exit 1
+    }
+
+    if (-not (Test-PythonFallbackHealth -Upstream $env:BILL_ANALYSER_PYTHON_UPSTREAM)) {
+        Write-Host "Error: Python fallback health check failed on $env:BILL_ANALYSER_PYTHON_UPSTREAM/api/health" -ForegroundColor Red
+        exit 1
+    }
+
+    & $env:BILL_ANALYSER_RUST_HTTP_SERVER
+    exit $LASTEXITCODE
+} finally {
+    if ($PythonProcess -and -not $PythonProcess.HasExited) {
+        Stop-Process -Id $PythonProcess.Id -ErrorAction SilentlyContinue
+    }
+}

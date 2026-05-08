@@ -89,6 +89,35 @@ fn safe_path_guard_rejects_real_data_bills_db() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn application_path_guard_accepts_real_data_bills_db_for_runtime() -> Result<(), Box<dyn Error>> {
+    let real_db = CreatedRealDb::ensure()?;
+
+    let db_path = SqliteDbPath::application_file(real_db.path())?;
+
+    assert_eq!(db_path.as_path(), real_db.path());
+    Ok(())
+}
+
+#[test]
+fn application_path_guard_rejects_missing_parent_and_directory_target() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let missing_parent = temp_dir.path().join("missing").join("runtime.db");
+    let missing_parent_error = SqliteDbPath::application_file(&missing_parent).unwrap_err();
+    assert!(missing_parent_error
+        .to_string()
+        .contains("parent directory must exist"));
+
+    let directory_target = temp_dir.path().join("directory-target");
+    std::fs::create_dir(&directory_target)?;
+    let directory_target_error = SqliteDbPath::application_file(&directory_target).unwrap_err();
+    assert!(directory_target_error
+        .to_string()
+        .contains("not a directory"));
+    Ok(())
+}
+
+#[test]
 fn safe_path_guard_rejects_temp_symlink_to_real_data_bills_db() -> Result<(), Box<dyn Error>> {
     let real_db = CreatedRealDb::ensure()?;
     let temp_dir = tempfile::tempdir()?;

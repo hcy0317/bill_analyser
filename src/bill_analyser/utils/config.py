@@ -138,9 +138,21 @@ def load_env_settings() -> dict[str, Any]:
     env_config: dict[str, Any] = {}
 
     if DOTENV_PATH.exists():
-        env_config.update({key: value for key, value in dotenv_values(DOTENV_PATH).items() if value is not None})
+        env_config.update(
+            {
+                key: value
+                for key, value in dotenv_values(DOTENV_PATH).items()
+                if value is not None
+            }
+        )
 
-    for key in ("JWT_SECRET_KEY", "BILL_ANALYSER_OPERATION_PASSWORD", "JWT_ACCESS_TOKEN_EXPIRES"):
+    for key in (
+        "JWT_SECRET_KEY",
+        "BILL_ANALYSER_OPERATION_PASSWORD",
+        "JWT_ACCESS_TOKEN_EXPIRES",
+        "BILL_ANALYSER_API_HOST",
+        "BILL_ANALYSER_API_PORT",
+    ):
         value = os.getenv(key)
         if value is not None:
             env_config[key] = value
@@ -178,23 +190,41 @@ def load_auth_settings(use_cache: bool = True) -> dict[str, Any]:
 def load_api_runtime_settings(use_cache: bool = True) -> dict[str, Any]:
     """加载 API 运行时配置（监听地址、端口、CORS 等）。"""
     server_config = get_server_config(use_cache)
+    env_config = load_env_settings()
     api_override = server_config.get("api") if isinstance(server_config.get("api"), dict) else {}
     runtime_config = _deep_merge_dicts(DEFAULT_API_RUNTIME_CONFIG, api_override)
 
     if "api_host" in server_config:
-        runtime_config["host"] = str(server_config.get("api_host") or runtime_config["host"]).strip() or runtime_config[
-            "host"
-        ]
+        configured_host = str(
+            server_config.get("api_host") or runtime_config["host"]
+        ).strip()
+        runtime_config["host"] = configured_host or runtime_config["host"]
+    if env_config.get("BILL_ANALYSER_API_HOST") is not None:
+        env_host = str(
+            env_config.get("BILL_ANALYSER_API_HOST") or runtime_config["host"]
+        ).strip()
+        runtime_config["host"] = env_host or runtime_config["host"]
 
-    runtime_config["port"] = _coerce_port(server_config.get("api_port", runtime_config.get("port")), runtime_config["port"])
+    runtime_config["port"] = _coerce_port(
+        server_config.get("api_port", runtime_config.get("port")),
+        runtime_config["port"],
+    )
+    runtime_config["port"] = _coerce_port(
+        env_config.get("BILL_ANALYSER_API_PORT", runtime_config["port"]),
+        runtime_config["port"],
+    )
     runtime_config["debug"] = bool(runtime_config.get("debug", False))
     runtime_config["threaded"] = bool(runtime_config.get("threaded", True))
 
     cors_defaults = DEFAULT_API_RUNTIME_CONFIG["cors"]
     cors_override = api_override.get("cors") if isinstance(api_override.get("cors"), dict) else {}
     cors_config = _deep_merge_dicts(cors_defaults, cors_override)
-    cors_config["origins"] = _normalize_string_list(cors_config.get("origins"), cors_defaults["origins"])
-    cors_config["methods"] = _normalize_string_list(cors_config.get("methods"), cors_defaults["methods"])
+    cors_config["origins"] = _normalize_string_list(
+        cors_config.get("origins"), cors_defaults["origins"]
+    )
+    cors_config["methods"] = _normalize_string_list(
+        cors_config.get("methods"), cors_defaults["methods"]
+    )
     cors_config["allow_headers"] = _normalize_string_list(
         cors_config.get("allow_headers"), cors_defaults["allow_headers"]
     )
@@ -202,7 +232,10 @@ def load_api_runtime_settings(use_cache: bool = True) -> dict[str, Any]:
         cors_config.get("expose_headers"), cors_defaults["expose_headers"]
     )
     cors_config["supports_credentials"] = bool(cors_config.get("supports_credentials", True))
-    cors_config["max_age_seconds"] = _coerce_port(cors_config.get("max_age_seconds"), cors_defaults["max_age_seconds"])
+    cors_config["max_age_seconds"] = _coerce_port(
+        cors_config.get("max_age_seconds"),
+        cors_defaults["max_age_seconds"],
+    )
     cors_config["send_wildcard"] = bool(cors_config.get("send_wildcard", False))
     cors_config["always_send"] = bool(cors_config.get("always_send", True))
 
@@ -224,7 +257,11 @@ def load_default_user_settings(use_cache: bool = True) -> dict[str, Any] | None:
         return None
 
     required_fields = ("username", "password", "email")
-    missing_fields = [field for field in required_fields if not str(default_user.get(field, "") or "").strip()]
+    missing_fields = [
+        field
+        for field in required_fields
+        if not str(default_user.get(field, "") or "").strip()
+    ]
     if missing_fields:
         raise ConfigValidationError(
             f"default_user 配置缺少必填字段: {', '.join(missing_fields)}"
@@ -233,7 +270,9 @@ def load_default_user_settings(use_cache: bool = True) -> dict[str, Any] | None:
     default_user["username"] = str(default_user["username"]).strip()
     default_user["password"] = str(default_user["password"])
     default_user["email"] = str(default_user["email"]).strip()
-    default_user["nickname"] = str(default_user.get("nickname", "") or default_user["username"]).strip()
+    default_user["nickname"] = str(
+        default_user.get("nickname", "") or default_user["username"]
+    ).strip()
     return default_user
 
 
@@ -254,7 +293,7 @@ class ConfigFileHandler(FileSystemEventHandler):
                 self.config_manager.reload_config(str(file_path))
 
 
-class ConfigManager:
+class ConfigManager:  # pylint: disable=too-many-instance-attributes
     """配置管理器"""
 
     _instance = None
@@ -305,7 +344,11 @@ class ConfigManager:
         """
         config_path = self.config_dir / filename
         legacy_config_path = self.legacy_config_dir / filename
-        source_path = config_path if config_path.exists() or not legacy_config_path.exists() else legacy_config_path
+        source_path = (
+            config_path
+            if config_path.exists() or not legacy_config_path.exists()
+            else legacy_config_path
+        )
 
         with self._cache_lock:
             # 检查缓存

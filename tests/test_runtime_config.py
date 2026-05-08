@@ -63,6 +63,25 @@ def test_load_api_runtime_settings_reads_api_section(monkeypatch):
     assert runtime_config["cors"]["max_age_seconds"] == 7200
 
 
+def test_load_api_runtime_settings_env_can_rebind_python_sidecar(monkeypatch):
+    """Rust 主 HTTP 服务启动时可通过环境变量把 Python fallback 移到 sidecar 端口。"""
+    monkeypatch.setattr(
+        config_module,
+        "get_server_config",
+        lambda use_cache=True: {"api": {"host": "127.0.0.1", "port": 5000}},
+    )
+    monkeypatch.setattr(
+        config_module,
+        "load_env_settings",
+        lambda: {"BILL_ANALYSER_API_HOST": "127.0.0.1", "BILL_ANALYSER_API_PORT": "5001"},
+    )
+
+    runtime_config = config_module.load_api_runtime_settings()
+
+    assert runtime_config["host"] == "127.0.0.1"
+    assert runtime_config["port"] == 5001
+
+
 def test_load_default_user_settings_requires_explicit_credentials(monkeypatch):
     """默认管理员如启用自动创建，账号凭证必须显式配置。"""
     monkeypatch.setattr(

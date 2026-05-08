@@ -140,13 +140,13 @@ pub fn schema_inventory() -> SchemaInventory {
             },
             SchemaResponsibility {
                 python_path: "src/bill_analyser/core/database/schema/templates_imports",
-                rust_mapping: "deferred to import/template domain slices",
-                status: "deferred",
+                rust_mapping: "crates/bill-analyser-db/src/import_staging.rs covers import session/preview staging subset; templates/learning remain later domain slices",
+                status: "foundational",
             },
             SchemaResponsibility {
                 python_path: "src/bill_analyser/core/database/schema/users_security.py",
-                rust_mapping: "deferred to auth/security domain slice",
-                status: "deferred",
+                rust_mapping: "crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; auth/security/backup tables remain deferred",
+                status: "foundational",
             },
         ],
     }

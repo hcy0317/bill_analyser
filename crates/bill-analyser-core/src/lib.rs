@@ -12,6 +12,7 @@ pub mod error;
 pub mod import_learning;
 pub mod import_pipeline;
 pub mod matching;
+pub mod migration_governance;
 pub mod ops;
 pub mod parsers;
 pub mod primitives;
@@ -21,6 +22,19 @@ pub mod smart_dedup;
 pub mod statistics;
 
 pub use adapters::{account, api, category, transaction};
+pub use ai_ocr_llm::{
+    build_llm_analysis_response, build_llm_candidate_list_response,
+    build_llm_candidate_reject_response, build_llm_config_get_response,
+    build_llm_contract_error_response, build_llm_preview_recommend_response,
+    build_ocr_config_response_payload, build_ocr_config_success_response, build_ocr_error_response,
+    build_runtime_llm_config_from_saved_config, build_unknown_ocr_provider_response,
+    copy_runtime_llm_config, llm_available_providers, llm_review_endpoint_requires_live_provider,
+    normalize_llm_advanced_settings, normalize_llm_provider_name, normalize_ocr_config,
+    ocr_available_providers_with_disabled, ocr_error_http_status, parse_payment_screenshot_text,
+    safe_llm_config_payload, AiRouteResponse, LlmProviderConfigContract, OcrConfigContract,
+    PaymentScreenshotParseContract, LLM_AVAILABLE_PROVIDERS, OCR_AVAILABLE_PROVIDERS,
+    OCR_DEFAULT_LANG, OCR_DISABLED_PROVIDER_NAME,
+};
 pub use error::{ErrorCode, RuntimeError};
 pub use import_learning::{
     amount_bucket, build_composite_match_features, build_composite_match_hash,
@@ -90,6 +104,14 @@ pub use matching::{
     INVESTMENT_PAIR_TYPE, LEGACY_SUMMARY_KIND_ORDER, MANUAL_PAIR_SOURCE, MAX_RECURRING_GAP_RATIO,
     MAX_RECURRING_INTERVAL_VARIATION, MIN_RECURRING_OCCURRENCES, MIN_RECURRING_PATTERN_CONFIDENCE,
     TRANSFER_AMOUNT_TOLERANCE, TRANSFER_PAIR_LOOKBACK_DAYS, TRANSFER_PAIR_TYPE,
+};
+pub use migration_governance::{
+    bills_crud_db_writer_policy, budgets_crud_db_writer_policy, can_delete_python_import_paths,
+    endpoints_by_owner, find_endpoint_ownership, import_db_writer_policy,
+    import_deletion_blocked_endpoints, import_deletion_gates, missing_import_deletion_gates,
+    response_envelope_policies, response_envelope_policy, rust_http_shell_ownership_matrix,
+    DbWriteInvariant, DbWriterMode, DbWriterPolicy, EndpointOwnership, ImportDeletionEvidence,
+    ImportDeletionGate, ResponseEnvelopeFamily, ResponseEnvelopePolicy, RouteOwner,
 };
 pub use ops::{
     backup_archive_summary_from_entries, backup_encryption_secret_configured,

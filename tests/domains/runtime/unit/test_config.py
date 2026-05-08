@@ -173,6 +173,33 @@ def test_load_api_runtime_settings_applies_overrides_and_normalizes_lists(
     assert runtime_settings["cors"]["always_send"] is False
 
 
+def test_load_api_runtime_settings_prefers_env_host_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rust primary startup can move the Python fallback to a different local port."""
+    monkeypatch.setattr(
+        config_module,
+        "get_server_config",
+        lambda use_cache=True: {
+            "api": {
+                "host": "127.0.0.1",
+                "port": 5000,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        config_module,
+        "load_env_settings",
+        lambda: {
+            "BILL_ANALYSER_API_HOST": "127.0.0.1",
+            "BILL_ANALYSER_API_PORT": "5001",
+        },
+    )
+
+    runtime_settings = config_module.load_api_runtime_settings()
+
+    assert runtime_settings["host"] == "127.0.0.1"
+    assert runtime_settings["port"] == 5001
+
+
 
 def test_load_default_user_settings_handles_disabled_missing_and_normalized_profiles(
     monkeypatch: pytest.MonkeyPatch,

@@ -13,15 +13,24 @@ path = "src/lib.rs"
 [dependencies]
 axum.workspace = true
 bill-analyser-core = { path = "../bill-analyser-core" }
+bill-analyser-db = { path = "../bill-analyser-db" }
+base64.workspace = true
 bytes.workspace = true
+chrono.workspace = true
+csv.workspace = true
+encoding_rs.workspace = true
 http.workspace = true
 reqwest.workspace = true
+ring.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tower.workspace = true
 
 [lints]

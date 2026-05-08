@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use crate::{DbError, DbResult};
 
@@ -13,6 +16,13 @@ impl SqliteDbPath {
         deny_real_data_path(&absolute)?;
         ensure_under_temp_root(&absolute)?;
         ensure_existing_targets_stay_under_temp(&absolute)?;
+        Ok(Self { path: absolute })
+    }
+
+    pub fn application_file(path: impl AsRef<Path>) -> DbResult<Self> {
+        let absolute = absolute_path(path.as_ref())?;
+        ensure_application_parent_exists(&absolute)?;
+        ensure_existing_application_target_is_file(&absolute)?;
         Ok(Self { path: absolute })
     }
 
@@ -78,6 +88,39 @@ fn ensure_under_temp_root(path: &Path) -> DbResult<()> {
     )))
 }
 
+fn ensure_application_parent_exists(path: &Path) -> DbResult<()> {
+    let parent = path.parent().ok_or_else(|| {
+        DbError::UnsafePath("database path must have a parent directory".to_string())
+    })?;
+    if !parent.exists() {
+        return Err(DbError::UnsafePath(format!(
+            "database parent directory must exist before opening: {}",
+            parent.display()
+        )));
+    }
+    if !parent.is_dir() {
+        return Err(DbError::UnsafePath(format!(
+            "database parent path must be a directory: {}",
+            parent.display()
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_existing_application_target_is_file(path: &Path) -> DbResult<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Err(DbError::UnsafePath(format!(
+            "database path must be a file target, not a directory: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(DbError::UnsafePath(format!(
+            "database path cannot be inspected before opening: {error}"
+        ))),
+    }
+}
+
 fn ensure_existing_targets_stay_under_temp(path: &Path) -> DbResult<()> {
     let canonical_temp_root = std::fs::canonicalize(normalize_lexically(&std::env::temp_dir()))?;
     let canonical_real_data_path = canonical_real_data_path()?;
@@ -111,7 +154,21 @@ fn canonical_real_data_path() -> DbResult<Option<PathBuf>> {
     let real_data_path =
         normalize_lexically(&std::env::current_dir()?.join("data").join("bills.db"));
     if std::fs::symlink_metadata(&real_data_path).is_ok() {
-        return Ok(Some(std::fs::canonicalize(real_data_path)?));
+        return match std::fs::canonicalize(real_data_path) {
+            Ok(path) => Ok(Some(path)),
+            // The runtime temp-path guard should not fail because a concurrent
+            // test or cleanup task is creating/removing the optional real DB
+            // fixture while we inspect it. Direct real-path opens are already
+            // blocked lexically; symlink escapes are still rejected by the temp
+            // root check below.
+            Err(error)
+                if error.kind() == ErrorKind::NotFound
+                    || error.kind() == ErrorKind::PermissionDenied =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error.into()),
+        };
     }
     Ok(None)
 }

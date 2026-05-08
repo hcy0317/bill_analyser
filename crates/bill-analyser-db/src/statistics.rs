@@ -1,0 +1,455 @@
+use std::collections::BTreeMap;
+
+use bill_analyser_core::statistics::{
+    build_asset_trend_legend, build_asset_trends, build_category_pie_data,
+    build_category_statistics_items, build_category_trend_statistics, build_net_worth_snapshot,
+    build_top_merchants_data, build_transaction_amount_period_result, NameValueStatisticItem,
+    StatisticsAccountInput, StatisticsBillInput, StatisticsCategoryInput, StatisticsYearMonthRange,
+    TopMerchantStatisticItem, TransactionAmountPeriodResult,
+};
+use bill_analyser_core::UserId;
+use chrono::NaiveDate;
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use serde_json::{json, Value};
+
+use crate::{DbError, DbResult, UserScope};
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StatisticsBillFilters {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub transaction_type: Option<String>,
+    pub keyword: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatisticsAllDateRange {
+    pub start_date: String,
+    pub end_date: String,
+}
+
+pub fn query_category_statistics_payload(
+    connection: &Connection,
+    user_id: UserId,
+    filters: &StatisticsBillFilters,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let bills = load_statistics_bills(connection, user_id, filters)?;
+    let categories = load_statistics_categories(connection, user_id)?;
+    let accounts = load_statistics_accounts(connection, user_id)?;
+    let items = build_category_statistics_items(&bills, &categories, &accounts);
+    Ok(json!(items))
+}
+
+pub fn query_category_trends_payload(
+    connection: &Connection,
+    user_id: UserId,
+    filters: &StatisticsBillFilters,
+    range: &StatisticsYearMonthRange,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let bills = load_statistics_bills(connection, user_id, filters)?;
+    let categories = load_statistics_categories(connection, user_id)?;
+    let accounts = load_statistics_accounts(connection, user_id)?;
+    let buckets = build_category_trend_statistics(&bills, &categories, &accounts, range);
+    Ok(json!(buckets))
+}
+
+pub fn query_asset_trends_payload(
+    connection: &Connection,
+    user_id: UserId,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let filters = StatisticsBillFilters {
+        start_date: Some(start_date.to_string()),
+        end_date: Some(end_date.to_string()),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    let accounts = load_statistics_accounts(connection, user_id)?;
+    let balances_before = load_account_balance_deltas_before(connection, user_id, start_date)?;
+    let days = build_asset_trends(&bills, &accounts, &balances_before, start_date, end_date);
+    let legend = build_asset_trend_legend(&accounts, &days);
+    Ok(json!({
+        "items": days,
+        "legend": legend
+    }))
+}
+
+pub fn query_category_pie_payload(
+    connection: &Connection,
+    user_id: UserId,
+    filters: &StatisticsBillFilters,
+) -> DbResult<Vec<NameValueStatisticItem>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let bills = load_statistics_bills(connection, user_id, filters)?;
+    Ok(build_category_pie_data(&bills))
+}
+
+pub fn query_top_merchants_payload(
+    connection: &Connection,
+    user_id: UserId,
+    filters: &StatisticsBillFilters,
+    limit: usize,
+) -> DbResult<Vec<TopMerchantStatisticItem>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let bills = load_statistics_bills(connection, user_id, filters)?;
+    Ok(build_top_merchants_data(&bills, limit))
+}
+
+pub fn query_transaction_amount_period(
+    connection: &Connection,
+    user_id: UserId,
+    start_time: i64,
+    end_time: i64,
+    start_date: String,
+    end_date: String,
+) -> DbResult<TransactionAmountPeriodResult> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let filters = StatisticsBillFilters {
+        start_date: Some(start_date),
+        end_date: Some(end_date),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    Ok(build_transaction_amount_period_result(
+        start_time, end_time, &bills,
+    ))
+}
+
+pub fn query_net_worth_payload(connection: &Connection, user_id: UserId) -> DbResult<Value> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let accounts = load_statistics_accounts(connection, user_id)?;
+    Ok(json!(build_net_worth_snapshot(&accounts)))
+}
+
+pub fn find_statistics_all_date_range(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Option<StatisticsAllDateRange>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let value = connection
+        .query_row(
+            "SELECT MIN(substr(date, 1, 10)), MAX(substr(date, 1, 10)) FROM bills WHERE user_id = ?1",
+            params![user_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((Some(start_date), Some(end_date))) = value else {
+        return Ok(None);
+    };
+    if start_date.trim().is_empty() || end_date.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(StatisticsAllDateRange {
+        start_date,
+        end_date,
+    }))
+}
+
+fn load_statistics_bills(
+    connection: &Connection,
+    user_id: i64,
+    filters: &StatisticsBillFilters,
+) -> DbResult<Vec<StatisticsBillInput>> {
+    if !table_exists(connection, "bills")? {
+        return Ok(Vec::new());
+    }
+    let payment_method_expr = optional_column_expr(connection, "bills", "payment_method", "''")?;
+    let counterparty_expr = optional_column_expr(connection, "bills", "counterparty", "''")?;
+    let description_expr = optional_column_expr(connection, "bills", "description", "''")?;
+    let main_category_expr = optional_column_expr(connection, "bills", "main_category", "''")?;
+    let sub_category_expr = optional_column_expr(connection, "bills", "sub_category", "''")?;
+    let source_account_expr =
+        optional_column_expr(connection, "bills", "source_account_id", "NULL")?;
+    let destination_account_expr =
+        optional_column_expr(connection, "bills", "destination_account_id", "NULL")?;
+    let destination_amount_expr =
+        optional_column_expr(connection, "bills", "destination_amount", "NULL")?;
+
+    let mut conditions = vec!["user_id = ?".to_string()];
+    let mut values = vec![SqlValue::Integer(user_id)];
+    if let Some(start_date) = text_filter(filters.start_date.as_deref()) {
+        conditions.push("date >= ?".to_string());
+        values.push(SqlValue::Text(start_date));
+    }
+    if let Some(end_date) = text_filter(filters.end_date.as_deref()) {
+        conditions.push("date <= ?".to_string());
+        values.push(SqlValue::Text(end_date));
+    }
+    if let Some(transaction_type) = text_filter(filters.transaction_type.as_deref()) {
+        conditions.push("type = ?".to_string());
+        values.push(SqlValue::Text(transaction_type));
+    }
+    if let Some(keyword) = text_filter(filters.keyword.as_deref()) {
+        conditions.push(format!(
+            "({description_expr} LIKE ? OR {counterparty_expr} LIKE ?)"
+        ));
+        values.push(SqlValue::Text(format!("%{keyword}%")));
+        values.push(SqlValue::Text(format!("%{keyword}%")));
+    }
+
+    let sql = format!(
+        "
+        SELECT id, date, type, amount,
+               {payment_method_expr} AS payment_method,
+               {source_account_expr} AS source_account_id,
+               {destination_account_expr} AS destination_account_id,
+               {destination_amount_expr} AS destination_amount,
+               {main_category_expr} AS main_category,
+               {sub_category_expr} AS sub_category,
+               {counterparty_expr} AS counterparty,
+               {description_expr} AS description
+        FROM bills
+        WHERE {}
+        ORDER BY date ASC, id ASC
+        ",
+        conditions.join(" AND ")
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok(StatisticsBillInput {
+            id: row.get::<_, Option<i64>>("id")?,
+            date: row.get::<_, String>("date")?,
+            bill_type: row.get::<_, String>("type")?,
+            amount_yuan: sqlite_number_text(row.get::<_, Option<f64>>("amount")?.unwrap_or(0.0)),
+            channel: row
+                .get::<_, Option<String>>("payment_method")?
+                .unwrap_or_default(),
+            source_account_id: positive_i64(row.get::<_, Option<i64>>("source_account_id")?),
+            destination_account_id: positive_i64(
+                row.get::<_, Option<i64>>("destination_account_id")?,
+            ),
+            destination_account: String::new(),
+            destination_amount_yuan: row
+                .get::<_, Option<f64>>("destination_amount")?
+                .map(sqlite_number_text),
+            main_category: row
+                .get::<_, Option<String>>("main_category")?
+                .unwrap_or_default(),
+            sub_category: row
+                .get::<_, Option<String>>("sub_category")?
+                .unwrap_or_default(),
+            counterparty: row
+                .get::<_, Option<String>>("counterparty")?
+                .unwrap_or_default(),
+            description: row
+                .get::<_, Option<String>>("description")?
+                .unwrap_or_default(),
+        })
+    })?;
+    collect_rows(rows)
+}
+
+fn load_statistics_categories(
+    connection: &Connection,
+    user_id: i64,
+) -> DbResult<Vec<StatisticsCategoryInput>> {
+    if !table_exists(connection, "categories")? {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "
+        SELECT id, main_category, sub_category
+        FROM categories
+        WHERE user_id = ?1
+        ORDER BY id ASC
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(StatisticsCategoryInput {
+            id: row.get::<_, i64>(0)?,
+            main_category: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            sub_category: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        })
+    })?;
+    collect_rows(rows)
+}
+
+fn load_statistics_accounts(
+    connection: &Connection,
+    user_id: i64,
+) -> DbResult<Vec<StatisticsAccountInput>> {
+    if !table_exists(connection, "accounts")? {
+        return Ok(Vec::new());
+    }
+    let type_expr = optional_column_expr(connection, "accounts", "type", "''")?;
+    let hidden_expr = optional_column_expr(connection, "accounts", "hidden", "0")?;
+    let balance_expr = optional_column_expr(connection, "accounts", "balance", "0")?;
+    let initial_balance_expr =
+        optional_column_expr(connection, "accounts", "initial_balance", "0")?;
+    let currency_expr = optional_column_expr(connection, "accounts", "currency", "NULL")?;
+    let icon_expr = optional_column_expr(connection, "accounts", "icon", "NULL")?;
+
+    let sql = format!(
+        "
+        SELECT id, name,
+               {type_expr} AS account_type,
+               {hidden_expr} AS hidden,
+               {balance_expr} AS balance,
+               {initial_balance_expr} AS initial_balance,
+               {currency_expr} AS currency,
+               {icon_expr} AS icon
+        FROM accounts
+        WHERE user_id = ?1
+        ORDER BY id ASC
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(StatisticsAccountInput {
+            id: row.get::<_, i64>("id")?,
+            name: row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+            account_type: sqlite_dynamic_text(row, "account_type")?,
+            hidden: row.get::<_, Option<i64>>("hidden")?.unwrap_or_default() != 0,
+            balance_yuan: sqlite_number_text(row.get::<_, Option<f64>>("balance")?.unwrap_or(0.0)),
+            initial_balance_yuan: sqlite_number_text(
+                row.get::<_, Option<f64>>("initial_balance")?.unwrap_or(0.0),
+            ),
+            currency: row.get::<_, Option<String>>("currency")?,
+            icon: row.get::<_, Option<String>>("icon")?,
+        })
+    })?;
+    collect_rows(rows)
+}
+
+fn load_account_balance_deltas_before(
+    connection: &Connection,
+    user_id: i64,
+    start_date: NaiveDate,
+) -> DbResult<BTreeMap<i64, String>> {
+    let filters = StatisticsBillFilters {
+        end_date: Some((start_date - chrono::Duration::days(1)).to_string()),
+        ..StatisticsBillFilters::default()
+    };
+    let bills = load_statistics_bills(connection, user_id, &filters)?;
+    let account_ids = load_statistics_accounts(connection, user_id)?
+        .into_iter()
+        .map(|account| account.id)
+        .collect::<Vec<_>>();
+    let mut deltas = BTreeMap::new();
+    for account_id in account_ids {
+        let mut cents = 0_i64;
+        for bill in &bills {
+            let amount = bill.amount_yuan.parse::<f64>().unwrap_or_default().abs();
+            let amount_cents = (amount * 100.0).round() as i64;
+            if is_income_type(&bill.bill_type) && bill.source_account_id == Some(account_id) {
+                cents += amount_cents;
+            } else if is_expense_type(&bill.bill_type) && bill.source_account_id == Some(account_id)
+            {
+                cents -= amount_cents;
+            } else if is_transfer_type(&bill.bill_type) {
+                if bill.source_account_id == Some(account_id) {
+                    cents -= amount_cents;
+                }
+                if bill.destination_account_id == Some(account_id) {
+                    let destination_cents = bill
+                        .destination_amount_yuan
+                        .as_deref()
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .map(|value| (value.abs() * 100.0).round() as i64)
+                        .filter(|value| *value != 0)
+                        .unwrap_or(amount_cents);
+                    cents += destination_cents;
+                }
+            }
+        }
+        deltas.insert(account_id, sqlite_number_text(cents as f64 / 100.0));
+    }
+    Ok(deltas)
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> DbResult<bool> {
+    connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map(|value| value.is_some())
+        .map_err(DbError::from)
+}
+
+fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> DbResult<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        if row? == column_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn optional_column_expr(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    fallback: &str,
+) -> DbResult<String> {
+    if column_exists(connection, table_name, column_name)? {
+        Ok(column_name.to_string())
+    } else {
+        Ok(fallback.to_string())
+    }
+}
+
+fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>, DbError> {
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
+fn sqlite_dynamic_text(row: &rusqlite::Row<'_>, key: &str) -> rusqlite::Result<String> {
+    let value = row.get_ref(key)?;
+    Ok(match value {
+        rusqlite::types::ValueRef::Null => String::new(),
+        rusqlite::types::ValueRef::Integer(value) => value.to_string(),
+        rusqlite::types::ValueRef::Real(value) => sqlite_number_text(value),
+        rusqlite::types::ValueRef::Text(value) => String::from_utf8_lossy(value).to_string(),
+        rusqlite::types::ValueRef::Blob(_) => String::new(),
+    })
+}
+
+fn text_filter(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn positive_i64(value: Option<i64>) -> Option<i64> {
+    value.filter(|value| *value > 0)
+}
+
+fn sqlite_number_text(value: f64) -> String {
+    let text = value.to_string();
+    if value.is_finite() && !text.contains('.') && !text.contains('e') && !text.contains('E') {
+        format!("{text}.0")
+    } else {
+        text
+    }
+}
+
+fn is_expense_type(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "expense" | "支出")
+}
+
+fn is_income_type(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "income" | "收入")
+}
+
+fn is_transfer_type(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "transfer" | "转账")
+}

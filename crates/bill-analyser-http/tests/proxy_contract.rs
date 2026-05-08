@@ -8,8 +8,9 @@ use axum::{
     Router,
 };
 use bill_analyser_http::{
-    build_router, build_upstream_url, filter_proxy_request_headers, http_shell_health,
-    HttpShellConfig, HttpShellConfigError, ProxyState, REQUEST_ID_HEADER,
+    bind_addr_from_env_with, build_router, build_upstream_url, filter_proxy_request_headers,
+    http_shell_health, run_http_server, HttpShellConfig, HttpShellConfigError, ImportRouteMode,
+    ProxyState, REQUEST_ID_HEADER,
 };
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -20,15 +21,16 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     let config = HttpShellConfig::default();
     let health = http_shell_health(&config);
 
-    assert_eq!(config.python_upstream, "http://127.0.0.1:5000");
+    assert_eq!(config.python_upstream, "http://127.0.0.1:5001");
     assert_eq!(config.timeout, Duration::from_millis(30_000));
     assert_eq!(config.body_limit_bytes, 10 * 1024 * 1024);
+    assert_eq!(config.import_route_mode, ImportRouteMode::ProxyOnly);
     assert_eq!(
         health.identity.runtime_boundary,
         "rust-http-shell:proxy-only"
     );
     assert_eq!(health.identity.business_migration, "none");
-    assert!(!health.identity.api_takeover);
+    assert!(health.identity.api_takeover);
     assert_eq!(
         health.details.get("proxied_routes"),
         Some(&"unowned /api/*".to_string())
@@ -41,6 +43,7 @@ fn config_from_env_reads_explicit_proxy_values() {
         "BILL_ANALYSER_PYTHON_UPSTREAM" => Some("http://127.0.0.1:5999/".to_string()),
         "BILL_ANALYSER_HTTP_TIMEOUT_MS" => Some("1234".to_string()),
         "BILL_ANALYSER_HTTP_BODY_LIMIT_BYTES" => Some("4096".to_string()),
+        "BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" => Some("import_route_skeleton".to_string()),
         _ => None,
     })
     .expect("env config parses");
@@ -48,6 +51,95 @@ fn config_from_env_reads_explicit_proxy_values() {
     assert_eq!(config.python_upstream, "http://127.0.0.1:5999");
     assert_eq!(config.timeout, Duration::from_millis(1234));
     assert_eq!(config.body_limit_bytes, 4096);
+    assert_eq!(
+        config.import_route_mode,
+        ImportRouteMode::ImportRouteSkeleton
+    );
+}
+
+#[test]
+fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
+    let config = HttpShellConfig::from_env_with(|name| match name {
+        "BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" => Some("import_db_runtime".to_string()),
+        "BILL_ANALYSER_SQLITE_DB_PATH" => Some("  C:/temp/bill-runtime.db  ".to_string()),
+        "BILL_ANALYSER_TRUSTED_USER_HEADER_SECRET" => Some("  route-secret  ".to_string()),
+        "BILL_ANALYSER_AUTH_JWT_SECRET" => Some("  jwt-secret  ".to_string()),
+        "BILL_ANALYSER_AUTH_JWT_ALGORITHM" => Some("HS256".to_string()),
+        _ => None,
+    })
+    .expect("env config parses");
+
+    assert_eq!(config.import_route_mode, ImportRouteMode::ImportDbRuntime);
+    assert_eq!(
+        config.sqlite_db_path.as_deref(),
+        Some("C:/temp/bill-runtime.db")
+    );
+    assert_eq!(
+        config.trusted_user_header_secret.as_deref(),
+        Some("route-secret")
+    );
+    assert_eq!(config.auth_jwt_secret.as_deref(), Some("jwt-secret"));
+    assert_eq!(config.auth_jwt_algorithm, "HS256");
+}
+
+#[test]
+fn config_from_env_reads_python_compatible_jwt_env_aliases() {
+    let config = HttpShellConfig::from_env_with(|name| match name {
+        "JWT_SECRET_KEY" => Some("  dotenv-secret  ".to_string()),
+        "JWT_ALGORITHM" => Some("hs512".to_string()),
+        _ => None,
+    })
+    .expect("env config parses");
+
+    assert_eq!(config.auth_jwt_secret.as_deref(), Some("dotenv-secret"));
+    assert_eq!(config.auth_jwt_algorithm, "hs512");
+}
+
+#[test]
+fn server_bind_addr_reads_rust_primary_http_env() {
+    let default_addr = bind_addr_from_env_with(|_| None).expect("default bind parses");
+    assert_eq!(default_addr.to_string(), "127.0.0.1:5000");
+
+    let custom_addr = bind_addr_from_env_with(|name| match name {
+        "BILL_ANALYSER_HTTP_BIND" => Some("127.0.0.1:5010".to_string()),
+        _ => None,
+    })
+    .expect("custom bind parses");
+    assert_eq!(custom_addr.to_string(), "127.0.0.1:5010");
+}
+
+#[tokio::test]
+async fn rust_primary_http_server_serves_router() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener binds");
+    let addr = listener.local_addr().expect("local addr");
+    let config = HttpShellConfig::default();
+    let state = ProxyState::new(config).expect("proxy state");
+    let server = tokio::spawn(async move { run_http_server(listener, state).await });
+    let client = reqwest::Client::new();
+    let url = format!("http://{addr}/api/health");
+    let mut last_error = None;
+    for _ in 0..20 {
+        match client.get(&url).send().await {
+            Ok(response) => {
+                assert_eq!(response.status(), StatusCode::OK);
+                let response_text = response.text().await.expect("response text");
+                let body: Value = serde_json::from_str(&response_text).expect("json body");
+                assert_eq!(body["identity"]["api_takeover"], true);
+                server.abort();
+                let _ = server.await;
+                return;
+            }
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+    server.abort();
+    let _ = server.await;
+    panic!("Rust primary server did not respond: {last_error:?}");
 }
 
 #[test]
@@ -68,6 +160,14 @@ fn config_rejects_invalid_upstream_body_limit_and_env_integer() {
         })
         .unwrap_err(),
         HttpShellConfigError::InvalidInteger("BILL_ANALYSER_HTTP_TIMEOUT_MS")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" => Some("takeover".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidImportRouteMode
     );
 }
 
@@ -144,7 +244,7 @@ async fn rust_owned_routes_take_precedence_over_proxy() {
     let body = read_json(response).await;
     assert_eq!(body["crate_name"], "bill-analyser-http");
     assert_eq!(body["business_migration"], "none");
-    assert_eq!(body["api_takeover"], false);
+    assert_eq!(body["api_takeover"], true);
 }
 
 #[tokio::test]
@@ -169,7 +269,7 @@ async fn health_route_reports_proxy_only_runtime_boundary() {
         "rust-http-shell:proxy-only"
     );
     assert_eq!(body["identity"]["business_migration"], "none");
-    assert_eq!(body["identity"]["api_takeover"], false);
+    assert_eq!(body["identity"]["api_takeover"], true);
 }
 
 #[tokio::test]
