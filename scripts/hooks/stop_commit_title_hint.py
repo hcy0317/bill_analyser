@@ -187,8 +187,8 @@ def _choose_description(commit_type: str, scope: str | None, changed_files: list
     return "整理仓库配置与辅助脚本"
 
 
-def _commit_title_fragments(scope: str | None, changed_files: list[str], diff_text: str) -> list[str]:
-    """Return optional dash-separated title fragments for multi-surface diffs."""
+def _commit_body_subtopics(scope: str | None, changed_files: list[str], diff_text: str) -> list[str]:
+    """Return optional newline body subtopics for multi-surface diffs."""
     fragments: list[str] = []
     diff_lower = diff_text.lower()
     has_hooks = any(path_text.startswith(HOOK_SCOPE_PATHS) for path_text in changed_files)
@@ -221,9 +221,7 @@ def _build_commit_title(changed_files: list[str], diff_text: str) -> str:
     scope = _classify_scope(changed_files)
     description = _choose_description(commit_type, scope, changed_files, diff_text)
     scope_segment = f"({scope})" if scope and scope != "docs" else ""
-    fragments = _commit_title_fragments(scope, changed_files, diff_text)
-    fragment_segment = "".join(f" - {fragment}" for fragment in fragments)
-    return f"{commit_type}{scope_segment}: {description}{fragment_segment}"
+    return f"{commit_type}{scope_segment}: {description}"
 
 
 def build_stop_messages(source: str, changed_files: list[str], diff_text: str) -> list[str]:
@@ -231,11 +229,15 @@ def build_stop_messages(source: str, changed_files: list[str], diff_text: str) -
         return []
 
     title = _build_commit_title(changed_files, diff_text)
+    subtopics = _commit_body_subtopics(_classify_scope(changed_files), changed_files, diff_text)
     lines = [
         "[hook] 检测到 git diff，已生成中文 Conventional Commit 标题建议：",
         f"[hook] 来源：{source}",
-        f"[hook] 建议：{title}",
+        f"[hook] 建议标题：{title}",
     ]
+    if subtopics:
+        lines.append("[hook] 建议正文小标题：")
+        lines.extend(f"  - {subtopic}" for subtopic in subtopics)
 
     if len(changed_files) <= 8:
         lines.append("[hook] 影响文件：")

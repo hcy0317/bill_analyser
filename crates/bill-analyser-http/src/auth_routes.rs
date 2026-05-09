@@ -72,6 +72,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/logout"),
+    ("POST", "/api/auth/oauth2/authorize"),
     ("GET", "/api/profile"),
     ("PUT", "/api/profile"),
     ("POST", "/api/profile/avatar"),
@@ -96,6 +97,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/auth/register",
             post(register_handler).options(register_options_handler),
+        )
+        .route(
+            "/api/auth/oauth2/authorize",
+            post(authorize_oauth2_callback_handler).options(auth_options_handler),
         )
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
@@ -1061,6 +1066,22 @@ async fn list_profile_external_auths_handler(
     });
 
     success_result(StatusCode::OK, external_auths_payload(result))
+}
+
+async fn authorize_oauth2_callback_handler(State(state): State<ProxyState>) -> Response {
+    if !state.config.auth_enable_oauth2 {
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "OAuth2 disabled",
+            "OAuth2 login is currently disabled",
+        ));
+    }
+
+    auth_rest_error_response(AuthRestError::new(
+        501,
+        "Not Implemented",
+        "OAuth2 callback authorization is not implemented in this workspace build",
+    ))
 }
 
 async fn unlink_profile_external_auth_handler(

@@ -528,6 +528,7 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         ("DELETE", "/api/profile/cloud-settings"),
         ("GET", "/api/profile/external-auths"),
         ("POST", "/api/profile/external-auths/unlink"),
+        ("POST", "/api/auth/oauth2/authorize"),
         ("GET", "/api/system/version"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
@@ -536,10 +537,45 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
             .all(|item| item != &route));
     }
 
+    let disabled_oauth_response = runtime_router_without_sqlite_path()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/oauth2/authorize")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(disabled_oauth_response.status(), StatusCode::FORBIDDEN);
+    let disabled_oauth_body = read_json(disabled_oauth_response).await;
+    assert_eq!(disabled_oauth_body["success"], false);
+    assert_eq!(disabled_oauth_body["error"], "OAuth2 disabled");
+    assert_eq!(
+        disabled_oauth_body["message"],
+        "OAuth2 login is currently disabled"
+    );
+
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
     seed_auth_db(fixture.db_path(), &token)?;
     let app = runtime_router(&fixture);
+
+    let oauth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/oauth2/authorize")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(oauth_response.status(), StatusCode::NOT_IMPLEMENTED);
+    let oauth_body = read_json(oauth_response).await;
+    assert_eq!(oauth_body["success"], false);
+    assert_eq!(oauth_body["error"], "Not Implemented");
+    assert_eq!(
+        oauth_body["message"],
+        "OAuth2 callback authorization is not implemented in this workspace build"
+    );
 
     let version_response = app
         .clone()

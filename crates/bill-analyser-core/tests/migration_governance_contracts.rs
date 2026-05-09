@@ -46,6 +46,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/auth/login")));
     assert!(rust_owned.contains(&("POST", "/api/auth/register")));
     assert!(rust_owned.contains(&("POST", "/api/auth/logout")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/oauth2/authorize")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -513,6 +514,26 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         auth_logout.envelope,
         ResponseEnvelopeFamily::FlaskSuccessResult
     );
+
+    let auth_oauth2_authorize = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "POST /api/auth/oauth2/authorize")
+        .expect("auth OAuth2 authorize route is present");
+    assert_eq!(
+        auth_oauth2_authorize.state,
+        MigrationState::RustOwnedVerified
+    );
+    assert_eq!(
+        auth_oauth2_authorize.handler,
+        RouteHandlerId::AuthTokenRuntime
+    );
+    assert_eq!(
+        auth_oauth2_authorize.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessResult
+    );
+    assert!(auth_oauth2_authorize
+        .unsupported_behavior
+        .contains("real OAuth provider exchange"));
 }
 
 #[test]

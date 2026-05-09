@@ -34,7 +34,7 @@ impl HttpShellIdentity {
             ),
             ImportRouteMode::ImportDbRuntime => (
                 "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-profile-cloud-external-auth-runtime",
-                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-profile-cloud-external-auth-system-runtime",
+                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-oauth2-authorize-profile-cloud-external-auth-system-runtime",
             ),
         };
 
