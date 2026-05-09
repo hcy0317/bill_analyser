@@ -516,6 +516,538 @@ async fn auth_register_runtime_creates_user_defaults_and_preserves_edges(
 }
 
 #[tokio::test]
+async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Box<dyn Error>> {
+    for route in [
+        ("GET", "/api/profile"),
+        ("PUT", "/api/profile"),
+        ("POST", "/api/profile/avatar"),
+        ("DELETE", "/api/profile/avatar"),
+        ("POST", "/api/profile/email/resend-verification"),
+        ("GET", "/api/profile/cloud-settings"),
+        ("PUT", "/api/profile/cloud-settings"),
+        ("DELETE", "/api/profile/cloud-settings"),
+        ("GET", "/api/system/version"),
+    ] {
+        assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+        assert!(AUTH_PROXIED_ROUTE_PATTERNS
+            .iter()
+            .all(|item| item != &route));
+    }
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let version_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/system/version")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(version_response.status(), StatusCode::OK);
+    let version_body = read_json(version_response).await;
+    assert_eq!(version_body["result"]["version"], "1.0.0");
+    assert_eq!(version_body["result"]["commitHash"], "");
+    assert_eq!(version_body["result"]["buildTime"], "");
+
+    let preflight_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/api/profile/cloud-settings")
+                .header("origin", "http://localhost:8081")
+                .header("access-control-request-method", "PUT")
+                .header(
+                    "access-control-request-headers",
+                    "authorization, content-type",
+                )
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(preflight_response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        preflight_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("http://localhost:8081")
+    );
+    assert_eq!(
+        preflight_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+            .and_then(|value| value.to_str().ok()),
+        Some("GET, POST, PUT, DELETE, OPTIONS")
+    );
+    assert_eq!(
+        preflight_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+            .and_then(|value| value.to_str().ok()),
+        Some("authorization, content-type")
+    );
+
+    let profile_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(profile_response.status(), StatusCode::OK);
+    let profile_body = read_json(profile_response).await;
+    assert_eq!(profile_body["result"]["username"], "alice");
+    assert_eq!(profile_body["result"]["nickname"], "Alice A.");
+    assert_eq!(profile_body["result"]["defaultCurrency"], "CNY");
+    assert_eq!(profile_body["result"]["emailVerified"], true);
+
+    let empty_update_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            Body::from("{}"),
+        ))
+        .await?;
+    assert_eq!(empty_update_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(empty_update_response).await["message"],
+        "Request body is required"
+    );
+
+    let update_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({
+                "nickname": "Alice Profile",
+                "language": "en",
+                "defaultCurrency": "USD",
+                "firstDayOfWeek": 2,
+                "defaultAccountId": "100",
+                "transactionEditScope": 3,
+                "calendarDisplayType": 1,
+                "cashAccountId": "",
+                "importLearningEnabled": false,
+                "investmentPlatformKeywords": ["蚂蚁财富", "雪球", "雪球"],
+                "investmentProductKeywords": "基金,ETF",
+                "investmentExcludeKeywords": ["还款"]
+            }),
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    let updated_user = &update_body["result"]["user"];
+    assert_eq!(updated_user["nickname"], "Alice Profile");
+    assert_eq!(updated_user["language"], "en");
+    assert_eq!(updated_user["defaultCurrency"], "USD");
+    assert_eq!(updated_user["firstDayOfWeek"], 2);
+    assert_eq!(updated_user["defaultAccountId"], "100");
+    assert_eq!(updated_user["cashAccountId"], "");
+    assert_eq!(updated_user["importLearningEnabled"], false);
+    assert_eq!(
+        updated_user["investmentPlatformKeywords"],
+        json!(["蚂蚁财富", "雪球"])
+    );
+    assert_profile_db_values(fixture.db_path())?;
+
+    let malformed_numeric_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"fiscalYearStart": {"unexpected": true}}),
+        ))
+        .await?;
+    assert_eq!(malformed_numeric_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(malformed_numeric_response).await["message"],
+        "fiscalYearStart is invalid"
+    );
+    assert_profile_db_values(fixture.db_path())?;
+
+    let malformed_bool_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"importLearningEnabled": "yes"}),
+        ))
+        .await?;
+    assert_eq!(malformed_bool_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(malformed_bool_response).await["message"],
+        "importLearningEnabled is invalid"
+    );
+    assert_profile_db_values(fixture.db_path())?;
+
+    let malformed_string_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"language": {"unexpected": true}}),
+        ))
+        .await?;
+    assert_eq!(malformed_string_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(malformed_string_response).await["message"],
+        "language is invalid"
+    );
+    assert_profile_db_values(fixture.db_path())?;
+
+    let cross_user_account_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"defaultAccountId": "101"}),
+        ))
+        .await?;
+    assert_eq!(
+        cross_user_account_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(cross_user_account_response).await["message"],
+        "defaultAccountId is invalid"
+    );
+
+    let malformed_account_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"defaultAccountId": "abc"}),
+        ))
+        .await?;
+    assert_eq!(malformed_account_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(malformed_account_response).await["message"],
+        "defaultAccountId is invalid"
+    );
+
+    let avatar_in_profile_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"avatar": "data:text/html;base64,PGgxPkJvb208L2gxPg=="}),
+        ))
+        .await?;
+    assert_eq!(avatar_in_profile_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(avatar_in_profile_response).await["message"],
+        "Avatar must be updated via /api/profile/avatar"
+    );
+
+    let duplicate_email_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"email": "bob@example.test"}),
+        ))
+        .await?;
+    assert_eq!(duplicate_email_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_email_response).await["message"],
+        "Email already exists"
+    );
+
+    let email_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"email": "alice-new@example.test"}),
+        ))
+        .await?;
+    assert_eq!(email_response.status(), StatusCode::OK);
+    let email_body = read_json(email_response).await;
+    assert_eq!(
+        email_body["result"]["user"]["email"],
+        "alice-new@example.test"
+    );
+    assert_eq!(email_body["result"]["user"]["emailVerified"], false);
+    assert_auth_log(fixture.db_path(), "profile_email_changed", true, "")?;
+    assert_eq!(
+        latest_auth_log_ip(fixture.db_path(), "profile_email_changed")?,
+        "198.51.100.13"
+    );
+    let email_change_metadata =
+        latest_auth_log_metadata(fixture.db_path(), "profile_email_changed")?;
+    assert_eq!(email_change_metadata["email_changed"], true);
+    assert_eq!(email_change_metadata["email_verified_reset"], true);
+    assert!(!email_change_metadata
+        .to_string()
+        .contains("alice-new@example.test"));
+    assert!(!email_change_metadata
+        .to_string()
+        .contains("alice@example.test"));
+
+    let invalid_email_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile",
+            &token,
+            json!({"email": "not-an-email"}),
+        ))
+        .await?;
+    assert_eq!(invalid_email_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_email_response).await["message"],
+        "Invalid email address"
+    );
+
+    let png_avatar_payload = b"\x89PNG\r\n\x1A\navatar-bytes";
+    let avatar_response = app
+        .clone()
+        .oneshot(multipart_avatar_request(
+            &token,
+            png_avatar_payload,
+            "image/png",
+        ))
+        .await?;
+    assert_eq!(avatar_response.status(), StatusCode::OK);
+    let avatar_body = read_json(avatar_response).await;
+    assert_eq!(
+        avatar_body["result"]["avatar"],
+        format!(
+            "data:image/png;base64,{}",
+            general_purpose::STANDARD.encode(png_avatar_payload)
+        )
+    );
+
+    let unsupported_avatar_response = app
+        .clone()
+        .oneshot(multipart_avatar_request(
+            &token,
+            b"avatar-bytes",
+            "text/plain",
+        ))
+        .await?;
+    assert_eq!(
+        unsupported_avatar_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(unsupported_avatar_response).await["message"],
+        "Unsupported avatar file type"
+    );
+
+    let empty_avatar_response = app
+        .clone()
+        .oneshot(multipart_avatar_request(&token, b"", "image/png"))
+        .await?;
+    assert_eq!(empty_avatar_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(empty_avatar_response).await["message"],
+        "Avatar file is empty"
+    );
+
+    let remove_avatar_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            "/api/profile/avatar",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(remove_avatar_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(remove_avatar_response).await["result"]["avatar"],
+        ""
+    );
+
+    let resend_response = app.clone().oneshot(profile_resend_request(&token)).await?;
+    assert_eq!(resend_response.status(), StatusCode::OK);
+    assert_eq!(read_json(resend_response).await["result"], true);
+    assert_auth_log(
+        fixture.db_path(),
+        "verification_email_resend_requested",
+        true,
+        "Mozilla/5.0 (Profile contract)",
+    )?;
+    let resend_metadata =
+        latest_auth_log_metadata(fixture.db_path(), "verification_email_resend_requested")?;
+    assert_eq!(resend_metadata["email_present"], true);
+    assert!(!resend_metadata
+        .to_string()
+        .contains("alice-new@example.test"));
+    for _ in 0..2 {
+        let repeated_resend_response = app.clone().oneshot(profile_resend_request(&token)).await?;
+        assert_eq!(repeated_resend_response.status(), StatusCode::OK);
+    }
+    let throttled_resend_response = app.clone().oneshot(profile_resend_request(&token)).await?;
+    assert_eq!(
+        throttled_resend_response.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        read_json(throttled_resend_response).await["message"],
+        "Too many verification email resend requests"
+    );
+
+    let empty_cloud_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/cloud-settings",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(empty_cloud_response.status(), StatusCode::OK);
+    assert_eq!(read_json(empty_cloud_response).await["result"], false);
+
+    let missing_settings_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_settings_response.status(), StatusCode::OK);
+    assert_eq!(read_json(missing_settings_response).await["result"], true);
+
+    let empty_object_settings_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(empty_object_settings_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(empty_object_settings_response).await["result"],
+        true
+    );
+
+    let invalid_cloud_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            json!({
+                "settings": [{"settingKey": "showAmountInHomePage", "settingValue": "yes"}]
+            }),
+        ))
+        .await?;
+    assert_eq!(invalid_cloud_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_cloud_response).await["message"],
+        "Invalid boolean value for showAmountInHomePage"
+    );
+
+    let update_cloud_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            json!({
+                "settings": [
+                    {"settingKey": "showAmountInHomePage", "settingValue": "true"},
+                    {"settingKey": "itemsCountInTransactionListPage", "settingValue": "50"},
+                    {"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{\"1\":true}"}
+                ],
+                "fullUpdate": false
+            }),
+        ))
+        .await?;
+    assert_eq!(update_cloud_response.status(), StatusCode::OK);
+    assert_eq!(read_json(update_cloud_response).await["result"], true);
+
+    let cloud_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/cloud-settings",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    let cloud_body = read_json(cloud_response).await;
+    assert_eq!(cloud_body["result"].as_array().expect("settings").len(), 3);
+    assert_eq!(
+        cloud_body["result"][0]["settingKey"],
+        "showAmountInHomePage"
+    );
+
+    let clear_without_settings_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            json!({"fullUpdate": true}),
+        ))
+        .await?;
+    assert_eq!(clear_without_settings_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(clear_without_settings_response).await["result"],
+        true
+    );
+    assert_eq!(cloud_setting_count(fixture.db_path(), 42)?, 0);
+
+    let full_update_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::PUT,
+            "/api/profile/cloud-settings",
+            &token,
+            json!({
+                "settings": [{"settingKey": "showAmountInHomePage", "settingValue": "false"}],
+                "fullUpdate": true
+            }),
+        ))
+        .await?;
+    assert_eq!(full_update_response.status(), StatusCode::OK);
+    assert_eq!(cloud_setting_count(fixture.db_path(), 42)?, 1);
+
+    let delete_cloud_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::DELETE,
+            "/api/profile/cloud-settings",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_cloud_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_cloud_response).await["result"], true);
+    assert_eq!(cloud_setting_count(fixture.db_path(), 42)?, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_token_runtime_preserves_flask_error_shapes() -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -1226,6 +1758,22 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
         "INSERT INTO users(id, username, email, password_hash, is_active) VALUES (77, 'bob', 'bob@example.test', ?1, 1)",
         [&password_hash],
     )?;
+    connection.execute(
+        "INSERT INTO accounts(id, user_id, name, type, created_at, updated_at) VALUES (100, 42, 'Cash', 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO accounts(id, user_id, name, type, created_at, updated_at) VALUES (101, 77, 'Other Cash', 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, main_category, sub_category, created_at) VALUES (200, 42, 'Transfer', '', '2026-01-01T00:00:00')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, main_category, sub_category, created_at) VALUES (201, 77, 'Other Transfer', '', '2026-01-01T00:00:00')",
+        [],
+    )?;
 
     let active_expires_at = (Local::now().naive_local() + ChronoDuration::hours(1))
         .format("%Y-%m-%dT%H:%M:%S%.f")
@@ -1557,6 +2105,37 @@ fn assert_auth_log(
     Ok(())
 }
 
+fn latest_auth_log_metadata(path: &Path, expected_event: &str) -> Result<Value, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let metadata: String = connection.query_row(
+        r#"
+        SELECT COALESCE(metadata, '{}')
+        FROM auth_logs
+        WHERE event_type = ?1
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+        [expected_event],
+        |row| row.get(0),
+    )?;
+    Ok(serde_json::from_str(&metadata)?)
+}
+
+fn latest_auth_log_ip(path: &Path, expected_event: &str) -> Result<String, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        r#"
+        SELECT ip_address
+        FROM auth_logs
+        WHERE event_type = ?1
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+        [expected_event],
+        |row| row.get(0),
+    )?)
+}
+
 fn assert_login_state(
     path: &Path,
     user_id: i64,
@@ -1701,6 +2280,76 @@ fn assert_registered_user_defaults(
         )? > 0
     );
     Ok(())
+}
+
+fn assert_profile_db_values(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (
+        nickname,
+        language,
+        default_currency,
+        first_day_of_week,
+        default_account_id,
+        transaction_edit_scope,
+        calendar_display_type,
+        cash_account_id,
+        import_learning_enabled,
+        platform_keywords,
+    ): (
+        String,
+        String,
+        String,
+        i64,
+        i64,
+        i64,
+        i64,
+        Option<i64>,
+        i64,
+        String,
+    ) = connection.query_row(
+        r#"
+        SELECT
+            nickname, language, default_currency, first_day_of_week,
+            default_account_id, transaction_edit_scope, calendar_display_type,
+            cash_account_id, import_learning_enabled, investment_platform_keywords
+        FROM users WHERE id = 42
+        "#,
+        [],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+            ))
+        },
+    )?;
+    assert_eq!(nickname, "Alice Profile");
+    assert_eq!(language, "en");
+    assert_eq!(default_currency, "USD");
+    assert_eq!(first_day_of_week, 2);
+    assert_eq!(default_account_id, 100);
+    assert_eq!(transaction_edit_scope, 3);
+    assert_eq!(calendar_display_type, 1);
+    assert_eq!(cash_account_id, None);
+    assert_eq!(import_learning_enabled, 0);
+    assert_eq!(platform_keywords, r#"["蚂蚁财富","雪球"]"#);
+    Ok(())
+}
+
+fn cloud_setting_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        "SELECT COUNT(*) FROM user_application_cloud_settings WHERE user_id = ?1",
+        [user_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn token_by_id<'a>(tokens: &'a [Value], token_id: &str) -> &'a Value {
@@ -1854,13 +2503,64 @@ fn logout_request(token: &str) -> Request<Body> {
 }
 
 fn bearer_request(method: Method, uri: &str, token: &str, body: Body) -> Request<Body> {
-    Request::builder()
+    let mut request = Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {token}"))
         .body(body)
-        .expect("request builds")
+        .expect("request builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.13:4300"
+            .parse::<SocketAddr>()
+            .expect("test bearer peer addr"),
+    ));
+    request
+}
+
+fn bearer_json_request(method: Method, uri: &str, token: &str, payload: Value) -> Request<Body> {
+    bearer_request(method, uri, token, Body::from(payload.to_string()))
+}
+
+fn multipart_avatar_request(token: &str, content: &[u8], mime_type: &str) -> Request<Body> {
+    let boundary = "profile-avatar-boundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"avatar\"; filename=\"avatar.txt\"\r\n",
+    );
+    body.extend_from_slice(format!("Content-Type: {mime_type}\r\n\r\n").as_bytes());
+    body.extend_from_slice(content);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Request::builder()
+        .method(Method::POST)
+        .uri("/api/profile/avatar")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body))
+        .expect("multipart avatar request builds")
+}
+
+fn profile_resend_request(token: &str) -> Request<Body> {
+    let mut request = bearer_request(
+        Method::POST,
+        "/api/profile/email/resend-verification",
+        token,
+        Body::empty(),
+    );
+    request.headers_mut().insert(
+        "user-agent",
+        HeaderValue::from_static("Mozilla/5.0 (Profile contract)"),
+    );
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.13:4300"
+            .parse::<SocketAddr>()
+            .expect("test peer addr"),
+    ));
+    request
 }
 
 fn trusted_request(method: Method, uri: &str, body: Body) -> Request<Body> {

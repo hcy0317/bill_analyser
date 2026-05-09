@@ -1,5 +1,6 @@
 use bill_analyser_core::UserId;
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::HashSet;
 
 use crate::{DbError, DbResult};
 
@@ -87,6 +88,46 @@ pub struct AuthUserProfileRow {
 pub struct ApplicationCloudSettingRow {
     pub setting_key: String,
     pub setting_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationCloudSettingDraft {
+    pub setting_key: String,
+    pub setting_value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthUserProfileUpdate {
+    Nickname(String),
+    Email(String),
+    Avatar(String),
+    Language(String),
+    DefaultCurrency(String),
+    FirstDayOfWeek(i64),
+    DefaultAccountId(Option<i64>),
+    TransactionEditScope(i64),
+    FiscalYearStart(i64),
+    CalendarDisplayType(i64),
+    DateDisplayType(i64),
+    LongDateFormat(i64),
+    ShortDateFormat(i64),
+    LongTimeFormat(i64),
+    ShortTimeFormat(i64),
+    FiscalYearFormat(i64),
+    CurrencyDisplayType(i64),
+    NumeralSystem(i64),
+    DecimalSeparator(i64),
+    DigitGroupingSymbol(i64),
+    DigitGrouping(i64),
+    CoordinateDisplayType(i64),
+    ExpenseAmountColor(i64),
+    IncomeAmountColor(i64),
+    CashAccountId(Option<i64>),
+    CashTransferCategoryId(Option<i64>),
+    ImportLearningEnabled(bool),
+    InvestmentPlatformKeywords(String),
+    InvestmentProductKeywords(String),
+    InvestmentExcludeKeywords(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,6 +337,276 @@ pub fn list_application_cloud_settings(
     })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn auth_email_exists_for_other_user(
+    connection: &Connection,
+    user_id: UserId,
+    email: &str,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            "SELECT 1 FROM users WHERE email = ?1 AND id != ?2 LIMIT 1",
+            params![email, user_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|value| value.is_some())
+        .map_err(DbError::from)
+}
+
+pub fn auth_account_belongs_to_user(
+    connection: &Connection,
+    user_id: UserId,
+    account_id: i64,
+) -> DbResult<bool> {
+    scoped_id_exists(connection, "accounts", user_id, account_id)
+}
+
+pub fn auth_category_belongs_to_user(
+    connection: &Connection,
+    user_id: UserId,
+    category_id: i64,
+) -> DbResult<bool> {
+    scoped_id_exists(connection, "categories", user_id, category_id)
+}
+
+pub fn count_auth_events_since(
+    connection: &Connection,
+    user_id: UserId,
+    event_type: &str,
+    since: &str,
+) -> DbResult<i64> {
+    let user_id = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM auth_logs
+            WHERE user_id = ?1 AND event_type = ?2 AND created_at >= ?3
+            "#,
+            params![user_id, event_type, since],
+            |row| row.get(0),
+        )
+        .map_err(DbError::from)
+}
+
+pub fn create_auth_log_under_event_limit(
+    connection: &Connection,
+    user_id: UserId,
+    event_type: &str,
+    since: &str,
+    limit: i64,
+    draft: &AuthLogDraft,
+) -> DbResult<bool> {
+    if draft.user_id != Some(user_id) {
+        return Err(DbError::InvalidOperation(
+            "auth log user does not match event limit user".to_string(),
+        ));
+    }
+    if draft.event_type != event_type {
+        return Err(DbError::InvalidOperation(
+            "auth log event type does not match event limit type".to_string(),
+        ));
+    }
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let count = count_auth_events_since(connection, user_id, event_type, since)?;
+        if count >= limit {
+            return Ok(false);
+        }
+        create_auth_log(connection, draft)?;
+        Ok(true)
+    })();
+
+    match result {
+        Ok(true) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(true)
+        }
+        Ok(false) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Ok(false)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn update_auth_user_profile(
+    connection: &Connection,
+    user_id: UserId,
+    updates: &[AuthUserProfileUpdate],
+    updated_at: &str,
+) -> DbResult<bool> {
+    if updates.is_empty() {
+        return Ok(false);
+    }
+    let user_id = user_id_sql(user_id)?;
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let mut touched = false;
+        for update in updates {
+            touched |= apply_user_profile_update(connection, user_id, update)?;
+        }
+        let updated = connection.execute(
+            "UPDATE users SET updated_at = ?1 WHERE id = ?2",
+            params![updated_at, user_id],
+        )?;
+        Ok(touched && updated > 0)
+    })();
+
+    match result {
+        Ok(value) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn update_auth_user_profile_with_auth_log(
+    connection: &Connection,
+    user_id: UserId,
+    updates: &[AuthUserProfileUpdate],
+    updated_at: &str,
+    auth_log: &AuthLogDraft,
+) -> DbResult<bool> {
+    if updates.is_empty() {
+        return Ok(false);
+    }
+    let user_id = user_id_sql(user_id)?;
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let mut touched = false;
+        for update in updates {
+            touched |= apply_user_profile_update(connection, user_id, update)?;
+        }
+        let updated = connection.execute(
+            "UPDATE users SET updated_at = ?1 WHERE id = ?2",
+            params![updated_at, user_id],
+        )?;
+        let changed = touched && updated > 0;
+        if changed {
+            create_auth_log(connection, auth_log)?;
+        }
+        Ok(changed)
+    })();
+
+    match result {
+        Ok(value) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn update_application_cloud_settings(
+    connection: &Connection,
+    user_id: UserId,
+    settings: &[ApplicationCloudSettingDraft],
+    full_update: bool,
+    updated_at: &str,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let normalized_settings = settings
+            .iter()
+            .filter(|setting| !setting.setting_key.trim().is_empty())
+            .collect::<Vec<_>>();
+        if full_update {
+            if normalized_settings.is_empty() {
+                connection.execute(
+                    "DELETE FROM user_application_cloud_settings WHERE user_id = ?1",
+                    [user_id],
+                )?;
+            } else {
+                let keep_keys = normalized_settings
+                    .iter()
+                    .map(|setting| setting.setting_key.trim().to_string())
+                    .collect::<HashSet<_>>();
+                let existing_keys = list_application_cloud_setting_keys(connection, user_id)?;
+                for existing_key in existing_keys {
+                    if !keep_keys.contains(&existing_key) {
+                        connection.execute(
+                            "DELETE FROM user_application_cloud_settings WHERE user_id = ?1 AND setting_key = ?2",
+                            params![user_id, existing_key],
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for setting in normalized_settings {
+            connection.execute(
+                r#"
+                INSERT INTO user_application_cloud_settings (
+                    user_id, setting_key, setting_value, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?4)
+                ON CONFLICT(user_id, setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    user_id,
+                    setting.setting_key.trim(),
+                    setting.setting_value,
+                    updated_at,
+                ],
+            )?;
+        }
+        Ok(true)
+    })();
+
+    match result {
+        Ok(value) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn delete_application_cloud_settings(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    connection.execute(
+        "DELETE FROM user_application_cloud_settings WHERE user_id = ?1",
+        [user_id],
+    )?;
+    Ok(true)
 }
 
 pub fn list_user_sessions(
@@ -592,6 +903,184 @@ fn user_id_from_sql(raw_id: i64, column: usize) -> rusqlite::Result<UserId> {
     UserId::new(raw_id).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, raw_id as i64))
 }
 
+fn apply_user_profile_update(
+    connection: &Connection,
+    user_id: i64,
+    update: &AuthUserProfileUpdate,
+) -> DbResult<bool> {
+    let changed = match update {
+        AuthUserProfileUpdate::Nickname(value) => {
+            update_text_field(connection, "nickname", value, user_id)?
+        }
+        AuthUserProfileUpdate::Email(value) => update_email_field(connection, value, user_id)?,
+        AuthUserProfileUpdate::Avatar(value) => {
+            update_text_field(connection, "avatar", value, user_id)?
+        }
+        AuthUserProfileUpdate::Language(value) => {
+            update_text_field(connection, "language", value, user_id)?
+        }
+        AuthUserProfileUpdate::DefaultCurrency(value) => {
+            update_text_field(connection, "default_currency", value, user_id)?
+        }
+        AuthUserProfileUpdate::FirstDayOfWeek(value) => {
+            update_i64_field(connection, "first_day_of_week", *value, user_id)?
+        }
+        AuthUserProfileUpdate::DefaultAccountId(value) => {
+            update_optional_i64_field(connection, "default_account_id", *value, user_id)?
+        }
+        AuthUserProfileUpdate::TransactionEditScope(value) => {
+            update_i64_field(connection, "transaction_edit_scope", *value, user_id)?
+        }
+        AuthUserProfileUpdate::FiscalYearStart(value) => {
+            update_i64_field(connection, "fiscal_year_start", *value, user_id)?
+        }
+        AuthUserProfileUpdate::CalendarDisplayType(value) => {
+            update_i64_field(connection, "calendar_display_type", *value, user_id)?
+        }
+        AuthUserProfileUpdate::DateDisplayType(value) => {
+            update_i64_field(connection, "date_display_type", *value, user_id)?
+        }
+        AuthUserProfileUpdate::LongDateFormat(value) => {
+            update_i64_field(connection, "long_date_format", *value, user_id)?
+        }
+        AuthUserProfileUpdate::ShortDateFormat(value) => {
+            update_i64_field(connection, "short_date_format", *value, user_id)?
+        }
+        AuthUserProfileUpdate::LongTimeFormat(value) => {
+            update_i64_field(connection, "long_time_format", *value, user_id)?
+        }
+        AuthUserProfileUpdate::ShortTimeFormat(value) => {
+            update_i64_field(connection, "short_time_format", *value, user_id)?
+        }
+        AuthUserProfileUpdate::FiscalYearFormat(value) => {
+            update_i64_field(connection, "fiscal_year_format", *value, user_id)?
+        }
+        AuthUserProfileUpdate::CurrencyDisplayType(value) => {
+            update_i64_field(connection, "currency_display_type", *value, user_id)?
+        }
+        AuthUserProfileUpdate::NumeralSystem(value) => {
+            update_i64_field(connection, "numeral_system", *value, user_id)?
+        }
+        AuthUserProfileUpdate::DecimalSeparator(value) => {
+            update_i64_field(connection, "decimal_separator", *value, user_id)?
+        }
+        AuthUserProfileUpdate::DigitGroupingSymbol(value) => {
+            update_i64_field(connection, "digit_grouping_symbol", *value, user_id)?
+        }
+        AuthUserProfileUpdate::DigitGrouping(value) => {
+            update_i64_field(connection, "digit_grouping", *value, user_id)?
+        }
+        AuthUserProfileUpdate::CoordinateDisplayType(value) => {
+            update_i64_field(connection, "coordinate_display_type", *value, user_id)?
+        }
+        AuthUserProfileUpdate::ExpenseAmountColor(value) => {
+            update_i64_field(connection, "expense_amount_color", *value, user_id)?
+        }
+        AuthUserProfileUpdate::IncomeAmountColor(value) => {
+            update_i64_field(connection, "income_amount_color", *value, user_id)?
+        }
+        AuthUserProfileUpdate::CashAccountId(value) => {
+            update_optional_i64_field(connection, "cash_account_id", *value, user_id)?
+        }
+        AuthUserProfileUpdate::CashTransferCategoryId(value) => {
+            update_optional_i64_field(connection, "cash_transfer_category_id", *value, user_id)?
+        }
+        AuthUserProfileUpdate::ImportLearningEnabled(value) => update_i64_field(
+            connection,
+            "import_learning_enabled",
+            i64::from(*value),
+            user_id,
+        )?,
+        AuthUserProfileUpdate::InvestmentPlatformKeywords(value) => {
+            update_text_field(connection, "investment_platform_keywords", value, user_id)?
+        }
+        AuthUserProfileUpdate::InvestmentProductKeywords(value) => {
+            update_text_field(connection, "investment_product_keywords", value, user_id)?
+        }
+        AuthUserProfileUpdate::InvestmentExcludeKeywords(value) => {
+            update_text_field(connection, "investment_exclude_keywords", value, user_id)?
+        }
+    };
+    Ok(changed)
+}
+
+fn update_text_field(
+    connection: &Connection,
+    field_name: &str,
+    value: &str,
+    user_id: i64,
+) -> DbResult<bool> {
+    let sql = format!("UPDATE users SET {field_name} = ?1 WHERE id = ?2");
+    Ok(connection.execute(&sql, params![value, user_id])? > 0)
+}
+
+fn update_i64_field(
+    connection: &Connection,
+    field_name: &str,
+    value: i64,
+    user_id: i64,
+) -> DbResult<bool> {
+    let sql = format!("UPDATE users SET {field_name} = ?1 WHERE id = ?2");
+    Ok(connection.execute(&sql, params![value, user_id])? > 0)
+}
+
+fn update_optional_i64_field(
+    connection: &Connection,
+    field_name: &str,
+    value: Option<i64>,
+    user_id: i64,
+) -> DbResult<bool> {
+    let sql = format!("UPDATE users SET {field_name} = ?1 WHERE id = ?2");
+    Ok(connection.execute(&sql, params![value, user_id])? > 0)
+}
+
+fn list_application_cloud_setting_keys(
+    connection: &Connection,
+    user_id: i64,
+) -> DbResult<Vec<String>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT setting_key
+        FROM user_application_cloud_settings
+        WHERE user_id = ?1
+        "#,
+    )?;
+    let rows = statement.query_map([user_id], |row| {
+        Ok(row.get::<_, Option<String>>(0)?.unwrap_or_default())
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn scoped_id_exists(
+    connection: &Connection,
+    table_name: &str,
+    user_id: UserId,
+    record_id: i64,
+) -> DbResult<bool> {
+    if record_id <= 0 {
+        return Ok(false);
+    }
+    let user_id = user_id_sql(user_id)?;
+    let sql = format!("SELECT 1 FROM {table_name} WHERE id = ?1 AND user_id = ?2 LIMIT 1");
+    connection
+        .query_row(&sql, params![record_id, user_id], |_| Ok(()))
+        .optional()
+        .map(|value| value.is_some())
+        .map_err(DbError::from)
+}
+
+fn update_email_field(connection: &Connection, value: &str, user_id: i64) -> DbResult<bool> {
+    Ok(connection.execute(
+        r#"
+        UPDATE users
+        SET email = ?1,
+            email_verified = CASE WHEN email = ?1 THEN email_verified ELSE 0 END
+        WHERE id = ?2
+        "#,
+        params![value, user_id],
+    )? > 0)
+}
+
 fn auth_user_profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthUserProfileRow> {
     let raw_id: i64 = row.get(0)?;
     Ok(AuthUserProfileRow {
@@ -834,6 +1323,369 @@ mod tests {
             &connection,
             "logout-token"
         )?);
+        Ok(())
+    }
+
+    #[test]
+    fn profile_and_cloud_setting_primitives_preserve_user_scope() -> DbResult<()> {
+        let connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            r#"
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                nickname TEXT,
+                avatar TEXT,
+                default_account_id INTEGER,
+                transaction_edit_scope INTEGER DEFAULT 0,
+                language TEXT DEFAULT 'zh_Hans',
+                default_currency TEXT DEFAULT 'CNY',
+                first_day_of_week INTEGER DEFAULT 1,
+                fiscal_year_start INTEGER DEFAULT 1,
+                calendar_display_type INTEGER DEFAULT 0,
+                date_display_type INTEGER DEFAULT 0,
+                long_date_format INTEGER DEFAULT 0,
+                short_date_format INTEGER DEFAULT 0,
+                long_time_format INTEGER DEFAULT 0,
+                short_time_format INTEGER DEFAULT 0,
+                fiscal_year_format INTEGER DEFAULT 0,
+                currency_display_type INTEGER DEFAULT 0,
+                numeral_system INTEGER DEFAULT 0,
+                decimal_separator INTEGER DEFAULT 0,
+                digit_grouping_symbol INTEGER DEFAULT 0,
+                digit_grouping INTEGER DEFAULT 0,
+                coordinate_display_type INTEGER DEFAULT 0,
+                expense_amount_color INTEGER DEFAULT 0,
+                income_amount_color INTEGER DEFAULT 0,
+                cash_account_id INTEGER,
+                cash_transfer_category_id INTEGER,
+                import_learning_enabled INTEGER DEFAULT 1,
+                investment_platform_keywords TEXT,
+                investment_product_keywords TEXT,
+                investment_exclude_keywords TEXT,
+                email_verified INTEGER DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE user_application_cloud_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                setting_key TEXT NOT NULL,
+                setting_value TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, setting_key)
+            );
+            CREATE TABLE accounts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE categories (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                main_category TEXT NOT NULL,
+                sub_category TEXT NOT NULL
+            );
+            CREATE TABLE auth_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                username TEXT,
+                event_type TEXT NOT NULL,
+                ip_address TEXT,
+                user_agent TEXT,
+                success INTEGER NOT NULL,
+                error_message TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO users(id, username, email, nickname, email_verified, updated_at)
+            VALUES (42, 'alice', 'alice@example.test', '', 1, '2026-01-01T00:00:00');
+            INSERT INTO users(id, username, email, nickname, updated_at)
+            VALUES (7, 'bob', 'bob@example.test', 'Bob', '2026-01-01T00:00:00');
+            INSERT INTO accounts(id, user_id, name) VALUES (100, 42, 'Cash'), (101, 7, 'Other Cash');
+            INSERT INTO categories(id, user_id, main_category, sub_category)
+            VALUES (200, 42, 'Transfer', ''), (201, 7, 'Other Transfer', '');
+            INSERT INTO auth_logs(user_id, username, event_type, ip_address, user_agent, success, created_at)
+            VALUES
+                (42, 'alice', 'verification_email_resend_requested', '127.0.0.1', '', 1, '2026-01-03T00:00:00'),
+                (42, 'alice', 'verification_email_resend_requested', '127.0.0.1', '', 1, '2026-01-03T00:04:00'),
+                (7, 'bob', 'verification_email_resend_requested', '127.0.0.1', '', 1, '2026-01-03T00:04:00');
+            INSERT INTO user_application_cloud_settings(user_id, setting_key, setting_value, created_at, updated_at)
+            VALUES
+                (42, 'showAmountInHomePage', 'true', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+                (42, 'autoSaveTransactionDraft', 'old', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+                (7, 'showAmountInHomePage', 'false', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+            "#,
+        )?;
+
+        assert!(update_auth_user_profile(
+            &connection,
+            user_id(42),
+            &[
+                AuthUserProfileUpdate::Nickname("Alice".to_string()),
+                AuthUserProfileUpdate::Email("new-alice@example.test".to_string()),
+                AuthUserProfileUpdate::Avatar("data:text/plain;base64,YQ==".to_string()),
+                AuthUserProfileUpdate::Language("en".to_string()),
+                AuthUserProfileUpdate::DefaultCurrency("USD".to_string()),
+                AuthUserProfileUpdate::FirstDayOfWeek(2),
+                AuthUserProfileUpdate::DefaultAccountId(Some(100)),
+                AuthUserProfileUpdate::TransactionEditScope(3),
+                AuthUserProfileUpdate::FiscalYearStart(4),
+                AuthUserProfileUpdate::CalendarDisplayType(5),
+                AuthUserProfileUpdate::DateDisplayType(6),
+                AuthUserProfileUpdate::LongDateFormat(7),
+                AuthUserProfileUpdate::ShortDateFormat(8),
+                AuthUserProfileUpdate::LongTimeFormat(9),
+                AuthUserProfileUpdate::ShortTimeFormat(10),
+                AuthUserProfileUpdate::FiscalYearFormat(11),
+                AuthUserProfileUpdate::CurrencyDisplayType(12),
+                AuthUserProfileUpdate::NumeralSystem(13),
+                AuthUserProfileUpdate::DecimalSeparator(14),
+                AuthUserProfileUpdate::DigitGroupingSymbol(15),
+                AuthUserProfileUpdate::DigitGrouping(16),
+                AuthUserProfileUpdate::CoordinateDisplayType(17),
+                AuthUserProfileUpdate::ExpenseAmountColor(18),
+                AuthUserProfileUpdate::IncomeAmountColor(19),
+                AuthUserProfileUpdate::CashAccountId(None),
+                AuthUserProfileUpdate::CashTransferCategoryId(Some(200)),
+                AuthUserProfileUpdate::ImportLearningEnabled(false),
+                AuthUserProfileUpdate::InvestmentPlatformKeywords(
+                    r#"["蚂蚁财富","雪球"]"#.to_string(),
+                ),
+                AuthUserProfileUpdate::InvestmentProductKeywords(r#"["基金"]"#.to_string()),
+                AuthUserProfileUpdate::InvestmentExcludeKeywords(r#"["还款"]"#.to_string()),
+            ],
+            "2026-01-02T00:00:00",
+        )?);
+        assert!(!update_auth_user_profile(
+            &connection,
+            user_id(42),
+            &[],
+            "2026-01-02T00:00:00",
+        )?);
+        assert!(!update_auth_user_profile(
+            &connection,
+            user_id(999),
+            &[AuthUserProfileUpdate::Nickname("Missing".to_string())],
+            "2026-01-02T00:00:00",
+        )?);
+        let profile = get_auth_user_profile(&connection, user_id(42))?.expect("profile");
+        assert_eq!(profile.nickname, "Alice");
+        assert_eq!(profile.email, "new-alice@example.test");
+        assert_eq!(profile.avatar, "data:text/plain;base64,YQ==");
+        assert_eq!(profile.language, "en");
+        assert_eq!(profile.default_currency, "USD");
+        assert_eq!(profile.first_day_of_week, 2);
+        assert_eq!(profile.default_account_id, Some(100));
+        assert_eq!(profile.transaction_edit_scope, 3);
+        assert_eq!(profile.fiscal_year_start, 4);
+        assert_eq!(profile.calendar_display_type, 5);
+        assert_eq!(profile.date_display_type, 6);
+        assert_eq!(profile.long_date_format, 7);
+        assert_eq!(profile.short_date_format, 8);
+        assert_eq!(profile.long_time_format, 9);
+        assert_eq!(profile.short_time_format, 10);
+        assert_eq!(profile.fiscal_year_format, 11);
+        assert_eq!(profile.currency_display_type, 12);
+        assert_eq!(profile.numeral_system, 13);
+        assert_eq!(profile.decimal_separator, 14);
+        assert_eq!(profile.digit_grouping_symbol, 15);
+        assert_eq!(profile.digit_grouping, 16);
+        assert_eq!(profile.coordinate_display_type, 17);
+        assert_eq!(profile.expense_amount_color, 18);
+        assert_eq!(profile.income_amount_color, 19);
+        assert_eq!(profile.cash_account_id, None);
+        assert_eq!(profile.cash_transfer_category_id, Some(200));
+        assert!(!profile.import_learning_enabled);
+        assert!(!profile.email_verified);
+        assert_eq!(
+            profile.investment_platform_keywords.as_deref(),
+            Some(r#"["蚂蚁财富","雪球"]"#)
+        );
+        assert_eq!(
+            profile.investment_product_keywords.as_deref(),
+            Some(r#"["基金"]"#)
+        );
+        assert_eq!(
+            profile.investment_exclude_keywords.as_deref(),
+            Some(r#"["还款"]"#)
+        );
+        assert_eq!(
+            get_auth_user_profile(&connection, user_id(7))?
+                .expect("other profile")
+                .nickname,
+            "Bob"
+        );
+        assert!(auth_email_exists_for_other_user(
+            &connection,
+            user_id(42),
+            "bob@example.test"
+        )?);
+        assert!(!auth_email_exists_for_other_user(
+            &connection,
+            user_id(42),
+            "new-alice@example.test"
+        )?);
+        assert!(auth_account_belongs_to_user(&connection, user_id(42), 100)?);
+        assert!(!auth_account_belongs_to_user(
+            &connection,
+            user_id(42),
+            101
+        )?);
+        assert!(auth_category_belongs_to_user(
+            &connection,
+            user_id(42),
+            200
+        )?);
+        assert!(!auth_category_belongs_to_user(
+            &connection,
+            user_id(42),
+            201
+        )?);
+        assert_eq!(
+            count_auth_events_since(
+                &connection,
+                user_id(42),
+                "verification_email_resend_requested",
+                "2026-01-03T00:01:00"
+            )?,
+            1
+        );
+        let resend_draft = AuthLogDraft {
+            user_id: Some(user_id(42)),
+            username: "alice".to_string(),
+            event_type: "verification_email_resend_requested".to_string(),
+            ip_address: "198.51.100.13".to_string(),
+            user_agent: "Mozilla".to_string(),
+            success: true,
+            error_message: None,
+            metadata: Some(r#"{"email_present":true}"#.to_string()),
+            created_at: "2026-01-03T00:05:00".to_string(),
+        };
+        assert!(create_auth_log_under_event_limit(
+            &connection,
+            user_id(42),
+            "verification_email_resend_requested",
+            "2026-01-03T00:01:00",
+            2,
+            &resend_draft,
+        )?);
+        assert!(!create_auth_log_under_event_limit(
+            &connection,
+            user_id(42),
+            "verification_email_resend_requested",
+            "2026-01-03T00:01:00",
+            2,
+            &resend_draft,
+        )?);
+        assert_eq!(
+            count_auth_events_since(
+                &connection,
+                user_id(42),
+                "verification_email_resend_requested",
+                "2026-01-03T00:01:00"
+            )?,
+            2
+        );
+        assert!(update_auth_user_profile_with_auth_log(
+            &connection,
+            user_id(42),
+            &[AuthUserProfileUpdate::Nickname("Alice Logged".to_string())],
+            "2026-01-02T00:01:00",
+            &AuthLogDraft {
+                user_id: Some(user_id(42)),
+                username: "alice".to_string(),
+                event_type: "profile_email_changed".to_string(),
+                ip_address: "127.0.0.1".to_string(),
+                user_agent: "Mozilla".to_string(),
+                success: true,
+                error_message: None,
+                metadata: Some(r#"{"email_changed":true}"#.to_string()),
+                created_at: "2026-01-02T00:01:00".to_string(),
+            },
+        )?);
+        assert_eq!(
+            get_auth_user_profile(&connection, user_id(42))?
+                .expect("logged profile")
+                .nickname,
+            "Alice Logged"
+        );
+        assert_eq!(
+            count_auth_events_since(
+                &connection,
+                user_id(42),
+                "profile_email_changed",
+                "2026-01-02T00:00:00"
+            )?,
+            1
+        );
+
+        assert!(update_application_cloud_settings(
+            &connection,
+            user_id(42),
+            &[
+                ApplicationCloudSettingDraft {
+                    setting_key: "showAmountInHomePage".to_string(),
+                    setting_value: "false".to_string(),
+                },
+                ApplicationCloudSettingDraft {
+                    setting_key: "itemsCountInTransactionListPage".to_string(),
+                    setting_value: "25".to_string(),
+                },
+            ],
+            true,
+            "2026-01-03T00:00:00",
+        )?);
+        let settings = list_application_cloud_settings(&connection, user_id(42))?;
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0].setting_key, "showAmountInHomePage");
+        assert_eq!(settings[0].setting_value, "false");
+        assert!(settings
+            .iter()
+            .all(|setting| setting.setting_key != "autoSaveTransactionDraft"));
+        assert_eq!(
+            list_application_cloud_settings(&connection, user_id(7))?.len(),
+            1
+        );
+
+        assert!(update_application_cloud_settings(
+            &connection,
+            user_id(42),
+            &[
+                ApplicationCloudSettingDraft {
+                    setting_key: "   ".to_string(),
+                    setting_value: "ignored".to_string(),
+                },
+                ApplicationCloudSettingDraft {
+                    setting_key: "autoSaveTransactionDraft".to_string(),
+                    setting_value: "draft".to_string(),
+                },
+            ],
+            false,
+            "2026-01-03T00:01:00",
+        )?);
+        let settings = list_application_cloud_settings(&connection, user_id(42))?;
+        assert_eq!(settings.len(), 3);
+        assert!(settings
+            .iter()
+            .any(|setting| setting.setting_key == "autoSaveTransactionDraft"));
+
+        assert!(update_application_cloud_settings(
+            &connection,
+            user_id(42),
+            &[],
+            true,
+            "2026-01-03T00:02:00",
+        )?);
+        assert!(list_application_cloud_settings(&connection, user_id(42))?.is_empty());
+
+        assert!(delete_application_cloud_settings(&connection, user_id(42))?);
+        assert!(list_application_cloud_settings(&connection, user_id(42))?.is_empty());
+        assert_eq!(
+            list_application_cloud_settings(&connection, user_id(7))?.len(),
+            1
+        );
         Ok(())
     }
 

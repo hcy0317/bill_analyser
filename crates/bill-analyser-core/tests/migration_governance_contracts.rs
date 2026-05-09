@@ -453,6 +453,23 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         .deletion_blockers
         .contains(&"token_refresh_parity"));
 
+    let auth_profile = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "PUT /api/profile")
+        .expect("auth profile route is present");
+    assert_eq!(auth_profile.state, MigrationState::RustOwnedVerified);
+    assert_eq!(auth_profile.handler, RouteHandlerId::AuthTokenRuntime);
+
+    let auth_cloud_settings = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "PUT /api/profile/cloud-settings")
+        .expect("auth cloud settings route is present");
+    assert_eq!(auth_cloud_settings.state, MigrationState::RustOwnedVerified);
+    assert_eq!(
+        auth_cloud_settings.handler,
+        RouteHandlerId::AuthTokenRuntime
+    );
+
     let auth_refresh = manifest
         .iter()
         .find(|entry| entry.endpoint == "POST /api/tokens/refresh")

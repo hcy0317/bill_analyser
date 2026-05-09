@@ -1570,22 +1570,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/networth/snapshot",
         "matching-recurring-calendar-networth"
     ),
-    python_proxy_route!("GET", "/api/profile", "auth-security-user-data"),
-    python_proxy_route!("PUT", "/api/profile", "auth-security-user-data"),
-    python_proxy_route!("DELETE", "/api/profile/avatar", "auth-security-user-data"),
-    python_proxy_route!("POST", "/api/profile/avatar", "auth-security-user-data"),
-    python_proxy_route!(
-        "DELETE",
-        "/api/profile/cloud-settings",
-        "auth-security-user-data"
-    ),
-    python_proxy_route!("GET", "/api/profile/cloud-settings", "auth-security-user-data"),
-    python_proxy_route!("PUT", "/api/profile/cloud-settings", "auth-security-user-data"),
-    python_proxy_route!(
-        "POST",
-        "/api/profile/email/resend-verification",
-        "auth-security-user-data"
-    ),
     python_proxy_route!("GET", "/api/profile/external-auths", "auth-security-user-data"),
     python_proxy_route!(
         "POST",
@@ -1660,7 +1644,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/settings/encryption/status",
         "taxonomy-rules-settings"
     ),
-    python_proxy_route!("GET", "/api/system/version", "auth-security-user-data"),
     python_proxy_route!("GET", "/api/tags/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/tags/", "taxonomy-rules-settings"),
     python_proxy_route!("DELETE", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
@@ -1779,6 +1762,96 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes:
             "Rust auth runtime verifies refresh token JWT/session state and issues rotated access/refresh sessions with profile/cloud settings response.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/profile",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime returns the authenticated user's Flask-compatible profile payload.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/profile",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime updates whitelisted user profile/display/investment-keyword fields, validates scoped account/category references, resets email verification on email changes, and returns result.user.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/profile/avatar",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime accepts validated PNG/JPEG/GIF/WebP multipart avatar uploads, stores a data URL, and returns the updated profile.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/profile/avatar",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime clears the avatar field and returns the updated profile.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/profile/email/resend-verification",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime rate-limits and records the mock-success verification email resend auth log, then returns result=true.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/profile/cloud-settings",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime lists application cloud settings and preserves the empty false response.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/profile/cloud-settings",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime validates supported application cloud setting keys/types and upserts full or partial updates.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/profile/cloud-settings",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime deletes all authenticated-user cloud settings and returns result=true.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/system/version",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime serves the unauthenticated system version metadata route with the legacy payload shape.",
     },
     EndpointOwnership {
         method: "CONTRACT",
@@ -2290,7 +2363,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; profile, 2FA verification/management, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile verification-email resend, and system version routes are Rust-owned; external-auth, 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2747,7 +2820,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; profile, 2FA verification/management, OAuth, and user-data routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile verification-email resend, and system version routes are Rust-owned; external-auth, 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

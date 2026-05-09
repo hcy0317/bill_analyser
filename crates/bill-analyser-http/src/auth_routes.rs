@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use axum::{
     body::{Body, Bytes},
     extract::{connect_info::ConnectInfo, Path, State},
-    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -15,17 +15,21 @@ use bill_analyser_core::{
         infer_token_type_from_user_agent, json_object_or_empty, parse_user_agent_device_name,
         validate_refresh_token_claims, AuthRestError, TokenKind,
     },
-    build_user_investment_keyword_settings, UserId,
+    build_user_investment_keyword_settings, serialize_keyword_list, UserId,
 };
 use bill_analyser_db::{
-    auth_email_exists, auth_username_exists, cleanup_expired_sessions,
-    count_recent_token_password_failures, create_auth_log, create_registered_user_with_defaults,
-    create_token_session, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, get_login_user_by_login_name,
-    increment_failed_login, invalidate_other_user_sessions, invalidate_session_by_id,
-    invalidate_session_by_token_hash, list_application_cloud_settings, list_user_sessions,
-    rotate_refresh_token_session, update_user_last_login, ApplicationCloudSettingRow, AuthLogDraft,
-    AuthLoginUserRow, AuthUserProfileRow, CreateTokenSessionDraft, DbError, RegisterPresetCategory,
+    auth_account_belongs_to_user, auth_category_belongs_to_user, auth_email_exists,
+    auth_email_exists_for_other_user, auth_username_exists, cleanup_expired_sessions,
+    count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
+    create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
+    get_active_logout_session_by_token_hash, get_active_refresh_session, get_auth_token_user,
+    get_auth_user_profile, get_login_user_by_login_name, increment_failed_login,
+    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
+    list_application_cloud_settings, list_user_sessions, rotate_refresh_token_session,
+    update_application_cloud_settings, update_auth_user_profile,
+    update_auth_user_profile_with_auth_log, update_user_last_login, ApplicationCloudSettingDraft,
+    ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow,
+    AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, RegisterPresetCategory,
     RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
     SqliteRuntime, TokenSessionRow,
 };
@@ -48,8 +52,12 @@ use crate::{
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const TOKEN_PASSWORD_FAILURE_LIMIT: i64 = 5;
 const TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES: i64 = 15;
+const PROFILE_VERIFICATION_RESEND_LIMIT: i64 = 3;
+const PROFILE_VERIFICATION_RESEND_WINDOW_MINUTES: i64 = 5;
+const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
 const FALLBACK_CLIENT_IP: &str = "127.0.0.1";
 const AUTH_ALLOWED_CORS_ORIGINS: &[&str] = &["http://localhost:8081", "http://127.0.0.1:8081"];
+const BILL_ANALYSER_APP_VERSION: &str = "1.0.0";
 
 type RouteResult<T> = Result<T, Box<Response>>;
 
@@ -63,6 +71,15 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/logout"),
+    ("GET", "/api/profile"),
+    ("PUT", "/api/profile"),
+    ("POST", "/api/profile/avatar"),
+    ("DELETE", "/api/profile/avatar"),
+    ("POST", "/api/profile/email/resend-verification"),
+    ("GET", "/api/profile/cloud-settings"),
+    ("PUT", "/api/profile/cloud-settings"),
+    ("DELETE", "/api/profile/cloud-settings"),
+    ("GET", "/api/system/version"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -81,6 +98,33 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
         .route("/api/tokens/refresh", post(refresh_token_handler))
         .route("/api/auth/logout", post(logout_handler))
+        .route(
+            "/api/profile",
+            get(get_profile_handler)
+                .put(update_profile_handler)
+                .options(auth_options_handler),
+        )
+        .route(
+            "/api/profile/avatar",
+            post(update_profile_avatar_handler)
+                .delete(remove_profile_avatar_handler)
+                .options(auth_options_handler),
+        )
+        .route(
+            "/api/profile/email/resend-verification",
+            post(resend_profile_verification_email_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/profile/cloud-settings",
+            get(get_profile_cloud_settings_handler)
+                .put(update_profile_cloud_settings_handler)
+                .delete(delete_profile_cloud_settings_handler)
+                .options(auth_options_handler),
+        )
+        .route(
+            "/api/system/version",
+            get(system_version_handler).options(auth_options_handler),
+        )
         .route(
             "/api/tokens",
             get(list_tokens_handler).delete(revoke_other_tokens_handler),
@@ -103,10 +147,22 @@ async fn register_options_handler(
     proxy_request(state, request).await
 }
 
+async fn auth_options_handler() -> Response {
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
+    let method = request.method().clone();
     let origin = request.headers().get(header::ORIGIN).cloned();
+    let requested_headers = request
+        .headers()
+        .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+        .cloned();
     let mut response = next.run(request).await;
     apply_auth_cors_headers(origin.as_ref(), response.headers_mut());
+    if method == Method::OPTIONS {
+        apply_auth_preflight_headers(requested_headers.as_ref(), response.headers_mut());
+    }
     response
 }
 
@@ -617,6 +673,346 @@ async fn refresh_token_handler(
             "newToken": tokens.access_token,
             "user": user_profile_payload(&user),
             "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
+async fn get_profile_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match get_auth_user_profile(runtime.connection(), auth.user_id) {
+        Ok(Some(user)) => success_result(StatusCode::OK, user_profile_payload(&user)),
+        Ok(None) => {
+            auth_rest_error_response(AuthRestError::new(404, "User not found", "User not found"))
+        }
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn update_profile_handler(
+    State(state): State<ProxyState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = request_body_object(&body);
+    if body.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Request body is required",
+        ));
+    }
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let current_user = match get_auth_user_profile(runtime.connection(), auth.user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let updates =
+        match validated_profile_updates(runtime.connection(), auth.user_id, &current_user, &body) {
+            Ok(value) => value,
+            Err(error) => return auth_rest_error_response(error),
+        };
+    let email_changed = profile_email_changed(&updates, &current_user.email);
+    let updated_at = utc_now_text();
+    let update_result = if email_changed.is_some() {
+        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+        let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+        update_auth_user_profile_with_auth_log(
+            runtime.connection(),
+            auth.user_id,
+            &updates,
+            &updated_at,
+            &AuthLogDraft {
+                user_id: Some(auth.user_id),
+                username: current_user.username.clone(),
+                event_type: "profile_email_changed".to_string(),
+                ip_address,
+                user_agent: request_user_agent,
+                success: true,
+                error_message: None,
+                metadata: Some(
+                    json!({
+                        "email_changed": true,
+                        "email_verified_reset": true
+                    })
+                    .to_string(),
+                ),
+                created_at: updated_at.clone(),
+            },
+        )
+    } else {
+        update_auth_user_profile(runtime.connection(), auth.user_id, &updates, &updated_at)
+    };
+    if !updates.is_empty() && !matches!(update_result, Ok(true)) {
+        return auth_rest_error_response(AuthRestError::new(
+            500,
+            "Update failed",
+            "Failed to update user profile",
+        ));
+    }
+
+    match get_auth_user_profile(runtime.connection(), auth.user_id) {
+        Ok(Some(user)) => success_result(
+            StatusCode::OK,
+            json!({ "user": user_profile_payload(&user) }),
+        ),
+        Ok(None) => auth_rest_error_response(AuthRestError::new(
+            404,
+            "User not found after update",
+            "User not found after update",
+        )),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn update_profile_avatar_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let avatar = match avatar_data_url_from_multipart(&headers, &body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    update_profile_avatar_value(&state, auth.user_id, avatar).await
+}
+
+async fn remove_profile_avatar_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    update_profile_avatar_value(&state, auth.user_id, String::new()).await
+}
+
+async fn update_profile_avatar_value(
+    state: &ProxyState,
+    user_id: UserId,
+    avatar: String,
+) -> Response {
+    let runtime = match open_runtime(state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let updates = [AuthUserProfileUpdate::Avatar(avatar)];
+    if !matches!(
+        update_auth_user_profile(runtime.connection(), user_id, &updates, &utc_now_text()),
+        Ok(true)
+    ) {
+        return auth_rest_error_response(AuthRestError::new(
+            500,
+            "Update failed",
+            "Failed to update avatar",
+        ));
+    }
+    match get_auth_user_profile(runtime.connection(), user_id) {
+        Ok(Some(user)) => success_result(StatusCode::OK, user_profile_payload(&user)),
+        Ok(None) => {
+            auth_rest_error_response(AuthRestError::new(404, "User not found", "User not found"))
+        }
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn resend_profile_verification_email_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_auth_user_profile(runtime.connection(), auth.user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    if user.email.trim().is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Email is required to resend verification email",
+        ));
+    }
+    let since = (Utc::now() - ChronoDuration::minutes(PROFILE_VERIFICATION_RESEND_WINDOW_MINUTES))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    let created_at = utc_now_text();
+    match create_auth_log_under_event_limit(
+        runtime.connection(),
+        auth.user_id,
+        "verification_email_resend_requested",
+        &since,
+        PROFILE_VERIFICATION_RESEND_LIMIT,
+        &AuthLogDraft {
+            user_id: Some(user.id),
+            username: user.username.clone(),
+            event_type: "verification_email_resend_requested".to_string(),
+            ip_address,
+            user_agent: request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: Some(
+                json!({
+                    "email_present": true,
+                    "email_verified": user.email_verified,
+                    "require_email_verification": state.config.auth_require_email_verification,
+                    "delivery": "not_configured_mock_success"
+                })
+                .to_string(),
+            ),
+            created_at,
+        },
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            return auth_rest_error_response(AuthRestError::new(
+                429,
+                "Too Many Requests",
+                "Too many verification email resend requests",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    }
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
+async fn get_profile_cloud_settings_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match list_application_cloud_settings(runtime.connection(), auth.user_id) {
+        Ok(settings) if settings.is_empty() => success_result(StatusCode::OK, Value::Bool(false)),
+        Ok(settings) => {
+            success_result(StatusCode::OK, application_cloud_settings_payload(settings))
+        }
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn update_profile_cloud_settings_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = request_body_object(&body);
+    let empty_settings = Vec::new();
+    let settings = match body.get("settings") {
+        Some(Value::Array(values)) => values,
+        Some(_) => {
+            return auth_rest_error_response(AuthRestError::new(
+                400,
+                "Bad Request",
+                "settings must be an array",
+            ));
+        }
+        None => &empty_settings,
+    };
+    let mut drafts = Vec::with_capacity(settings.len());
+    for setting in settings {
+        match validate_application_cloud_setting(setting) {
+            Ok(value) => drafts.push(value),
+            Err(error) => return auth_rest_error_response(error),
+        }
+    }
+    let full_update = body
+        .get("fullUpdate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match update_application_cloud_settings(
+        runtime.connection(),
+        auth.user_id,
+        &drafts,
+        full_update,
+        &utc_now_text(),
+    ) {
+        Ok(_) => success_result(StatusCode::OK, Value::Bool(true)),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn delete_profile_cloud_settings_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match delete_application_cloud_settings(runtime.connection(), auth.user_id) {
+        Ok(_) => success_result(StatusCode::OK, Value::Bool(true)),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn system_version_handler() -> Response {
+    success_result(
+        StatusCode::OK,
+        json!({
+            "version": BILL_ANALYSER_APP_VERSION,
+            "commitHash": "",
+            "buildTime": ""
         }),
     )
 }
@@ -1273,6 +1669,677 @@ fn request_body_object(body: &[u8]) -> Map<String, Value> {
     json_object_or_empty(parsed.as_ref())
 }
 
+fn validated_profile_updates(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    current_user: &AuthUserProfileRow,
+    body: &Map<String, Value>,
+) -> Result<Vec<AuthUserProfileUpdate>, AuthRestError> {
+    if body.contains_key("avatar") {
+        return Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Avatar must be updated via /api/profile/avatar",
+        ));
+    }
+    let updates = profile_updates_from_body(body)?;
+    validate_profile_email_update(connection, user_id, current_user, &updates)?;
+    validate_profile_reference_ids(connection, user_id, &updates)?;
+    Ok(updates)
+}
+
+fn validate_profile_email_update(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    current_user: &AuthUserProfileRow,
+    updates: &[AuthUserProfileUpdate],
+) -> Result<(), AuthRestError> {
+    let Some(new_email) = updates.iter().find_map(|update| match update {
+        AuthUserProfileUpdate::Email(value) => Some(value),
+        _ => None,
+    }) else {
+        return Ok(());
+    };
+    if !valid_email_address(new_email) {
+        return Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Invalid email address",
+        ));
+    }
+    if new_email == &current_user.email {
+        return Ok(());
+    }
+    match auth_email_exists_for_other_user(connection, user_id, new_email) {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(AuthRestError::new(
+            409,
+            "Email exists",
+            "Email already exists",
+        )),
+        Err(_) => Err(AuthRestError::new(
+            500,
+            "Internal Server Error",
+            "Rust auth token runtime DB error",
+        )),
+    }
+}
+
+fn validate_profile_reference_ids(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    updates: &[AuthUserProfileUpdate],
+) -> Result<(), AuthRestError> {
+    for update in updates {
+        match update {
+            AuthUserProfileUpdate::DefaultAccountId(Some(account_id)) => {
+                validate_profile_account_id(connection, user_id, *account_id, "defaultAccountId")?;
+            }
+            AuthUserProfileUpdate::CashAccountId(Some(account_id)) => {
+                validate_profile_account_id(connection, user_id, *account_id, "cashAccountId")?;
+            }
+            AuthUserProfileUpdate::CashTransferCategoryId(Some(category_id)) => {
+                validate_profile_category_id(
+                    connection,
+                    user_id,
+                    *category_id,
+                    "cashTransferCategoryId",
+                )?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_profile_account_id(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    account_id: i64,
+    field_name: &str,
+) -> Result<(), AuthRestError> {
+    match auth_account_belongs_to_user(connection, user_id, account_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            format!("{field_name} is invalid"),
+        )),
+        Err(_) => Err(AuthRestError::new(
+            500,
+            "Internal Server Error",
+            "Rust auth token runtime DB error",
+        )),
+    }
+}
+
+fn validate_profile_category_id(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    category_id: i64,
+    field_name: &str,
+) -> Result<(), AuthRestError> {
+    match auth_category_belongs_to_user(connection, user_id, category_id) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            format!("{field_name} is invalid"),
+        )),
+        Err(_) => Err(AuthRestError::new(
+            500,
+            "Internal Server Error",
+            "Rust auth token runtime DB error",
+        )),
+    }
+}
+
+fn valid_email_address(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_whitespace) || value.matches('@').count() != 1
+    {
+        return false;
+    }
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.is_empty()
+        && domain.contains('.')
+        && !domain.contains("..")
+        && domain
+            .split('.')
+            .all(|label| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-'))
+}
+
+fn profile_email_changed(updates: &[AuthUserProfileUpdate], current_email: &str) -> Option<String> {
+    updates.iter().find_map(|update| match update {
+        AuthUserProfileUpdate::Email(value) if value != current_email => Some(value.clone()),
+        _ => None,
+    })
+}
+
+fn profile_updates_from_body(
+    body: &Map<String, Value>,
+) -> Result<Vec<AuthUserProfileUpdate>, AuthRestError> {
+    let mut updates = Vec::new();
+    if let Some(value) = body.get("nickname") {
+        updates.push(AuthUserProfileUpdate::Nickname(profile_string(
+            value, "nickname",
+        )?));
+    }
+    if let Some(value) = body.get("email") {
+        updates.push(AuthUserProfileUpdate::Email(
+            profile_string(value, "email")?.trim().to_string(),
+        ));
+    }
+    if let Some(value) = body.get("language") {
+        updates.push(AuthUserProfileUpdate::Language(profile_string(
+            value, "language",
+        )?));
+    }
+    if let Some(value) = body.get("defaultCurrency") {
+        updates.push(AuthUserProfileUpdate::DefaultCurrency(profile_string(
+            value,
+            "defaultCurrency",
+        )?));
+    }
+    if let Some(value) = body.get("firstDayOfWeek") {
+        updates.push(AuthUserProfileUpdate::FirstDayOfWeek(profile_i64(
+            value,
+            "firstDayOfWeek",
+        )?));
+    }
+    if let Some(value) = body.get("defaultAccountId") {
+        updates.push(AuthUserProfileUpdate::DefaultAccountId(
+            optional_profile_id(value, "defaultAccountId")?,
+        ));
+    }
+    if let Some(value) = body.get("transactionEditScope") {
+        updates.push(AuthUserProfileUpdate::TransactionEditScope(profile_i64(
+            value,
+            "transactionEditScope",
+        )?));
+    }
+    if let Some(value) = body.get("fiscalYearStart") {
+        updates.push(AuthUserProfileUpdate::FiscalYearStart(profile_i64(
+            value,
+            "fiscalYearStart",
+        )?));
+    }
+    if let Some(value) = body.get("calendarDisplayType") {
+        updates.push(AuthUserProfileUpdate::CalendarDisplayType(profile_i64(
+            value,
+            "calendarDisplayType",
+        )?));
+    }
+    if let Some(value) = body.get("dateDisplayType") {
+        updates.push(AuthUserProfileUpdate::DateDisplayType(profile_i64(
+            value,
+            "dateDisplayType",
+        )?));
+    }
+    if let Some(value) = body.get("longDateFormat") {
+        updates.push(AuthUserProfileUpdate::LongDateFormat(profile_i64(
+            value,
+            "longDateFormat",
+        )?));
+    }
+    if let Some(value) = body.get("shortDateFormat") {
+        updates.push(AuthUserProfileUpdate::ShortDateFormat(profile_i64(
+            value,
+            "shortDateFormat",
+        )?));
+    }
+    if let Some(value) = body.get("longTimeFormat") {
+        updates.push(AuthUserProfileUpdate::LongTimeFormat(profile_i64(
+            value,
+            "longTimeFormat",
+        )?));
+    }
+    if let Some(value) = body.get("shortTimeFormat") {
+        updates.push(AuthUserProfileUpdate::ShortTimeFormat(profile_i64(
+            value,
+            "shortTimeFormat",
+        )?));
+    }
+    if let Some(value) = body.get("fiscalYearFormat") {
+        updates.push(AuthUserProfileUpdate::FiscalYearFormat(profile_i64(
+            value,
+            "fiscalYearFormat",
+        )?));
+    }
+    if let Some(value) = body.get("currencyDisplayType") {
+        updates.push(AuthUserProfileUpdate::CurrencyDisplayType(profile_i64(
+            value,
+            "currencyDisplayType",
+        )?));
+    }
+    if let Some(value) = body.get("numeralSystem") {
+        updates.push(AuthUserProfileUpdate::NumeralSystem(profile_i64(
+            value,
+            "numeralSystem",
+        )?));
+    }
+    if let Some(value) = body.get("decimalSeparator") {
+        updates.push(AuthUserProfileUpdate::DecimalSeparator(profile_i64(
+            value,
+            "decimalSeparator",
+        )?));
+    }
+    if let Some(value) = body.get("digitGroupingSymbol") {
+        updates.push(AuthUserProfileUpdate::DigitGroupingSymbol(profile_i64(
+            value,
+            "digitGroupingSymbol",
+        )?));
+    }
+    if let Some(value) = body.get("digitGrouping") {
+        updates.push(AuthUserProfileUpdate::DigitGrouping(profile_i64(
+            value,
+            "digitGrouping",
+        )?));
+    }
+    if let Some(value) = body.get("coordinateDisplayType") {
+        updates.push(AuthUserProfileUpdate::CoordinateDisplayType(profile_i64(
+            value,
+            "coordinateDisplayType",
+        )?));
+    }
+    if let Some(value) = body.get("expenseAmountColor") {
+        updates.push(AuthUserProfileUpdate::ExpenseAmountColor(profile_i64(
+            value,
+            "expenseAmountColor",
+        )?));
+    }
+    if let Some(value) = body.get("incomeAmountColor") {
+        updates.push(AuthUserProfileUpdate::IncomeAmountColor(profile_i64(
+            value,
+            "incomeAmountColor",
+        )?));
+    }
+    if let Some(value) = body.get("cashAccountId") {
+        updates.push(AuthUserProfileUpdate::CashAccountId(optional_profile_id(
+            value,
+            "cashAccountId",
+        )?));
+    }
+    if let Some(value) = body.get("cashTransferCategoryId") {
+        updates.push(AuthUserProfileUpdate::CashTransferCategoryId(
+            optional_profile_id(value, "cashTransferCategoryId")?,
+        ));
+    }
+    if let Some(value) = body.get("importLearningEnabled") {
+        updates.push(AuthUserProfileUpdate::ImportLearningEnabled(profile_bool(
+            value,
+            "importLearningEnabled",
+        )?));
+    }
+    if let Some(value) = body.get("investmentPlatformKeywords") {
+        updates.push(AuthUserProfileUpdate::InvestmentPlatformKeywords(
+            serialize_keyword_list(Some(value)),
+        ));
+    }
+    if let Some(value) = body.get("investmentProductKeywords") {
+        updates.push(AuthUserProfileUpdate::InvestmentProductKeywords(
+            serialize_keyword_list(Some(value)),
+        ));
+    }
+    if let Some(value) = body.get("investmentExcludeKeywords") {
+        updates.push(AuthUserProfileUpdate::InvestmentExcludeKeywords(
+            serialize_keyword_list(Some(value)),
+        ));
+    }
+    Ok(updates)
+}
+
+fn profile_string(value: &Value, field_name: &str) -> Result<String, AuthRestError> {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .ok_or_else(|| AuthRestError::new(400, "Bad Request", format!("{field_name} is invalid")))
+}
+
+fn profile_i64(value: &Value, field_name: &str) -> Result<i64, AuthRestError> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .or_else(|| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse().ok())
+        })
+        .ok_or_else(|| AuthRestError::new(400, "Bad Request", format!("{field_name} is invalid")))
+}
+
+fn profile_bool(value: &Value, field_name: &str) -> Result<bool, AuthRestError> {
+    if let Some(value) = value.as_bool() {
+        return Ok(value);
+    }
+    if let Some(value) = value.as_i64() {
+        return match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(AuthRestError::new(
+                400,
+                "Bad Request",
+                format!("{field_name} is invalid"),
+            )),
+        };
+    }
+    if let Some(value) = value.as_str() {
+        return match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            _ => Err(AuthRestError::new(
+                400,
+                "Bad Request",
+                format!("{field_name} is invalid"),
+            )),
+        };
+    }
+    Err(AuthRestError::new(
+        400,
+        "Bad Request",
+        format!("{field_name} is invalid"),
+    ))
+}
+
+fn optional_profile_id(value: &Value, field_name: &str) -> Result<Option<i64>, AuthRestError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    if value.as_str().is_some_and(|value| value.trim().is_empty()) {
+        return Ok(None);
+    }
+    let parsed = value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .or_else(|| value.as_str().and_then(|value| value.trim().parse().ok()))
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            AuthRestError::new(400, "Bad Request", format!("{field_name} is invalid"))
+        })?;
+    Ok(Some(parsed))
+}
+
+fn avatar_data_url_from_multipart(headers: &HeaderMap, body: &[u8]) -> RouteResult<String> {
+    let content_type = header_value(headers, header::CONTENT_TYPE.as_str());
+    let boundary = multipart_boundary(&content_type).ok_or_else(|| {
+        Box::new(auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Avatar file is required",
+        )))
+    })?;
+    let parts = multipart_parts(body, boundary.as_bytes());
+    for part in parts {
+        let Some((raw_headers, raw_body)) = split_multipart_part(part) else {
+            continue;
+        };
+        let header_text = String::from_utf8_lossy(raw_headers);
+        if !header_text.contains("name=\"avatar\"") {
+            continue;
+        }
+        let payload = trim_trailing_newline(raw_body);
+        if payload.is_empty() {
+            return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+                400,
+                "Bad Request",
+                "Avatar file is empty",
+            ))));
+        }
+        return avatar_data_url_from_payload(payload, multipart_part_content_type(&header_text));
+    }
+    Err(Box::new(auth_rest_error_response(AuthRestError::new(
+        400,
+        "Bad Request",
+        "Avatar file is required",
+    ))))
+}
+
+fn avatar_data_url_from_payload(
+    payload: &[u8],
+    declared_mime_type: Option<String>,
+) -> RouteResult<String> {
+    if payload.len() > MAX_AVATAR_BYTES {
+        return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Avatar file is too large",
+        ))));
+    }
+    let Some(detected_mime_type) = detect_avatar_mime_type(payload) else {
+        return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Unsupported avatar file type",
+        ))));
+    };
+    if let Some(declared_mime_type) = declared_mime_type {
+        if !declared_mime_type.eq_ignore_ascii_case(detected_mime_type) {
+            return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+                400,
+                "Bad Request",
+                "Avatar MIME type does not match file content",
+            ))));
+        }
+    }
+    Ok(format!(
+        "data:{detected_mime_type};base64,{}",
+        general_purpose::STANDARD.encode(payload)
+    ))
+}
+
+fn detect_avatar_mime_type(payload: &[u8]) -> Option<&'static str> {
+    if payload.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Some("image/png");
+    }
+    if payload.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg");
+    }
+    if payload.starts_with(b"GIF87a") || payload.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if payload.len() >= 12 && payload.starts_with(b"RIFF") && &payload[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
+}
+
+fn multipart_boundary(content_type: &str) -> Option<String> {
+    content_type.split(';').find_map(|segment| {
+        let segment = segment.trim();
+        let value = segment.strip_prefix("boundary=")?;
+        Some(value.trim_matches('"').to_string())
+    })
+}
+
+fn multipart_parts<'a>(body: &'a [u8], boundary: &[u8]) -> Vec<&'a [u8]> {
+    let delimiter = [b"--".as_slice(), boundary].concat();
+    let mut parts = Vec::new();
+    let mut search_start = 0;
+    while let Some(boundary_start) = find_bytes(&body[search_start..], &delimiter) {
+        let part_start = search_start + boundary_start + delimiter.len();
+        if body.get(part_start..part_start + 2) == Some(b"--") {
+            break;
+        }
+        let part_start = if body.get(part_start..part_start + 2) == Some(b"\r\n") {
+            part_start + 2
+        } else if body.get(part_start..part_start + 1) == Some(b"\n") {
+            part_start + 1
+        } else {
+            part_start
+        };
+        let Some(next_boundary) = find_bytes(&body[part_start..], &delimiter) else {
+            break;
+        };
+        let part_end = part_start + next_boundary;
+        parts.push(&body[part_start..part_end]);
+        search_start = part_end;
+    }
+    parts
+}
+
+fn split_multipart_part(part: &[u8]) -> Option<(&[u8], &[u8])> {
+    if let Some(index) = find_bytes(part, b"\r\n\r\n") {
+        return Some((&part[..index], &part[index + 4..]));
+    }
+    find_bytes(part, b"\n\n").map(|index| (&part[..index], &part[index + 2..]))
+}
+
+fn trim_trailing_newline(mut value: &[u8]) -> &[u8] {
+    if value.ends_with(b"\r\n") {
+        value = &value[..value.len().saturating_sub(2)];
+    } else if value.ends_with(b"\n") {
+        value = &value[..value.len().saturating_sub(1)];
+    }
+    value
+}
+
+fn multipart_part_content_type(header_text: &str) -> Option<String> {
+    header_text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.trim().eq_ignore_ascii_case("content-type") {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+        None
+    })
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn validate_application_cloud_setting(
+    setting: &Value,
+) -> Result<ApplicationCloudSettingDraft, AuthRestError> {
+    let setting_key = setting
+        .get("settingKey")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let Some(setting_value) = setting.get("settingValue").and_then(Value::as_str) else {
+        return Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            format!("Invalid setting value for {setting_key}"),
+        ));
+    };
+    if setting_key.is_empty() {
+        return Err(AuthRestError::new(
+            400,
+            "Bad Request",
+            "settingKey is required",
+        ));
+    }
+    match application_cloud_setting_type(&setting_key) {
+        Some("string") => {}
+        Some("number") => {
+            if setting_value.parse::<f64>().is_err() {
+                return Err(AuthRestError::new(
+                    400,
+                    "Bad Request",
+                    format!("Invalid number value for {setting_key}"),
+                ));
+            }
+        }
+        Some("boolean") => {
+            if !matches!(setting_value, "true" | "false") {
+                return Err(AuthRestError::new(
+                    400,
+                    "Bad Request",
+                    format!("Invalid boolean value for {setting_key}"),
+                ));
+            }
+        }
+        Some("string_boolean_map") => {
+            let parsed = serde_json::from_str::<Value>(setting_value).map_err(|_| {
+                AuthRestError::new(
+                    400,
+                    "Bad Request",
+                    format!("Invalid JSON value for {setting_key}"),
+                )
+            })?;
+            let Some(object) = parsed.as_object() else {
+                return Err(AuthRestError::new(
+                    400,
+                    "Bad Request",
+                    format!("Invalid map value for {setting_key}"),
+                ));
+            };
+            if object
+                .iter()
+                .any(|(map_key, map_value)| map_key.is_empty() || !map_value.is_boolean())
+            {
+                return Err(AuthRestError::new(
+                    400,
+                    "Bad Request",
+                    format!("Invalid map value for {setting_key}"),
+                ));
+            }
+        }
+        Some(_) => {
+            return Err(AuthRestError::new(
+                400,
+                "Bad Request",
+                format!("Unsupported setting type for {setting_key}"),
+            ));
+        }
+        None => {
+            return Err(AuthRestError::new(
+                400,
+                "Bad Request",
+                format!("Unsupported setting key: {setting_key}"),
+            ));
+        }
+    }
+    Ok(ApplicationCloudSettingDraft {
+        setting_key,
+        setting_value: setting_value.to_string(),
+    })
+}
+
+fn application_cloud_setting_type(setting_key: &str) -> Option<&'static str> {
+    match setting_key {
+        "showAccountBalance"
+        | "showAmountInHomePage"
+        | "showTotalAmountInTransactionListPage"
+        | "showTagInTransactionListPage"
+        | "autoGetCurrentGeoLocation"
+        | "alwaysShowTransactionPicturesInMobileTransactionEditPage" => Some("boolean"),
+        "timezoneUsedForStatisticsInHomePage"
+        | "itemsCountInTransactionListPage"
+        | "currencySortByInExchangeRatesPage"
+        | "statistics.defaultChartDataType"
+        | "statistics.defaultTimezoneType"
+        | "statistics.defaultSortingType"
+        | "statistics.defaultCategoricalChartType"
+        | "statistics.defaultCategoricalChartDataRangeType"
+        | "statistics.defaultTrendChartType"
+        | "statistics.defaultTrendChartDataRangeType"
+        | "statistics.defaultAssetTrendsChartType"
+        | "statistics.defaultAssetTrendsChartDataRangeType" => Some("number"),
+        "overviewAccountFilterInHomePage"
+        | "overviewTransactionCategoryFilterInHomePage"
+        | "totalAmountExcludeAccountIds"
+        | "statistics.defaultAccountFilter"
+        | "statistics.defaultTransactionCategoryFilter" => Some("string_boolean_map"),
+        "autoSaveTransactionDraft" => Some("string"),
+        _ => None,
+    }
+}
+
 fn register_preset_categories_from_body(body: &Map<String, Value>) -> Vec<RegisterPresetCategory> {
     let Some(categories) = body.get("categories").and_then(Value::as_array) else {
         return Vec::new();
@@ -1734,6 +2801,27 @@ fn apply_auth_cors_headers(origin: Option<&HeaderValue>, headers: &mut HeaderMap
     headers.append(header::VARY, HeaderValue::from_static("Origin"));
 }
 
+fn apply_auth_preflight_headers(requested_headers: Option<&HeaderValue>, headers: &mut HeaderMap) {
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        requested_headers
+            .cloned()
+            .unwrap_or_else(|| HeaderValue::from_static("authorization, content-type")),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    headers.append(
+        header::VARY,
+        HeaderValue::from_static("Access-Control-Request-Headers"),
+    );
+}
+
 fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -1861,5 +2949,263 @@ mod tests {
             .status(),
             StatusCode::IM_A_TEAPOT
         );
+    }
+
+    #[test]
+    fn profile_helper_edges_cover_updates_multipart_and_cloud_validation() {
+        let body = json!({
+            "nickname": "Alice",
+            "email": "alice@example.test",
+            "avatar": true,
+            "language": "en",
+            "defaultCurrency": "USD",
+            "firstDayOfWeek": 2,
+            "defaultAccountId": "",
+            "transactionEditScope": "3",
+            "fiscalYearStart": 4,
+            "calendarDisplayType": 5,
+            "dateDisplayType": "6",
+            "longDateFormat": 7,
+            "shortDateFormat": 8,
+            "longTimeFormat": 9,
+            "shortTimeFormat": 10,
+            "fiscalYearFormat": 11,
+            "currencyDisplayType": 12,
+            "numeralSystem": 13,
+            "decimalSeparator": 14,
+            "digitGroupingSymbol": 15,
+            "digitGrouping": 16,
+            "coordinateDisplayType": 17,
+            "expenseAmountColor": 18,
+            "incomeAmountColor": 19,
+            "cashAccountId": null,
+            "cashTransferCategoryId": "200",
+            "importLearningEnabled": "0",
+            "investmentPlatformKeywords": ["蚂蚁财富", "雪球"],
+            "investmentProductKeywords": "基金",
+            "investmentExcludeKeywords": ["还款"]
+        });
+        let updates = profile_updates_from_body(body.as_object().expect("object"))
+            .expect("profile updates parse");
+        assert_eq!(updates.len(), 29);
+        assert!(updates.contains(&AuthUserProfileUpdate::Nickname("Alice".to_string())));
+        assert!(!updates
+            .iter()
+            .any(|update| matches!(update, AuthUserProfileUpdate::Avatar(_))));
+        assert!(updates.contains(&AuthUserProfileUpdate::DefaultAccountId(None)));
+        assert!(updates.contains(&AuthUserProfileUpdate::TransactionEditScope(3)));
+        assert!(updates.contains(&AuthUserProfileUpdate::FiscalYearStart(4)));
+        assert!(updates.contains(&AuthUserProfileUpdate::CashTransferCategoryId(Some(200))));
+        assert!(updates.contains(&AuthUserProfileUpdate::ImportLearningEnabled(false)));
+        assert_eq!(
+            profile_string(&json!("en"), "language").expect("profile string"),
+            "en"
+        );
+        assert!(profile_string(&Value::Null, "language").is_err());
+        assert!(valid_email_address("alice@example.test"));
+        assert!(!valid_email_address("not-an-email"));
+        assert!(!valid_email_address("a@b@c.com"));
+        assert!(!valid_email_address("alice @example.test"));
+        assert!(!valid_email_address("alice@example .test"));
+        assert!(!valid_email_address("alice@-example.test"));
+        assert!(!valid_email_address("alice@example-.test"));
+        assert_eq!(
+            profile_email_changed(
+                &[AuthUserProfileUpdate::Email("new@example.test".to_string())],
+                "old@example.test",
+            )
+            .as_deref(),
+            Some("new@example.test")
+        );
+        assert!(profile_email_changed(
+            &[AuthUserProfileUpdate::Email(
+                "same@example.test".to_string()
+            )],
+            "same@example.test",
+        )
+        .is_none());
+
+        assert!(profile_i64(&Value::Bool(true), "firstDayOfWeek").is_err());
+        assert_eq!(
+            profile_i64(&json!("42"), "firstDayOfWeek").expect("numeric string"),
+            42
+        );
+        assert!(profile_i64(
+            &Value::Number(serde_json::Number::from(u64::MAX)),
+            "firstDayOfWeek"
+        )
+        .is_err());
+        assert!(profile_i64(&json!({"unexpected": true}), "firstDayOfWeek").is_err());
+        assert!(profile_bool(&Value::Bool(true), "importLearningEnabled").expect("bool"));
+        assert!(profile_bool(&json!(1), "importLearningEnabled").expect("one"));
+        assert!(profile_bool(&json!("yes"), "importLearningEnabled").is_err());
+        assert!(!profile_bool(&json!("false"), "importLearningEnabled").expect("false string"));
+        assert!(!profile_bool(&json!("0"), "importLearningEnabled").expect("zero string"));
+        assert!(profile_bool(&Value::Null, "importLearningEnabled").is_err());
+        assert_eq!(
+            optional_profile_id(&Value::Null, "defaultAccountId").expect("null clears"),
+            None
+        );
+        assert_eq!(
+            optional_profile_id(&json!(""), "defaultAccountId").expect("empty clears"),
+            None
+        );
+        assert!(optional_profile_id(&json!("-1"), "defaultAccountId").is_err());
+        assert!(optional_profile_id(&json!("0"), "defaultAccountId").is_err());
+        assert!(optional_profile_id(&json!("abc"), "defaultAccountId").is_err());
+        assert_eq!(
+            optional_profile_id(&json!("7"), "defaultAccountId").expect("positive id"),
+            Some(7)
+        );
+
+        let mut headers = HeaderMap::new();
+        assert!(avatar_data_url_from_multipart(&headers, b"").is_err());
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=\"quoted\""),
+        );
+        assert_eq!(
+            multipart_boundary(
+                headers
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+            )
+            .as_deref(),
+            Some("quoted")
+        );
+
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=plain"),
+        );
+        let no_avatar =
+            b"--plain\r\nContent-Disposition: form-data; name=\"other\"\r\n\r\nvalue\r\n--plain--\r\n";
+        assert!(avatar_data_url_from_multipart(&headers, no_avatar).is_err());
+        let empty_avatar = b"--plain\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.txt\"\r\n\r\n\r\n--plain--\r\n";
+        assert!(avatar_data_url_from_multipart(&headers, empty_avatar).is_err());
+        let text_avatar = b"--plain\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--plain--\r\n";
+        assert!(avatar_data_url_from_multipart(&headers, text_avatar).is_err());
+        let png_payload = b"\x89PNG\r\n\x1A\navatar";
+        let png_avatar = b"--plain\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n\x89PNG\r\n\x1A\navatar\r\n--plain--\r\n";
+        assert_eq!(
+            avatar_data_url_from_multipart(&headers, png_avatar).expect("png avatar"),
+            format!(
+                "data:image/png;base64,{}",
+                general_purpose::STANDARD.encode(png_payload)
+            )
+        );
+        let mismatched_avatar = b"--plain\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.png\"\r\nContent-Type: image/jpeg\r\n\r\n\x89PNG\r\n\x1A\navatar\r\n--plain--\r\n";
+        assert!(avatar_data_url_from_multipart(&headers, mismatched_avatar).is_err());
+        assert!(avatar_data_url_from_payload(
+            &vec![0_u8; MAX_AVATAR_BYTES + 1],
+            Some("image/png".to_string())
+        )
+        .is_err());
+
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=lf"),
+        );
+        let lf_avatar =
+            b"--lf\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.webp\"\n\nRIFFxxxxWEBPdata\n--lf--\n";
+        assert_eq!(
+            avatar_data_url_from_multipart(&headers, lf_avatar).expect("lf avatar"),
+            "data:image/webp;base64,UklGRnh4eHhXRUJQZGF0YQ=="
+        );
+        assert_eq!(find_bytes(b"abc", b""), None);
+        assert_eq!(find_bytes(b"abc", b"abcd"), None);
+
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "autoSaveTransactionDraft", "settingValue": "draft"})
+            )
+            .expect("string setting")
+            .setting_value,
+            "draft"
+        );
+        assert!(validate_application_cloud_setting(
+            &json!({"settingKey": "itemsCountInTransactionListPage", "settingValue": "25"})
+        )
+        .is_ok());
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "itemsCountInTransactionListPage", "settingValue": "NaN?"})
+            )
+            .expect_err("invalid number")
+            .message,
+            "Invalid number value for itemsCountInTransactionListPage"
+        );
+        assert!(validate_application_cloud_setting(
+            &json!({"settingKey": "showAmountInHomePage", "settingValue": "true"})
+        )
+        .is_ok());
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "showAmountInHomePage", "settingValue": "1"})
+            )
+            .expect_err("invalid boolean")
+            .message,
+            "Invalid boolean value for showAmountInHomePage"
+        );
+        assert!(validate_application_cloud_setting(
+            &json!({"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{\"1\":true}"})
+        )
+        .is_ok());
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{"})
+            )
+            .expect_err("invalid json")
+            .message,
+            "Invalid JSON value for overviewAccountFilterInHomePage"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "overviewAccountFilterInHomePage", "settingValue": "[]"})
+            )
+            .expect_err("invalid map")
+            .message,
+            "Invalid map value for overviewAccountFilterInHomePage"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{\"\":false}"})
+            )
+            .expect_err("empty map key")
+            .message,
+            "Invalid map value for overviewAccountFilterInHomePage"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "overviewAccountFilterInHomePage", "settingValue": "{\"1\":\"yes\"}"})
+            )
+            .expect_err("non boolean map value")
+            .message,
+            "Invalid map value for overviewAccountFilterInHomePage"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(&json!({"settingKey": "", "settingValue": "x"}))
+                .expect_err("empty key")
+                .message,
+            "settingKey is required"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "autoSaveTransactionDraft", "settingValue": true})
+            )
+            .expect_err("non string value")
+            .message,
+            "Invalid setting value for autoSaveTransactionDraft"
+        );
+        assert_eq!(
+            validate_application_cloud_setting(
+                &json!({"settingKey": "unsupported", "settingValue": "x"})
+            )
+            .expect_err("unsupported key")
+            .message,
+            "Unsupported setting key: unsupported"
+        );
+        assert_eq!(application_cloud_setting_type("unknown"), None);
     }
 }
