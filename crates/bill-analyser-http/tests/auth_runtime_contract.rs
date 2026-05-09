@@ -1178,6 +1178,232 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
 }
 
 #[tokio::test]
+async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(), Box<dyn Error>> {
+    for route in [
+        ("POST", "/api/auth/email/verify"),
+        ("POST", "/api/auth/email/resend-verification"),
+        ("POST", "/api/auth/password/forgot"),
+        ("POST", "/api/auth/password/reset"),
+    ] {
+        assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+        assert!(AUTH_PROXIED_ROUTE_PATTERNS
+            .iter()
+            .all(|item| item != &route));
+    }
+
+    let disabled_fixture = RuntimeFixture::new()?;
+    seed_auth_db(
+        disabled_fixture.db_path(),
+        &test_access_token(42, TEST_AUTH_SECRET),
+    )?;
+    let disabled_app = runtime_router(&disabled_fixture);
+    let disabled_response = disabled_app
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "alice@example.test"}),
+        ))
+        .await?;
+    assert_eq!(disabled_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(disabled_response).await["message"],
+        "Forget password is currently disabled"
+    );
+
+    let fixture = RuntimeFixture::new()?;
+    seed_auth_db(fixture.db_path(), &test_access_token(42, TEST_AUTH_SECRET))?;
+    set_email_verified(fixture.db_path(), 42, false)?;
+    let app = runtime_router_with_password_reset(fixture.db_path(), true);
+
+    let missing_verify_token_response = app
+        .clone()
+        .oneshot(json_post("/api/auth/email/verify", json!({})))
+        .await?;
+    assert_eq!(
+        missing_verify_token_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_verify_token_response).await["message"],
+        "Verification token is required"
+    );
+
+    let stale_verify_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "verify_email",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    set_user_email(fixture.db_path(), 42, "alice-new@example.test")?;
+    let stale_verify_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/verify",
+            json!({"token": stale_verify_token}),
+        ))
+        .await?;
+    assert_eq!(stale_verify_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(stale_verify_response).await["message"],
+        "Verification token does not match email"
+    );
+    assert!(!email_verified(fixture.db_path(), 42)?);
+    set_user_email(fixture.db_path(), 42, "alice@example.test")?;
+
+    let verify_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "verify_email",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let seed_updated_at = user_updated_at(fixture.db_path(), 42)?;
+    let verify_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/verify",
+            json!({"token": verify_token, "requestNewToken": true}),
+        ))
+        .await?;
+    assert_eq!(verify_response.status(), StatusCode::OK);
+    let verify_body = read_json(verify_response).await;
+    assert_eq!(verify_body["success"], true);
+    assert!(verify_body["result"]["newToken"].as_str().is_some());
+    assert_eq!(verify_body["result"]["user"]["emailVerified"], true);
+    assert!(email_verified(fixture.db_path(), 42)?);
+    assert_ne!(user_updated_at(fixture.db_path(), 42)?, seed_updated_at);
+    assert_auth_log(
+        fixture.db_path(),
+        "email_verified",
+        true,
+        "Mozilla/5.0 (JSON contract)",
+    )?;
+
+    let bad_resend_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/resend-verification",
+            json!({"email": "alice@example.test", "password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(bad_resend_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(bad_resend_response).await["message"],
+        "Invalid email or password"
+    );
+
+    let resend_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/email/resend-verification",
+            json!({"email": "alice@example.test", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(resend_response.status(), StatusCode::OK);
+    assert_eq!(read_json(resend_response).await["result"], true);
+    let resend_metadata =
+        latest_auth_log_metadata(fixture.db_path(), "verification_email_resend_requested")?;
+    assert_eq!(resend_metadata["email"], "alice@example.test");
+    assert_eq!(resend_metadata["delivery"], "not_configured_mock_success");
+    assert!(resend_metadata["verification_token"].as_str().is_some());
+
+    let forgot_missing_response = app
+        .clone()
+        .oneshot(json_post("/api/auth/password/forgot", json!({})))
+        .await?;
+    assert_eq!(forgot_missing_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(forgot_missing_response).await["message"],
+        "Email is required"
+    );
+
+    let forgot_unknown_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "nobody@example.test"}),
+        ))
+        .await?;
+    assert_eq!(forgot_unknown_response.status(), StatusCode::OK);
+    assert_eq!(read_json(forgot_unknown_response).await["result"], true);
+
+    let forgot_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/forgot",
+            json!({"email": "alice@example.test"}),
+        ))
+        .await?;
+    assert_eq!(forgot_response.status(), StatusCode::OK);
+    let reset_metadata = latest_auth_log_metadata(fixture.db_path(), "password_reset_requested")?;
+    let reset_token = reset_metadata["reset_token"]
+        .as_str()
+        .expect("reset token")
+        .to_string();
+    assert_eq!(reset_metadata["email"], "alice@example.test");
+
+    let weak_reset_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "alice@example.test", "password": "short", "token": reset_token}),
+        ))
+        .await?;
+    assert_eq!(weak_reset_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(weak_reset_response).await["error"],
+        "Invalid password"
+    );
+
+    let mismatch_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "reset_password",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let mismatch_reset_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "other@example.test", "password": "new-password", "token": mismatch_token}),
+        ))
+        .await?;
+    assert_eq!(mismatch_reset_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(mismatch_reset_response).await["message"],
+        "Reset password token does not match email"
+    );
+
+    set_user_updated_at(fixture.db_path(), 42, "2026-01-01T00:00:00")?;
+    let reset_response = app
+        .clone()
+        .oneshot(json_post(
+            "/api/auth/password/reset",
+            json!({"email": "alice@example.test", "password": "new-password", "token": reset_token}),
+        ))
+        .await?;
+    assert_eq!(reset_response.status(), StatusCode::OK);
+    assert_eq!(read_json(reset_response).await["result"], true);
+    assert_password(fixture.db_path(), "alice", "new-password")?;
+    assert_ne!(
+        user_updated_at(fixture.db_path(), 42)?,
+        "2026-01-01T00:00:00"
+    );
+    assert_auth_log(
+        fixture.db_path(),
+        "password_reset_completed",
+        true,
+        "Mozilla/5.0 (JSON contract)",
+    )?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_token_runtime_preserves_flask_error_shapes() -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
     let token = test_access_token(42, TEST_AUTH_SECRET);
@@ -1744,6 +1970,23 @@ fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router 
     if include_jwt_secret {
         config = config.with_auth_jwt_secret(TEST_AUTH_SECRET);
     }
+    let state = ProxyState::new(config).expect("proxy state");
+    build_router(state)
+}
+
+fn runtime_router_with_password_reset(path: &Path, enabled: bool) -> Router {
+    let config = HttpShellConfig::new_with_import_route_mode(
+        "http://127.0.0.1:59999",
+        Duration::from_millis(200),
+        1024 * 1024,
+        ImportRouteMode::ImportDbRuntime,
+    )
+    .expect("config")
+    .with_sqlite_db_path(path.display().to_string())
+    .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+    .with_auth_jwt_secret(TEST_AUTH_SECRET)
+    .with_auth_enable_user_forget_password(enabled)
+    .with_public_base_url("https://api.example.test");
     let state = ProxyState::new(config).expect("proxy state");
     build_router(state)
 }
@@ -2504,6 +2747,62 @@ fn assert_profile_db_values(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn assert_password(path: &Path, username: &str, password: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let password_hash: String = connection.query_row(
+        "SELECT password_hash FROM users WHERE username = ?1",
+        [username],
+        |row| row.get(0),
+    )?;
+    assert!(verify(password, &password_hash)?);
+    Ok(())
+}
+
+fn set_email_verified(path: &Path, user_id: i64, verified: bool) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET email_verified = ?1 WHERE id = ?2",
+        (if verified { 1 } else { 0 }, user_id),
+    )?;
+    Ok(())
+}
+
+fn set_user_email(path: &Path, user_id: i64, email: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET email = ?1 WHERE id = ?2",
+        (email, user_id),
+    )?;
+    Ok(())
+}
+
+fn set_user_updated_at(path: &Path, user_id: i64, updated_at: &str) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET updated_at = ?1 WHERE id = ?2",
+        (updated_at, user_id),
+    )?;
+    Ok(())
+}
+
+fn user_updated_at(path: &Path, user_id: i64) -> Result<String, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        "SELECT updated_at FROM users WHERE id = ?1",
+        [user_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn email_verified(path: &Path, user_id: i64) -> Result<bool, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        "SELECT email_verified FROM users WHERE id = ?1",
+        [user_id],
+        |row| Ok(row.get::<_, i64>(0)? != 0),
+    )?)
+}
+
 fn cloud_setting_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>> {
     let connection = Connection::open(path)?;
     Ok(connection.query_row(
@@ -2696,6 +2995,22 @@ fn bearer_json_request(method: Method, uri: &str, token: &str, payload: Value) -
     bearer_request(method, uri, token, Body::from(payload.to_string()))
 }
 
+fn json_post(uri: &str, payload: Value) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("user-agent", "Mozilla/5.0 (JSON contract)")
+        .body(Body::from(payload.to_string()))
+        .expect("json post builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.14:4300"
+            .parse::<SocketAddr>()
+            .expect("test json peer addr"),
+    ));
+    request
+}
+
 fn multipart_avatar_request(token: &str, content: &[u8], mime_type: &str) -> Request<Body> {
     let boundary = "profile-avatar-boundary";
     let mut body = Vec::new();
@@ -2780,6 +3095,36 @@ fn test_refresh_token(
     expires_in: ChronoDuration,
 ) -> String {
     test_jwt_token(user_id, username, "refresh", secret, expires_in)
+}
+
+fn test_action_token(
+    user_id: i64,
+    username: &str,
+    email: &str,
+    token_type: &str,
+    secret: &str,
+    expires_in: ChronoDuration,
+) -> String {
+    let now = Local::now();
+    let header = json!({"alg": "HS256", "typ": "JWT"});
+    let payload = json!({
+        "user_id": user_id,
+        "username": username,
+        "email": email,
+        "type": token_type,
+        "iat": now.timestamp(),
+        "exp": (now + expires_in).timestamp(),
+        "nonce": "auth-action-route-test"
+    });
+    let encoded_header =
+        general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).expect("header json"));
+    let encoded_payload = general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(&payload).expect("payload json"));
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.as_bytes());
+    let signature = hmac::sign(&key, signing_input.as_bytes());
+    let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
+    format!("{signing_input}.{encoded_signature}")
 }
 
 fn test_jwt_token(

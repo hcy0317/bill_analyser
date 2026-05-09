@@ -17,17 +17,21 @@ ALLOWED_CURSOR_ADAPTERS = {".cursor\\mcp.json", ".cursor/mcp.json"}
 DIFF_COMMIT_SKILL = "zh-conventional-commit-from-diff"
 SESSION_RESUME_SKILL = "session-resume"
 ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS = {
-    "section": ("## Session Completion", "Session Completion"),
+    "section": ("## Session Completion", "Session Completion", "## Session completion", "Session completion"),
     "session": ("会话结束前", "结束会话时", "会话完成前", "ending a session", "Before ending a session"),
     "diff": ("git diff", "staged", "unstaged"),
     "skill": (DIFF_COMMIT_SKILL,),
     "title": ("中文 Conventional Commit 标题", "中文约定式提交标题", "Chinese Conventional Commit title"),
+    "pr_title": ("PR 标题", "PR titles", "PR title"),
+    "pr_format": ("type(scope):", "type(scope): 主标题", "type(scope): title"),
 }
 SKILL_SESSION_COMPLETION_REQUIREMENTS = {
     "session": ("ending a session", "Before ending a session", "结束会话时", "会话结束前"),
     "diff": ("git diff", "diff", "staged", "unstaged"),
     "skill": (DIFF_COMMIT_SKILL,),
     "title": ("中文 Conventional Commit 标题", "中文约定式提交标题", "Chinese Conventional Commit title"),
+    "pr_title": ("PR 标题", "PR titles", "PR title"),
+    "pr_format": ("type(scope):", "type(scope): 主标题", "type(scope): title"),
 }
 SESSION_RESUME_REQUIREMENTS = {
     "skill": (SESSION_RESUME_SKILL,),
@@ -48,6 +52,20 @@ PARSER_STANDARD_FLOW_SKILL_PATH = f".agents/skills/{PARSER_STANDARD_FLOW_SKILL}/
 PARSER_STANDARD_FLOW_DOC_PATH = "docs/parsers/add-parser-standard-flow.md"
 UI_STYLE_REFERENCE_SKILL = "bill-analyser-ui-style-reference"
 UI_STYLE_REFERENCE_SKILL_PATH = f".agents/skills/{UI_STYLE_REFERENCE_SKILL}/SKILL.md"
+CONVENTIONAL_PR_TITLE_RE = re.compile(
+    r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)\([a-z0-9][a-z0-9-]*\)!?: .+\S$"
+)
+PR_TITLE_VALID_EXAMPLES = (
+    "feat(rust): 接管账号恢复路由",
+    "fix(auth): 修复邮箱验证令牌绑定",
+    "chore(agent-stack): 约束 PR 标题格式",
+)
+PR_TITLE_INVALID_EXAMPLES = (
+    "接管账号恢复路由",
+    "feat: 接管账号恢复路由",
+    "Feat(rust): 接管账号恢复路由",
+    "feat(rust): ",
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +103,10 @@ def _load_json(path: Path) -> dict:
 
 def _contains_any(text: str, candidates: tuple[str, ...]) -> bool:
     return any(candidate in text for candidate in candidates)
+
+
+def is_conventional_pr_title(title: str) -> bool:
+    return bool(CONVENTIONAL_PR_TITLE_RE.fullmatch(title.strip()))
 
 
 def _normalize_markdown_table_match_text(text: str) -> str:
@@ -328,6 +350,10 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
         )
 
     session_contract_paths = {
+        "AGENTS.md": (
+            repo_root / "AGENTS.md",
+            ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS,
+        ),
         ".github/copilot-instructions.md": (
             repo_root / ".github" / "copilot-instructions.md",
             ENTRYPOINT_SESSION_COMPLETION_REQUIREMENTS,
@@ -360,7 +386,7 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 "repo.diff-commit-skill",
                 "repo",
                 "pass",
-                "仓库级入口已约束：结束会话且存在 diff 时自动生成中文提交标题。",
+                "仓库级入口已约束：结束会话且存在 diff 时自动生成中文提交标题，并要求 PR 标题使用 Conventional Commit 大标题格式。",
                 [*session_contract_paths.keys(), f"skill={DIFF_COMMIT_SKILL}"],
             )
         )
@@ -374,9 +400,41 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 "repo.diff-commit-skill",
                 "repo",
                 "fail",
-                "仓库尚未稳定声明：结束会话遇到 diff 时自动生成中文提交标题。",
+                "仓库尚未稳定声明：结束会话遇到 diff 时自动生成中文提交标题，并要求 PR 标题使用 Conventional Commit 大标题格式。",
                 evidence,
                 "在 `.github/copilot-instructions.md` 定义 canonical 规则，并让 Codex/Claude/仓库技能入口同步这条会话收尾约束。",
+            )
+        )
+
+    invalid_pr_title_validator = [
+        f"accepted invalid example: {title}"
+        for title in PR_TITLE_INVALID_EXAMPLES
+        if is_conventional_pr_title(title)
+    ]
+    invalid_pr_title_validator.extend(
+        f"rejected valid example: {title}"
+        for title in PR_TITLE_VALID_EXAMPLES
+        if not is_conventional_pr_title(title)
+    )
+    if invalid_pr_title_validator:
+        checks.append(
+            _result(
+                "repo.pr-title-format-gate",
+                "repo",
+                "fail",
+                "PR 标题格式校验器没有稳定执行 Conventional Commit 大标题规则。",
+                invalid_pr_title_validator,
+                "修复 `is_conventional_pr_title`，确保 PR 标题必须满足 `type(scope): 主标题`。",
+            )
+        )
+    else:
+        checks.append(
+            _result(
+                "repo.pr-title-format-gate",
+                "repo",
+                "pass",
+                "PR 标题格式校验器要求 `type(scope): 主标题` 并拒绝无 scope 或非小写 type。",
+                [*PR_TITLE_VALID_EXAMPLES],
             )
         )
 

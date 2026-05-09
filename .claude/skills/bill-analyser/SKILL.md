@@ -24,7 +24,7 @@ This `.claude/skills` entry exists so Claude Code can discover the repository wo
 - Then load the canonical shared skill in `.agents/skills/bill-analyser-conventions/`.
 - Use `.claude/rules/` only for concise Claude-specific reminders or path-scoped overlays.
 - Before ending a session that leaves any git diff behind, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title.
-- Follow `AGENTS.md` for commit/PR closeout details: keep commit subjects one line, put subtopics in newline body bullets, prefer multiple commits per reviewable slice, prefer squash merge, delete the source branch after merge, and never force an OmX co-author trailer.
+- Follow `AGENTS.md` for commit/PR closeout details: keep commit subjects one line, put subtopics in newline body bullets, prefer multiple commits per reviewable slice, require PR titles to use a `type(scope): title` heading while describing the domain outcome, prefer squash merge, delete the source branch after merge, and never force an OmX co-author trailer.
 - If a session is interrupted, inspect `.git/ai/last-session.md` and resume with the shared `.agents/skills/session-resume/SKILL.md` workflow.
 
 ## Examples

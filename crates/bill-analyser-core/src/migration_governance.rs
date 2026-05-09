@@ -1335,22 +1335,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/accounts/sync-balances",
         "taxonomy-rules-settings"
     ),
-    python_proxy_route!(
-        "POST",
-        "/api/auth/email/resend-verification",
-        "auth-security-user-data"
-    ),
-    python_proxy_route!("POST", "/api/auth/email/verify", "auth-security-user-data"),
-    python_proxy_route!(
-        "POST",
-        "/api/auth/password/forgot",
-        "auth-security-user-data"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/auth/password/reset",
-        "auth-security-user-data"
-    ),
     python_proxy_route!("GET", "/api/backup/", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/cleanup", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/create", "backup-ops"),
@@ -1691,6 +1675,46 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes:
             "Rust auth runtime invalidates the bearer session by token hash, records logout auth logs for active sessions, and keeps Flask-compatible idempotent success.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/auth/email/verify",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth account-recovery runtime validates verify_email action tokens, marks email_verified, optionally issues a new session token, writes email_verified auth logs, and returns result.user.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/auth/email/resend-verification",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth account-recovery runtime verifies email/password credentials, issues mock-success verification tokens, records verification_email_resend_requested metadata, and returns result=true.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/auth/password/forgot",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth account-recovery runtime honors the forget-password feature flag, returns success for unknown emails, and records mock-success reset token metadata for existing users.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/auth/password/reset",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth account-recovery runtime validates reset_password action tokens, password policy, and email/user match before updating the password hash and writing password_reset_completed auth logs.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2382,7 +2406,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, password recovery, real OAuth provider exchange, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2839,7 +2863,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, password recovery, real OAuth provider exchange, step-up, and user-data routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, and user-data routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

@@ -241,6 +241,37 @@ pub fn get_login_user_by_login_name(
         .map_err(DbError::from)
 }
 
+pub fn get_login_user_by_email(
+    connection: &Connection,
+    email: &str,
+) -> DbResult<Option<AuthLoginUserRow>> {
+    connection
+        .query_row(
+            r#"
+            SELECT
+                id, username, email, nickname, avatar, default_account_id,
+                transaction_edit_scope, language, default_currency, first_day_of_week,
+                fiscal_year_start, calendar_display_type, date_display_type,
+                long_date_format, short_date_format, long_time_format, short_time_format,
+                fiscal_year_format, currency_display_type, numeral_system, decimal_separator,
+                digit_grouping_symbol, digit_grouping, coordinate_display_type,
+                expense_amount_color, income_amount_color, cash_account_id,
+                cash_transfer_category_id, import_learning_enabled,
+                investment_platform_keywords, investment_product_keywords,
+                investment_exclude_keywords, email_verified,
+                password_hash, is_active, two_factor_enabled, failed_login_attempts, locked_until
+            FROM users
+            WHERE email = ?1
+            ORDER BY id ASC
+            LIMIT 1
+            "#,
+            [email],
+            auth_login_user_from_row,
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
 pub fn get_active_refresh_session(
     connection: &Connection,
     refresh_token_hash: &str,
@@ -889,6 +920,34 @@ pub fn update_user_last_login(
         WHERE id = ?3
         "#,
         params![last_login_at, ip_address, user_id],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn set_user_email_verified(
+    connection: &Connection,
+    user_id: UserId,
+    verified: bool,
+    updated_at: &str,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        "UPDATE users SET email_verified = ?1, updated_at = ?2 WHERE id = ?3",
+        params![if verified { 1 } else { 0 }, updated_at, user_id],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn update_user_password_hash(
+    connection: &Connection,
+    user_id: UserId,
+    password_hash: &str,
+    updated_at: &str,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        "UPDATE users SET password_hash = ?1, updated_at = ?2 WHERE id = ?3",
+        params![password_hash, updated_at, user_id],
     )?;
     Ok(changed > 0)
 }

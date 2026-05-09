@@ -14,6 +14,7 @@ pub const DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 5;
 pub const DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 15;
 pub const DEFAULT_AUTH_ENABLE_USER_REGISTRATION: bool = true;
 pub const DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION: bool = false;
+pub const DEFAULT_AUTH_ENABLE_USER_FORGET_PASSWORD: bool = false;
 pub const DEFAULT_AUTH_ENABLE_OAUTH2: bool = false;
 pub const DEFAULT_AUTH_PASSWORD_MIN_LENGTH: usize = 8;
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
@@ -38,6 +39,7 @@ pub struct HttpShellConfig {
     pub auth_lockout_duration_minutes: i64,
     pub auth_enable_user_registration: bool,
     pub auth_require_email_verification: bool,
+    pub auth_enable_user_forget_password: bool,
     pub auth_enable_oauth2: bool,
     pub auth_oauth2_provider: String,
     pub auth_password_policy: PasswordPolicy,
@@ -84,6 +86,7 @@ impl HttpShellConfig {
             auth_lockout_duration_minutes: DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
             auth_enable_user_registration: DEFAULT_AUTH_ENABLE_USER_REGISTRATION,
             auth_require_email_verification: DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
+            auth_enable_user_forget_password: DEFAULT_AUTH_ENABLE_USER_FORGET_PASSWORD,
             auth_enable_oauth2: DEFAULT_AUTH_ENABLE_OAUTH2,
             auth_oauth2_provider: String::new(),
             auth_password_policy: PasswordPolicy {
@@ -141,6 +144,11 @@ impl HttpShellConfig {
 
     pub fn with_auth_require_email_verification(mut self, required: bool) -> Self {
         self.auth_require_email_verification = required;
+        self
+    }
+
+    pub fn with_auth_enable_user_forget_password(mut self, enabled: bool) -> Self {
+        self.auth_enable_user_forget_password = enabled;
         self
     }
 
@@ -250,6 +258,12 @@ impl HttpShellConfig {
                 .or_else(|| lookup("REQUIRE_EMAIL_VERIFICATION")),
             DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
         )?;
+        let auth_enable_user_forget_password = parse_env_bool_value(
+            "BILL_ANALYSER_AUTH_ENABLE_USER_FORGET_PASSWORD",
+            lookup("BILL_ANALYSER_AUTH_ENABLE_USER_FORGET_PASSWORD")
+                .or_else(|| lookup("ENABLE_USER_FORGET_PASSWORD")),
+            DEFAULT_AUTH_ENABLE_USER_FORGET_PASSWORD,
+        )?;
         let auth_enable_oauth2 = parse_env_bool_value(
             "BILL_ANALYSER_AUTH_ENABLE_OAUTH2",
             lookup("BILL_ANALYSER_AUTH_ENABLE_OAUTH2").or_else(|| lookup("ENABLE_OAUTH2")),
@@ -314,6 +328,7 @@ impl HttpShellConfig {
         config.auth_lockout_duration_minutes = auth_lockout_duration_minutes;
         config.auth_enable_user_registration = auth_enable_user_registration;
         config.auth_require_email_verification = auth_require_email_verification;
+        config.auth_enable_user_forget_password = auth_enable_user_forget_password;
         config.auth_enable_oauth2 = auth_enable_oauth2;
         config.auth_oauth2_provider = auth_oauth2_provider;
         config.auth_password_policy = auth_password_policy;

@@ -162,7 +162,7 @@ npm run test:coverage
 - 生成结果必须给出一条基于当前 diff 的中文 Conventional Commit 标题；如果 staged diff 非空，优先基于 staged diff 生成。
 - 多主题但仍属于同一提交意图的 diff，提交标题保持一行 `type(scope): 主标题`；关键子变更写到提交正文里的换行小标题 / bullet，不要堆在标题里。
 - Plan-driven / OMX 切面进入 PR 前，若一个切面内存在可独立评审的规则、实现、测试或文档步骤，应优先拆成多个小 commits；不要为了省事把所有内容压成一个大提交。
-- PR 标题应描述功能域切面的最终结果，不要直接复用第一个 commit 标题；PR body 必须列出 Summary、Test plan 和仍未关闭的 Open gates。
+- PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标题格式，并描述功能域切面的最终结果；不要直接复用第一个 commit 标题。PR body 必须列出 Summary、Test plan 和仍未关闭的 Open gates。
 - PR 合并时优先使用 squash / 压缩提交；合并后应删除来源分支，平台支持自动删除时启用自动删除，否则在确认合并完成后删除远端 feature branch。
 - hooks / gate / commit 模板不得强制或自动追加 `Co-authored-by: OmX <omx@oh-my-codex.dev>`；只有用户明确要求时才可添加该 trailer。
 - 只有在确认没有任何 diff 时，才可以跳过这一步。

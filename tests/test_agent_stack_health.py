@@ -180,6 +180,7 @@ def test_repo_scan_reports_expected_contracts() -> None:
     assert checks["repo.cursor-removed"]["status"] == "pass"
     assert checks["repo.hooks-baseline"]["status"] == "pass"
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
+    assert checks["repo.pr-title-format-gate"]["status"] == "pass"
     assert checks["repo.session-resume-skill"]["status"] == "pass"
     assert checks["repo.workflow-entrypoints"]["status"] == "pass"
     assert checks["repo.ui-style-skill"]["status"] == "pass"
@@ -253,7 +254,11 @@ def test_doctor_format_highlights_quick_actions() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert "AI 定制层 Doctor" in result.stdout
     assert "快速命令" in result.stdout
-    assert "repo.workflow-entrypoints" in result.stdout or "repo.task-state-support" in result.stdout
+    assert (
+        "repo.pr-title-format-gate" in result.stdout
+        or "repo.workflow-entrypoints" in result.stdout
+        or "repo.task-state-support" in result.stdout
+    )
 
 
 def test_pytest_conftest_bootstraps_src_layout_in_clean_python() -> None:
@@ -297,6 +302,7 @@ def test_account_adapter_imports_under_python3() -> None:
 
 
 def test_workspace_instructions_require_diff_commit_skill() -> None:
+    agents_text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     instructions_text = (REPO_ROOT / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
     codex_text = (REPO_ROOT / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
     repo_skill_text = (
@@ -307,24 +313,47 @@ def test_workspace_instructions_require_diff_commit_skill() -> None:
     ).read_text(encoding="utf-8")
 
     entrypoint_requirements = (
-        ("## Session Completion", "Session Completion"),
+        ("## Session Completion", "Session Completion", "## Session completion", "Session completion"),
         ("会话结束前", "结束会话时", "会话完成前", "ending a session", "Before ending a session"),
         ("git diff", "staged", "unstaged"),
         ("zh-conventional-commit-from-diff",),
         ("中文 Conventional Commit 标题", "中文约定式提交标题", "Chinese Conventional Commit title"),
+        ("PR 标题", "PR titles", "PR title"),
+        ("type(scope):", "type(scope): 主标题", "type(scope): title"),
     )
     skill_requirements = (
         ("会话结束前", "结束会话时", "ending a session", "Before ending a session"),
         ("git diff", "diff", "staged", "unstaged"),
         ("zh-conventional-commit-from-diff",),
         ("中文 Conventional Commit 标题", "中文约定式提交标题", "Chinese Conventional Commit title"),
+        ("PR 标题", "PR titles", "PR title"),
+        ("type(scope):", "type(scope): 主标题", "type(scope): title"),
     )
 
-    for contract_text in (instructions_text, codex_text):
+    for contract_text in (agents_text, instructions_text, codex_text):
         _assert_session_completion_contract(contract_text, entrypoint_requirements)
 
     for contract_text in (repo_skill_text, claude_skill_text):
         _assert_session_completion_contract(contract_text, skill_requirements)
+
+
+def test_pr_title_format_gate_requires_conventional_commit_heading() -> None:
+    agent_stack_health = importlib.import_module("scripts.agent_stack_health")
+
+    for title in (
+        "feat(rust): 接管账号恢复路由",
+        "fix(auth): 修复邮箱验证令牌绑定",
+        "chore(agent-stack): 约束 PR 标题格式",
+    ):
+        assert agent_stack_health.is_conventional_pr_title(title)
+
+    for title in (
+        "接管账号恢复路由",
+        "feat: 接管账号恢复路由",
+        "Feat(rust): 接管账号恢复路由",
+        "feat(rust): ",
+    ):
+        assert not agent_stack_health.is_conventional_pr_title(title)
 
 
 def test_workspace_guides_require_session_resume_recovery_path() -> None:

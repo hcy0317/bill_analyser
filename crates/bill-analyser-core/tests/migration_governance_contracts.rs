@@ -46,6 +46,10 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/auth/login")));
     assert!(rust_owned.contains(&("POST", "/api/auth/register")));
     assert!(rust_owned.contains(&("POST", "/api/auth/logout")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/email/verify")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/email/resend-verification")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/password/forgot")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/password/reset")));
     assert!(rust_owned.contains(&("POST", "/api/auth/oauth2/authorize")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
@@ -514,6 +518,30 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         auth_logout.envelope,
         ResponseEnvelopeFamily::FlaskSuccessResult
     );
+
+    for endpoint in [
+        "POST /api/auth/email/verify",
+        "POST /api/auth/email/resend-verification",
+        "POST /api/auth/password/forgot",
+        "POST /api/auth/password/reset",
+    ] {
+        let auth_account_recovery = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("auth account recovery route is present: {endpoint}"));
+        assert_eq!(
+            auth_account_recovery.state,
+            MigrationState::RustOwnedVerified
+        );
+        assert_eq!(
+            auth_account_recovery.handler,
+            RouteHandlerId::AuthTokenRuntime
+        );
+        assert_eq!(
+            auth_account_recovery.envelope,
+            ResponseEnvelopeFamily::FlaskSuccessResult
+        );
+    }
 
     let auth_oauth2_authorize = manifest
         .iter()

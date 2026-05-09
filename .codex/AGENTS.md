@@ -19,7 +19,7 @@ This file supplements [AGENTS.md](AGENTS.md) with Codex-specific guidance.
 
 - Codex 侧没有仓库内 stop hooks 兜底时，仍然必须遵循 `AGENTS.md` 里的会话收尾规则。
 - 只要结束会话时存在 git diff，就自动使用 `zh-conventional-commit-from-diff` 生成一条中文 Conventional Commit 标题，再结束本次会话。
-- 具体 commit/PR 收尾策略以 `AGENTS.md` 为准：提交标题保持一行，小标题写入正文换行 bullet；切面 PR 尽量拆成多个可评审 commits，合并时优先 squash，合并后删除来源分支；不要强制追加 OmX co-author trailer。
+- 具体 commit/PR 收尾策略以 `AGENTS.md` 为准：提交标题保持一行，小标题写入正文换行 bullet；切面 PR 尽量拆成多个可评审 commits；PR 标题必须使用 `type(scope): 主标题` 格式并描述功能域结果；合并时优先 squash，合并后删除来源分支；不要强制追加 OmX co-author trailer。
 
 ## MCP Baseline
 

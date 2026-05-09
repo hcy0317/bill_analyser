@@ -54,7 +54,7 @@ Use this skill when you are:
 - If staged diff exists, base the title on staged diff first; otherwise use the full working diff.
 - For one coherent commit that still has multiple notable subchanges, keep the subject to one line like `type(scope): main title`; put reviewable subtopics in newline body bullets instead of appending them to the subject.
 - For plan-driven or OMX slices, prefer multiple small commits in one PR when rules, implementation, tests, and docs are independently reviewable.
-- PR titles should describe the functional-domain outcome, not blindly copy the first commit title; PR bodies should include Summary, Test plan, and Open gates when any gate remains blocked.
+- PR titles must use a Conventional Commit heading format like `type(scope): main title` while describing the functional-domain outcome; do not blindly copy the first commit title. PR bodies should include Summary, Test plan, and Open gates when any gate remains blocked.
 - Prefer squash merge when merging a PR. After a PR is merged, delete the source feature branch through the forge auto-delete option when available, otherwise delete the remote branch after merge is confirmed.
 - Do not require or automatically append `Co-authored-by: OmX <omx@oh-my-codex.dev>`; add that trailer only when the user explicitly asks for it.
 

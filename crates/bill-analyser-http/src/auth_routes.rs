@@ -23,16 +23,17 @@ use bill_analyser_db::{
     count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
     create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
     delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, get_login_user_by_login_name,
-    get_user_external_auth, increment_failed_login, invalidate_other_user_sessions,
-    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
-    update_application_cloud_settings, update_auth_user_profile,
-    update_auth_user_profile_with_auth_log, update_user_last_login, ApplicationCloudSettingDraft,
-    ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow,
-    AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
-    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, TokenSessionRow,
+    get_auth_token_user, get_auth_user_profile, get_login_user_by_email,
+    get_login_user_by_login_name, get_user_external_auth, increment_failed_login,
+    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
+    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
+    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
+    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
+    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
+    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
+    CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -72,6 +73,10 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/logout"),
+    ("POST", "/api/auth/email/verify"),
+    ("POST", "/api/auth/email/resend-verification"),
+    ("POST", "/api/auth/password/forgot"),
+    ("POST", "/api/auth/password/reset"),
     ("POST", "/api/auth/oauth2/authorize"),
     ("GET", "/api/profile"),
     ("PUT", "/api/profile"),
@@ -101,6 +106,22 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/auth/oauth2/authorize",
             post(authorize_oauth2_callback_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/auth/email/verify",
+            post(verify_email_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/auth/email/resend-verification",
+            post(resend_public_verification_email_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/auth/password/forgot",
+            post(forgot_password_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/auth/password/reset",
+            post(reset_password_handler).options(auth_options_handler),
         )
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
@@ -1084,6 +1105,392 @@ async fn authorize_oauth2_callback_handler(State(state): State<ProxyState>) -> R
     ))
 }
 
+async fn verify_email_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let peer_addr = connect_info.map(|ConnectInfo(addr)| addr);
+    let body = request_body_object(&body);
+    let token = body
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if token.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Verification token is required",
+        ));
+    }
+    let request_new_token = body
+        .get("requestNewToken")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let payload = match validate_action_jwt(
+        token,
+        &state,
+        "verify_email",
+        "Verification token is invalid or expired",
+    ) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = match action_user_id(&payload, "Verification token is invalid") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_auth_user_profile(runtime.connection(), user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    if payload.get("email").and_then(Value::as_str) != Some(user.email.trim()) {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Invalid token",
+            "Verification token does not match email",
+        ));
+    }
+    if set_user_email_verified(runtime.connection(), user_id, true, &utc_now_text()).is_err() {
+        return db_error_response();
+    }
+    let user = match get_auth_user_profile(runtime.connection(), user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let mut new_token = Value::Null;
+    if request_new_token {
+        let tokens = match issue_session_tokens(user.id, &user.username, &state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let created_at = now_text();
+        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+        let ip_address = client_ip(&headers, peer_addr);
+        if create_token_session(
+            runtime.connection(),
+            &CreateTokenSessionDraft {
+                user_id: user.id,
+                token_hash: sha256_hex(&tokens.access_token),
+                refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+                expires_at: tokens.expires_at,
+                refresh_expires_at: Some(tokens.refresh_expires_at),
+                user_agent: request_user_agent,
+                ip_address,
+                created_at,
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        new_token = Value::String(tokens.access_token);
+    }
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, peer_addr);
+    if log_auth_event(
+        runtime.connection(),
+        AuthEvent {
+            user_id: Some(user.id),
+            username: &user.username,
+            event_type: "email_verified",
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: None,
+        },
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "newToken": new_token,
+            "user": user_profile_payload(&user),
+            "notificationContent": "",
+        }),
+    )
+}
+
+async fn resend_public_verification_email_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let email = body
+        .get("email")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if email.is_empty() || password.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Email and password are required",
+        ));
+    }
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_email(runtime.connection(), &email) {
+        Ok(Some(value)) if bcrypt::verify(password, &value.password_hash).unwrap_or(false) => value,
+        Ok(_) => {
+            return auth_rest_error_response(AuthRestError::new(
+                401,
+                "Invalid credentials",
+                "Invalid email or password",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let verification_token = match issue_action_token(&user, "verify_email", 24, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if log_auth_event(
+        runtime.connection(),
+        AuthEvent {
+            user_id: Some(user.profile.id),
+            username: &user.profile.username,
+            event_type: "verification_email_resend_requested",
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: Some(
+                json!({
+                    "email": email,
+                    "delivery": "not_configured_mock_success",
+                    "verification_token": verification_token,
+                })
+                .to_string(),
+            ),
+        },
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
+async fn forgot_password_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let email = body
+        .get("email")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if email.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Email is required",
+        ));
+    }
+    if !state.config.auth_enable_user_forget_password {
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Forget password disabled",
+            "Forget password is currently disabled",
+        ));
+    }
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_email(runtime.connection(), &email) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if let Some(user) = user {
+        let reset_token = match issue_action_token(&user, "reset_password", 24, &state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+        let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+        if log_auth_event(
+            runtime.connection(),
+            AuthEvent {
+                user_id: Some(user.profile.id),
+                username: &user.profile.username,
+                event_type: "password_reset_requested",
+                ip_address: &ip_address,
+                user_agent: &request_user_agent,
+                success: true,
+                error_message: None,
+                metadata: Some(
+                    json!({
+                        "email": email,
+                        "delivery": "not_configured_mock_success",
+                        "reset_token": reset_token,
+                    })
+                    .to_string(),
+                ),
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+    }
+
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
+async fn reset_password_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let email = body
+        .get("email")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let token = body
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if email.is_empty() || password.is_empty() || token.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Email, password and token are required",
+        ));
+    }
+    if !state.config.auth_enable_user_forget_password {
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Forget password disabled",
+            "Forget password is currently disabled",
+        ));
+    }
+    if let Err(message) = state.config.auth_password_policy.validate(password) {
+        return auth_rest_error_response(AuthRestError::new(400, "Invalid password", message));
+    }
+    let payload = match validate_action_jwt(
+        token,
+        &state,
+        "reset_password",
+        "Reset password token is invalid or expired",
+    ) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if payload.get("email").and_then(Value::as_str) != Some(email.as_str()) {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Invalid token",
+            "Reset password token does not match email",
+        ));
+    }
+    let user_id = match action_user_id(&payload, "Invalid token") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_auth_user_profile(runtime.connection(), user_id) {
+        Ok(Some(value)) if value.email.trim() == email => value,
+        Ok(_) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if update_user_password_hash(
+        runtime.connection(),
+        user.id,
+        &password_hash,
+        &utc_now_text(),
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if log_auth_event(
+        runtime.connection(),
+        AuthEvent {
+            user_id: Some(user.id),
+            username: &user.username,
+            event_type: "password_reset_completed",
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: None,
+        },
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
 async fn unlink_profile_external_auth_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -1652,6 +2059,94 @@ fn validate_refresh_jwt(
         .map_err(|error| Box::new(auth_rest_error_response(error)))
 }
 
+fn validate_action_jwt(
+    token: &str,
+    state: &ProxyState,
+    expected_type: &str,
+    invalid_message: &'static str,
+) -> RouteResult<Value> {
+    let secret = state
+        .config
+        .auth_jwt_secret
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            Box::new(auth_rest_error_response(AuthRestError::new(
+                503,
+                "Service Unavailable",
+                "Rust auth token runtime requires BILL_ANALYSER_AUTH_JWT_SECRET or JWT_SECRET_KEY",
+            )))
+        })?;
+    let mut parts = token.split('.');
+    let encoded_header = parts
+        .next()
+        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    let encoded_payload = parts
+        .next()
+        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    let encoded_signature = parts
+        .next()
+        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    if parts.next().is_some() {
+        return Err(invalid_action_token_box(invalid_message));
+    }
+
+    let header = decode_action_jwt_part(encoded_header, invalid_message)?;
+    let payload = decode_action_jwt_part(encoded_payload, invalid_message)?;
+    let configured_algorithm = normalize_jwt_algorithm(&state.config.auth_jwt_algorithm);
+    let header_algorithm = normalize_jwt_algorithm(
+        header
+            .get("alg")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    if header_algorithm != configured_algorithm {
+        return Err(invalid_action_token_box(invalid_message));
+    }
+    let hmac_algorithm = jwt_hmac_algorithm(&configured_algorithm).map_err(|error| {
+        Box::new(auth_rest_error_response(AuthRestError::new(
+            503,
+            "Service Unavailable",
+            error.message,
+        )))
+    })?;
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    let signature = general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded_signature)
+        .or_else(|_| general_purpose::URL_SAFE.decode(encoded_signature))
+        .map_err(|_| invalid_action_token_box(invalid_message))?;
+    let key = hmac::Key::new(hmac_algorithm, secret.as_bytes());
+    hmac::verify(&key, signing_input.as_bytes(), &signature)
+        .map_err(|_| invalid_action_token_box(invalid_message))?;
+    let exp = payload
+        .get("exp")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    if exp <= Utc::now().timestamp() {
+        return Err(invalid_action_token_box(invalid_message));
+    }
+    if payload.get("type").and_then(Value::as_str) != Some(expected_type) {
+        return Err(invalid_action_token_box(invalid_message));
+    }
+    Ok(payload)
+}
+
+fn decode_action_jwt_part(encoded: &str, invalid_message: &'static str) -> RouteResult<Value> {
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .or_else(|_| general_purpose::URL_SAFE.decode(encoded))
+        .map_err(|_| invalid_action_token_box(invalid_message))?;
+    serde_json::from_slice(&decoded).map_err(|_| invalid_action_token_box(invalid_message))
+}
+
+fn action_user_id(payload: &Value, invalid_message: &'static str) -> RouteResult<UserId> {
+    let raw_user_id = payload
+        .get("user_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    UserId::new(raw_user_id).map_err(|_| invalid_action_token_box(invalid_message))
+}
+
 fn issue_session_tokens(
     user_id: UserId,
     username: &str,
@@ -1801,6 +2296,14 @@ fn verify_hmac_signature(
 
 fn invalid_refresh_token_box() -> Box<Response> {
     Box::new(invalid_refresh_token_response())
+}
+
+fn invalid_action_token_box(message: &'static str) -> Box<Response> {
+    Box::new(auth_rest_error_response(AuthRestError::new(
+        400,
+        "Invalid token",
+        message,
+    )))
 }
 
 fn invalid_refresh_token_response() -> Response {
