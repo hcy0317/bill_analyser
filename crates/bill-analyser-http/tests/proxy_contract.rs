@@ -31,6 +31,8 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(config.auth_lockout_duration_minutes, 15);
     assert!(config.auth_enable_user_registration);
     assert!(!config.auth_require_email_verification);
+    assert!(!config.auth_enable_oauth2);
+    assert_eq!(config.auth_oauth2_provider, "");
     assert_eq!(config.auth_password_policy, PasswordPolicy::default());
     let tuned_config = config
         .clone()
@@ -38,6 +40,8 @@ fn config_defaults_keep_python_as_proxy_fallback() {
         .with_auth_lockout_duration_minutes(60)
         .with_auth_enable_user_registration(false)
         .with_auth_require_email_verification(true)
+        .with_auth_enable_oauth2(true)
+        .with_auth_oauth2_provider(" github ")
         .with_auth_password_policy(PasswordPolicy {
             min_length: 12,
             require_uppercase: true,
@@ -49,6 +53,8 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(tuned_config.auth_lockout_duration_minutes, 60);
     assert!(!tuned_config.auth_enable_user_registration);
     assert!(tuned_config.auth_require_email_verification);
+    assert!(tuned_config.auth_enable_oauth2);
+    assert_eq!(tuned_config.auth_oauth2_provider, "github");
     assert_eq!(tuned_config.auth_password_policy.min_length, 12);
     assert_eq!(
         health.identity.runtime_boundary,
@@ -96,6 +102,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES" => Some("45".to_string()),
         "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION" => Some("false".to_string()),
         "BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_ENABLE_OAUTH2" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_OAUTH2_PROVIDER" => Some(" gitlab ".to_string()),
         "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH" => Some("10".to_string()),
         "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE" => Some("true".to_string()),
         "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_LOWERCASE" => Some("true".to_string()),
@@ -123,6 +131,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     assert_eq!(config.auth_lockout_duration_minutes, 45);
     assert!(!config.auth_enable_user_registration);
     assert!(config.auth_require_email_verification);
+    assert!(config.auth_enable_oauth2);
+    assert_eq!(config.auth_oauth2_provider, "gitlab");
     assert_eq!(
         config.auth_password_policy,
         PasswordPolicy {
@@ -150,6 +160,8 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
         "LOCKOUT_DURATION_MINUTES" => Some("30".to_string()),
         "ENABLE_USER_REGISTRATION" => Some("0".to_string()),
         "REQUIRE_EMAIL_VERIFICATION" => Some("1".to_string()),
+        "ENABLE_OAUTH2" => Some("1".to_string()),
+        "OAUTH2_PROVIDER" => Some("google".to_string()),
         "PASSWORD_MIN_LENGTH" => Some("9".to_string()),
         "PASSWORD_REQUIRE_UPPERCASE" => Some("yes".to_string()),
         "PASSWORD_REQUIRE_LOWERCASE" => Some("on".to_string()),
@@ -167,6 +179,8 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
     assert_eq!(config.auth_lockout_duration_minutes, 30);
     assert!(!config.auth_enable_user_registration);
     assert!(config.auth_require_email_verification);
+    assert!(config.auth_enable_oauth2);
+    assert_eq!(config.auth_oauth2_provider, "google");
     assert_eq!(config.auth_password_policy.min_length, 9);
     assert!(config.auth_password_policy.require_uppercase);
     assert!(config.auth_password_policy.require_lowercase);

@@ -22,16 +22,17 @@ use bill_analyser_db::{
     auth_email_exists_for_other_user, auth_username_exists, cleanup_expired_sessions,
     count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
     create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
-    get_active_logout_session_by_token_hash, get_active_refresh_session, get_auth_token_user,
-    get_auth_user_profile, get_login_user_by_login_name, increment_failed_login,
-    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
-    list_application_cloud_settings, list_user_sessions, rotate_refresh_token_session,
+    delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
+    get_auth_token_user, get_auth_user_profile, get_login_user_by_login_name,
+    get_user_external_auth, increment_failed_login, invalidate_other_user_sessions,
+    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
+    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
     update_application_cloud_settings, update_auth_user_profile,
     update_auth_user_profile_with_auth_log, update_user_last_login, ApplicationCloudSettingDraft,
     ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow,
-    AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, RegisterPresetCategory,
-    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow,
+    AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
+    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -79,6 +80,8 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/profile/cloud-settings"),
     ("PUT", "/api/profile/cloud-settings"),
     ("DELETE", "/api/profile/cloud-settings"),
+    ("GET", "/api/profile/external-auths"),
+    ("POST", "/api/profile/external-auths/unlink"),
     ("GET", "/api/system/version"),
 ];
 
@@ -120,6 +123,14 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
                 .put(update_profile_cloud_settings_handler)
                 .delete(delete_profile_cloud_settings_handler)
                 .options(auth_options_handler),
+        )
+        .route(
+            "/api/profile/external-auths",
+            get(list_profile_external_auths_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/profile/external-auths/unlink",
+            post(unlink_profile_external_auth_handler).options(auth_options_handler),
         )
         .route(
             "/api/system/version",
@@ -1004,6 +1015,157 @@ async fn delete_profile_cloud_settings_handler(
         Ok(_) => success_result(StatusCode::OK, Value::Bool(true)),
         Err(_) => db_error_response(),
     }
+}
+
+async fn list_profile_external_auths_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let rows = match list_user_external_auths(runtime.connection(), auth.user_id) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    let mut result: Vec<ExternalAuthInfo> =
+        rows.into_iter().map(ExternalAuthInfo::linked).collect();
+
+    let oauth2_provider = state.config.auth_oauth2_provider.trim();
+    if state.config.auth_enable_oauth2
+        && !oauth2_provider.is_empty()
+        && !result
+            .iter()
+            .any(|item| item.external_auth_type == oauth2_provider)
+    {
+        result.push(ExternalAuthInfo {
+            external_auth_category: "oauth2".to_string(),
+            external_auth_type: oauth2_provider.to_string(),
+            linked: false,
+            external_username: String::new(),
+            created_at: 0,
+        });
+    }
+
+    result.sort_by(|left, right| {
+        right
+            .linked
+            .cmp(&left.linked)
+            .then_with(|| left.external_auth_type.cmp(&right.external_auth_type))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+    });
+
+    success_result(StatusCode::OK, external_auths_payload(result))
+}
+
+async fn unlink_profile_external_auth_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = request_body_object(&body);
+    let external_auth_type = body
+        .get("externalAuthType")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if external_auth_type.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "externalAuthType is required",
+        ));
+    }
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if password.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "password is required",
+        ));
+    }
+
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_auth_token_user(runtime.connection(), auth.user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                404,
+                "User not found",
+                "User not found",
+            ));
+        }
+        Err(_) => return db_error_response(),
+    };
+    if !bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Invalid password",
+        ));
+    }
+
+    let existing =
+        match get_user_external_auth(runtime.connection(), auth.user_id, &external_auth_type) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                return auth_rest_error_response(AuthRestError::new(
+                    404,
+                    "Not Found",
+                    "Third-party login is not linked",
+                ));
+            }
+            Err(_) => return db_error_response(),
+        };
+    let success =
+        match delete_user_external_auth(runtime.connection(), auth.user_id, &external_auth_type) {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if log_auth_event(
+        runtime.connection(),
+        AuthEvent {
+            user_id: Some(user.id),
+            username: &user.username,
+            event_type: "external_auth_unlinked",
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            success,
+            error_message: None,
+            metadata: Some(
+                json!({
+                    "external_auth_type": external_auth_type,
+                    "external_auth_category": existing.external_auth_category,
+                })
+                .to_string(),
+            ),
+        },
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+
+    success_result(StatusCode::OK, Value::Bool(success))
 }
 
 async fn system_version_handler() -> Response {
@@ -2688,6 +2850,43 @@ fn application_cloud_settings_payload(settings: Vec<ApplicationCloudSettingRow>)
                 json!({
                     "settingKey": setting.setting_key,
                     "settingValue": setting.setting_value,
+                })
+            })
+            .collect(),
+    )
+}
+
+struct ExternalAuthInfo {
+    external_auth_category: String,
+    external_auth_type: String,
+    linked: bool,
+    external_username: String,
+    created_at: i64,
+}
+
+impl ExternalAuthInfo {
+    fn linked(row: ExternalAuthRow) -> Self {
+        Self {
+            external_auth_category: row.external_auth_category,
+            external_auth_type: row.external_auth_type,
+            linked: true,
+            external_username: row.external_username,
+            created_at: datetime_to_unix_millis(&row.created_at),
+        }
+    }
+}
+
+fn external_auths_payload(auths: Vec<ExternalAuthInfo>) -> Value {
+    Value::Array(
+        auths
+            .into_iter()
+            .map(|auth| {
+                json!({
+                    "externalAuthCategory": auth.external_auth_category,
+                    "externalAuthType": auth.external_auth_type,
+                    "linked": auth.linked,
+                    "externalUsername": auth.external_username,
+                    "createdAt": auth.created_at,
                 })
             })
             .collect(),

@@ -1570,12 +1570,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/networth/snapshot",
         "matching-recurring-calendar-networth"
     ),
-    python_proxy_route!("GET", "/api/profile/external-auths", "auth-security-user-data"),
-    python_proxy_route!(
-        "POST",
-        "/api/profile/external-auths/unlink",
-        "auth-security-user-data"
-    ),
     python_proxy_route!(
         "GET",
         "/api/recurring/suggestions",
@@ -1842,6 +1836,26 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes:
             "Rust auth profile runtime deletes all authenticated-user cloud settings and returns result=true.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/profile/external-auths",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime lists user-scoped external-auth bindings, preserves createdAt millisecond projection, and appends the configured OAuth2 unlinked placeholder.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/profile/external-auths/unlink",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth profile runtime verifies the current password before deleting a user-scoped external-auth binding and writing external_auth_unlinked audit metadata.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2363,7 +2377,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile verification-email resend, and system version routes are Rust-owned; external-auth, 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2820,7 +2834,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile verification-email resend, and system version routes are Rust-owned; external-auth, 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, OAuth/password recovery, step-up, and user-data routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

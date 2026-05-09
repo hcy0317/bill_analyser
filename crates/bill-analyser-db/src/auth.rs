@@ -91,6 +91,14 @@ pub struct ApplicationCloudSettingRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalAuthRow {
+    pub external_auth_category: String,
+    pub external_auth_type: String,
+    pub external_username: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplicationCloudSettingDraft {
     pub setting_key: String,
     pub setting_value: String,
@@ -337,6 +345,58 @@ pub fn list_application_cloud_settings(
     })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn list_user_external_auths(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Vec<ExternalAuthRow>> {
+    let user_id_sql = user_id_sql(user_id)?;
+    let mut statement = connection.prepare(
+        r#"
+        SELECT external_auth_category, external_auth_type, external_username, created_at
+        FROM user_external_auths
+        WHERE user_id = ?1
+        ORDER BY created_at DESC, id DESC
+        "#,
+    )?;
+    let rows = statement.query_map([user_id_sql], external_auth_from_row)?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn get_user_external_auth(
+    connection: &Connection,
+    user_id: UserId,
+    external_auth_type: &str,
+) -> DbResult<Option<ExternalAuthRow>> {
+    let user_id_sql = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            r#"
+            SELECT external_auth_category, external_auth_type, external_username, created_at
+            FROM user_external_auths
+            WHERE user_id = ?1 AND external_auth_type = ?2
+            LIMIT 1
+            "#,
+            params![user_id_sql, external_auth_type],
+            external_auth_from_row,
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn delete_user_external_auth(
+    connection: &Connection,
+    user_id: UserId,
+    external_auth_type: &str,
+) -> DbResult<bool> {
+    let user_id_sql = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        "DELETE FROM user_external_auths WHERE user_id = ?1 AND external_auth_type = ?2",
+        params![user_id_sql, external_auth_type],
+    )?;
+    Ok(changed > 0)
 }
 
 pub fn auth_email_exists_for_other_user(
@@ -903,6 +963,15 @@ fn user_id_from_sql(raw_id: i64, column: usize) -> rusqlite::Result<UserId> {
     UserId::new(raw_id).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, raw_id as i64))
 }
 
+fn external_auth_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExternalAuthRow> {
+    Ok(ExternalAuthRow {
+        external_auth_category: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+        external_auth_type: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+        external_username: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+        created_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+    })
+}
+
 fn apply_user_profile_update(
     connection: &Connection,
     user_id: i64,
@@ -1376,6 +1445,17 @@ mod tests {
                 updated_at TEXT NOT NULL,
                 UNIQUE(user_id, setting_key)
             );
+            CREATE TABLE user_external_auths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                external_auth_category TEXT NOT NULL,
+                external_auth_type TEXT NOT NULL,
+                external_user_id TEXT,
+                external_username TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, external_auth_type)
+            );
             CREATE TABLE accounts (
                 id INTEGER PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -1416,6 +1496,13 @@ mod tests {
                 (42, 'showAmountInHomePage', 'true', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
                 (42, 'autoSaveTransactionDraft', 'old', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
                 (7, 'showAmountInHomePage', 'false', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+            INSERT INTO user_external_auths(
+                user_id, external_auth_category, external_auth_type,
+                external_user_id, external_username, created_at, updated_at
+            ) VALUES
+                (42, 'oauth2', 'github', 'gh-42', 'alice-gh', '2026-01-02T00:00:00', '2026-01-02T00:00:00'),
+                (42, 'oauth2', 'google', 'gg-42', NULL, '2026-01-03T00:00:00', '2026-01-03T00:00:00'),
+                (7, 'oauth2', 'github', 'gh-7', 'bob-gh', '2026-01-04T00:00:00', '2026-01-04T00:00:00');
             "#,
         )?;
 
@@ -1620,6 +1707,35 @@ mod tests {
             )?,
             1
         );
+
+        let external_auths = list_user_external_auths(&connection, user_id(42))?;
+        assert_eq!(
+            external_auths
+                .iter()
+                .map(|item| item.external_auth_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["google", "github"]
+        );
+        assert_eq!(external_auths[0].external_username, "");
+        assert_eq!(
+            get_user_external_auth(&connection, user_id(42), "github")?
+                .expect("github auth")
+                .external_username,
+            "alice-gh"
+        );
+        assert!(get_user_external_auth(&connection, user_id(42), "missing")?.is_none());
+        assert!(delete_user_external_auth(
+            &connection,
+            user_id(42),
+            "github"
+        )?);
+        assert!(get_user_external_auth(&connection, user_id(42), "github")?.is_none());
+        assert!(!delete_user_external_auth(
+            &connection,
+            user_id(42),
+            "github"
+        )?);
+        assert_eq!(list_user_external_auths(&connection, user_id(7))?.len(), 1);
 
         assert!(update_application_cloud_settings(
             &connection,

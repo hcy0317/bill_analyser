@@ -326,6 +326,19 @@ fn create_core_tables(connection: &Connection) -> DbResult<()> {
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS user_external_auths (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            external_auth_category TEXT NOT NULL,
+            external_auth_type TEXT NOT NULL,
+            external_user_id TEXT,
+            external_username TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, external_auth_type),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -580,6 +593,8 @@ fn create_core_indexes(connection: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_exchange_rates_date
             ON user_exchange_rates(effective_date DESC);
         CREATE INDEX IF NOT EXISTS idx_user_exchange_rates_user_id ON user_exchange_rates(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_external_auths_type ON user_external_auths(external_auth_type);
         ",
     )?;
     Ok(())

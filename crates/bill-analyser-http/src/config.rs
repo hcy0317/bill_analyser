@@ -14,6 +14,7 @@ pub const DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 5;
 pub const DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 15;
 pub const DEFAULT_AUTH_ENABLE_USER_REGISTRATION: bool = true;
 pub const DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION: bool = false;
+pub const DEFAULT_AUTH_ENABLE_OAUTH2: bool = false;
 pub const DEFAULT_AUTH_PASSWORD_MIN_LENGTH: usize = 8;
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
@@ -37,6 +38,8 @@ pub struct HttpShellConfig {
     pub auth_lockout_duration_minutes: i64,
     pub auth_enable_user_registration: bool,
     pub auth_require_email_verification: bool,
+    pub auth_enable_oauth2: bool,
+    pub auth_oauth2_provider: String,
     pub auth_password_policy: PasswordPolicy,
     pub public_base_url: Option<String>,
 }
@@ -81,6 +84,8 @@ impl HttpShellConfig {
             auth_lockout_duration_minutes: DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
             auth_enable_user_registration: DEFAULT_AUTH_ENABLE_USER_REGISTRATION,
             auth_require_email_verification: DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
+            auth_enable_oauth2: DEFAULT_AUTH_ENABLE_OAUTH2,
+            auth_oauth2_provider: String::new(),
             auth_password_policy: PasswordPolicy {
                 min_length: DEFAULT_AUTH_PASSWORD_MIN_LENGTH,
                 ..PasswordPolicy::default()
@@ -136,6 +141,16 @@ impl HttpShellConfig {
 
     pub fn with_auth_require_email_verification(mut self, required: bool) -> Self {
         self.auth_require_email_verification = required;
+        self
+    }
+
+    pub fn with_auth_enable_oauth2(mut self, enabled: bool) -> Self {
+        self.auth_enable_oauth2 = enabled;
+        self
+    }
+
+    pub fn with_auth_oauth2_provider(mut self, provider: impl Into<String>) -> Self {
+        self.auth_oauth2_provider = provider.into().trim().to_string();
         self
     }
 
@@ -235,6 +250,16 @@ impl HttpShellConfig {
                 .or_else(|| lookup("REQUIRE_EMAIL_VERIFICATION")),
             DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
         )?;
+        let auth_enable_oauth2 = parse_env_bool_value(
+            "BILL_ANALYSER_AUTH_ENABLE_OAUTH2",
+            lookup("BILL_ANALYSER_AUTH_ENABLE_OAUTH2").or_else(|| lookup("ENABLE_OAUTH2")),
+            DEFAULT_AUTH_ENABLE_OAUTH2,
+        )?;
+        let auth_oauth2_provider = lookup("BILL_ANALYSER_AUTH_OAUTH2_PROVIDER")
+            .or_else(|| lookup("OAUTH2_PROVIDER"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_default();
         let auth_password_policy = PasswordPolicy {
             min_length: parse_env_usize_range_value(
                 "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH",
@@ -289,6 +314,8 @@ impl HttpShellConfig {
         config.auth_lockout_duration_minutes = auth_lockout_duration_minutes;
         config.auth_enable_user_registration = auth_enable_user_registration;
         config.auth_require_email_verification = auth_require_email_verification;
+        config.auth_enable_oauth2 = auth_enable_oauth2;
+        config.auth_oauth2_provider = auth_oauth2_provider;
         config.auth_password_policy = auth_password_policy;
         config.public_base_url = public_base_url;
         Ok(config)

@@ -526,6 +526,8 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
         ("GET", "/api/profile/cloud-settings"),
         ("PUT", "/api/profile/cloud-settings"),
         ("DELETE", "/api/profile/cloud-settings"),
+        ("GET", "/api/profile/external-auths"),
+        ("POST", "/api/profile/external-auths/unlink"),
         ("GET", "/api/system/version"),
     ] {
         assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
@@ -590,6 +592,98 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
             .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
             .and_then(|value| value.to_str().ok()),
         Some("authorization, content-type")
+    );
+
+    let external_auths_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/profile/external-auths",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(external_auths_response.status(), StatusCode::OK);
+    let external_auths_body = read_json(external_auths_response).await;
+    assert_eq!(external_auths_body["success"], true);
+    let external_auths = external_auths_body["result"]
+        .as_array()
+        .expect("external auths");
+    assert_eq!(external_auths.len(), 2);
+    assert_eq!(external_auths[0]["externalAuthType"], "github");
+    assert_eq!(external_auths[0]["externalUsername"], "alice-gh");
+    assert_eq!(external_auths[0]["linked"], true);
+    assert!(external_auths[0]["createdAt"].as_i64().unwrap_or_default() > 0);
+    assert_eq!(external_auths[1]["externalAuthType"], "google");
+    assert_eq!(external_auths[1]["linked"], false);
+    assert_eq!(external_auths[1]["createdAt"], 0);
+
+    let missing_unlink_type_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_unlink_type_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_unlink_type_response).await["message"],
+        "externalAuthType is required"
+    );
+
+    let invalid_unlink_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &token,
+            json!({"externalAuthType": "github", "password": "wrong"}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_unlink_password_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_unlink_password_response).await["message"],
+        "Invalid password"
+    );
+
+    let unlink_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &token,
+            json!({"externalAuthType": "github", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(unlink_response.status(), StatusCode::OK);
+    assert_eq!(read_json(unlink_response).await["result"], true);
+    assert_eq!(external_auth_count(fixture.db_path(), 42, "github")?, 0);
+    assert_eq!(external_auth_count(fixture.db_path(), 77, "github")?, 1);
+    let unlink_metadata = latest_auth_log_metadata(fixture.db_path(), "external_auth_unlinked")?;
+    assert_eq!(unlink_metadata["external_auth_type"], "github");
+    assert_eq!(unlink_metadata["external_auth_category"], "oauth2");
+
+    let missing_link_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/profile/external-auths/unlink",
+            &token,
+            json!({"externalAuthType": "github", "password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_link_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_link_response).await["message"],
+        "Third-party login is not linked"
     );
 
     let profile_response = app
@@ -1608,6 +1702,8 @@ fn runtime_router_with_db_path(path: &Path, include_jwt_secret: bool) -> Router 
     .expect("config")
     .with_sqlite_db_path(path.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET)
+    .with_auth_enable_oauth2(true)
+    .with_auth_oauth2_provider("google")
     .with_public_base_url("https://api.example.test");
     if include_jwt_secret {
         config = config.with_auth_jwt_secret(TEST_AUTH_SECRET);
@@ -1698,6 +1794,17 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             updated_at TEXT NOT NULL,
             UNIQUE(user_id, setting_key)
         );
+        CREATE TABLE user_external_auths (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            external_auth_category TEXT NOT NULL,
+            external_auth_type TEXT NOT NULL,
+            external_user_id TEXT,
+            external_username TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, external_auth_type)
+        );
         CREATE TABLE categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -1772,6 +1879,24 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
     )?;
     connection.execute(
         "INSERT INTO categories(id, user_id, main_category, sub_category, created_at) VALUES (201, 77, 'Other Transfer', '', '2026-01-01T00:00:00')",
+        [],
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO user_external_auths(
+            user_id, external_auth_category, external_auth_type,
+            external_user_id, external_username, created_at, updated_at
+        ) VALUES (42, 'oauth2', 'github', 'gh-42', 'alice-gh', '2026-01-02T00:00:00', '2026-01-02T00:00:00')
+        "#,
+        [],
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO user_external_auths(
+            user_id, external_auth_category, external_auth_type,
+            external_user_id, external_username, created_at, updated_at
+        ) VALUES (77, 'oauth2', 'github', 'gh-77', 'bob-gh', '2026-01-03T00:00:00', '2026-01-03T00:00:00')
+        "#,
         [],
     )?;
 
@@ -2348,6 +2473,19 @@ fn cloud_setting_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>>
     Ok(connection.query_row(
         "SELECT COUNT(*) FROM user_application_cloud_settings WHERE user_id = ?1",
         [user_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn external_auth_count(
+    path: &Path,
+    user_id: i64,
+    external_auth_type: &str,
+) -> Result<i64, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        "SELECT COUNT(*) FROM user_external_auths WHERE user_id = ?1 AND external_auth_type = ?2",
+        (user_id, external_auth_type),
         |row| row.get(0),
     )?)
 }
