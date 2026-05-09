@@ -16,6 +16,7 @@ pub mod schema;
 pub mod statistics;
 pub mod taxonomy;
 pub mod transaction;
+pub mod user_data;
 pub mod user_scope;
 
 pub use app_settings::{
@@ -102,4 +103,5 @@ pub use statistics::{
     StatisticsBillFilters,
 };
 pub use transaction::run_transaction;
+pub use user_data::get_user_data_statistics;
 pub use user_scope::UserScope;

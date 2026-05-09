@@ -15,7 +15,8 @@ use bill_analyser_core::{
         infer_token_type_from_user_agent, json_object_or_empty, parse_user_agent_device_name,
         validate_refresh_token_claims, AuthRestError, TokenKind,
     },
-    build_user_investment_keyword_settings, serialize_keyword_list, UserId,
+    build_user_investment_keyword_settings, serialize_keyword_list, user_data_statistics_response,
+    UserId,
 };
 use bill_analyser_db::{
     auth_account_belongs_to_user, auth_category_belongs_to_user, auth_email_exists,
@@ -24,16 +25,16 @@ use bill_analyser_db::{
     create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
     delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
     get_auth_token_user, get_auth_user_profile, get_login_user_by_email,
-    get_login_user_by_login_name, get_user_external_auth, increment_failed_login,
-    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
-    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
-    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
-    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
-    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
-    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
-    CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
-    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow,
+    get_login_user_by_login_name, get_user_data_statistics as get_db_user_data_statistics,
+    get_user_external_auth, increment_failed_login, invalidate_other_user_sessions,
+    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
+    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
+    set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
+    update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
+    ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
+    AuthUserProfileRow, AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
+    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -89,6 +90,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/profile/external-auths"),
     ("POST", "/api/profile/external-auths/unlink"),
     ("GET", "/api/system/version"),
+    ("GET", "/api/data/statistics"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -161,6 +163,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/system/version",
             get(system_version_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/data/statistics",
+            get(get_user_data_statistics_handler).options(auth_options_handler),
         )
         .route(
             "/api/tokens",
@@ -1605,6 +1611,24 @@ async fn system_version_handler() -> Response {
             "buildTime": ""
         }),
     )
+}
+
+async fn get_user_data_statistics_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match get_db_user_data_statistics(runtime.connection(), auth.user_id) {
+        Ok(statistics) => json_response(StatusCode::OK, user_data_statistics_response(&statistics)),
+        Err(_) => db_error_response(),
+    }
 }
 
 async fn list_tokens_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {

@@ -562,6 +562,26 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert!(auth_oauth2_authorize
         .unsupported_behavior
         .contains("real OAuth provider exchange"));
+
+    let auth_user_data_statistics = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/data/statistics")
+        .expect("auth user-data statistics route is present");
+    assert_eq!(
+        auth_user_data_statistics.state,
+        MigrationState::RustOwnedVerified
+    );
+    assert_eq!(
+        auth_user_data_statistics.handler,
+        RouteHandlerId::AuthTokenRuntime
+    );
+    assert_eq!(
+        auth_user_data_statistics.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessResult
+    );
+    assert!(auth_user_data_statistics
+        .unsupported_behavior
+        .contains("data export"));
 }
 
 #[test]

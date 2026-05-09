@@ -367,11 +367,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-runtime"
+        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-runtime"
     );
 
     let health_response = app

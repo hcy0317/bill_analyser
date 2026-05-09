@@ -1178,6 +1178,41 @@ async fn auth_profile_cloud_runtime_preserves_flask_contracts() -> Result<(), Bo
 }
 
 #[tokio::test]
+async fn auth_user_data_statistics_runtime_preserves_flask_contract() -> Result<(), Box<dyn Error>>
+{
+    let route = ("GET", "/api/data/statistics");
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|item| item != &route));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    seed_user_data_statistics_rows(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/statistics",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["result"]["billCount"], 2);
+    assert_eq!(body["result"]["accountCount"], 1);
+    assert_eq!(body["result"]["categoryCount"], 1);
+    assert_eq!(body["result"]["tagCount"], 3);
+    assert_eq!(body["result"]["templateCount"], 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_account_recovery_runtime_preserves_flask_contracts() -> Result<(), Box<dyn Error>> {
     for route in [
         ("POST", "/api/auth/email/verify"),
@@ -2262,6 +2297,45 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             row,
         )?;
     }
+    Ok(())
+}
+
+fn seed_user_data_statistics_rows(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        r#"
+        CREATE TABLE bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL
+        );
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE bill_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO bills(user_id) VALUES (42), (42), (77);
+        INSERT INTO tags(user_id, name, created_at, updated_at)
+        VALUES
+            (42, 'food', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (42, 'travel', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (42, 'work', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (77, 'other', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO bill_templates(user_id, name, created_at, updated_at)
+        VALUES
+            (42, 'monthly rent', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (77, 'other template', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        "#,
+    )?;
     Ok(())
 }
 

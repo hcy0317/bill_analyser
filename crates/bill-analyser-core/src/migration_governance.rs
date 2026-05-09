@@ -1444,7 +1444,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "auth-security-user-data",
         ResponseEnvelopeFamily::FlaskRawPassthrough
     ),
-    python_proxy_route!("GET", "/api/data/statistics", "auth-security-user-data"),
     python_proxy_route!("GET", "/api/insights/anomalies", "statistics-analyzer"),
     python_proxy_route!("GET", "/api/llm/candidates", "ai-learning-llm"),
     python_proxy_route!("GET", "/api/llm/candidates/{candidate_id}", "ai-learning-llm"),
@@ -1895,6 +1894,16 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes:
             "Rust auth runtime serves the unauthenticated system version metadata route with the legacy payload shape.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/data/statistics",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth user-data runtime returns authenticated user-scoped bill/account/category/tag/template counts with the Flask-compatible success/result envelope.",
     },
     EndpointOwnership {
         method: "CONTRACT",
@@ -2393,12 +2402,14 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "crates/bill-analyser-http/src/auth_routes.rs",
             "crates/bill-analyser-db/src/auth.rs",
             "crates/bill-analyser-db/src/auth_registration.rs",
+            "crates/bill-analyser-db/src/user_data.rs",
             "crates/bill-analyser-core/src/auth/mod.rs",
             "crates/bill-analyser-http/src/proxy.rs",
         ],
         tests_migrated: &[
             "crates/bill-analyser-http/tests/auth_runtime_contract.rs",
             "crates/bill-analyser-core/tests/auth_security_contracts.rs",
+            "crates/bill-analyser-core/tests/ops_contracts.rs",
         ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
@@ -2406,7 +2417,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, and user-data statistics routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2863,7 +2874,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, and system version routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, and user-data routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, and user-data statistics routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,
