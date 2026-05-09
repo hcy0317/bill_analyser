@@ -1,7 +1,9 @@
 use axum::http::{header, HeaderMap};
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{auth::parse_bearer_authorization_header, UserId};
-use bill_analyser_db::{SqliteConnectionConfig, SqliteDbPath, SqliteRuntime};
+use bill_analyser_db::{
+    init_auth_security_schema, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+};
 use chrono::{Local, NaiveDateTime};
 use ring::hmac;
 use rusqlite::OptionalExtension;
@@ -276,6 +278,8 @@ fn resolve_session_user(
         busy_timeout: config.timeout,
     })
     .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
+    init_auth_security_schema(runtime.connection())
+        .map_err(|error| RustRouteAuthError::internal(format!("Rust auth DB error: {error}")))?;
     let token_hash = sha256_hex(token);
     let raw_session = runtime
         .connection()

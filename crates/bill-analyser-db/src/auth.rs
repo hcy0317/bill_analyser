@@ -1,5 +1,6 @@
-use bill_analyser_core::UserId;
+use bill_analyser_core::{auth::recovery_code_hash_input, UserId};
 use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 use crate::{DbError, DbResult};
@@ -821,6 +822,111 @@ pub fn create_auth_log(connection: &Connection, draft: &AuthLogDraft) -> DbResul
         ],
     )?;
     Ok(connection.last_insert_rowid())
+}
+
+pub fn hash_two_factor_recovery_code(recovery_code: &str) -> Option<String> {
+    recovery_code_hash_input(recovery_code)
+        .map(|value| format!("{:x}", Sha256::digest(value.as_bytes())))
+}
+
+pub fn replace_two_factor_recovery_codes(
+    connection: &Connection,
+    user_id: UserId,
+    recovery_codes: &[&str],
+    now: &str,
+) -> DbResult<usize> {
+    let user_id = user_id_sql(user_id)?;
+    let mut seen_hashes = HashSet::new();
+    let mut code_hashes = Vec::new();
+    for recovery_code in recovery_codes {
+        let Some(code_hash) = hash_two_factor_recovery_code(recovery_code) else {
+            continue;
+        };
+        if seen_hashes.insert(code_hash.clone()) {
+            code_hashes.push(code_hash);
+        }
+    }
+
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| {
+        connection.execute(
+            "DELETE FROM user_two_factor_recovery_codes WHERE user_id = ?1",
+            [user_id],
+        )?;
+        if !code_hashes.is_empty() {
+            let mut statement = connection.prepare(
+                r#"
+                INSERT INTO user_two_factor_recovery_codes (
+                    user_id, code_hash, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4)
+                "#,
+            )?;
+            for code_hash in &code_hashes {
+                statement.execute(params![user_id, code_hash, now, now])?;
+            }
+        }
+        Ok(code_hashes.len())
+    })();
+
+    match result {
+        Ok(count) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(count)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn consume_two_factor_recovery_code(
+    connection: &Connection,
+    user_id: UserId,
+    recovery_code: &str,
+    now: &str,
+) -> DbResult<bool> {
+    let Some(code_hash) = hash_two_factor_recovery_code(recovery_code) else {
+        return Ok(false);
+    };
+    let user_id = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        r#"
+        UPDATE user_two_factor_recovery_codes
+        SET used_at = ?1, updated_at = ?1
+        WHERE user_id = ?2 AND code_hash = ?3 AND used_at IS NULL
+        "#,
+        params![now, user_id, code_hash],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn clear_two_factor_recovery_codes(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<usize> {
+    let user_id = user_id_sql(user_id)?;
+    Ok(connection.execute(
+        "DELETE FROM user_two_factor_recovery_codes WHERE user_id = ?1",
+        [user_id],
+    )?)
+}
+
+pub fn count_active_two_factor_recovery_codes(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<i64> {
+    let user_id = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM user_two_factor_recovery_codes WHERE user_id = ?1 AND used_at IS NULL",
+            [user_id],
+            |row| row.get(0),
+        )
+        .map_err(DbError::from)
 }
 
 pub fn increment_failed_login(

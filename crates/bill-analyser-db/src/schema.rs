@@ -65,6 +65,13 @@ pub fn init_foundational_schema(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+pub fn init_auth_security_schema(connection: &Connection) -> DbResult<()> {
+    create_auth_security_tables(connection)?;
+    migrate_legacy_user_security_columns(connection)?;
+    create_auth_security_indexes(connection)?;
+    Ok(())
+}
+
 pub fn migrate_core_user_scope_constraints(connection: &Connection) -> DbResult<()> {
     for table_name in USER_SCOPED_TABLES {
         migrate_user_id_field(connection, table_name)?;
@@ -600,6 +607,229 @@ fn create_core_indexes(connection: &Connection) -> DbResult<()> {
     Ok(())
 }
 
+fn create_auth_security_tables(connection: &Connection) -> DbResult<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            nickname TEXT,
+            avatar TEXT,
+            default_account_id INTEGER,
+            transaction_edit_scope INTEGER DEFAULT 0,
+            language TEXT DEFAULT 'zh_Hans',
+            default_currency TEXT DEFAULT 'CNY',
+            first_day_of_week INTEGER DEFAULT 1,
+            fiscal_year_start INTEGER DEFAULT 1,
+            calendar_display_type INTEGER DEFAULT 0,
+            date_display_type INTEGER DEFAULT 0,
+            long_date_format INTEGER DEFAULT 0,
+            short_date_format INTEGER DEFAULT 0,
+            long_time_format INTEGER DEFAULT 0,
+            fiscal_year_format INTEGER DEFAULT 0,
+            currency_display_type INTEGER DEFAULT 0,
+            numeral_system INTEGER DEFAULT 0,
+            decimal_separator INTEGER DEFAULT 0,
+            digit_grouping_symbol INTEGER DEFAULT 0,
+            digit_grouping INTEGER DEFAULT 0,
+            coordinate_display_type INTEGER DEFAULT 0,
+            expense_amount_color INTEGER DEFAULT 0,
+            income_amount_color INTEGER DEFAULT 0,
+            cash_account_id INTEGER,
+            cash_transfer_category_id INTEGER,
+            import_learning_enabled BOOLEAN DEFAULT 1,
+            investment_platform_keywords TEXT,
+            investment_product_keywords TEXT,
+            investment_exclude_keywords TEXT,
+            is_active BOOLEAN DEFAULT 1,
+            email_verified BOOLEAN DEFAULT 0,
+            two_factor_enabled BOOLEAN DEFAULT 0,
+            two_factor_secret TEXT,
+            failed_login_attempts INTEGER DEFAULT 0,
+            locked_until TEXT,
+            last_login_at TEXT,
+            last_login_ip TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            refresh_token_hash TEXT UNIQUE,
+            expires_at TEXT NOT NULL,
+            refresh_expires_at TEXT,
+            user_agent TEXT,
+            ip_address TEXT,
+            is_active BOOLEAN DEFAULT 1,
+            last_activity_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS auth_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            event_type TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            success BOOLEAN NOT NULL,
+            error_message TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS user_two_factor_recovery_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            code_hash TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, code_hash),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_external_auths (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            external_auth_category TEXT NOT NULL,
+            external_auth_type TEXT NOT NULL,
+            external_user_id TEXT,
+            external_username TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, external_auth_type),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_application_cloud_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            setting_key TEXT NOT NULL,
+            setting_value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, setting_key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn create_auth_security_indexes(connection: &Connection) -> DbResult<()> {
+    if table_exists(connection, "users")? {
+        let user_columns = table_column_names(connection, "users")?;
+        if user_columns.iter().any(|column| column == "username") {
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique
+                 ON users(username)
+                 WHERE username IS NOT NULL AND username <> ''",
+                [],
+            )?;
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+                [],
+            )?;
+        }
+        if user_columns.iter().any(|column| column == "email") {
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+                 ON users(email)
+                 WHERE email IS NOT NULL AND email <> ''",
+                [],
+            )?;
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+                [],
+            )?;
+        }
+        if user_columns.iter().any(|column| column == "is_active") {
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)",
+                [],
+            )?;
+        }
+    }
+    connection.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_auth_logs_user ON auth_logs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_auth_logs_event ON auth_logs(event_type, created_at);
+        CREATE INDEX IF NOT EXISTS idx_auth_logs_created ON auth_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_user_two_factor_recovery_codes_user
+            ON user_two_factor_recovery_codes(user_id, used_at);
+        CREATE INDEX IF NOT EXISTS idx_user_two_factor_recovery_codes_hash
+            ON user_two_factor_recovery_codes(user_id, code_hash);
+        CREATE INDEX IF NOT EXISTS idx_user_external_auths_user ON user_external_auths(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_external_auths_type
+            ON user_external_auths(external_auth_type);
+        CREATE INDEX IF NOT EXISTS idx_user_application_cloud_settings_user
+            ON user_application_cloud_settings(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_application_cloud_settings_key
+            ON user_application_cloud_settings(setting_key);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_legacy_user_security_columns(connection: &Connection) -> DbResult<()> {
+    for (column, definition) in [
+        ("email", "TEXT DEFAULT ''"),
+        ("password_hash", "TEXT DEFAULT ''"),
+        ("nickname", "TEXT"),
+        ("avatar", "TEXT"),
+        ("default_account_id", "INTEGER"),
+        ("transaction_edit_scope", "INTEGER DEFAULT 0"),
+        ("language", "TEXT DEFAULT 'zh_Hans'"),
+        ("default_currency", "TEXT DEFAULT 'CNY'"),
+        ("first_day_of_week", "INTEGER DEFAULT 1"),
+        ("fiscal_year_start", "INTEGER DEFAULT 1"),
+        ("calendar_display_type", "INTEGER DEFAULT 0"),
+        ("date_display_type", "INTEGER DEFAULT 0"),
+        ("long_date_format", "INTEGER DEFAULT 0"),
+        ("short_date_format", "INTEGER DEFAULT 0"),
+        ("long_time_format", "INTEGER DEFAULT 0"),
+        ("short_time_format", "INTEGER DEFAULT 0"),
+        ("fiscal_year_format", "INTEGER DEFAULT 0"),
+        ("currency_display_type", "INTEGER DEFAULT 0"),
+        ("numeral_system", "INTEGER DEFAULT 0"),
+        ("decimal_separator", "INTEGER DEFAULT 0"),
+        ("digit_grouping_symbol", "INTEGER DEFAULT 0"),
+        ("digit_grouping", "INTEGER DEFAULT 0"),
+        ("coordinate_display_type", "INTEGER DEFAULT 0"),
+        ("expense_amount_color", "INTEGER DEFAULT 0"),
+        ("income_amount_color", "INTEGER DEFAULT 0"),
+        ("cash_account_id", "INTEGER"),
+        ("cash_transfer_category_id", "INTEGER"),
+        ("import_learning_enabled", "BOOLEAN DEFAULT 1"),
+        ("investment_platform_keywords", "TEXT"),
+        ("investment_product_keywords", "TEXT"),
+        ("investment_exclude_keywords", "TEXT"),
+        ("is_active", "BOOLEAN DEFAULT 1"),
+        ("email_verified", "BOOLEAN DEFAULT 0"),
+        ("two_factor_enabled", "BOOLEAN DEFAULT 0"),
+        ("two_factor_secret", "TEXT"),
+        ("failed_login_attempts", "INTEGER DEFAULT 0"),
+        ("locked_until", "TEXT"),
+        ("last_login_at", "TEXT"),
+        ("last_login_ip", "TEXT"),
+        ("created_at", "TEXT DEFAULT ''"),
+        ("updated_at", "TEXT DEFAULT ''"),
+    ] {
+        add_column_if_missing(connection, "users", column, definition)?;
+    }
+    Ok(())
+}
+
 fn migrate_core_legacy_columns(connection: &Connection) -> DbResult<()> {
     for (table, column, definition) in [
         ("categories", "type", "INTEGER DEFAULT 1"),
@@ -906,7 +1136,7 @@ pub fn schema_inventory() -> SchemaInventory {
             },
             SchemaResponsibility {
                 python_path: "src/bill_analyser/core/database/schema/users_security.py",
-                rust_mapping: "crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; auth/security/backup tables remain deferred",
+                rust_mapping: "crates/bill-analyser-db/src/schema.rs covers auth/security users/session/cloud schema; crates/bill-analyser-db/src/app_settings.rs covers app_settings/OCR config subset; backup tables remain deferred",
                 status: "foundational",
             },
         ],

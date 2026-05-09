@@ -28,14 +28,16 @@ def test_workspace_declares_internal_sqlite_db_crate() -> None:
     assert "rusqlite" in manifest.get("dependencies", {})
 
 
-def test_sqlite_runtime_sources_keep_real_db_path_guard_and_no_business_primary_claim() -> None:
+def test_sqlite_runtime_sources_keep_real_db_path_guard_and_auth_schema_gate() -> None:
     lib_rs = (DB_CRATE / "src" / "lib.rs").read_text(encoding="utf-8")
     path_rs = (DB_CRATE / "src" / "path.rs").read_text(encoding="utf-8")
     schema_rs = (DB_CRATE / "src" / "schema.rs").read_text(encoding="utf-8")
 
-    assert "no business database write path is Rust-primary" in lib_rs
+    assert "Rust-owned HTTP domains use this crate" in lib_rs
     assert "data/bills.db" in path_rs
     assert "deny_real_data_path" in path_rs
+    assert "init_auth_security_schema" in schema_rs
+    assert "user_application_cloud_settings" in schema_rs
     assert "src/bill_analyser/core/database/runtime.py" in schema_rs
     assert "src/bill_analyser/core/database/schema/__init__.py" in schema_rs
 

@@ -4,6 +4,8 @@
 
 Rust profile runtime 会在邮箱变更时校验格式/唯一性、重置 `email_verified` 并记录审计日志；账户/分类引用 ID 必须属于当前用户，头像上传只接受 PNG/JPEG/GIF/WebP 真实图片内容，已接管的 profile/cloud/external-auth 路由直接响应 `OPTIONS` preflight。
 
+Rust DB foundation 额外负责 auth/security schema 的幂等初始化，覆盖 `users` legacy 认证字段补齐、`sessions`、`auth_logs`、2FA 恢复码、external auth 与 profile cloud settings 基础表/索引；2FA 恢复码当前仅接管 hash/replace/consume/clear/count SQLite primitive，2FA 路由、step-up、data export 与 data clear 仍由 Python sidecar 保留。
+
 ## 目录
 
 - [项目定位](overview-positioning.md) — 系统目标、核心数据源（微信/支付宝/多家银行）

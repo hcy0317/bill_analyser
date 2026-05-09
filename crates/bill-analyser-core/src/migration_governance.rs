@@ -2542,6 +2542,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "crates/bill-analyser-db/src/bills.rs",
             "crates/bill-analyser-db/src/budgets.rs",
             "crates/bill-analyser-db/src/import_staging.rs",
+            "crates/bill-analyser-db/src/auth.rs",
             "crates/bill-analyser-db/src/statistics.rs",
             "crates/bill-analyser-db/src/app_settings.rs",
             "crates/bill-analyser-db/src/taxonomy",
@@ -2550,6 +2551,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "crates/bill-analyser-db/tests/bills_runtime.rs",
             "crates/bill-analyser-db/tests/budgets_runtime.rs",
             "crates/bill-analyser-db/tests/import_staging.rs",
+            "crates/bill-analyser-db/tests/auth_two_factor_recovery.rs",
             "crates/bill-analyser-db/tests/app_settings.rs",
             "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs",
         ],
@@ -2559,7 +2561,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["business_domain_route_takeover"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Repository implementations exist for several Rust-owned or bridge-backed domains, but Python facade deletion remains blocked until each business domain owns its routes and tests.",
+            "Repository implementations exist for several Rust-owned or bridge-backed domains, including 2FA recovery-code DB primitives; Python facade deletion remains blocked until each business domain owns its routes and tests.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_REPOSITORY_EVIDENCE,
@@ -3025,7 +3027,7 @@ pub fn database_schema_db_writer_policy() -> DbWriterPolicy {
     DbWriterPolicy {
         domain: "database-schema",
         mode: DbWriterMode::RustDomainOwned,
-        active_writer: "crates/bill-analyser-db/src/schema.rs::init_foundational_schema",
+        active_writer: "crates/bill-analyser-db/src/schema.rs::init_foundational_schema + init_auth_security_schema",
         rust_write_allowed: true,
         invariants: &CRUD_DB_WRITE_INVARIANTS,
     }

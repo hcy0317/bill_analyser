@@ -26,15 +26,16 @@ use bill_analyser_db::{
     delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
     get_auth_token_user, get_auth_user_profile, get_login_user_by_email,
     get_login_user_by_login_name, get_user_data_statistics as get_db_user_data_statistics,
-    get_user_external_auth, increment_failed_login, invalidate_other_user_sessions,
-    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
-    set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
-    update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
-    ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
-    AuthUserProfileRow, AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
-    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, TokenSessionRow,
+    get_user_external_auth, increment_failed_login, init_auth_security_schema,
+    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
+    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
+    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
+    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
+    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
+    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
+    CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -3164,12 +3165,14 @@ fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
             error.to_string(),
         )))
     })?;
-    SqliteRuntime::open(SqliteConnectionConfig {
+    let runtime = SqliteRuntime::open(SqliteConnectionConfig {
         path: db_path,
         create_if_missing: false,
         busy_timeout: state.config.timeout,
     })
-    .map_err(|_| Box::new(db_error_response()))
+    .map_err(|_| Box::new(db_error_response()))?;
+    init_auth_security_schema(runtime.connection()).map_err(|_| Box::new(db_error_response()))?;
+    Ok(runtime)
 }
 
 fn client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {

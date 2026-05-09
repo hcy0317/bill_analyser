@@ -1872,14 +1872,47 @@ async fn auth_token_runtime_covers_configuration_and_db_error_edges() -> Result<
     let missing_sessions_response = missing_sessions_app
         .oneshot(trusted_request(Method::GET, "/api/tokens", Body::empty()))
         .await?;
+    assert_eq!(missing_sessions_response.status(), StatusCode::OK);
+    let missing_sessions_body = read_json(missing_sessions_response).await;
+    assert_eq!(missing_sessions_body["success"], true);
+    assert_eq!(missing_sessions_body["result"].as_array().unwrap().len(), 0);
+
+    let missing_bearer_sessions_fixture = RuntimeFixture::new()?;
+    Connection::open(missing_bearer_sessions_fixture.db_path())?.execute_batch(
+        "CREATE TABLE users (
+             id INTEGER PRIMARY KEY,
+             username TEXT NOT NULL,
+             email TEXT NOT NULL UNIQUE,
+             is_active INTEGER NOT NULL DEFAULT 1
+         );
+         INSERT INTO users(id, username, email, is_active)
+             VALUES (42, 'alice', 'alice@example.test', 1);",
+    )?;
+    let missing_bearer_sessions_app =
+        runtime_router_with_db_path(missing_bearer_sessions_fixture.db_path(), true);
+    let missing_bearer_sessions_response = missing_bearer_sessions_app
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/tokens",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
     assert_eq!(
-        missing_sessions_response.status(),
-        StatusCode::INTERNAL_SERVER_ERROR
+        missing_bearer_sessions_response.status(),
+        StatusCode::UNAUTHORIZED
     );
     assert_eq!(
-        read_json(missing_sessions_response).await["message"],
-        "Rust auth token runtime DB error"
+        read_json(missing_bearer_sessions_response).await["message"],
+        "Invalid or expired session"
     );
+    let sessions_created: i64 = Connection::open(missing_bearer_sessions_fixture.db_path())?
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+            [],
+            |row| row.get(0),
+        )?;
+    assert_eq!(sessions_created, 1);
 
     let bad_list_fixture = RuntimeFixture::new()?;
     seed_auth_db_missing_list_columns(bad_list_fixture.db_path(), &token)?;
@@ -1900,7 +1933,13 @@ async fn auth_token_runtime_covers_configuration_and_db_error_edges() -> Result<
     let login_rollback_fixture = RuntimeFixture::new()?;
     seed_auth_db(login_rollback_fixture.db_path(), &token)?;
     let before_login_session_count = session_count(login_rollback_fixture.db_path())?;
-    Connection::open(login_rollback_fixture.db_path())?.execute_batch("DROP TABLE auth_logs;")?;
+    Connection::open(login_rollback_fixture.db_path())?.execute_batch(
+        "CREATE TRIGGER fail_auth_log_insert
+         BEFORE INSERT ON auth_logs
+         BEGIN
+             SELECT RAISE(FAIL, 'forced auth log failure');
+         END;",
+    )?;
     let login_rollback_app = runtime_router_with_db_path(login_rollback_fixture.db_path(), true);
     let login_rollback_response = login_rollback_app
         .oneshot(login_request("alice", TEST_PASSWORD))

@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
-    init_foundational_schema, migrate_categories_unique_constraint, migrate_user_id_field,
-    run_transaction, schema_inventory, SchemaDryRun, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, UserScope,
+    init_auth_security_schema, init_foundational_schema, migrate_categories_unique_constraint,
+    migrate_user_id_field, run_transaction, schema_inventory, SchemaDryRun, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, UserScope,
 };
 use rusqlite::Connection;
 
@@ -287,6 +287,112 @@ fn foundational_schema_initializes_core_tables_indexes_and_runtime_contracts(
         [],
     );
     assert!(duplicate_filter.is_err());
+    Ok(())
+}
+
+#[test]
+fn auth_security_schema_initializes_tables_and_migrates_legacy_user_columns(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let runtime = runtime_for(&temp_dir.path().join("test_auth_security_schema.db"))?;
+    runtime.connection().execute_batch(
+        "
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL
+        );
+        INSERT INTO users(id, username) VALUES (42, 'legacy-auth-user');
+        ",
+    )?;
+
+    init_auth_security_schema(runtime.connection())?;
+    init_auth_security_schema(runtime.connection())?;
+
+    for column in [
+        "email",
+        "password_hash",
+        "nickname",
+        "avatar",
+        "cash_account_id",
+        "cash_transfer_category_id",
+        "import_learning_enabled",
+        "investment_platform_keywords",
+        "investment_product_keywords",
+        "investment_exclude_keywords",
+        "is_active",
+        "email_verified",
+        "two_factor_enabled",
+        "failed_login_attempts",
+        "locked_until",
+        "last_login_at",
+        "last_login_ip",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            table_columns(runtime.connection(), "users")?.contains(&column.to_string()),
+            "{column}"
+        );
+    }
+    for table in [
+        "sessions",
+        "auth_logs",
+        "user_two_factor_recovery_codes",
+        "user_external_auths",
+        "user_application_cloud_settings",
+    ] {
+        assert!(
+            !table_columns(runtime.connection(), table)?.is_empty(),
+            "{table}"
+        );
+    }
+
+    assert!(table_indexes(runtime.connection(), "sessions")?
+        .contains(&"idx_sessions_token".to_string()));
+    assert!(table_indexes(runtime.connection(), "auth_logs")?
+        .contains(&"idx_auth_logs_event".to_string()));
+    assert!(table_indexes(runtime.connection(), "users")?
+        .contains(&"idx_users_username_unique".to_string()));
+    assert!(table_indexes(runtime.connection(), "users")?
+        .contains(&"idx_users_email_unique".to_string()));
+    assert!(
+        table_indexes(runtime.connection(), "user_application_cloud_settings")?
+            .contains(&"idx_user_application_cloud_settings_user".to_string())
+    );
+
+    let defaults: (String, i64, i64, i64) = runtime.connection().query_row(
+        "SELECT COALESCE(email, ''), is_active, import_learning_enabled, failed_login_attempts
+         FROM users WHERE id = 42",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
+    assert_eq!(defaults, ("".to_string(), 1, 1, 0));
+
+    runtime.connection().execute(
+        "UPDATE users SET email = 'legacy@example.test' WHERE id = 42",
+        [],
+    )?;
+    let duplicate_username = runtime.connection().execute(
+        "INSERT INTO users(id, username, email) VALUES (43, 'legacy-auth-user', 'other@example.test')",
+        [],
+    );
+    assert!(duplicate_username.is_err());
+    let duplicate_email = runtime.connection().execute(
+        "INSERT INTO users(id, username, email) VALUES (44, 'other-auth-user', 'legacy@example.test')",
+        [],
+    );
+    assert!(duplicate_email.is_err());
+
+    runtime.connection().execute(
+        "INSERT INTO sessions(user_id, token_hash, expires_at, created_at)
+         VALUES (42, 'token-hash', '2026-05-09T19:00:00', '2026-05-09T18:00:00')",
+        [],
+    )?;
+    runtime.connection().execute(
+        "INSERT INTO auth_logs(user_id, username, event_type, success, created_at)
+         VALUES (42, 'legacy-auth-user', 'schema_smoke', 1, '2026-05-09T18:00:00')",
+        [],
+    )?;
     Ok(())
 }
 
@@ -632,8 +738,7 @@ fn schema_inventory_maps_python_runtime_schema_responsibilities_as_foundational_
         .responsibilities
         .iter()
         .all(|item| item.status == "foundational" || item.status == "deferred"));
-    assert!(inventory
-        .responsibilities
-        .iter()
-        .any(|item| item.rust_mapping.contains("crates/bill-analyser-db/src")));
+    assert!(inventory.responsibilities.iter().any(|item| item
+        .rust_mapping
+        .contains("auth/security users/session/cloud schema")));
 }

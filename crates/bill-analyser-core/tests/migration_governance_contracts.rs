@@ -629,6 +629,23 @@ fn domain_policies_record_provider_and_deletion_blockers() {
     assert!(database_repositories
         .transition_evidence
         .contains(&"repository_contract"));
+    assert!(database_repositories
+        .rust_owner_files
+        .contains(&"crates/bill-analyser-db/src/auth.rs"));
+    assert!(database_repositories
+        .tests_migrated
+        .contains(&"crates/bill-analyser-db/tests/auth_two_factor_recovery.rs"));
+    assert!(database_repositories
+        .unsupported_behavior
+        .contains("2FA recovery-code DB primitives"));
+
+    let database_schema_writer = database_schema_db_writer_policy();
+    assert!(database_schema_writer
+        .active_writer
+        .contains("init_foundational_schema"));
+    assert!(database_schema_writer
+        .active_writer
+        .contains("init_auth_security_schema"));
 }
 
 #[test]

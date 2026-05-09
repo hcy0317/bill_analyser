@@ -1,7 +1,7 @@
 //! Internal SQLite runtime foundations for the Bill Analyser Rust migration.
 //!
-//! This crate is scaffolding only. Python/Flask keeps the business runtime
-//! shell, and no business database write path is Rust-primary here.
+//! Rust-owned HTTP domains use this crate for their SQLite repositories while
+//! unmigrated domains continue through the Python/Flask database facade.
 
 pub mod app_settings;
 pub mod auth;
@@ -26,14 +26,16 @@ pub use app_settings::{
 };
 pub use auth::{
     auth_account_belongs_to_user, auth_category_belongs_to_user, auth_email_exists_for_other_user,
-    cleanup_expired_sessions, clear_expired_login_lock, count_auth_events_since,
-    count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
-    create_token_session, delete_application_cloud_settings, delete_user_external_auth,
-    get_active_logout_session_by_token_hash, get_active_refresh_session, get_auth_token_user,
-    get_auth_user_profile, get_login_user_by_email, get_login_user_by_login_name,
-    get_user_external_auth, increment_failed_login, invalidate_other_user_sessions,
-    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
+    cleanup_expired_sessions, clear_expired_login_lock, clear_two_factor_recovery_codes,
+    consume_two_factor_recovery_code, count_active_two_factor_recovery_codes,
+    count_auth_events_since, count_recent_token_password_failures, create_auth_log,
+    create_auth_log_under_event_limit, create_token_session, delete_application_cloud_settings,
+    delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
+    get_auth_token_user, get_auth_user_profile, get_login_user_by_email,
+    get_login_user_by_login_name, get_user_external_auth, hash_two_factor_recovery_code,
+    increment_failed_login, invalidate_other_user_sessions, invalidate_session_by_id,
+    invalidate_session_by_token_hash, list_application_cloud_settings, list_user_external_auths,
+    list_user_sessions, replace_two_factor_recovery_codes, rotate_refresh_token_session,
     set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
     update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
     ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
@@ -91,7 +93,7 @@ pub use import_staging::{
 };
 pub use path::SqliteDbPath;
 pub use schema::{
-    init_foundational_schema, migrate_bills_hash_unique_constraint,
+    init_auth_security_schema, init_foundational_schema, migrate_bills_hash_unique_constraint,
     migrate_categories_unique_constraint, migrate_core_user_scope_constraints,
     migrate_user_exchange_rates_unique_constraint, migrate_user_id_field, schema_inventory,
     SchemaDryRun, SchemaDryRunReport, SchemaResponsibility,
