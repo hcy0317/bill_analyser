@@ -24,6 +24,7 @@ This `.claude/skills` entry exists so Claude Code can discover the repository wo
 - Then load the canonical shared skill in `.agents/skills/bill-analyser-conventions/`.
 - Use `.claude/rules/` only for concise Claude-specific reminders or path-scoped overlays.
 - Before ending a session that leaves any git diff behind, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title.
+- Follow `AGENTS.md` for commit/PR closeout details: dash-separated subtopics when useful, multiple commits per reviewable slice, and source branch deletion after merge.
 - If a session is interrupted, inspect `.git/ai/last-session.md` and resume with the shared `.agents/skills/session-resume/SKILL.md` workflow.
 
 ## Examples

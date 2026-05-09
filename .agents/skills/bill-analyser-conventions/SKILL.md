@@ -52,6 +52,10 @@ Use this skill when you are:
 - Before ending a session with any staged or unstaged `git diff`, invoke `zh-conventional-commit-from-diff`.
 - Produce a Chinese Conventional Commit title for the current change set.
 - If staged diff exists, base the title on staged diff first; otherwise use the full working diff.
+- For one coherent commit that still has multiple notable subchanges, prefer `type(scope): main title - subtopic - subtopic` so the title records the reviewable sub-scope without becoming a paragraph.
+- For plan-driven or OMX slices, prefer multiple small commits in one PR when rules, implementation, tests, and docs are independently reviewable.
+- PR titles should describe the functional-domain outcome, not blindly copy the first commit title; PR bodies should include Summary, Test plan, and Open gates when any gate remains blocked.
+- After a PR is merged, delete the source feature branch through the forge auto-delete option when available, otherwise delete the remote branch after merge is confirmed.
 
 ## Interrupted-session Recovery
 

@@ -187,12 +187,43 @@ def _choose_description(commit_type: str, scope: str | None, changed_files: list
     return "整理仓库配置与辅助脚本"
 
 
+def _commit_title_fragments(scope: str | None, changed_files: list[str], diff_text: str) -> list[str]:
+    """Return optional dash-separated title fragments for multi-surface diffs."""
+    fragments: list[str] = []
+    diff_lower = diff_text.lower()
+    has_hooks = any(path_text.startswith(HOOK_SCOPE_PATHS) for path_text in changed_files)
+    has_agent_stack = any(
+        path_text == item or path_text.startswith(item) for path_text in changed_files for item in AGENT_STACK_PATHS
+    )
+    has_docs = any(_is_docs_path(path_text) for path_text in changed_files)
+    has_tests = any(_is_test_path(path_text) for path_text in changed_files)
+
+    if has_hooks and scope != "hooks":
+        fragments.append("更新 hook")
+    if has_agent_stack and scope != "agent-stack":
+        fragments.append("同步 AI 入口")
+    if has_docs and scope != "docs":
+        fragments.append("同步文档")
+    if has_tests and scope != "tests":
+        fragments.append("补充测试")
+    if any(token in diff_lower for token in ("gate", "门禁", "pr", "pull request", "提交", "commit")):
+        fragments.append("收紧提交门禁")
+
+    deduped: list[str] = []
+    for fragment in fragments:
+        if fragment not in deduped:
+            deduped.append(fragment)
+    return deduped[:3]
+
+
 def _build_commit_title(changed_files: list[str], diff_text: str) -> str:
     commit_type = _classify_type(changed_files, diff_text)
     scope = _classify_scope(changed_files)
     description = _choose_description(commit_type, scope, changed_files, diff_text)
     scope_segment = f"({scope})" if scope and scope != "docs" else ""
-    return f"{commit_type}{scope_segment}: {description}"
+    fragments = _commit_title_fragments(scope, changed_files, diff_text)
+    fragment_segment = "".join(f" - {fragment}" for fragment in fragments)
+    return f"{commit_type}{scope_segment}: {description}{fragment_segment}"
 
 
 def build_stop_messages(source: str, changed_files: list[str], diff_text: str) -> list[str]:
