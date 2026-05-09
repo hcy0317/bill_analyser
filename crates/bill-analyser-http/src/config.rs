@@ -1,5 +1,6 @@
 use std::{env, time::Duration};
 
+use bill_analyser_core::auth::PasswordPolicy;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -11,10 +12,14 @@ pub const DEFAULT_AUTH_JWT_EXPIRATION_DAYS: i64 = 7;
 pub const DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 30;
 pub const DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 5;
 pub const DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 15;
+pub const DEFAULT_AUTH_ENABLE_USER_REGISTRATION: bool = true;
+pub const DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION: bool = false;
+pub const DEFAULT_AUTH_PASSWORD_MIN_LENGTH: usize = 8;
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 100;
 pub const MAX_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 24 * 60;
+pub const MAX_AUTH_PASSWORD_MIN_LENGTH: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpShellConfig {
@@ -30,6 +35,9 @@ pub struct HttpShellConfig {
     pub auth_refresh_token_expiration_days: i64,
     pub auth_max_login_attempts: i64,
     pub auth_lockout_duration_minutes: i64,
+    pub auth_enable_user_registration: bool,
+    pub auth_require_email_verification: bool,
+    pub auth_password_policy: PasswordPolicy,
     pub public_base_url: Option<String>,
 }
 
@@ -71,6 +79,12 @@ impl HttpShellConfig {
             auth_refresh_token_expiration_days: DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
             auth_max_login_attempts: DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS,
             auth_lockout_duration_minutes: DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
+            auth_enable_user_registration: DEFAULT_AUTH_ENABLE_USER_REGISTRATION,
+            auth_require_email_verification: DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
+            auth_password_policy: PasswordPolicy {
+                min_length: DEFAULT_AUTH_PASSWORD_MIN_LENGTH,
+                ..PasswordPolicy::default()
+            },
             public_base_url: None,
         })
     }
@@ -112,6 +126,21 @@ impl HttpShellConfig {
 
     pub fn with_auth_lockout_duration_minutes(mut self, minutes: i64) -> Self {
         self.auth_lockout_duration_minutes = minutes;
+        self
+    }
+
+    pub fn with_auth_enable_user_registration(mut self, enabled: bool) -> Self {
+        self.auth_enable_user_registration = enabled;
+        self
+    }
+
+    pub fn with_auth_require_email_verification(mut self, required: bool) -> Self {
+        self.auth_require_email_verification = required;
+        self
+    }
+
+    pub fn with_auth_password_policy(mut self, policy: PasswordPolicy) -> Self {
+        self.auth_password_policy = policy;
         self
     }
 
@@ -194,6 +223,52 @@ impl HttpShellConfig {
             1,
             MAX_AUTH_LOCKOUT_DURATION_MINUTES,
         )?;
+        let auth_enable_user_registration = parse_env_bool_value(
+            "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION",
+            lookup("BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION")
+                .or_else(|| lookup("ENABLE_USER_REGISTRATION")),
+            DEFAULT_AUTH_ENABLE_USER_REGISTRATION,
+        )?;
+        let auth_require_email_verification = parse_env_bool_value(
+            "BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION",
+            lookup("BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION")
+                .or_else(|| lookup("REQUIRE_EMAIL_VERIFICATION")),
+            DEFAULT_AUTH_REQUIRE_EMAIL_VERIFICATION,
+        )?;
+        let auth_password_policy = PasswordPolicy {
+            min_length: parse_env_usize_range_value(
+                "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH",
+                lookup("BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH")
+                    .or_else(|| lookup("PASSWORD_MIN_LENGTH")),
+                DEFAULT_AUTH_PASSWORD_MIN_LENGTH,
+                1,
+                MAX_AUTH_PASSWORD_MIN_LENGTH,
+            )?,
+            require_uppercase: parse_env_bool_value(
+                "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE",
+                lookup("BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE")
+                    .or_else(|| lookup("PASSWORD_REQUIRE_UPPERCASE")),
+                false,
+            )?,
+            require_lowercase: parse_env_bool_value(
+                "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_LOWERCASE",
+                lookup("BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_LOWERCASE")
+                    .or_else(|| lookup("PASSWORD_REQUIRE_LOWERCASE")),
+                false,
+            )?,
+            require_digit: parse_env_bool_value(
+                "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_DIGIT",
+                lookup("BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_DIGIT")
+                    .or_else(|| lookup("PASSWORD_REQUIRE_DIGIT")),
+                false,
+            )?,
+            require_special: parse_env_bool_value(
+                "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_SPECIAL",
+                lookup("BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_SPECIAL")
+                    .or_else(|| lookup("PASSWORD_REQUIRE_SPECIAL")),
+                false,
+            )?,
+        };
         let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
             .map(normalize_upstream)
             .transpose()?;
@@ -212,6 +287,9 @@ impl HttpShellConfig {
         config.auth_refresh_token_expiration_days = auth_refresh_token_expiration_days;
         config.auth_max_login_attempts = auth_max_login_attempts;
         config.auth_lockout_duration_minutes = auth_lockout_duration_minutes;
+        config.auth_enable_user_registration = auth_enable_user_registration;
+        config.auth_require_email_verification = auth_require_email_verification;
+        config.auth_password_policy = auth_password_policy;
         config.public_base_url = public_base_url;
         Ok(config)
     }
@@ -236,6 +314,8 @@ pub enum HttpShellConfigError {
     InvalidBodyLimit,
     #[error("invalid integer for {0}")]
     InvalidInteger(&'static str),
+    #[error("invalid boolean for {0}")]
+    InvalidBoolean(&'static str),
     #[error("invalid import route mode")]
     InvalidImportRouteMode,
 }
@@ -296,6 +376,20 @@ fn parse_env_usize_value(
     }
 }
 
+fn parse_env_usize_range_value(
+    name: &'static str,
+    value: Option<String>,
+    default_value: usize,
+    min_value: usize,
+    max_value: usize,
+) -> Result<usize, HttpShellConfigError> {
+    let parsed = parse_env_usize_value(name, value, default_value)?;
+    if parsed < min_value || parsed > max_value {
+        return Err(HttpShellConfigError::InvalidInteger(name));
+    }
+    Ok(parsed)
+}
+
 fn parse_env_i64_range_value(
     name: &'static str,
     value: Option<String>,
@@ -314,6 +408,21 @@ fn parse_env_i64_range_value(
             Ok(parsed)
         }
         None => Ok(default_value),
+    }
+}
+
+fn parse_env_bool_value(
+    name: &'static str,
+    value: Option<String>,
+    default_value: bool,
+) -> Result<bool, HttpShellConfigError> {
+    let Some(value) = value else {
+        return Ok(default_value);
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(HttpShellConfigError::InvalidBoolean(name)),
     }
 }
 

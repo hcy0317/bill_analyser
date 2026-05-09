@@ -161,6 +161,29 @@ if (-not $env:BILL_ANALYSER_SQLITE_DB_PATH) {
 
 $DotenvSettings = Read-DotenvSettings -Path $DotenvPath
 
+function Set-RustAuthEnvFromServerConfig {
+    param(
+        [object]$Config,
+        [string]$PropertyName,
+        [string]$EnvName
+    )
+
+    if ([Environment]::GetEnvironmentVariable($EnvName)) {
+        return
+    }
+
+    $Property = $Config.PSObject.Properties | Where-Object { $_.Name -eq $PropertyName } | Select-Object -First 1
+    if ($null -eq $Property -or $null -eq $Property.Value) {
+        return
+    }
+
+    $Value = $Property.Value
+    if ($Value -is [bool]) {
+        $Value = if ($Value) { "true" } else { "false" }
+    }
+    Set-Item -Path "Env:$EnvName" -Value ([string]$Value)
+}
+
 if (-not $env:BILL_ANALYSER_AUTH_JWT_SECRET) {
     if ($env:JWT_SECRET_KEY) {
         $env:BILL_ANALYSER_AUTH_JWT_SECRET = $env:JWT_SECRET_KEY
@@ -186,6 +209,17 @@ if (Test-Path $ServerConfigPath) {
         if (-not $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM -and $ServerConfig.jwt_algorithm) {
             $env:BILL_ANALYSER_AUTH_JWT_ALGORITHM = [string]$ServerConfig.jwt_algorithm
         }
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "jwt_expiration_days" -EnvName "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "refresh_token_expiration_days" -EnvName "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "max_login_attempts" -EnvName "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "lockout_duration_minutes" -EnvName "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "enable_user_registration" -EnvName "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "require_email_verification" -EnvName "BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "password_min_length" -EnvName "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "password_require_uppercase" -EnvName "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "password_require_lowercase" -EnvName "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_LOWERCASE"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "password_require_digit" -EnvName "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_DIGIT"
+        Set-RustAuthEnvFromServerConfig -Config $ServerConfig -PropertyName "password_require_special" -EnvName "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_SPECIAL"
     } catch {
         Write-Host "Warning: Failed to read server_config.json for Rust auth settings: $_" -ForegroundColor Yellow
     }

@@ -44,6 +44,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/tokens/api")));
     assert!(rust_owned.contains(&("POST", "/api/tokens/mcp")));
     assert!(rust_owned.contains(&("POST", "/api/auth/login")));
+    assert!(rust_owned.contains(&("POST", "/api/auth/register")));
     assert!(rust_owned.contains(&("POST", "/api/auth/logout")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
@@ -471,6 +472,17 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert_eq!(auth_login.handler, RouteHandlerId::AuthTokenRuntime);
     assert_eq!(
         auth_login.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessResult
+    );
+
+    let auth_register = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "POST /api/auth/register")
+        .expect("auth register route is present");
+    assert_eq!(auth_register.state, MigrationState::RustOwnedVerified);
+    assert_eq!(auth_register.handler, RouteHandlerId::AuthTokenRuntime);
+    assert_eq!(
+        auth_register.envelope,
         ResponseEnvelopeFamily::FlaskSuccessResult
     );
 

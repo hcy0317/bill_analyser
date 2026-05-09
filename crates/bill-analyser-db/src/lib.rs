@@ -5,6 +5,7 @@
 
 pub mod app_settings;
 pub mod auth;
+pub mod auth_registration;
 pub mod bills;
 pub mod budgets;
 pub mod connection;
@@ -32,6 +33,11 @@ pub use auth::{
     ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow, AuthLogoutSessionRow,
     AuthRefreshSessionRow, AuthTokenUserRow, AuthUserProfileRow, CreateTokenSessionDraft,
     LoginFailureUpdate, TokenSessionRow,
+};
+pub use auth_registration::{
+    auth_email_exists, auth_username_exists, create_registered_user_with_defaults,
+    RegisterDefaultSeedSummary, RegisterPresetCategory, RegisterPresetSubCategory,
+    RegisterUserDraft, RegisterUserResult,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,

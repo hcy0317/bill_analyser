@@ -18,14 +18,16 @@ use bill_analyser_core::{
     build_user_investment_keyword_settings, UserId,
 };
 use bill_analyser_db::{
-    cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
+    auth_email_exists, auth_username_exists, cleanup_expired_sessions,
+    count_recent_token_password_failures, create_auth_log, create_registered_user_with_defaults,
     create_token_session, get_active_logout_session_by_token_hash, get_active_refresh_session,
     get_auth_token_user, get_auth_user_profile, get_login_user_by_login_name,
     increment_failed_login, invalidate_other_user_sessions, invalidate_session_by_id,
     invalidate_session_by_token_hash, list_application_cloud_settings, list_user_sessions,
     rotate_refresh_token_session, update_user_last_login, ApplicationCloudSettingRow, AuthLogDraft,
-    AuthLoginUserRow, AuthUserProfileRow, CreateTokenSessionDraft, DbError, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, TokenSessionRow,
+    AuthLoginUserRow, AuthUserProfileRow, CreateTokenSessionDraft, DbError, RegisterPresetCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -59,16 +61,21 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/tokens/mcp"),
     ("POST", "/api/tokens/refresh"),
     ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/register"),
     ("POST", "/api/auth/logout"),
 ];
 
-pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[("POST", "/api/auth/register")];
+pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub fn auth_token_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route(
             "/api/auth/login",
             post(login_handler).options(login_options_handler),
+        )
+        .route(
+            "/api/auth/register",
+            post(register_handler).options(register_options_handler),
         )
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
@@ -89,11 +96,199 @@ async fn login_options_handler(
     proxy_request(state, request).await
 }
 
+async fn register_options_handler(
+    State(state): State<ProxyState>,
+    request: Request<Body>,
+) -> Response {
+    proxy_request(state, request).await
+}
+
 async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
     let origin = request.headers().get(header::ORIGIN).cloned();
     let mut response = next.run(request).await;
     apply_auth_cors_headers(origin.as_ref(), response.headers_mut());
     response
+}
+
+async fn register_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let username = body
+        .get("username")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let email = body
+        .get("email")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if username.is_empty() || email.is_empty() || password.is_empty() {
+        return auth_rest_error_response(AuthRestError::invalid_request(
+            "Username, email and password are required",
+        ));
+    }
+    if !state.config.auth_enable_user_registration {
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Registration disabled",
+            "User registration is currently disabled",
+        ));
+    }
+    if let Err(message) = state.config.auth_password_policy.validate(password) {
+        return auth_rest_error_response(AuthRestError::new(400, "Invalid password", message));
+    }
+
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    let username_exists = match auth_username_exists(runtime.connection(), &username) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if username_exists {
+        if log_auth_event(
+            runtime.connection(),
+            AuthEvent {
+                user_id: None,
+                username: &username,
+                event_type: "register_failed",
+                ip_address: &ip_address,
+                user_agent: &request_user_agent,
+                success: false,
+                error_message: Some("Username already exists".to_string()),
+                metadata: None,
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            409,
+            "Username exists",
+            "Username already exists",
+        ));
+    }
+    let email_exists = match auth_email_exists(runtime.connection(), &email) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if email_exists {
+        if log_auth_event(
+            runtime.connection(),
+            AuthEvent {
+                user_id: None,
+                username: &username,
+                event_type: "register_failed",
+                ip_address: &ip_address,
+                user_agent: &request_user_agent,
+                success: false,
+                error_message: Some("Email already exists".to_string()),
+                metadata: None,
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            409,
+            "Email exists",
+            "Email already exists",
+        ));
+    }
+
+    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
+        Ok(value) => value,
+        Err(_) => {
+            return auth_rest_error_response(AuthRestError::new(
+                500,
+                "Internal Server Error",
+                "Rust auth register runtime password hashing error",
+            ))
+        }
+    };
+    let language = body
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("zh_Hans")
+        .to_string();
+    let default_currency = body
+        .get("defaultCurrency")
+        .and_then(Value::as_str)
+        .unwrap_or("CNY")
+        .to_string();
+    let first_day_of_week = body
+        .get("firstDayOfWeek")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let nickname = body
+        .get("nickname")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let nickname = if nickname.is_empty() {
+        username.clone()
+    } else {
+        nickname
+    };
+    let created_at = utc_now_text();
+    let register_result = match create_registered_user_with_defaults(
+        runtime.connection(),
+        &RegisterUserDraft {
+            username: username.clone(),
+            email: email.clone(),
+            password_hash,
+            nickname,
+            language,
+            default_currency,
+            first_day_of_week,
+            email_verified: !state.config.auth_require_email_verification,
+            created_at: created_at.clone(),
+        },
+        &register_preset_categories_from_body(&body),
+        &AuthLogDraft {
+            user_id: None,
+            username: username.clone(),
+            event_type: "register_success".to_string(),
+            ip_address: ip_address.clone(),
+            user_agent: request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: None,
+            created_at,
+        },
+    ) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    success_result(
+        StatusCode::OK,
+        json!({
+            "user_id": register_result.user_id,
+            "username": username,
+            "email": email,
+            "needVerifyEmail": state.config.auth_require_email_verification,
+            "presetCategoriesSaved": register_result.preset_categories_saved,
+            "presetAccountsSaved": register_result.preset_accounts_saved,
+            "message": "Registration successful",
+        }),
+    )
 }
 
 async fn generate_api_token_handler(
@@ -1076,6 +1271,73 @@ fn authenticated_user(headers: &HeaderMap, state: &ProxyState) -> RouteResult<Au
 fn request_body_object(body: &[u8]) -> Map<String, Value> {
     let parsed = serde_json::from_slice::<Value>(body).ok();
     json_object_or_empty(parsed.as_ref())
+}
+
+fn register_preset_categories_from_body(body: &Map<String, Value>) -> Vec<RegisterPresetCategory> {
+    let Some(categories) = body.get("categories").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    categories
+        .iter()
+        .filter_map(|item| {
+            let object = item.as_object()?;
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let sub_categories = object
+                .get("subCategories")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|sub_item| {
+                    let sub_object = sub_item.as_object()?;
+                    let name = sub_object
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(RegisterPresetSubCategory {
+                        name,
+                        icon: sub_object
+                            .get("icon")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        color: sub_object
+                            .get("color")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect();
+            Some(RegisterPresetCategory {
+                name,
+                type_code: object.get("type").and_then(Value::as_i64).unwrap_or(3),
+                icon: object
+                    .get("icon")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                color: object
+                    .get("color")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                sub_categories,
+            })
+        })
+        .collect()
 }
 
 fn parse_expires_in_seconds(body: &Map<String, Value>) -> RouteResult<i64> {

@@ -1356,7 +1356,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/auth/password/reset",
         "auth-security-user-data"
     ),
-    python_proxy_route!("POST", "/api/auth/register", "auth-security-user-data"),
     python_proxy_route!("GET", "/api/backup/", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/cleanup", "backup-ops"),
     python_proxy_route!("POST", "/api/backup/create", "backup-ops"),
@@ -1700,6 +1699,16 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes:
             "Rust auth runtime verifies username/email password login, handles lockout/inactive/2FA-pending branches, writes sessions and auth logs, and returns Flask-compatible tokens, profile, and application cloud settings.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/auth/register",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust auth runtime validates registration input/password policy, creates the user, default categories/rules/accounts, and auth log transactionally, and returns the Flask-compatible registration result.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2267,6 +2276,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         rust_owner_files: &[
             "crates/bill-analyser-http/src/auth_routes.rs",
             "crates/bill-analyser-db/src/auth.rs",
+            "crates/bill-analyser-db/src/auth_registration.rs",
             "crates/bill-analyser-core/src/auth/mod.rs",
             "crates/bill-analyser-http/src/proxy.rs",
         ],
@@ -2280,7 +2290,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; registration, profile, 2FA verification/management, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; profile, 2FA verification/management, OAuth, and user-data routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2737,7 +2747,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; registration, profile, 2FA verification/management, OAuth, and user-data routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, and logout routes are Rust-owned; profile, 2FA verification/management, OAuth, and user-data routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

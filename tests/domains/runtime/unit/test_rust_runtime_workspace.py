@@ -177,6 +177,12 @@ def test_auth_bridge_runtime_is_built_before_backend_pytest_and_startup() -> Non
     assert "$DotenvPath" in start_backend
     assert "JWT_SECRET_KEY" in start_backend
     assert "JWT_ALGORITHM" in start_backend
+    assert "Set-RustAuthEnvFromServerConfig" in start_backend
+    assert "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION" in start_backend
+    assert "BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION" in start_backend
+    assert "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH" in start_backend
+    assert "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE" in start_backend
+    assert "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS" in start_backend
     assert "Test-PythonFallbackHealth" in start_backend
     assert "Python fallback port already in use" in start_backend
     assert "Start-Process" in start_backend

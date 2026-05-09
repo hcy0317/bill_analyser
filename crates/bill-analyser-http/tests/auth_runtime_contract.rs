@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
-use bcrypt::hash;
+use bcrypt::{hash, verify};
 use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState, AUTH_PROXIED_ROUTE_PATTERNS,
     AUTH_TOKEN_ROUTE_PATTERNS,
@@ -392,6 +392,126 @@ async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Resul
         "Your account has been deactivated"
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_register_runtime_creates_user_defaults_and_preserves_edges(
+) -> Result<(), Box<dyn Error>> {
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/auth/register")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/auth/register")));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let missing_response = app
+        .clone()
+        .oneshot(register_request(json!({ "username": "missing" })))
+        .await?;
+    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_response).await["message"],
+        "Username, email and password are required"
+    );
+
+    let weak_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "weak",
+            "email": "weak@example.test",
+            "password": "short"
+        })))
+        .await?;
+    assert_eq!(weak_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(weak_response).await["message"],
+        "Password must be at least 8 characters long"
+    );
+
+    let duplicate_username_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "alice",
+            "email": "new-alice@example.test",
+            "password": TEST_PASSWORD
+        })))
+        .await?;
+    assert_eq!(duplicate_username_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_username_response).await["message"],
+        "Username already exists"
+    );
+    assert_auth_log(
+        fixture.db_path(),
+        "register_failed",
+        false,
+        "Mozilla/5.0 (Register contract)",
+    )?;
+
+    let duplicate_email_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "alice2",
+            "email": "alice@example.test",
+            "password": TEST_PASSWORD
+        })))
+        .await?;
+    assert_eq!(duplicate_email_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_email_response).await["message"],
+        "Email already exists"
+    );
+
+    let success_response = app
+        .clone()
+        .oneshot(register_request(json!({
+            "username": "newuser",
+            "email": "newuser@example.test",
+            "password": TEST_PASSWORD,
+            "nickname": "",
+            "language": "zh_Hans",
+            "defaultCurrency": "CNY",
+            "firstDayOfWeek": 2,
+            "categories": [
+                {
+                    "name": "自定义",
+                    "type": 3,
+                    "icon": "custom",
+                    "color": "123456",
+                    "subCategories": [{"name": "子类"}]
+                }
+            ]
+        })))
+        .await?;
+    assert_eq!(success_response.status(), StatusCode::OK);
+    assert_eq!(
+        success_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("http://localhost:8081")
+    );
+    let success_body = read_json(success_response).await;
+    assert_eq!(success_body["success"], true);
+    assert_eq!(success_body["result"]["username"], "newuser");
+    assert_eq!(success_body["result"]["email"], "newuser@example.test");
+    assert_eq!(success_body["result"]["needVerifyEmail"], false);
+    assert_eq!(success_body["result"]["presetCategoriesSaved"], true);
+    assert_eq!(success_body["result"]["presetAccountsSaved"], true);
+
+    assert_registered_user_defaults(fixture.db_path(), "newuser", TEST_PASSWORD)?;
+    assert_auth_log(
+        fixture.db_path(),
+        "register_success",
+        true,
+        "Mozilla/5.0 (Register contract)",
+    )?;
     Ok(())
 }
 
@@ -1046,6 +1166,54 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             updated_at TEXT NOT NULL,
             UNIQUE(user_id, setting_key)
         );
+        CREATE TABLE categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type INTEGER DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            priority INTEGER DEFAULT 0,
+            keywords TEXT,
+            hidden INTEGER DEFAULT 0,
+            icon TEXT,
+            color TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, main_category, sub_category)
+        );
+        CREATE TABLE category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type INTEGER NOT NULL,
+            category INTEGER,
+            currency TEXT DEFAULT 'CNY',
+            icon TEXT,
+            color TEXT,
+            balance REAL DEFAULT 0,
+            initial_balance REAL DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            comment TEXT,
+            aliases TEXT,
+            parent_id INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
         "#,
     )?;
@@ -1468,6 +1636,73 @@ fn assert_login_unlocked(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
+fn assert_registered_user_defaults(
+    path: &Path,
+    username: &str,
+    password: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (user_id, password_hash, nickname, first_day_of_week, email_verified): (
+        i64,
+        String,
+        String,
+        i64,
+        i64,
+    ) = connection.query_row(
+        "SELECT id, password_hash, nickname, first_day_of_week, email_verified FROM users WHERE username = ?1",
+        [username],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    )?;
+    assert!(verify(password, &password_hash)?);
+    assert_eq!(nickname, username);
+    assert_eq!(first_day_of_week, 2);
+    assert_eq!(email_verified, 1);
+
+    let (default_account_id, cash_account_id): (i64, i64) = connection.query_row(
+        "SELECT default_account_id, cash_account_id FROM users WHERE id = ?1",
+        [user_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(default_account_id, cash_account_id);
+    assert_eq!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE user_id = ?1",
+            [user_id],
+            |row| row.get::<_, i64>(0),
+        )?,
+        5
+    );
+    assert_eq!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM categories WHERE user_id = ?1 AND main_category = '自定义'",
+            [user_id],
+            |row| row.get::<_, i64>(0),
+        )?,
+        2
+    );
+    assert!(connection.query_row(
+        "SELECT COUNT(*) FROM categories WHERE user_id = ?1 AND main_category = '餐饮' AND sub_category = '外卖'",
+        [user_id],
+        |row| row.get::<_, i64>(0),
+    )? > 0);
+    assert_eq!(
+        connection.query_row(
+            "SELECT type FROM categories WHERE user_id = ?1 AND main_category = '账户互转' AND sub_category = ''",
+            [user_id],
+            |row| row.get::<_, i64>(0),
+        )?,
+        4
+    );
+    assert!(
+        connection.query_row(
+            "SELECT COUNT(*) FROM category_rules WHERE user_id = ?1 AND name = 'default:餐饮/外卖'",
+            [user_id],
+            |row| row.get::<_, i64>(0),
+        )? > 0
+    );
+    Ok(())
+}
+
 fn token_by_id<'a>(tokens: &'a [Value], token_id: &str) -> &'a Value {
     tokens
         .iter()
@@ -1510,6 +1745,24 @@ fn login_request_with_origin_and_forwarded_ip(
     request
         .headers_mut()
         .insert("x-forwarded-for", HeaderValue::from_static(forwarded_for));
+    request
+}
+
+fn register_request(payload: Value) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/register")
+        .header("content-type", "application/json")
+        .header("user-agent", "Mozilla/5.0 (Register contract)")
+        .header(header::ORIGIN, "http://localhost:8081")
+        .header("x-forwarded-for", "203.0.113.45")
+        .body(Body::from(payload.to_string()))
+        .expect("register request builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.31:4300"
+            .parse::<SocketAddr>()
+            .expect("peer addr"),
+    ));
     request
 }
 

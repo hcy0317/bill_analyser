@@ -7,6 +7,7 @@ use axum::{
     routing::{any, get},
     Router,
 };
+use bill_analyser_core::auth::PasswordPolicy;
 use bill_analyser_http::{
     bind_addr_from_env, bind_addr_from_env_with, build_router, build_upstream_url,
     filter_proxy_request_headers, http_shell_health, run_http_server, HttpShellConfig,
@@ -28,12 +29,27 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(config.public_base_url, None);
     assert_eq!(config.auth_max_login_attempts, 5);
     assert_eq!(config.auth_lockout_duration_minutes, 15);
+    assert!(config.auth_enable_user_registration);
+    assert!(!config.auth_require_email_verification);
+    assert_eq!(config.auth_password_policy, PasswordPolicy::default());
     let tuned_config = config
         .clone()
         .with_auth_max_login_attempts(8)
-        .with_auth_lockout_duration_minutes(60);
+        .with_auth_lockout_duration_minutes(60)
+        .with_auth_enable_user_registration(false)
+        .with_auth_require_email_verification(true)
+        .with_auth_password_policy(PasswordPolicy {
+            min_length: 12,
+            require_uppercase: true,
+            require_lowercase: true,
+            require_digit: true,
+            require_special: true,
+        });
     assert_eq!(tuned_config.auth_max_login_attempts, 8);
     assert_eq!(tuned_config.auth_lockout_duration_minutes, 60);
+    assert!(!tuned_config.auth_enable_user_registration);
+    assert!(tuned_config.auth_require_email_verification);
+    assert_eq!(tuned_config.auth_password_policy.min_length, 12);
     assert_eq!(
         health.identity.runtime_boundary,
         "rust-http-shell:proxy-only"
@@ -78,6 +94,13 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS" => Some("9".to_string()),
         "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS" => Some("7".to_string()),
         "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES" => Some("45".to_string()),
+        "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION" => Some("false".to_string()),
+        "BILL_ANALYSER_AUTH_REQUIRE_EMAIL_VERIFICATION" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH" => Some("10".to_string()),
+        "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_UPPERCASE" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_LOWERCASE" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_DIGIT" => Some("true".to_string()),
+        "BILL_ANALYSER_AUTH_PASSWORD_REQUIRE_SPECIAL" => Some("true".to_string()),
         "BILL_ANALYSER_PUBLIC_BASE_URL" => Some("  https://api.example.test/  ".to_string()),
         _ => None,
     })
@@ -98,6 +121,18 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     assert_eq!(config.auth_refresh_token_expiration_days, 9);
     assert_eq!(config.auth_max_login_attempts, 7);
     assert_eq!(config.auth_lockout_duration_minutes, 45);
+    assert!(!config.auth_enable_user_registration);
+    assert!(config.auth_require_email_verification);
+    assert_eq!(
+        config.auth_password_policy,
+        PasswordPolicy {
+            min_length: 10,
+            require_uppercase: true,
+            require_lowercase: true,
+            require_digit: true,
+            require_special: true,
+        }
+    );
     assert_eq!(
         config.public_base_url.as_deref(),
         Some("https://api.example.test")
@@ -113,6 +148,13 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
         "REFRESH_TOKEN_EXPIRATION_DAYS" => Some("11".to_string()),
         "MAX_LOGIN_ATTEMPTS" => Some("4".to_string()),
         "LOCKOUT_DURATION_MINUTES" => Some("30".to_string()),
+        "ENABLE_USER_REGISTRATION" => Some("0".to_string()),
+        "REQUIRE_EMAIL_VERIFICATION" => Some("1".to_string()),
+        "PASSWORD_MIN_LENGTH" => Some("9".to_string()),
+        "PASSWORD_REQUIRE_UPPERCASE" => Some("yes".to_string()),
+        "PASSWORD_REQUIRE_LOWERCASE" => Some("on".to_string()),
+        "PASSWORD_REQUIRE_DIGIT" => Some("true".to_string()),
+        "PASSWORD_REQUIRE_SPECIAL" => Some("true".to_string()),
         _ => None,
     })
     .expect("env config parses");
@@ -123,6 +165,13 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
     assert_eq!(config.auth_refresh_token_expiration_days, 11);
     assert_eq!(config.auth_max_login_attempts, 4);
     assert_eq!(config.auth_lockout_duration_minutes, 30);
+    assert!(!config.auth_enable_user_registration);
+    assert!(config.auth_require_email_verification);
+    assert_eq!(config.auth_password_policy.min_length, 9);
+    assert!(config.auth_password_policy.require_uppercase);
+    assert!(config.auth_password_policy.require_lowercase);
+    assert!(config.auth_password_policy.require_digit);
+    assert!(config.auth_password_policy.require_special);
 }
 
 #[test]
@@ -235,6 +284,22 @@ fn config_rejects_invalid_upstream_body_limit_and_env_integer() {
         })
         .unwrap_err(),
         HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH" => Some("0".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_PASSWORD_MIN_LENGTH")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION" => Some("maybe".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidBoolean("BILL_ANALYSER_AUTH_ENABLE_USER_REGISTRATION")
     );
     assert_eq!(
         HttpShellConfig::from_env_with(|name| match name {
