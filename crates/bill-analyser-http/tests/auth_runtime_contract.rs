@@ -3,7 +3,7 @@ use std::{error::Error, net::SocketAddr, path::Path, time::Duration};
 use axum::{
     body::{to_bytes, Body},
     extract::{connect_info::ConnectInfo, Request},
-    http::{HeaderValue, Method, StatusCode},
+    http::{header, HeaderValue, Method, StatusCode},
     Router,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -12,7 +12,7 @@ use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState, AUTH_PROXIED_ROUTE_PATTERNS,
     AUTH_TOKEN_ROUTE_PATTERNS,
 };
-use chrono::{Duration as ChronoDuration, Local};
+use chrono::{Duration as ChronoDuration, Local, Utc};
 use ring::hmac;
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -186,6 +186,210 @@ async fn auth_logout_runtime_invalidates_session_and_is_idempotent() -> Result<(
     assert_eq!(
         read_json(malformed_header_response).await["message"],
         "Invalid authorization header"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Result<(), Box<dyn Error>>
+{
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/auth/login")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/auth/login")));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    seed_login_edge_users(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let login_response = app
+        .clone()
+        .oneshot(login_request_with_origin_and_forwarded_ip(
+            "alice",
+            TEST_PASSWORD,
+            "http://localhost:8081",
+            "203.0.113.44, 198.51.100.2",
+        ))
+        .await?;
+    assert_eq!(login_response.status(), StatusCode::OK);
+    assert_eq!(
+        login_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("http://localhost:8081")
+    );
+    assert_eq!(
+        login_response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
+    let login_body = read_json(login_response).await;
+    assert_eq!(login_body["success"], true);
+    let login_result = login_body["result"].as_object().expect("login result");
+    let access_token = login_result["token"].as_str().expect("access token");
+    let refresh_token = login_result["refreshToken"]
+        .as_str()
+        .expect("refresh token");
+    assert_eq!(login_result["need2FA"], false);
+    assert_eq!(login_result["user"]["id"], 42);
+    assert_eq!(login_result["user"]["username"], "alice");
+    assert_eq!(login_result["user"]["nickname"], "Alice A.");
+    assert_eq!(
+        login_result["applicationCloudSettings"][0]["settingKey"],
+        "showAmountInHomePage"
+    );
+    assert_eq!(jwt_payload(access_token)["type"], "access");
+    assert_eq!(jwt_payload(refresh_token)["type"], "refresh");
+    assert_session_token_pair(
+        fixture.db_path(),
+        access_token,
+        refresh_token,
+        "Mozilla/5.0 (Login contract)",
+        "203.0.113.44",
+    )?;
+    assert_auth_log(
+        fixture.db_path(),
+        "login_success",
+        true,
+        "Mozilla/5.0 (Login contract)",
+    )?;
+    assert_login_state(fixture.db_path(), 42, 0, "203.0.113.44")?;
+
+    let email_login_response = app
+        .clone()
+        .oneshot(login_request("alice@example.test", TEST_PASSWORD))
+        .await?;
+    assert_eq!(email_login_response.status(), StatusCode::OK);
+    let email_login_body = read_json(email_login_response).await;
+    assert_eq!(email_login_body["result"]["need2FA"], false);
+    let email_access_token = email_login_body["result"]["token"]
+        .as_str()
+        .expect("email access token");
+    let email_refresh_token = email_login_body["result"]["refreshToken"]
+        .as_str()
+        .expect("email refresh token");
+    assert_session_token_pair(
+        fixture.db_path(),
+        email_access_token,
+        email_refresh_token,
+        "Mozilla/5.0 (Login contract)",
+        "198.51.100.30",
+    )?;
+
+    let two_factor_response = app
+        .clone()
+        .oneshot(login_request("twofa", TEST_PASSWORD))
+        .await?;
+    assert_eq!(two_factor_response.status(), StatusCode::OK);
+    let two_factor_body = read_json(two_factor_response).await;
+    assert_eq!(two_factor_body["success"], true);
+    assert_eq!(two_factor_body["result"]["need2FA"], true);
+    let pending_token = two_factor_body["result"]["token"]
+        .as_str()
+        .expect("pending token");
+    assert_eq!(jwt_payload(pending_token)["type"], "pending_2fa");
+    assert_auth_log(
+        fixture.db_path(),
+        "login_2fa_pending",
+        true,
+        "Mozilla/5.0 (Login contract)",
+    )?;
+
+    let missing_credentials_response = app
+        .clone()
+        .oneshot(login_request("", TEST_PASSWORD))
+        .await?;
+    assert_eq!(
+        missing_credentials_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_credentials_response).await["message"],
+        "Username and password are required"
+    );
+
+    let unknown_response = app
+        .clone()
+        .oneshot(login_request("missing-user", TEST_PASSWORD))
+        .await?;
+    assert_eq!(unknown_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(unknown_response).await["message"],
+        "Invalid username or password"
+    );
+    assert_auth_log(
+        fixture.db_path(),
+        "login_failed",
+        false,
+        "Mozilla/5.0 (Login contract)",
+    )?;
+
+    let wrong_password_response = app
+        .clone()
+        .oneshot(login_request("bob", "wrong-password"))
+        .await?;
+    assert_eq!(wrong_password_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(wrong_password_response).await["message"],
+        "Invalid username or password"
+    );
+    assert_login_failure_count(fixture.db_path(), 77, 1)?;
+
+    let lockout_transition_response = app
+        .clone()
+        .oneshot(login_request("nearlylocked", "wrong-password"))
+        .await?;
+    assert_eq!(
+        lockout_transition_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_login_locked(fixture.db_path(), 81, 5)?;
+
+    let expired_lock_wrong_password_response = app
+        .clone()
+        .oneshot(login_request("expiredwrong", "wrong-password"))
+        .await?;
+    assert_eq!(
+        expired_lock_wrong_password_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_login_failure_count(fixture.db_path(), 83, 1)?;
+    assert_login_unlocked(fixture.db_path(), 83)?;
+
+    let locked_response = app
+        .clone()
+        .oneshot(login_request("locked", TEST_PASSWORD))
+        .await?;
+    assert_eq!(locked_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(locked_response).await["message"],
+        "Account is temporarily locked due to multiple failed login attempts"
+    );
+
+    let expired_lock_response = app
+        .clone()
+        .oneshot(login_request("expiredlock", TEST_PASSWORD))
+        .await?;
+    assert_eq!(expired_lock_response.status(), StatusCode::OK);
+    assert_login_state(fixture.db_path(), 82, 0, "198.51.100.30")?;
+    assert_login_unlocked(fixture.db_path(), 82)?;
+
+    let inactive_response = app
+        .clone()
+        .oneshot(login_request("inactive", TEST_PASSWORD))
+        .await?;
+    assert_eq!(inactive_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(inactive_response).await["message"],
+        "Your account has been deactivated"
     );
 
     Ok(())
@@ -650,6 +854,24 @@ async fn auth_token_runtime_covers_configuration_and_db_error_edges() -> Result<
         StatusCode::INTERNAL_SERVER_ERROR
     );
 
+    let login_rollback_fixture = RuntimeFixture::new()?;
+    seed_auth_db(login_rollback_fixture.db_path(), &token)?;
+    let before_login_session_count = session_count(login_rollback_fixture.db_path())?;
+    Connection::open(login_rollback_fixture.db_path())?.execute_batch("DROP TABLE auth_logs;")?;
+    let login_rollback_app = runtime_router_with_db_path(login_rollback_fixture.db_path(), true);
+    let login_rollback_response = login_rollback_app
+        .oneshot(login_request("alice", TEST_PASSWORD))
+        .await?;
+    assert_eq!(
+        login_rollback_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        session_count(login_rollback_fixture.db_path())?,
+        before_login_session_count
+    );
+    assert_login_last_ip(login_rollback_fixture.db_path(), 42, "")?;
+
     let revoke_error_fixture = RuntimeFixture::new()?;
     seed_auth_db(revoke_error_fixture.db_path(), &token)?;
     install_revoke_failure_trigger(revoke_error_fixture.db_path())?;
@@ -781,6 +1003,11 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             investment_product_keywords TEXT,
             investment_exclude_keywords TEXT,
             is_active INTEGER NOT NULL DEFAULT 1,
+            two_factor_enabled INTEGER DEFAULT 0,
+            failed_login_attempts INTEGER DEFAULT 0,
+            locked_until TEXT,
+            last_login_at TEXT,
+            last_login_ip TEXT,
             email_verified INTEGER DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00',
             updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00'
@@ -915,6 +1142,50 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             row,
         )?;
     }
+    Ok(())
+}
+
+fn seed_login_edge_users(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let password_hash = hash(TEST_PASSWORD, 4)?;
+    let future_lock = (Utc::now().naive_utc() + ChronoDuration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    let expired_lock = (Utc::now().naive_utc() - ChronoDuration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string();
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active, two_factor_enabled) VALUES (78, 'twofa', 'twofa@example.test', ?1, 1, 1)",
+        [&password_hash],
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active, locked_until, failed_login_attempts) VALUES (79, 'locked', 'locked@example.test', ?1, 1, ?2, 5)",
+        (&password_hash, &future_lock),
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active) VALUES (80, 'inactive', 'inactive@example.test', ?1, 0)",
+        [&password_hash],
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active, locked_until, failed_login_attempts) VALUES (81, 'nearlylocked', 'nearlylocked@example.test', ?1, 1, NULL, 4)",
+        [&password_hash],
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active, locked_until, failed_login_attempts) VALUES (82, 'expiredlock', 'expiredlock@example.test', ?1, 1, ?2, 5)",
+        (&password_hash, &expired_lock),
+    )?;
+    connection.execute(
+        "INSERT INTO users(id, username, email, password_hash, is_active, locked_until, failed_login_attempts) VALUES (83, 'expiredwrong', 'expiredwrong@example.test', ?1, 1, ?2, 5)",
+        (&password_hash, &expired_lock),
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO user_application_cloud_settings (
+            user_id, setting_key, setting_value, created_at, updated_at
+        ) VALUES (42, 'showAmountInHomePage', 'true', '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        "#,
+        [],
+    )?;
     Ok(())
 }
 
@@ -1118,11 +1389,128 @@ fn assert_auth_log(
     Ok(())
 }
 
+fn assert_login_state(
+    path: &Path,
+    user_id: i64,
+    failed_attempts: i64,
+    ip_address: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (attempts, last_login_ip): (i64, String) = connection.query_row(
+        "SELECT failed_login_attempts, last_login_ip FROM users WHERE id = ?1",
+        [user_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(attempts, failed_attempts);
+    assert_eq!(last_login_ip, ip_address);
+    Ok(())
+}
+
+fn assert_login_last_ip(
+    path: &Path,
+    user_id: i64,
+    expected_ip_address: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let last_login_ip = connection.query_row(
+        "SELECT COALESCE(last_login_ip, '') FROM users WHERE id = ?1",
+        [user_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    assert_eq!(last_login_ip, expected_ip_address);
+    Ok(())
+}
+
+fn session_count(path: &Path) -> Result<i64, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?)
+}
+
+fn assert_login_failure_count(
+    path: &Path,
+    user_id: i64,
+    expected_attempts: i64,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let attempts = connection.query_row(
+        "SELECT failed_login_attempts FROM users WHERE id = ?1",
+        [user_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    assert_eq!(attempts, expected_attempts);
+    Ok(())
+}
+
+fn assert_login_locked(
+    path: &Path,
+    user_id: i64,
+    expected_attempts: i64,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (attempts, locked_until): (i64, String) = connection.query_row(
+        "SELECT failed_login_attempts, COALESCE(locked_until, '') FROM users WHERE id = ?1",
+        [user_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(attempts, expected_attempts);
+    assert!(!locked_until.trim().is_empty());
+    Ok(())
+}
+
+fn assert_login_unlocked(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let locked_until = connection.query_row(
+        "SELECT COALESCE(locked_until, '') FROM users WHERE id = ?1",
+        [user_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    assert_eq!(locked_until, "");
+    Ok(())
+}
+
 fn token_by_id<'a>(tokens: &'a [Value], token_id: &str) -> &'a Value {
     tokens
         .iter()
         .find(|token| token["tokenId"] == token_id)
         .expect("token id exists")
+}
+
+fn login_request(login_name: &str, password: &str) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("content-type", "application/json")
+        .header("user-agent", "Mozilla/5.0 (Login contract)")
+        .body(Body::from(
+            json!({
+                "loginName": login_name,
+                "password": password,
+            })
+            .to_string(),
+        ))
+        .expect("login request builds");
+    request.extensions_mut().insert(ConnectInfo(
+        "198.51.100.30:4300"
+            .parse::<SocketAddr>()
+            .expect("peer addr"),
+    ));
+    request
+}
+
+fn login_request_with_origin_and_forwarded_ip(
+    login_name: &str,
+    password: &str,
+    origin: &'static str,
+    forwarded_for: &'static str,
+) -> Request<Body> {
+    let mut request = login_request(login_name, password);
+    request
+        .headers_mut()
+        .insert(header::ORIGIN, HeaderValue::from_static(origin));
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", HeaderValue::from_static(forwarded_for));
+    request
 }
 
 fn personal_token_request(

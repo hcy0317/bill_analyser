@@ -9,8 +9,12 @@ pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
 pub const DEFAULT_AUTH_JWT_ALGORITHM: &str = "HS256";
 pub const DEFAULT_AUTH_JWT_EXPIRATION_DAYS: i64 = 7;
 pub const DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 30;
+pub const DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 5;
+pub const DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 15;
 pub const MAX_AUTH_JWT_EXPIRATION_DAYS: i64 = 365;
 pub const MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 365;
+pub const MAX_AUTH_MAX_LOGIN_ATTEMPTS: i64 = 100;
+pub const MAX_AUTH_LOCKOUT_DURATION_MINUTES: i64 = 24 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpShellConfig {
@@ -24,6 +28,8 @@ pub struct HttpShellConfig {
     pub auth_jwt_algorithm: String,
     pub auth_jwt_expiration_days: i64,
     pub auth_refresh_token_expiration_days: i64,
+    pub auth_max_login_attempts: i64,
+    pub auth_lockout_duration_minutes: i64,
     pub public_base_url: Option<String>,
 }
 
@@ -63,6 +69,8 @@ impl HttpShellConfig {
             auth_jwt_algorithm: DEFAULT_AUTH_JWT_ALGORITHM.to_string(),
             auth_jwt_expiration_days: DEFAULT_AUTH_JWT_EXPIRATION_DAYS,
             auth_refresh_token_expiration_days: DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
+            auth_max_login_attempts: DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS,
+            auth_lockout_duration_minutes: DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
             public_base_url: None,
         })
     }
@@ -94,6 +102,16 @@ impl HttpShellConfig {
 
     pub fn with_auth_refresh_token_expiration_days(mut self, days: i64) -> Self {
         self.auth_refresh_token_expiration_days = days;
+        self
+    }
+
+    pub fn with_auth_max_login_attempts(mut self, attempts: i64) -> Self {
+        self.auth_max_login_attempts = attempts;
+        self
+    }
+
+    pub fn with_auth_lockout_duration_minutes(mut self, minutes: i64) -> Self {
+        self.auth_lockout_duration_minutes = minutes;
         self
     }
 
@@ -160,6 +178,22 @@ impl HttpShellConfig {
             1,
             MAX_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS,
         )?;
+        let auth_max_login_attempts = parse_env_i64_range_value(
+            "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS",
+            lookup("BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS")
+                .or_else(|| lookup("MAX_LOGIN_ATTEMPTS")),
+            DEFAULT_AUTH_MAX_LOGIN_ATTEMPTS,
+            1,
+            MAX_AUTH_MAX_LOGIN_ATTEMPTS,
+        )?;
+        let auth_lockout_duration_minutes = parse_env_i64_range_value(
+            "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES",
+            lookup("BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES")
+                .or_else(|| lookup("LOCKOUT_DURATION_MINUTES")),
+            DEFAULT_AUTH_LOCKOUT_DURATION_MINUTES,
+            1,
+            MAX_AUTH_LOCKOUT_DURATION_MINUTES,
+        )?;
         let public_base_url = lookup("BILL_ANALYSER_PUBLIC_BASE_URL")
             .map(normalize_upstream)
             .transpose()?;
@@ -176,6 +210,8 @@ impl HttpShellConfig {
         config.auth_jwt_algorithm = auth_jwt_algorithm;
         config.auth_jwt_expiration_days = auth_jwt_expiration_days;
         config.auth_refresh_token_expiration_days = auth_refresh_token_expiration_days;
+        config.auth_max_login_attempts = auth_max_login_attempts;
+        config.auth_lockout_duration_minutes = auth_lockout_duration_minutes;
         config.public_base_url = public_base_url;
         Ok(config)
     }

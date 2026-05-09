@@ -23,13 +23,15 @@ pub use app_settings::{
     AppSettingRow, OCR_CONFIG_SETTING_KEY,
 };
 pub use auth::{
-    cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
-    create_token_session, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, invalidate_other_user_sessions,
+    cleanup_expired_sessions, clear_expired_login_lock, count_recent_token_password_failures,
+    create_auth_log, create_token_session, get_active_logout_session_by_token_hash,
+    get_active_refresh_session, get_auth_token_user, get_auth_user_profile,
+    get_login_user_by_login_name, increment_failed_login, invalidate_other_user_sessions,
     invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_sessions, rotate_refresh_token_session, ApplicationCloudSettingRow, AuthLogDraft,
-    AuthLogoutSessionRow, AuthRefreshSessionRow, AuthTokenUserRow, AuthUserProfileRow,
-    CreateTokenSessionDraft, TokenSessionRow,
+    list_user_sessions, rotate_refresh_token_session, update_user_last_login,
+    ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow, AuthLogoutSessionRow,
+    AuthRefreshSessionRow, AuthTokenUserRow, AuthUserProfileRow, CreateTokenSessionDraft,
+    LoginFailureUpdate, TokenSessionRow,
 };
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,

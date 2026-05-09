@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{connect_info::ConnectInfo, Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
@@ -19,11 +20,12 @@ use bill_analyser_core::{
 use bill_analyser_db::{
     cleanup_expired_sessions, count_recent_token_password_failures, create_auth_log,
     create_token_session, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, invalidate_other_user_sessions,
-    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_sessions, rotate_refresh_token_session, ApplicationCloudSettingRow, AuthLogDraft,
-    AuthUserProfileRow, CreateTokenSessionDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow,
+    get_auth_token_user, get_auth_user_profile, get_login_user_by_login_name,
+    increment_failed_login, invalidate_other_user_sessions, invalidate_session_by_id,
+    invalidate_session_by_token_hash, list_application_cloud_settings, list_user_sessions,
+    rotate_refresh_token_session, update_user_last_login, ApplicationCloudSettingRow, AuthLogDraft,
+    AuthLoginUserRow, AuthUserProfileRow, CreateTokenSessionDraft, DbError, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -38,13 +40,14 @@ use crate::{
         jwt_hmac_algorithm, normalize_jwt_algorithm, resolve_authenticated_user_from_headers,
         AuthenticatedUser, RustRouteAuthError,
     },
-    proxy::ProxyState,
+    proxy::{proxy_request, ProxyState},
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const TOKEN_PASSWORD_FAILURE_LIMIT: i64 = 5;
 const TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES: i64 = 15;
 const FALLBACK_CLIENT_IP: &str = "127.0.0.1";
+const AUTH_ALLOWED_CORS_ORIGINS: &[&str] = &["http://localhost:8081", "http://127.0.0.1:8081"];
 
 type RouteResult<T> = Result<T, Box<Response>>;
 
@@ -55,14 +58,18 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/tokens/api"),
     ("POST", "/api/tokens/mcp"),
     ("POST", "/api/tokens/refresh"),
+    ("POST", "/api/auth/login"),
     ("POST", "/api/auth/logout"),
 ];
 
-pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] =
-    &[("POST", "/api/auth/login"), ("POST", "/api/auth/register")];
+pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[("POST", "/api/auth/register")];
 
 pub fn auth_token_runtime_router() -> Router<ProxyState> {
     Router::new()
+        .route(
+            "/api/auth/login",
+            post(login_handler).options(login_options_handler),
+        )
         .route("/api/tokens/api", post(generate_api_token_handler))
         .route("/api/tokens/mcp", post(generate_mcp_token_handler))
         .route("/api/tokens/refresh", post(refresh_token_handler))
@@ -72,6 +79,21 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
             get(list_tokens_handler).delete(revoke_other_tokens_handler),
         )
         .route("/api/tokens/:token_id", delete(revoke_token_handler))
+        .layer(middleware::from_fn(auth_cors_middleware))
+}
+
+async fn login_options_handler(
+    State(state): State<ProxyState>,
+    request: Request<Body>,
+) -> Response {
+    proxy_request(state, request).await
+}
+
+async fn auth_cors_middleware(request: Request<Body>, next: Next) -> Response {
+    let origin = request.headers().get(header::ORIGIN).cloned();
+    let mut response = next.run(request).await;
+    apply_auth_cors_headers(origin.as_ref(), response.headers_mut());
+    response
 }
 
 async fn generate_api_token_handler(
@@ -104,6 +126,209 @@ async fn generate_mcp_token_handler(
         body,
     )
     .await
+}
+
+async fn login_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let body = request_body_object(&body);
+    let login_name = body
+        .get("loginName")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if login_name.is_empty() || password.is_empty() {
+        return auth_rest_error_response(AuthRestError::invalid_request(
+            "Username and password are required",
+        ));
+    }
+
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+
+    let user = match get_login_user_by_login_name(runtime.connection(), &login_name) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            if log_auth_event(
+                runtime.connection(),
+                AuthEvent {
+                    user_id: None,
+                    username: &login_name,
+                    event_type: "login_failed",
+                    ip_address: &ip_address,
+                    user_agent: &request_user_agent,
+                    success: false,
+                    error_message: Some("User not found".to_string()),
+                    metadata: None,
+                },
+            )
+            .is_err()
+            {
+                return db_error_response();
+            }
+            return invalid_login_credentials_response();
+        }
+        Err(_) => return db_error_response(),
+    };
+
+    if login_lock_is_active(&user.locked_until) {
+        if log_login_failure(
+            runtime.connection(),
+            &user,
+            &ip_address,
+            &request_user_agent,
+            "Account locked",
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account locked",
+            "Account is temporarily locked due to multiple failed login attempts",
+        ));
+    }
+    let expired_locked_until = if user.locked_until.trim().is_empty() {
+        None
+    } else {
+        Some(user.locked_until.as_str())
+    };
+
+    if !bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
+        let lockout_until = login_lockout_until_text(state.config.auth_lockout_duration_minutes);
+        if increment_failed_login(
+            runtime.connection(),
+            user.profile.id,
+            state.config.auth_max_login_attempts,
+            &lockout_until,
+            expired_locked_until,
+        )
+        .is_err()
+            || log_login_failure(
+                runtime.connection(),
+                &user,
+                &ip_address,
+                &request_user_agent,
+                "Invalid password",
+            )
+            .is_err()
+        {
+            return db_error_response();
+        }
+        return invalid_login_credentials_response();
+    }
+
+    if !user.is_active {
+        if log_login_failure(
+            runtime.connection(),
+            &user,
+            &ip_address,
+            &request_user_agent,
+            "Account not active",
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account not active",
+            "Your account has been deactivated",
+        ));
+    }
+
+    if user.two_factor_enabled {
+        let pending_token = match issue_action_token(&user, "pending_2fa", 1, &state) {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        if log_auth_event(
+            runtime.connection(),
+            AuthEvent {
+                user_id: Some(user.profile.id),
+                username: &user.profile.username,
+                event_type: "login_2fa_pending",
+                ip_address: &ip_address,
+                user_agent: &request_user_agent,
+                success: true,
+                error_message: None,
+                metadata: None,
+            },
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return success_result(
+            StatusCode::OK,
+            json!({
+                "token": pending_token,
+                "need2FA": true,
+            }),
+        );
+    }
+
+    let cloud_settings =
+        match list_application_cloud_settings(runtime.connection(), user.profile.id) {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let now = utc_now_text();
+    let session_draft = CreateTokenSessionDraft {
+        user_id: user.profile.id,
+        token_hash: sha256_hex(&tokens.access_token),
+        refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+        expires_at: tokens.expires_at.clone(),
+        refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+        user_agent: request_user_agent.clone(),
+        ip_address: ip_address.clone(),
+        created_at: now.clone(),
+    };
+    if persist_login_success(
+        runtime.connection(),
+        &session_draft,
+        user.profile.id,
+        &user.profile.username,
+        &now,
+        &ip_address,
+        &request_user_agent,
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+    let mut user_payload = user_profile_payload(&user.profile);
+    if let Value::Object(ref mut object) = user_payload {
+        object.insert("id".to_string(), Value::from(user.profile.id.get()));
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "need2FA": false,
+            "user": user_payload,
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
 }
 
 async fn refresh_token_handler(
@@ -539,6 +764,47 @@ fn logout_session_not_found_warning_payload(token_hash: &str) -> Value {
     })
 }
 
+fn invalid_login_credentials_response() -> Response {
+    auth_rest_error_response(AuthRestError::new(
+        401,
+        "Invalid credentials",
+        "Invalid username or password",
+    ))
+}
+
+fn log_login_failure(
+    connection: &rusqlite::Connection,
+    user: &AuthLoginUserRow,
+    ip_address: &str,
+    user_agent: &str,
+    error_message: &str,
+) -> bill_analyser_db::DbResult<i64> {
+    log_auth_event(
+        connection,
+        AuthEvent {
+            user_id: Some(user.profile.id),
+            username: &user.profile.username,
+            event_type: "login_failed",
+            ip_address,
+            user_agent,
+            success: false,
+            error_message: Some(error_message.to_string()),
+            metadata: None,
+        },
+    )
+}
+
+fn login_lock_is_active(locked_until: &str) -> bool {
+    let value = locked_until.trim();
+    if value.is_empty() {
+        return false;
+    }
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")
+        .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S%.f"))
+        .map(|datetime| Utc::now().naive_utc() < datetime)
+        .unwrap_or(false)
+}
+
 struct IssuedAccessToken {
     access_token: String,
     expires_at: String,
@@ -650,6 +916,26 @@ fn issue_session_tokens(
             .format("%Y-%m-%dT%H:%M:%S%.f")
             .to_string(),
     })
+}
+
+fn issue_action_token(
+    user: &AuthLoginUserRow,
+    token_type: &str,
+    expires_in_hours: i64,
+    state: &ProxyState,
+) -> RouteResult<String> {
+    let now = Local::now();
+    let expires_at = now + ChronoDuration::hours(expires_in_hours);
+    let payload = json!({
+        "user_id": user.profile.id.get(),
+        "username": user.profile.username.clone(),
+        "email": user.profile.email.clone(),
+        "type": token_type,
+        "iat": now.timestamp(),
+        "exp": expires_at.timestamp(),
+        "nonce": random_nonce_hex()?,
+    });
+    sign_jwt(&payload, state)
 }
 
 fn issue_access_token(
@@ -851,20 +1137,32 @@ fn client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {
     if let Some(addr) = peer_addr {
         return addr.ip().to_string();
     }
+    forwarded_header_ip(headers).unwrap_or_else(|| FALLBACK_CLIENT_IP.to_string())
+}
+
+fn login_client_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> String {
+    forwarded_header_ip(headers)
+        .or_else(|| peer_addr.map(|addr| addr.ip().to_string()))
+        .unwrap_or_else(|| FALLBACK_CLIENT_IP.to_string())
+}
+
+fn forwarded_header_ip(headers: &HeaderMap) -> Option<String> {
     let forwarded_for = header_value(headers, "x-forwarded-for");
     if !forwarded_for.is_empty() {
-        return forwarded_for
-            .split(',')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        return Some(
+            forwarded_for
+                .split(',')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        );
     }
     let real_ip = header_value(headers, "x-real-ip");
     if !real_ip.is_empty() {
-        return real_ip;
+        return Some(real_ip);
     }
-    FALLBACK_CLIENT_IP.to_string()
+    None
 }
 
 fn request_origin(state: &ProxyState) -> RouteResult<String> {
@@ -912,9 +1210,57 @@ fn log_auth_event(
             success: event.success,
             error_message: event.error_message,
             metadata: event.metadata,
-            created_at: now_text(),
+            created_at: utc_now_text(),
         },
     )
+}
+
+fn persist_login_success(
+    connection: &rusqlite::Connection,
+    session_draft: &CreateTokenSessionDraft,
+    user_id: UserId,
+    username: &str,
+    now: &str,
+    ip_address: &str,
+    user_agent: &str,
+) -> bill_analyser_db::DbResult<i64> {
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| {
+        let session_id = create_token_session(connection, session_draft)?;
+        if !update_user_last_login(connection, user_id, now, ip_address)? {
+            return Err(DbError::InvalidOperation(
+                "login user row was not updated".to_string(),
+            ));
+        }
+        log_auth_event(
+            connection,
+            AuthEvent {
+                user_id: Some(user_id),
+                username,
+                event_type: "login_success",
+                ip_address,
+                user_agent,
+                success: true,
+                error_message: None,
+                metadata: Some(json!({ "session_id": session_id }).to_string()),
+            },
+        )?;
+        Ok(session_id)
+    })();
+
+    match result {
+        Ok(session_id) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(session_id)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
 }
 
 fn session_payload(session: TokenSessionRow, current_session_id: Option<i64>) -> Value {
@@ -1044,8 +1390,21 @@ fn now_text() -> String {
         .to_string()
 }
 
+fn utc_now_text() -> String {
+    Utc::now()
+        .naive_utc()
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string()
+}
+
+fn login_lockout_until_text(minutes: i64) -> String {
+    (Utc::now().naive_utc() + ChronoDuration::minutes(minutes))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string()
+}
+
 fn token_failure_window_start_text() -> String {
-    (Local::now().naive_local() - ChronoDuration::minutes(TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES))
+    (Utc::now().naive_utc() - ChronoDuration::minutes(TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES))
         .format("%Y-%m-%dT%H:%M:%S%.f")
         .to_string()
 }
@@ -1091,6 +1450,28 @@ fn json_response(status: StatusCode, body: Value) -> Response {
     (status, Json(body)).into_response()
 }
 
+fn apply_auth_cors_headers(origin: Option<&HeaderValue>, headers: &mut HeaderMap) {
+    let Some(origin) = origin else {
+        return;
+    };
+    let Ok(origin_text) = origin.to_str() else {
+        return;
+    };
+    if !AUTH_ALLOWED_CORS_ORIGINS.contains(&origin_text) {
+        return;
+    }
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+        HeaderValue::from_static("true"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        HeaderValue::from_static("Content-Type, Authorization"),
+    );
+    headers.append(header::VARY, HeaderValue::from_static("Origin"));
+}
+
 fn status_or_internal(status: u16) -> StatusCode {
     StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -1117,6 +1498,18 @@ mod tests {
         assert_eq!(
             client_ip(&headers, Some("198.51.100.20:4300".parse().expect("addr"))),
             "198.51.100.20"
+        );
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("192.0.2.99, 198.51.100.2"),
+        );
+        assert_eq!(
+            client_ip(&headers, Some("198.51.100.20:4300".parse().expect("addr"))),
+            "198.51.100.20"
+        );
+        assert_eq!(
+            login_client_ip(&headers, Some("198.51.100.20:4300".parse().expect("addr"))),
+            "192.0.2.99"
         );
         assert_eq!(client_ip(&HeaderMap::new(), None), FALLBACK_CLIENT_IP);
 

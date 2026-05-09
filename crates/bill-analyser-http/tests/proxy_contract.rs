@@ -26,6 +26,14 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(config.body_limit_bytes, 10 * 1024 * 1024);
     assert_eq!(config.import_route_mode, ImportRouteMode::ProxyOnly);
     assert_eq!(config.public_base_url, None);
+    assert_eq!(config.auth_max_login_attempts, 5);
+    assert_eq!(config.auth_lockout_duration_minutes, 15);
+    let tuned_config = config
+        .clone()
+        .with_auth_max_login_attempts(8)
+        .with_auth_lockout_duration_minutes(60);
+    assert_eq!(tuned_config.auth_max_login_attempts, 8);
+    assert_eq!(tuned_config.auth_lockout_duration_minutes, 60);
     assert_eq!(
         health.identity.runtime_boundary,
         "rust-http-shell:proxy-only"
@@ -68,6 +76,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         "BILL_ANALYSER_AUTH_JWT_ALGORITHM" => Some("HS256".to_string()),
         "BILL_ANALYSER_AUTH_JWT_EXPIRATION_DAYS" => Some("3".to_string()),
         "BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS" => Some("9".to_string()),
+        "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS" => Some("7".to_string()),
+        "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES" => Some("45".to_string()),
         "BILL_ANALYSER_PUBLIC_BASE_URL" => Some("  https://api.example.test/  ".to_string()),
         _ => None,
     })
@@ -86,6 +96,8 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     assert_eq!(config.auth_jwt_algorithm, "HS256");
     assert_eq!(config.auth_jwt_expiration_days, 3);
     assert_eq!(config.auth_refresh_token_expiration_days, 9);
+    assert_eq!(config.auth_max_login_attempts, 7);
+    assert_eq!(config.auth_lockout_duration_minutes, 45);
     assert_eq!(
         config.public_base_url.as_deref(),
         Some("https://api.example.test")
@@ -99,6 +111,8 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
         "JWT_ALGORITHM" => Some("hs512".to_string()),
         "JWT_EXPIRATION_DAYS" => Some("5".to_string()),
         "REFRESH_TOKEN_EXPIRATION_DAYS" => Some("11".to_string()),
+        "MAX_LOGIN_ATTEMPTS" => Some("4".to_string()),
+        "LOCKOUT_DURATION_MINUTES" => Some("30".to_string()),
         _ => None,
     })
     .expect("env config parses");
@@ -107,6 +121,8 @@ fn config_from_env_reads_python_compatible_jwt_env_aliases() {
     assert_eq!(config.auth_jwt_algorithm, "hs512");
     assert_eq!(config.auth_jwt_expiration_days, 5);
     assert_eq!(config.auth_refresh_token_expiration_days, 11);
+    assert_eq!(config.auth_max_login_attempts, 4);
+    assert_eq!(config.auth_lockout_duration_minutes, 30);
 }
 
 #[test]
@@ -203,6 +219,22 @@ fn config_rejects_invalid_upstream_body_limit_and_env_integer() {
         })
         .unwrap_err(),
         HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS" => Some("0".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_MAX_LOGIN_ATTEMPTS")
+    );
+    assert_eq!(
+        HttpShellConfig::from_env_with(|name| match name {
+            "BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES" => Some("1441".to_string()),
+            _ => None,
+        })
+        .unwrap_err(),
+        HttpShellConfigError::InvalidInteger("BILL_ANALYSER_AUTH_LOCKOUT_DURATION_MINUTES")
     );
     assert_eq!(
         HttpShellConfig::from_env_with(|name| match name {
@@ -324,10 +356,26 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         "/api/statistics/exchange-rates"
     );
 
+    let login_preflight_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/api/auth/login")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(login_preflight_response.status(), StatusCode::OK);
+    let login_preflight_body = read_json(login_preflight_response).await;
+    assert_eq!(login_preflight_body["method"], "OPTIONS");
+    assert_eq!(login_preflight_body["path"], "/api/auth/login");
+
     for (method, path) in [
         (Method::GET, "/api/accounts/"),
         (Method::GET, "/api/accounts/123"),
-        (Method::OPTIONS, "/api/auth/login"),
+        (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/virtual_food"),
         (Method::PUT, "/api/categories/virtual_food"),
         (Method::DELETE, "/api/categories/virtual_food"),

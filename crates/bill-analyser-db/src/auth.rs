@@ -21,6 +21,16 @@ pub struct AuthTokenUserRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthLoginUserRow {
+    pub profile: AuthUserProfileRow,
+    pub password_hash: String,
+    pub is_active: bool,
+    pub two_factor_enabled: bool,
+    pub failed_login_attempts: i64,
+    pub locked_until: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthRefreshSessionRow {
     pub id: i64,
     pub user_id: UserId,
@@ -104,6 +114,12 @@ pub struct AuthLogDraft {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginFailureUpdate {
+    pub failed_attempts: i64,
+    pub locked: bool,
+}
+
 pub fn cleanup_expired_sessions(connection: &Connection, now: &str) -> DbResult<usize> {
     Ok(connection.execute(
         r#"
@@ -140,6 +156,37 @@ pub fn get_auth_token_user(
                     password_hash: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 })
             },
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn get_login_user_by_login_name(
+    connection: &Connection,
+    login_name: &str,
+) -> DbResult<Option<AuthLoginUserRow>> {
+    connection
+        .query_row(
+            r#"
+            SELECT
+                id, username, email, nickname, avatar, default_account_id,
+                transaction_edit_scope, language, default_currency, first_day_of_week,
+                fiscal_year_start, calendar_display_type, date_display_type,
+                long_date_format, short_date_format, long_time_format, short_time_format,
+                fiscal_year_format, currency_display_type, numeral_system, decimal_separator,
+                digit_grouping_symbol, digit_grouping, coordinate_display_type,
+                expense_amount_color, income_amount_color, cash_account_id,
+                cash_transfer_category_id, import_learning_enabled,
+                investment_platform_keywords, investment_product_keywords,
+                investment_exclude_keywords, email_verified,
+                password_hash, is_active, two_factor_enabled, failed_login_attempts, locked_until
+            FROM users
+            WHERE username = ?1 OR email = ?1
+            ORDER BY CASE WHEN username = ?1 THEN 0 ELSE 1 END, id ASC
+            LIMIT 1
+            "#,
+            [login_name],
+            auth_login_user_from_row,
         )
         .optional()
         .map_err(DbError::from)
@@ -374,6 +421,107 @@ pub fn create_auth_log(connection: &Connection, draft: &AuthLogDraft) -> DbResul
     Ok(connection.last_insert_rowid())
 }
 
+pub fn increment_failed_login(
+    connection: &Connection,
+    user_id: UserId,
+    max_login_attempts: i64,
+    lockout_until: &str,
+    reset_locked_until: Option<&str>,
+) -> DbResult<Option<LoginFailureUpdate>> {
+    let user_id = user_id_sql(user_id)?;
+    let max_login_attempts = max_login_attempts.max(1);
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| {
+        let login_state = connection
+            .query_row(
+                "SELECT failed_login_attempts, locked_until FROM users WHERE id = ?1",
+                [user_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((failed_attempts, current_locked_until)) = login_state else {
+            return Ok(None);
+        };
+        let reset_expired_lock = reset_locked_until
+            .filter(|value| !value.trim().is_empty())
+            .is_some_and(|value| current_locked_until.as_deref() == Some(value));
+        let failed_attempts = if reset_expired_lock {
+            0
+        } else {
+            failed_attempts.unwrap_or(0)
+        };
+        let failed_attempts = failed_attempts + 1;
+        let locked = failed_attempts >= max_login_attempts;
+        if locked {
+            connection.execute(
+                "UPDATE users SET failed_login_attempts = ?1, locked_until = ?2 WHERE id = ?3",
+                params![failed_attempts, lockout_until, user_id],
+            )?;
+        } else if reset_expired_lock {
+            connection.execute(
+                "UPDATE users SET failed_login_attempts = ?1, locked_until = NULL WHERE id = ?2",
+                params![failed_attempts, user_id],
+            )?;
+        } else {
+            connection.execute(
+                "UPDATE users SET failed_login_attempts = ?1 WHERE id = ?2",
+                params![failed_attempts, user_id],
+            )?;
+        }
+        Ok(Some(LoginFailureUpdate {
+            failed_attempts,
+            locked,
+        }))
+    })();
+
+    match result {
+        Ok(value) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+pub fn clear_expired_login_lock(connection: &Connection, user_id: UserId) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        "UPDATE users SET locked_until = NULL, failed_login_attempts = 0 WHERE id = ?1",
+        [user_id],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn update_user_last_login(
+    connection: &Connection,
+    user_id: UserId,
+    last_login_at: &str,
+    ip_address: &str,
+) -> DbResult<bool> {
+    let user_id = user_id_sql(user_id)?;
+    let changed = connection.execute(
+        r#"
+        UPDATE users
+        SET last_login_at = ?1, last_login_ip = ?2, failed_login_attempts = 0, locked_until = NULL
+        WHERE id = ?3
+        "#,
+        params![last_login_at, ip_address, user_id],
+    )?;
+    Ok(changed > 0)
+}
+
 pub fn count_recent_token_password_failures(
     connection: &Connection,
     user_id: UserId,
@@ -486,6 +634,17 @@ fn auth_user_profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthU
         investment_product_keywords: row.get(30)?,
         investment_exclude_keywords: row.get(31)?,
         email_verified: row.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
+    })
+}
+
+fn auth_login_user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthLoginUserRow> {
+    Ok(AuthLoginUserRow {
+        profile: auth_user_profile_from_row(row)?,
+        password_hash: row.get::<_, Option<String>>(33)?.unwrap_or_default(),
+        is_active: row.get::<_, Option<i64>>(34)?.unwrap_or(0) != 0,
+        two_factor_enabled: row.get::<_, Option<i64>>(35)?.unwrap_or(0) != 0,
+        failed_login_attempts: row.get::<_, Option<i64>>(36)?.unwrap_or(0),
+        locked_until: row.get::<_, Option<String>>(37)?.unwrap_or_default(),
     })
 }
 
@@ -675,6 +834,123 @@ mod tests {
             &connection,
             "logout-token"
         )?);
+        Ok(())
+    }
+
+    #[test]
+    fn login_failure_primitives_cover_lockout_and_reset_edges() -> DbResult<()> {
+        let connection = Connection::open_in_memory()?;
+        connection.execute_batch(
+            r#"
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                failed_login_attempts INTEGER,
+                locked_until TEXT,
+                last_login_at TEXT,
+                last_login_ip TEXT
+            );
+            INSERT INTO users(id, failed_login_attempts, locked_until) VALUES
+                (1, 0, NULL),
+                (2, 2, NULL),
+                (3, 8, '2020-01-01T00:00:00'),
+                (4, 4, '2026-01-01T00:00:00');
+            "#,
+        )?;
+
+        assert_eq!(
+            increment_failed_login(&connection, user_id(999), 3, "2026-01-02T00:00:00", None,)?,
+            None
+        );
+        assert_eq!(
+            increment_failed_login(&connection, user_id(1), 3, "2026-01-02T00:00:00", None)?,
+            Some(LoginFailureUpdate {
+                failed_attempts: 1,
+                locked: false
+            })
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT failed_login_attempts, locked_until FROM users WHERE id = 1",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            )?,
+            (1, None)
+        );
+
+        assert_eq!(
+            increment_failed_login(&connection, user_id(2), 3, "2026-01-02T00:00:00", None)?,
+            Some(LoginFailureUpdate {
+                failed_attempts: 3,
+                locked: true
+            })
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT failed_login_attempts, locked_until FROM users WHERE id = 2",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            )?,
+            (3, Some("2026-01-02T00:00:00".to_string()))
+        );
+
+        assert_eq!(
+            increment_failed_login(
+                &connection,
+                user_id(3),
+                3,
+                "2026-01-02T00:00:00",
+                Some("2020-01-01T00:00:00"),
+            )?,
+            Some(LoginFailureUpdate {
+                failed_attempts: 1,
+                locked: false
+            })
+        );
+        assert_eq!(
+            connection.query_row(
+                "SELECT failed_login_attempts, locked_until FROM users WHERE id = 3",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            )?,
+            (1, None)
+        );
+
+        assert!(clear_expired_login_lock(&connection, user_id(4))?);
+        assert_eq!(
+            connection.query_row(
+                "SELECT failed_login_attempts, locked_until FROM users WHERE id = 4",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            )?,
+            (0, None)
+        );
+
+        assert!(update_user_last_login(
+            &connection,
+            user_id(1),
+            "2026-01-03T00:00:00",
+            "127.0.0.1",
+        )?);
+        assert_eq!(
+            connection.query_row(
+                "SELECT last_login_at, last_login_ip, failed_login_attempts, locked_until FROM users WHERE id = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                }
+            )?,
+            (
+                Some("2026-01-03T00:00:00".to_string()),
+                Some("127.0.0.1".to_string()),
+                0,
+                None
+            )
+        );
         Ok(())
     }
 }
