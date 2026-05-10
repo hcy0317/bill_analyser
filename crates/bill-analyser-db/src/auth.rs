@@ -356,6 +356,21 @@ pub fn get_auth_user_profile(
         .map_err(DbError::from)
 }
 
+pub fn get_auth_user_two_factor_enabled(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Option<bool>> {
+    let user_id_sql = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            "SELECT COALESCE(two_factor_enabled, 0) FROM users WHERE id = ?1",
+            [user_id_sql],
+            |row| Ok(row.get::<_, i64>(0)? != 0),
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
 pub fn list_application_cloud_settings(
     connection: &Connection,
     user_id: UserId,

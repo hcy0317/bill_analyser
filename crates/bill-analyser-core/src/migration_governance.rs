@@ -1296,7 +1296,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "auth-security-user-data"
     ),
     python_proxy_route!("POST", "/api/2fa/recovery/verify", "auth-security-user-data"),
-    python_proxy_route!("GET", "/api/2fa/status", "auth-security-user-data"),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/2fa/status",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust auth runtime owns the authenticated 2FA status read route; 2FA write and login-verification routes remain Python-proxied.",
+    },
     python_proxy_route!("POST", "/api/2fa/verify", "auth-security-user-data"),
     python_proxy_route!("GET", "/api/accounts/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/accounts/", "taxonomy-rules-settings"),
@@ -2417,7 +2425,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, and user-data statistics routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, and authenticated 2FA status routes are Rust-owned; 2FA verification/write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2876,7 +2884,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, and user-data statistics routes are Rust-owned; 2FA verification/management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, and authenticated 2FA status routes are Rust-owned; 2FA verification/write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

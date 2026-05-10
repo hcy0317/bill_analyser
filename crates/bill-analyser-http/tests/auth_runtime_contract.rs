@@ -192,6 +192,118 @@ async fn auth_logout_runtime_invalidates_session_and_is_idempotent() -> Result<(
 }
 
 #[tokio::test]
+async fn auth_two_factor_status_runtime_reads_user_flag() -> Result<(), Box<dyn Error>> {
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/2fa/status")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("GET", "/api/2fa/status")));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let disabled_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/2fa/status",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(disabled_response.status(), StatusCode::OK);
+    let disabled_body = read_json(disabled_response).await;
+    assert_eq!(disabled_body["success"], true);
+    assert_eq!(disabled_body["result"]["enable"], false);
+    assert_eq!(disabled_body["result"]["isEnabled"], false);
+
+    set_two_factor_enabled(fixture.db_path(), 42, true)?;
+    let enabled_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/2fa/status",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(enabled_response.status(), StatusCode::OK);
+    let enabled_body = read_json(enabled_response).await;
+    assert_eq!(enabled_body["success"], true);
+    assert_eq!(enabled_body["result"]["enable"], true);
+    assert_eq!(enabled_body["result"]["isEnabled"], true);
+
+    let missing_auth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/2fa/status")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(missing_auth_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(missing_auth_response).await["message"],
+        "Missing authorization header"
+    );
+
+    let missing_db_path_response = runtime_router_without_sqlite_path()
+        .oneshot(trusted_request(
+            Method::GET,
+            "/api/2fa/status",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        missing_db_path_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        read_json(missing_db_path_response).await["message"],
+        "Rust auth token runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    delete_user(fixture.db_path(), 42)?;
+    let missing_user_response = app
+        .clone()
+        .oneshot(trusted_request(
+            Method::GET,
+            "/api/2fa/status",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_user_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_user_response).await["message"],
+        "User not found"
+    );
+
+    seed_minimal_user_with_malformed_two_factor_status(fixture.db_path(), 42)?;
+    let db_error_response = app
+        .clone()
+        .oneshot(trusted_request(
+            Method::GET,
+            "/api/2fa/status",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        db_error_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(db_error_response).await["message"],
+        "Rust auth token runtime DB error"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Result<(), Box<dyn Error>>
 {
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
@@ -2729,6 +2841,36 @@ fn assert_login_unlocked(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>
         |row| row.get::<_, String>(0),
     )?;
     assert_eq!(locked_until, "");
+    Ok(())
+}
+
+fn set_two_factor_enabled(path: &Path, user_id: i64, enabled: bool) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET two_factor_enabled = ?1 WHERE id = ?2",
+        (if enabled { 1 } else { 0 }, user_id),
+    )?;
+    Ok(())
+}
+
+fn delete_user(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute("DELETE FROM users WHERE id = ?1", [user_id])?;
+    Ok(())
+}
+
+fn seed_minimal_user_with_malformed_two_factor_status(
+    path: &Path,
+    user_id: i64,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "
+        INSERT INTO users(id, username, email, password_hash, two_factor_enabled)
+        VALUES (?1, 'malformed-2fa', 'malformed-2fa@example.test', 'hash', 'not-a-number')
+        ",
+        [user_id],
+    )?;
     Ok(())
 }
 

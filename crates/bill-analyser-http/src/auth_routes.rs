@@ -24,18 +24,18 @@ use bill_analyser_db::{
     count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
     create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
     delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, get_login_user_by_email,
-    get_login_user_by_login_name, get_user_data_statistics as get_db_user_data_statistics,
-    get_user_external_auth, increment_failed_login, init_auth_security_schema,
-    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
-    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
-    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
-    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
-    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
-    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
-    CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
-    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow,
+    get_auth_token_user, get_auth_user_profile, get_auth_user_two_factor_enabled,
+    get_login_user_by_email, get_login_user_by_login_name,
+    get_user_data_statistics as get_db_user_data_statistics, get_user_external_auth,
+    increment_failed_login, init_auth_security_schema, invalidate_other_user_sessions,
+    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
+    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
+    set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
+    update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
+    ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
+    AuthUserProfileRow, AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
+    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
+    SqliteDbPath, SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use ring::{
@@ -92,6 +92,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/profile/external-auths/unlink"),
     ("GET", "/api/system/version"),
     ("GET", "/api/data/statistics"),
+    ("GET", "/api/2fa/status"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -168,6 +169,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/data/statistics",
             get(get_user_data_statistics_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/2fa/status",
+            get(get_two_factor_status_handler).options(auth_options_handler),
         )
         .route(
             "/api/tokens",
@@ -1628,6 +1633,33 @@ async fn get_user_data_statistics_handler(
     };
     match get_db_user_data_statistics(runtime.connection(), auth.user_id) {
         Ok(statistics) => json_response(StatusCode::OK, user_data_statistics_response(&statistics)),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn get_two_factor_status_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match get_auth_user_two_factor_enabled(runtime.connection(), auth.user_id) {
+        Ok(Some(enabled)) => success_result(
+            StatusCode::OK,
+            json!({
+                "enable": enabled,
+                "isEnabled": enabled
+            }),
+        ),
+        Ok(None) => {
+            auth_rest_error_response(AuthRestError::new(404, "User not found", "User not found"))
+        }
         Err(_) => db_error_response(),
     }
 }
