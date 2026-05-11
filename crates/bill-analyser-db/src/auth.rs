@@ -28,6 +28,7 @@ pub struct AuthLoginUserRow {
     pub password_hash: String,
     pub is_active: bool,
     pub two_factor_enabled: bool,
+    pub two_factor_secret: String,
     pub failed_login_attempts: i64,
     pub locked_until: String,
 }
@@ -229,7 +230,8 @@ pub fn get_login_user_by_login_name(
                 cash_transfer_category_id, import_learning_enabled,
                 investment_platform_keywords, investment_product_keywords,
                 investment_exclude_keywords, email_verified,
-                password_hash, is_active, two_factor_enabled, failed_login_attempts, locked_until
+                password_hash, is_active, two_factor_enabled, two_factor_secret,
+                failed_login_attempts, locked_until
             FROM users
             WHERE username = ?1 OR email = ?1
             ORDER BY CASE WHEN username = ?1 THEN 0 ELSE 1 END, id ASC
@@ -260,13 +262,45 @@ pub fn get_login_user_by_email(
                 cash_transfer_category_id, import_learning_enabled,
                 investment_platform_keywords, investment_product_keywords,
                 investment_exclude_keywords, email_verified,
-                password_hash, is_active, two_factor_enabled, failed_login_attempts, locked_until
+                password_hash, is_active, two_factor_enabled, two_factor_secret,
+                failed_login_attempts, locked_until
             FROM users
             WHERE email = ?1
             ORDER BY id ASC
             LIMIT 1
             "#,
             [email],
+            auth_login_user_from_row,
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+pub fn get_login_user_by_id(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<Option<AuthLoginUserRow>> {
+    let user_id = user_id_sql(user_id)?;
+    connection
+        .query_row(
+            r#"
+            SELECT
+                id, username, email, nickname, avatar, default_account_id,
+                transaction_edit_scope, language, default_currency, first_day_of_week,
+                fiscal_year_start, calendar_display_type, date_display_type,
+                long_date_format, short_date_format, long_time_format, short_time_format,
+                fiscal_year_format, currency_display_type, numeral_system, decimal_separator,
+                digit_grouping_symbol, digit_grouping, coordinate_display_type,
+                expense_amount_color, income_amount_color, cash_account_id,
+                cash_transfer_category_id, import_learning_enabled,
+                investment_platform_keywords, investment_product_keywords,
+                investment_exclude_keywords, email_verified,
+                password_hash, is_active, two_factor_enabled, two_factor_secret,
+                failed_login_attempts, locked_until
+            FROM users
+            WHERE id = ?1
+            "#,
+            [user_id],
             auth_login_user_from_row,
         )
         .optional()
@@ -1381,8 +1415,9 @@ fn auth_login_user_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthLog
         password_hash: row.get::<_, Option<String>>(33)?.unwrap_or_default(),
         is_active: row.get::<_, Option<i64>>(34)?.unwrap_or(0) != 0,
         two_factor_enabled: row.get::<_, Option<i64>>(35)?.unwrap_or(0) != 0,
-        failed_login_attempts: row.get::<_, Option<i64>>(36)?.unwrap_or(0),
-        locked_until: row.get::<_, Option<String>>(37)?.unwrap_or_default(),
+        two_factor_secret: row.get::<_, Option<String>>(36)?.unwrap_or_default(),
+        failed_login_attempts: row.get::<_, Option<i64>>(37)?.unwrap_or(0),
+        locked_until: row.get::<_, Option<String>>(38)?.unwrap_or_default(),
     })
 }
 

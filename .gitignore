@@ -490,3 +490,4 @@ output/*
 uploads/*
 tests/.runtime/
 .omx/
+coverage.json

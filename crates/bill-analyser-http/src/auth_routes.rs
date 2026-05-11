@@ -25,7 +25,7 @@ use bill_analyser_db::{
     create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
     delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
     get_auth_token_user, get_auth_user_profile, get_auth_user_two_factor_enabled,
-    get_login_user_by_email, get_login_user_by_login_name,
+    get_login_user_by_email, get_login_user_by_id, get_login_user_by_login_name,
     get_user_data_statistics as get_db_user_data_statistics, get_user_external_auth,
     increment_failed_login, init_auth_security_schema, invalidate_other_user_sessions,
     invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
@@ -93,6 +93,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/system/version"),
     ("GET", "/api/data/statistics"),
     ("GET", "/api/2fa/status"),
+    ("POST", "/api/2fa/verify"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -173,6 +174,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/2fa/status",
             get(get_two_factor_status_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/2fa/verify",
+            post(verify_two_factor_login_handler).options(auth_options_handler),
         )
         .route(
             "/api/tokens",
@@ -1664,6 +1669,143 @@ async fn get_two_factor_status_handler(
     }
 }
 
+async fn verify_two_factor_login_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let token = match parse_logout_bearer_token(&headers) {
+        Ok(value) => value,
+        Err(error) => return auth_rest_error_response(error),
+    };
+    let body = request_body_object(&body);
+    let passcode = body
+        .get("passcode")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if passcode.is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "success": false,
+                "error": "Bad Request",
+                "errorCode": 203005,
+                "message": "Passcode is required"
+            }),
+        );
+    }
+
+    let payload = match validate_pending_two_factor_jwt(&token, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = match pending_two_factor_user_id(&payload) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_id(runtime.connection(), user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "success": false,
+                    "error": "User not found"
+                }),
+            );
+        }
+        Err(_) => return db_error_response(),
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if !user.is_active {
+        if log_login_failure(
+            runtime.connection(),
+            &user,
+            &ip_address,
+            &request_user_agent,
+            "Account not active",
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account not active",
+            "Your account has been deactivated",
+        ));
+    }
+    let secret = user.two_factor_secret.trim().replace(' ', "");
+    if !user.two_factor_enabled || secret.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Two-factor authentication is not enabled",
+        ));
+    }
+    if !verify_totp_passcode(&secret, passcode, Utc::now().timestamp()) {
+        return auth_rest_error_response(AuthRestError::new(
+            401,
+            "Invalid passcode",
+            "The current passcode is incorrect",
+        ));
+    }
+
+    let cloud_settings =
+        match list_application_cloud_settings(runtime.connection(), user.profile.id) {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let now = now_text();
+    if persist_two_factor_login_success(
+        runtime.connection(),
+        &CreateTokenSessionDraft {
+            user_id: user.profile.id,
+            token_hash: sha256_hex(&tokens.access_token),
+            refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+            expires_at: tokens.expires_at.clone(),
+            refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+            user_agent: request_user_agent.clone(),
+            ip_address: ip_address.clone(),
+            created_at: now,
+        },
+        user.profile.id,
+        &user.profile.username,
+        &ip_address,
+        &request_user_agent,
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+    let mut user_payload = user_profile_payload(&user.profile);
+    if let Value::Object(ref mut object) = user_payload {
+        object.insert("id".to_string(), Value::from(user.profile.id.get()));
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "need2FA": false,
+            "user": user_payload,
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
 async fn list_tokens_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
     let auth = match authenticated_user(&headers, &state) {
         Ok(value) => value,
@@ -2122,6 +2264,24 @@ fn validate_action_jwt(
     expected_type: &str,
     invalid_message: &'static str,
 ) -> RouteResult<Value> {
+    validate_action_jwt_with_invalid(token, state, expected_type, || {
+        invalid_action_token_box(invalid_message)
+    })
+}
+
+fn validate_pending_two_factor_jwt(token: &str, state: &ProxyState) -> RouteResult<Value> {
+    validate_action_jwt_with_invalid(token, state, "pending_2fa", invalid_pending_two_factor_box)
+}
+
+fn validate_action_jwt_with_invalid<F>(
+    token: &str,
+    state: &ProxyState,
+    expected_type: &str,
+    invalid_response: F,
+) -> RouteResult<Value>
+where
+    F: Fn() -> Box<Response> + Copy,
+{
     let secret = state
         .config
         .auth_jwt_secret
@@ -2135,21 +2295,15 @@ fn validate_action_jwt(
             )))
         })?;
     let mut parts = token.split('.');
-    let encoded_header = parts
-        .next()
-        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
-    let encoded_payload = parts
-        .next()
-        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
-    let encoded_signature = parts
-        .next()
-        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+    let encoded_header = parts.next().ok_or_else(invalid_response)?;
+    let encoded_payload = parts.next().ok_or_else(invalid_response)?;
+    let encoded_signature = parts.next().ok_or_else(invalid_response)?;
     if parts.next().is_some() {
-        return Err(invalid_action_token_box(invalid_message));
+        return Err(invalid_response());
     }
 
-    let header = decode_action_jwt_part(encoded_header, invalid_message)?;
-    let payload = decode_action_jwt_part(encoded_payload, invalid_message)?;
+    let header = decode_action_jwt_part(encoded_header, invalid_response)?;
+    let payload = decode_action_jwt_part(encoded_payload, invalid_response)?;
     let configured_algorithm = normalize_jwt_algorithm(&state.config.auth_jwt_algorithm);
     let header_algorithm = normalize_jwt_algorithm(
         header
@@ -2158,7 +2312,7 @@ fn validate_action_jwt(
             .unwrap_or_default(),
     );
     if header_algorithm != configured_algorithm {
-        return Err(invalid_action_token_box(invalid_message));
+        return Err(invalid_response());
     }
     let hmac_algorithm = jwt_hmac_algorithm(&configured_algorithm).map_err(|error| {
         Box::new(auth_rest_error_response(AuthRestError::new(
@@ -2171,37 +2325,50 @@ fn validate_action_jwt(
     let signature = general_purpose::URL_SAFE_NO_PAD
         .decode(encoded_signature)
         .or_else(|_| general_purpose::URL_SAFE.decode(encoded_signature))
-        .map_err(|_| invalid_action_token_box(invalid_message))?;
+        .map_err(|_| invalid_response())?;
     let key = hmac::Key::new(hmac_algorithm, secret.as_bytes());
-    hmac::verify(&key, signing_input.as_bytes(), &signature)
-        .map_err(|_| invalid_action_token_box(invalid_message))?;
+    hmac::verify(&key, signing_input.as_bytes(), &signature).map_err(|_| invalid_response())?;
     let exp = payload
         .get("exp")
         .and_then(Value::as_i64)
-        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
+        .ok_or_else(invalid_response)?;
     if exp <= Utc::now().timestamp() {
-        return Err(invalid_action_token_box(invalid_message));
+        return Err(invalid_response());
     }
     if payload.get("type").and_then(Value::as_str) != Some(expected_type) {
-        return Err(invalid_action_token_box(invalid_message));
+        return Err(invalid_response());
     }
     Ok(payload)
 }
 
-fn decode_action_jwt_part(encoded: &str, invalid_message: &'static str) -> RouteResult<Value> {
+fn decode_action_jwt_part<F>(encoded: &str, invalid_response: F) -> RouteResult<Value>
+where
+    F: Fn() -> Box<Response> + Copy,
+{
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
         .or_else(|_| general_purpose::URL_SAFE.decode(encoded))
-        .map_err(|_| invalid_action_token_box(invalid_message))?;
-    serde_json::from_slice(&decoded).map_err(|_| invalid_action_token_box(invalid_message))
+        .map_err(|_| invalid_response())?;
+    serde_json::from_slice(&decoded).map_err(|_| invalid_response())
 }
 
 fn action_user_id(payload: &Value, invalid_message: &'static str) -> RouteResult<UserId> {
+    action_user_id_with_invalid(payload, || invalid_action_token_box(invalid_message))
+}
+
+fn pending_two_factor_user_id(payload: &Value) -> RouteResult<UserId> {
+    action_user_id_with_invalid(payload, invalid_pending_two_factor_box)
+}
+
+fn action_user_id_with_invalid<F>(payload: &Value, invalid_response: F) -> RouteResult<UserId>
+where
+    F: Fn() -> Box<Response> + Copy,
+{
     let raw_user_id = payload
         .get("user_id")
         .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_action_token_box(invalid_message))?;
-    UserId::new(raw_user_id).map_err(|_| invalid_action_token_box(invalid_message))
+        .ok_or_else(invalid_response)?;
+    UserId::new(raw_user_id).map_err(|_| invalid_response())
 }
 
 fn issue_session_tokens(
@@ -2363,6 +2530,14 @@ fn invalid_action_token_box(message: &'static str) -> Box<Response> {
     )))
 }
 
+fn invalid_pending_two_factor_box() -> Box<Response> {
+    Box::new(auth_rest_error_response(AuthRestError::new(
+        401,
+        "Unauthorized",
+        "Invalid or expired 2FA token",
+    )))
+}
+
 fn invalid_refresh_token_response() -> Response {
     auth_rest_error_response(AuthRestError::invalid_token(401, "Invalid refresh token"))
 }
@@ -2400,6 +2575,73 @@ fn random_nonce_hex() -> RouteResult<String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>())
+}
+
+fn verify_totp_passcode(secret: &str, passcode: &str, timestamp: i64) -> bool {
+    let passcode = passcode.trim();
+    if passcode.is_empty() {
+        return false;
+    }
+    let counter = timestamp.max(0) / 30;
+    (-1_i64..=1).any(|offset| {
+        let Some(candidate_counter) = counter.checked_add(offset) else {
+            return false;
+        };
+        if candidate_counter < 0 {
+            return false;
+        }
+        totp_passcode(secret, candidate_counter as u64)
+            .is_some_and(|candidate| constant_time_eq(candidate.as_bytes(), passcode.as_bytes()))
+    })
+}
+
+fn totp_passcode(secret: &str, counter: u64) -> Option<String> {
+    let key_bytes = base32_decode_secret(secret)?;
+    if key_bytes.is_empty() {
+        return None;
+    }
+    let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, &key_bytes);
+    let digest = hmac::sign(&key, &counter.to_be_bytes());
+    let bytes = digest.as_ref();
+    let offset = usize::from(bytes[bytes.len() - 1] & 0x0f);
+    let binary = ((u32::from(bytes[offset]) & 0x7f) << 24)
+        | (u32::from(bytes[offset + 1]) << 16)
+        | (u32::from(bytes[offset + 2]) << 8)
+        | u32::from(bytes[offset + 3]);
+    Some(format!("{:06}", binary % 1_000_000))
+}
+
+fn base32_decode_secret(secret: &str) -> Option<Vec<u8>> {
+    let mut buffer = 0_u32;
+    let mut bit_count = 0_u8;
+    let mut output = Vec::new();
+    for byte in secret.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a',
+            b'2'..=b'7' => byte - b'2' + 26,
+            b'=' => continue,
+            _ => return None,
+        };
+        buffer = (buffer << 5) | u32::from(value);
+        bit_count += 5;
+        while bit_count >= 8 {
+            bit_count -= 8;
+            output.push(((buffer >> bit_count) & 0xff) as u8);
+        }
+    }
+    Some(output)
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0_u8;
+    for (left_byte, right_byte) in left.iter().zip(right.iter()) {
+        diff |= left_byte ^ right_byte;
+    }
+    diff == 0
 }
 
 fn authenticated_user(headers: &HeaderMap, state: &ProxyState) -> RouteResult<AuthenticatedUser> {
@@ -3312,6 +3554,48 @@ fn persist_login_success(
                 user_id: Some(user_id),
                 username,
                 event_type: "login_success",
+                ip_address,
+                user_agent,
+                success: true,
+                error_message: None,
+                metadata: Some(json!({ "session_id": session_id }).to_string()),
+            },
+        )?;
+        Ok(session_id)
+    })();
+
+    match result {
+        Ok(session_id) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(session_id)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn persist_two_factor_login_success(
+    connection: &rusqlite::Connection,
+    session_draft: &CreateTokenSessionDraft,
+    user_id: UserId,
+    username: &str,
+    ip_address: &str,
+    user_agent: &str,
+) -> bill_analyser_db::DbResult<i64> {
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| {
+        let session_id = create_token_session(connection, session_draft)?;
+        log_auth_event(
+            connection,
+            AuthEvent {
+                user_id: Some(user_id),
+                username,
+                event_type: "login_2fa_success",
                 ip_address,
                 user_agent,
                 success: true,

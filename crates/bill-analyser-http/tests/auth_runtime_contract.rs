@@ -304,6 +304,194 @@ async fn auth_two_factor_status_runtime_reads_user_flag() -> Result<(), Box<dyn 
 }
 
 #[tokio::test]
+async fn auth_two_factor_verify_runtime_exchanges_pending_token_for_session(
+) -> Result<(), Box<dyn Error>> {
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/2fa/verify")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/2fa/verify")));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    set_two_factor_state(fixture.db_path(), 42, true, Some("JBSWY3DPEHPK3PXP"))?;
+    let app = runtime_router(&fixture);
+    let pending_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+
+    let missing_header_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/2fa/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"passcode": "123456"}).to_string()))?,
+        )
+        .await?;
+    assert_eq!(missing_header_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(missing_header_response).await["message"],
+        "Missing authorization header"
+    );
+
+    let missing_passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &pending_token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_passcode_response.status(), StatusCode::BAD_REQUEST);
+    let missing_passcode_body = read_json(missing_passcode_response).await;
+    assert_eq!(missing_passcode_body["message"], "Passcode is required");
+    assert_eq!(missing_passcode_body["errorCode"], 203005);
+
+    let invalid_token_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &token,
+            json!({"passcode": "123456"}),
+        ))
+        .await?;
+    assert_eq!(invalid_token_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(invalid_token_response).await["message"],
+        "Invalid or expired 2FA token"
+    );
+
+    let missing_user_pending_token = test_action_token(
+        999,
+        "missing",
+        "missing@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let missing_user_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &missing_user_pending_token,
+            json!({"passcode": "123456"}),
+        ))
+        .await?;
+    assert_eq!(missing_user_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_user_response).await["error"],
+        "User not found"
+    );
+
+    set_user_active(fixture.db_path(), 42, false)?;
+    let inactive_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &pending_token,
+            json!({"passcode": "123456"}),
+        ))
+        .await?;
+    assert_eq!(inactive_response.status(), StatusCode::FORBIDDEN);
+    let inactive_body = read_json(inactive_response).await;
+    assert_eq!(inactive_body["error"], "Account not active");
+    assert_eq!(
+        inactive_body["message"],
+        "Your account has been deactivated"
+    );
+    set_user_active(fixture.db_path(), 42, true)?;
+
+    let not_enabled_token = test_action_token(
+        77,
+        "bob",
+        "bob@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let not_enabled_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &not_enabled_token,
+            json!({"passcode": "123456"}),
+        ))
+        .await?;
+    assert_eq!(not_enabled_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(not_enabled_response).await["message"],
+        "Two-factor authentication is not enabled"
+    );
+
+    let invalid_passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/verify",
+            &pending_token,
+            json!({"passcode": "000000"}),
+        ))
+        .await?;
+    assert_eq!(invalid_passcode_response.status(), StatusCode::UNAUTHORIZED);
+    let invalid_passcode_body = read_json(invalid_passcode_response).await;
+    assert_eq!(invalid_passcode_body["error"], "Invalid passcode");
+    assert_eq!(
+        invalid_passcode_body["message"],
+        "The current passcode is incorrect"
+    );
+
+    let passcode = totp_passcode("JBSWY3DPEHPK3PXP", Local::now().timestamp());
+    let mut success_request = bearer_json_request(
+        Method::POST,
+        "/api/2fa/verify",
+        &pending_token,
+        json!({"passcode": passcode}),
+    );
+    success_request.headers_mut().insert(
+        "x-forwarded-for",
+        HeaderValue::from_static("203.0.113.250, 198.51.100.13"),
+    );
+    let success_response = app.clone().oneshot(success_request).await?;
+    assert_eq!(success_response.status(), StatusCode::OK);
+    let success_body = read_json(success_response).await;
+    assert_eq!(success_body["success"], true);
+    let result = success_body["result"].as_object().expect("2fa result");
+    let access_token = result["token"].as_str().expect("2fa access token");
+    let refresh_token = result["refreshToken"].as_str().expect("2fa refresh token");
+    assert_eq!(result["need2FA"], false);
+    assert_eq!(result["user"]["id"], 42);
+    assert_eq!(result["user"]["username"], "alice");
+    assert_session_token_pair(
+        fixture.db_path(),
+        access_token,
+        refresh_token,
+        "",
+        "203.0.113.250",
+    )?;
+    assert_auth_log(fixture.db_path(), "login_2fa_success", true, "")?;
+    assert_eq!(
+        latest_auth_log_ip(fixture.db_path(), "login_2fa_success")?,
+        "203.0.113.250"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Result<(), Box<dyn Error>>
 {
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
@@ -2217,6 +2405,7 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             investment_exclude_keywords TEXT,
             is_active INTEGER NOT NULL DEFAULT 1,
             two_factor_enabled INTEGER DEFAULT 0,
+            two_factor_secret TEXT,
             failed_login_attempts INTEGER DEFAULT 0,
             locked_until TEXT,
             last_login_at TEXT,
@@ -2853,6 +3042,29 @@ fn set_two_factor_enabled(path: &Path, user_id: i64, enabled: bool) -> Result<()
     Ok(())
 }
 
+fn set_two_factor_state(
+    path: &Path,
+    user_id: i64,
+    enabled: bool,
+    secret: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET two_factor_enabled = ?1, two_factor_secret = ?2 WHERE id = ?3",
+        (if enabled { 1 } else { 0 }, secret, user_id),
+    )?;
+    Ok(())
+}
+
+fn set_user_active(path: &Path, user_id: i64, active: bool) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE users SET is_active = ?1 WHERE id = ?2",
+        (if active { 1 } else { 0 }, user_id),
+    )?;
+    Ok(())
+}
+
 fn delete_user(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>> {
     let connection = Connection::open(path)?;
     connection.execute("DELETE FROM users WHERE id = ?1", [user_id])?;
@@ -3408,4 +3620,40 @@ fn test_jwt_token(
     let signature = hmac::sign(&key, signing_input.as_bytes());
     let encoded_signature = general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref());
     format!("{signing_input}.{encoded_signature}")
+}
+
+fn totp_passcode(secret: &str, timestamp: i64) -> String {
+    let counter = u64::try_from(timestamp.max(0) / 30).expect("nonnegative totp counter");
+    let key_bytes = base32_decode(secret).expect("valid base32 secret");
+    let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, &key_bytes);
+    let digest = hmac::sign(&key, &counter.to_be_bytes());
+    let bytes = digest.as_ref();
+    let offset = usize::from(bytes[bytes.len() - 1] & 0x0f);
+    let binary = ((u32::from(bytes[offset]) & 0x7f) << 24)
+        | (u32::from(bytes[offset + 1]) << 16)
+        | (u32::from(bytes[offset + 2]) << 8)
+        | u32::from(bytes[offset + 3]);
+    format!("{:06}", binary % 1_000_000)
+}
+
+fn base32_decode(secret: &str) -> Option<Vec<u8>> {
+    let mut buffer = 0_u32;
+    let mut bit_count = 0_u8;
+    let mut output = Vec::new();
+    for byte in secret.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a',
+            b'2'..=b'7' => byte - b'2' + 26,
+            b'=' | b' ' => continue,
+            _ => return None,
+        };
+        buffer = (buffer << 5) | u32::from(value);
+        bit_count += 5;
+        while bit_count >= 8 {
+            bit_count -= 8;
+            output.push(((buffer >> bit_count) & 0xff) as u8);
+        }
+    }
+    Some(output)
 }
