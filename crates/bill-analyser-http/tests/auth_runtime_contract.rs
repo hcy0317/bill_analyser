@@ -8,6 +8,7 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bcrypt::{hash, verify};
+use bill_analyser_db::hash_two_factor_recovery_code;
 use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState, AUTH_PROXIED_ROUTE_PATTERNS,
     AUTH_TOKEN_ROUTE_PATTERNS,
@@ -487,6 +488,310 @@ async fn auth_two_factor_verify_runtime_exchanges_pending_token_for_session(
         latest_auth_log_ip(fixture.db_path(), "login_2fa_success")?,
         "203.0.113.250"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_two_factor_recovery_verify_runtime_consumes_code_and_issues_session(
+) -> Result<(), Box<dyn Error>> {
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/2fa/recovery/verify")));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/2fa/recovery/verify")));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    set_two_factor_state(fixture.db_path(), 42, true, Some("JBSWY3DPEHPK3PXP"))?;
+    seed_two_factor_recovery_code(fixture.db_path(), 42, "ABCD-1234")?;
+    let app = runtime_router(&fixture);
+    let pending_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+
+    let missing_header_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/2fa/recovery/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"recoveryCode": "ABCD-1234"}).to_string()))?,
+        )
+        .await?;
+    assert_eq!(missing_header_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(missing_header_response).await["message"],
+        "Missing authorization header"
+    );
+
+    let missing_code_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_code_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_code_response).await["message"],
+        "Recovery code is required"
+    );
+
+    let invalid_token_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(invalid_token_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(invalid_token_response).await["message"],
+        "Invalid or expired 2FA token"
+    );
+
+    let invalid_user_id_token = test_action_token(
+        0,
+        "invalid",
+        "invalid@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let invalid_user_id_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &invalid_user_id_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(invalid_user_id_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(invalid_user_id_response).await["message"],
+        "Invalid or expired 2FA token"
+    );
+
+    let missing_user_pending_token = test_action_token(
+        999,
+        "missing",
+        "missing@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let missing_user_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &missing_user_pending_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(missing_user_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_user_response).await["error"],
+        "User not found"
+    );
+
+    set_user_active(fixture.db_path(), 42, false)?;
+    let inactive_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(inactive_response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        read_json(inactive_response).await["message"],
+        "Your account has been deactivated"
+    );
+    assert!(!recovery_code_is_used(fixture.db_path(), 42, "ABCD-1234")?);
+    set_user_active(fixture.db_path(), 42, true)?;
+
+    let not_enabled_token = test_action_token(
+        77,
+        "bob",
+        "bob@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+    let not_enabled_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &not_enabled_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(not_enabled_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(not_enabled_response).await["message"],
+        "Two-factor authentication is not enabled"
+    );
+
+    let invalid_code_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({"recoveryCode": "wrong-code"}),
+        ))
+        .await?;
+    assert_eq!(invalid_code_response.status(), StatusCode::UNAUTHORIZED);
+    let invalid_code_body = read_json(invalid_code_response).await;
+    assert_eq!(invalid_code_body["error"], "Invalid recovery code");
+    assert_eq!(
+        invalid_code_body["message"],
+        "Recovery code is invalid or already used"
+    );
+    assert!(!recovery_code_is_used(fixture.db_path(), 42, "ABCD-1234")?);
+
+    let mut success_request = bearer_json_request(
+        Method::POST,
+        "/api/2fa/recovery/verify",
+        &pending_token,
+        json!({"recoveryCode": "abcd-1234"}),
+    );
+    success_request.headers_mut().insert(
+        "x-forwarded-for",
+        HeaderValue::from_static("203.0.113.251, 198.51.100.13"),
+    );
+    let success_response = app.clone().oneshot(success_request).await?;
+    assert_eq!(success_response.status(), StatusCode::OK);
+    let success_body = read_json(success_response).await;
+    assert_eq!(success_body["success"], true);
+    let result = success_body["result"]
+        .as_object()
+        .expect("2fa recovery result");
+    let access_token = result["token"].as_str().expect("2fa recovery access token");
+    let refresh_token = result["refreshToken"]
+        .as_str()
+        .expect("2fa recovery refresh token");
+    assert_eq!(result["need2FA"], false);
+    assert_eq!(result["user"]["id"], 42);
+    assert_eq!(result["user"]["username"], "alice");
+    assert_session_token_pair(
+        fixture.db_path(),
+        access_token,
+        refresh_token,
+        "",
+        "203.0.113.251",
+    )?;
+    assert!(recovery_code_is_used(fixture.db_path(), 42, "ABCD-1234")?);
+    assert_auth_log(fixture.db_path(), "login_2fa_recovery_success", true, "")?;
+    assert_eq!(
+        latest_auth_log_ip(fixture.db_path(), "login_2fa_recovery_success")?,
+        "203.0.113.251"
+    );
+    let audit_details = latest_audit_log_details(fixture.db_path(), "2fa_recovery_code_used", 42)?;
+    assert_eq!(audit_details["verification"], "recovery_code");
+
+    let reused_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(reused_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(reused_response).await["message"],
+        "Recovery code is invalid or already used"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_two_factor_recovery_verify_runtime_rolls_back_on_db_errors(
+) -> Result<(), Box<dyn Error>> {
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    let pending_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "pending_2fa",
+        TEST_AUTH_SECRET,
+        ChronoDuration::hours(1),
+    );
+
+    let no_db_response = runtime_router_without_sqlite_path()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({"recoveryCode": "ABCD-1234"}),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["message"],
+        "Rust auth token runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    let rollback_fixture = RuntimeFixture::new()?;
+    seed_auth_db(rollback_fixture.db_path(), &token)?;
+    set_two_factor_state(
+        rollback_fixture.db_path(),
+        42,
+        true,
+        Some("JBSWY3DPEHPK3PXP"),
+    )?;
+    seed_two_factor_recovery_code(rollback_fixture.db_path(), 42, "ROLL-BACK")?;
+    let before_session_count = session_count(rollback_fixture.db_path())?;
+    Connection::open(rollback_fixture.db_path())?.execute_batch(
+        "CREATE TRIGGER fail_recovery_auth_log_insert
+         BEFORE INSERT ON auth_logs
+         WHEN NEW.event_type = 'login_2fa_recovery_success'
+         BEGIN
+             SELECT RAISE(FAIL, 'forced recovery auth log failure');
+         END;",
+    )?;
+    let rollback_response = runtime_router(&rollback_fixture)
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/verify",
+            &pending_token,
+            json!({"recoveryCode": "ROLL-BACK"}),
+        ))
+        .await?;
+    assert_eq!(
+        rollback_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        session_count(rollback_fixture.db_path())?,
+        before_session_count
+    );
+    assert!(!recovery_code_is_used(
+        rollback_fixture.db_path(),
+        42,
+        "ROLL-BACK"
+    )?);
 
     Ok(())
 }
@@ -2439,6 +2744,29 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             metadata TEXT,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation_type TEXT NOT NULL,
+            operation_target TEXT NOT NULL,
+            target_id INTEGER,
+            details TEXT,
+            affected_count INTEGER DEFAULT 0,
+            ip_address TEXT,
+            user_agent TEXT,
+            session_id TEXT,
+            status TEXT NOT NULL DEFAULT 'success',
+            error_message TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE user_two_factor_recovery_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            code_hash TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, code_hash)
+        );
         CREATE TABLE user_application_cloud_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -2923,6 +3251,30 @@ fn assert_auth_log(
     Ok(())
 }
 
+fn latest_audit_log_details(
+    path: &Path,
+    expected_operation: &str,
+    expected_target_id: i64,
+) -> Result<Value, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (target_id, status, affected_count, details): (i64, String, i64, String) = connection
+        .query_row(
+            r#"
+            SELECT target_id, status, affected_count, COALESCE(details, '{}')
+            FROM audit_logs
+            WHERE operation_type = ?1
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+            [expected_operation],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    assert_eq!(target_id, expected_target_id);
+    assert_eq!(status, "success");
+    assert_eq!(affected_count, 1);
+    Ok(serde_json::from_str(&details)?)
+}
+
 fn latest_auth_log_metadata(path: &Path, expected_event: &str) -> Result<Value, Box<dyn Error>> {
     let connection = Connection::open(path)?;
     let metadata: String = connection.query_row(
@@ -3031,6 +3383,44 @@ fn assert_login_unlocked(path: &Path, user_id: i64) -> Result<(), Box<dyn Error>
     )?;
     assert_eq!(locked_until, "");
     Ok(())
+}
+
+fn seed_two_factor_recovery_code(
+    path: &Path,
+    user_id: i64,
+    recovery_code: &str,
+) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let code_hash =
+        hash_two_factor_recovery_code(recovery_code).expect("non-empty recovery code hashes");
+    connection.execute(
+        r#"
+        INSERT INTO user_two_factor_recovery_codes(
+            user_id, code_hash, created_at, updated_at
+        ) VALUES (?1, ?2, '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        "#,
+        (user_id, code_hash),
+    )?;
+    Ok(())
+}
+
+fn recovery_code_is_used(
+    path: &Path,
+    user_id: i64,
+    recovery_code: &str,
+) -> Result<bool, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let code_hash =
+        hash_two_factor_recovery_code(recovery_code).expect("non-empty recovery code hashes");
+    Ok(connection.query_row(
+        r#"
+        SELECT used_at IS NOT NULL
+        FROM user_two_factor_recovery_codes
+        WHERE user_id = ?1 AND code_hash = ?2
+        "#,
+        (user_id, code_hash),
+        |row| row.get::<_, i64>(0),
+    )? != 0)
 }
 
 fn set_two_factor_enabled(path: &Path, user_id: i64, enabled: bool) -> Result<(), Box<dyn Error>> {

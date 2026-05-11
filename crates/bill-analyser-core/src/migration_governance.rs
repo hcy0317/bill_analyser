@@ -1295,7 +1295,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/2fa/recovery/regenerate",
         "auth-security-user-data"
     ),
-    python_proxy_route!("POST", "/api/2fa/recovery/verify", "auth-security-user-data"),
     EndpointOwnership {
         method: "GET",
         pattern: "/api/2fa/status",
@@ -1303,7 +1302,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust auth runtime owns the authenticated 2FA status read route; 2FA write and remaining login-verification routes stay Python-proxied until their own cutovers.",
+        notes: "Rust auth runtime owns the authenticated 2FA status read route; 2FA write routes stay Python-proxied until their own cutovers.",
     },
     EndpointOwnership {
         method: "POST",
@@ -1313,6 +1312,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust auth runtime verifies pending_2fa action tokens plus TOTP passcodes, creates the access/refresh session, and logs login_2fa_success.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/2fa/recovery/verify",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust auth runtime verifies pending_2fa action tokens plus one-time recovery codes, creates the access/refresh session, logs login_2fa_recovery_success, and records a best-effort 2fa_recovery_code_used audit log when audit_logs exists.",
     },
     python_proxy_route!("GET", "/api/accounts/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/accounts/", "taxonomy-rules-settings"),
@@ -2433,7 +2441,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, and TOTP login verification routes are Rust-owned; 2FA recovery verification/write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, TOTP login verification, and recovery-code login verification routes are Rust-owned; 2FA write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2892,7 +2900,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, and TOTP login verification routes are Rust-owned; 2FA recovery verification/write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, TOTP login verification, and recovery-code login verification routes are Rust-owned; 2FA write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes remain Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

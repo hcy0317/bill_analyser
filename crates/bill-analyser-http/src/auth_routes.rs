@@ -21,11 +21,12 @@ use bill_analyser_core::{
 use bill_analyser_db::{
     auth_account_belongs_to_user, auth_category_belongs_to_user, auth_email_exists,
     auth_email_exists_for_other_user, auth_username_exists, cleanup_expired_sessions,
-    count_recent_token_password_failures, create_auth_log, create_auth_log_under_event_limit,
-    create_registered_user_with_defaults, create_token_session, delete_application_cloud_settings,
-    delete_user_external_auth, get_active_logout_session_by_token_hash, get_active_refresh_session,
-    get_auth_token_user, get_auth_user_profile, get_auth_user_two_factor_enabled,
-    get_login_user_by_email, get_login_user_by_id, get_login_user_by_login_name,
+    consume_two_factor_recovery_code, count_recent_token_password_failures, create_auth_log,
+    create_auth_log_under_event_limit, create_registered_user_with_defaults, create_token_session,
+    delete_application_cloud_settings, delete_user_external_auth,
+    get_active_logout_session_by_token_hash, get_active_refresh_session, get_auth_token_user,
+    get_auth_user_profile, get_auth_user_two_factor_enabled, get_login_user_by_email,
+    get_login_user_by_id, get_login_user_by_login_name,
     get_user_data_statistics as get_db_user_data_statistics, get_user_external_auth,
     increment_failed_login, init_auth_security_schema, invalidate_other_user_sessions,
     invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
@@ -94,6 +95,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/data/statistics"),
     ("GET", "/api/2fa/status"),
     ("POST", "/api/2fa/verify"),
+    ("POST", "/api/2fa/recovery/verify"),
 ];
 
 pub const AUTH_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
@@ -178,6 +180,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/2fa/verify",
             post(verify_two_factor_login_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/2fa/recovery/verify",
+            post(verify_two_factor_recovery_login_handler).options(auth_options_handler),
         )
         .route(
             "/api/tokens",
@@ -1788,6 +1794,142 @@ async fn verify_two_factor_login_handler(
     .is_err()
     {
         return db_error_response();
+    }
+    let mut user_payload = user_profile_payload(&user.profile);
+    if let Value::Object(ref mut object) = user_payload {
+        object.insert("id".to_string(), Value::from(user.profile.id.get()));
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "token": tokens.access_token,
+            "refreshToken": tokens.refresh_token,
+            "need2FA": false,
+            "user": user_payload,
+            "applicationCloudSettings": application_cloud_settings_payload(cloud_settings),
+        }),
+    )
+}
+
+async fn verify_two_factor_recovery_login_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let token = match parse_logout_bearer_token(&headers) {
+        Ok(value) => value,
+        Err(error) => return auth_rest_error_response(error),
+    };
+    let body = request_body_object(&body);
+    let recovery_code = body
+        .get("recoveryCode")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if recovery_code.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Recovery code is required",
+        ));
+    }
+
+    let payload = match validate_pending_two_factor_jwt(&token, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = match pending_two_factor_user_id(&payload) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_id(runtime.connection(), user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "success": false,
+                    "error": "User not found"
+                }),
+            );
+        }
+        Err(_) => return db_error_response(),
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if !user.is_active {
+        if log_login_failure(
+            runtime.connection(),
+            &user,
+            &ip_address,
+            &request_user_agent,
+            "Account not active",
+        )
+        .is_err()
+        {
+            return db_error_response();
+        }
+        return auth_rest_error_response(AuthRestError::new(
+            403,
+            "Account not active",
+            "Your account has been deactivated",
+        ));
+    }
+    if !user.two_factor_enabled {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "Two-factor authentication is not enabled",
+        ));
+    }
+
+    let cloud_settings =
+        match list_application_cloud_settings(runtime.connection(), user.profile.id) {
+            Ok(value) => value,
+            Err(_) => return db_error_response(),
+        };
+    let tokens = match issue_session_tokens(user.profile.id, &user.profile.username, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let now = now_text();
+    let persist_result = persist_two_factor_recovery_login_success(
+        runtime.connection(),
+        TwoFactorRecoveryLoginDraft {
+            recovery_code,
+            session_draft: &CreateTokenSessionDraft {
+                user_id: user.profile.id,
+                token_hash: sha256_hex(&tokens.access_token),
+                refresh_token_hash: Some(sha256_hex(&tokens.refresh_token)),
+                expires_at: tokens.expires_at.clone(),
+                refresh_expires_at: Some(tokens.refresh_expires_at.clone()),
+                user_agent: request_user_agent.clone(),
+                ip_address: ip_address.clone(),
+                created_at: now.clone(),
+            },
+            user_id: user.profile.id,
+            username: &user.profile.username,
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            now: &now,
+        },
+    );
+    match persist_result {
+        Ok(Some(_session_id)) => {}
+        Ok(None) => {
+            return auth_rest_error_response(AuthRestError::new(
+                401,
+                "Invalid recovery code",
+                "Recovery code is invalid or already used",
+            ));
+        }
+        Err(_) => return db_error_response(),
     }
     let mut user_payload = user_profile_payload(&user.profile);
     if let Value::Object(ref mut object) = user_payload {
@@ -3511,6 +3653,16 @@ struct AuthEvent<'a> {
     metadata: Option<String>,
 }
 
+struct TwoFactorRecoveryLoginDraft<'a> {
+    recovery_code: &'a str,
+    session_draft: &'a CreateTokenSessionDraft,
+    user_id: UserId,
+    username: &'a str,
+    ip_address: &'a str,
+    user_agent: &'a str,
+    now: &'a str,
+}
+
 fn log_auth_event(
     connection: &rusqlite::Connection,
     event: AuthEvent<'_>,
@@ -3619,6 +3771,98 @@ fn persist_two_factor_login_success(
             Err(error)
         }
     }
+}
+
+fn persist_two_factor_recovery_login_success(
+    connection: &rusqlite::Connection,
+    draft: TwoFactorRecoveryLoginDraft<'_>,
+) -> bill_analyser_db::DbResult<Option<i64>> {
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| {
+        if !consume_two_factor_recovery_code(
+            connection,
+            draft.user_id,
+            draft.recovery_code,
+            draft.now,
+        )? {
+            return Ok(None);
+        }
+        let session_id = create_token_session(connection, draft.session_draft)?;
+        log_auth_event(
+            connection,
+            AuthEvent {
+                user_id: Some(draft.user_id),
+                username: draft.username,
+                event_type: "login_2fa_recovery_success",
+                ip_address: draft.ip_address,
+                user_agent: draft.user_agent,
+                success: true,
+                error_message: None,
+                metadata: Some(json!({ "session_id": session_id }).to_string()),
+            },
+        )?;
+        create_two_factor_recovery_audit_log_best_effort(
+            connection,
+            draft.user_id,
+            draft.ip_address,
+            draft.user_agent,
+            draft.now,
+        );
+        Ok(Some(session_id))
+    })();
+
+    match result {
+        Ok(Some(session_id)) => {
+            if let Err(error) = connection.execute_batch("COMMIT") {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error.into());
+            }
+            Ok(Some(session_id))
+        }
+        Ok(None) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Ok(None)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn create_two_factor_recovery_audit_log_best_effort(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    ip_address: &str,
+    user_agent: &str,
+    now: &str,
+) {
+    let Ok(target_id) = i64::try_from(user_id.get()) else {
+        return;
+    };
+    let details = json!({ "verification": "recovery_code" }).to_string();
+    let _ = connection.execute(
+        r#"
+        INSERT INTO audit_logs (
+            operation_type, operation_target, target_id, details,
+            affected_count, ip_address, user_agent, session_id,
+            status, error_message, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "#,
+        (
+            "2fa_recovery_code_used",
+            "user",
+            target_id,
+            details,
+            1_i64,
+            ip_address,
+            user_agent,
+            Option::<String>::None,
+            "success",
+            Option::<String>::None,
+            now,
+        ),
+    );
 }
 
 fn session_payload(session: TokenSessionRow, current_session_id: Option<i64>) -> Value {

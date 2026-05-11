@@ -582,6 +582,23 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     assert!(auth_user_data_statistics
         .unsupported_behavior
         .contains("data export"));
+
+    for endpoint in [
+        "GET /api/2fa/status",
+        "POST /api/2fa/verify",
+        "POST /api/2fa/recovery/verify",
+    ] {
+        let auth_two_factor = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("auth 2FA route is present: {endpoint}"));
+        assert_eq!(auth_two_factor.state, MigrationState::RustOwnedVerified);
+        assert_eq!(auth_two_factor.handler, RouteHandlerId::AuthTokenRuntime);
+        assert_eq!(
+            auth_two_factor.envelope,
+            ResponseEnvelopeFamily::FlaskSuccessResult
+        );
+    }
 }
 
 #[test]
