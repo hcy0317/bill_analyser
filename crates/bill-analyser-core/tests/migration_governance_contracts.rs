@@ -51,6 +51,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/auth/password/forgot")));
     assert!(rust_owned.contains(&("POST", "/api/auth/password/reset")));
     assert!(rust_owned.contains(&("POST", "/api/auth/oauth2/authorize")));
+    assert!(rust_owned.contains(&("POST", "/api/security/step-up/verify")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -591,6 +592,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         "POST /api/2fa/disable",
         "POST /api/2fa/recovery/regenerate",
         "POST /api/2fa/recovery/verify",
+        "POST /api/security/step-up/verify",
     ] {
         let auth_two_factor = manifest
             .iter()

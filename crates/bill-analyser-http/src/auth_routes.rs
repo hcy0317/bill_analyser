@@ -25,19 +25,20 @@ use bill_analyser_db::{
     create_auth_log_under_event_limit, create_registered_user_with_defaults, create_token_session,
     delete_application_cloud_settings, delete_user_external_auth,
     disable_two_factor_and_clear_recovery_codes, enable_two_factor_with_recovery_codes_and_session,
-    get_active_logout_session_by_token_hash, get_active_refresh_session, get_auth_token_user,
-    get_auth_user_profile, get_auth_user_two_factor_enabled, get_login_user_by_email,
-    get_login_user_by_id, get_login_user_by_login_name,
+    get_active_logout_session_by_token_hash, get_active_refresh_session, get_app_setting,
+    get_auth_token_user, get_auth_user_profile, get_auth_user_two_factor_enabled,
+    get_login_user_by_email, get_login_user_by_id, get_login_user_by_login_name,
     get_user_data_statistics as get_db_user_data_statistics, get_user_external_auth,
-    increment_failed_login, init_auth_security_schema, invalidate_other_user_sessions,
-    invalidate_session_by_id, invalidate_session_by_token_hash, list_application_cloud_settings,
-    list_user_external_auths, list_user_sessions, rotate_refresh_token_session,
-    set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
-    update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
-    ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
-    AuthUserProfileRow, AuthUserProfileUpdate, CreateTokenSessionDraft, DbError, ExternalAuthRow,
-    RegisterPresetCategory, RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig,
-    SqliteDbPath, SqliteRuntime, TokenSessionRow,
+    increment_failed_login, init_app_settings_schema, init_auth_security_schema,
+    invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
+    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
+    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
+    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
+    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
+    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
+    CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
+    RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, TokenSessionRow,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use qrcodegen::{QrCode, QrCodeEcc};
@@ -95,6 +96,7 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/profile/external-auths/unlink"),
     ("GET", "/api/system/version"),
     ("GET", "/api/data/statistics"),
+    ("POST", "/api/security/step-up/verify"),
     ("GET", "/api/2fa/status"),
     ("POST", "/api/2fa/verify"),
     ("POST", "/api/2fa/enable/request"),
@@ -178,6 +180,10 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/data/statistics",
             get(get_user_data_statistics_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/security/step-up/verify",
+            post(verify_security_step_up_handler).options(auth_options_handler),
         )
         .route(
             "/api/2fa/status",
@@ -1697,6 +1703,117 @@ async fn get_two_factor_status_handler(
     }
 }
 
+async fn verify_security_step_up_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = request_body_object(&body);
+    let password = body
+        .get("password")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let passcode = body
+        .get("passcode")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if password.is_empty() && passcode.is_empty() {
+        return auth_rest_error_response(AuthRestError::new(
+            400,
+            "Bad Request",
+            "password or passcode is required",
+        ));
+    }
+
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_id(runtime.connection(), auth.user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "success": false,
+                    "error": "User not found"
+                }),
+            );
+        }
+        Err(_) => return db_error_response(),
+    };
+
+    let verified_via = if !password.is_empty() {
+        match verify_sensitive_operation_password(runtime.connection(), &user, password) {
+            Ok(true) => {}
+            Ok(false) => {
+                return auth_rest_error_response(AuthRestError::new(
+                    401,
+                    "Invalid credentials",
+                    "Current password is incorrect",
+                ));
+            }
+            Err(_) => return db_error_response(),
+        }
+        "password"
+    } else {
+        let secret = user.two_factor_secret.trim().replace(' ', "");
+        if !user.two_factor_enabled || secret.is_empty() {
+            return auth_rest_error_response(AuthRestError::new(
+                400,
+                "Bad Request",
+                "Two-factor authentication is not enabled",
+            ));
+        }
+        if !verify_totp_passcode(&secret, passcode, Utc::now().timestamp()) {
+            return auth_rest_error_response(AuthRestError::new(
+                401,
+                "Invalid passcode",
+                "The current passcode is incorrect",
+            ));
+        }
+        "passcode"
+    };
+
+    let step_up_token = match issue_action_token(&user, "step_up", 1, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if log_auth_event(
+        runtime.connection(),
+        AuthEvent {
+            user_id: Some(user.profile.id),
+            username: &user.profile.username,
+            event_type: "step_up_verified",
+            ip_address: &ip_address,
+            user_agent: &request_user_agent,
+            success: true,
+            error_message: None,
+            metadata: Some(json!({ "verified_via": verified_via }).to_string()),
+        },
+    )
+    .is_err()
+    {
+        return db_error_response();
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({
+            "stepUpToken": step_up_token,
+            "verifiedVia": verified_via
+        }),
+    )
+}
+
 async fn verify_two_factor_login_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2025,11 +2142,13 @@ async fn disable_two_factor_handler(
         Err(_) => return db_error_response(),
     };
     let body = request_body_object(&body);
-    let auth_mode = match resolve_sensitive_two_factor_auth(&body, &state, &user) {
-        Ok(value) => value,
-        Err(SensitiveTwoFactorAuthError::Missing) => return sensitive_auth_missing_response(),
-        Err(SensitiveTwoFactorAuthError::Invalid) => return sensitive_auth_invalid_response(),
-    };
+    let auth_mode =
+        match resolve_sensitive_two_factor_auth(runtime.connection(), &body, &state, &user) {
+            Ok(value) => value,
+            Err(SensitiveTwoFactorAuthError::Missing) => return sensitive_auth_missing_response(),
+            Err(SensitiveTwoFactorAuthError::Invalid) => return sensitive_auth_invalid_response(),
+            Err(SensitiveTwoFactorAuthError::Db) => return db_error_response(),
+        };
     let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
     let ip_address = login_client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
     let now = now_text();
@@ -2086,11 +2205,13 @@ async fn regenerate_two_factor_recovery_codes_handler(
         Err(_) => return db_error_response(),
     };
     let body = request_body_object(&body);
-    let auth_mode = match resolve_sensitive_two_factor_auth(&body, &state, &user) {
-        Ok(value) => value,
-        Err(SensitiveTwoFactorAuthError::Missing) => return sensitive_auth_missing_response(),
-        Err(SensitiveTwoFactorAuthError::Invalid) => return sensitive_auth_invalid_response(),
-    };
+    let auth_mode =
+        match resolve_sensitive_two_factor_auth(runtime.connection(), &body, &state, &user) {
+            Ok(value) => value,
+            Err(SensitiveTwoFactorAuthError::Missing) => return sensitive_auth_missing_response(),
+            Err(SensitiveTwoFactorAuthError::Invalid) => return sensitive_auth_invalid_response(),
+            Err(SensitiveTwoFactorAuthError::Db) => return db_error_response(),
+        };
     if !user.two_factor_enabled {
         return auth_rest_error_response(AuthRestError::new(
             400,
@@ -3330,6 +3451,41 @@ fn authenticated_user(headers: &HeaderMap, state: &ProxyState) -> RouteResult<Au
         .map_err(|error| Box::new(auth_error_response(error)))
 }
 
+fn verify_sensitive_operation_password(
+    connection: &rusqlite::Connection,
+    user: &AuthLoginUserRow,
+    password: &str,
+) -> bill_analyser_db::DbResult<bool> {
+    if password.is_empty() {
+        return Ok(false);
+    }
+    if bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
+        return Ok(true);
+    }
+    verify_operation_password(connection, password)
+}
+
+fn verify_operation_password(
+    connection: &rusqlite::Connection,
+    password: &str,
+) -> bill_analyser_db::DbResult<bool> {
+    if let Some(env_password) = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(password == env_password);
+    }
+
+    init_app_settings_schema(connection)?;
+    let stored_password = get_app_setting(connection, "operation_password")?;
+    Ok(
+        match stored_password.as_deref().filter(|value| !value.is_empty()) {
+            Some(value) => password == value,
+            None => true,
+        },
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SensitiveTwoFactorAuthMode {
     Password,
@@ -3349,9 +3505,11 @@ impl SensitiveTwoFactorAuthMode {
 enum SensitiveTwoFactorAuthError {
     Missing,
     Invalid,
+    Db,
 }
 
 fn resolve_sensitive_two_factor_auth(
+    connection: &rusqlite::Connection,
     body: &Map<String, Value>,
     state: &ProxyState,
     user: &AuthLoginUserRow,
@@ -3382,10 +3540,10 @@ fn resolve_sensitive_two_factor_auth(
     if password.is_empty() {
         return Err(SensitiveTwoFactorAuthError::Missing);
     }
-    if bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
-        Ok(SensitiveTwoFactorAuthMode::Password)
-    } else {
-        Err(SensitiveTwoFactorAuthError::Invalid)
+    match verify_sensitive_operation_password(connection, user, password) {
+        Ok(true) => Ok(SensitiveTwoFactorAuthMode::Password),
+        Ok(false) => Err(SensitiveTwoFactorAuthError::Invalid),
+        Err(_) => Err(SensitiveTwoFactorAuthError::Db),
     }
 }
 

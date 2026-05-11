@@ -1047,6 +1047,252 @@ async fn auth_two_factor_write_runtime_manages_setup_recovery_and_disable(
 }
 
 #[tokio::test]
+async fn auth_step_up_runtime_issues_short_lived_tokens_for_password_or_totp(
+) -> Result<(), Box<dyn Error>> {
+    let route = ("POST", "/api/security/step-up/verify");
+    assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+    assert!(AUTH_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|item| item != &route));
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let missing_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_response).await["message"],
+        "password or passcode is required"
+    );
+
+    let no_auth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/security/step-up/verify")
+                .body(Body::from(json!({"password": TEST_PASSWORD}).to_string()))?,
+        )
+        .await?;
+    assert_eq!(no_auth_response.status(), StatusCode::UNAUTHORIZED);
+
+    let missing_user_response = app
+        .clone()
+        .oneshot(trusted_user_json_request(
+            999,
+            Method::POST,
+            "/api/security/step-up/verify",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(missing_user_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_user_response).await["error"],
+        "User not found"
+    );
+
+    let invalid_path = fixture
+        .db_path()
+        .parent()
+        .expect("fixture parent")
+        .join("missing-parent")
+        .join("auth.db");
+    let invalid_path_app = runtime_router_with_db_path(&invalid_path, true);
+    let invalid_path_response = invalid_path_app
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/security/step-up/verify",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_path_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let wrong_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"password": "Wrong123!"}),
+        ))
+        .await?;
+    assert_eq!(wrong_password_response.status(), StatusCode::UNAUTHORIZED);
+    let wrong_password_body = read_json(wrong_password_response).await;
+    assert_eq!(wrong_password_body["error"], "Invalid credentials");
+    assert_eq!(
+        wrong_password_body["message"],
+        "Current password is incorrect"
+    );
+
+    let no_2fa_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"passcode": "123456"}),
+        ))
+        .await?;
+    assert_eq!(no_2fa_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(no_2fa_response).await["message"],
+        "Two-factor authentication is not enabled"
+    );
+
+    set_two_factor_state(fixture.db_path(), 42, true, Some("JBSWY3DPEHPK3PXP"))?;
+    let invalid_passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"passcode": "000000"}),
+        ))
+        .await?;
+    assert_eq!(invalid_passcode_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(invalid_passcode_response).await["message"],
+        "The current passcode is incorrect"
+    );
+
+    let mut password_request = bearer_json_request(
+        Method::POST,
+        "/api/security/step-up/verify",
+        &token,
+        json!({"password": TEST_PASSWORD}),
+    );
+    password_request.headers_mut().insert(
+        "user-agent",
+        HeaderValue::from_static("Mozilla/5.0 (Step-up contract)"),
+    );
+    let password_response = app.clone().oneshot(password_request).await?;
+    assert_eq!(password_response.status(), StatusCode::OK);
+    let password_body = read_json(password_response).await;
+    assert_eq!(password_body["success"], true);
+    assert_eq!(password_body["result"]["verifiedVia"], "password");
+    let password_step_up_token = password_body["result"]["stepUpToken"]
+        .as_str()
+        .expect("password step-up token");
+    let password_payload = jwt_payload(password_step_up_token);
+    assert_eq!(password_payload["type"], "step_up");
+    assert_eq!(password_payload["user_id"], 42);
+    assert_eq!(password_payload["email"], "alice@example.test");
+    assert_eq!(jwt_lifetime_seconds(&password_payload), 3600);
+    assert_auth_log(
+        fixture.db_path(),
+        "step_up_verified",
+        true,
+        "Mozilla/5.0 (Step-up contract)",
+    )?;
+    assert_eq!(
+        latest_auth_log_metadata(fixture.db_path(), "step_up_verified")?["verified_via"],
+        "password"
+    );
+
+    let operation_password = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "operation-secret".to_string());
+    let operation_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"password": operation_password}),
+        ))
+        .await?;
+    assert_eq!(operation_password_response.status(), StatusCode::OK);
+    let operation_password_body = read_json(operation_password_response).await;
+    assert_eq!(operation_password_body["result"]["verifiedVia"], "password");
+    let operation_password_payload = jwt_payload(
+        operation_password_body["result"]["stepUpToken"]
+            .as_str()
+            .expect("operation password step-up token"),
+    );
+    assert_eq!(operation_password_payload["type"], "step_up");
+    assert_eq!(jwt_lifetime_seconds(&operation_password_payload), 3600);
+
+    let no_jwt_secret_app = runtime_router_with_db_path(fixture.db_path(), false);
+    let no_jwt_secret_response = no_jwt_secret_app
+        .oneshot(trusted_user_json_request(
+            42,
+            Method::POST,
+            "/api/security/step-up/verify",
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(
+        no_jwt_secret_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    let log_error_fixture = RuntimeFixture::new()?;
+    let log_error_token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(log_error_fixture.db_path(), &log_error_token)?;
+    Connection::open(log_error_fixture.db_path())?.execute_batch(
+        "CREATE TRIGGER fail_step_up_auth_log_insert
+         BEFORE INSERT ON auth_logs
+         BEGIN
+             SELECT RAISE(FAIL, 'forced step-up auth log failure');
+         END;",
+    )?;
+    let log_error_app = runtime_router(&log_error_fixture);
+    let log_error_response = log_error_app
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &log_error_token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(
+        log_error_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let passcode = totp_passcode("JBSWY3DPEHPK3PXP", Local::now().timestamp());
+    let passcode_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"passcode": passcode}),
+        ))
+        .await?;
+    assert_eq!(passcode_response.status(), StatusCode::OK);
+    let passcode_body = read_json(passcode_response).await;
+    assert_eq!(passcode_body["result"]["verifiedVia"], "passcode");
+    let passcode_step_up_token = passcode_body["result"]["stepUpToken"]
+        .as_str()
+        .expect("passcode step-up token");
+    let passcode_payload = jwt_payload(passcode_step_up_token);
+    assert_eq!(passcode_payload["type"], "step_up");
+    assert_eq!(jwt_lifetime_seconds(&passcode_payload), 3600);
+    assert_eq!(
+        latest_auth_log_metadata(fixture.db_path(), "step_up_verified")?["verified_via"],
+        "passcode"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Result<(), Box<dyn Error>>
 {
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
@@ -3008,6 +3254,16 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             error_message TEXT,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE app_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL UNIQUE,
+            value TEXT,
+            value_type TEXT DEFAULT 'string',
+            description TEXT,
+            is_encrypted BOOLEAN DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         CREATE TABLE user_two_factor_recovery_codes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -3037,6 +3293,8 @@ fn seed_auth_db(path: &Path, token: &str) -> Result<(), Box<dyn Error>> {
             updated_at TEXT NOT NULL,
             UNIQUE(user_id, external_auth_type)
         );
+        INSERT INTO app_settings(key, value, value_type, description, is_encrypted, created_at, updated_at)
+        VALUES ('operation_password', 'operation-secret', 'string', 'Test operation password', 0, '2026-01-01T00:00:00', '2026-01-01T00:00:00');
         CREATE TABLE categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -4193,6 +4451,22 @@ fn trusted_request(method: Method, uri: &str, body: Body) -> Request<Body> {
         .expect("request builds")
 }
 
+fn trusted_user_json_request(
+    user_id: i64,
+    method: Method,
+    uri: &str,
+    payload: Value,
+) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("x-user-id", user_id.to_string())
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .body(Body::from(payload.to_string()))
+        .expect("trusted user request builds")
+}
+
 async fn read_json(response: axum::response::Response) -> Value {
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
@@ -4206,6 +4480,10 @@ fn jwt_payload(token: &str) -> Value {
         .decode(payload)
         .expect("payload decodes");
     serde_json::from_slice(&bytes).expect("payload json")
+}
+
+fn jwt_lifetime_seconds(payload: &Value) -> i64 {
+    payload["exp"].as_i64().expect("jwt exp") - payload["iat"].as_i64().expect("jwt iat")
 }
 
 fn test_access_token(user_id: i64, secret: &str) -> String {
