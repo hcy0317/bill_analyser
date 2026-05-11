@@ -797,6 +797,256 @@ async fn auth_two_factor_recovery_verify_runtime_rolls_back_on_db_errors(
 }
 
 #[tokio::test]
+async fn auth_two_factor_write_runtime_manages_setup_recovery_and_disable(
+) -> Result<(), Box<dyn Error>> {
+    for route in [
+        ("POST", "/api/2fa/enable/request"),
+        ("POST", "/api/2fa/enable/confirm"),
+        ("POST", "/api/2fa/disable"),
+        ("POST", "/api/2fa/recovery/regenerate"),
+    ] {
+        assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+        assert!(AUTH_PROXIED_ROUTE_PATTERNS
+            .iter()
+            .all(|item| item != &route));
+    }
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    let request_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            "/api/2fa/enable/request",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(request_response.status(), StatusCode::OK);
+    let request_body = read_json(request_response).await;
+    assert_eq!(request_body["success"], true);
+    let secret = request_body["result"]["secret"]
+        .as_str()
+        .expect("2fa secret");
+    assert_eq!(secret.len(), 32);
+    assert!(secret
+        .bytes()
+        .all(|byte| matches!(byte, b'A'..=b'Z' | b'2'..=b'7')));
+    let qrcode = request_body["result"]["qrcode"]
+        .as_str()
+        .expect("2fa qrcode");
+    assert!(qrcode.starts_with("data:image/png;base64,"));
+    let qrcode_bytes = general_purpose::STANDARD.decode(
+        qrcode
+            .strip_prefix("data:image/png;base64,")
+            .expect("png data url"),
+    )?;
+    assert!(qrcode_bytes.starts_with(b"\x89PNG\r\n\x1A\n"));
+
+    let missing_confirm_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            &token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_confirm_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_confirm_response).await["message"],
+        "Secret and passcode are required"
+    );
+
+    let invalid_confirm_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            &token,
+            json!({"secret": secret, "passcode": "000000"}),
+        ))
+        .await?;
+    assert_eq!(invalid_confirm_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_confirm_response).await["error"],
+        "Invalid passcode"
+    );
+
+    let passcode = totp_passcode(secret, Local::now().timestamp());
+    let mut confirm_request = bearer_json_request(
+        Method::POST,
+        "/api/2fa/enable/confirm",
+        &token,
+        json!({"secret": secret, "passcode": passcode}),
+    );
+    confirm_request.headers_mut().insert(
+        "user-agent",
+        HeaderValue::from_static("Mozilla/5.0 (2FA write contract)"),
+    );
+    let confirm_response = app.clone().oneshot(confirm_request).await?;
+    assert_eq!(confirm_response.status(), StatusCode::OK);
+    let confirm_body = read_json(confirm_response).await;
+    assert_eq!(confirm_body["success"], true);
+    let confirm_result = confirm_body["result"].as_object().expect("2fa result");
+    let access_token = confirm_result["token"].as_str().expect("2fa access token");
+    let refresh_token = confirm_result["refreshToken"]
+        .as_str()
+        .expect("2fa refresh token");
+    let recovery_codes = confirm_result["recoveryCodes"]
+        .as_array()
+        .expect("recovery codes");
+    assert_eq!(recovery_codes.len(), 8);
+    for code in recovery_codes {
+        let code = code.as_str().expect("recovery code");
+        assert!(code.len() == 9 && code.as_bytes()[4] == b'-');
+        assert!(code
+            .bytes()
+            .all(|byte| matches!(byte, b'A'..=b'F' | b'0'..=b'9' | b'-')));
+    }
+    assert_session_token_pair(
+        fixture.db_path(),
+        access_token,
+        refresh_token,
+        "Mozilla/5.0 (2FA write contract)",
+        "198.51.100.13",
+    )?;
+    assert_eq!(
+        two_factor_state(fixture.db_path(), 42)?,
+        (true, secret.to_string())
+    );
+    assert_eq!(active_recovery_code_count(fixture.db_path(), 42)?, 8);
+    let enable_audit = latest_audit_log_details(fixture.db_path(), "2fa_enabled", 42)?;
+    assert_eq!(enable_audit["recovery_code_count"], 8);
+
+    let second_request_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            "/api/2fa/enable/request",
+            access_token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(second_request_response.status(), StatusCode::OK);
+    let second_request_body = read_json(second_request_response).await;
+    let second_secret = second_request_body["result"]["secret"]
+        .as_str()
+        .expect("replacement secret");
+    let second_passcode = totp_passcode(second_secret, Local::now().timestamp());
+    let already_enabled_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/enable/confirm",
+            access_token,
+            json!({"secret": second_secret, "passcode": second_passcode}),
+        ))
+        .await?;
+    assert_eq!(already_enabled_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(already_enabled_response).await["message"],
+        "Two-factor authentication is already enabled"
+    );
+    assert_eq!(
+        two_factor_state(fixture.db_path(), 42)?,
+        (true, secret.to_string())
+    );
+    assert_eq!(active_recovery_code_count(fixture.db_path(), 42)?, 8);
+
+    let missing_regenerate_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            access_token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_regenerate_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_regenerate_response).await["message"],
+        "Current password or stepUpToken is required"
+    );
+
+    let wrong_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            access_token,
+            json!({"password": "Wrong123!"}),
+        ))
+        .await?;
+    assert_eq!(wrong_password_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(wrong_password_response).await["message"],
+        "Current password is incorrect"
+    );
+
+    let step_up_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "step_up",
+        TEST_AUTH_SECRET,
+        ChronoDuration::minutes(5),
+    );
+    let regenerate_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/recovery/regenerate",
+            access_token,
+            json!({"stepUpToken": step_up_token}),
+        ))
+        .await?;
+    assert_eq!(regenerate_response.status(), StatusCode::OK);
+    let regenerate_body = read_json(regenerate_response).await;
+    assert_eq!(regenerate_body["success"], true);
+    assert_eq!(
+        regenerate_body["result"]["recoveryCodes"]
+            .as_array()
+            .expect("regenerated codes")
+            .len(),
+        8
+    );
+    assert_eq!(active_recovery_code_count(fixture.db_path(), 42)?, 8);
+    let regenerate_audit =
+        latest_audit_log_details(fixture.db_path(), "2fa_recovery_regenerated", 42)?;
+    assert_eq!(regenerate_audit["auth_mode"], "step_up");
+
+    let disable_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/2fa/disable",
+            access_token,
+            json!({"password": TEST_PASSWORD}),
+        ))
+        .await?;
+    assert_eq!(disable_response.status(), StatusCode::OK);
+    let disable_body = read_json(disable_response).await;
+    assert_eq!(disable_body["success"], true);
+    assert_eq!(disable_body["result"], true);
+    assert_eq!(
+        two_factor_state(fixture.db_path(), 42)?,
+        (false, String::new())
+    );
+    assert_eq!(active_recovery_code_count(fixture.db_path(), 42)?, 0);
+    let disable_audit = latest_audit_log_details(fixture.db_path(), "2fa_disabled", 42)?;
+    assert_eq!(disable_audit["auth_mode"], "password");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn auth_login_runtime_issues_session_tokens_and_preserves_edges() -> Result<(), Box<dyn Error>>
 {
     assert!(AUTH_TOKEN_ROUTE_PATTERNS
@@ -3421,6 +3671,29 @@ fn recovery_code_is_used(
         (user_id, code_hash),
         |row| row.get::<_, i64>(0),
     )? != 0)
+}
+
+fn active_recovery_code_count(path: &Path, user_id: i64) -> Result<i64, Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM user_two_factor_recovery_codes
+        WHERE user_id = ?1 AND used_at IS NULL
+        "#,
+        [user_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn two_factor_state(path: &Path, user_id: i64) -> Result<(bool, String), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (enabled, secret): (i64, String) = connection.query_row(
+        "SELECT COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, '') FROM users WHERE id = ?1",
+        [user_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok((enabled != 0, secret))
 }
 
 fn set_two_factor_enabled(path: &Path, user_id: i64, enabled: bool) -> Result<(), Box<dyn Error>> {

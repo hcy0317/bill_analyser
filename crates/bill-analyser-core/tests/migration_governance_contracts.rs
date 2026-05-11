@@ -586,6 +586,10 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     for endpoint in [
         "GET /api/2fa/status",
         "POST /api/2fa/verify",
+        "POST /api/2fa/enable/request",
+        "POST /api/2fa/enable/confirm",
+        "POST /api/2fa/disable",
+        "POST /api/2fa/recovery/regenerate",
         "POST /api/2fa/recovery/verify",
     ] {
         let auth_two_factor = manifest

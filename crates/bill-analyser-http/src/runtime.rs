@@ -33,8 +33,8 @@ impl HttpShellIdentity {
                 "import-route-skeleton-no-db",
             ),
             ImportRouteMode::ImportDbRuntime => (
-                "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-verify-runtime",
-                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-verify-runtime",
+                "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-runtime",
+                "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-runtime",
             ),
         };
 
@@ -62,7 +62,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "owned_routes".to_string(),
         if config.import_route_mode.intercepts_import_routes() {
             if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics/2fa-status/2fa-verify/2fa-recovery-verify runtime routes".to_string()
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write runtime routes".to_string()
             } else {
                 "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
             }
@@ -107,7 +107,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "auth_token_runtime".to_string(),
-            "owned login, registration, token session list/revoke, API/MCP personal token generation, token refresh, logout, account-recovery email verification/resend/password forgot/reset, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification resend, OAuth2 authorize disabled-safe/not-implemented, system version, user-data statistics, 2FA status, 2FA TOTP login verification, and 2FA recovery-code login verification routes; 2FA write management, real OAuth provider exchange, step-up, data export, and destructive data-clear routes proxied".to_string(),
+            "owned login, registration, token session list/revoke, API/MCP personal token generation, token refresh, logout, account-recovery email verification/resend/password forgot/reset, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification resend, OAuth2 authorize disabled-safe/not-implemented, system version, user-data statistics, 2FA status, 2FA TOTP login verification, 2FA recovery-code login verification, and 2FA write management routes; real OAuth provider exchange, step-up, data export, and destructive data-clear routes proxied".to_string(),
         );
     }
     details.insert(
