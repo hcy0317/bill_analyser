@@ -109,11 +109,12 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     }
 
     for (method, pattern) in [
+        ("GET", "/api/bills/export"),
         ("POST", "/api/bills/pictures"),
         ("POST", "/api/bills/pictures/unused"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
-            panic!("missing Rust-owned bills picture endpoint {method} {pattern}")
+            panic!("missing Rust-owned bills adjacent endpoint {method} {pattern}")
         });
         assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
         assert!(!endpoint.is_python_runtime_owner());
@@ -127,7 +128,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     assert!(!receipt_recognition.is_import_deletion_blocked());
 
     for (method, pattern) in [
-        ("GET", "/api/bills/export"),
         ("GET", "/api/bills/reconciliation_statements"),
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
@@ -452,6 +452,8 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         bills_export.envelope,
         ResponseEnvelopeFamily::FlaskRawPassthrough
     );
+    assert_eq!(bills_export.state, MigrationState::RustOwnedVerified);
+    assert_eq!(bills_export.handler, RouteHandlerId::BillsCrudRuntime);
 
     let auth_tokens = manifest
         .iter()

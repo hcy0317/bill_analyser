@@ -1,7 +1,7 @@
 use std::{fmt::Write as _, fs, path::Path as FsPath};
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -20,18 +20,18 @@ use bill_analyser_core::adapters::transaction::{
     legacy_delete_bill_success_payload, legacy_modify_bill_success_payload,
     missing_transaction_picture_file_response, missing_unused_transaction_picture_id_response,
     normalize_bill_create_aliases, remove_unused_transaction_picture_success_response,
-    transaction_list_type_filter, transaction_picture_data_url_from_base64,
-    transaction_picture_delete_path, transaction_picture_internal_error_response,
-    transaction_picture_upload_id, transaction_picture_upload_success_response,
-    unsupported_transaction_picture_type_response, BackendTransactionView, FrontendTransactionTag,
-    RouteResponseContract,
+    serialize_optional_export_cell, transaction_list_type_filter,
+    transaction_picture_data_url_from_base64, transaction_picture_delete_path,
+    transaction_picture_internal_error_response, transaction_picture_upload_id,
+    transaction_picture_upload_success_response, unsupported_transaction_picture_type_response,
+    BackendTransactionView, FrontendTransactionTag, RouteResponseContract, EXPORT_COLUMNS,
 };
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
     batch_create_bills, batch_delete_bills, batch_update_bills, create_bill, delete_bill,
-    get_bill_by_id, get_bill_tags, get_bill_update_snapshot, get_first_account_id, query_bills,
-    update_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    get_bill_by_id, get_bill_tags, get_bill_update_snapshot, get_first_account_id, list_bills,
+    query_bills, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
+    BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -66,12 +66,12 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/batch"),
     ("PUT", "/api/bills/batch/update"),
     ("DELETE", "/api/bills/batch/delete"),
+    ("GET", "/api/bills/export"),
     ("POST", "/api/bills/pictures"),
     ("POST", "/api/bills/pictures/unused"),
 ];
 
 pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("GET", "/api/bills/export"),
     ("GET", "/api/bills/reconciliation_statements"),
     ("GET", "/api/bills/{bill_id}/recurring-candidates"),
     ("PUT", "/api/bills/{bill_id}/recurring-match"),
@@ -82,7 +82,7 @@ pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
 
 pub fn bill_runtime_router() -> Router<ProxyState> {
     Router::new()
-        .route("/api/bills/export", any(ownership_aware_proxy_handler))
+        .route("/api/bills/export", get(export_bills_handler))
         .route(
             "/api/bills/pictures",
             post(upload_transaction_picture_handler),
@@ -226,6 +226,11 @@ struct BillIdQuery {
     id: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct BillsExportQuery {
+    format: Option<String>,
+}
+
 async fn list_bills_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -284,6 +289,46 @@ async fn bills_by_month_handler(
     }) {
         Ok(body) => json_response(StatusCode::OK, body),
         Err(_) => db_error_response(),
+    }
+}
+
+async fn export_bills_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BillsExportQuery>,
+) -> Response {
+    let export_format = match BillExportFormat::normalize(query.format.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let bills = match list_bills(runtime.connection(), user_id, &BillFilters::default()) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    if bills.is_empty() {
+        return not_found("No bills to export");
+    }
+
+    match export_format {
+        BillExportFormat::Csv => match render_bills_csv_export(&bills) {
+            Ok(body) => {
+                export_file_response("text/csv; charset=utf-8", export_filename("csv"), body)
+            }
+            Err(_) => db_error_response(),
+        },
+        BillExportFormat::Excel => export_file_response(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            export_filename("xlsx"),
+            render_bills_xlsx_export(&bills),
+        ),
     }
 }
 
@@ -1027,6 +1072,260 @@ fn picture_id_from_payload(payload: &Value) -> Option<String> {
     };
     let picture_id = raw_value.trim().to_string();
     (!picture_id.is_empty()).then_some(picture_id)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BillExportFormat {
+    Csv,
+    Excel,
+}
+
+impl BillExportFormat {
+    fn normalize(value: Option<&str>) -> RouteResult<Self> {
+        let normalized = value.unwrap_or("csv").trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "" | "csv" => Ok(Self::Csv),
+            "excel" | "xlsx" | "xls" => Ok(Self::Excel),
+            _ => Err(Box::new(bad_request("Unsupported export format"))),
+        }
+    }
+}
+
+fn export_filename(extension: &str) -> String {
+    format!(
+        "bills_export_{}.{}",
+        Local::now().format("%Y%m%d_%H%M%S"),
+        extension
+    )
+}
+
+fn export_file_response(content_type: &'static str, filename: String, body: Vec<u8>) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", content_type)
+        .header(
+            "content-disposition",
+            format!("attachment; filename={filename}"),
+        )
+        .body(Body::from(body))
+        .unwrap_or_else(|_| db_error_response())
+}
+
+fn render_bills_csv_export(bills: &[BillRecord]) -> Result<Vec<u8>, csv::Error> {
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::CRLF)
+        .from_writer(Vec::new());
+    writer.write_record(EXPORT_COLUMNS.iter().map(|(label, _)| *label))?;
+    for bill in bills {
+        writer.write_record(
+            EXPORT_COLUMNS
+                .iter()
+                .map(|(_, key)| export_bill_value(bill, key)),
+        )?;
+    }
+    let mut body = "\u{feff}".as_bytes().to_vec();
+    body.extend(writer.into_inner().map_err(|error| error.into_error())?);
+    Ok(body)
+}
+
+fn render_bills_xlsx_export(bills: &[BillRecord]) -> Vec<u8> {
+    let sheet_xml = render_bills_xlsx_sheet(bills);
+    let entries = [
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.as_slice(),
+        ),
+        (
+            "_rels/.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.as_slice(),
+        ),
+        (
+            "xl/workbook.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Bills" sheetId="1" r:id="rId1"/></sheets></workbook>"#.as_slice(),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.as_slice(),
+        ),
+        ("xl/worksheets/sheet1.xml", sheet_xml.as_bytes()),
+    ];
+    render_stored_zip(&entries)
+}
+
+fn render_bills_xlsx_sheet(bills: &[BillRecord]) -> String {
+    let mut sheet = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"#,
+    );
+    render_xlsx_row(
+        &mut sheet,
+        1,
+        EXPORT_COLUMNS.iter().map(|(label, _)| label.to_string()),
+    );
+    for (index, bill) in bills.iter().enumerate() {
+        render_xlsx_row(
+            &mut sheet,
+            index + 2,
+            EXPORT_COLUMNS
+                .iter()
+                .map(|(_, key)| export_bill_value(bill, key)),
+        );
+    }
+    sheet.push_str("</sheetData></worksheet>");
+    sheet
+}
+
+fn render_xlsx_row<I>(sheet: &mut String, row_number: usize, cells: I)
+where
+    I: IntoIterator<Item = String>,
+{
+    let _ = write!(sheet, r#"<row r="{row_number}">"#);
+    for (column_index, cell) in cells.into_iter().enumerate() {
+        let reference = xlsx_cell_reference(column_index, row_number);
+        let _ = write!(
+            sheet,
+            r#"<c r="{reference}" t="inlineStr"><is><t xml:space="preserve">{}</t></is></c>"#,
+            xml_escape(&cell)
+        );
+    }
+    sheet.push_str("</row>");
+}
+
+fn xlsx_cell_reference(mut column_index: usize, row_number: usize) -> String {
+    let mut column = Vec::new();
+    loop {
+        let remainder = column_index % 26;
+        column.push((b'A' + u8::try_from(remainder).unwrap_or(0)) as char);
+        column_index /= 26;
+        if column_index == 0 {
+            break;
+        }
+        column_index -= 1;
+    }
+    column.iter().rev().collect::<String>() + &row_number.to_string()
+}
+
+fn xml_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn export_bill_value(bill: &BillRecord, key: &str) -> String {
+    match bill.get(key) {
+        Some(Value::String(text)) => serialize_optional_export_cell(key, Some(text)),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Null) | None => String::new(),
+        Some(value) => serialize_optional_export_cell(key, Some(value.to_string())),
+    }
+}
+
+fn render_stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut body = Vec::new();
+    let mut central_directory = Vec::new();
+    for (name, data) in entries {
+        let offset = u32::try_from(body.len()).unwrap_or(u32::MAX);
+        write_zip_local_file(&mut body, name, data);
+        write_zip_central_directory_file(&mut central_directory, name, data, offset);
+    }
+    let central_directory_offset = u32::try_from(body.len()).unwrap_or(u32::MAX);
+    let central_directory_size = u32::try_from(central_directory.len()).unwrap_or(u32::MAX);
+    body.extend(central_directory);
+    write_zip_end_of_central_directory(
+        &mut body,
+        u16::try_from(entries.len()).unwrap_or(u16::MAX),
+        central_directory_size,
+        central_directory_offset,
+    );
+    body
+}
+
+fn write_zip_local_file(body: &mut Vec<u8>, name: &str, data: &[u8]) {
+    write_u32_le(body, 0x0403_4b50);
+    write_u16_le(body, 20);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_zip_data_descriptor(body, name, data);
+    body.extend(name.as_bytes());
+    body.extend(data);
+}
+
+fn write_zip_central_directory_file(
+    body: &mut Vec<u8>,
+    name: &str,
+    data: &[u8],
+    local_header_offset: u32,
+) {
+    write_u32_le(body, 0x0201_4b50);
+    write_u16_le(body, 20);
+    write_u16_le(body, 20);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_zip_data_descriptor(body, name, data);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u32_le(body, 0);
+    write_u32_le(body, local_header_offset);
+    body.extend(name.as_bytes());
+}
+
+fn write_zip_data_descriptor(body: &mut Vec<u8>, name: &str, data: &[u8]) {
+    write_u32_le(body, crc32(data));
+    let data_len = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    write_u32_le(body, data_len);
+    write_u32_le(body, data_len);
+    write_u16_le(body, u16::try_from(name.len()).unwrap_or(u16::MAX));
+    write_u16_le(body, 0);
+}
+
+fn write_zip_end_of_central_directory(
+    body: &mut Vec<u8>,
+    entry_count: u16,
+    central_directory_size: u32,
+    central_directory_offset: u32,
+) {
+    write_u32_le(body, 0x0605_4b50);
+    write_u16_le(body, 0);
+    write_u16_le(body, 0);
+    write_u16_le(body, entry_count);
+    write_u16_le(body, entry_count);
+    write_u32_le(body, central_directory_size);
+    write_u32_le(body, central_directory_offset);
+    write_u16_le(body, 0);
+}
+
+fn write_u16_le(body: &mut Vec<u8>, value: u16) {
+    body.extend(value.to_le_bytes());
+}
+
+fn write_u32_le(body: &mut Vec<u8>, value: u32) {
+    body.extend(value.to_le_bytes());
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffff_u32;
+    for byte in data {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
 }
 
 fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {

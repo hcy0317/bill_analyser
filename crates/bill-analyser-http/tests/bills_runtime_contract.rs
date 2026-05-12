@@ -316,6 +316,134 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
 }
 
 #[tokio::test]
+async fn bills_runtime_exports_csv_and_xlsx_without_python_proxy() -> Result<(), Box<dyn Error>> {
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/bills/export")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("GET", "/api/bills/export")));
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let unsupported_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/export?format=pdf",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(unsupported_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(unsupported_response).await["error"],
+        "Unsupported export format"
+    );
+
+    let empty_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/export?format=csv",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(empty_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(empty_response).await["error"],
+        "No bills to export"
+    );
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills",
+            json!({
+                "date": "2026-05-09 08:30:00",
+                "type": "支出",
+                "amount": 8.8,
+                "counterparty": "=Formula Shop",
+                "description": "  -csv injection guard",
+                "payment_method": "@card",
+                "main_category": "+food",
+                "sub_category": "早餐",
+                "source_account_id": 10
+            }),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+
+    let csv_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/export?format=csv",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(csv_response.status(), StatusCode::OK);
+    assert!(csv_response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .expect("content type")
+        .starts_with("text/csv"));
+    assert!(csv_response
+        .headers()
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .expect("content disposition")
+        .contains("bills_export_"));
+    let csv_text = read_text(csv_response).await;
+    assert!(csv_text.starts_with('\u{feff}'));
+    assert!(csv_text.contains("date,type,amount,counterparty,description,payment_method,main_category,sub_category,source_account_id,destination_account_id,destination_amount"));
+    assert!(csv_text.contains("'=Formula Shop"));
+    assert!(csv_text.contains("'  -csv injection guard"));
+    assert!(csv_text.contains("'@card"));
+    assert!(csv_text.contains("'+food"));
+
+    let xlsx_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/export?format=xls",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(xlsx_response.status(), StatusCode::OK);
+    assert!(xlsx_response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .expect("xlsx content type")
+        .starts_with("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+    assert!(xlsx_response
+        .headers()
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .expect("xlsx content disposition")
+        .contains(".xlsx"));
+    let xlsx_bytes = read_bytes(xlsx_response).await;
+    assert!(xlsx_bytes.starts_with(b"PK"));
+    let xlsx_text = String::from_utf8_lossy(&xlsx_bytes);
+    assert!(xlsx_text.contains("xl/worksheets/sheet1.xml"));
+    assert!(xlsx_text.contains("'=Formula Shop"));
+
+    let unauthenticated_response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/bills/export")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
@@ -331,9 +459,6 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
         .all(|route| route != &("POST", "/api/bills/pictures/unused")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("GET", "/api/bills/export")));
-    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
-        .iter()
         .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
@@ -343,7 +468,6 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
     let app = runtime_router(&fixture);
 
     for (method, path) in [
-        (Method::GET, "/api/bills/export?format=csv"),
         (Method::GET, "/api/bills/reconciliation_statements"),
         (Method::GET, "/api/bills/123/recurring-candidates"),
         (Method::PUT, "/api/bills/123/recurring-match"),
@@ -595,11 +719,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
 
     let health_response = app
@@ -615,6 +739,10 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("owned routes")
         .contains("bills picture runtime routes"));
+    assert!(health["details"]["owned_routes"]
+        .as_str()
+        .expect("owned routes")
+        .contains("bills export runtime route"));
     assert!(health["details"]["bills_crud_runtime"].as_str().is_some());
     assert!(health["details"]["budgets_crud_runtime"].as_str().is_some());
     assert!(health["details"]["statistics_read_runtime"]
@@ -942,8 +1070,17 @@ async fn echo_handler(request: Request<Body>) -> impl IntoResponse {
 }
 
 async fn read_json(response: axum::response::Response) -> Value {
+    let bytes = read_bytes(response).await;
+    serde_json::from_slice(&bytes).expect("json body")
+}
+
+async fn read_text(response: axum::response::Response) -> String {
+    String::from_utf8(read_bytes(response).await).expect("utf8 body")
+}
+
+async fn read_bytes(response: axum::response::Response) -> Vec<u8> {
     let bytes = to_bytes(response.into_body(), 1024 * 1024)
         .await
         .expect("body bytes");
-    serde_json::from_slice(&bytes).expect("json body")
+    bytes.to_vec()
 }
