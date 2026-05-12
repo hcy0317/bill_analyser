@@ -8,6 +8,7 @@ use axum::{
 use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState,
     TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
+    TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
     TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
@@ -354,6 +355,40 @@ async fn taxonomy_account_update_reconciles_direct_subaccounts() -> Result<(), B
     assert_eq!(account_balance(&fixture.db_path, 11)?, 9.99);
     assert_eq!(child_count(&fixture.db_path, 10)?, 2);
     assert_eq!(body["result"]["subAccounts"].as_array().unwrap().len(), 2);
+    let new_child_id = body["result"]["subAccounts"]
+        .as_array()
+        .expect("sub accounts")
+        .iter()
+        .find(|account| account["name"] == "新子账户")
+        .and_then(|account| account["id"].as_str())
+        .expect("new child id")
+        .parse::<i64>()?;
+
+    let prune_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/accounts/10",
+            json!({
+                "name": "工资卡更新",
+                "type": 1,
+                "category": 2,
+                "currency": "CNY",
+                "balance": 4321,
+                "subAccounts": [{
+                    "id": new_child_id,
+                    "name": "新子账户保留",
+                    "type": 1,
+                    "balance": 250,
+                    "visible": true
+                }]
+            }),
+        ))
+        .await?;
+    assert_eq!(prune_response.status(), StatusCode::OK);
+    assert_eq!(child_count(&fixture.db_path, 10)?, 0);
+    assert!(!account_exists(&fixture.db_path, 11)?);
+    assert!(account_exists(&fixture.db_path, new_child_id)?);
 
     Ok(())
 }
@@ -818,6 +853,1187 @@ async fn taxonomy_tags_runtime_reports_db_errors_for_missing_tag_schema(
     Ok(())
 }
 
+#[tokio::test]
+async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/categories/")));
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/categories/batch")));
+    assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/categories/rules")));
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["success"], true);
+    let expense_categories = list_body["result"]["3"].as_array().expect("type 3 list");
+    assert_eq!(expense_categories.len(), 1);
+    assert_eq!(expense_categories[0]["id"], "30");
+    assert_eq!(expense_categories[0]["name"], "餐饮");
+    assert_eq!(expense_categories[0]["subCategories"][0]["name"], "午餐");
+    assert_eq!(expense_categories[0]["subCategories"][0]["hidden"], true);
+    assert!(!serde_json::to_string(&list_body)?.contains("其他用户分类"));
+
+    let get_parent_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/30",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(get_parent_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(get_parent_response).await["result"]["parentId"],
+        "0"
+    );
+
+    let get_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/31",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let get_body = read_json(get_response).await;
+    assert_eq!(get_body["result"]["parentId"], "30");
+    assert_eq!(get_body["result"]["name"], "午餐");
+
+    let update_parent_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/30",
+            json!({"comment": "主类更新", "displayOrder": 4}),
+        ))
+        .await?;
+    assert_eq!(update_parent_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(update_parent_response).await["result"]["comment"],
+        "主类更新"
+    );
+
+    let create_parent_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({
+                "name": "出行",
+                "type": 3,
+                "comment": "交通主类",
+                "displayOrder": 5,
+                "visible": false,
+                "icon": "mdi-bus",
+                "color": "#336699"
+            }),
+        ))
+        .await?;
+    assert_eq!(create_parent_response.status(), StatusCode::CREATED);
+    let create_parent_body = read_json(create_parent_response).await;
+    assert_eq!(create_parent_body["result"]["hidden"], true);
+    let parent_id = create_parent_body["result"]["id"]
+        .as_str()
+        .expect("created category id")
+        .parse::<i64>()?;
+    assert!(category_exists(&fixture.db_path, parent_id)?);
+
+    let create_child_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({
+                "name": "地铁",
+                "parentId": parent_id.to_string(),
+                "comment": "轨交",
+                "displayOrder": 6
+            }),
+        ))
+        .await?;
+    assert_eq!(create_child_response.status(), StatusCode::OK);
+    let create_child_body = read_json(create_child_response).await;
+    assert_eq!(
+        create_child_body["result"]["parentId"],
+        parent_id.to_string()
+    );
+    let child_id = create_child_body["result"]["id"]
+        .as_str()
+        .expect("created child id")
+        .parse::<i64>()?;
+
+    let update_child_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{child_id}"),
+            json!({"name": "公交", "comment": "地面公交", "displayOrder": 8, "visible": true}),
+        ))
+        .await?;
+    assert_eq!(update_child_response.status(), StatusCode::OK);
+    let update_child_body = read_json(update_child_response).await;
+    assert_eq!(update_child_body["result"]["name"], "公交");
+    assert_eq!(update_child_body["result"]["displayOrder"], 8);
+
+    let move_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/move",
+            json!({"newDisplayOrders": [{"id": child_id, "displayOrder": 12}]}),
+        ))
+        .await?;
+    assert_eq!(move_response.status(), StatusCode::OK);
+    assert_eq!(read_json(move_response).await["result"], true);
+    assert_eq!(category_priority(&fixture.db_path, child_id)?, 12);
+
+    let flat_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/flat",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(flat_response.status(), StatusCode::OK);
+    let flat_body = read_json(flat_response).await;
+    assert!(flat_body["result"]
+        .as_array()
+        .expect("flat categories")
+        .iter()
+        .any(|category| category["name"] == "公交"));
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(export_response.status(), StatusCode::OK);
+    let export_body = read_json(export_response).await;
+    assert!(export_body["result"]
+        .as_array()
+        .expect("exported categories")
+        .iter()
+        .all(|category| category.get("id").is_none()));
+
+    let import_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/import",
+            json!({"categories": [
+                {"main_category": "餐饮", "sub_category": "午餐", "description": "导入更新", "priority": 9},
+                {"main_category": "学习", "sub_category": "课程", "type": 3, "priority": 10},
+                {"sub_category": "缺主类"}
+            ]}),
+        ))
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let import_body = read_json(import_response).await;
+    assert_eq!(import_body["result"]["updated"], 1);
+    assert_eq!(import_body["result"]["imported"], 1);
+    assert_eq!(import_body["result"]["skipped"], 1);
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/categories/{parent_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["result"], true);
+    assert!(!category_exists(&fixture.db_path, parent_id)?);
+    assert!(!category_exists(&fixture.db_path, child_id)?);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_categories_runtime_covers_legacy_aliases_virtual_and_batch_edges(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let all_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/all",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(all_response.status(), StatusCode::OK);
+    assert!(read_json(all_response).await["result"]
+        .as_array()
+        .expect("raw category rows")
+        .iter()
+        .any(|category| category["id"] == 30));
+
+    let update_all_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/all",
+            json!({"categories": []}),
+        ))
+        .await?;
+    assert_eq!(update_all_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(update_all_response).await["message"],
+        "Categories updated successfully"
+    );
+
+    let update_all_missing = app
+        .clone()
+        .oneshot(json_request(Method::PUT, "/api/categories/all", json!({})))
+        .await?;
+    assert_eq!(update_all_missing.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(update_all_missing).await["error"],
+        "categories are required"
+    );
+
+    let duplicate_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "餐饮", "parentId": "0"}),
+        ))
+        .await?;
+    assert_eq!(duplicate_parent.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(duplicate_parent).await["message"],
+        "Category already exists"
+    );
+
+    let duplicate_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "午餐", "parentId": "30"}),
+        ))
+        .await?;
+    assert_eq!(duplicate_child.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(duplicate_child).await["message"],
+        "Category already exists"
+    );
+
+    let missing_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "孤儿", "parentId": "99999"}),
+        ))
+        .await?;
+    assert_eq!(missing_parent.status(), StatusCode::NOT_FOUND);
+
+    let food_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Food", "type": 3, "displayOrder": 3}),
+        ))
+        .await?;
+    assert_eq!(food_parent.status(), StatusCode::CREATED);
+    let food_parent_body = read_json(food_parent).await;
+    let food_parent_id = food_parent_body["result"]["id"]
+        .as_str()
+        .expect("food parent id")
+        .parse::<i64>()?;
+
+    let food_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Lunch", "parentId": food_parent_id.to_string()}),
+        ))
+        .await?;
+    assert_eq!(food_child.status(), StatusCode::OK);
+    let food_child_body = read_json(food_child).await;
+    let food_child_id = food_child_body["result"]["id"]
+        .as_str()
+        .expect("food child id")
+        .parse::<i64>()?;
+
+    let virtual_get = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/virtual_Food",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(virtual_get.status(), StatusCode::OK);
+    assert_eq!(read_json(virtual_get).await["result"]["name"], "Food");
+
+    let virtual_rename = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_Food",
+            json!({
+                "name": "Meals",
+                "type": 3,
+                "comment": "renamed parent",
+                "displayOrder": 11,
+                "visible": false,
+                "keywords": "eat",
+                "icon": "mdi-food",
+                "color": "#112233"
+            }),
+        ))
+        .await?;
+    assert_eq!(virtual_rename.status(), StatusCode::OK);
+    let virtual_rename_body = read_json(virtual_rename).await;
+    assert_eq!(virtual_rename_body["result"]["name"], "Meals");
+    assert_eq!(virtual_rename_body["result"]["hidden"], true);
+
+    let travel_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Travel", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(travel_parent.status(), StatusCode::CREATED);
+
+    let virtual_conflict = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_Meals",
+            json!({"name": "Travel"}),
+        ))
+        .await?;
+    assert_eq!(virtual_conflict.status(), StatusCode::CONFLICT);
+
+    let virtual_create = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_NewGroup",
+            json!({"name": "NewGroup", "type": 3, "displayOrder": 14}),
+        ))
+        .await?;
+    assert_eq!(virtual_create.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(virtual_create).await["result"]["name"],
+        "NewGroup"
+    );
+
+    let update_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{food_child_id}"),
+            json!({
+                "name": "Dinner",
+                "comment": "evening",
+                "displayOrder": 15,
+                "keywords": "night",
+                "type": 3,
+                "visible": false,
+                "icon": "mdi-dinner",
+                "color": "#445566"
+            }),
+        ))
+        .await?;
+    assert_eq!(update_child.status(), StatusCode::OK);
+    let update_child_body = read_json(update_child).await;
+    assert_eq!(update_child_body["result"]["name"], "Dinner");
+    assert_eq!(update_child_body["result"]["hidden"], true);
+
+    let rename_real_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{food_parent_id}"),
+            json!({"name": "Household", "comment": "real parent rename"}),
+        ))
+        .await?;
+    assert_eq!(rename_real_parent.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(rename_real_parent).await["result"]["name"],
+        "Household"
+    );
+
+    for body in [
+        json!({}),
+        json!({"newDisplayOrders": []}),
+        json!({"newDisplayOrders": [{"id": "bad"}, {"id": food_child_id}]}),
+    ] {
+        let move_response = app
+            .clone()
+            .oneshot(json_request(Method::POST, "/api/categories/move", body))
+            .await?;
+        assert_eq!(move_response.status(), StatusCode::OK);
+        assert_eq!(read_json(move_response).await["result"], true);
+    }
+
+    let batch_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/batch",
+            json!({"categories": [
+                {"name": "Home", "type": 3, "subCategories": [
+                    {"name": "Rent", "displayOrder": 4},
+                    {"name": ""}
+                ]},
+                {"name": ""}
+            ]}),
+        ))
+        .await?;
+    assert_eq!(batch_response.status(), StatusCode::OK);
+    assert!(serde_json::to_string(&read_json(batch_response).await)?.contains("Rent"));
+
+    let raw_import = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/import",
+            json!([
+                {"main_category": "Health", "sub_category": "", "description": "checkup"},
+                {"main_category": "Health", "sub_category": "Doctor", "priority": 6}
+            ]),
+        ))
+        .await?;
+    assert_eq!(raw_import.status(), StatusCode::OK);
+    assert_eq!(read_json(raw_import).await["result"]["imported"], 2);
+
+    let result_import = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/import",
+            json!({"result": [{"main_category": "Health", "sub_category": "Doctor", "priority": 7}]}),
+        ))
+        .await?;
+    assert_eq!(result_import.status(), StatusCode::OK);
+    assert_eq!(read_json(result_import).await["result"]["updated"], 1);
+
+    let invalid_import = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/import",
+            json!({"categories": {}}),
+        ))
+        .await?;
+    assert_eq!(invalid_import.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_import).await["error"],
+        "Invalid format, expected list of categories"
+    );
+
+    let invalid_update_body = app
+        .clone()
+        .oneshot(json_request(Method::PUT, "/api/categories/30", json!([])))
+        .await?;
+    assert_eq!(invalid_update_body.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_update_body).await["error"],
+        "Invalid request"
+    );
+
+    let invalid_delete_id = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/categories/not-a-number",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_delete_id.status(), StatusCode::BAD_REQUEST);
+
+    let delete_virtual = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/categories/virtual_Household",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_virtual.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_virtual).await["result"], true);
+    assert!(!category_exists(&fixture.db_path, food_parent_id)?);
+    assert!(!category_exists(&fixture.db_path, food_child_id)?);
+
+    let deleted_get = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            &format!("/api/categories/{food_child_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(deleted_get.status(), StatusCode::NOT_FOUND);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_categories_runtime_covers_error_edges_and_orphan_fallbacks(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    for (method, uri) in [
+        (Method::GET, "/api/categories/flat"),
+        (Method::GET, "/api/categories/all"),
+        (Method::PUT, "/api/categories/all"),
+        (Method::POST, "/api/categories/"),
+        (Method::GET, "/api/categories/30"),
+        (Method::PUT, "/api/categories/30"),
+        (Method::DELETE, "/api/categories/30"),
+        (Method::POST, "/api/categories/move"),
+        (Method::POST, "/api/categories/batch"),
+        (Method::GET, "/api/categories/export"),
+        (Method::POST, "/api/categories/import"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
+    for (method, uri) in [
+        (Method::PUT, "/api/categories/all"),
+        (Method::PUT, "/api/categories/30"),
+        (Method::POST, "/api/categories/move"),
+        (Method::POST, "/api/categories/batch"),
+        (Method::POST, "/api/categories/import"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, uri, Body::from("{")))
+            .await?;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(read_json(response).await["error"], "Invalid JSON");
+    }
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    for (method, uri, body) in [
+        (Method::GET, "/api/categories/flat", Body::empty()),
+        (Method::GET, "/api/categories/all", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/",
+            Body::from(r#"{"name":"NoDb"}"#),
+        ),
+        (Method::GET, "/api/categories/30", Body::empty()),
+        (
+            Method::PUT,
+            "/api/categories/30",
+            Body::from(r#"{"comment":"NoDb"}"#),
+        ),
+        (Method::DELETE, "/api/categories/30", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/move",
+            Body::from(r#"{"newDisplayOrders":[{"id":30,"displayOrder":1}]}"#),
+        ),
+        (
+            Method::POST,
+            "/api/categories/batch",
+            Body::from(r#"{"categories":[{"name":"NoDb"}]}"#),
+        ),
+        (Method::GET, "/api/categories/export", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/import",
+            Body::from(r#"[{"main_category":"NoDb","sub_category":""}]"#),
+        ),
+    ] {
+        let response = no_db_app
+            .clone()
+            .oneshot(authed_request(method, uri, body))
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+    }
+
+    let empty_name = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": ""}),
+        ))
+        .await?;
+    assert_eq!(empty_name.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(empty_name).await["error"],
+        "Category name is required"
+    );
+
+    let invalid_parent_text = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "BadParent", "parentId": "not-a-number"}),
+        ))
+        .await?;
+    assert_eq!(invalid_parent_text.status(), StatusCode::NOT_FOUND);
+
+    let virtual_parent_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "VirtualChild", "parentId": "virtual_VirtualParent"}),
+        ))
+        .await?;
+    assert_eq!(virtual_parent_child.status(), StatusCode::OK);
+
+    let invalid_update_id = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/not-a-number",
+            json!({"comment": "x"}),
+        ))
+        .await?;
+    assert_eq!(invalid_update_id.status(), StatusCode::BAD_REQUEST);
+
+    let missing_update_with_name = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/99999",
+            json!({"name": "Missing"}),
+        ))
+        .await?;
+    assert_eq!(missing_update_with_name.status(), StatusCode::NOT_FOUND);
+
+    let missing_update_without_name = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/99999",
+            json!({"comment": "Missing"}),
+        ))
+        .await?;
+    assert_eq!(missing_update_without_name.status(), StatusCode::NOT_FOUND);
+
+    let alpha = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Alpha", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(alpha.status(), StatusCode::CREATED);
+    let alpha_id = read_json(alpha).await["result"]["id"]
+        .as_str()
+        .expect("alpha id")
+        .parse::<i64>()?;
+
+    let beta = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Beta", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(beta.status(), StatusCode::CREATED);
+
+    let real_rename_conflict = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{alpha_id}"),
+            json!({"name": "Beta"}),
+        ))
+        .await?;
+    assert_eq!(real_rename_conflict.status(), StatusCode::CONFLICT);
+
+    let parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "SubConflictParent", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(parent.status(), StatusCode::CREATED);
+    let parent_id = read_json(parent).await["result"]["id"]
+        .as_str()
+        .expect("parent id")
+        .parse::<i64>()?;
+    let first_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "First", "parentId": parent_id.to_string()}),
+        ))
+        .await?;
+    assert_eq!(first_child.status(), StatusCode::OK);
+    let second_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "Second", "parentId": parent_id.to_string()}),
+        ))
+        .await?;
+    assert_eq!(second_child.status(), StatusCode::OK);
+    let second_child_id = read_json(second_child).await["result"]["id"]
+        .as_str()
+        .expect("second child id")
+        .parse::<i64>()?;
+    let sub_rename_conflict = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{second_child_id}"),
+            json!({"name": "First"}),
+        ))
+        .await?;
+    assert_eq!(sub_rename_conflict.status(), StatusCode::CONFLICT);
+
+    let orphan_id = {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute(
+            "INSERT INTO categories(
+                user_id, type, main_category, sub_category, description,
+                priority, keywords, hidden, icon, color, created_at
+            ) VALUES (42, 3, 'OrphanMain', 'OnlyChild', 'orphan', 33, '', 0, '', '', 'now')",
+            [],
+        )?;
+        connection.last_insert_rowid()
+    };
+
+    let orphan_get = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            &format!("/api/categories/{orphan_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(orphan_get.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(orphan_get).await["result"]["parentId"],
+        "virtual_OrphanMain"
+    );
+
+    let orphan_tree = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/tree",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(orphan_tree.status(), StatusCode::OK);
+    assert!(serde_json::to_string(&read_json(orphan_tree).await)?.contains("virtual_OrphanMain"));
+
+    let orphan_virtual_update = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_OrphanMain",
+            json!({"name": "OrphanRenamed"}),
+        ))
+        .await?;
+    assert_eq!(orphan_virtual_update.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(orphan_virtual_update).await["result"]["name"],
+        "OrphanRenamed"
+    );
+
+    let rollback_virtual = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "RollbackVirtual", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(rollback_virtual.status(), StatusCode::CREATED);
+    {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute_batch(
+            "
+            CREATE TRIGGER fail_virtual_category_save
+            BEFORE UPDATE OF description ON categories
+            WHEN NEW.main_category = 'RollbackVirtual2'
+            BEGIN
+                SELECT RAISE(FAIL, 'forced category update');
+            END;
+            ",
+        )?;
+    }
+    let virtual_save_failure = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_RollbackVirtual",
+            json!({"name": "RollbackVirtual2", "comment": "boom"}),
+        ))
+        .await?;
+    assert_eq!(
+        virtual_save_failure.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(virtual_save_failure).await["error"],
+        "Failed to save category"
+    );
+    Connection::open(&fixture.db_path)?.execute("DROP TRIGGER fail_virtual_category_save", [])?;
+
+    let real_rollback = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "RollbackReal", "type": 3}),
+        ))
+        .await?;
+    assert_eq!(real_rollback.status(), StatusCode::CREATED);
+    let real_rollback_id = read_json(real_rollback).await["result"]["id"]
+        .as_str()
+        .expect("rollback real id")
+        .parse::<i64>()?;
+    {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute_batch(
+            "
+            CREATE TRIGGER fail_real_category_save
+            BEFORE UPDATE OF description ON categories
+            WHEN NEW.main_category = 'RollbackReal2'
+            BEGIN
+                SELECT RAISE(FAIL, 'forced category update');
+            END;
+            ",
+        )?;
+    }
+    let real_save_failure = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/categories/{real_rollback_id}"),
+            json!({"name": "RollbackReal2", "comment": "boom"}),
+        ))
+        .await?;
+    assert_eq!(
+        real_save_failure.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(real_save_failure).await["error"],
+        "Failed to update category"
+    );
+    Connection::open(&fixture.db_path)?.execute("DROP TRIGGER fail_real_category_save", [])?;
+
+    let virtual_missing_old = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_MissingOldGroup",
+            json!({"name": "CreatedFromMissingOld"}),
+        ))
+        .await?;
+    assert_eq!(virtual_missing_old.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(virtual_missing_old).await["result"]["name"],
+        "CreatedFromMissingOld"
+    );
+
+    {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute_batch(
+            "
+            CREATE TRIGGER fail_main_category_rename
+            BEFORE UPDATE OF main_category ON categories
+            WHEN NEW.main_category = 'BlockedRename'
+            BEGIN
+                SELECT RAISE(FAIL, 'forced rename constraint');
+            END;
+            ",
+        )?;
+    }
+    let virtual_rename_constraint = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/virtual_RollbackVirtual",
+            json!({"name": "BlockedRename"}),
+        ))
+        .await?;
+    assert_eq!(virtual_rename_constraint.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(virtual_rename_constraint).await["error"],
+        "Category rename conflict"
+    );
+    Connection::open(&fixture.db_path)?.execute("DROP TRIGGER fail_main_category_rename", [])?;
+
+    {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute_batch(
+            "
+            CREATE TRIGGER fail_category_parent_insert
+            BEFORE INSERT ON categories
+            WHEN NEW.main_category = 'ConstraintParent'
+            BEGIN
+                SELECT RAISE(FAIL, 'forced insert constraint');
+            END;
+            ",
+        )?;
+    }
+    let constraint_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "ConstraintParent"}),
+        ))
+        .await?;
+    assert_eq!(
+        constraint_parent.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    Connection::open(&fixture.db_path)?.execute("DROP TRIGGER fail_category_parent_insert", [])?;
+
+    let child_constraint_parent = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "ChildConstraintParent"}),
+        ))
+        .await?;
+    assert_eq!(child_constraint_parent.status(), StatusCode::CREATED);
+    let child_constraint_parent_id = read_json(child_constraint_parent).await["result"]["id"]
+        .as_str()
+        .expect("child constraint parent id")
+        .parse::<i64>()?;
+    {
+        let connection = Connection::open(&fixture.db_path)?;
+        connection.execute_batch(
+            "
+            CREATE TRIGGER fail_category_child_insert
+            BEFORE INSERT ON categories
+            WHEN NEW.sub_category = 'ConstraintChild'
+            BEGIN
+                SELECT RAISE(FAIL, 'forced child insert constraint');
+            END;
+            ",
+        )?;
+    }
+    let constraint_child = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/",
+            json!({"name": "ConstraintChild", "parentId": child_constraint_parent_id.to_string()}),
+        ))
+        .await?;
+    assert_eq!(constraint_child.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    Connection::open(&fixture.db_path)?.execute("DROP TRIGGER fail_category_child_insert", [])?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let unauth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/categories/")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauth_response.status(), StatusCode::UNAUTHORIZED);
+
+    let missing_create = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/categories/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_create.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(missing_create).await["error"], "No data provided");
+
+    let nameless_create = app
+        .clone()
+        .oneshot(json_request(Method::POST, "/api/categories/", json!({})))
+        .await?;
+    assert_eq!(nameless_create.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(nameless_create).await["error"],
+        "No data provided"
+    );
+
+    let invalid_id = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/not-a-number",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_id.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(invalid_id).await["error"], "Invalid category ID");
+
+    let missing_category = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/categories/97",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_category.status(), StatusCode::NOT_FOUND);
+    assert!(category_exists(&fixture.db_path, 97)?);
+
+    let invalid_batch = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/batch",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(invalid_batch.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_batch).await["error"],
+        "No categories provided"
+    );
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    let no_db_response = no_db_app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["error"],
+        "Rust taxonomy categories DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_categories_runtime_reports_db_errors_for_missing_schema(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE categories", [])?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        read_json(response).await["error"],
+        "Rust taxonomy categories route runtime DB error"
+    );
+
+    for (method, uri, body) in [
+        (Method::GET, "/api/categories/flat", Body::empty()),
+        (Method::GET, "/api/categories/all", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/",
+            Body::from(r#"{"name":"Broken"}"#),
+        ),
+        (
+            Method::POST,
+            "/api/categories/",
+            Body::from(r#"{"name":"BrokenChild","parentId":"30"}"#),
+        ),
+        (Method::GET, "/api/categories/30", Body::empty()),
+        (Method::DELETE, "/api/categories/30", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/move",
+            Body::from(r#"{"newDisplayOrders":[{"id":30,"displayOrder":1}]}"#),
+        ),
+        (
+            Method::POST,
+            "/api/categories/batch",
+            Body::from(r#"{"categories":[{"name":"Broken"}]}"#),
+        ),
+        (Method::GET, "/api/categories/export", Body::empty()),
+        (
+            Method::POST,
+            "/api/categories/import",
+            Body::from(r#"[{"main_category":"Broken","sub_category":""}]"#),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, uri, body))
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{uri}"
+        );
+        assert_eq!(
+            read_json(response).await["error"],
+            "Rust taxonomy categories route runtime DB error"
+        );
+    }
+
+    Ok(())
+}
+
 struct RuntimeFixture {
     _temp_dir: TempDir,
     db_path: std::path::PathBuf,
@@ -903,6 +2119,21 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             updated_at TEXT NOT NULL,
             UNIQUE(user_id, name)
         );
+        CREATE TABLE categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            type INTEGER DEFAULT 1,
+            main_category TEXT NOT NULL,
+            sub_category TEXT NOT NULL,
+            description TEXT,
+            priority INTEGER DEFAULT 0,
+            keywords TEXT,
+            hidden BOOLEAN DEFAULT 0,
+            icon TEXT,
+            color TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, main_category, sub_category)
+        );
         ",
     )?;
     connection.execute(
@@ -929,6 +2160,17 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (20, 42, '午饭', '#ff6600', 'food', 2, 0, '2026-01-01T00:00:00', 'now'),
             (21, 42, '通勤', '#0066ff', 'bus', 1, 1, '2026-01-02T00:00:00', 'now'),
             (98, 77, '其他用户标签', '#999999', 'tag', 0, 0, '2026-01-03T00:00:00', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(
+            id, user_id, type, main_category, sub_category, description,
+            priority, keywords, hidden, icon, color, created_at
+        )
+        VALUES
+            (30, 42, 3, '餐饮', '', '主分类', 1, '', 0, 'mdi-food', '#ff6600', 'now'),
+            (31, 42, 3, '餐饮', '午餐', '子分类', 2, '饭', 1, 'mdi-food', '#ff6600', 'now'),
+            (97, 77, 3, '其他用户分类', '', '', 0, '', 0, '', '', 'now')",
         [],
     )?;
     Ok(())
@@ -1000,6 +2242,22 @@ fn tag_display_order(path: &Path, tag_id: i64) -> Result<i64, Box<dyn Error>> {
     Ok(Connection::open(path)?.query_row(
         "SELECT display_order FROM tags WHERE id = ?1",
         [tag_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn category_exists(path: &Path, category_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM categories WHERE id = ?1",
+        [category_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn category_priority(path: &Path, category_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT priority FROM categories WHERE id = ?1",
+        [category_id],
         |row| row.get::<_, i64>(0),
     )?)
 }

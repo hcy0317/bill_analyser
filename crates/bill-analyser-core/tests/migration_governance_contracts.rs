@@ -171,7 +171,7 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             "/api/accounts/{account_id}/transactions/move",
             "taxonomy-rules-settings",
         ),
-        ("GET", "/api/categories/tree", "taxonomy-rules-settings"),
+        ("GET", "/api/categories/rules", "taxonomy-rules-settings"),
         (
             "GET",
             "/api/settings/bundle/export",
@@ -193,7 +193,7 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
 }
 
 #[test]
-fn taxonomy_account_crud_routes_are_rust_owned_while_p4_remainder_stays_proxied() {
+fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied() {
     let manifest = expanded_route_manifest();
     for endpoint in [
         "GET /api/accounts/",
@@ -212,7 +212,7 @@ fn taxonomy_account_crud_routes_are_rust_owned_while_p4_remainder_stays_proxied(
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("tag batch create, categories, templates"));
+            .contains("tag batch create, templates"));
     }
 
     for endpoint in [
@@ -233,11 +233,50 @@ fn taxonomy_account_crud_routes_are_rust_owned_while_p4_remainder_stays_proxied(
         assert!(entry.unsupported_behavior.contains("tag batch create"));
     }
 
+    for endpoint in [
+        "GET /api/categories",
+        "POST /api/categories",
+        "GET /api/categories/",
+        "POST /api/categories/",
+        "GET /api/categories/{category_id}",
+        "PUT /api/categories/{category_id}",
+        "DELETE /api/categories/{category_id}",
+        "GET /api/categories/tree",
+        "GET /api/categories/flat",
+        "GET /api/categories/all",
+        "PUT /api/categories/all",
+        "POST /api/categories/batch",
+        "POST /api/categories/move",
+        "GET /api/categories/export",
+        "POST /api/categories/import",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy category route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
+        assert!(entry
+            .unsupported_behavior
+            .contains("category master-data routes are Rust-owned"));
+        assert!(entry
+            .deletion_blockers
+            .contains(&"tag_batch_templates_category_rules_settings_parity"));
+        assert!(entry
+            .deletion_blockers
+            .contains(&"account_transaction_operations_parity"));
+    }
+
     for (method, pattern) in [
         ("POST", "/api/accounts/{account_id}/transactions/clear"),
         ("POST", "/api/accounts/{account_id}/transactions/move"),
         ("POST", "/api/accounts/sync-balances"),
         ("POST", "/api/tags/batch"),
+        ("GET", "/api/categories/rules"),
+        ("PUT", "/api/categories/rules"),
+        ("GET", "/api/categories/statistics"),
+        ("POST", "/api/categories/update-all"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("taxonomy proxied route is present: {method} {pattern}"));

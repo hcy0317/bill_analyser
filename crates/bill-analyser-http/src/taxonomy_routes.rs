@@ -12,6 +12,7 @@ use bill_analyser_core::UserId;
 use bill_analyser_db::{
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
+        categories::{CategoriesRepository, CategoryRecord},
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
     },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
@@ -58,6 +59,31 @@ pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
 
 pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[("POST", "/api/tags/batch")];
 
+pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/categories"),
+    ("GET", "/api/categories/"),
+    ("POST", "/api/categories"),
+    ("POST", "/api/categories/"),
+    ("GET", "/api/categories/all"),
+    ("PUT", "/api/categories/all"),
+    ("POST", "/api/categories/batch"),
+    ("GET", "/api/categories/export"),
+    ("GET", "/api/categories/flat"),
+    ("POST", "/api/categories/import"),
+    ("POST", "/api/categories/move"),
+    ("GET", "/api/categories/tree"),
+    ("GET", "/api/categories/{category_id}"),
+    ("PUT", "/api/categories/{category_id}"),
+    ("DELETE", "/api/categories/{category_id}"),
+];
+
+pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/categories/rules"),
+    ("PUT", "/api/categories/rules"),
+    ("GET", "/api/categories/statistics"),
+    ("POST", "/api/categories/update-all"),
+];
+
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route(
@@ -100,6 +126,51 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
             get(get_tag_handler)
                 .put(update_tag_handler)
                 .delete(delete_tag_handler),
+        )
+        .route(
+            "/api/categories",
+            get(list_categories_handler).post(create_category_handler),
+        )
+        .route(
+            "/api/categories/",
+            get(list_categories_handler).post(create_category_handler),
+        )
+        .route("/api/categories/tree", get(list_categories_handler))
+        .route("/api/categories/flat", get(flat_categories_handler))
+        .route(
+            "/api/categories/all",
+            get(all_categories_handler).put(update_all_categories_handler),
+        )
+        .route(
+            "/api/categories/batch",
+            axum::routing::post(batch_create_categories_handler),
+        )
+        .route("/api/categories/export", get(export_categories_handler))
+        .route(
+            "/api/categories/import",
+            axum::routing::post(import_categories_handler),
+        )
+        .route(
+            "/api/categories/move",
+            axum::routing::post(move_categories_handler),
+        )
+        .route(
+            "/api/categories/rules",
+            get(ownership_aware_proxy_handler).put(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/categories/statistics",
+            get(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/categories/update-all",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/categories/:category_id",
+            get(get_category_handler)
+                .put(update_category_handler)
+                .delete(delete_category_handler),
         )
 }
 
@@ -511,6 +582,530 @@ async fn update_tag_display_orders_handler(
     }
 }
 
+async fn list_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+
+    match repository.list_categories(db_user_id(user_id)) {
+        Ok(categories) => success_result(StatusCode::OK, format_category_tree_response(categories)),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn flat_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+
+    match repository.list_categories(db_user_id(user_id)) {
+        Ok(categories) => success_result(StatusCode::OK, format_category_flat_response(categories)),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn all_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+
+    match repository.list_categories(db_user_id(user_id)) {
+        Ok(categories) => success_result(StatusCode::OK, categories_to_value(categories)),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn update_all_categories_handler(
+    headers: HeaderMap,
+    State(state): State<ProxyState>,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = user_id_from_headers(&headers, &state.config) {
+        return *response;
+    }
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if body
+        .as_object()
+        .and_then(|object| object.get("categories"))
+        .is_none()
+    {
+        return bad_request("categories are required");
+    }
+
+    json_response(
+        StatusCode::OK,
+        json!({ "success": true, "message": "Categories updated successfully" }),
+    )
+}
+
+async fn create_category_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(name) = category_name_from_body(&body).filter(|value| !value.is_empty()) else {
+        return bad_request("Category name is required");
+    };
+    let parent_id = value_string(body.get("parentId"), "0");
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    if parent_id == "0" {
+        if let Ok(Some(existing)) = repository.get_category_by_name(&name, "", user_id) {
+            return success_result_with_message(
+                StatusCode::OK,
+                Value::Object(backend_category_to_frontend(&existing, "0")),
+                "Category already exists",
+            );
+        }
+
+        let category_type = body.get("type").and_then(value_as_i64).unwrap_or(1);
+        let payload = Value::Object(frontend_category_to_backend(
+            &body,
+            &name,
+            "",
+            category_type,
+            CategoryPayloadMode::FrontendDefaults,
+        ));
+        let category_id = match repository.create_category(&payload, user_id) {
+            Ok(Some(value)) => value,
+            Ok(None) => return category_db_error_response(),
+            Err(_) => return category_db_error_response(),
+        };
+        return match repository.get_category_by_id(category_id, user_id) {
+            Ok(Some(category)) => success_result(
+                StatusCode::CREATED,
+                Value::Object(backend_category_to_frontend(&category, "0")),
+            ),
+            Ok(None) => category_db_error_response(),
+            Err(_) => category_db_error_response(),
+        };
+    }
+
+    let (main_category, parent_type) =
+        match resolve_parent_category(&mut repository, &parent_id, user_id) {
+            Ok(Some(value)) => value,
+            Ok(None) => return not_found("Parent category not found"),
+            Err(_) => return category_db_error_response(),
+        };
+    if let Ok(Some(existing)) = repository.get_category_by_name(&main_category, &name, user_id) {
+        return success_result_with_message(
+            StatusCode::OK,
+            Value::Object(backend_category_to_frontend(&existing, &parent_id)),
+            "Category already exists",
+        );
+    }
+
+    let payload = Value::Object(frontend_category_to_backend(
+        &body,
+        &main_category,
+        &name,
+        parent_type,
+        CategoryPayloadMode::FrontendDefaults,
+    ));
+    let category_id = match repository.create_category(&payload, user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => return category_db_error_response(),
+        Err(_) => return category_db_error_response(),
+    };
+    match repository.get_category_by_id(category_id, user_id) {
+        Ok(Some(category)) => success_result(
+            StatusCode::OK,
+            Value::Object(backend_category_to_frontend(&category, &parent_id)),
+        ),
+        Ok(None) => category_db_error_response(),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn get_category_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(category_id): Path<String>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if let Some(main_category_name) = virtual_category_name(&category_id) {
+        return success_result(
+            StatusCode::OK,
+            json!({
+                "id": category_id,
+                "name": main_category_name,
+                "parentId": "0",
+                "type": 1,
+                "icon": "",
+                "color": "",
+                "comment": "",
+                "displayOrder": 0,
+                "visible": true,
+                "keywords": ""
+            }),
+        );
+    }
+    let category_id = match category_id.parse::<i64>() {
+        Ok(value) => value,
+        Err(_) => return bad_request("Invalid category ID"),
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    match repository.get_category_by_id(category_id, user_id) {
+        Ok(Some(category)) => {
+            let parent_id = category_parent_id_for_get(&mut repository, &category, user_id);
+            success_result(
+                StatusCode::OK,
+                Value::Object(backend_category_to_frontend(&category, &parent_id)),
+            )
+        }
+        Ok(None) => not_found("Category not found"),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn update_category_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(category_id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if !body.is_object() {
+        return bad_request("Invalid request");
+    }
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    if let Some(old_name) = virtual_category_name(&category_id) {
+        return update_virtual_category_handler(&mut repository, user_id, &old_name, &body);
+    }
+
+    let category_id = match category_id.parse::<i64>() {
+        Ok(value) => value,
+        Err(_) => return bad_request("Invalid category ID"),
+    };
+    update_real_category_handler(&mut repository, user_id, category_id, &body)
+}
+
+async fn delete_category_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(category_id): Path<String>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    let deleted = if let Some(main_category) = virtual_category_name(&category_id) {
+        repository.delete_categories_by_main_category(&main_category, user_id)
+    } else {
+        match category_id.parse::<i64>() {
+            Ok(category_id) => repository.delete_category(category_id, user_id),
+            Err(_) => return bad_request("Invalid category ID"),
+        }
+    };
+
+    match deleted {
+        Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(false) => not_found("Category not found or delete failed"),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn move_categories_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(new_display_orders) = body.get("newDisplayOrders").and_then(Value::as_array) else {
+        return success_result(StatusCode::OK, Value::Bool(true));
+    };
+    if new_display_orders.is_empty() {
+        return success_result(StatusCode::OK, Value::Bool(true));
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    for item in new_display_orders {
+        let Some(category_id) = item.get("id").and_then(value_as_i64) else {
+            continue;
+        };
+        let Some(display_order) = item.get("displayOrder").and_then(value_as_i64) else {
+            continue;
+        };
+        if repository
+            .update_category(category_id, &json!({ "priority": display_order }), user_id)
+            .is_err()
+        {
+            return category_db_error_response();
+        }
+    }
+
+    success_result(StatusCode::OK, Value::Bool(true))
+}
+
+async fn batch_create_categories_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(categories) = body
+        .as_object()
+        .and_then(|object| object.get("categories"))
+        .and_then(Value::as_array)
+    else {
+        return bad_request("No categories provided");
+    };
+
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    for category in categories {
+        let Some(main_name) = category_name_from_body(category).filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let category_type = category.get("type").and_then(value_as_i64).unwrap_or(3);
+        if repository
+            .get_category_by_name(&main_name, "", user_id)
+            .map(|existing| existing.is_none())
+            .unwrap_or(false)
+        {
+            let payload = Value::Object(frontend_category_to_backend(
+                category,
+                &main_name,
+                "",
+                category_type,
+                CategoryPayloadMode::FrontendDefaults,
+            ));
+            if repository.create_category(&payload, user_id).is_err() {
+                return category_db_error_response();
+            }
+        }
+
+        let Some(sub_categories) = category.get("subCategories").and_then(Value::as_array) else {
+            continue;
+        };
+        for sub_category in sub_categories {
+            let Some(sub_name) =
+                category_name_from_body(sub_category).filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let sub_type = sub_category
+                .get("type")
+                .and_then(value_as_i64)
+                .unwrap_or(category_type);
+            if repository
+                .get_category_by_name(&main_name, &sub_name, user_id)
+                .map(|existing| existing.is_none())
+                .unwrap_or(false)
+            {
+                let payload = Value::Object(frontend_category_to_backend(
+                    sub_category,
+                    &main_name,
+                    &sub_name,
+                    sub_type,
+                    CategoryPayloadMode::FrontendDefaults,
+                ));
+                if repository.create_category(&payload, user_id).is_err() {
+                    return category_db_error_response();
+                }
+            }
+        }
+    }
+
+    match repository.list_categories(user_id) {
+        Ok(categories) => success_result(StatusCode::OK, format_category_tree_response(categories)),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn export_categories_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+
+    match repository.list_categories(db_user_id(user_id)) {
+        Ok(categories) => success_result(
+            StatusCode::OK,
+            Value::Array(
+                categories
+                    .iter()
+                    .map(category_export_record)
+                    .map(Value::Object)
+                    .collect(),
+            ),
+        ),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn import_categories_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let categories = if let Some(object) = body.as_object() {
+        object
+            .get("categories")
+            .or_else(|| object.get("result"))
+            .unwrap_or(&body)
+    } else {
+        &body
+    };
+    let Some(categories) = categories.as_array() else {
+        return bad_request("Invalid format, expected list of categories");
+    };
+
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+    let mut imported = 0;
+    let mut updated = 0;
+    let mut skipped = 0;
+
+    for category in categories {
+        let main_category = string_or_default(category.get("main_category"), "");
+        if main_category.trim().is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let sub_category = string_or_default(category.get("sub_category"), "");
+        let payload = Value::Object(import_category_payload(
+            category,
+            &main_category,
+            &sub_category,
+        ));
+        match repository.get_category_by_name(&main_category, &sub_category, user_id) {
+            Ok(Some(existing)) => {
+                if let Some(category_id) = existing.get("id").and_then(value_as_i64) {
+                    if repository
+                        .update_category(category_id, &payload, user_id)
+                        .is_err()
+                    {
+                        return category_db_error_response();
+                    }
+                }
+                updated += 1;
+            }
+            Ok(None) => {
+                if repository.create_category(&payload, user_id).is_err() {
+                    return category_db_error_response();
+                }
+                imported += 1;
+            }
+            Err(_) => return category_db_error_response(),
+        }
+    }
+
+    success_result(
+        StatusCode::OK,
+        json!({ "imported": imported, "updated": updated, "skipped": skipped }),
+    )
+}
+
 fn update_sub_accounts(
     repository: &mut AccountsRepository<'_>,
     account_id: i64,
@@ -852,6 +1447,700 @@ fn backend_tag_to_frontend(tag: TagRecord) -> Map<String, Value> {
     result
 }
 
+fn update_virtual_category_handler(
+    repository: &mut CategoriesRepository<'_>,
+    user_id: i64,
+    old_name: &str,
+    body: &Value,
+) -> Response {
+    let new_name = category_name_from_body(body).unwrap_or_else(|| old_name.to_string());
+    let mut renamed_group = false;
+
+    if new_name != old_name {
+        let real_categories = match repository.list_categories(user_id) {
+            Ok(value) => value,
+            Err(_) => return category_db_error_response(),
+        };
+        let has_old_group = real_categories
+            .iter()
+            .any(|category| category_text(category, "main_category") == old_name);
+        let has_target_group = real_categories
+            .iter()
+            .any(|category| category_text(category, "main_category") == new_name);
+        if has_old_group && has_target_group {
+            return error_response(StatusCode::CONFLICT, "Category rename conflict");
+        }
+        match repository.update_main_category_name(old_name, &new_name, user_id) {
+            Ok(true) => renamed_group = has_old_group,
+            Ok(false) if has_old_group => {
+                return error_response(StatusCode::CONFLICT, "Category rename conflict");
+            }
+            Ok(false) => {}
+            Err(_) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to rename category",
+                )
+            }
+        }
+    }
+
+    let updates = Value::Object(virtual_category_update_payload(body, &new_name));
+    let category_id = match repository.get_category_by_name(&new_name, "", user_id) {
+        Ok(Some(existing)) => {
+            let Some(category_id) = existing.get("id").and_then(value_as_i64) else {
+                return category_db_error_response();
+            };
+            match repository.update_category(category_id, &updates, user_id) {
+                Ok(true) => category_id,
+                Ok(false) => match repository.get_category_by_name(&new_name, "", user_id) {
+                    Ok(Some(refreshed)) => {
+                        let Some(category_id) = refreshed.get("id").and_then(value_as_i64) else {
+                            return category_db_error_response();
+                        };
+                        match repository.update_category(category_id, &updates, user_id) {
+                            Ok(true) => category_id,
+                            Ok(false) => {
+                                rollback_category_rename(
+                                    repository,
+                                    renamed_group,
+                                    &new_name,
+                                    old_name,
+                                    user_id,
+                                );
+                                return error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Failed to save category",
+                                );
+                            }
+                            Err(_) => {
+                                rollback_category_rename(
+                                    repository,
+                                    renamed_group,
+                                    &new_name,
+                                    old_name,
+                                    user_id,
+                                );
+                                return error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Failed to save category",
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        rollback_category_rename(
+                            repository,
+                            renamed_group,
+                            &new_name,
+                            old_name,
+                            user_id,
+                        );
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save category",
+                        );
+                    }
+                    Err(_) => {
+                        rollback_category_rename(
+                            repository,
+                            renamed_group,
+                            &new_name,
+                            old_name,
+                            user_id,
+                        );
+                        return category_db_error_response();
+                    }
+                },
+                Err(_) => {
+                    rollback_category_rename(
+                        repository,
+                        renamed_group,
+                        &new_name,
+                        old_name,
+                        user_id,
+                    );
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to save category",
+                    );
+                }
+            }
+        }
+        Ok(None) => {
+            let create_payload = Value::Object(virtual_category_create_payload(body, &new_name));
+            match repository.create_category(&create_payload, user_id) {
+                Ok(Some(category_id)) => category_id,
+                Ok(None) => match repository.get_category_by_name(&new_name, "", user_id) {
+                    Ok(Some(refreshed)) => {
+                        let Some(category_id) = refreshed.get("id").and_then(value_as_i64) else {
+                            return category_db_error_response();
+                        };
+                        match repository.update_category(category_id, &updates, user_id) {
+                            Ok(true) => category_id,
+                            Ok(false) => {
+                                rollback_category_rename(
+                                    repository,
+                                    renamed_group,
+                                    &new_name,
+                                    old_name,
+                                    user_id,
+                                );
+                                return error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Failed to save category",
+                                );
+                            }
+                            Err(_) => {
+                                rollback_category_rename(
+                                    repository,
+                                    renamed_group,
+                                    &new_name,
+                                    old_name,
+                                    user_id,
+                                );
+                                return error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Failed to save category",
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        rollback_category_rename(
+                            repository,
+                            renamed_group,
+                            &new_name,
+                            old_name,
+                            user_id,
+                        );
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save category",
+                        );
+                    }
+                    Err(_) => return category_db_error_response(),
+                },
+                Err(_) => {
+                    rollback_category_rename(
+                        repository,
+                        renamed_group,
+                        &new_name,
+                        old_name,
+                        user_id,
+                    );
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to save category",
+                    );
+                }
+            }
+        }
+        Err(_) => return category_db_error_response(),
+    };
+
+    match repository.get_category_by_id(category_id, user_id) {
+        Ok(Some(category)) => success_result(
+            StatusCode::OK,
+            Value::Object(backend_category_to_frontend(&category, "0")),
+        ),
+        Ok(None) => {
+            rollback_category_rename(repository, renamed_group, &new_name, old_name, user_id);
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load updated category",
+            )
+        }
+        Err(_) => category_db_error_response(),
+    }
+}
+
+fn update_real_category_handler(
+    repository: &mut CategoriesRepository<'_>,
+    user_id: i64,
+    category_id: i64,
+    body: &Value,
+) -> Response {
+    let mut updates = category_update_payload_from_frontend(body);
+    let mut renamed_main_category = false;
+    let mut original_main_category = String::new();
+    let mut renamed_to_main_category = String::new();
+
+    if let Some(new_name) = category_name_from_body(body) {
+        let category = match repository.get_category_by_id(category_id, user_id) {
+            Ok(Some(value)) => value,
+            Ok(None) => return not_found("Category not found"),
+            Err(_) => return category_db_error_response(),
+        };
+        if category_text(&category, "sub_category").is_empty() {
+            let old_name = category_text(&category, "main_category");
+            if new_name != old_name {
+                let real_categories = match repository.list_categories(user_id) {
+                    Ok(value) => value,
+                    Err(_) => return category_db_error_response(),
+                };
+                if real_categories
+                    .iter()
+                    .any(|category| category_text(category, "main_category") == new_name)
+                {
+                    return error_response(StatusCode::CONFLICT, "Category rename conflict");
+                }
+                match repository.update_main_category_name(&old_name, &new_name, user_id) {
+                    Ok(true) => {
+                        renamed_main_category = true;
+                        original_main_category = old_name;
+                        renamed_to_main_category = new_name;
+                    }
+                    Ok(false) => {
+                        return error_response(StatusCode::CONFLICT, "Category rename conflict")
+                    }
+                    Err(_) => {
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to rename category",
+                        );
+                    }
+                }
+            }
+        } else {
+            updates.insert("sub_category".to_string(), Value::String(new_name));
+        }
+    }
+
+    let payload = Value::Object(updates);
+    match repository.update_category(category_id, &payload, user_id) {
+        Ok(true) => match repository.get_category_by_id(category_id, user_id) {
+            Ok(Some(category)) => success_result(
+                StatusCode::OK,
+                Value::Object(backend_category_to_frontend(&category, "0")),
+            ),
+            Ok(None) => {
+                rollback_category_rename(
+                    repository,
+                    renamed_main_category,
+                    &renamed_to_main_category,
+                    &original_main_category,
+                    user_id,
+                );
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load updated category",
+                )
+            }
+            Err(_) => category_db_error_response(),
+        },
+        Ok(false) => {
+            rollback_category_rename(
+                repository,
+                renamed_main_category,
+                &renamed_to_main_category,
+                &original_main_category,
+                user_id,
+            );
+            not_found("Category not found")
+        }
+        Err(error) => {
+            rollback_category_rename(
+                repository,
+                renamed_main_category,
+                &renamed_to_main_category,
+                &original_main_category,
+                user_id,
+            );
+            let text = error.to_string();
+            if text.contains("constraint") || text.contains("UNIQUE") {
+                error_response(StatusCode::CONFLICT, "Category update conflict")
+            } else {
+                error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update category",
+                )
+            }
+        }
+    }
+}
+
+fn rollback_category_rename(
+    repository: &mut CategoriesRepository<'_>,
+    renamed: bool,
+    current_name: &str,
+    previous_name: &str,
+    user_id: i64,
+) {
+    if renamed {
+        let _ = repository.update_main_category_name(current_name, previous_name, user_id);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CategoryPayloadMode {
+    FrontendDefaults,
+    ImportDefaults,
+}
+
+fn resolve_parent_category(
+    repository: &mut CategoriesRepository<'_>,
+    parent_id: &str,
+    user_id: i64,
+) -> bill_analyser_db::DbResult<Option<(String, i64)>> {
+    if let Some(parent_name) = virtual_category_name(parent_id) {
+        return Ok(Some((parent_name, 1)));
+    }
+    let Ok(parent_id) = parent_id.parse::<i64>() else {
+        return Ok(None);
+    };
+    Ok(repository
+        .get_category_by_id(parent_id, user_id)?
+        .map(|parent| {
+            (
+                category_text(&parent, "main_category"),
+                parent.get("type").and_then(value_as_i64).unwrap_or(1),
+            )
+        }))
+}
+
+fn category_name_from_body(payload: &Value) -> Option<String> {
+    payload
+        .as_object()
+        .and_then(|object| object.get("name"))
+        .map(|value| string_or_default(Some(value), ""))
+}
+
+fn virtual_category_name(category_id: &str) -> Option<String> {
+    category_id
+        .strip_prefix("virtual_")
+        .map(ToString::to_string)
+}
+
+fn category_parent_id_for_get(
+    repository: &mut CategoriesRepository<'_>,
+    category: &CategoryRecord,
+    user_id: i64,
+) -> String {
+    let sub_category = category_text(category, "sub_category");
+    if sub_category.is_empty() {
+        return "0".to_string();
+    }
+    let main_category = category_text(category, "main_category");
+    match repository.get_category_by_name(&main_category, "", user_id) {
+        Ok(Some(parent)) => parent
+            .get("id")
+            .map(|value| value_string(Some(value), "0"))
+            .unwrap_or_else(|| format!("virtual_{main_category}")),
+        Ok(None) | Err(_) => format!("virtual_{main_category}"),
+    }
+}
+
+fn frontend_category_to_backend(
+    payload: &Value,
+    main_category: &str,
+    sub_category: &str,
+    category_type: i64,
+    mode: CategoryPayloadMode,
+) -> Map<String, Value> {
+    let mut result = Map::new();
+    result.insert(
+        "type".to_string(),
+        Value::Number(Number::from(category_type)),
+    );
+    result.insert(
+        "main_category".to_string(),
+        Value::String(main_category.to_string()),
+    );
+    result.insert(
+        "sub_category".to_string(),
+        Value::String(sub_category.to_string()),
+    );
+    result.insert(
+        "description".to_string(),
+        Value::String(string_or_default(payload.get("comment"), "")),
+    );
+    result.insert(
+        "priority".to_string(),
+        Value::Number(Number::from(
+            payload
+                .get("displayOrder")
+                .and_then(value_as_i64)
+                .unwrap_or(0),
+        )),
+    );
+    result.insert(
+        "keywords".to_string(),
+        Value::String(string_or_default(payload.get("keywords"), "")),
+    );
+    let hidden = match mode {
+        CategoryPayloadMode::FrontendDefaults => payload
+            .get("visible")
+            .map(|visible| !value_truthy(visible))
+            .or_else(|| payload.get("hidden").map(value_truthy))
+            .unwrap_or(false),
+        CategoryPayloadMode::ImportDefaults => {
+            payload.get("hidden").map(value_truthy).unwrap_or(false)
+        }
+    };
+    result.insert("hidden".to_string(), Value::Bool(hidden));
+    result.insert(
+        "icon".to_string(),
+        Value::String(string_or_default(payload.get("icon"), "")),
+    );
+    result.insert(
+        "color".to_string(),
+        Value::String(string_or_default(payload.get("color"), "")),
+    );
+    result
+}
+
+fn virtual_category_update_payload(payload: &Value, main_category: &str) -> Map<String, Value> {
+    let category_type = payload.get("type").and_then(value_as_i64).unwrap_or(1);
+    frontend_category_to_backend(
+        payload,
+        main_category,
+        "",
+        category_type,
+        CategoryPayloadMode::FrontendDefaults,
+    )
+}
+
+fn virtual_category_create_payload(payload: &Value, main_category: &str) -> Map<String, Value> {
+    virtual_category_update_payload(payload, main_category)
+}
+
+fn category_update_payload_from_frontend(payload: &Value) -> Map<String, Value> {
+    let mut result = Map::new();
+    if let Some(comment) = payload.get("comment") {
+        result.insert(
+            "description".to_string(),
+            Value::String(string_or_default(Some(comment), "")),
+        );
+    }
+    if let Some(display_order) = payload.get("displayOrder").and_then(value_as_i64) {
+        result.insert(
+            "priority".to_string(),
+            Value::Number(Number::from(display_order)),
+        );
+    }
+    if let Some(keywords) = payload.get("keywords") {
+        result.insert(
+            "keywords".to_string(),
+            Value::String(string_or_default(Some(keywords), "")),
+        );
+    }
+    if let Some(category_type) = payload.get("type").and_then(value_as_i64) {
+        result.insert(
+            "type".to_string(),
+            Value::Number(Number::from(category_type)),
+        );
+    }
+    if let Some(visible) = payload.get("visible") {
+        result.insert("hidden".to_string(), Value::Bool(!value_truthy(visible)));
+    }
+    if let Some(icon) = payload.get("icon") {
+        result.insert(
+            "icon".to_string(),
+            Value::String(string_or_default(Some(icon), "")),
+        );
+    }
+    if let Some(color) = payload.get("color") {
+        result.insert(
+            "color".to_string(),
+            Value::String(string_or_default(Some(color), "")),
+        );
+    }
+    result
+}
+
+fn import_category_payload(
+    payload: &Value,
+    main_category: &str,
+    sub_category: &str,
+) -> Map<String, Value> {
+    let category_type = payload.get("type").and_then(value_as_i64).unwrap_or(3);
+    let mut result = frontend_category_to_backend(
+        payload,
+        main_category,
+        sub_category,
+        category_type,
+        CategoryPayloadMode::ImportDefaults,
+    );
+    if let Some(description) = payload.get("description") {
+        result.insert(
+            "description".to_string(),
+            Value::String(string_or_default(Some(description), "")),
+        );
+    }
+    if let Some(priority) = payload.get("priority").and_then(value_as_i64) {
+        result.insert(
+            "priority".to_string(),
+            Value::Number(Number::from(priority)),
+        );
+    }
+    result
+}
+
+fn format_category_tree_response(categories: Vec<CategoryRecord>) -> Value {
+    let mut grouped: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
+    let mut main_indices: BTreeMap<(i64, String), (i64, usize)> = BTreeMap::new();
+
+    for category in categories {
+        let category_type = category.get("type").and_then(value_as_i64).unwrap_or(0);
+        let main_name = category_text(&category, "main_category");
+        let sub_name = category_text(&category, "sub_category");
+        let key = (category_type, main_name.clone());
+
+        if !main_indices.contains_key(&key) {
+            let parent_id = if sub_name.is_empty() {
+                value_string(category.get("id"), &format!("virtual_{main_name}"))
+            } else {
+                format!("virtual_{main_name}")
+            };
+            let mut node = backend_category_to_frontend(&category, "0");
+            node.insert("id".to_string(), Value::String(parent_id));
+            node.insert("name".to_string(), Value::String(main_name.clone()));
+            node.insert("parentId".to_string(), Value::String("0".to_string()));
+            node.insert("comment".to_string(), Value::String(String::new()));
+            node.insert("hidden".to_string(), Value::Bool(false));
+            node.insert("visible".to_string(), Value::Bool(true));
+            node.insert("keywords".to_string(), Value::String(String::new()));
+            node.insert("subCategories".to_string(), Value::Array(Vec::new()));
+            let bucket = grouped.entry(category_type).or_default();
+            let index = bucket.len();
+            bucket.push(Value::Object(node));
+            main_indices.insert(key.clone(), (category_type, index));
+        }
+
+        let Some((bucket_key, index)) = main_indices.get(&key).copied() else {
+            continue;
+        };
+        let Some(bucket) = grouped.get_mut(&bucket_key) else {
+            continue;
+        };
+        let Some(node) = bucket.get_mut(index).and_then(Value::as_object_mut) else {
+            continue;
+        };
+
+        if sub_name.is_empty() {
+            let sub_categories = node
+                .remove("subCategories")
+                .unwrap_or_else(|| Value::Array(Vec::new()));
+            *node = backend_category_to_frontend(&category, "0");
+            node.insert("subCategories".to_string(), sub_categories);
+        } else {
+            let parent_id = node
+                .get("id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| format!("virtual_{main_name}"));
+            let sub_node = backend_category_to_frontend(&category, &parent_id);
+            node.entry("subCategories".to_string())
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut()
+                .expect("subCategories must stay an array")
+                .push(Value::Object(sub_node));
+        }
+    }
+
+    let mut result = Map::new();
+    for (category_type, values) in grouped {
+        result.insert(category_type.to_string(), Value::Array(values));
+    }
+    Value::Object(result)
+}
+
+fn format_category_flat_response(categories: Vec<CategoryRecord>) -> Value {
+    Value::Array(
+        categories
+            .iter()
+            .map(|category| {
+                let parent_id = if category_text(category, "sub_category").is_empty() {
+                    "0".to_string()
+                } else {
+                    format!("virtual_{}", category_text(category, "main_category"))
+                };
+                Value::Object(backend_category_to_frontend(category, &parent_id))
+            })
+            .collect(),
+    )
+}
+
+fn categories_to_value(categories: Vec<CategoryRecord>) -> Value {
+    Value::Array(categories.into_iter().map(Value::Object).collect())
+}
+
+fn category_export_record(category: &CategoryRecord) -> Map<String, Value> {
+    let mut result = Map::new();
+    for (field, default) in [
+        ("type", Value::Number(Number::from(3))),
+        ("main_category", Value::String(String::new())),
+        ("sub_category", Value::String(String::new())),
+        ("priority", Value::Number(Number::from(0))),
+        ("keywords", Value::String(String::new())),
+        ("description", Value::String(String::new())),
+        ("icon", Value::String(String::new())),
+        ("color", Value::String(String::new())),
+        ("hidden", Value::Bool(false)),
+    ] {
+        result.insert(
+            field.to_string(),
+            category.get(field).cloned().unwrap_or(default),
+        );
+    }
+    result
+}
+
+fn backend_category_to_frontend(category: &CategoryRecord, parent_id: &str) -> Map<String, Value> {
+    let hidden = category.get("hidden").map(value_truthy).unwrap_or(false);
+    let sub_category = category_text(category, "sub_category");
+    let name = if sub_category.is_empty() {
+        category_text(category, "main_category")
+    } else {
+        sub_category
+    };
+    let mut result = Map::new();
+    result.insert(
+        "id".to_string(),
+        Value::String(value_string(category.get("id"), "")),
+    );
+    result.insert("name".to_string(), Value::String(name));
+    result.insert("parentId".to_string(), Value::String(parent_id.to_string()));
+    result.insert(
+        "type".to_string(),
+        category
+            .get("type")
+            .cloned()
+            .unwrap_or_else(|| Value::Number(Number::from(0))),
+    );
+    result.insert(
+        "icon".to_string(),
+        Value::String(string_or_default(category.get("icon"), "")),
+    );
+    result.insert(
+        "color".to_string(),
+        Value::String(string_or_default(category.get("color"), "")),
+    );
+    result.insert(
+        "comment".to_string(),
+        Value::String(string_or_default(category.get("description"), "")),
+    );
+    result.insert(
+        "displayOrder".to_string(),
+        category
+            .get("priority")
+            .cloned()
+            .unwrap_or_else(|| Value::Number(Number::from(0))),
+    );
+    result.insert("hidden".to_string(), Value::Bool(hidden));
+    result.insert("visible".to_string(), Value::Bool(!hidden));
+    result.insert(
+        "keywords".to_string(),
+        Value::String(string_or_default(category.get("keywords"), "")),
+    );
+    result
+}
+
+fn category_text(category: &CategoryRecord, key: &str) -> String {
+    string_or_default(category.get(key), "")
+}
+
 fn required_json_body(body: Bytes, missing_message: &'static str) -> RouteResult<Value> {
     let value = parse_json_body(body)?;
     if matches!(value, Value::Null) || value.as_object().is_some_and(Map::is_empty) {
@@ -909,6 +2198,13 @@ fn success_result(status: StatusCode, result: Value) -> Response {
     json_response(status, json!({ "success": true, "result": result }))
 }
 
+fn success_result_with_message(status: StatusCode, result: Value, message: &str) -> Response {
+    json_response(
+        status,
+        json!({ "success": true, "result": result, "message": message }),
+    )
+}
+
 fn bad_request(message: impl ToString) -> Response {
     error_response(StatusCode::BAD_REQUEST, message)
 }
@@ -928,6 +2224,13 @@ fn tag_db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Rust taxonomy tags route runtime DB error",
+    )
+}
+
+fn category_db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust taxonomy categories route runtime DB error",
     )
 }
 
