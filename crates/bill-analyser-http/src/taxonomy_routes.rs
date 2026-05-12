@@ -13,6 +13,7 @@ use bill_analyser_db::{
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
+        category_rules::{CategoryRuleRecord, CategoryRulesRepository},
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
@@ -98,6 +99,19 @@ pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/rules"),
     ("PUT", "/api/categories/rules"),
     ("POST", "/api/categories/update-all"),
+];
+
+pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] =
+    &[("GET", "/api/category-rules/")];
+
+pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("POST", "/api/category-rules/"),
+    ("DELETE", "/api/category-rules/{rule_id}"),
+    ("PUT", "/api/category-rules/{rule_id}"),
+    ("POST", "/api/category-rules/{rule_id}/test"),
+    ("POST", "/api/category-rules/defaults"),
+    ("POST", "/api/category-rules/migrate"),
+    ("POST", "/api/category-rules/reorder"),
 ];
 
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
@@ -201,6 +215,30 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
             axum::routing::post(ownership_aware_proxy_handler),
         )
         .route(
+            "/api/category-rules/",
+            get(list_category_rules_handler).post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/category-rules/reorder",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/category-rules/defaults",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/category-rules/migrate",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/category-rules/:rule_id",
+            put(ownership_aware_proxy_handler).delete(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/category-rules/:rule_id/test",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
             "/api/categories/:category_id",
             get(get_category_handler)
                 .put(update_category_handler)
@@ -215,6 +253,12 @@ struct CategoryStatisticsQuery {
     end_date: Option<String>,
     #[serde(rename = "type")]
     category_type: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CategoryRulesQuery {
+    category_id: Option<i64>,
+    enabled_only: Option<String>,
 }
 
 async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -1353,6 +1397,31 @@ async fn category_statistics_handler(
     }
 }
 
+async fn list_category_rules_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<CategoryRulesQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+
+    match repository.list_rules(
+        db_user_id(user_id),
+        query.category_id,
+        category_rules_enabled_only(&query),
+    ) {
+        Ok(rules) => json_response(StatusCode::OK, format_category_rules_response(rules)),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
 async fn import_categories_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2446,6 +2515,23 @@ fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Va
     Value::Object(result)
 }
 
+fn format_category_rules_response(rules: Vec<CategoryRuleRecord>) -> Value {
+    let total = rules.len();
+    json!({
+        "success": true,
+        "data": Value::Array(rules.into_iter().map(Value::Object).collect()),
+        "total": total,
+    })
+}
+
+fn category_rules_enabled_only(query: &CategoryRulesQuery) -> bool {
+    !query
+        .enabled_only
+        .as_deref()
+        .unwrap_or("true")
+        .eq_ignore_ascii_case("false")
+}
+
 fn category_export_record(category: &CategoryRecord) -> Map<String, Value> {
     let mut result = Map::new();
     for (field, default) in [
@@ -2611,6 +2697,13 @@ fn category_db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Rust taxonomy categories route runtime DB error",
+    )
+}
+
+fn category_rule_db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust taxonomy category rules route runtime DB error",
     )
 }
 

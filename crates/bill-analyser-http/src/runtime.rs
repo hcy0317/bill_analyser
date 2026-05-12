@@ -62,7 +62,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "owned_routes".to_string(),
         if config.import_route_mode.intercepts_import_routes() {
             if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,taxonomy account CRUD/display-order runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics runtime routes,taxonomy templates CRUD/display-order runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,taxonomy account CRUD/display-order runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list runtime routes,taxonomy templates CRUD/display-order runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
             } else {
                 "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
             }
@@ -115,7 +115,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_categories_runtime".to_string(),
-            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes with user-scoped DB reads and writes; category rules and settings bundle import remain proxied".to_string(),
+            "owned category list/tree/flat/detail/create/update/delete/batch/move/import/export/all/statistics routes and category-rule list route with user-scoped DB reads and writes; category rule mutations and settings bundle import remain proxied".to_string(),
         );
         details.insert(
             "taxonomy_templates_runtime".to_string(),

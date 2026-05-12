@@ -9,6 +9,7 @@ use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState,
     TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
     TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
+    TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
     TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
     TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
@@ -1504,6 +1505,97 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
 }
 
 #[tokio::test]
+async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
+) -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/category-rules/")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/reorder")));
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/category-rules/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["success"], true);
+    assert_eq!(list_body["total"], 1);
+    let rules = list_body["data"].as_array().expect("rules array");
+    assert_eq!(rules[0]["id"], 60);
+    assert_eq!(rules[0]["category_id"], 31);
+    assert_eq!(rules[0]["name"], "午餐规则");
+    assert_eq!(rules[0]["main_category"], "餐饮");
+    assert_eq!(rules[0]["sub_category"], "午餐");
+    assert_eq!(rules[0]["category_type"], 3);
+    assert!(!serde_json::to_string(&list_body)?.contains("其他用户规则"));
+
+    let include_disabled_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/category-rules/?enabled_only=false&category_id=31",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(include_disabled_response.status(), StatusCode::OK);
+    let include_disabled_body = read_json(include_disabled_response).await;
+    assert_eq!(include_disabled_body["total"], 2);
+    assert_eq!(include_disabled_body["data"][0]["id"], 60);
+    assert_eq!(include_disabled_body["data"][1]["id"], 61);
+    assert_eq!(include_disabled_body["data"][1]["enabled"], 0);
+
+    let missing_category_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/category-rules/?category_id=999",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_category_response.status(), StatusCode::OK);
+    assert_eq!(read_json(missing_category_response).await["total"], 0);
+
+    let unauthenticated_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/category-rules/")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    let no_db_response = no_db_app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/category-rules/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["error"],
+        "Rust taxonomy category rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn taxonomy_categories_runtime_covers_legacy_aliases_virtual_and_batch_edges(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
@@ -2569,6 +2661,21 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             created_at TEXT NOT NULL,
             UNIQUE(user_id, main_category, sub_category)
         );
+        CREATE TABLE category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            priority INTEGER DEFAULT 0,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            last_applied_at TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
         CREATE TABLE bill_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -2666,6 +2773,17 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (30, 42, 3, '餐饮', '', '主分类', 1, '', 0, 'mdi-food', '#ff6600', 'now'),
             (31, 42, 3, '餐饮', '午餐', '子分类', 2, '饭', 1, 'mdi-food', '#ff6600', 'now'),
             (97, 77, 3, '其他用户分类', '', '', 0, '', 0, '', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(
+            id, user_id, category_id, name, priority, rule_expression,
+            regex_enabled, enabled, applied_count, last_applied_at, created_at, updated_at
+        )
+        VALUES
+            (60, 42, 31, '午餐规则', 10, 'OR={午餐,饭}', 0, 1, 2, '2026-01-02T00:00:00', 'now', 'now'),
+            (61, 42, 31, '禁用规则', 20, 'OR={禁用}', 0, 0, 0, NULL, 'now', 'now'),
+            (96, 77, 97, '其他用户规则', 1, 'OR={其他}', 0, 1, 1, NULL, 'now', 'now')",
         [],
     )?;
     connection.execute(
