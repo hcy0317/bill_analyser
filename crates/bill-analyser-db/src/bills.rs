@@ -8,8 +8,8 @@ use bill_analyser_core::adapters::transaction::{
     BILL_UPDATE_COLUMNS, ROUTE_ALLOWED_BATCH_UPDATE_FIELDS,
 };
 use bill_analyser_core::{classify_investment_pnl_change, Money, RuntimeError, UserId};
-use chrono::Utc;
-use rusqlite::types::Value as SqlValue;
+use chrono::{Datelike, Duration, NaiveDate, Utc};
+use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Number, Value};
 
@@ -66,6 +66,20 @@ pub struct BatchUpdateBillsResult {
     pub success_count: usize,
     pub failed_count: usize,
     pub failed_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BillRecurringCandidates {
+    pub linked_recurring_id: Option<i64>,
+    pub linked_recurring_name: String,
+    pub candidates: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BillRecurringBindResult {
+    pub bill_id: i64,
+    pub recurring_id: i64,
+    pub next_scheduled_date: Option<String>,
 }
 
 const BILL_SELECT_COLUMNS: &[&str] = &[
@@ -377,6 +391,116 @@ pub fn query_bills(
         bills.push(row?);
     }
     Ok(BillPage { bills, total })
+}
+
+pub fn get_bill_recurring_candidates(
+    connection: &Connection,
+    user_id: UserId,
+    bill_id: i64,
+    tolerance_days: i64,
+) -> DbResult<Option<BillRecurringCandidates>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let Some(bill) = get_bill_by_id_on_connection(connection, user_id, bill_id)? else {
+        return Ok(None);
+    };
+    let linked_recurring_id = record_optional_i64(&bill, "created_from_recurring");
+    let linked_recurring_name = linked_recurring_id
+        .and_then(|recurring_id| {
+            connection
+                .query_row(
+                    "SELECT name FROM recurring_bills WHERE id = ?1 AND user_id = ?2",
+                    params![recurring_id, user_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .transpose()
+        })
+        .transpose()?
+        .flatten()
+        .unwrap_or_default();
+    let recurring_rows = list_enabled_recurring_templates(connection, user_id)?;
+    let candidates = build_recurring_candidates_for_bill_data(
+        &bill,
+        &recurring_rows,
+        linked_recurring_id,
+        tolerance_days.clamp(0, 31),
+    );
+    Ok(Some(BillRecurringCandidates {
+        linked_recurring_id,
+        linked_recurring_name,
+        candidates,
+    }))
+}
+
+pub fn bind_bill_to_recurring(
+    connection: &mut Connection,
+    user_id: UserId,
+    bill_id: i64,
+    recurring_id: i64,
+) -> DbResult<Option<BillRecurringBindResult>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    run_transaction(connection, |tx| {
+        let Some(bill) = get_bill_by_id_on_tx(tx, user_id, bill_id)? else {
+            return Ok(None);
+        };
+        let previous_recurring_id = record_optional_i64(&bill, "created_from_recurring");
+        let Some(recurring) = get_recurring_template_on_tx(tx, user_id, recurring_id)? else {
+            return Ok(None);
+        };
+        let bill_date_text = record_text(&bill, "date");
+        let next_occurrence = parse_date_value(&bill_date_text)
+            .and_then(|bill_date| get_next_recurring_occurrence_after(&recurring, bill_date, 370))
+            .map(|date| date.to_string());
+        let fallback_next_date = recurring_text(&recurring, "next_date");
+        let stored_next_date = next_occurrence
+            .as_deref()
+            .or_else(|| non_empty_str(fallback_next_date.as_str()));
+        let now = now_text();
+        tx.execute(
+            "UPDATE bills SET created_from_recurring = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+            params![recurring_id, now, bill_id, user_id],
+        )?;
+        tx.execute(
+            "UPDATE recurring_bills SET next_date = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+            params![stored_next_date, now, recurring_id, user_id],
+        )?;
+        if previous_recurring_id.is_some_and(|previous| previous != recurring_id) {
+            recalculate_recurring_next_date_on_tx(
+                tx,
+                user_id,
+                previous_recurring_id.unwrap_or_default(),
+                &now,
+            )?;
+        }
+        Ok(Some(BillRecurringBindResult {
+            bill_id,
+            recurring_id,
+            next_scheduled_date: stored_next_date.map(ToString::to_string),
+        }))
+    })
+}
+
+pub fn unbind_bill_from_recurring(
+    connection: &mut Connection,
+    user_id: UserId,
+    bill_id: i64,
+) -> DbResult<Option<bool>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    run_transaction(connection, |tx| {
+        let Some(bill) = get_bill_by_id_on_tx(tx, user_id, bill_id)? else {
+            return Ok(None);
+        };
+        let recurring_id = record_optional_i64(&bill, "created_from_recurring");
+        let now = now_text();
+        let updated = tx.execute(
+            "UPDATE bills SET created_from_recurring = NULL, updated_at = ?1 WHERE id = ?2 AND user_id = ?3",
+            params![now, bill_id, user_id],
+        )?;
+        if let Some(recurring_id) = recurring_id {
+            recalculate_recurring_next_date_on_tx(tx, user_id, recurring_id, &now)?;
+        }
+        Ok(Some(updated > 0))
+    })
 }
 
 pub fn list_bills(
@@ -1096,6 +1220,412 @@ fn tag_value_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(Value::Object(tag))
 }
 
+fn list_enabled_recurring_templates(
+    connection: &Connection,
+    user_id: i64,
+) -> DbResult<Vec<BillRecord>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, user_id, template_id, name, description, type, category,
+               amount, account, counterparty, destination_amount, hide_amount,
+               tag, comment, frequency, scheduled_frequency_type, start_date,
+               end_date, next_date, enabled, auto_create, display_order, hidden,
+               utc_offset, created_at, updated_at
+        FROM recurring_bills
+        WHERE user_id = ?1 AND enabled = 1
+        ORDER BY COALESCE(display_order, 0), name
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], recurring_record_from_row)?;
+    let mut recurring = Vec::new();
+    for row in rows {
+        recurring.push(row?);
+    }
+    Ok(recurring)
+}
+
+fn get_recurring_template_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    recurring_id: i64,
+) -> DbResult<Option<BillRecord>> {
+    tx.query_row(
+        "
+        SELECT id, user_id, template_id, name, description, type, category,
+               amount, account, counterparty, destination_amount, hide_amount,
+               tag, comment, frequency, scheduled_frequency_type, start_date,
+               end_date, next_date, enabled, auto_create, display_order, hidden,
+               utc_offset, created_at, updated_at
+        FROM recurring_bills
+        WHERE id = ?1 AND user_id = ?2
+        ",
+        params![recurring_id, user_id],
+        recurring_record_from_row,
+    )
+    .optional()
+    .map_err(DbError::from)
+}
+
+fn recurring_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BillRecord> {
+    let mut record = Map::new();
+    for key in [
+        "id",
+        "user_id",
+        "template_id",
+        "name",
+        "description",
+        "type",
+        "category",
+        "amount",
+        "account",
+        "counterparty",
+        "destination_amount",
+        "hide_amount",
+        "tag",
+        "comment",
+        "frequency",
+        "scheduled_frequency_type",
+        "start_date",
+        "end_date",
+        "next_date",
+        "enabled",
+        "auto_create",
+        "display_order",
+        "hidden",
+        "utc_offset",
+        "created_at",
+        "updated_at",
+    ] {
+        record.insert(key.to_string(), sql_value_ref_to_json(row.get_ref(key)?));
+    }
+    Ok(record)
+}
+
+fn sql_value_ref_to_json(value: ValueRef<'_>) -> Value {
+    match value {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(value) => json_i64(value),
+        ValueRef::Real(value) => json_real(value),
+        ValueRef::Text(value) => Value::String(String::from_utf8_lossy(value).into_owned()),
+        ValueRef::Blob(value) => Value::String(String::from_utf8_lossy(value).into_owned()),
+    }
+}
+
+fn build_recurring_candidates_for_bill_data(
+    bill: &BillRecord,
+    recurring_rows: &[BillRecord],
+    linked_recurring_id: Option<i64>,
+    tolerance_days: i64,
+) -> Vec<Value> {
+    let Some(bill_date) = parse_date_value(&record_text(bill, "date")) else {
+        return Vec::new();
+    };
+    let bill_type = normalize_template_transaction_type(bill.get("type"));
+    let bill_amount_cents =
+        (record_f64(bill, "amount").unwrap_or(0.0).abs() * 100.0).round() as i64;
+    let bill_source_account = record_text(bill, "source_account_id");
+    let bill_destination_account = record_text(bill, "destination_account_id");
+    let mut candidates = Vec::new();
+
+    for recurring in recurring_rows {
+        if normalize_template_transaction_type(recurring.get("type")) != bill_type {
+            continue;
+        }
+        let recurring_amount_cents = recurring_f64(recurring, "amount").abs().round() as i64;
+        if recurring_amount_cents != bill_amount_cents {
+            continue;
+        }
+        let Some(matched_occurrence) =
+            find_recurring_occurrence_near_date(recurring, bill_date, tolerance_days)
+        else {
+            continue;
+        };
+
+        let mut score = 80_i64;
+        let mut reasons = vec![
+            Value::String("type".to_string()),
+            Value::String("amount".to_string()),
+            Value::String("schedule".to_string()),
+        ];
+        if recurring_text(recurring, "account") == bill_source_account {
+            reasons.push(Value::String("source_account".to_string()));
+            score += 10;
+        }
+        if !matches!(bill_destination_account.as_str(), "" | "0")
+            && recurring_text(recurring, "counterparty") == bill_destination_account
+        {
+            reasons.push(Value::String("destination_account".to_string()));
+            score += 10;
+        }
+        let days_offset = (matched_occurrence - bill_date).num_days().abs();
+        score += (10 - days_offset * 2).max(0);
+
+        let mut candidate = serialize_recurring_template_row(recurring);
+        candidate.insert("matchScore".to_string(), json_i64(score));
+        candidate.insert("matchReasons".to_string(), Value::Array(reasons));
+        candidate.insert(
+            "matchedOccurrenceDate".to_string(),
+            Value::String(matched_occurrence.to_string()),
+        );
+        candidate.insert("matchedDayOffset".to_string(), json_i64(days_offset));
+        candidate.insert(
+            "linked".to_string(),
+            Value::Bool(
+                linked_recurring_id
+                    .zip(recurring_i64(recurring, "id"))
+                    .is_some_and(|(linked, recurring_id)| linked == recurring_id),
+            ),
+        );
+        candidates.push(Value::Object(candidate));
+    }
+
+    candidates.sort_by(|left, right| {
+        let left = left.as_object().expect("candidate object");
+        let right = right.as_object().expect("candidate object");
+        recurring_i64(right, "matchScore")
+            .cmp(&recurring_i64(left, "matchScore"))
+            .then_with(|| {
+                recurring_i64(left, "matchedDayOffset")
+                    .unwrap_or(999)
+                    .cmp(&recurring_i64(right, "matchedDayOffset").unwrap_or(999))
+            })
+            .then_with(|| recurring_text(left, "name").cmp(&recurring_text(right, "name")))
+    });
+    candidates
+}
+
+fn serialize_recurring_template_row(row: &BillRecord) -> Map<String, Value> {
+    let mut value = Map::new();
+    value.insert("id".to_string(), recurring_text(row, "id").into());
+    value.insert("timeSequenceId".to_string(), String::new().into());
+    value.insert("templateType".to_string(), json_i64(2));
+    value.insert("name".to_string(), recurring_text(row, "name").into());
+    value.insert(
+        "type".to_string(),
+        json_i64(normalize_template_transaction_type(row.get("type"))),
+    );
+    value.insert(
+        "categoryId".to_string(),
+        recurring_text(row, "category").into(),
+    );
+    value.insert("time".to_string(), json_i64(0));
+    value.insert(
+        "utcOffset".to_string(),
+        json_i64(recurring_i64(row, "utc_offset").unwrap_or(0)),
+    );
+    value.insert(
+        "sourceAccountId".to_string(),
+        recurring_text(row, "account").into(),
+    );
+    value.insert(
+        "destinationAccountId".to_string(),
+        recurring_text(row, "counterparty").into(),
+    );
+    value.insert(
+        "sourceAmount".to_string(),
+        json_real(recurring_f64(row, "amount")),
+    );
+    value.insert(
+        "destinationAmount".to_string(),
+        json_real(recurring_f64(row, "destination_amount")),
+    );
+    value.insert(
+        "hideAmount".to_string(),
+        Value::Bool(recurring_i64(row, "hide_amount").unwrap_or(0) != 0),
+    );
+    value.insert(
+        "tagIds".to_string(),
+        Value::Array(
+            recurring_text(row, "tag")
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(|item| Value::String(item.to_string()))
+                .collect(),
+        ),
+    );
+    value.insert("comment".to_string(), recurring_text(row, "comment").into());
+    value.insert("editable".to_string(), Value::Bool(true));
+    value.insert(
+        "displayOrder".to_string(),
+        json_i64(recurring_i64(row, "display_order").unwrap_or(0)),
+    );
+    value.insert(
+        "hidden".to_string(),
+        Value::Bool(recurring_i64(row, "hidden").unwrap_or(0) != 0),
+    );
+    value.insert(
+        "scheduledFrequencyType".to_string(),
+        json_i64(recurring_i64(row, "scheduled_frequency_type").unwrap_or(0)),
+    );
+    value.insert(
+        "scheduledFrequency".to_string(),
+        recurring_optional_text_json(row, "frequency"),
+    );
+    value.insert(
+        "scheduledStartDate".to_string(),
+        recurring_optional_text_json(row, "start_date"),
+    );
+    value.insert(
+        "scheduledEndDate".to_string(),
+        recurring_optional_text_json(row, "end_date"),
+    );
+    value.insert("scheduledAt".to_string(), Value::Null);
+    value
+}
+
+fn recalculate_recurring_next_date_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    recurring_id: i64,
+    now: &str,
+) -> DbResult<()> {
+    let Some(recurring) = get_recurring_template_on_tx(tx, user_id, recurring_id)? else {
+        return Ok(());
+    };
+    let latest_linked_date = tx
+        .query_row(
+            "
+            SELECT date FROM bills
+            WHERE user_id = ?1 AND created_from_recurring = ?2
+            ORDER BY date DESC
+            LIMIT 1
+            ",
+            params![user_id, recurring_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .and_then(|value| parse_date_value(&value));
+    let fallback_next_date = recurring_text(&recurring, "next_date");
+    let next_occurrence = latest_linked_date
+        .and_then(|date| get_next_recurring_occurrence_after(&recurring, date, 370))
+        .or_else(|| get_first_recurring_occurrence(&recurring, 370))
+        .map(|date| date.to_string())
+        .or_else(|| non_empty_str(fallback_next_date.as_str()).map(ToString::to_string));
+    tx.execute(
+        "UPDATE recurring_bills SET next_date = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+        params![next_occurrence, now, recurring_id, user_id],
+    )?;
+    Ok(())
+}
+
+fn parse_date_value(value: &str) -> Option<NaiveDate> {
+    let text = value.trim();
+    if text.is_empty() {
+        return None;
+    }
+    NaiveDate::parse_from_str(text.get(..10)?, "%Y-%m-%d").ok()
+}
+
+fn parse_schedule_frequency_values(value: &str) -> Vec<u32> {
+    let mut values = value
+        .split(',')
+        .filter_map(|item| item.trim().parse::<u32>().ok())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values
+}
+
+fn weekday_sunday_first(date: NaiveDate) -> u32 {
+    date.weekday().num_days_from_sunday()
+}
+
+fn is_recurring_active_on_date(recurring: &BillRecord, target_date: NaiveDate) -> bool {
+    if parse_date_value(&recurring_text(recurring, "start_date"))
+        .is_some_and(|start_date| target_date < start_date)
+    {
+        return false;
+    }
+    if parse_date_value(&recurring_text(recurring, "end_date"))
+        .is_some_and(|end_date| target_date > end_date)
+    {
+        return false;
+    }
+    true
+}
+
+fn is_recurring_due_on_date(recurring: &BillRecord, target_date: NaiveDate) -> bool {
+    if !is_recurring_active_on_date(recurring, target_date) {
+        return false;
+    }
+    let frequency_type = recurring_i64(recurring, "scheduled_frequency_type").unwrap_or(0);
+    let frequency_values = parse_schedule_frequency_values(&recurring_text(recurring, "frequency"));
+    let start_date = parse_date_value(&recurring_text(recurring, "start_date"));
+    let next_date = parse_date_value(&recurring_text(recurring, "next_date"));
+
+    if frequency_type == 1 {
+        let valid_weekdays = if frequency_values.is_empty() {
+            start_date
+                .map(weekday_sunday_first)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            frequency_values
+        };
+        return valid_weekdays.contains(&weekday_sunday_first(target_date));
+    }
+    if frequency_type == 2 {
+        let valid_days = if frequency_values.is_empty() {
+            start_date
+                .map(|date| date.day())
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            frequency_values
+        };
+        return valid_days.contains(&target_date.day());
+    }
+    next_date.is_some_and(|date| date == target_date)
+        || start_date.is_some_and(|date| date == target_date)
+}
+
+fn find_recurring_occurrence_near_date(
+    recurring: &BillRecord,
+    target_date: NaiveDate,
+    tolerance_days: i64,
+) -> Option<NaiveDate> {
+    let mut nearest_date = None;
+    let mut nearest_diff = None;
+    for offset in -tolerance_days..=tolerance_days {
+        let current_date = target_date + Duration::days(offset);
+        if !is_recurring_due_on_date(recurring, current_date) {
+            continue;
+        }
+        let diff = offset.abs();
+        if nearest_date.is_none() || nearest_diff.is_some_and(|value| diff < value) {
+            nearest_date = Some(current_date);
+            nearest_diff = Some(diff);
+        }
+    }
+    nearest_date
+}
+
+fn get_next_recurring_occurrence_after(
+    recurring: &BillRecord,
+    after_date: NaiveDate,
+    max_search_days: i64,
+) -> Option<NaiveDate> {
+    (1..=max_search_days)
+        .map(|offset| after_date + Duration::days(offset))
+        .find(|candidate| is_recurring_due_on_date(recurring, *candidate))
+}
+
+fn get_first_recurring_occurrence(
+    recurring: &BillRecord,
+    max_search_days: i64,
+) -> Option<NaiveDate> {
+    let Some(start_date) = parse_date_value(&recurring_text(recurring, "start_date")) else {
+        return parse_date_value(&recurring_text(recurring, "next_date"));
+    };
+    (0..=max_search_days)
+        .map(|offset| start_date + Duration::days(offset))
+        .find(|candidate| is_recurring_due_on_date(recurring, *candidate))
+        .or_else(|| parse_date_value(&recurring_text(recurring, "next_date")))
+}
+
 fn collect_account_ids(snapshots: impl IntoIterator<Item = BillAccountSyncSnapshot>) -> Vec<i64> {
     let mut ids = BTreeSet::new();
     for snapshot in snapshots {
@@ -1165,6 +1695,76 @@ fn record_f64(record: &BillRecord, key: &str) -> DbResult<f64> {
         _ => Err(DbError::InvalidOperation(format!(
             "missing numeric field: {key}"
         ))),
+    }
+}
+
+fn record_optional_i64(record: &BillRecord, key: &str) -> Option<i64> {
+    value_as_i64(record.get(key)?)
+}
+
+fn recurring_text(record: &BillRecord, key: &str) -> String {
+    match record.get(key) {
+        Some(Value::String(value)) => value.clone(),
+        Some(Value::Number(value)) => value.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn recurring_i64(record: &BillRecord, key: &str) -> Option<i64> {
+    value_as_i64(record.get(key)?)
+}
+
+fn recurring_f64(record: &BillRecord, key: &str) -> f64 {
+    match record.get(key) {
+        Some(Value::Number(value)) => value.as_f64().unwrap_or(0.0),
+        Some(Value::String(value)) => value.trim().parse::<f64>().unwrap_or(0.0),
+        Some(Value::Bool(value)) => f64::from(*value as u8),
+        _ => 0.0,
+    }
+}
+
+fn value_as_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(value) => value
+            .as_i64()
+            .or_else(|| value.as_f64().map(|value| value as i64)),
+        Value::String(value) => value.trim().parse::<i64>().ok(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn recurring_optional_text_json(record: &BillRecord, key: &str) -> Value {
+    match record.get(key) {
+        Some(Value::String(value)) => Value::String(value.clone()),
+        Some(Value::Number(value)) => Value::String(value.to_string()),
+        Some(Value::Bool(value)) => Value::String(value.to_string()),
+        Some(Value::Null) | Some(Value::Array(_)) | Some(Value::Object(_)) | None => Value::Null,
+    }
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
+    let text = match value {
+        Some(Value::String(value)) => value.trim().to_ascii_lowercase(),
+        Some(Value::Number(value)) => value.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        _ => return 3,
+    };
+    match text.as_str() {
+        "2" | "income" | "收入" => 2,
+        "3" | "expense" | "支出" => 3,
+        "4" | "transfer" | "转账" => 4,
+        "5" | "investment" | "投资" => 5,
+        _ => 3,
     }
 }
 

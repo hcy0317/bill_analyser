@@ -2,9 +2,10 @@ use std::error::Error;
 
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
-    batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,
-    create_bill, delete_bill, get_bill_by_id, get_bill_tags, query_bills, update_bill,
-    BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
+    batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,
+    calculate_bill_hash_from_fields, create_bill, delete_bill, get_bill_by_id,
+    get_bill_recurring_candidates, get_bill_tags, query_bills, unbind_bill_from_recurring,
+    update_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use serde_json::{json, Map, Value};
@@ -132,6 +133,34 @@ fn init_schema(runtime: &SqliteRuntime) -> Result<(), Box<dyn Error>> {
             created_at TEXT NOT NULL,
             UNIQUE(user_id, bill_id, rule_id)
         );
+        CREATE TABLE recurring_bills (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            template_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT,
+            type INTEGER,
+            category TEXT,
+            amount REAL,
+            account TEXT,
+            counterparty TEXT,
+            destination_amount REAL,
+            hide_amount INTEGER DEFAULT 0,
+            tag TEXT,
+            comment TEXT,
+            frequency TEXT,
+            scheduled_frequency_type INTEGER,
+            start_date TEXT,
+            end_date TEXT,
+            next_date TEXT,
+            enabled INTEGER DEFAULT 1,
+            auto_create INTEGER DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            utc_offset INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         ",
     )?;
     runtime.connection().execute(
@@ -203,6 +232,272 @@ fn value_text(record: &Map<String, Value>, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_recurring_template(
+    runtime: &SqliteRuntime,
+    recurring_id: i64,
+    name: &str,
+    tx_type: i64,
+    amount_cents: f64,
+    account: &str,
+    counterparty: &str,
+    frequency_type: i64,
+    frequency: &str,
+    start_date: &str,
+    end_date: &str,
+    next_date: &str,
+    display_order: i64,
+) -> Result<(), Box<dyn Error>> {
+    runtime.connection().execute(
+        "INSERT INTO recurring_bills(
+            id, user_id, name, type, category, amount, account, counterparty,
+            destination_amount, hide_amount, tag, comment, frequency,
+            scheduled_frequency_type, start_date, end_date, next_date,
+            enabled, display_order, hidden, utc_offset, created_at, updated_at
+         ) VALUES (?1, 42, ?2, ?3, '1', ?4, ?5, ?6, 0, 0, ?7, 'note',
+            ?8, ?9, ?10, ?11, ?12, 1, ?13, 0, 480, 'now', 'now')",
+        rusqlite::params![
+            recurring_id,
+            name,
+            tx_type,
+            amount_cents,
+            account,
+            counterparty,
+            b"1,2".as_slice(),
+            frequency,
+            frequency_type,
+            start_date,
+            end_date,
+            next_date,
+            display_order
+        ],
+    )?;
+    Ok(())
+}
+
+fn recurring_next_date(
+    runtime: &SqliteRuntime,
+    recurring_id: i64,
+) -> Result<String, Box<dyn Error>> {
+    Ok(runtime.connection().query_row(
+        "SELECT next_date FROM recurring_bills WHERE id = ?1",
+        [recurring_id],
+        |row| row.get::<_, String>(0),
+    )?)
+}
+
+#[test]
+fn recurring_candidates_bind_and_unbind_match_python_schedule_edges() -> Result<(), Box<dyn Error>>
+{
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("bills-recurring.db"))?;
+    init_schema(&runtime)?;
+
+    insert_recurring_template(
+        &runtime,
+        501,
+        "weekly rent",
+        3,
+        1234.0,
+        "10",
+        "0",
+        1,
+        "",
+        "2026-05-03",
+        "",
+        "2026-05-03",
+        2,
+    )?;
+    insert_recurring_template(
+        &runtime,
+        502,
+        "monthly rent",
+        3,
+        1234.0,
+        "10",
+        "0",
+        2,
+        "9",
+        "2026-05-01",
+        "",
+        "2026-05-09",
+        1,
+    )?;
+    insert_recurring_template(
+        &runtime,
+        503,
+        "wrong type",
+        2,
+        1234.0,
+        "10",
+        "0",
+        2,
+        "10",
+        "2026-05-01",
+        "",
+        "2026-05-10",
+        3,
+    )?;
+    insert_recurring_template(
+        &runtime,
+        504,
+        "wrong amount",
+        3,
+        9999.0,
+        "10",
+        "0",
+        2,
+        "10",
+        "2026-05-01",
+        "",
+        "2026-05-10",
+        4,
+    )?;
+    insert_recurring_template(
+        &runtime,
+        505,
+        "inactive",
+        3,
+        1234.0,
+        "10",
+        "0",
+        2,
+        "10",
+        "2026-04-01",
+        "2026-04-30",
+        "2026-04-10",
+        5,
+    )?;
+
+    let bill_id = create_bill(
+        runtime.connection_mut(),
+        user_id(42),
+        &BillCreateDraft {
+            fields: bill_fields("2026-05-10 09:00:00", "支出", 12.34, "Landlord", "Rent", 10),
+            tag_ids: vec![],
+        },
+    )?;
+
+    let candidates = get_bill_recurring_candidates(runtime.connection(), user_id(42), bill_id, 2)?
+        .expect("bill exists");
+    assert_eq!(candidates.linked_recurring_id, None);
+    assert_eq!(candidates.candidates.len(), 2);
+    assert_eq!(candidates.candidates[0]["id"], "501");
+    assert_eq!(
+        candidates.candidates[0]["matchedOccurrenceDate"],
+        "2026-05-10"
+    );
+    assert_eq!(candidates.candidates[0]["scheduledFrequency"], "");
+    assert_eq!(candidates.candidates[0]["scheduledEndDate"], "");
+    assert_eq!(candidates.candidates[0]["matchedDayOffset"], 0);
+    assert_eq!(candidates.candidates[0]["tagIds"], json!(["1", "2"]));
+    assert_eq!(candidates.candidates[1]["id"], "502");
+    assert_eq!(candidates.candidates[1]["matchedDayOffset"], 1);
+
+    assert!(bind_bill_to_recurring(runtime.connection_mut(), user_id(42), 999, 501)?.is_none());
+    assert!(bind_bill_to_recurring(runtime.connection_mut(), user_id(42), bill_id, 999)?.is_none());
+
+    let bound = bind_bill_to_recurring(runtime.connection_mut(), user_id(42), bill_id, 501)?
+        .expect("bind succeeds");
+    assert_eq!(bound.recurring_id, 501);
+    assert_eq!(bound.next_scheduled_date.as_deref(), Some("2026-05-17"));
+    assert_eq!(recurring_next_date(&runtime, 501)?, "2026-05-17");
+
+    let rebound = bind_bill_to_recurring(runtime.connection_mut(), user_id(42), bill_id, 502)?
+        .expect("rebind succeeds");
+    assert_eq!(rebound.recurring_id, 502);
+    assert_eq!(rebound.next_scheduled_date.as_deref(), Some("2026-06-09"));
+    assert_eq!(recurring_next_date(&runtime, 501)?, "2026-05-03");
+
+    let linked = get_bill_recurring_candidates(runtime.connection(), user_id(42), bill_id, 31)?
+        .expect("bill exists");
+    assert_eq!(linked.linked_recurring_id, Some(502));
+    assert_eq!(linked.linked_recurring_name, "monthly rent");
+    assert!(linked
+        .candidates
+        .iter()
+        .any(|candidate| { candidate["id"] == "502" && candidate["linked"] == true }));
+
+    assert!(unbind_bill_from_recurring(runtime.connection_mut(), user_id(42), 999)?.is_none());
+    assert_eq!(
+        unbind_bill_from_recurring(runtime.connection_mut(), user_id(42), bill_id)?,
+        Some(true)
+    );
+    assert_eq!(recurring_next_date(&runtime, 502)?, "2026-05-09");
+
+    runtime.connection().execute(
+        "INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            source_account_id, destination_account_id, created_at, updated_at
+         ) VALUES (900, 42, 'bad-date', '支出', 12.34, 'n/a', 'bad date', 10, 0, 'now', 'now')",
+        [],
+    )?;
+    let invalid_date = get_bill_recurring_candidates(runtime.connection(), user_id(42), 900, 31)?
+        .expect("bad-date bill exists");
+    assert!(invalid_date.candidates.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn recurring_transfer_candidates_score_destination_and_one_time_schedule(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("bills-recurring-transfer.db"))?;
+    init_schema(&runtime)?;
+    insert_recurring_template(
+        &runtime,
+        601,
+        "card payment",
+        4,
+        2000.0,
+        "10",
+        "20",
+        0,
+        "",
+        "2026-05-12",
+        "",
+        "2026-05-12",
+        0,
+    )?;
+
+    let mut fields = bill_fields(
+        "2026-05-12 08:00:00",
+        "转账",
+        20.0,
+        "Credit Card",
+        "Card payment",
+        10,
+    );
+    fields.insert("destination_account_id".to_string(), json!(20));
+    let bill_id = create_bill(
+        runtime.connection_mut(),
+        user_id(42),
+        &BillCreateDraft {
+            fields,
+            tag_ids: vec![],
+        },
+    )?;
+
+    let candidates = get_bill_recurring_candidates(runtime.connection(), user_id(42), bill_id, 0)?
+        .expect("bill exists");
+    assert_eq!(candidates.candidates.len(), 1);
+    assert_eq!(candidates.candidates[0]["id"], "601");
+    assert_eq!(
+        candidates.candidates[0]["matchReasons"],
+        json!([
+            "type",
+            "amount",
+            "schedule",
+            "source_account",
+            "destination_account"
+        ])
+    );
+    assert_eq!(candidates.candidates[0]["matchScore"], 110);
+
+    Ok(())
 }
 
 #[test]

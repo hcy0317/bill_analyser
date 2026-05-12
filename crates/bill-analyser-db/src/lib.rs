@@ -51,11 +51,12 @@ pub use auth_registration::{
     RegisterUserDraft, RegisterUserResult,
 };
 pub use bills::{
-    batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,
-    calculate_bill_hash_from_record, create_bill, delete_bill, get_bill_by_id, get_bill_tags,
-    get_bill_update_snapshot, get_first_account_id, list_bills, query_bills, update_bill,
+    batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,
+    calculate_bill_hash_from_fields, calculate_bill_hash_from_record, create_bill, delete_bill,
+    get_bill_by_id, get_bill_recurring_candidates, get_bill_tags, get_bill_update_snapshot,
+    get_first_account_id, list_bills, query_bills, unbind_bill_from_recurring, update_bill,
     BatchUpdateBillsResult, BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord,
-    BillUpdateDraft,
+    BillRecurringBindResult, BillRecurringCandidates, BillUpdateDraft,
 };
 pub use budgets::{
     create_budget, create_budget_execution_snapshots, delete_budget, export_budgets,

@@ -444,6 +444,164 @@ async fn bills_runtime_exports_csv_and_xlsx_without_python_proxy() -> Result<(),
 }
 
 #[tokio::test]
+async fn bills_runtime_serves_recurring_candidates_and_match_without_python_proxy(
+) -> Result<(), Box<dyn Error>> {
+    for route in [
+        ("GET", "/api/bills/{bill_id}/recurring-candidates"),
+        ("PUT", "/api/bills/{bill_id}/recurring-match"),
+        ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+    ] {
+        assert!(BILL_CRUD_ROUTE_PATTERNS.iter().any(|item| item == &route));
+        assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+            .iter()
+            .all(|item| item != &route));
+    }
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+    insert_recurring_template(&fixture.db_path, 500, "rent", 4321.0, "2026-03-01", "8")?;
+
+    let missing_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/999/recurring-candidates",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(read_json(missing_response).await["error"], "Bill not found");
+
+    let missing_recurring_id_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/bills/999/recurring-match",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_recurring_id_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_recurring_id_response).await["error"],
+        "Missing recurringId"
+    );
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills",
+            json!({
+                "date": "2026-03-08 08:30:00",
+                "type": "支出",
+                "amount": 43.21,
+                "counterparty": "房东",
+                "description": "monthly rent",
+                "source_account_id": 10,
+                "main_category": "房租"
+            }),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let bill_id = read_json(create_response).await["result"]["id"]
+        .as_str()
+        .expect("bill id")
+        .to_string();
+
+    let candidates_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            &format!("/api/bills/{bill_id}/recurring-candidates?toleranceDays=2"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(candidates_response.status(), StatusCode::OK);
+    let candidates_body = read_json(candidates_response).await;
+    assert_eq!(candidates_body["success"], true);
+    assert_eq!(candidates_body["result"]["billId"], bill_id.parse::<i64>()?);
+    assert_eq!(candidates_body["result"]["linkedRecurringId"], Value::Null);
+    assert_eq!(
+        candidates_body["result"]["candidates"][0]["id"],
+        Value::String("500".to_string())
+    );
+    assert_eq!(
+        candidates_body["result"]["candidates"][0]["matchedOccurrenceDate"],
+        "2026-03-08"
+    );
+    assert!(
+        candidates_body["result"]["candidates"][0]["matchScore"]
+            .as_i64()
+            .unwrap()
+            >= 90
+    );
+    assert_eq!(candidates_body["result"]["candidates"][0]["linked"], false);
+
+    let bind_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/bills/{bill_id}/recurring-match"),
+            json!({"recurringId": 500}),
+        ))
+        .await?;
+    assert_eq!(bind_response.status(), StatusCode::OK);
+    let bind_body = read_json(bind_response).await;
+    assert_eq!(bind_body["success"], true);
+    assert_eq!(bind_body["result"]["recurringId"], 500);
+    assert_eq!(bind_body["result"]["nextScheduledDate"], "2026-04-08");
+    assert_eq!(recurring_next_date(&fixture.db_path, 500)?, "2026-04-08");
+    assert_eq!(
+        bill_created_from_recurring(&fixture.db_path, bill_id.parse::<i64>()?)?,
+        Some(500)
+    );
+
+    let linked_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            &format!("/api/bills/{bill_id}/recurring-candidates"),
+            Body::empty(),
+        ))
+        .await?;
+    let linked_body = read_json(linked_response).await;
+    assert_eq!(linked_body["result"]["linkedRecurringId"], 500);
+    assert_eq!(linked_body["result"]["linkedRecurringName"], "rent");
+    assert_eq!(linked_body["result"]["candidates"][0]["linked"], true);
+
+    let unbind_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/bills/{bill_id}/recurring-match"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(unbind_response.status(), StatusCode::OK);
+    assert_eq!(read_json(unbind_response).await["result"], true);
+    assert_eq!(recurring_next_date(&fixture.db_path, 500)?, "2026-03-08");
+    assert_eq!(
+        bill_created_from_recurring(&fixture.db_path, bill_id.parse::<i64>()?)?,
+        None
+    );
+
+    let unauthenticated_response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/bills/{bill_id}/recurring-candidates"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
@@ -462,16 +620,13 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
         .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("DELETE", "/api/bills/{bill_id}/recurring-match")));
+        .all(|route| route != &("DELETE", "/api/bills/{bill_id}/recurring-match")));
     let upstream = spawn_fake_upstream().await;
     let fixture = RuntimeFixture::new_with_upstream(upstream.url())?;
     let app = runtime_router(&fixture);
 
     for (method, path) in [
         (Method::GET, "/api/bills/reconciliation_statements"),
-        (Method::GET, "/api/bills/123/recurring-candidates"),
-        (Method::PUT, "/api/bills/123/recurring-match"),
-        (Method::DELETE, "/api/bills/123/recurring-match"),
         (Method::POST, "/api/bills/category/quick-add-keyword"),
         (Method::POST, "/api/bills/category/refresh"),
     ] {
@@ -719,11 +874,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
 
     let health_response = app
@@ -743,6 +898,10 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("owned routes")
         .contains("bills export runtime route"));
+    assert!(health["details"]["owned_routes"]
+        .as_str()
+        .expect("owned routes")
+        .contains("bills recurring runtime routes"));
     assert!(health["details"]["bills_crud_runtime"].as_str().is_some());
     assert!(health["details"]["budgets_crud_runtime"].as_str().is_some());
     assert!(health["details"]["statistics_read_runtime"]
@@ -864,6 +1023,34 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             created_at TEXT NOT NULL,
             PRIMARY KEY (bill_id, tag_id)
         );
+        CREATE TABLE recurring_bills (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            template_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT,
+            type INTEGER,
+            category TEXT,
+            amount REAL,
+            account TEXT,
+            counterparty TEXT,
+            destination_amount REAL,
+            hide_amount INTEGER DEFAULT 0,
+            tag TEXT,
+            comment TEXT,
+            frequency TEXT,
+            scheduled_frequency_type INTEGER,
+            start_date TEXT,
+            end_date TEXT,
+            next_date TEXT,
+            enabled INTEGER DEFAULT 1,
+            auto_create INTEGER DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            utc_offset INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         ",
     )?;
     connection.execute("INSERT INTO users(id, username) VALUES (42, 'owner')", [])?;
@@ -883,6 +1070,41 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         [],
     )?;
     Ok(())
+}
+
+fn insert_recurring_template(
+    path: &Path,
+    recurring_id: i64,
+    name: &str,
+    amount: f64,
+    start_date: &str,
+    frequency: &str,
+) -> Result<(), Box<dyn Error>> {
+    Connection::open(path)?.execute(
+        "INSERT INTO recurring_bills(
+            id, user_id, name, type, category, amount, account, counterparty,
+            destination_amount, frequency, scheduled_frequency_type, start_date,
+            end_date, next_date, enabled, display_order, created_at, updated_at
+         ) VALUES (?1, 42, ?2, 3, '1', ?3, '10', '0', 0, ?4, 2, ?5, '', ?5, 1, 0, 'now', 'now')",
+        rusqlite::params![recurring_id, name, amount, frequency, start_date],
+    )?;
+    Ok(())
+}
+
+fn recurring_next_date(path: &Path, recurring_id: i64) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT next_date FROM recurring_bills WHERE id = ?1",
+        [recurring_id],
+        |row| row.get::<_, String>(0),
+    )?)
+}
+
+fn bill_created_from_recurring(path: &Path, bill_id: i64) -> Result<Option<i64>, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT created_from_recurring FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )?)
 }
 
 fn account_balance(path: &Path, account_id: i64) -> Result<f64, Box<dyn Error>> {

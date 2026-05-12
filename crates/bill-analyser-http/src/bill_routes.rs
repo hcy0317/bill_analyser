@@ -28,10 +28,11 @@ use bill_analyser_core::adapters::transaction::{
 };
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
-    batch_create_bills, batch_delete_bills, batch_update_bills, create_bill, delete_bill,
-    get_bill_by_id, get_bill_tags, get_bill_update_snapshot, get_first_account_id, list_bills,
-    query_bills, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord,
-    BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,
+    create_bill, delete_bill, get_bill_by_id, get_bill_recurring_candidates, get_bill_tags,
+    get_bill_update_snapshot, get_first_account_id, list_bills, query_bills,
+    unbind_bill_from_recurring, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters,
+    BillRecord, BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use chrono::{DateTime, Local};
 use ring::rand::{SecureRandom, SystemRandom};
@@ -67,15 +68,15 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/bills/batch/update"),
     ("DELETE", "/api/bills/batch/delete"),
     ("GET", "/api/bills/export"),
+    ("GET", "/api/bills/{bill_id}/recurring-candidates"),
+    ("PUT", "/api/bills/{bill_id}/recurring-match"),
+    ("DELETE", "/api/bills/{bill_id}/recurring-match"),
     ("POST", "/api/bills/pictures"),
     ("POST", "/api/bills/pictures/unused"),
 ];
 
 pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/bills/reconciliation_statements"),
-    ("GET", "/api/bills/{bill_id}/recurring-candidates"),
-    ("PUT", "/api/bills/{bill_id}/recurring-match"),
-    ("DELETE", "/api/bills/{bill_id}/recurring-match"),
     ("POST", "/api/bills/category/quick-add-keyword"),
     ("POST", "/api/bills/category/refresh"),
 ];
@@ -101,11 +102,11 @@ pub fn bill_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/bills/:bill_id/recurring-candidates",
-            any(ownership_aware_proxy_handler),
+            get(recurring_candidates_handler),
         )
         .route(
             "/api/bills/:bill_id/recurring-match",
-            any(ownership_aware_proxy_handler),
+            put(bind_recurring_match_handler).delete(unbind_recurring_match_handler),
         )
         .route(
             "/api/bills/category/*path",
@@ -231,6 +232,12 @@ struct BillsExportQuery {
     format: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct RecurringCandidatesQuery {
+    #[serde(rename = "toleranceDays")]
+    tolerance_days: Option<i64>,
+}
+
 async fn list_bills_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -329,6 +336,87 @@ async fn export_bills_handler(
             export_filename("xlsx"),
             render_bills_xlsx_export(&bills),
         ),
+    }
+}
+
+async fn recurring_candidates_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(bill_id): Path<i64>,
+    Query(query): Query<RecurringCandidatesQuery>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let tolerance_days = query.tolerance_days.unwrap_or(3).clamp(0, 31);
+    match get_bill_recurring_candidates(runtime.connection(), user_id, bill_id, tolerance_days) {
+        Ok(Some(result)) => success_result(
+            StatusCode::OK,
+            json!({
+                "billId": bill_id,
+                "linkedRecurringId": result.linked_recurring_id,
+                "linkedRecurringName": result.linked_recurring_name,
+                "candidates": result.candidates,
+            }),
+        ),
+        Ok(None) => not_found("Bill not found"),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn bind_recurring_match_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(bill_id): Path<i64>,
+    Json(payload): Json<Value>,
+) -> Response {
+    let Some(recurring_id) = payload.get("recurringId").and_then(value_to_positive_i64) else {
+        return bad_request("Missing recurringId");
+    };
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match bind_bill_to_recurring(runtime.connection_mut(), user_id, bill_id, recurring_id) {
+        Ok(Some(result)) => success_result(
+            StatusCode::OK,
+            json!({
+                "billId": result.bill_id,
+                "recurringId": result.recurring_id,
+                "nextScheduledDate": result.next_scheduled_date,
+            }),
+        ),
+        Ok(None) => not_found("Bill or recurring template not found"),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn unbind_recurring_match_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(bill_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    match unbind_bill_from_recurring(runtime.connection_mut(), user_id, bill_id) {
+        Ok(Some(true)) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(Some(false)) | Ok(None) => not_found("Bill not found"),
+        Err(_) => db_error_response(),
     }
 }
 

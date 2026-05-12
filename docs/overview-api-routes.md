@@ -49,10 +49,10 @@
 - 账单/分类/账户路由层已完成一轮适配器收敛：
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `accounts/` / `categories/` / `bills/` 已统一改从中性适配器模块导入。
-- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管核心账单/交易 CRUD 写入口、交易图片和账单导出：
-  - Rust-owned：`GET/POST /api/bills`、`GET/POST /api/bills/`、`GET /api/bills/by-month`、`GET /api/bills/get`、`GET/PUT/DELETE /api/bills/<id>`、`POST /api/bills/modify`、`POST /api/bills/delete`、`POST /api/bills/batch`、`PUT /api/bills/batch/update`、`DELETE /api/bills/batch/delete`、`POST /api/bills/pictures`、`POST /api/bills/pictures/unused`、`GET /api/bills/export`；
-  - Python-proxied：`/api/bills/reconciliation_statements`、`/api/bills/<id>/recurring-candidates`、`/api/bills/<id>/recurring-match`、`/api/bills/category/*`；未登记的 `/api/bills/pictures/*` 子路径在 manifest fallback 下返回 404；
-  - CRUD 响应保持前端交易 DTO 与 Flask-compatible `success/result` envelope，frontend cents 与 DB yuan 的转换在 Rust adapter 边界完成；交易图片上传/未使用清理由 Rust 使用 `BILL_ANALYSER_UPLOADS_DIR`（默认 `data/uploads`）保存和删除文件，响应保持 `pictureId/originalUrl` data URL 合同；账单导出由 Rust 生成带 BOM 的 CSV 或 XLSX 文件，保留旧文件名、空结果错误和公式型文本转义。
+- Rust 主 HTTP 服务在 `import_db_runtime` 模式下接管核心账单/交易 CRUD 写入口、交易图片、账单导出和正式账单 recurring 匹配：
+  - Rust-owned：`GET/POST /api/bills`、`GET/POST /api/bills/`、`GET /api/bills/by-month`、`GET /api/bills/get`、`GET/PUT/DELETE /api/bills/<id>`、`POST /api/bills/modify`、`POST /api/bills/delete`、`POST /api/bills/batch`、`PUT /api/bills/batch/update`、`DELETE /api/bills/batch/delete`、`POST /api/bills/pictures`、`POST /api/bills/pictures/unused`、`GET /api/bills/export`、`GET /api/bills/<id>/recurring-candidates`、`PUT/DELETE /api/bills/<id>/recurring-match`；
+  - Python-proxied：`/api/bills/reconciliation_statements`、`/api/bills/category/*`；未登记的 `/api/bills/pictures/*` 子路径在 manifest fallback 下返回 404；
+  - CRUD 响应保持前端交易 DTO 与 Flask-compatible `success/result` envelope，frontend cents 与 DB yuan 的转换在 Rust adapter 边界完成；交易图片上传/未使用清理由 Rust 使用 `BILL_ANALYSER_UPLOADS_DIR`（默认 `data/uploads`）保存和删除文件，响应保持 `pictureId/originalUrl` data URL 合同；账单导出由 Rust 生成带 BOM 的 CSV 或 XLSX 文件，保留旧文件名、空结果错误和公式型文本转义；recurring candidates/match 由 Rust 读取 `recurring_bills` 并维护 `bills.created_from_recurring` 与 `recurring_bills.next_date`。
 - Rust 主 HTTP 服务在 `import_db_runtime` 模式下也接管预算 CRUD/export/execution/forecast/history/snapshot/import 入口：
   - Rust-owned：`GET/POST /api/budgets`、`GET/POST /api/budgets/`、`GET/PUT/DELETE /api/budgets/<id>`、`GET /api/budgets/export`、`GET /api/budgets/execution`、`GET /api/budgets/forecast`、`GET /api/budgets/history`、`POST /api/budgets/history/snapshot`、`POST /api/budgets/import`；
   - Python-proxied：无预算 route set 内剩余代理项；

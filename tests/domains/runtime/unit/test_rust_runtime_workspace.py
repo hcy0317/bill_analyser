@@ -58,9 +58,9 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "`BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_route_skeleton`" in architecture
     assert "默认 `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime`" in architecture
     assert "migration governance oracle" in architecture
-    assert "当前治理矩阵把第一阶段导入与预览决策旁路、核心账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、预算 CRUD/export/execution/forecast/history/import、DB-backed statistics read routes 标为 Rust-owned" in architecture
-    assert "同时把 reconciliation statements、recurring candidates/match、分类 actions、统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成、全局 Learning Center suggestion/rules 决策与真实 OAuth provider exchange 标为 Python-proxied" in architecture
-    assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 统计读取" in architecture
+    assert "当前治理矩阵把第一阶段导入与预览决策旁路、核心账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、预算 CRUD/export/execution/forecast/history/import、DB-backed statistics read routes 标为 Rust-owned" in architecture
+    assert "同时把 reconciliation statements、分类 actions、统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成、全局 Learning Center suggestion/rules 决策与真实 OAuth provider exchange 标为 Python-proxied" in architecture
+    assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 统计读取" in architecture
     assert "Rust DB writer policy 为 `RustDomainOwned`" in architecture
     assert "Rust import DB runtime 可校验前端 Bearer access token" in architecture
     assert "S1 Rust Runtime Shell" in migration_plan
@@ -85,7 +85,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "Python import route disabling/deletion is blocked unless all five evidence gates pass" in migration_plan
     assert "business_migration=import-route-skeleton-no-db" in migration_plan
     assert "`BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime`" in architecture
-    assert "business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial" in migration_plan
+    assert "business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial" in migration_plan
     assert "S10 switches the local startup boundary from Python-primary to Rust-primary HTTP" in migration_plan
     assert "BILL_ANALYSER_PYTHON_UPSTREAM=http://127.0.0.1:5001" in migration_plan
     assert "Authorization: Bearer" in migration_plan
@@ -94,7 +94,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "可用前端 Bearer access token 校验 HS256/HS384/HS512 HMAC JWT" in project_overview
     assert "Rust 路由、DB 写入语义、前端导入流程、全量 coverage、无残留引用五项证据未同时通过前，Python import 删除仍阻塞" in project_overview
     assert "preview update/reclassify、preview-item transfer/recurring/learning decision、learning promotion、preview LLM recommendation/memory event、OCR config app_settings、annotation sample upsert/read" in architecture
-    assert "当前通过显式 `import_db_runtime` 暴露 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、预算 CRUD/export/execution/forecast/history/import 与统计读取" in architecture
+    assert "当前通过显式 `import_db_runtime` 暴露 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路与 promotion、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、预算 CRUD/export/execution/forecast/history/import 与统计读取" in architecture
     assert "The S9b HTTP tests cover single preview-row edit persistence" in migration_plan
     assert "The S9c HTTP tests cover transfer accept projection" in migration_plan
     assert "The S9d HTTP tests cover JSON parse -> parse_generic -> dedup -> confirm DB writes" in migration_plan
