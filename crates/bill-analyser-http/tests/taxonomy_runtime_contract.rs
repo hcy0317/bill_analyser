@@ -1266,9 +1266,15 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
     assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/categories/batch")));
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/categories/statistics")));
     assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/categories/rules")));
+    assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/categories/statistics")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -1456,6 +1462,30 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
     assert_eq!(import_body["result"]["updated"], 1);
     assert_eq!(import_body["result"]["imported"], 1);
     assert_eq!(import_body["result"]["skipped"], 1);
+
+    let statistics_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/statistics?period=month&type=%E6%94%AF%E5%87%BA&start_date=2026-01-01&end_date=2026-01-31",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(statistics_response.status(), StatusCode::OK);
+    let statistics_body = read_json(statistics_response).await;
+    assert_eq!(statistics_body["success"], true);
+    assert_eq!(statistics_body["result"]["餐饮"]["total_amount"], 20.0);
+    assert_eq!(statistics_body["result"]["餐饮"]["count"], 2);
+    assert_eq!(
+        statistics_body["result"]["餐饮"]["sub_categories"]["午餐"]["total_amount"],
+        20.0
+    );
+    assert_eq!(
+        statistics_body["result"]["餐饮"]["sub_categories"]["午餐"]["count"],
+        2
+    );
+    assert_eq!(statistics_body["result"]["交通"]["total_amount"], 3.0);
+    assert!(statistics_body["result"].get("其他用户分类").is_none());
 
     let delete_response = app
         .clone()
@@ -2590,6 +2620,15 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             utc_offset INTEGER DEFAULT 0,
             scheduled_frequency_type INTEGER DEFAULT 0
         );
+        CREATE TABLE bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            type TEXT,
+            amount REAL NOT NULL,
+            date TEXT NOT NULL,
+            main_category TEXT,
+            sub_category TEXT
+        );
         ",
     )?;
     connection.execute(
@@ -2651,6 +2690,18 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         )
         VALUES
             (41, 42, NULL, '房租模板', '每月房租', '支出', '30', 3000.0, '10', '0', '', '租金', 'monthly', 2, '2026-01-01', NULL, '2026-02-01', 1, 0, 1, 0, 480, 'now', 'now', 0, 0)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, type, amount, date, main_category, sub_category
+        )
+        VALUES
+            (50, 42, '支出', -12.5, '2026-01-05', '餐饮', '午餐'),
+            (51, 42, '支出', -7.5, '2026-01-08', '餐饮', '午餐'),
+            (52, 42, '支出', -3.0, '2026-01-10', '交通', '公交'),
+            (53, 42, '支出', -99.0, '2025-12-31', '餐饮', '晚餐'),
+            (97, 77, '支出', -99.0, '2026-01-10', '其他用户分类', '')",
         [],
     )?;
     Ok(())

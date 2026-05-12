@@ -22,6 +22,14 @@ pub struct CategoryEnsureSummary {
     pub skipped: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CategoryStatistic {
+    pub main_category: String,
+    pub sub_category: String,
+    pub count: i64,
+    pub total_amount: f64,
+}
+
 pub struct CategoriesRepository<'conn> {
     connection: &'conn mut Connection,
 }
@@ -246,6 +254,42 @@ impl<'conn> CategoriesRepository<'conn> {
             Err(error) => Err(error),
         }
     }
+
+    pub fn category_statistics(
+        &mut self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        user_id: i64,
+    ) -> DbResult<Vec<CategoryStatistic>> {
+        let mut sql = String::from(
+            "SELECT
+                main_category,
+                COALESCE(sub_category, '') AS sub_category,
+                COUNT(*) AS count,
+                COALESCE(SUM(amount), 0) AS total_amount
+             FROM bills
+             WHERE main_category IS NOT NULL AND user_id = ?",
+        );
+        let mut values = vec![SqlValue::Integer(user_id)];
+
+        if let Some(value) = non_empty_text(start_date) {
+            sql.push_str(" AND date >= ?");
+            values.push(SqlValue::Text(value.to_string()));
+        }
+        if let Some(value) = non_empty_text(end_date) {
+            sql.push_str(" AND date <= ?");
+            values.push(SqlValue::Text(value.to_string()));
+        }
+
+        sql.push_str(" GROUP BY main_category, sub_category, type ORDER BY total_amount DESC");
+
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(
+            rusqlite::params_from_iter(values),
+            category_statistic_from_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
 }
 
 pub fn open_categories_connection(db_path: &str) -> DbResult<Connection> {
@@ -303,6 +347,15 @@ fn bill_category_from_row(row: &Row<'_>) -> rusqlite::Result<CategoryRecord> {
     category.insert("priority".to_string(), Value::Number(Number::from(0)));
     category.insert("keywords".to_string(), Value::String(String::new()));
     Ok(category)
+}
+
+fn category_statistic_from_row(row: &Row<'_>) -> rusqlite::Result<CategoryStatistic> {
+    Ok(CategoryStatistic {
+        main_category: row.get("main_category")?,
+        sub_category: row.get("sub_category")?,
+        count: row.get("count")?,
+        total_amount: row.get("total_amount")?,
+    })
 }
 
 fn category_insert_values(
@@ -457,6 +510,10 @@ fn text_field(record: &CategoryRecord, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+fn non_empty_text(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
 }
 
 fn is_constraint_error(error: &RusqliteError) -> bool {

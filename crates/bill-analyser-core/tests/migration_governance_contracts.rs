@@ -254,6 +254,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         "POST /api/categories/move",
         "GET /api/categories/export",
         "POST /api/categories/import",
+        "GET /api/categories/statistics",
     ] {
         let entry = manifest
             .iter()
@@ -264,7 +265,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data, and templates routes are Rust-owned"));
+            .contains("category master-data/statistics, and templates routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -299,7 +300,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         ("POST", "/api/accounts/sync-balances"),
         ("GET", "/api/categories/rules"),
         ("PUT", "/api/categories/rules"),
-        ("GET", "/api/categories/statistics"),
         ("POST", "/api/categories/update-all"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)

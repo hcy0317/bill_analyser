@@ -1616,11 +1616,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
     },
     python_proxy_route!("GET", "/api/categories/rules", "taxonomy-rules-settings"),
     python_proxy_route!("PUT", "/api/categories/rules", "taxonomy-rules-settings"),
-    python_proxy_route!(
-        "GET",
-        "/api/categories/statistics",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/categories/statistics",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy categories runtime reads user-scoped bill category aggregates and returns the legacy tree-shaped category statistics response.",
+    },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/categories/tree",
@@ -2756,7 +2760,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data, and templates routes are Rust-owned. Account transaction move/clear, balance sync, category rules, category statistics, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data/statistics, and templates routes are Rust-owned. Account transaction move/clear, balance sync, category rules, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3195,10 +3199,10 @@ fn route_contract_details(
         },
         ("taxonomy-rules-settings", MigrationState::RustOwnedVerified) => RouteContractDetails {
             handler: RouteHandlerId::TaxonomyRuntime,
-            deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
-            blocked_status: MigrationBlockedStatus::None,
-            unsupported_behavior:
-                "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data, and templates routes are Rust-owned; account transaction move/clear, balance sync, category rules, category statistics, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
+        deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
+        blocked_status: MigrationBlockedStatus::None,
+        unsupported_behavior:
+                "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data/statistics, and templates routes are Rust-owned; account transaction move/clear, balance sync, category rules, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

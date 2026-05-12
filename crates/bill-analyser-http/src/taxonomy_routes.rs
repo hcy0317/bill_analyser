@@ -12,12 +12,13 @@ use bill_analyser_core::UserId;
 use bill_analyser_db::{
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
-        categories::{CategoriesRepository, CategoryRecord},
+        categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
+use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
 use crate::{
@@ -86,6 +87,7 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/flat"),
     ("POST", "/api/categories/import"),
     ("POST", "/api/categories/move"),
+    ("GET", "/api/categories/statistics"),
     ("GET", "/api/categories/tree"),
     ("GET", "/api/categories/{category_id}"),
     ("PUT", "/api/categories/{category_id}"),
@@ -95,7 +97,6 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
 pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/rules"),
     ("PUT", "/api/categories/rules"),
-    ("GET", "/api/categories/statistics"),
     ("POST", "/api/categories/update-all"),
 ];
 
@@ -193,7 +194,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/categories/statistics",
-            get(ownership_aware_proxy_handler),
+            get(category_statistics_handler),
         )
         .route(
             "/api/categories/update-all",
@@ -205,6 +206,15 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
                 .put(update_category_handler)
                 .delete(delete_category_handler),
         )
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CategoryStatisticsQuery {
+    period: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    #[serde(rename = "type")]
+    category_type: Option<String>,
 }
 
 async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -1314,6 +1324,35 @@ async fn export_categories_handler(
     }
 }
 
+async fn category_statistics_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<CategoryStatisticsQuery>,
+) -> Response {
+    let _ignored_legacy_filters = (query.period.as_deref(), query.category_type.as_deref());
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoriesRepository::new(runtime.connection_mut());
+
+    match repository.category_statistics(
+        query.start_date.as_deref(),
+        query.end_date.as_deref(),
+        db_user_id(user_id),
+    ) {
+        Ok(statistics) => success_result(
+            StatusCode::OK,
+            format_category_statistics_response(statistics),
+        ),
+        Err(_) => category_db_error_response(),
+    }
+}
+
 async fn import_categories_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2351,6 +2390,60 @@ fn format_category_flat_response(categories: Vec<CategoryRecord>) -> Value {
 
 fn categories_to_value(categories: Vec<CategoryRecord>) -> Value {
     Value::Array(categories.into_iter().map(Value::Object).collect())
+}
+
+fn format_category_statistics_response(statistics: Vec<CategoryStatistic>) -> Value {
+    let mut result = Map::new();
+
+    for statistic in statistics {
+        let entry = result
+            .entry(statistic.main_category.clone())
+            .or_insert_with(|| {
+                json!({
+                    "total_amount": 0.0,
+                    "count": 0,
+                    "sub_categories": {}
+                })
+            });
+        let Some(entry_object) = entry.as_object_mut() else {
+            continue;
+        };
+
+        let total_amount = entry_object
+            .get("total_amount")
+            .and_then(value_as_f64)
+            .unwrap_or_default()
+            + statistic.total_amount.abs();
+        entry_object.insert(
+            "total_amount".to_string(),
+            json_number(round2(total_amount)),
+        );
+
+        let count = entry_object
+            .get("count")
+            .and_then(value_as_i64)
+            .unwrap_or_default()
+            + statistic.count;
+        entry_object.insert("count".to_string(), Value::Number(Number::from(count)));
+
+        if statistic.sub_category.is_empty() {
+            continue;
+        }
+        let sub_categories = entry_object
+            .entry("sub_categories".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Some(sub_categories) = sub_categories.as_object_mut() {
+            sub_categories.insert(
+                statistic.sub_category.clone(),
+                json!({
+                    "total_amount": round2(statistic.total_amount.abs()),
+                    "count": statistic.count
+                }),
+            );
+        }
+    }
+
+    Value::Object(result)
 }
 
 fn category_export_record(category: &CategoryRecord) -> Map<String, Value> {

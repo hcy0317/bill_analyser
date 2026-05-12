@@ -474,7 +474,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/rules"),
         (Method::PUT, "/api/categories/rules"),
-        (Method::GET, "/api/categories/statistics"),
         (Method::POST, "/api/categories/update-all"),
         (Method::GET, "/api/settings/bundle/export"),
         (Method::GET, "/api/llm/config"),
