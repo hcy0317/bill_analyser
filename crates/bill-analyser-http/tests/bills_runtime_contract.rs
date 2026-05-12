@@ -444,6 +444,117 @@ async fn bills_runtime_exports_csv_and_xlsx_without_python_proxy() -> Result<(),
 }
 
 #[tokio::test]
+async fn bills_runtime_serves_reconciliation_statements_without_python_proxy(
+) -> Result<(), Box<dyn Error>> {
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("GET", "/api/bills/reconciliation_statements")));
+    let fixture = RuntimeFixture::new()?;
+    seed_reconciliation_statement_data(&fixture.db_path)?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/reconciliation_statements?account_id=10&start_time=0&end_time=0&category_ids=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["result"]["accountId"], "10");
+    assert_eq!(body["result"]["accountName"], "cash");
+    assert_eq!(body["result"]["openingBalance"], 2000);
+    assert_eq!(body["result"]["closingBalance"], 2900);
+    assert_eq!(body["result"]["totalInflows"], 1700);
+    assert_eq!(body["result"]["totalOutflows"], 800);
+    assert_eq!(body["result"]["netFlow"], 900);
+    assert_eq!(body["result"]["itemCount"], 3);
+    assert_eq!(body["result"]["transactions"][0]["id"], "3");
+    assert_eq!(
+        body["result"]["transactions"][0]["accountOpeningBalance"],
+        2400
+    );
+    assert_eq!(
+        body["result"]["transactions"][0]["accountClosingBalance"],
+        2900
+    );
+
+    let filtered_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/reconciliation_statements?account_id=10&start_time=1772380800&end_time=1772467200&type=1&keyword=Salary",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(filtered_response.status(), StatusCode::OK);
+    let filtered_body = read_json(filtered_response).await;
+    assert_eq!(filtered_body["result"]["openingBalance"], 0);
+    assert_eq!(filtered_body["result"]["totalInflows"], 1200);
+    assert_eq!(filtered_body["result"]["itemCount"], 1);
+
+    let missing_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/reconciliation_statements?account_id=10&start_time=0",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_response).await["error"],
+        "Missing required parameters: account_id, start_time, end_time"
+    );
+
+    let invalid_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/reconciliation_statements?account_id=abc&start_time=0&end_time=0",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_response).await["error"],
+        "Invalid account_id: abc"
+    );
+
+    let not_found_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/bills/reconciliation_statements?account_id=999&start_time=0&end_time=0",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(not_found_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(not_found_response).await["error"],
+        "Account not found"
+    );
+
+    let unauthenticated_response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/bills/reconciliation_statements?account_id=10&start_time=0&end_time=0")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn bills_runtime_serves_recurring_candidates_and_match_without_python_proxy(
 ) -> Result<(), Box<dyn Error>> {
     for route in [
@@ -617,7 +728,7 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
         .all(|route| route != &("POST", "/api/bills/pictures/unused")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
+        .all(|route| route != &("GET", "/api/bills/reconciliation_statements")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
         .all(|route| route != &("DELETE", "/api/bills/{bill_id}/recurring-match")));
@@ -626,7 +737,6 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
     let app = runtime_router(&fixture);
 
     for (method, path) in [
-        (Method::GET, "/api/bills/reconciliation_statements"),
         (Method::POST, "/api/bills/category/quick-add-keyword"),
         (Method::POST, "/api/bills/category/refresh"),
     ] {
@@ -874,11 +984,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
 
     let health_response = app
@@ -902,6 +1012,10 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("owned routes")
         .contains("bills recurring runtime routes"));
+    assert!(health["details"]["owned_routes"]
+        .as_str()
+        .expect("owned routes")
+        .contains("bills reconciliation runtime route"));
     assert!(health["details"]["bills_crud_runtime"].as_str().is_some());
     assert!(health["details"]["budgets_crud_runtime"].as_str().is_some());
     assert!(health["details"]["statistics_read_runtime"]
@@ -1069,6 +1183,70 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
          VALUES (1, 42, 'salary', 'now', 'now')",
         [],
     )?;
+    Ok(())
+}
+
+fn seed_reconciliation_statement_data(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "UPDATE accounts SET initial_balance = 20.0, balance = 29.0 WHERE id = 10",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO accounts(id, user_id, name, type, balance, initial_balance, created_at, updated_at)
+         VALUES (20, 42, 'broker', 1, 0.0, 0.0, 'now', 'now')",
+        [],
+    )?;
+    for (id, date, bill_type, amount, counterparty, description, source, destination) in [
+        (
+            1,
+            "2026-03-02 08:00:00",
+            "收入",
+            12.0,
+            "ACME",
+            "Salary",
+            10,
+            0,
+        ),
+        (
+            2,
+            "2026-03-03 08:00:00",
+            "支出",
+            -8.0,
+            "Shop",
+            "Breakfast",
+            10,
+            0,
+        ),
+        (
+            3,
+            "2026-03-04 08:00:00",
+            "转账",
+            -5.0,
+            "Broker",
+            "Transfer in",
+            20,
+            10,
+        ),
+    ] {
+        connection.execute(
+            "INSERT INTO bills(
+                id, user_id, date, type, amount, counterparty, description,
+                payment_method, main_category, sub_category, created_at, updated_at,
+                source_account_id, destination_account_id, destination_amount
+            ) VALUES (?1, 42, ?2, ?3, ?4, ?5, ?6, 'manual', '工资', '', 'now', 'now', ?7, ?8, 0.0)",
+            rusqlite::params![
+                id,
+                date,
+                bill_type,
+                amount,
+                counterparty,
+                description,
+                source,
+                destination
+            ],
+        )?;
+    }
     Ok(())
 }
 

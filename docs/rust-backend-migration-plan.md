@@ -186,9 +186,13 @@ S14a makes Rust the runtime owner for DB-backed statistics read routes in `impor
 
 ## S14b Bills Recurring Runtime
 
-S14b makes Rust the runtime owner for formal bill recurring candidates and match writes in `import_db_runtime`: `GET /api/bills/{bill_id}/recurring-candidates`, `PUT /api/bills/{bill_id}/recurring-match`, and `DELETE /api/bills/{bill_id}/recurring-match`. The Rust path reads enabled `recurring_bills`, preserves tolerance-day clamping, type/amount/schedule/account scoring, linked recurring metadata, Flask-compatible `success/result` envelopes, `bills.created_from_recurring` writes, and `recurring_bills.next_date` recalculation after bind/unbind. Reconciliation statements and category action helpers remain Python-proxied follow-up slices.
+S14b makes Rust the runtime owner for formal bill recurring candidates and match writes in `import_db_runtime`: `GET /api/bills/{bill_id}/recurring-candidates`, `PUT /api/bills/{bill_id}/recurring-match`, and `DELETE /api/bills/{bill_id}/recurring-match`. The Rust path reads enabled `recurring_bills`, preserves tolerance-day clamping, type/amount/schedule/account scoring, linked recurring metadata, Flask-compatible `success/result` envelopes, `bills.created_from_recurring` writes, and `recurring_bills.next_date` recalculation after bind/unbind.
 
-Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`; the `partial` suffix remains because Analyzer and exchange-rate provider/custom-rate routes are still Python-proxied.
+## S14c Bills Reconciliation Runtime
+
+S14c makes Rust the runtime owner for account reconciliation statements in `import_db_runtime`: `GET /api/bills/reconciliation_statements`. The Rust path preserves required `account_id/start_time/end_time` validation, category ID mapping, type and keyword filters, account-scoped bill selection, Flask-compatible `success/result` and error envelopes, yuan-to-cents response amounts, and per-transaction opening/closing balance trace. Category action helpers remain Python-proxied follow-up slices.
+
+Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`; the `partial` suffix remains because Analyzer and exchange-rate provider/custom-rate routes are still Python-proxied.
 
 ## Deletion Gate
 
