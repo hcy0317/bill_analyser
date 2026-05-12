@@ -40,6 +40,12 @@ pub const EXPORT_TEXT_KEYS: &[&str] = &[
     "payment_method",
     "main_category",
     "sub_category",
+    "source_account",
+    "destination_account",
+    "tags",
+    "comment",
+    "created_at",
+    "updated_at",
 ];
 pub const BILL_CREATE_COLUMNS: &[&str] = &[
     "user_id",

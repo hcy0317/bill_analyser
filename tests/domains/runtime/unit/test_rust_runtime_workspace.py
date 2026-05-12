@@ -59,7 +59,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "默认 `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime`" in architecture
     assert "migration governance oracle" in architecture
     assert "当前治理矩阵把第一阶段导入与预览决策旁路、核心账单 CRUD、预算 CRUD/export/execution/forecast/history/import、DB-backed statistics read routes 标为 Rust-owned" in architecture
-    assert "同时把统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成与全局 Learning Center suggestion/rules 决策标为 Python-proxied" in architecture
+    assert "同时把统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成、全局 Learning Center suggestion/rules 决策与真实 OAuth provider exchange 标为 Python-proxied" in architecture
     assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 统计读取" in architecture
     assert "Rust DB writer policy 为 `RustDomainOwned`" in architecture
     assert "Rust import DB runtime 可校验前端 Bearer access token" in architecture

@@ -468,7 +468,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::GET, "/api/categories/tree"),
         (Method::GET, "/api/settings/bundle/export"),
         (Method::GET, "/api/llm/config"),
-        (Method::GET, "/api/data/export.json"),
         (Method::POST, "/api/matching/candidates/session/12/accept"),
         (Method::DELETE, "/api/bills/123/recurring-match"),
     ] {

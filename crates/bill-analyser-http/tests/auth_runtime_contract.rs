@@ -1227,6 +1227,28 @@ async fn auth_step_up_runtime_issues_short_lived_tokens_for_password_or_totp(
     assert_eq!(operation_password_payload["type"], "step_up");
     assert_eq!(jwt_lifetime_seconds(&operation_password_payload), 3600);
 
+    {
+        let connection = Connection::open(fixture.db_path())?;
+        connection.execute(
+            "DELETE FROM app_settings WHERE key = 'operation_password'",
+            [],
+        )?;
+    }
+    let unset_operation_password_response = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"password": "not-the-current-password"}),
+        ))
+        .await?;
+    assert_eq!(
+        unset_operation_password_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_auth_log(fixture.db_path(), "step_up_auth_failed", false, "")?;
+
     let no_jwt_secret_app = runtime_router_with_db_path(fixture.db_path(), false);
     let no_jwt_secret_response = no_jwt_secret_app
         .oneshot(trusted_user_json_request(
@@ -1288,6 +1310,64 @@ async fn auth_step_up_runtime_issues_short_lived_tokens_for_password_or_totp(
         latest_auth_log_metadata(fixture.db_path(), "step_up_verified")?["verified_via"],
         "passcode"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_sensitive_operation_failures_are_logged_and_rate_limited(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    let app = runtime_router(&fixture);
+
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(bearer_json_request(
+                Method::POST,
+                "/api/security/step-up/verify",
+                &token,
+                json!({"password": "wrong-password"}),
+            ))
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    assert_auth_log(fixture.db_path(), "step_up_auth_failed", false, "")?;
+    let rate_limited_step_up = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/security/step-up/verify",
+            &token,
+            json!({"password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(rate_limited_step_up.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    for _ in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(bearer_json_request(
+                Method::POST,
+                "/api/data/clear/transactions",
+                &token,
+                json!({"password": "wrong-password"}),
+            ))
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    assert_auth_log(fixture.db_path(), "user_data_clear_auth_failed", false, "")?;
+    let rate_limited_clear = app
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/transactions",
+            &token,
+            json!({"password": "wrong-password"}),
+        ))
+        .await?;
+    assert_eq!(rate_limited_clear.status(), StatusCode::TOO_MANY_REQUESTS);
 
     Ok(())
 }
@@ -2309,6 +2389,220 @@ async fn auth_user_data_statistics_runtime_preserves_flask_contract() -> Result<
     assert_eq!(body["result"]["categoryCount"], 1);
     assert_eq!(body["result"]["tagCount"], 3);
     assert_eq!(body["result"]["templateCount"], 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn auth_user_data_export_and_clear_runtime_preserve_flask_contracts(
+) -> Result<(), Box<dyn Error>> {
+    for route in [
+        ("GET", "/api/data/export.{file_type}"),
+        ("POST", "/api/data/clear/transactions"),
+        ("POST", "/api/data/clear/all"),
+    ] {
+        assert!(AUTH_TOKEN_ROUTE_PATTERNS.iter().any(|item| item == &route));
+        assert!(AUTH_PROXIED_ROUTE_PATTERNS
+            .iter()
+            .all(|item| item != &route));
+    }
+
+    let fixture = RuntimeFixture::new()?;
+    let token = test_access_token(42, TEST_AUTH_SECRET);
+    seed_auth_db(fixture.db_path(), &token)?;
+    seed_user_data_management_rows(fixture.db_path())?;
+    let app = runtime_router(&fixture);
+
+    let unsupported_export = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/export.json",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(unsupported_export.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(unsupported_export).await["message"],
+        "Unsupported export file type"
+    );
+
+    let csv_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/export.csv?type=3&account_ids=100&tag_ids=400&category_ids=200",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(csv_response.status(), StatusCode::OK);
+    assert!(csv_response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .starts_with("text/csv"));
+    assert!(csv_response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .contains("bill_analyser_export_"));
+    let csv_text = read_text(csv_response).await;
+    assert!(csv_text.starts_with('\u{feff}'));
+    assert!(csv_text.contains("source_account"));
+    assert!(csv_text.contains("导出测试账单"));
+    assert!(csv_text.contains("'=Cash"));
+    assert!(csv_text.contains("'@早餐|工作"));
+    assert!(!csv_text.contains("其他用户账单"));
+
+    let invalid_amount_filter = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/export.csv?amount_filter=gt:not-a-number",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_amount_filter.status(), StatusCode::OK);
+    let invalid_amount_filter_text = read_text(invalid_amount_filter).await;
+    assert!(invalid_amount_filter_text.contains("导出测试账单"));
+    assert!(!invalid_amount_filter_text.contains("其他用户账单"));
+
+    let tsv_response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::GET,
+            "/api/data/export.tsv",
+            &token,
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(tsv_response.status(), StatusCode::OK);
+    let tsv_text = read_text(tsv_response).await;
+    assert!(tsv_text.contains("\tsource_account\t"));
+
+    let missing_auth = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/transactions",
+            &token,
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_auth.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_auth).await["message"],
+        "Current password or stepUpToken is required"
+    );
+
+    {
+        let connection = Connection::open(fixture.db_path())?;
+        connection.execute(
+            "DELETE FROM app_settings WHERE key = 'operation_password'",
+            [],
+        )?;
+    }
+    let wrong_password = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/transactions",
+            &token,
+            json!({"password": "Wrong123!"}),
+        ))
+        .await?;
+    assert_eq!(wrong_password.status(), StatusCode::UNAUTHORIZED);
+    assert_auth_log(fixture.db_path(), "user_data_clear_auth_failed", false, "")?;
+    assert_eq!(table_count(fixture.db_path(), "bills", 42)?, 1);
+
+    let step_up_token = test_action_token(
+        42,
+        "alice",
+        "alice@example.test",
+        "step_up",
+        TEST_AUTH_SECRET,
+        ChronoDuration::minutes(5),
+    );
+    let clear_transactions = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/transactions",
+            &token,
+            json!({"stepUpToken": step_up_token}),
+        ))
+        .await?;
+    assert_eq!(clear_transactions.status(), StatusCode::OK);
+    let clear_transactions_body = read_json(clear_transactions).await;
+    assert_eq!(clear_transactions_body["success"], true);
+    assert_eq!(clear_transactions_body["result"], true);
+    assert_eq!(clear_transactions_body["deletedCount"], 1);
+    assert_eq!(table_count(fixture.db_path(), "bills", 42)?, 0);
+    assert_eq!(table_count(fixture.db_path(), "bills", 77)?, 1);
+    assert_eq!(table_count(fixture.db_path(), "accounts", 42)?, 1);
+    let clear_transactions_audit = latest_user_data_audit(fixture.db_path(), "clear_transactions")?;
+    assert_eq!(clear_transactions_audit.0, 42);
+    assert_eq!(clear_transactions_audit.1, 1);
+    assert_eq!(clear_transactions_audit.2["auth_mode"], "step_up");
+    assert_eq!(clear_transactions_audit.2["deleted_count"], 1);
+
+    seed_user_data_clear_all_rows(fixture.db_path())?;
+    {
+        let connection = Connection::open(fixture.db_path())?;
+        connection.execute(
+            r#"
+            INSERT OR REPLACE INTO app_settings(
+                key, value, value_type, description, is_encrypted, created_at, updated_at
+            ) VALUES (
+                'operation_password', 'operation-secret', 'string',
+                'Test operation password', 0,
+                '2026-01-01T00:00:00', '2026-01-01T00:00:00'
+            )
+            "#,
+            [],
+        )?;
+    }
+    let operation_password = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "operation-secret".to_string());
+    let clear_all = app
+        .clone()
+        .oneshot(bearer_json_request(
+            Method::POST,
+            "/api/data/clear/all",
+            &token,
+            json!({"password": operation_password}),
+        ))
+        .await?;
+    assert_eq!(clear_all.status(), StatusCode::OK);
+    let clear_all_body = read_json(clear_all).await;
+    assert_eq!(clear_all_body["success"], true);
+    assert_eq!(clear_all_body["result"], true);
+    assert_eq!(clear_all_body["counts"]["accounts"], 2);
+    assert_eq!(clear_all_body["counts"]["category_rules"], 1);
+    assert_eq!(clear_all_body["counts"]["categories"], 2);
+    assert_eq!(table_count(fixture.db_path(), "accounts", 42)?, 0);
+    assert_eq!(table_count(fixture.db_path(), "category_rules", 42)?, 0);
+    assert_eq!(table_count(fixture.db_path(), "category_rules", 77)?, 1);
+    assert_eq!(table_count(fixture.db_path(), "categories", 42)?, 0);
+    assert_eq!(table_count(fixture.db_path(), "bill_templates", 42)?, 0);
+    assert_eq!(
+        table_count(fixture.db_path(), "import_annotation_samples", 42)?,
+        0
+    );
+    assert_eq!(table_count(fixture.db_path(), "llm_memory_events", 42)?, 0);
+    assert_eq!(table_count(fixture.db_path(), "bills", 77)?, 1);
+    let clear_all_audit = latest_user_data_audit(fixture.db_path(), "clear_all_user_data")?;
+    assert_eq!(clear_all_audit.0, 42);
+    assert_eq!(clear_all_audit.1, 13);
+    assert_eq!(clear_all_audit.2["auth_mode"], "password");
+    assert_eq!(clear_all_audit.2["accounts"], 2);
 
     Ok(())
 }
@@ -3515,6 +3809,140 @@ fn seed_user_data_statistics_rows(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn seed_user_data_management_rows(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        r#"
+        CREATE TABLE bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            counterparty TEXT NOT NULL,
+            description TEXT NOT NULL,
+            payment_method TEXT DEFAULT '',
+            main_category TEXT,
+            sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source_account_id INTEGER DEFAULT 0,
+            destination_account_id INTEGER DEFAULT 0,
+            destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
+            created_from_recurring INTEGER,
+            import_history_id INTEGER
+        );
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            color TEXT,
+            icon TEXT,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE bill_tags (
+            bill_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE bill_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE recurring_bills (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE budgets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE budget_history (id INTEGER PRIMARY KEY AUTOINCREMENT, budget_id INTEGER NOT NULL);
+        CREATE TABLE bills_preview (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE bills_parser_template (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE import_annotation_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE llm_memory_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE import_sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL);
+        CREATE TABLE saved_filters (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE account_transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE account_types (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL);
+        CREATE TABLE bill_pair_links (user_id INTEGER NOT NULL, left_bill_id INTEGER, right_bill_id INTEGER);
+        CREATE TABLE bill_transfer_pair_suppressions (user_id INTEGER NOT NULL, left_bill_id INTEGER, right_bill_id INTEGER);
+        CREATE TABLE bill_investment_pair_suppressions (user_id INTEGER NOT NULL, left_bill_id INTEGER, right_bill_id INTEGER);
+        CREATE TABLE bill_learning_rule_suppressions (user_id INTEGER NOT NULL, bill_id INTEGER);
+
+        INSERT INTO tags(id, user_id, name, created_at, updated_at)
+        VALUES
+            (400, 42, '@早餐', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (401, 42, '工作', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (402, 77, '其他标签', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        UPDATE accounts SET name = '=Cash' WHERE id = 100 AND user_id = 42;
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description, payment_method,
+            main_category, sub_category, created_at, updated_at, source_account_id,
+            destination_account_id, destination_amount
+        ) VALUES
+            (300, 42, '2026-01-02 12:34:56', '支出', -12.34, '测试商户', '导出测试账单', '支付宝',
+             'Transfer', '', '2026-01-02T00:00:00', '2026-01-02T00:00:00', 100, 0, 0),
+            (301, 77, '2026-01-02 12:34:56', '支出', -88.00, '其他商户', '其他用户账单', '现金',
+             'Other Transfer', '', '2026-01-02T00:00:00', '2026-01-02T00:00:00', 101, 0, 0);
+        INSERT INTO bill_tags(bill_id, tag_id, created_at)
+        VALUES (300, 400, 'now'), (300, 401, 'now'), (301, 402, 'now');
+        INSERT INTO bill_templates(id, user_id, name, created_at, updated_at)
+        VALUES (500, 42, '模板', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO bill_pair_links(user_id, left_bill_id, right_bill_id) VALUES (42, 300, 302);
+        INSERT INTO bill_transfer_pair_suppressions(user_id, left_bill_id, right_bill_id) VALUES (42, 300, 302);
+        INSERT INTO bill_investment_pair_suppressions(user_id, left_bill_id, right_bill_id) VALUES (42, 300, 302);
+        INSERT INTO bill_learning_rule_suppressions(user_id, bill_id) VALUES (42, 300);
+        "#,
+    )?;
+    Ok(())
+}
+
+fn seed_user_data_clear_all_rows(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute_batch(
+        r#"
+        INSERT INTO accounts(id, user_id, name, type, created_at, updated_at)
+        VALUES (102, 42, 'Clear All Cash', 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO categories(id, user_id, main_category, sub_category, created_at)
+        VALUES (202, 42, '清理分类', '', '2026-01-01T00:00:00');
+        INSERT INTO category_rules(
+            id, user_id, category_id, name, priority, rule_expression, created_at, updated_at
+        ) VALUES
+            (203, 42, 202, '清理规则', 1, 'counterparty:工资', '2026-01-01T00:00:00', '2026-01-01T00:00:00'),
+            (204, 77, 201, '其他规则', 1, 'counterparty:其他', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description, payment_method,
+            main_category, sub_category, created_at, updated_at, source_account_id,
+            destination_account_id, destination_amount
+        ) VALUES
+            (302, 42, '2026-01-03 12:34:56', '收入', 66.00, '工资', '清理账单', '银行卡',
+             '清理分类', '', '2026-01-03T00:00:00', '2026-01-03T00:00:00', 102, 0, 0);
+        INSERT INTO tags(id, user_id, name, created_at, updated_at)
+        VALUES (403, 42, '清理标签', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO bill_tags(bill_id, tag_id, created_at) VALUES (302, 403, 'now');
+        INSERT INTO bill_templates(id, user_id, name, created_at, updated_at)
+        VALUES (501, 42, '清理模板', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        INSERT INTO recurring_bills(id, user_id) VALUES (600, 42);
+        INSERT INTO budgets(id, user_id) VALUES (700, 42);
+        INSERT INTO budget_history(id, budget_id) VALUES (701, 700);
+        INSERT INTO bills_preview(id, user_id) VALUES (800, 42);
+        INSERT INTO bills_parser_template(id, user_id) VALUES (801, 42);
+        INSERT INTO import_annotation_samples(id, user_id) VALUES (802, 42);
+        INSERT INTO llm_memory_events(id, user_id) VALUES (803, 42);
+        INSERT INTO import_sessions(id, user_id) VALUES ('clear-all-session', 42);
+        INSERT INTO saved_filters(id, user_id) VALUES (900, 42);
+        INSERT INTO account_transfers(id, user_id) VALUES (901, 42);
+        INSERT INTO account_types(id, user_id) VALUES (902, 42);
+        "#,
+    )?;
+    Ok(())
+}
+
 fn seed_login_edge_users(path: &Path) -> Result<(), Box<dyn Error>> {
     let connection = Connection::open(path)?;
     let password_hash = hash(TEST_PASSWORD, 4)?;
@@ -3783,6 +4211,36 @@ fn latest_audit_log_details(
     Ok(serde_json::from_str(&details)?)
 }
 
+fn latest_user_data_audit(
+    path: &Path,
+    expected_operation: &str,
+) -> Result<(i64, i64, Value), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    let (target_id, target, status, affected_count, details): (i64, String, String, i64, String) =
+        connection.query_row(
+            r#"
+            SELECT target_id, operation_target, status, affected_count, COALESCE(details, '{}')
+            FROM audit_logs
+            WHERE operation_type = ?1
+            ORDER BY id DESC
+            LIMIT 1
+            "#,
+            [expected_operation],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )?;
+    assert_eq!(target, "user_data");
+    assert_eq!(status, "success");
+    Ok((target_id, affected_count, serde_json::from_str(&details)?))
+}
+
 fn latest_auth_log_metadata(path: &Path, expected_event: &str) -> Result<Value, Box<dyn Error>> {
     let connection = Connection::open(path)?;
     let metadata: String = connection.query_row(
@@ -3849,6 +4307,18 @@ fn assert_login_last_ip(
 fn session_count(path: &Path) -> Result<i64, Box<dyn Error>> {
     let connection = Connection::open(path)?;
     Ok(connection.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?)
+}
+
+fn table_count(path: &Path, table_name: &str, user_id: i64) -> Result<i64, Box<dyn Error>> {
+    assert!(table_name
+        .chars()
+        .all(|value| value.is_ascii_alphanumeric() || value == '_'));
+    let connection = Connection::open(path)?;
+    Ok(connection.query_row(
+        &format!("SELECT COUNT(*) FROM {table_name} WHERE user_id = ?1"),
+        [user_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn assert_login_failure_count(
@@ -4472,6 +4942,13 @@ async fn read_json(response: axum::response::Response) -> Value {
         .await
         .expect("body bytes");
     serde_json::from_slice(&bytes).expect("json body")
+}
+
+async fn read_text(response: axum::response::Response) -> String {
+    let bytes = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body bytes");
+    String::from_utf8(bytes.to_vec()).expect("utf-8 body")
 }
 
 fn jwt_payload(token: &str) -> Value {

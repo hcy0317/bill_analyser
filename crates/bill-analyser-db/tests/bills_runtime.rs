@@ -610,11 +610,16 @@ fn query_filters_empty_mutations_and_investment_pnl_balance_edges() -> Result<()
         1,
         20,
         &BillFilters {
+            id: Some(salary_id),
             amount_filter: Some("eq:not-a-number".to_string()),
             ..BillFilters::default()
         },
+    )?;
+    assert_eq!(invalid_amount.total, 1);
+    assert_eq!(
+        invalid_amount.bills[0].get("id").and_then(Value::as_i64),
+        Some(salary_id)
     );
-    assert!(invalid_amount.is_err());
 
     let mut investment_gain = bill_fields(
         "2026-05-09 10:00:00",

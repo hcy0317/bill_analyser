@@ -12,7 +12,7 @@
   - `import_db_runtime` 下预算 CRUD/export/execution/forecast/history/snapshot/import 已由 Rust `crates/bill-analyser-db/src/budgets.rs` 访问普通应用 SQLite 文件，保持 `user_id` 隔离、yuan-style numeric 金额、父子预算自动上卷、月度到季度/年度父周期同步、旧 `categories.type=1` 支出归一、列表 category metadata 解析、export DTO、execution 只读聚合的日期窗口交集/账户标签过滤/`abs(sum(amount))`、forecast 历史窗口扩展/period grouping/当前周期花费/预算 primary-sub-total 映射/backtest MAPE、history canonical `filter_summary` 精确快照优先与 on-demand fallback、snapshot 对 `budget_history` 的同 user/filter/period replacement 写入，以及 import 按 `name + user_id` 更新或插入预算、单事务提交、逐项错误计数和默认 `period_type/alert_threshold/enabled` 处理。Rust `crates/bill-analyser-core/src/budgets.rs` 继续固定期间、金额口径、父子预算、历史过滤、导入校验和预测计算合同。
 - 用户与安全：`users`、`sessions`、`auth_logs`、`audit_logs`、`user_two_factor_recovery_codes`
 - 备份与恢复：`backup_records`、`backup_jobs`
-  - `audit_logs`、`backup_records`、`backup_jobs` 的实际写入仍由 Python `core/database/audit_backup/` 在 `aiosqlite` 事务中执行；Rust `ops.rs` 固定备份记录投影、cleanup record-first 决策、用户数据清理审计 payload 和 backup job 默认值/校验合同。
+  - `backup_records`、`backup_jobs` 以及备份域 `audit_logs` 的实际写入仍由 Python `core/database/audit_backup/` 在 `aiosqlite` 事务中执行；Rust `ops.rs` 固定备份记录投影、cleanup record-first 决策、用户数据清理审计 payload 和 backup job 默认值/校验合同。默认 `import_db_runtime` 下，用户数据清理路由自身已由 Rust 写入 `user_data` 审计元数据。
 - 导入三阶段：`import_sessions`、`bills_parser_template`、`bills_preview`
 - 导入三阶段临时表当前还会持久化解析器元标签：`bills_parser_template.parser_tags_json` 保存解析阶段 tags，`bills_preview.preview_parser_tags_json` 保存预览阶段 tags
 - 迁移与索引补齐由 schema 子模块统一编排；运行态调用方不直接依赖某个单独 schema 文件

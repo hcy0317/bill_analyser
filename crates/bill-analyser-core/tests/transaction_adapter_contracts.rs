@@ -195,6 +195,11 @@ fn export_cells_escape_formula_like_text_columns_only() {
         serialize_export_cell("counterparty", "-SUM(A1)"),
         "'-SUM(A1)"
     );
+    assert_eq!(
+        serialize_export_cell("source_account", "=HYPERLINK(\"http://example.test\")"),
+        "'=HYPERLINK(\"http://example.test\")"
+    );
+    assert_eq!(serialize_export_cell("tags", "@cmd"), "'@cmd");
     assert_eq!(serialize_export_cell("amount", "-12.34"), "-12.34");
     assert_eq!(serialize_export_cell("description", "normal"), "normal");
     assert_eq!(

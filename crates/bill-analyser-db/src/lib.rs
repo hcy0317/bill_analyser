@@ -53,7 +53,7 @@ pub use auth_registration::{
 pub use bills::{
     batch_create_bills, batch_delete_bills, batch_update_bills, calculate_bill_hash_from_fields,
     calculate_bill_hash_from_record, create_bill, delete_bill, get_bill_by_id, get_bill_tags,
-    get_bill_update_snapshot, get_first_account_id, query_bills, update_bill,
+    get_bill_update_snapshot, get_first_account_id, list_bills, query_bills, update_bill,
     BatchUpdateBillsResult, BillCategoryFilter, BillCreateDraft, BillFilters, BillPage, BillRecord,
     BillUpdateDraft,
 };
@@ -107,5 +107,8 @@ pub use statistics::{
     StatisticsBillFilters,
 };
 pub use transaction::run_transaction;
-pub use user_data::get_user_data_statistics;
+pub use user_data::{
+    clear_user_data, clear_user_transactions, get_user_data_statistics, list_user_data_categories,
+    load_user_data_export, UserDataClearAllResult, UserDataExportBundle, UserDataExportCategory,
+};
 pub use user_scope::UserScope;

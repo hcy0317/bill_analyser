@@ -1357,7 +1357,34 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust auth runtime verifies the current password, operation password fallback, or 2FA TOTP passcode and issues a one-hour step_up action token for sensitive operations.",
+        notes: "Rust auth runtime verifies the current password, configured operation password fallback, or 2FA TOTP passcode and issues a one-hour step_up action token for sensitive operations.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/data/export.{file_type}",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust auth runtime exports authenticated user bills as CSV/TSV with the legacy filename, BOM, account-name, tag-name, and filter semantics.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/data/clear/transactions",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust auth runtime clears current-user bills and bill side effects after current password, configured operation password fallback, or step-up action-token verification, then records user_data audit metadata.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/data/clear/all",
+        domain: "auth-security-user-data",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust auth runtime clears current-user business data after current password, configured operation password fallback, or step-up action-token verification, preserving legacy count keys and user_data audit metadata.",
     },
     python_proxy_route!("GET", "/api/accounts/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/accounts/", "taxonomy-rules-settings"),
@@ -1488,22 +1515,6 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "POST",
         "/api/category-rules/reorder",
         "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/data/clear/all",
-        "auth-security-user-data"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/data/clear/transactions",
-        "auth-security-user-data"
-    ),
-    python_proxy_route!(
-        "GET",
-        "/api/data/export.{file_type}",
-        "auth-security-user-data",
-        ResponseEnvelopeFamily::FlaskRawPassthrough
     ),
     python_proxy_route!("GET", "/api/insights/anomalies", "statistics-analyzer"),
     python_proxy_route!("GET", "/api/llm/candidates", "ai-learning-llm"),
@@ -2473,7 +2484,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange, data export, and destructive data-clear routes remain Python-proxied until later P3 cutovers.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange remains Python-proxied until a later P3 cutover.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -2932,7 +2943,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange, data export, and destructive data-clear routes remain Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange remains Python-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

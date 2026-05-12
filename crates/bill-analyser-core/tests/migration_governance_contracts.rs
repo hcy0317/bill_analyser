@@ -52,6 +52,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/auth/password/reset")));
     assert!(rust_owned.contains(&("POST", "/api/auth/oauth2/authorize")));
     assert!(rust_owned.contains(&("POST", "/api/security/step-up/verify")));
+    assert!(rust_owned.contains(&("GET", "/api/data/export.{file_type}")));
+    assert!(rust_owned.contains(&("POST", "/api/data/clear/transactions")));
+    assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -165,11 +168,6 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             "POST",
             "/api/matching/candidates/{*candidate_id}/accept",
             "matching-recurring-calendar-networth",
-        ),
-        (
-            "GET",
-            "/api/data/export.{file_type}",
-            "auth-security-user-data",
         ),
         ("GET", "/api/backup/jobs", "backup-ops"),
     ] {
@@ -580,11 +578,30 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         auth_user_data_statistics.envelope,
         ResponseEnvelopeFamily::FlaskSuccessResult
     );
-    assert!(auth_user_data_statistics
+    assert!(!auth_user_data_statistics
         .unsupported_behavior
         .contains("data export"));
 
+    let auth_user_data_export = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/data/export.{file_type}")
+        .expect("auth user-data export route is present");
+    assert_eq!(
+        auth_user_data_export.state,
+        MigrationState::RustOwnedVerified
+    );
+    assert_eq!(
+        auth_user_data_export.handler,
+        RouteHandlerId::AuthTokenRuntime
+    );
+    assert_eq!(
+        auth_user_data_export.envelope,
+        ResponseEnvelopeFamily::FlaskRawPassthrough
+    );
+
     for endpoint in [
+        "POST /api/data/clear/transactions",
+        "POST /api/data/clear/all",
         "GET /api/2fa/status",
         "POST /api/2fa/verify",
         "POST /api/2fa/enable/request",

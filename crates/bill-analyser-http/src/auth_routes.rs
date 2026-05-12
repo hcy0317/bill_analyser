@@ -1,8 +1,11 @@
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    net::SocketAddr,
+};
 
 use axum::{
     body::{Body, Bytes},
-    extract::{connect_info::ConnectInfo, Path, State},
+    extract::{connect_info::ConnectInfo, Path, Query, State},
     http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -11,17 +14,20 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::{
+    adapters::transaction::serialize_optional_export_cell,
     auth::{
         infer_token_type_from_user_agent, json_object_or_empty, parse_user_agent_device_name,
         validate_refresh_token_claims, AuthRestError, TokenKind,
     },
-    build_user_investment_keyword_settings, serialize_keyword_list, user_data_statistics_response,
-    UserId,
+    build_user_investment_keyword_settings, parse_comma_separated_ints,
+    parse_export_timestamp_millis, serialize_keyword_list, user_data_statistics_response,
+    UserDataClearKind, UserId,
 };
 use bill_analyser_db::{
     auth_account_belongs_to_user, auth_category_belongs_to_user, auth_email_exists,
     auth_email_exists_for_other_user, auth_username_exists, cleanup_expired_sessions,
-    consume_two_factor_recovery_code, count_recent_token_password_failures, create_auth_log,
+    clear_user_data, clear_user_transactions, consume_two_factor_recovery_code,
+    count_auth_events_since, count_recent_token_password_failures, create_auth_log,
     create_auth_log_under_event_limit, create_registered_user_with_defaults, create_token_session,
     delete_application_cloud_settings, delete_user_external_auth,
     disable_two_factor_and_clear_recovery_codes, enable_two_factor_with_recovery_codes_and_session,
@@ -31,14 +37,15 @@ use bill_analyser_db::{
     get_user_data_statistics as get_db_user_data_statistics, get_user_external_auth,
     increment_failed_login, init_app_settings_schema, init_auth_security_schema,
     invalidate_other_user_sessions, invalidate_session_by_id, invalidate_session_by_token_hash,
-    list_application_cloud_settings, list_user_external_auths, list_user_sessions,
-    rotate_refresh_token_session, set_user_email_verified, update_application_cloud_settings,
-    update_auth_user_profile, update_auth_user_profile_with_auth_log, update_user_last_login,
-    update_user_password_hash, ApplicationCloudSettingDraft, ApplicationCloudSettingRow,
-    AuthLogDraft, AuthLoginUserRow, AuthUserProfileRow, AuthUserProfileUpdate,
+    list_application_cloud_settings, list_user_data_categories, list_user_external_auths,
+    list_user_sessions, load_user_data_export, rotate_refresh_token_session,
+    set_user_email_verified, update_application_cloud_settings, update_auth_user_profile,
+    update_auth_user_profile_with_auth_log, update_user_last_login, update_user_password_hash,
+    ApplicationCloudSettingDraft, ApplicationCloudSettingRow, AuthLogDraft, AuthLoginUserRow,
+    AuthUserProfileRow, AuthUserProfileUpdate, BillCategoryFilter, BillFilters,
     CreateTokenSessionDraft, DbError, ExternalAuthRow, RegisterPresetCategory,
     RegisterPresetSubCategory, RegisterUserDraft, SqliteConnectionConfig, SqliteDbPath,
-    SqliteRuntime, TokenSessionRow,
+    SqliteRuntime, TokenSessionRow, UserDataExportBundle, UserDataExportCategory,
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDateTime, TimeZone, Utc};
 use qrcodegen::{QrCode, QrCodeEcc};
@@ -60,6 +67,10 @@ use crate::{
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const TOKEN_PASSWORD_FAILURE_LIMIT: i64 = 5;
 const TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES: i64 = 15;
+const SENSITIVE_AUTH_FAILURE_LIMIT: i64 = 5;
+const SENSITIVE_AUTH_FAILURE_WINDOW_MINUTES: i64 = 15;
+const STEP_UP_AUTH_FAILED_EVENT: &str = "step_up_auth_failed";
+const USER_DATA_CLEAR_AUTH_FAILED_EVENT: &str = "user_data_clear_auth_failed";
 const PROFILE_VERIFICATION_RESEND_LIMIT: i64 = 3;
 const PROFILE_VERIFICATION_RESEND_WINDOW_MINUTES: i64 = 5;
 const MAX_AVATAR_BYTES: usize = 2 * 1024 * 1024;
@@ -96,6 +107,9 @@ pub const AUTH_TOKEN_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/profile/external-auths/unlink"),
     ("GET", "/api/system/version"),
     ("GET", "/api/data/statistics"),
+    ("GET", "/api/data/export.{file_type}"),
+    ("POST", "/api/data/clear/transactions"),
+    ("POST", "/api/data/clear/all"),
     ("POST", "/api/security/step-up/verify"),
     ("GET", "/api/2fa/status"),
     ("POST", "/api/2fa/verify"),
@@ -180,6 +194,18 @@ pub fn auth_token_runtime_router() -> Router<ProxyState> {
         .route(
             "/api/data/statistics",
             get(get_user_data_statistics_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/data/export.:file_type",
+            get(export_user_data_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/data/clear/transactions",
+            post(clear_user_transactions_handler).options(auth_options_handler),
+        )
+        .route(
+            "/api/data/clear/all",
+            post(clear_all_user_data_handler).options(auth_options_handler),
         )
         .route(
             "/api/security/step-up/verify",
@@ -1676,6 +1702,220 @@ async fn get_user_data_statistics_handler(
     }
 }
 
+async fn export_user_data_handler(
+    State(state): State<ProxyState>,
+    Path(file_type): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let export_type = match normalize_user_data_export_type(&file_type) {
+        Ok(value) => value,
+        Err(error) => return auth_rest_error_response(error),
+    };
+    let runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let categories = match list_user_data_categories(runtime.connection(), auth.user_id) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    let filters = build_user_data_export_filters(&query, &categories);
+    let bundle = match load_user_data_export(runtime.connection(), auth.user_id, &filters) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    let export_text = match render_user_data_export(&bundle, export_type.delimiter()) {
+        Ok(value) => value,
+        Err(_) => return db_error_response(),
+    };
+    let filename = format!(
+        "bill_analyser_export_{}.{}",
+        Local::now().format("%Y%m%d_%H%M%S"),
+        export_type.extension()
+    );
+    let mut response = Response::new(Body::from(format!("\u{feff}{export_text}")));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(export_type.content_type()),
+    );
+    if let Ok(value) = HeaderValue::from_str(&format!("attachment; filename={filename}")) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
+}
+
+async fn clear_user_transactions_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    clear_user_data_handler(
+        state,
+        headers,
+        connect_info,
+        body,
+        UserDataClearKind::Transactions,
+    )
+}
+
+async fn clear_all_user_data_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+) -> Response {
+    clear_user_data_handler(state, headers, connect_info, body, UserDataClearKind::All)
+}
+
+fn clear_user_data_handler(
+    state: ProxyState,
+    headers: HeaderMap,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
+    kind: UserDataClearKind,
+) -> Response {
+    let auth = match authenticated_user(&headers, &state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = request_body_object(&body);
+    let mut runtime = match open_runtime(&state) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user = match get_login_user_by_id(runtime.connection(), auth.user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "success": false,
+                    "error": "User not found"
+                }),
+            );
+        }
+        Err(_) => return db_error_response(),
+    };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if let Err(response) = ensure_sensitive_auth_failure_limit(
+        runtime.connection(),
+        user.profile.id,
+        USER_DATA_CLEAR_AUTH_FAILED_EVENT,
+    ) {
+        return *response;
+    }
+    let auth_mode =
+        match resolve_destructive_user_data_auth(runtime.connection(), &body, &state, &user) {
+            Ok(value) => value,
+            Err(SensitiveTwoFactorAuthError::Missing) => {
+                if let Err(response) = record_sensitive_auth_failure(
+                    runtime.connection(),
+                    &user,
+                    USER_DATA_CLEAR_AUTH_FAILED_EVENT,
+                    &ip_address,
+                    &request_user_agent,
+                    "Missing current password or step-up token",
+                    Some(json!({
+                        "operation_type": kind.operation_type(),
+                        "reason": "missing_credentials"
+                    })),
+                ) {
+                    return *response;
+                }
+                return sensitive_auth_missing_response();
+            }
+            Err(SensitiveTwoFactorAuthError::Invalid) => {
+                if let Err(response) = record_sensitive_auth_failure(
+                    runtime.connection(),
+                    &user,
+                    USER_DATA_CLEAR_AUTH_FAILED_EVENT,
+                    &ip_address,
+                    &request_user_agent,
+                    "Invalid current password or step-up token",
+                    Some(json!({
+                        "operation_type": kind.operation_type(),
+                        "reason": "invalid_credentials"
+                    })),
+                ) {
+                    return *response;
+                }
+                return sensitive_auth_invalid_response();
+            }
+            Err(SensitiveTwoFactorAuthError::Db) => return db_error_response(),
+        };
+    let now = utc_now_text();
+    match kind {
+        UserDataClearKind::Transactions => {
+            let deleted_count =
+                match clear_user_transactions(runtime.connection_mut(), auth.user_id) {
+                    Ok(value) => value,
+                    Err(_) => return db_error_response(),
+                };
+            create_user_data_audit_log_best_effort(
+                runtime.connection(),
+                UserDataAuditLogDraft {
+                    operation_type: kind.operation_type(),
+                    user_id: auth.user_id,
+                    details: json!({
+                        "deleted_count": deleted_count,
+                        "auth_mode": auth_mode.as_str()
+                    }),
+                    affected_count: deleted_count,
+                    ip_address: &ip_address,
+                    user_agent: &request_user_agent,
+                    now: &now,
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "result": true,
+                    "deletedCount": deleted_count
+                }),
+            )
+        }
+        UserDataClearKind::All => {
+            let result = match clear_user_data(runtime.connection_mut(), auth.user_id) {
+                Ok(value) => value,
+                Err(_) => return db_error_response(),
+            };
+            let affected_count = result.counts.values().copied().sum::<i64>();
+            let details = user_data_clear_all_audit_details(&result.counts, auth_mode.as_str());
+            create_user_data_audit_log_best_effort(
+                runtime.connection(),
+                UserDataAuditLogDraft {
+                    operation_type: kind.operation_type(),
+                    user_id: auth.user_id,
+                    details,
+                    affected_count,
+                    ip_address: &ip_address,
+                    user_agent: &request_user_agent,
+                    now: &now,
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "result": true,
+                    "counts": result.counts
+                }),
+            )
+        }
+    }
+}
+
 async fn get_two_factor_status_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -1748,11 +1988,36 @@ async fn verify_security_step_up_handler(
         }
         Err(_) => return db_error_response(),
     };
+    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
+    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
+    if let Err(response) = ensure_sensitive_auth_failure_limit(
+        runtime.connection(),
+        user.profile.id,
+        STEP_UP_AUTH_FAILED_EVENT,
+    ) {
+        return *response;
+    }
 
     let verified_via = if !password.is_empty() {
-        match verify_sensitive_operation_password(runtime.connection(), &user, password) {
+        match verify_sensitive_operation_password_with_policy(
+            runtime.connection(),
+            &user,
+            password,
+            OperationPasswordPolicy::RequireConfigured,
+        ) {
             Ok(true) => {}
             Ok(false) => {
+                if let Err(response) = record_sensitive_auth_failure(
+                    runtime.connection(),
+                    &user,
+                    STEP_UP_AUTH_FAILED_EVENT,
+                    &ip_address,
+                    &request_user_agent,
+                    "Invalid password",
+                    Some(json!({ "reason": "invalid_password" })),
+                ) {
+                    return *response;
+                }
                 return auth_rest_error_response(AuthRestError::new(
                     401,
                     "Invalid credentials",
@@ -1765,6 +2030,17 @@ async fn verify_security_step_up_handler(
     } else {
         let secret = user.two_factor_secret.trim().replace(' ', "");
         if !user.two_factor_enabled || secret.is_empty() {
+            if let Err(response) = record_sensitive_auth_failure(
+                runtime.connection(),
+                &user,
+                STEP_UP_AUTH_FAILED_EVENT,
+                &ip_address,
+                &request_user_agent,
+                "Two-factor authentication is not enabled",
+                Some(json!({ "reason": "totp_unavailable" })),
+            ) {
+                return *response;
+            }
             return auth_rest_error_response(AuthRestError::new(
                 400,
                 "Bad Request",
@@ -1772,6 +2048,17 @@ async fn verify_security_step_up_handler(
             ));
         }
         if !verify_totp_passcode(&secret, passcode, Utc::now().timestamp()) {
+            if let Err(response) = record_sensitive_auth_failure(
+                runtime.connection(),
+                &user,
+                STEP_UP_AUTH_FAILED_EVENT,
+                &ip_address,
+                &request_user_agent,
+                "Invalid passcode",
+                Some(json!({ "reason": "invalid_passcode" })),
+            ) {
+                return *response;
+            }
             return auth_rest_error_response(AuthRestError::new(
                 401,
                 "Invalid passcode",
@@ -1785,8 +2072,6 @@ async fn verify_security_step_up_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let request_user_agent = header_value(&headers, header::USER_AGENT.as_str());
-    let ip_address = client_ip(&headers, connect_info.map(|ConnectInfo(addr)| addr));
     if log_auth_event(
         runtime.connection(),
         AuthEvent {
@@ -3451,10 +3736,11 @@ fn authenticated_user(headers: &HeaderMap, state: &ProxyState) -> RouteResult<Au
         .map_err(|error| Box::new(auth_error_response(error)))
 }
 
-fn verify_sensitive_operation_password(
+fn verify_sensitive_operation_password_with_policy(
     connection: &rusqlite::Connection,
     user: &AuthLoginUserRow,
     password: &str,
+    operation_password_policy: OperationPasswordPolicy,
 ) -> bill_analyser_db::DbResult<bool> {
     if password.is_empty() {
         return Ok(false);
@@ -3462,12 +3748,19 @@ fn verify_sensitive_operation_password(
     if bcrypt::verify(password, &user.password_hash).unwrap_or(false) {
         return Ok(true);
     }
-    verify_operation_password(connection, password)
+    verify_operation_password(connection, password, operation_password_policy)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperationPasswordPolicy {
+    AllowUnset,
+    RequireConfigured,
 }
 
 fn verify_operation_password(
     connection: &rusqlite::Connection,
     password: &str,
+    operation_password_policy: OperationPasswordPolicy,
 ) -> bill_analyser_db::DbResult<bool> {
     if let Some(env_password) = std::env::var("BILL_ANALYSER_OPERATION_PASSWORD")
         .ok()
@@ -3481,7 +3774,7 @@ fn verify_operation_password(
     Ok(
         match stored_password.as_deref().filter(|value| !value.is_empty()) {
             Some(value) => password == value,
-            None => true,
+            None => operation_password_policy == OperationPasswordPolicy::AllowUnset,
         },
     )
 }
@@ -3514,6 +3807,37 @@ fn resolve_sensitive_two_factor_auth(
     state: &ProxyState,
     user: &AuthLoginUserRow,
 ) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
+    resolve_sensitive_two_factor_auth_with_policy(
+        connection,
+        body,
+        state,
+        user,
+        OperationPasswordPolicy::AllowUnset,
+    )
+}
+
+fn resolve_destructive_user_data_auth(
+    connection: &rusqlite::Connection,
+    body: &Map<String, Value>,
+    state: &ProxyState,
+    user: &AuthLoginUserRow,
+) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
+    resolve_sensitive_two_factor_auth_with_policy(
+        connection,
+        body,
+        state,
+        user,
+        OperationPasswordPolicy::RequireConfigured,
+    )
+}
+
+fn resolve_sensitive_two_factor_auth_with_policy(
+    connection: &rusqlite::Connection,
+    body: &Map<String, Value>,
+    state: &ProxyState,
+    user: &AuthLoginUserRow,
+    operation_password_policy: OperationPasswordPolicy,
+) -> Result<SensitiveTwoFactorAuthMode, SensitiveTwoFactorAuthError> {
     let step_up_token = body
         .get("stepUpToken")
         .or_else(|| body.get("step_up_token"))
@@ -3540,11 +3864,237 @@ fn resolve_sensitive_two_factor_auth(
     if password.is_empty() {
         return Err(SensitiveTwoFactorAuthError::Missing);
     }
-    match verify_sensitive_operation_password(connection, user, password) {
+    match verify_sensitive_operation_password_with_policy(
+        connection,
+        user,
+        password,
+        operation_password_policy,
+    ) {
         Ok(true) => Ok(SensitiveTwoFactorAuthMode::Password),
         Ok(false) => Err(SensitiveTwoFactorAuthError::Invalid),
         Err(_) => Err(SensitiveTwoFactorAuthError::Db),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserDataExportType {
+    Csv,
+    Tsv,
+}
+
+impl UserDataExportType {
+    const fn delimiter(self) -> u8 {
+        match self {
+            Self::Csv => b',',
+            Self::Tsv => b'\t',
+        }
+    }
+
+    const fn content_type(self) -> &'static str {
+        match self {
+            Self::Csv => "text/csv; charset=utf-8",
+            Self::Tsv => "text/tab-separated-values; charset=utf-8",
+        }
+    }
+
+    const fn extension(self) -> &'static str {
+        match self {
+            Self::Csv => "csv",
+            Self::Tsv => "tsv",
+        }
+    }
+}
+
+fn normalize_user_data_export_type(file_type: &str) -> Result<UserDataExportType, AuthRestError> {
+    match file_type.trim().to_ascii_lowercase().as_str() {
+        "csv" => Ok(UserDataExportType::Csv),
+        "tsv" => Ok(UserDataExportType::Tsv),
+        _ => Err(AuthRestError::new(
+            400,
+            "Invalid request",
+            "Unsupported export file type",
+        )),
+    }
+}
+
+fn build_user_data_export_filters(
+    query: &HashMap<String, String>,
+    categories: &[UserDataExportCategory],
+) -> BillFilters {
+    BillFilters {
+        date_from: query
+            .get("min_time")
+            .and_then(|value| parse_export_timestamp_millis(value)),
+        date_to: query
+            .get("max_time")
+            .and_then(|value| parse_export_timestamp_millis(value)),
+        transaction_type: query
+            .get("type")
+            .and_then(|value| user_data_export_transaction_type(value)),
+        keyword: query
+            .get("keyword")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        amount_filter: query
+            .get("amount_filter")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        account_ids: query
+            .get("account_ids")
+            .map(|value| parse_comma_separated_ints(value))
+            .unwrap_or_default(),
+        tag_ids: query
+            .get("tag_ids")
+            .map(|value| parse_comma_separated_ints(value))
+            .unwrap_or_default(),
+        categories: user_data_export_category_filters(
+            query
+                .get("category_ids")
+                .map(|value| parse_comma_separated_ints(value))
+                .unwrap_or_default(),
+            categories,
+        ),
+        ..Default::default()
+    }
+}
+
+fn user_data_export_transaction_type(raw_value: &str) -> Option<String> {
+    let value = raw_value.trim();
+    if value.is_empty() || value == "0" {
+        return None;
+    }
+    if let Ok(code) = value.parse::<i64>() {
+        return match code {
+            2 => Some("收入".to_string()),
+            3 => Some("支出".to_string()),
+            4 => Some("转账".to_string()),
+            5 => Some("投资".to_string()),
+            _ => None,
+        };
+    }
+    Some(value.to_string())
+}
+
+fn user_data_export_category_filters(
+    category_ids: Vec<i64>,
+    categories: &[UserDataExportCategory],
+) -> Vec<BillCategoryFilter> {
+    if category_ids.is_empty() {
+        return Vec::new();
+    }
+    let category_map = categories
+        .iter()
+        .map(|category| (category.id, category))
+        .collect::<BTreeMap<_, _>>();
+    category_ids
+        .into_iter()
+        .filter_map(|category_id| category_map.get(&category_id))
+        .map(|category| BillCategoryFilter {
+            main: category.main_category.clone(),
+            sub: Some(category.sub_category.clone()).filter(|value| !value.trim().is_empty()),
+        })
+        .collect()
+}
+
+fn render_user_data_export(
+    bundle: &UserDataExportBundle,
+    delimiter: u8,
+) -> Result<String, csv::Error> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .terminator(csv::Terminator::Any(b'\n'))
+        .from_writer(Vec::new());
+    writer.write_record([
+        "id",
+        "date",
+        "type",
+        "amount",
+        "main_category",
+        "sub_category",
+        "source_account",
+        "destination_account",
+        "counterparty",
+        "payment_method",
+        "description",
+        "tags",
+        "comment",
+        "created_at",
+        "updated_at",
+    ])?;
+    for bill in &bundle.bills {
+        let bill_id = value_i64(bill.get("id")).unwrap_or(-1);
+        writer.write_record([
+            export_value(bill.get("id"), "id"),
+            export_value(bill.get("date"), "date"),
+            export_value(bill.get("type"), "type"),
+            export_value(bill.get("amount"), "amount"),
+            export_value(bill.get("main_category"), "main_category"),
+            export_value(bill.get("sub_category"), "sub_category"),
+            export_account_name(
+                bill.get("source_account_id"),
+                "source_account",
+                &bundle.account_names,
+            ),
+            export_account_name(
+                bill.get("destination_account_id"),
+                "destination_account",
+                &bundle.account_names,
+            ),
+            export_value(bill.get("counterparty"), "counterparty"),
+            export_value(bill.get("payment_method"), "payment_method"),
+            export_value(bill.get("description"), "description"),
+            bundle
+                .tag_names_by_bill
+                .get(&bill_id)
+                .map(|tags| tags.join("|"))
+                .map(|tags| serialize_optional_export_cell("tags", Some(tags)))
+                .unwrap_or_default(),
+            export_value(bill.get("comment"), "comment"),
+            export_value(bill.get("created_at"), "created_at"),
+            export_value(bill.get("updated_at"), "updated_at"),
+        ])?;
+    }
+    let bytes = writer.into_inner().map_err(|error| error.into_error())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn export_value(value: Option<&Value>, key: &str) -> String {
+    match value {
+        Some(Value::String(text)) => serialize_optional_export_cell(key, Some(text)),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Null) | None => String::new(),
+        Some(value) => serialize_optional_export_cell(key, Some(value.to_string())),
+    }
+}
+
+fn export_account_name(
+    value: Option<&Value>,
+    key: &str,
+    account_names: &BTreeMap<i64, String>,
+) -> String {
+    let account_id = value_i64(value).unwrap_or_default();
+    account_names
+        .get(&account_id)
+        .map(|value| serialize_optional_export_cell(key, Some(value)))
+        .unwrap_or_default()
+}
+
+fn value_i64(value: Option<&Value>) -> Option<i64> {
+    value.and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()))
+    })
+}
+
+fn user_data_clear_all_audit_details(counts: &BTreeMap<String, i64>, auth_mode: &str) -> Value {
+    let mut details = Map::new();
+    for (key, value) in counts {
+        details.insert(key.clone(), json!(value));
+    }
+    details.insert("auth_mode".to_string(), json!(auth_mode));
+    Value::Object(details)
 }
 
 fn sensitive_auth_missing_response() -> Response {
@@ -4463,6 +5013,54 @@ fn log_auth_event(
     )
 }
 
+fn ensure_sensitive_auth_failure_limit(
+    connection: &rusqlite::Connection,
+    user_id: UserId,
+    event_type: &str,
+) -> RouteResult<()> {
+    let failure_count = count_auth_events_since(
+        connection,
+        user_id,
+        event_type,
+        &sensitive_auth_failure_window_start_text(),
+    )
+    .map_err(|_| Box::new(db_error_response()))?;
+    if failure_count >= SENSITIVE_AUTH_FAILURE_LIMIT {
+        return Err(Box::new(auth_rest_error_response(AuthRestError::new(
+            429,
+            "Too Many Requests",
+            "Too many failed sensitive-operation authentication attempts, please try again later",
+        ))));
+    }
+    Ok(())
+}
+
+fn record_sensitive_auth_failure(
+    connection: &rusqlite::Connection,
+    user: &AuthLoginUserRow,
+    event_type: &str,
+    ip_address: &str,
+    user_agent: &str,
+    error_message: &str,
+    metadata: Option<Value>,
+) -> RouteResult<()> {
+    log_auth_event(
+        connection,
+        AuthEvent {
+            user_id: Some(user.profile.id),
+            username: &user.profile.username,
+            event_type,
+            ip_address,
+            user_agent,
+            success: false,
+            error_message: Some(error_message.to_string()),
+            metadata: metadata.map(|value| value.to_string()),
+        },
+    )
+    .map(|_| ())
+    .map_err(|_| Box::new(db_error_response()))
+}
+
 fn persist_login_success(
     connection: &rusqlite::Connection,
     session_draft: &CreateTokenSessionDraft,
@@ -4641,6 +5239,16 @@ struct UserAuditLogDraft<'a> {
     now: &'a str,
 }
 
+struct UserDataAuditLogDraft<'a> {
+    operation_type: &'a str,
+    user_id: UserId,
+    details: Value,
+    affected_count: i64,
+    ip_address: &'a str,
+    user_agent: &'a str,
+    now: &'a str,
+}
+
 fn create_user_audit_log_best_effort(
     connection: &rusqlite::Connection,
     draft: UserAuditLogDraft<'_>,
@@ -4662,6 +5270,37 @@ fn create_user_audit_log_best_effort(
             "user",
             target_id,
             details,
+            draft.affected_count,
+            draft.ip_address,
+            draft.user_agent,
+            Option::<String>::None,
+            "success",
+            Option::<String>::None,
+            draft.now,
+        ),
+    );
+}
+
+fn create_user_data_audit_log_best_effort(
+    connection: &rusqlite::Connection,
+    draft: UserDataAuditLogDraft<'_>,
+) {
+    let Ok(target_id) = i64::try_from(draft.user_id.get()) else {
+        return;
+    };
+    let _ = connection.execute(
+        r#"
+        INSERT INTO audit_logs (
+            operation_type, operation_target, target_id, details,
+            affected_count, ip_address, user_agent, session_id,
+            status, error_message, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "#,
+        (
+            draft.operation_type,
+            "user_data",
+            target_id,
+            draft.details.to_string(),
             draft.affected_count,
             draft.ip_address,
             draft.user_agent,
@@ -4852,6 +5491,12 @@ fn login_lockout_until_text(minutes: i64) -> String {
 
 fn token_failure_window_start_text() -> String {
     (Utc::now().naive_utc() - ChronoDuration::minutes(TOKEN_PASSWORD_FAILURE_WINDOW_MINUTES))
+        .format("%Y-%m-%dT%H:%M:%S%.f")
+        .to_string()
+}
+
+fn sensitive_auth_failure_window_start_text() -> String {
+    (Utc::now().naive_utc() - ChronoDuration::minutes(SENSITIVE_AUTH_FAILURE_WINDOW_MINUTES))
         .format("%Y-%m-%dT%H:%M:%S%.f")
         .to_string()
 }

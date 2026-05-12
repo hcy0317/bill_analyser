@@ -379,6 +379,29 @@ pub fn query_bills(
     Ok(BillPage { bills, total })
 }
 
+pub fn list_bills(
+    connection: &Connection,
+    user_id: UserId,
+    filters: &BillFilters,
+) -> DbResult<Vec<BillRecord>> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let (conditions, filter_params) = build_bill_filter_conditions(filters)?;
+    let mut list_params = vec![SqlValue::Integer(user_id)];
+    list_params.extend(filter_params);
+    let list_sql = format!(
+        "SELECT {} FROM bills WHERE user_id = ?{} ORDER BY date DESC",
+        BILL_SELECT_COLUMNS.join(", "),
+        where_suffix(&conditions)
+    );
+    let mut statement = connection.prepare(&list_sql)?;
+    let rows = statement.query_map(params_from_iter(list_params), bill_record_from_row)?;
+    let mut bills = Vec::new();
+    for row in rows {
+        bills.push(row?);
+    }
+    Ok(bills)
+}
+
 pub fn get_first_account_id(connection: &Connection, user_id: UserId) -> DbResult<Option<i64>> {
     let user_id = UserScope::new(user_id).bind_value()?;
     connection
@@ -949,7 +972,7 @@ fn build_bill_filter_conditions(filters: &BillFilters) -> DbResult<(Vec<String>,
         params.push(SqlValue::Real(value));
     }
     if let Some(value) = text_filter(filters.amount_filter.as_deref()) {
-        apply_amount_filter(&mut conditions, &mut params, &value)?;
+        apply_amount_filter(&mut conditions, &mut params, &value);
     }
     Ok((conditions, params))
 }
@@ -958,51 +981,40 @@ fn apply_amount_filter(
     conditions: &mut Vec<String>,
     params: &mut Vec<SqlValue>,
     amount_filter: &str,
-) -> DbResult<()> {
+) {
     let parts = amount_filter.split(':').collect::<Vec<_>>();
     if parts.len() < 2 {
-        return Ok(());
+        return;
     }
-    let amount = |index: usize| -> DbResult<f64> {
-        parts
-            .get(index)
-            .ok_or_else(|| DbError::InvalidOperation("invalid amount filter".to_string()))?
-            .parse::<f64>()
-            .map_err(|_| DbError::InvalidOperation("invalid amount filter".to_string()))
-    };
+    let amount = |index: usize| -> Option<f64> { parts.get(index)?.parse::<f64>().ok() };
     match parts[0].to_ascii_lowercase().as_str() {
-        "eq" => {
-            conditions.push("amount = ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "ne" => {
-            conditions.push("amount != ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "gt" => {
-            conditions.push("amount > ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "lt" => {
-            conditions.push("amount < ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "gte" => {
-            conditions.push("amount >= ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "lte" => {
-            conditions.push("amount <= ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-        }
-        "between" if parts.len() >= 3 => {
-            conditions.push("amount BETWEEN ? AND ?".to_string());
-            params.push(SqlValue::Real(amount(1)?));
-            params.push(SqlValue::Real(amount(2)?));
+        "eq" => push_amount_filter_condition(conditions, params, "amount = ?", amount(1)),
+        "ne" => push_amount_filter_condition(conditions, params, "amount != ?", amount(1)),
+        "gt" => push_amount_filter_condition(conditions, params, "amount > ?", amount(1)),
+        "lt" => push_amount_filter_condition(conditions, params, "amount < ?", amount(1)),
+        "gte" => push_amount_filter_condition(conditions, params, "amount >= ?", amount(1)),
+        "lte" => push_amount_filter_condition(conditions, params, "amount <= ?", amount(1)),
+        "between" => {
+            if let (Some(minimum), Some(maximum)) = (amount(1), amount(2)) {
+                conditions.push("amount BETWEEN ? AND ?".to_string());
+                params.push(SqlValue::Real(minimum));
+                params.push(SqlValue::Real(maximum));
+            }
         }
         _ => {}
     }
-    Ok(())
+}
+
+fn push_amount_filter_condition(
+    conditions: &mut Vec<String>,
+    params: &mut Vec<SqlValue>,
+    condition: &str,
+    amount: Option<f64>,
+) {
+    if let Some(amount) = amount {
+        conditions.push(condition.to_string());
+        params.push(SqlValue::Real(amount));
+    }
 }
 
 fn bill_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BillRecord> {
