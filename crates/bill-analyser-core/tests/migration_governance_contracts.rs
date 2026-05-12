@@ -116,6 +116,8 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),
         ("DELETE", "/api/bills/{bill_id}/recurring-match"),
+        ("POST", "/api/bills/category/quick-add-keyword"),
+        ("POST", "/api/bills/category/refresh"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
             panic!("missing Rust-owned bills adjacent endpoint {method} {pattern}")
@@ -132,8 +134,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
     assert!(!receipt_recognition.is_import_deletion_blocked());
 
     for (method, pattern) in [
-        ("POST", "/api/bills/category/quick-add-keyword"),
-        ("POST", "/api/bills/category/refresh"),
         ("GET", "/api/statistics/overview"),
         ("GET", "/api/statistics/trends"),
         ("GET", "/api/statistics/comparison"),

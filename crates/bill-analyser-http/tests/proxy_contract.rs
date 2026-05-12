@@ -527,7 +527,10 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         )
         .await
         .expect("response");
-    assert_eq!(wrong_method_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        wrong_method_response.status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
 
     let overmatched_wildcard_response = app
         .clone()

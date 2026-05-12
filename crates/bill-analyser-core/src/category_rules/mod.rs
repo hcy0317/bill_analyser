@@ -57,6 +57,93 @@ pub fn compile_rule_expression(expr: &str, regex_enabled: bool) -> CompiledRuleD
     }
 }
 
+pub fn match_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> bool {
+    let compiled = compile_rule_expression(expr, regex_enabled);
+    match_compiled_rule(text, &compiled)
+}
+
+pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
+    if compiled.is_empty || text.is_empty() {
+        return false;
+    }
+
+    let text_lower = text.to_lowercase();
+    if let Some(expression_ast) = &compiled.expression_ast {
+        return match_rule_expression_node(&text_lower, expression_ast);
+    }
+
+    if compiled
+        .not_patterns
+        .iter()
+        .any(|pattern| match_rule_pattern(&text_lower, pattern))
+    {
+        return false;
+    }
+
+    if compiled
+        .and_patterns
+        .iter()
+        .any(|pattern| !match_rule_pattern(&text_lower, pattern))
+    {
+        return false;
+    }
+
+    if !compiled.or_blocks.is_empty() {
+        return compiled.or_blocks.iter().all(|block| {
+            block
+                .iter()
+                .any(|pattern| match_rule_pattern(&text_lower, pattern))
+        });
+    }
+
+    !compiled.and_patterns.is_empty() || !compiled.not_patterns.is_empty()
+}
+
+fn match_rule_expression_node(text_lower: &str, node: &RuleExpressionNodeDto) -> bool {
+    match node.kind.as_str() {
+        "all" => {
+            !node.children.is_empty()
+                && node
+                    .children
+                    .iter()
+                    .all(|child| match_rule_expression_node(text_lower, child))
+        }
+        "any" => node
+            .children
+            .iter()
+            .any(|child| match_rule_expression_node(text_lower, child)),
+        "not" => {
+            node.children.len() == 1 && !match_rule_expression_node(text_lower, &node.children[0])
+        }
+        "clause" if node.operator == "OR" => node
+            .patterns
+            .iter()
+            .any(|pattern| match_rule_pattern(text_lower, pattern)),
+        "clause" if node.operator == "AND" => {
+            !node.patterns.is_empty()
+                && node
+                    .patterns
+                    .iter()
+                    .all(|pattern| match_rule_pattern(text_lower, pattern))
+        }
+        "clause" if node.operator == "NOT" => !node
+            .patterns
+            .iter()
+            .any(|pattern| match_rule_pattern(text_lower, pattern)),
+        _ => false,
+    }
+}
+
+fn match_rule_pattern(text_lower: &str, pattern: &str) -> bool {
+    if let Some(regex_pattern) = pattern.strip_prefix("regex:") {
+        return regex::RegexBuilder::new(regex_pattern)
+            .case_insensitive(true)
+            .build()
+            .is_ok_and(|regex| regex.is_match(text_lower));
+    }
+    text_lower.contains(pattern)
+}
+
 fn compile_legacy_rule(rule: &str) -> CompiledRuleDto {
     if rule.is_empty() {
         return CompiledRuleDto::empty();
@@ -527,7 +614,7 @@ fn is_factor_terminator(value: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_rule_expression;
+    use super::{compile_rule_expression, match_rule_expression};
 
     #[test]
     fn compiles_legacy_rule_expression() {
@@ -603,5 +690,43 @@ mod tests {
             assert!(compiled.is_empty, "{expr}");
             assert!(compiled.expression_ast.is_none(), "{expr}");
         }
+    }
+
+    #[test]
+    fn matches_legacy_and_expression_rules() {
+        assert!(match_rule_expression(
+            "滴滴 打车",
+            "OR:滴滴|快的&AND:打车",
+            false
+        ));
+        assert!(!match_rule_expression(
+            "滴滴 打车 退款",
+            "OR:滴滴|快的&AND:打车&NOT:退款",
+            false
+        ));
+        assert!(match_rule_expression(
+            "星巴克燕麦拿铁",
+            "OR={星巴克}+AND={拿铁}",
+            false
+        ));
+        assert!(!match_rule_expression(
+            "星巴克燕麦拿铁 退款",
+            "OR={星巴克}+AND={拿铁}×OR={退款}",
+            false
+        ));
+    }
+
+    #[test]
+    fn matches_regex_rules_case_insensitively() {
+        assert!(match_rule_expression(
+            "STARBUCKS latte",
+            "REGEX={star.*latte}",
+            false
+        ));
+        assert!(!match_rule_expression(
+            "refund starbucks latte",
+            "REGEX={star.*latte}+NOT={refund}",
+            false
+        ));
     }
 }

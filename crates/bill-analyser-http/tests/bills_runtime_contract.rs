@@ -1,11 +1,9 @@
-use std::{error::Error, fs, net::SocketAddr, path::Path, time::Duration};
+use std::{error::Error, fs, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
     extract::Request,
     http::{Method, StatusCode},
-    response::IntoResponse,
-    routing::any,
     Router,
 };
 use base64::Engine as _;
@@ -16,7 +14,6 @@ use bill_analyser_http::{
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 const TEST_AUTH_SECRET: &str = "bills-route-secret";
@@ -713,6 +710,257 @@ async fn bills_runtime_serves_recurring_candidates_and_match_without_python_prox
 }
 
 #[tokio::test]
+async fn bills_runtime_serves_category_quick_actions_without_python_proxy(
+) -> Result<(), Box<dyn Error>> {
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/bills/category/quick-add-keyword")));
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/bills/category/refresh")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/bills/category/quick-add-keyword")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/bills/category/refresh")));
+
+    let fixture = RuntimeFixture::new()?;
+    seed_category_action_data(&fixture.db_path)?;
+    let app = runtime_router(&fixture);
+
+    let empty_body_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(empty_body_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(empty_body_response).await["error"],
+        "Request body is required"
+    );
+
+    let invalid_json_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_json_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert!(read_json(invalid_json_response).await["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("JSON parse error"));
+
+    let null_body_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            Body::from("null"),
+        ))
+        .await?;
+    assert_eq!(null_body_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(null_body_response).await["error"],
+        "Request body is required"
+    );
+
+    let missing_main_category_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            json!({"keyword": "美团"}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_main_category_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_main_category_response).await["error"],
+        "main_category and keyword are required"
+    );
+
+    let missing_fields_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            json!({"main_category": "餐饮"}),
+        ))
+        .await?;
+    assert_eq!(missing_fields_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_fields_response).await["error"],
+        "main_category and keyword are required"
+    );
+
+    let unauthenticated_quick_add_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/category/quick-add-keyword")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"main_category": "餐饮", "keyword": "美团"}).to_string(),
+                ))?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_quick_add_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let missing_category_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            json!({"main_category": "不存在", "keyword": "美团"}),
+        ))
+        .await?;
+    assert_eq!(missing_category_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_category_response).await["error"],
+        "Failed to add keyword"
+    );
+
+    let quick_add_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            json!({"main_category": "餐饮", "sub_category": "早餐", "keyword": "美团"}),
+        ))
+        .await?;
+    assert_eq!(quick_add_response.status(), StatusCode::OK);
+    let quick_add_body = read_json(quick_add_response).await;
+    assert_eq!(quick_add_body["success"], true);
+    assert_eq!(quick_add_body["message"], "Keyword added successfully");
+    assert_eq!(
+        category_keywords(&fixture.db_path, "餐饮", "早餐")?,
+        "早餐,美团"
+    );
+
+    let duplicate_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/quick-add-keyword",
+            json!({"main_category": "餐饮", "sub_category": "早餐", "keyword": "美团"}),
+        ))
+        .await?;
+    assert_eq!(duplicate_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(duplicate_response).await["error"],
+        "Failed to add keyword"
+    );
+
+    let refresh_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/category/refresh",
+            json!({"bill_ids": [501, 502, 999]}),
+        ))
+        .await?;
+    let refresh_status = refresh_response.status();
+    let refresh_body = read_json(refresh_response).await;
+    assert_eq!(refresh_status, StatusCode::OK, "{refresh_body:?}");
+    assert_eq!(refresh_body["success"], true);
+    assert_eq!(refresh_body["result"]["total"], 2);
+    assert_eq!(refresh_body["result"]["categorized"], 1);
+    assert_eq!(refresh_body["result"]["still_uncategorized"], 1);
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 501)?,
+        ("餐饮".to_string(), "早餐".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 502)?,
+        ("".to_string(), "".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 601)?,
+        ("".to_string(), "".to_string())
+    );
+
+    let refresh_all_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/bills/category/refresh",
+            Body::empty(),
+        ))
+        .await?;
+    let refresh_all_status = refresh_all_response.status();
+    let refresh_all_body = read_json(refresh_all_response).await;
+    assert_eq!(refresh_all_status, StatusCode::OK, "{refresh_all_body:?}");
+    assert_eq!(refresh_all_body["result"]["total"], 10);
+    assert_eq!(refresh_all_body["result"]["categorized"], 8);
+    assert_eq!(refresh_all_body["result"]["still_uncategorized"], 2);
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 601)?,
+        ("餐饮".to_string(), "早餐".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 602)?,
+        ("收入".to_string(), "工资".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 603)?,
+        ("转账".to_string(), "内部".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 604)?,
+        ("投资".to_string(), "基金".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 606)?,
+        ("餐饮".to_string(), "午餐".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 607)?,
+        ("收入".to_string(), "工资".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 608)?,
+        ("投资".to_string(), "基金".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 609)?,
+        ("".to_string(), "".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 610)?,
+        ("餐饮".to_string(), "午餐".to_string())
+    );
+
+    let unauthenticated_response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/category/refresh")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))?,
+        )
+        .await?;
+    assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
     assert!(BILL_CRUD_ROUTE_PATTERNS
         .iter()
@@ -732,27 +980,7 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
         .all(|route| route != &("DELETE", "/api/bills/{bill_id}/recurring-match")));
-    let upstream = spawn_fake_upstream().await;
-    let fixture = RuntimeFixture::new_with_upstream(upstream.url())?;
-    let app = runtime_router(&fixture);
-
-    for (method, path) in [
-        (Method::POST, "/api/bills/category/quick-add-keyword"),
-        (Method::POST, "/api/bills/category/refresh"),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(authed_request(method, path, Body::empty()))
-            .await?;
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        let body = read_json(response).await;
-        assert_eq!(body["runtime"], "python-sidecar", "{path}");
-        assert_eq!(
-            body["path"],
-            path.split('?').next().unwrap_or(path),
-            "{path}"
-        );
-    }
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS.is_empty());
 
     Ok(())
 }
@@ -984,11 +1212,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
 
     let health_response = app
@@ -1117,10 +1345,24 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
             type INTEGER DEFAULT 1,
+            priority INTEGER DEFAULT 0,
             main_category TEXT NOT NULL,
             sub_category TEXT NOT NULL,
+            keywords TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(user_id, main_category, sub_category)
+        );
+        CREATE TABLE category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            category_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            priority INTEGER DEFAULT 100,
+            rule_expression TEXT NOT NULL,
+            regex_enabled INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );
         CREATE TABLE tags (
             id INTEGER PRIMARY KEY,
@@ -1250,6 +1492,119 @@ fn seed_reconciliation_statement_data(path: &Path) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
+fn seed_category_action_data(path: &Path) -> Result<(), Box<dyn Error>> {
+    let connection = Connection::open(path)?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (2, 42, 3, 1, '餐饮', '早餐', '早餐', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (3, 42, 2, 2, '收入', '工资', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (4, 42, 4, 3, '转账', '内部', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (5, 42, 5, 4, '投资', '基金', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (6, 42, 1, 5, '餐饮', '午餐', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO categories(id, user_id, type, priority, main_category, sub_category, keywords, created_at)
+         VALUES (7, 42, 99, 6, '忽略', '未知', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (10, 42, 2, 'breakfast', 1, 'OR={美团}+NOT={退款}', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (11, 42, 3, 'salary', 2, '工资', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (12, 42, 4, 'transfer', 3, '还款', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (13, 42, 5, 'fund', 4, '定投', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (14, 42, 6, 'lunch', 5, '午餐', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO category_rules(id, user_id, category_id, name, priority, rule_expression, regex_enabled, enabled, created_at, updated_at)
+         VALUES (15, 42, 7, 'unknown-type', 6, '不会命中', 0, 1, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, created_at, updated_at,
+            source_account_id, destination_account_id, destination_amount
+        ) VALUES (501, 42, '2026-03-02 08:00:00', '支出', -8.0, '美团', '早餐', 'manual', '', '', 'now', 'now', 10, 0, 0.0)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, created_at, updated_at,
+            source_account_id, destination_account_id, destination_amount
+        ) VALUES (502, 42, '2026-03-03 08:00:00', '支出', -6.0, '美团', '退款', 'manual', '', '', 'now', 'now', 10, 0, 0.0)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            payment_method, main_category, sub_category, created_at, updated_at,
+            source_account_id, destination_account_id, destination_amount
+        ) VALUES (601, 42, '2026-03-04 08:00:00', '支出', -9.0, '美团', '早餐', 'manual', '', '', 'now', 'now', 10, 0, 0.0)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO accounts(id, user_id, name, type, balance, initial_balance, created_at, updated_at)
+         VALUES (20, 42, 'bank', 1, 0.0, 0.0, 'now', 'now')",
+        [],
+    )?;
+    for (id, bill_type, amount, counterparty, description, source, destination) in [
+        (602, "收入", 120.0, "公司", "工资发放", 10, 0),
+        (603, "转账", -50.0, "招商银行", "内部还款", 10, 20),
+        (604, "投资", -200.0, "天天基金", "基金定投", 10, 0),
+        (606, "其他", -12.0, "快餐店", "午餐套餐", 0, 0),
+        (607, "其他", 120.0, "公司", "工资发放", 0, 0),
+        (608, "其他", 0.0, "天天基金", "基金定投", 0, 0),
+        (609, "收入", 0.6, "招商银行", "活期结息 利息入账", 10, 0),
+        (610, "其他", -18.0, "快餐店", "午餐", 0, 0),
+    ] {
+        connection.execute(
+            "INSERT INTO bills(
+                id, user_id, date, type, amount, counterparty, description,
+                payment_method, main_category, sub_category, created_at, updated_at,
+                source_account_id, destination_account_id, destination_amount
+            ) VALUES (?1, 42, '2026-03-05 08:00:00', ?2, ?3, ?4, ?5, 'manual', '', '', 'now', 'now', ?6, ?7, 0.0)",
+            rusqlite::params![id, bill_type, amount, counterparty, description, source, destination],
+        )?;
+    }
+    Ok(())
+}
+
 fn insert_recurring_template(
     path: &Path,
     recurring_id: i64,
@@ -1295,6 +1650,26 @@ fn account_balance(path: &Path, account_id: i64) -> Result<f64, Box<dyn Error>> 
 
 fn bill_count(path: &Path) -> Result<i64, Box<dyn Error>> {
     Ok(Connection::open(path)?.query_row("SELECT COUNT(*) FROM bills", [], |row| row.get(0))?)
+}
+
+fn category_keywords(
+    path: &Path,
+    main_category: &str,
+    sub_category: &str,
+) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COALESCE(keywords, '') FROM categories WHERE user_id = 42 AND main_category = ?1 AND sub_category = ?2",
+        [main_category, sub_category],
+        |row| row.get::<_, String>(0),
+    )?)
+}
+
+fn bill_category_pair(path: &Path, bill_id: i64) -> Result<(String, String), Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COALESCE(main_category, ''), COALESCE(sub_category, '') FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?)
 }
 
 fn json_request(method: Method, uri: &str, body: Value) -> Request<Body> {
@@ -1408,16 +1783,6 @@ fn malformed_multipart_header_request(uri: &str) -> Request<Body> {
         .expect("multipart request builds")
 }
 
-struct FakeUpstream {
-    addr: SocketAddr,
-}
-
-impl FakeUpstream {
-    fn url(&self) -> String {
-        format!("http://{}", self.addr)
-    }
-}
-
 fn backend_bill_payload(
     date: &str,
     bill_type: &str,
@@ -1439,34 +1804,6 @@ fn backend_bill_payload(
         "category_id": 1,
         "tag_ids": [1]
     })
-}
-
-async fn spawn_fake_upstream() -> FakeUpstream {
-    let app = Router::new().fallback(any(echo_handler));
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("listener binds");
-    let addr = listener.local_addr().expect("local addr");
-
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("fake upstream serves");
-    });
-
-    FakeUpstream { addr }
-}
-
-async fn echo_handler(request: Request<Body>) -> impl IntoResponse {
-    let (parts, body) = request.into_parts();
-    let body = to_bytes(body, 1024 * 1024).await.expect("body bytes");
-    axum::Json(json!({
-        "runtime": "python-sidecar",
-        "method": parts.method.as_str(),
-        "path": parts.uri.path(),
-        "query": parts.uri.query().unwrap_or(""),
-        "body": String::from_utf8_lossy(&body).to_string(),
-    }))
 }
 
 async fn read_json(response: axum::response::Response) -> Value {
