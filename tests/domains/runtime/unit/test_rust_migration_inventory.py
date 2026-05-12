@@ -21,7 +21,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert len(expected_python_paths) == 321
     assert inventory.summary["python_backend_files"] == 321
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
-    assert inventory.summary["rust_backend_files"] == 98
+    assert inventory.summary["rust_backend_files"] == 100
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/lib.rs" in inventory.rust_files
     assert "crates/bill-analyser-core/src/parsers.rs" in inventory.rust_files
@@ -73,6 +73,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-http/src/proxy.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/server.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/src/statistics_routes.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/src/taxonomy_routes.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/auth_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/bills_runtime_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/budget_runtime_contract.rs" in inventory.rust_files
@@ -80,6 +81,7 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
     assert "crates/bill-analyser-http/tests/import_skeleton_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/proxy_contract.rs" in inventory.rust_files
     assert "crates/bill-analyser-http/tests/statistics_runtime_contract.rs" in inventory.rust_files
+    assert "crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs" in inventory.rust_files
 
 
 def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo_root: Path) -> None:
@@ -126,7 +128,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
     assert "- Python backend files: 321" in first_render
-    assert "- Rust backend files: 98" in first_render
+    assert "- Rust backend files: 100" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
     assert "Governance manifest tool: `cargo run -p bill-analyser-core --bin bill_migration_manifest`" in first_render
@@ -196,6 +198,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-http/src/proxy.rs" in first_render
     assert "- crates/bill-analyser-http/src/server.rs" in first_render
     assert "- crates/bill-analyser-http/src/statistics_routes.rs" in first_render
+    assert "- crates/bill-analyser-http/src/taxonomy_routes.rs" in first_render
     assert "- crates/bill-analyser-http/tests/auth_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/bills_runtime_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/budget_runtime_contract.rs" in first_render
@@ -203,6 +206,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "- crates/bill-analyser-http/tests/import_skeleton_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/proxy_contract.rs" in first_render
     assert "- crates/bill-analyser-http/tests/statistics_runtime_contract.rs" in first_render
+    assert "- crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs" in first_render
 
 
 def test_migration_plan_markdown_is_deterministic_and_keeps_s0_non_runtime(repo_root: Path) -> None:

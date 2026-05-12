@@ -91,6 +91,10 @@ pub enum RouteHandlerId {
     StatisticsExchangeProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime")]
     AuthTokenRuntime,
+    #[serde(
+        rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_accounts_runtime"
+    )]
+    TaxonomyAccountsRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
     LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
@@ -145,6 +149,9 @@ impl RouteHandlerId {
             }
             Self::AuthTokenRuntime => {
                 "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime"
+            }
+            Self::TaxonomyAccountsRuntime => {
+                "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_accounts_runtime"
             }
             Self::LegacyPythonProxyPassthrough => {
                 "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
@@ -1395,23 +1402,51 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust auth runtime clears current-user business data after current password, configured operation password fallback, or step-up action-token verification, preserving legacy count keys and user_data audit metadata.",
     },
-    python_proxy_route!("GET", "/api/accounts/", "taxonomy-rules-settings"),
-    python_proxy_route!("POST", "/api/accounts/", "taxonomy-rules-settings"),
-    python_proxy_route!(
-        "DELETE",
-        "/api/accounts/{account_id}",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "GET",
-        "/api/accounts/{account_id}",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "PUT",
-        "/api/accounts/{account_id}",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/accounts/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime lists authenticated user accounts, builds the legacy parent-child response hierarchy, and returns frontend cents fields.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/accounts/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime creates accounts and subaccounts with frontend cents to SQLite yuan conversion and legacy aliases formatting.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/accounts/{account_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime deletes authenticated user accounts and their direct subaccounts without Python proxy fallback.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/accounts/{account_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime reads account detail with direct subaccounts and frontend account DTO formatting.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/accounts/{account_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime updates account fields and direct subaccount sets using the authenticated user scope.",
+    },
     python_proxy_route!(
         "POST",
         "/api/accounts/{account_id}/transactions/clear",
@@ -1422,11 +1457,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/accounts/{account_id}/transactions/move",
         "taxonomy-rules-settings"
     ),
-    python_proxy_route!(
-        "PUT",
-        "/api/accounts/display-orders",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/accounts/display-orders",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy accounts runtime persists authenticated user account display ordering.",
+    },
     python_proxy_route!(
         "POST",
         "/api/accounts/sync-balances",
@@ -2502,18 +2541,25 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
             "src/bill_analyser/api/routes/settings_bundle.py",
         ],
         rust_owner_files: &[
+            "crates/bill-analyser-http/src/taxonomy_routes.rs",
             "crates/bill-analyser-http/src/proxy.rs",
             "crates/bill-analyser-core/src/adapters/category.rs",
             "crates/bill-analyser-db/src/taxonomy",
         ],
-        tests_migrated: &["crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs"],
+        tests_migrated: &[
+            "crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs",
+            "crates/bill-analyser-db/tests/taxonomy_bridge_cli.rs",
+        ],
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: EMPTY_STRINGS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["taxonomy_crud_parity", "settings_bundle_parity"],
+        deletion_blockers: &[
+            "categories_tags_templates_rules_settings_parity",
+            "account_transaction_operations_parity",
+        ],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Accounts, categories, tags, templates, category rules, and settings bundle routes remain Python-proxied until the P4 domain cutover ports runtime handlers.",
+            "Account CRUD and display-order routes are Rust-owned. Account transaction move/clear, balance sync, categories, tags, templates, category rules, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -2946,6 +2992,16 @@ fn route_contract_details(
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
                 "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange remains Python-owned.",
+            decision_required: DecisionRequired::Port,
+            decision_owner: "migration-program",
+            transition_evidence: DB_RUNTIME_EVIDENCE,
+        },
+        ("taxonomy-rules-settings", MigrationState::RustOwnedVerified) => RouteContractDetails {
+            handler: RouteHandlerId::TaxonomyAccountsRuntime,
+            deletion_blockers: &["categories_tags_templates_rules_settings_parity"],
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior:
+                "Account CRUD and display-order routes are Rust-owned; account transaction move/clear, balance sync, categories, tags, templates, category rules, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

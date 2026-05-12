@@ -15,6 +15,7 @@ pub mod router;
 pub mod runtime;
 pub mod server;
 pub mod statistics_routes;
+pub mod taxonomy_routes;
 
 pub use auth::{
     resolve_authenticated_user_from_headers, resolve_user_id_from_headers, AuthenticatedUser,
@@ -43,4 +44,8 @@ pub use runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity, ProxyFa
 pub use server::{bind_addr_from_env, bind_addr_from_env_with, run_http_server, DEFAULT_HTTP_BIND};
 pub use statistics_routes::{
     statistics_runtime_router, STATISTICS_PROXIED_ROUTE_PATTERNS, STATISTICS_ROUTE_PATTERNS,
+};
+pub use taxonomy_routes::{
+    taxonomy_runtime_router, TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS,
+    TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
 };

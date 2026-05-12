@@ -468,8 +468,9 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
     assert_eq!(login_preflight_body["path"], "/api/auth/login");
 
     for (method, path) in [
-        (Method::GET, "/api/accounts/"),
-        (Method::GET, "/api/accounts/123"),
+        (Method::POST, "/api/accounts/123/transactions/move"),
+        (Method::POST, "/api/accounts/123/transactions/clear"),
+        (Method::POST, "/api/accounts/sync-balances"),
         (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/virtual_food"),
         (Method::PUT, "/api/categories/virtual_food"),
@@ -552,7 +553,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::POST, "/api/bills/pictures/unused/extra"),
         (Method::POST, "/api/bills/category"),
         (Method::POST, "/api/bills/category/not-real"),
-        (Method::GET, "/api/accounts/display-orders"),
     ] {
         let response = app
             .clone()
@@ -567,6 +567,22 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
             .expect("response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
+
+    let taxonomy_wrong_method_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/accounts/display-orders")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(
+        taxonomy_wrong_method_response.status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
 }
 
 #[tokio::test]

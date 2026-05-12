@@ -7,7 +7,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 ## Summary
 
 - Python backend files: 321
-- Rust backend files: 98
+- Rust backend files: 100
 - Migration domains: 22
 - Files marked port: 253
 - Files marked facade: 68
@@ -462,6 +462,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-http/src/runtime.rs
 - crates/bill-analyser-http/src/server.rs
 - crates/bill-analyser-http/src/statistics_routes.rs
+- crates/bill-analyser-http/src/taxonomy_routes.rs
 - crates/bill-analyser-http/tests/auth_runtime_contract.rs
 - crates/bill-analyser-http/tests/bills_runtime_contract.rs
 - crates/bill-analyser-http/tests/budget_runtime_contract.rs
@@ -469,6 +470,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 - crates/bill-analyser-http/tests/import_skeleton_contract.rs
 - crates/bill-analyser-http/tests/proxy_contract.rs
 - crates/bill-analyser-http/tests/statistics_runtime_contract.rs
+- crates/bill-analyser-http/tests/taxonomy_runtime_contract.rs
 
 ## Verified Dead Baseline
 

@@ -33,8 +33,8 @@ impl HttpShellIdentity {
                 "import-route-skeleton-no-db",
             ),
             ImportRouteMode::ImportDbRuntime => (
-                "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime",
-                "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime",
+                "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+taxonomy-accounts-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime",
+                "import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+taxonomy-accounts-runtime+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime",
             ),
         };
 
@@ -62,7 +62,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "owned_routes".to_string(),
         if config.import_route_mode.intercepts_import_routes() {
             if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,taxonomy account CRUD/display-order runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
             } else {
                 "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
             }
@@ -104,6 +104,10 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         details.insert(
             "statistics_read_runtime".to_string(),
             "owned DB-backed category statistics, category trends, asset trends, category pie, top merchants, and transaction amounts; analyzer overview/comparison and live exchange providers proxied".to_string(),
+        );
+        details.insert(
+            "taxonomy_accounts_runtime".to_string(),
+            "owned account list/detail/create/update/delete/display-order routes with frontend cents to SQLite yuan conversion; transaction move/clear and balance sync remain proxied".to_string(),
         );
         details.insert(
             "auth_token_runtime".to_string(),

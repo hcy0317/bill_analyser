@@ -166,7 +166,11 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
-        ("GET", "/api/accounts/", "taxonomy-rules-settings"),
+        (
+            "POST",
+            "/api/accounts/{account_id}/transactions/move",
+            "taxonomy-rules-settings",
+        ),
         ("GET", "/api/categories/tree", "taxonomy-rules-settings"),
         (
             "GET",
@@ -185,6 +189,41 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
             .unwrap_or_else(|| panic!("missing live Python sidecar endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::PythonProxied);
         assert_eq!(endpoint.domain, domain);
+    }
+}
+
+#[test]
+fn taxonomy_account_crud_routes_are_rust_owned_while_p4_remainder_stays_proxied() {
+    let manifest = expanded_route_manifest();
+    for endpoint in [
+        "GET /api/accounts/",
+        "POST /api/accounts/",
+        "GET /api/accounts/{account_id}",
+        "PUT /api/accounts/{account_id}",
+        "DELETE /api/accounts/{account_id}",
+        "PUT /api/accounts/display-orders",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy account route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyAccountsRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
+        assert!(entry
+            .unsupported_behavior
+            .contains("categories, tags, templates"));
+    }
+
+    for (method, pattern) in [
+        ("POST", "/api/accounts/{account_id}/transactions/clear"),
+        ("POST", "/api/accounts/{account_id}/transactions/move"),
+        ("POST", "/api/accounts/sync-balances"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("taxonomy proxied route is present: {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::PythonProxied);
+        assert_eq!(endpoint.domain, "taxonomy-rules-settings");
     }
 }
 

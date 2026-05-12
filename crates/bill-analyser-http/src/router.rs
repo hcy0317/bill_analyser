@@ -14,6 +14,7 @@ use crate::{
     proxy::{ownership_aware_proxy_handler, proxy_handler, ProxyState},
     runtime::{http_shell_health, HttpShellHealth, HttpShellIdentity},
     statistics_routes::statistics_runtime_router,
+    taxonomy_routes::taxonomy_runtime_router,
 };
 
 pub fn build_router(state: ProxyState) -> Router {
@@ -29,7 +30,8 @@ pub fn build_router(state: ProxyState) -> Router {
             .merge(bill_runtime_router())
             .merge(auth_token_runtime_router())
             .merge(budget_runtime_router())
-            .merge(statistics_runtime_router()),
+            .merge(statistics_runtime_router())
+            .merge(taxonomy_runtime_router()),
         ImportRouteMode::ProxyOnly => router,
     };
 
