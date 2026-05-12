@@ -1510,12 +1510,18 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/category-rules/")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/reorder")));
+    assert!(!TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -1567,6 +1573,56 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert_eq!(missing_category_response.status(), StatusCode::OK);
     assert_eq!(read_json(missing_category_response).await["total"], 0);
 
+    let match_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/60/test",
+            json!({"text": "工作日午餐付款"}),
+        ))
+        .await?;
+    assert_eq!(match_response.status(), StatusCode::OK);
+    assert_eq!(read_json(match_response).await["data"]["matched"], true);
+
+    let miss_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/60/test",
+            json!({"text": "地铁通勤"}),
+        ))
+        .await?;
+    assert_eq!(miss_response.status(), StatusCode::OK);
+    assert_eq!(read_json(miss_response).await["data"]["matched"], false);
+
+    let missing_rule_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/999/test",
+            json!({"text": "午餐"}),
+        ))
+        .await?;
+    assert_eq!(missing_rule_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_rule_response).await["error"],
+        "Rule not found"
+    );
+
+    let missing_text_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/60/test",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(missing_text_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_text_response).await["error"],
+        "text is required"
+    );
+
     let unauthenticated_response = app
         .clone()
         .oneshot(
@@ -1580,6 +1636,7 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
 
     let no_db_app = runtime_router_without_db(&fixture);
     let no_db_response = no_db_app
+        .clone()
         .oneshot(authed_request(
             Method::GET,
             "/api/category-rules/",
@@ -1590,6 +1647,17 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert_eq!(
         read_json(no_db_response).await["error"],
         "Rust taxonomy category rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+    let no_db_test_response = no_db_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/60/test",
+            json!({"text": "午餐"}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_test_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
     );
 
     Ok(())

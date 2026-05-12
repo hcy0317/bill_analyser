@@ -8,7 +8,7 @@ use axum::{
     routing::{get, put},
     Json, Router,
 };
-use bill_analyser_core::UserId;
+use bill_analyser_core::{category_rules::match_rule_expression, UserId};
 use bill_analyser_db::{
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
@@ -101,14 +101,15 @@ pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/categories/update-all"),
 ];
 
-pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] =
-    &[("GET", "/api/category-rules/")];
+pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/category-rules/"),
+    ("POST", "/api/category-rules/{rule_id}/test"),
+];
 
 pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/"),
     ("DELETE", "/api/category-rules/{rule_id}"),
     ("PUT", "/api/category-rules/{rule_id}"),
-    ("POST", "/api/category-rules/{rule_id}/test"),
     ("POST", "/api/category-rules/defaults"),
     ("POST", "/api/category-rules/migrate"),
     ("POST", "/api/category-rules/reorder"),
@@ -236,7 +237,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/category-rules/:rule_id/test",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(test_category_rule_handler),
         )
         .route(
             "/api/categories/:category_id",
@@ -1418,6 +1419,49 @@ async fn list_category_rules_handler(
         category_rules_enabled_only(&query),
     ) {
         Ok(rules) => json_response(StatusCode::OK, format_category_rules_response(rules)),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn test_category_rule_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(rule_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "text is required") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(text) = body.get("text").and_then(Value::as_str) else {
+        return bad_request("text is required");
+    };
+
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+
+    match repository.get_rule(rule_id, db_user_id(user_id)) {
+        Ok(Some(rule)) => {
+            let rule_expression = string_or_default(rule.get("rule_expression"), "");
+            let regex_enabled = rule.get("regex_enabled").is_some_and(value_truthy);
+            json_response(
+                StatusCode::OK,
+                json!({
+                    "success": true,
+                    "data": {
+                        "matched": match_rule_expression(text, &rule_expression, regex_enabled)
+                    }
+                }),
+            )
+        }
+        Ok(None) => not_found("Rule not found"),
         Err(_) => category_rule_db_error_response(),
     }
 }

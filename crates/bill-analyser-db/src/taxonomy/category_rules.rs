@@ -1,5 +1,5 @@
 use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params_from_iter, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde_json::{Map, Number, Value};
 
 use crate::{DbError, DbResult};
@@ -45,6 +45,24 @@ impl<'conn> CategoryRulesRepository<'conn> {
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(params), category_rule_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
+
+    pub fn get_rule(&mut self, rule_id: i64, user_id: i64) -> DbResult<Option<CategoryRuleRecord>> {
+        self.connection
+            .query_row(
+                "SELECT
+                    cr.id, cr.user_id, cr.category_id, cr.name, cr.priority,
+                    cr.rule_expression, cr.regex_enabled, cr.enabled, cr.applied_count,
+                    cr.last_applied_at, cr.created_at, cr.updated_at,
+                    c.main_category, c.sub_category, c.type AS category_type
+                 FROM category_rules cr
+                 JOIN categories c ON cr.category_id = c.id
+                 WHERE cr.id = ? AND cr.user_id = ?",
+                params![rule_id, user_id],
+                category_rule_from_row,
+            )
+            .optional()
+            .map_err(DbError::from)
     }
 }
 
@@ -115,6 +133,14 @@ mod tests {
             .list_rules(42, Some(999), false)
             .expect("missing category");
         assert!(missing.is_empty());
+
+        let rule = repository
+            .get_rule(60, 42)
+            .expect("get rule")
+            .expect("rule");
+        assert_eq!(rule["name"], "午餐规则");
+        assert_eq!(rule["rule_expression"], "OR={午餐,饭}");
+        assert!(repository.get_rule(96, 42).expect("other user").is_none());
     }
 
     fn fixture_connection() -> Connection {

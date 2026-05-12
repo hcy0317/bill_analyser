@@ -478,7 +478,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::POST, "/api/category-rules/"),
         (Method::PUT, "/api/category-rules/60"),
         (Method::DELETE, "/api/category-rules/60"),
-        (Method::POST, "/api/category-rules/60/test"),
         (Method::POST, "/api/category-rules/defaults"),
         (Method::POST, "/api/category-rules/migrate"),
         (Method::POST, "/api/category-rules/reorder"),

@@ -58,6 +58,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/templates/")));
     assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
+    assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -266,7 +267,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics, category-rule list, and templates routes are Rust-owned"));
+            .contains("category master-data/statistics, category-rule list/test, and templates routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -295,19 +296,21 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
             .contains("templates routes are Rust-owned"));
     }
 
-    let category_rules_list = manifest
-        .iter()
-        .find(|entry| entry.endpoint == "GET /api/category-rules/")
-        .expect("taxonomy category-rules list route is present");
-    assert_eq!(category_rules_list.state, MigrationState::RustOwnedVerified);
-    assert_eq!(category_rules_list.handler, RouteHandlerId::TaxonomyRuntime);
-    assert_eq!(
-        category_rules_list.envelope,
-        ResponseEnvelopeFamily::FlaskSuccessData
-    );
-    assert!(category_rules_list
-        .unsupported_behavior
-        .contains("category rule mutations"));
+    for endpoint in [
+        "GET /api/category-rules/",
+        "POST /api/category-rules/{rule_id}/test",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy category-rules route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
+        assert!(entry
+            .unsupported_behavior
+            .contains("category rule mutations"));
+    }
 
     for (method, pattern) in [
         ("POST", "/api/accounts/{account_id}/transactions/clear"),
@@ -319,7 +322,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         ("POST", "/api/category-rules/"),
         ("DELETE", "/api/category-rules/{rule_id}"),
         ("PUT", "/api/category-rules/{rule_id}"),
-        ("POST", "/api/category-rules/{rule_id}/test"),
         ("POST", "/api/category-rules/defaults"),
         ("POST", "/api/category-rules/migrate"),
         ("POST", "/api/category-rules/reorder"),

@@ -60,7 +60,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "默认 `BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE=import_db_runtime`" in architecture
     assert "migration governance oracle" in architecture
     assert "当前治理矩阵把第一阶段导入与预览决策旁路、核心账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order、标签 CRUD/display-order/batch-create、分类主数据与分类账单统计、预算 CRUD/export/execution/forecast/history/import、DB-backed statistics read routes 标为 Rust-owned" in architecture
-    assert "分类规则列表 `GET /api/category-rules/` 当前由 Rust taxonomy runtime 直接读取" in architecture
+    assert "分类规则列表 `GET /api/category-rules/` 与测试 `POST /api/category-rules/{rule_id}/test` 当前由 Rust taxonomy runtime 直接读取" in architecture
     assert "同时把账户交易 move/clear 与余额同步、统计 Analyzer overview/trends/comparison/category/trend、真实 exchange-rate provider/custom-rate 写入、真实 LLM/OCR provider 生成、全局 Learning Center suggestion/rules 决策与真实 OAuth provider exchange 标为 Python-proxied" in architecture
     assert "显式 `import_db_runtime` 已能用 Rust 处理 import v2 JSON parse/parse_generic/dedup/confirm、前端 FormData CSV 上传解析、未匹配文件 temp preview 与列映射 parse_generic、session/preview 读取清理、preview update/reclassify 显式 DB 更新、preview-item transfer/recurring 决策、learning 会话预览旁路、LLM accept/reject/memory 事件、OCR config app_settings、账单 CRUD、交易图片上传/未使用清理、账单 CSV/XLSX 导出、账单 recurring candidates/match、账户对账单、账单分类 quick actions、账户 CRUD/display-order、标签 CRUD/display-order/batch-create、分类主数据与 `GET /api/categories/statistics`、预算 CRUD/export/execution/forecast/history/import，以及 category statistics/trends、asset trends、category pie、top merchants、amounts 统计读取" in architecture
     assert "Rust DB writer policy 为 `RustDomainOwned`" in architecture
@@ -91,7 +91,7 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "S15b.1 makes Rust the runtime owner for tag batch creation" in migration_plan
     assert "S15c makes Rust the runtime owner for category master-data routes" in migration_plan
     assert "S15c.1 makes Rust the runtime owner for `GET /api/categories/statistics`" in migration_plan
-    assert "S15c.2 makes Rust the runtime owner for `GET /api/category-rules/`" in migration_plan
+    assert "S15c.2 makes Rust the runtime owner for `GET /api/category-rules/` and `POST /api/category-rules/{rule_id}/test`" in migration_plan
     assert "标签 list/get/create/update/delete/display-order/batch-create 路由由 Rust HTTP taxonomy runtime 直接接管" in api_routes
     assert "批量创建 `POST /api/tags/batch` 仍由 Python 处理" not in api_routes
     assert "S10 switches the local startup boundary from Python-primary to Rust-primary HTTP" in migration_plan
