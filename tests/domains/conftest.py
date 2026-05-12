@@ -43,6 +43,13 @@ def _restore_domain_runtime_context(flask_app):
         app_module.bill_service = bill_service_instance
 
 
+def _ensure_domain_auth_schema(flask_app):
+    """Ensure auth routes see an initialized user/session schema before login setup."""
+    db_instance = flask_app.config.get("DB_INSTANCE")
+    if db_instance is not None:
+        asyncio.run(db_instance.init_db())
+
+
 @pytest.fixture(scope="session")
 def app():
     """Provide a configured Flask app instance for domain integration tests."""
@@ -80,9 +87,10 @@ def _restore_domain_app_context(app):
     _restore_domain_runtime_context(app)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def client(app):
     """Create a reusable Flask test client."""
+    _restore_domain_runtime_context(app)
     return app.test_client()
 
 
@@ -95,8 +103,10 @@ def _tracked_test_user_cleanup(db_instance):
 
 
 @pytest.fixture
-def auth_identity(client, db_instance):
+def auth_identity(app, client, db_instance):
     """Register an isolated test user for each integration test."""
+    _restore_domain_runtime_context(app)
+    _ensure_domain_auth_schema(app)
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     username = f"test_domains_{suffix}"
     password = "Test123456!"
@@ -119,8 +129,9 @@ def auth_identity(client, db_instance):
 
 
 @pytest.fixture
-def auth_context(client, auth_identity):
+def auth_context(app, client, auth_identity):
     """Log in with the isolated user and expose token + user payload."""
+    _restore_domain_runtime_context(app)
     login_response = client.post(
         "/api/auth/login",
         json={"loginName": auth_identity["username"], "password": auth_identity["password"]},

@@ -55,6 +55,13 @@ def _restore_new_ui_runtime_context(flask_app):
         app_module.bill_service = bill_service_instance
 
 
+def _ensure_new_ui_auth_schema(flask_app):
+    """Ensure auth routes see an initialized user/session schema before login setup."""
+    db_instance = flask_app.config.get("DB_INSTANCE")
+    if db_instance is not None:
+        asyncio.run(db_instance.init_db())
+
+
 @pytest_asyncio.fixture(scope="session")
 async def initialize_app():
     """异步初始化Flask应用"""
@@ -100,9 +107,10 @@ def _restore_new_ui_app_context(app):
     _restore_new_ui_runtime_context(app)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def client(app):
     """创建测试客户端"""
+    _restore_new_ui_runtime_context(app)
     return app.test_client()
 
 
@@ -115,8 +123,10 @@ def _tracked_test_user_cleanup(db):
 
 
 @pytest.fixture
-def auth_identity(client, db):
+def auth_identity(app, client, db):
     """为每个测试返回独立的测试认证身份信息。"""
+    _restore_new_ui_runtime_context(app)
+    _ensure_new_ui_auth_schema(app)
     suffix = f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
     username = f"test_new_ui_{suffix}"
     password = "Test123456!"
@@ -139,8 +149,9 @@ def auth_identity(client, db):
 
 
 @pytest.fixture
-def auth_context(client, auth_identity):
+def auth_context(app, client, auth_identity):
     """为每个测试生成新的认证上下文，避免共享 token 被其他用例作废。"""
+    _restore_new_ui_runtime_context(app)
     login_response = client.post("/api/auth/login", json={
         "loginName": auth_identity["username"],
         "password": auth_identity["password"]
