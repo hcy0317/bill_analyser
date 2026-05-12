@@ -1,5 +1,6 @@
 """Project-wide filesystem constants."""
 
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -9,7 +10,7 @@ STATIC_DIR = PACKAGE_DIR / "static"
 DATA_DIR = PROJECT_ROOT / "data"
 CONFIG_DIR = DATA_DIR / "config"
 LOG_DIR = DATA_DIR / "logs"
-UPLOADS_DIR = DATA_DIR / "uploads"
+UPLOADS_DIR = Path(os.environ.get("BILL_ANALYSER_UPLOADS_DIR") or DATA_DIR / "uploads")
 BACKUP_DIR = PROJECT_ROOT / "backup"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 LEGACY_CONFIG_DIR = PROJECT_ROOT / "config"

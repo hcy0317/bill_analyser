@@ -21,6 +21,28 @@ from tests.user_cleanup_support import (
 _DOMAIN_TEST_DB_PATH: Path | None = None
 
 
+def _restore_domain_runtime_context(flask_app):
+    """Restore domain integration runtime globals after route unit tests patch them."""
+    from bill_analyser.api import app as app_module
+
+    db_instance = flask_app.config.get("_PYTEST_DOMAINS_DB_INSTANCE")
+    category_engine_instance = flask_app.config.get("_PYTEST_DOMAINS_CATEGORY_ENGINE_INSTANCE")
+    bill_service_instance = flask_app.config.get("_PYTEST_DOMAINS_BILL_SERVICE_INSTANCE")
+
+    if db_instance is not None:
+        flask_app.config["DB_INSTANCE"] = db_instance
+        app_module.DB_INSTANCE = db_instance
+        app_module.db = db_instance
+    if category_engine_instance is not None:
+        flask_app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
+        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
+        app_module.category_engine = category_engine_instance
+    if bill_service_instance is not None:
+        flask_app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
+        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
+        app_module.bill_service = bill_service_instance
+
+
 @pytest.fixture(scope="session")
 def app():
     """Provide a configured Flask app instance for domain integration tests."""
@@ -53,24 +75,9 @@ def app():
 @pytest.fixture(autouse=True)
 def _restore_domain_app_context(app):
     """Restore domain integration app context after route unit tests rewire globals."""
-    from bill_analyser.api import app as app_module
-
-    db_instance = app.config.get("_PYTEST_DOMAINS_DB_INSTANCE")
-    category_engine_instance = app.config.get("_PYTEST_DOMAINS_CATEGORY_ENGINE_INSTANCE")
-    bill_service_instance = app.config.get("_PYTEST_DOMAINS_BILL_SERVICE_INSTANCE")
-
-    if db_instance is not None:
-        app.config["DB_INSTANCE"] = db_instance
-        app_module.DB_INSTANCE = db_instance
-        app_module.db = db_instance
-    if category_engine_instance is not None:
-        app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
-        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
-        app_module.category_engine = category_engine_instance
-    if bill_service_instance is not None:
-        app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
-        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
-        app_module.bill_service = bill_service_instance
+    _restore_domain_runtime_context(app)
+    yield
+    _restore_domain_runtime_context(app)
 
 
 @pytest.fixture(scope="session")
@@ -144,4 +151,5 @@ def auth_headers(auth_context):
 @pytest.fixture
 def db_instance(app):
     """Expose the initialized database instance."""
+    _restore_domain_runtime_context(app)
     return app.config["DB_INSTANCE"]

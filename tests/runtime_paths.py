@@ -4,18 +4,20 @@ import os
 from pathlib import Path
 
 TEST_DB_DIR_ENV = "BILL_ANALYSER_TEST_DB_DIR"
+TEST_UPLOADS_DIR_ENV = "BILL_ANALYSER_UPLOADS_DIR"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DB_PATH = REPO_ROOT / "data" / "bills.db"
 TESTS_RUNTIME_DIR = REPO_ROOT / "tests" / ".runtime"
 TESTS_DB_DIR = TESTS_RUNTIME_DIR / "db"
+TESTS_UPLOADS_DIR = TESTS_RUNTIME_DIR / "uploads"
 TEST_DB_SIDE_CAR_SUFFIXES = ("", "-wal", "-shm", "-journal")
 PYTEST_XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
 
 
-def _test_db_base_dir() -> Path:
-    configured = os.environ.get(TEST_DB_DIR_ENV)
+def _worker_aware_base_dir(env_name: str, default: Path) -> Path:
+    configured = os.environ.get(env_name)
     if not configured:
-        return TESTS_DB_DIR
+        return default
 
     path = Path(configured)
     worker_id = os.environ.get(PYTEST_XDIST_WORKER_ENV)
@@ -24,19 +26,34 @@ def _test_db_base_dir() -> Path:
     return path
 
 
-def _test_db_dir() -> Path:
-    db_dir = _test_db_base_dir()
+def _worker_aware_dir(env_name: str, default: Path) -> Path:
+    runtime_dir = _worker_aware_base_dir(env_name, default)
     worker_id = os.environ.get(PYTEST_XDIST_WORKER_ENV)
     if worker_id:
-        return db_dir / worker_id
-    return db_dir
+        return runtime_dir / worker_id
+    return runtime_dir
+
+
+def _test_db_base_dir() -> Path:
+    return _worker_aware_base_dir(TEST_DB_DIR_ENV, TESTS_DB_DIR)
+
+
+def _test_db_dir() -> Path:
+    return _worker_aware_dir(TEST_DB_DIR_ENV, TESTS_DB_DIR)
+
+
+def _test_uploads_dir() -> Path:
+    return _worker_aware_dir(TEST_UPLOADS_DIR_ENV, TESTS_UPLOADS_DIR)
 
 
 def configure_test_runtime_environment() -> Path:
     """Ensure runtime directories exist and expose the DB root via environment."""
     db_dir = _test_db_dir()
+    uploads_dir = _test_uploads_dir()
     db_dir.mkdir(parents=True, exist_ok=True)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
     os.environ[TEST_DB_DIR_ENV] = str(db_dir)
+    os.environ[TEST_UPLOADS_DIR_ENV] = str(uploads_dir)
     return db_dir
 
 

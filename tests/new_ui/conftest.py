@@ -33,6 +33,28 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
+def _restore_new_ui_runtime_context(flask_app):
+    """Restore this package's initialized app context if another test rewired it."""
+    from bill_analyser.api import app as app_module
+
+    db_instance = flask_app.config.get("_PYTEST_NEW_UI_DB_INSTANCE")
+    category_engine_instance = flask_app.config.get("_PYTEST_NEW_UI_CATEGORY_ENGINE_INSTANCE")
+    bill_service_instance = flask_app.config.get("_PYTEST_NEW_UI_BILL_SERVICE_INSTANCE")
+
+    if db_instance is not None:
+        flask_app.config["DB_INSTANCE"] = db_instance
+        app_module.DB_INSTANCE = db_instance
+        app_module.db = db_instance
+    if category_engine_instance is not None:
+        flask_app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
+        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
+        app_module.category_engine = category_engine_instance
+    if bill_service_instance is not None:
+        flask_app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
+        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
+        app_module.bill_service = bill_service_instance
+
+
 @pytest_asyncio.fixture(scope="session")
 async def initialize_app():
     """异步初始化Flask应用"""
@@ -73,24 +95,9 @@ async def app(initialize_app):
 @pytest.fixture(autouse=True)
 def _restore_new_ui_app_context(app):
     """Restore this package's initialized app context if another test rewired it."""
-    from bill_analyser.api import app as app_module
-
-    db_instance = app.config.get("_PYTEST_NEW_UI_DB_INSTANCE")
-    category_engine_instance = app.config.get("_PYTEST_NEW_UI_CATEGORY_ENGINE_INSTANCE")
-    bill_service_instance = app.config.get("_PYTEST_NEW_UI_BILL_SERVICE_INSTANCE")
-
-    if db_instance is not None:
-        app.config["DB_INSTANCE"] = db_instance
-        app_module.DB_INSTANCE = db_instance
-        app_module.db = db_instance
-    if category_engine_instance is not None:
-        app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
-        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
-        app_module.category_engine = category_engine_instance
-    if bill_service_instance is not None:
-        app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
-        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
-        app_module.bill_service = bill_service_instance
+    _restore_new_ui_runtime_context(app)
+    yield
+    _restore_new_ui_runtime_context(app)
 
 
 @pytest.fixture(scope="session")
@@ -178,6 +185,7 @@ def operation_password(app):
 @pytest.fixture
 def db(app):
     """获取数据库实例"""
+    _restore_new_ui_runtime_context(app)
     return app.config["DB_INSTANCE"]
 
 

@@ -147,7 +147,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/statistics/trend_analysis.py | statistics-reporting | api-route | port | 363 |
 | src/bill_analyser/api/routes/tags.py | tags-templates | api-route | port | 237 |
 | src/bill_analyser/api/routes/templates.py | tags-templates | api-route | facade | 239 |
-| src/bill_analyser/constants.py | shared-primitives | backend-module | port | 17 |
+| src/bill_analyser/constants.py | shared-primitives | backend-module | port | 18 |
 | src/bill_analyser/core/__init__.py | shared-primitives | package-marker | facade | 6 |
 | src/bill_analyser/core/account_rust_bridge.py | accounts | core-service | port | 176 |
 | src/bill_analyser/core/ai/__init__.py | ai-learning-llm | package-marker | facade | 1 |

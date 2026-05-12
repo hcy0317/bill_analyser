@@ -28,10 +28,12 @@ def test_relative_test_database_path_redirects_to_tests_runtime(monkeypatch, tmp
     assert database.db_path == runtime_db_dir / "test_relative_redirect.db"
 
 
-def test_xdist_test_database_paths_use_worker_subdirectories(monkeypatch, tmp_path):
-    """Parallel pytest workers should not share SQLite runtime files."""
+def test_xdist_test_runtime_paths_use_worker_subdirectories(monkeypatch, tmp_path):
+    """Parallel pytest workers should not share SQLite or upload runtime files."""
     runtime_db_dir = tmp_path / "tests-runtime-db"
+    runtime_uploads_dir = tmp_path / "tests-runtime-uploads"
     monkeypatch.setenv(runtime_paths.TEST_DB_DIR_ENV, str(runtime_db_dir))
+    monkeypatch.setenv(runtime_paths.TEST_UPLOADS_DIR_ENV, str(runtime_uploads_dir))
     monkeypatch.setenv(runtime_paths.PYTEST_XDIST_WORKER_ENV, "gw3")
 
     first_path = runtime_paths.get_test_db_path("shared_name.db")
@@ -40,3 +42,4 @@ def test_xdist_test_database_paths_use_worker_subdirectories(monkeypatch, tmp_pa
     assert first_path == runtime_db_dir / "gw3" / "shared_name.db"
     assert second_path == runtime_db_dir / "gw3" / "another.db"
     assert runtime_paths.configure_test_runtime_environment() == runtime_db_dir / "gw3"
+    assert runtime_uploads_dir.joinpath("gw3").is_dir()
