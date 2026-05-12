@@ -113,7 +113,7 @@ jobs:
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
 
       - name: Run pytest coverage
-        run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v
+        run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
 
   frontend-ci:
     name: frontend-ci

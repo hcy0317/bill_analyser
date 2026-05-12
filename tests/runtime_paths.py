@@ -9,19 +9,43 @@ RUNTIME_DB_PATH = REPO_ROOT / "data" / "bills.db"
 TESTS_RUNTIME_DIR = REPO_ROOT / "tests" / ".runtime"
 TESTS_DB_DIR = TESTS_RUNTIME_DIR / "db"
 TEST_DB_SIDE_CAR_SUFFIXES = ("", "-wal", "-shm", "-journal")
+PYTEST_XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
+
+
+def _test_db_base_dir() -> Path:
+    configured = os.environ.get(TEST_DB_DIR_ENV)
+    if not configured:
+        return TESTS_DB_DIR
+
+    path = Path(configured)
+    worker_id = os.environ.get(PYTEST_XDIST_WORKER_ENV)
+    if worker_id and path.name == worker_id:
+        return path.parent
+    return path
+
+
+def _test_db_dir() -> Path:
+    db_dir = _test_db_base_dir()
+    worker_id = os.environ.get(PYTEST_XDIST_WORKER_ENV)
+    if worker_id:
+        return db_dir / worker_id
+    return db_dir
 
 
 def configure_test_runtime_environment() -> Path:
     """Ensure runtime directories exist and expose the DB root via environment."""
-    TESTS_DB_DIR.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault(TEST_DB_DIR_ENV, str(TESTS_DB_DIR))
-    return TESTS_DB_DIR
+    db_dir = _test_db_dir()
+    db_dir.mkdir(parents=True, exist_ok=True)
+    os.environ[TEST_DB_DIR_ENV] = str(db_dir)
+    return db_dir
 
 
 def cleanup_test_runtime_databases() -> None:
     """Best-effort cleanup of leftover test databases from previous runs."""
     db_dir = configure_test_runtime_environment()
-    for db_file in db_dir.glob("*.db"):
+    worker_id = os.environ.get(PYTEST_XDIST_WORKER_ENV)
+    db_files = db_dir.glob("*.db") if worker_id else db_dir.rglob("*.db")
+    for db_file in db_files:
         remove_test_database_family(db_file)
 
 

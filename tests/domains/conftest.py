@@ -33,8 +33,13 @@ def app():
     remove_test_database_family(_DOMAIN_TEST_DB_PATH)
     asyncio.run(initialize(db_path=str(_DOMAIN_TEST_DB_PATH)))
 
+    from bill_analyser.api import app as app_module
+
     flask_app.config["TESTING"] = True
     flask_app.config["DEBUG"] = False
+    flask_app.config["_PYTEST_DOMAINS_DB_INSTANCE"] = app_module.db
+    flask_app.config["_PYTEST_DOMAINS_CATEGORY_ENGINE_INSTANCE"] = app_module.category_engine
+    flask_app.config["_PYTEST_DOMAINS_BILL_SERVICE_INSTANCE"] = app_module.bill_service
 
     yield flask_app
 
@@ -43,6 +48,29 @@ def app():
 
     if _DOMAIN_TEST_DB_PATH is not None:
         remove_test_database_family(_DOMAIN_TEST_DB_PATH)
+
+
+@pytest.fixture(autouse=True)
+def _restore_domain_app_context(app):
+    """Restore domain integration app context after route unit tests rewire globals."""
+    from bill_analyser.api import app as app_module
+
+    db_instance = app.config.get("_PYTEST_DOMAINS_DB_INSTANCE")
+    category_engine_instance = app.config.get("_PYTEST_DOMAINS_CATEGORY_ENGINE_INSTANCE")
+    bill_service_instance = app.config.get("_PYTEST_DOMAINS_BILL_SERVICE_INSTANCE")
+
+    if db_instance is not None:
+        app.config["DB_INSTANCE"] = db_instance
+        app_module.DB_INSTANCE = db_instance
+        app_module.db = db_instance
+    if category_engine_instance is not None:
+        app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
+        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
+        app_module.category_engine = category_engine_instance
+    if bill_service_instance is not None:
+        app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
+        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
+        app_module.bill_service = bill_service_instance
 
 
 @pytest.fixture(scope="session")

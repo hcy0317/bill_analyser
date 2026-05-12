@@ -94,7 +94,8 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     assert 'cargo install cargo-llvm-cov --locked' in text
     assert 'cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90' in text
     assert (
-        'python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v'
+        'python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile'
         in text
     )
+    assert 'pytest-xdist' in text
     assert 'npm run test:coverage' in text

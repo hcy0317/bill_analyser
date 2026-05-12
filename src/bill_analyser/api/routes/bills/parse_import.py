@@ -1,4 +1,5 @@
-# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable
+# pylint: disable=wildcard-import,unused-wildcard-import,undefined-variable,line-too-long
+# pylint: disable=missing-module-docstring,import-outside-toplevel,too-many-locals,broad-exception-caught
 from .support import *  # noqa: F403
 from .import_detection import *  # noqa: F403
 from .import_rows import *  # noqa: F403
@@ -32,6 +33,7 @@ def _save_parse_import_upload(file) -> Path:
     filename = secure_filename(file.filename)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = UPLOAD_FOLDER / f"{timestamp}_{filename}"
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     file.save(str(file_path))
     logger.info("临时文件已保存: %s", file_path)
     return file_path

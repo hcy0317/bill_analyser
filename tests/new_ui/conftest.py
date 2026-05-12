@@ -48,12 +48,15 @@ async def initialize_app():
 @pytest_asyncio.fixture(scope="session")
 async def app(initialize_app):
     """创建Flask应用实例（依赖异步初始化）"""
-    from bill_analyser.api.app import app, db
+    from bill_analyser.api.app import app, bill_service, category_engine, db
     from bill_analyser.utils.logger import _logger_instance
 
     # 配置测试模式
     app.config["TESTING"] = True
     app.config["DEBUG"] = False
+    app.config["_PYTEST_NEW_UI_DB_INSTANCE"] = db
+    app.config["_PYTEST_NEW_UI_CATEGORY_ENGINE_INSTANCE"] = category_engine
+    app.config["_PYTEST_NEW_UI_BILL_SERVICE_INSTANCE"] = bill_service
 
     yield app
 
@@ -65,6 +68,29 @@ async def app(initialize_app):
 
     # 停止日志监听器
     _logger_instance.stop()
+
+
+@pytest.fixture(autouse=True)
+def _restore_new_ui_app_context(app):
+    """Restore this package's initialized app context if another test rewired it."""
+    from bill_analyser.api import app as app_module
+
+    db_instance = app.config.get("_PYTEST_NEW_UI_DB_INSTANCE")
+    category_engine_instance = app.config.get("_PYTEST_NEW_UI_CATEGORY_ENGINE_INSTANCE")
+    bill_service_instance = app.config.get("_PYTEST_NEW_UI_BILL_SERVICE_INSTANCE")
+
+    if db_instance is not None:
+        app.config["DB_INSTANCE"] = db_instance
+        app_module.DB_INSTANCE = db_instance
+        app_module.db = db_instance
+    if category_engine_instance is not None:
+        app.config["CATEGORY_ENGINE_INSTANCE"] = category_engine_instance
+        app_module.CATEGORY_ENGINE_INSTANCE = category_engine_instance
+        app_module.category_engine = category_engine_instance
+    if bill_service_instance is not None:
+        app.config["BILL_SERVICE_INSTANCE"] = bill_service_instance
+        app_module.BILL_SERVICE_INSTANCE = bill_service_instance
+        app_module.bill_service = bill_service_instance
 
 
 @pytest.fixture(scope="session")
