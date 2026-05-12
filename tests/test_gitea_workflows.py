@@ -50,6 +50,16 @@ def test_gitea_ci_workflow_uses_parallel_jobs_instead_of_top_level_concurrency()
     assert re.search(r'(?m)^\s*environment:\s*', text) is None, 'ci.yml must avoid unsupported job environment'
 
 
+def test_ci_workflow_avoids_duplicate_feature_branch_push_runs() -> None:
+    text = _read('ci.yml')
+
+    assert re.search(
+        r"(?ms)^  push:\n    branches:\n      - main\n    paths:",
+        text,
+    ), 'feature branches should rely on pull_request CI instead of duplicate push CI'
+    assert 'refs/heads/codex/' not in text
+
+
 def test_gitea_workflows_pin_read_only_contents_permissions() -> None:
     for name in _workflow_files():
         text = _read(name)
