@@ -10,7 +10,10 @@ use axum::{
 };
 use bill_analyser_core::UserId;
 use bill_analyser_db::{
-    taxonomy::accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
+    taxonomy::{
+        accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
+        tags::{TagDisplayOrder, TagRecord, TagsRepository},
+    },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use serde_json::{json, Map, Number, Value};
@@ -42,6 +45,19 @@ pub const TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/accounts/sync-balances"),
 ];
 
+pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/tags"),
+    ("GET", "/api/tags/"),
+    ("POST", "/api/tags"),
+    ("POST", "/api/tags/"),
+    ("GET", "/api/tags/{tag_id}"),
+    ("PUT", "/api/tags/{tag_id}"),
+    ("DELETE", "/api/tags/{tag_id}"),
+    ("PUT", "/api/tags/display-orders"),
+];
+
+pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[("POST", "/api/tags/batch")];
+
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route(
@@ -66,6 +82,25 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
                 .put(update_account_handler)
                 .delete(delete_account_handler),
         )
+        .route("/api/tags", get(list_tags_handler).post(create_tag_handler))
+        .route(
+            "/api/tags/",
+            get(list_tags_handler).post(create_tag_handler),
+        )
+        .route(
+            "/api/tags/display-orders",
+            put(update_tag_display_orders_handler),
+        )
+        .route(
+            "/api/tags/batch",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/tags/:tag_id",
+            get(get_tag_handler)
+                .put(update_tag_handler)
+                .delete(delete_tag_handler),
+        )
 }
 
 async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -73,7 +108,7 @@ async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderM
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -94,7 +129,7 @@ async fn get_account_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -127,7 +162,7 @@ async fn create_account_handler(
         Ok(value) => Value::Object(value),
         Err(message) => return bad_request(message),
     };
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -167,7 +202,7 @@ async fn update_account_handler(
         Err(message) => return bad_request(message),
     };
     payload.remove("subAccounts");
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -209,7 +244,7 @@ async fn delete_account_handler(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -269,7 +304,7 @@ async fn update_account_display_orders_handler(
         });
     }
 
-    let mut runtime = match open_runtime(&state) {
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
         Ok(value) => value,
         Err(response) => return *response,
     };
@@ -278,6 +313,201 @@ async fn update_account_display_orders_handler(
         Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
         Ok(false) => db_error_response(),
         Err(_) => db_error_response(),
+    }
+}
+
+async fn list_tags_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+
+    match repository.list_tags(db_user_id(user_id)) {
+        Ok(tags) => success_result(StatusCode::OK, format_tag_list_response(tags)),
+        Err(_) => tag_db_error_response(),
+    }
+}
+
+async fn get_tag_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(tag_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+
+    match repository.get_tag(tag_id, db_user_id(user_id)) {
+        Ok(Some(tag)) => {
+            success_result(StatusCode::OK, Value::Object(backend_tag_to_frontend(tag)))
+        }
+        Ok(None) => not_found("Tag not found"),
+        Err(_) => tag_db_error_response(),
+    }
+}
+
+async fn create_tag_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if !tag_name_is_present(&body) {
+        return bad_request("name is required");
+    }
+    let payload = match frontend_tag_to_backend(&body) {
+        Ok(value) => Value::Object(value),
+        Err(message) => return bad_request(message),
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    let tag_id = match repository.create_tag(&payload, user_id) {
+        Ok(value) => value,
+        Err(_) => return tag_db_error_response(),
+    };
+    match repository.get_tag(tag_id, user_id) {
+        Ok(Some(tag)) => success_result(
+            StatusCode::CREATED,
+            Value::Object(backend_tag_to_frontend(tag)),
+        ),
+        Ok(None) => success_result(StatusCode::CREATED, json!({ "id": tag_id.to_string() })),
+        Err(_) => tag_db_error_response(),
+    }
+}
+
+async fn update_tag_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(tag_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let payload = match frontend_tag_to_backend(&body) {
+        Ok(value) => Value::Object(value),
+        Err(message) => return bad_request(message),
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    match repository.update_tag(tag_id, &payload, user_id) {
+        Ok(true) => match repository.get_tag(tag_id, user_id) {
+            Ok(Some(tag)) => {
+                success_result(StatusCode::OK, Value::Object(backend_tag_to_frontend(tag)))
+            }
+            Ok(None) => success_result(StatusCode::OK, json!({ "id": tag_id.to_string() })),
+            Err(_) => tag_db_error_response(),
+        },
+        Ok(false) => not_found("Tag not found"),
+        Err(_) => tag_db_error_response(),
+    }
+}
+
+async fn delete_tag_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(tag_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+
+    match repository.delete_tag(tag_id, db_user_id(user_id)) {
+        Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(false) => not_found("Tag not found"),
+        Err(_) => tag_db_error_response(),
+    }
+}
+
+async fn update_tag_display_orders_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(new_display_orders) = body.get("newDisplayOrders") else {
+        return bad_request("newDisplayOrders is required");
+    };
+    let Some(items) = new_display_orders.as_array() else {
+        return bad_request("newDisplayOrders must be an array");
+    };
+    let mut orders = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(object) = item.as_object() else {
+            return bad_request("Each item must have id and displayOrder");
+        };
+        if !object.contains_key("id") || !object.contains_key("displayOrder") {
+            return bad_request("Each item must have id and displayOrder");
+        }
+        let tag_id = match object.get("id").and_then(parse_python_int) {
+            Some(value) => value,
+            None => return bad_request(invalid_tag_order_value_error(object.get("id"))),
+        };
+        let display_order = match object.get("displayOrder").and_then(parse_python_int) {
+            Some(value) => value,
+            None => return bad_request(invalid_tag_order_value_error(object.get("displayOrder"))),
+        };
+        orders.push(TagDisplayOrder {
+            tag_id,
+            display_order,
+        });
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+    match repository.update_display_orders(&orders, db_user_id(user_id)) {
+        Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(false) => tag_db_error_response(),
+        Err(_) => tag_db_error_response(),
     }
 }
 
@@ -591,6 +821,37 @@ fn backend_account_to_frontend(mut account: AccountRecord) -> Map<String, Value>
     result
 }
 
+fn format_tag_list_response(tags: Vec<TagRecord>) -> Value {
+    Value::Array(
+        tags.into_iter()
+            .map(backend_tag_to_frontend)
+            .map(Value::Object)
+            .collect(),
+    )
+}
+
+fn backend_tag_to_frontend(tag: TagRecord) -> Map<String, Value> {
+    let hidden = tag.hidden != 0;
+    let mut result = Map::new();
+    result.insert("id".to_string(), Value::String(tag.id.to_string()));
+    result.insert("name".to_string(), Value::String(tag.name));
+    result.insert(
+        "color".to_string(),
+        tag.color.map_or(Value::Null, Value::String),
+    );
+    result.insert(
+        "icon".to_string(),
+        tag.icon.map_or(Value::Null, Value::String),
+    );
+    result.insert(
+        "displayOrder".to_string(),
+        Value::Number(Number::from(tag.display_order)),
+    );
+    result.insert("hidden".to_string(), Value::Bool(hidden));
+    result.insert("visible".to_string(), Value::Bool(!hidden));
+    result
+}
+
 fn required_json_body(body: Bytes, missing_message: &'static str) -> RouteResult<Value> {
     let value = parse_json_body(body)?;
     if matches!(value, Value::Null) || value.as_object().is_some_and(Map::is_empty) {
@@ -606,11 +867,11 @@ fn parse_json_body(body: Bytes) -> RouteResult<Value> {
     serde_json::from_slice(&body).map_err(|_| Box::new(bad_request("Invalid JSON")))
 }
 
-fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {
+fn open_runtime(state: &ProxyState, runtime_label: &str) -> RouteResult<SqliteRuntime> {
     let db_path = state.config.sqlite_db_path.as_deref().ok_or_else(|| {
         Box::new(error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            "Rust taxonomy accounts DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH",
+            format!("Rust {runtime_label} DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"),
         ))
     })?;
     let db_path = SqliteDbPath::application_file(db_path).map_err(|error| {
@@ -660,6 +921,13 @@ fn db_error_response() -> Response {
     error_response(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Rust taxonomy accounts route runtime DB error",
+    )
+}
+
+fn tag_db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust taxonomy tags route runtime DB error",
     )
 }
 
@@ -720,6 +988,71 @@ fn python_value_text(value: &Value) -> String {
     }
 }
 
+fn tag_name_is_present(payload: &Value) -> bool {
+    payload
+        .as_object()
+        .and_then(|object| object.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn frontend_tag_to_backend(payload: &Value) -> Result<Map<String, Value>, String> {
+    let Some(object) = payload.as_object() else {
+        return Err("Tag payload must be an object".to_string());
+    };
+    let mut result = Map::new();
+
+    if let Some(id) = object.get("id") {
+        result.insert("id".to_string(), id.clone());
+    }
+    if let Some(name) = object.get("name") {
+        result.insert(
+            "name".to_string(),
+            Value::String(string_or_default(Some(name), "")),
+        );
+    }
+    if let Some(color) = object.get("color") {
+        result.insert(
+            "color".to_string(),
+            if color.is_null() {
+                Value::Null
+            } else {
+                Value::String(string_or_default(Some(color), "#000000"))
+            },
+        );
+    }
+    if let Some(icon) = object.get("icon") {
+        result.insert(
+            "icon".to_string(),
+            if icon.is_null() {
+                Value::Null
+            } else {
+                Value::String(string_or_default(Some(icon), ""))
+            },
+        );
+    }
+    if let Some(hidden) = object.get("hidden") {
+        result.insert("hidden".to_string(), Value::Bool(value_truthy(hidden)));
+    } else if let Some(visible) = object.get("visible") {
+        result.insert("hidden".to_string(), Value::Bool(!value_truthy(visible)));
+    }
+    if let Some(display_order) = object
+        .get("displayOrder")
+        .or_else(|| object.get("display_order"))
+    {
+        let Some(display_order) = value_as_i64(display_order) else {
+            return Err("displayOrder must be an integer".to_string());
+        };
+        result.insert(
+            "display_order".to_string(),
+            Value::Number(Number::from(display_order)),
+        );
+    }
+
+    Ok(result)
+}
+
 fn value_string(value: Option<&Value>, default: &str) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
@@ -736,6 +1069,30 @@ fn string_or_default(value: Option<&Value>, default: &str) -> String {
         Some(Value::Null) | None => default.to_string(),
         Some(value) => value.to_string(),
     }
+}
+
+fn parse_python_int(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        Value::Bool(flag) => Some(i64::from(*flag)),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn invalid_tag_order_value_error(value: Option<&Value>) -> String {
+    let reason = match value {
+        Some(Value::String(text)) => {
+            format!("invalid literal for int() with base 10: '{text}'")
+        }
+        Some(Value::Null) => {
+            "int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
+                .to_string()
+        }
+        Some(value) => format!("unsupported integer value: {value}"),
+        None => "missing value".to_string(),
+    };
+    format!("Invalid id or displayOrder: {reason}")
 }
 
 fn value_as_i64(value: &Value) -> Option<i64> {

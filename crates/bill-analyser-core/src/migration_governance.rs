@@ -91,10 +91,8 @@ pub enum RouteHandlerId {
     StatisticsExchangeProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime")]
     AuthTokenRuntime,
-    #[serde(
-        rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_accounts_runtime"
-    )]
-    TaxonomyAccountsRuntime,
+    #[serde(rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime")]
+    TaxonomyRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler")]
     LegacyPythonProxyPassthrough,
     #[serde(rename = "crates/bill-analyser-core/src/migration_governance.rs::contract_oracle")]
@@ -150,8 +148,8 @@ impl RouteHandlerId {
             Self::AuthTokenRuntime => {
                 "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime"
             }
-            Self::TaxonomyAccountsRuntime => {
-                "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_accounts_runtime"
+            Self::TaxonomyRuntime => {
+                "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime"
             }
             Self::LegacyPythonProxyPassthrough => {
                 "crates/bill-analyser-http/src/proxy.rs::ownership_aware_proxy_handler"
@@ -1726,13 +1724,61 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         "/api/settings/encryption/status",
         "taxonomy-rules-settings"
     ),
-    python_proxy_route!("GET", "/api/tags/", "taxonomy-rules-settings"),
-    python_proxy_route!("POST", "/api/tags/", "taxonomy-rules-settings"),
-    python_proxy_route!("DELETE", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
-    python_proxy_route!("GET", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
-    python_proxy_route!("PUT", "/api/tags/{tag_id}", "taxonomy-rules-settings"),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/tags/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns current-user tag list route and emits frontend displayOrder/hidden DTO fields.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/tags/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns current-user tag creation with Flask-compatible name validation.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/tags/{tag_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns current-user tag deletion and preserves Tag not found for cross-user IDs.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/tags/{tag_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns current-user tag detail lookup.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/tags/{tag_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns tag content and visibility updates for the authenticated user.",
+    },
     python_proxy_route!("POST", "/api/tags/batch", "taxonomy-rules-settings"),
-    python_proxy_route!("PUT", "/api/tags/display-orders", "taxonomy-rules-settings"),
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/tags/display-orders",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns user-scoped tag display-order updates; batch tag creation remains proxied.",
+    },
     python_proxy_route!("GET", "/api/templates/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/templates/", "taxonomy-rules-settings"),
     python_proxy_route!(
@@ -2559,7 +2605,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         ],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD and display-order routes are Rust-owned. Account transaction move/clear, balance sync, categories, tags, templates, category rules, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order and tag CRUD/display-order routes are Rust-owned. Account transaction move/clear, balance sync, tag batch create, categories, templates, category rules, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -2997,11 +3043,11 @@ fn route_contract_details(
             transition_evidence: DB_RUNTIME_EVIDENCE,
         },
         ("taxonomy-rules-settings", MigrationState::RustOwnedVerified) => RouteContractDetails {
-            handler: RouteHandlerId::TaxonomyAccountsRuntime,
+            handler: RouteHandlerId::TaxonomyRuntime,
             deletion_blockers: &["categories_tags_templates_rules_settings_parity"],
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD and display-order routes are Rust-owned; account transaction move/clear, balance sync, categories, tags, templates, category rules, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order and tag CRUD/display-order routes are Rust-owned; account transaction move/clear, balance sync, tag batch create, categories, templates, category rules, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

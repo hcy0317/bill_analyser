@@ -26,6 +26,7 @@
   - `PUT /api/tags/<id>` 同时承担内容更新与 `hidden` 可见性更新
   - `POST /api/tags/batch` 支持批量创建
   - `PUT /api/tags/display-orders` 支持批量排序
+  - `import_db_runtime` 下标签 list/get/create/update/delete/display-order 路由由 Rust HTTP taxonomy runtime 直接接管；批量创建 `POST /api/tags/batch` 仍由 Python 处理。
 - 前端 `services.ts` 与标签 store 已移除对应直连 v1 排序路径，改为统一走 REST 入口
 - 模板域已完成契约梳理，但被重新评估为非低风险域：
   - 该域已完成首轮收口：前端模板调用统一走 REST，后端补齐 `templateType` 过滤、双表 DTO 映射、隐藏/排序与 `user_id` 收口；

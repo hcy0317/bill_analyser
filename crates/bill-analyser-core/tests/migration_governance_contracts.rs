@@ -208,17 +208,36 @@ fn taxonomy_account_crud_routes_are_rust_owned_while_p4_remainder_stays_proxied(
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy account route is present: {endpoint}"));
         assert_eq!(entry.state, MigrationState::RustOwnedVerified);
-        assert_eq!(entry.handler, RouteHandlerId::TaxonomyAccountsRuntime);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("categories, tags, templates"));
+            .contains("tag batch create, categories, templates"));
+    }
+
+    for endpoint in [
+        "GET /api/tags/",
+        "POST /api/tags/",
+        "GET /api/tags/{tag_id}",
+        "PUT /api/tags/{tag_id}",
+        "DELETE /api/tags/{tag_id}",
+        "PUT /api/tags/display-orders",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy tag route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
+        assert!(entry.unsupported_behavior.contains("tag batch create"));
     }
 
     for (method, pattern) in [
         ("POST", "/api/accounts/{account_id}/transactions/clear"),
         ("POST", "/api/accounts/{account_id}/transactions/move"),
         ("POST", "/api/accounts/sync-balances"),
+        ("POST", "/api/tags/batch"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("taxonomy proxied route is present: {method} {pattern}"));

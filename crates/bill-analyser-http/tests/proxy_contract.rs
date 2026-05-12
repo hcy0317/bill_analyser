@@ -471,6 +471,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::POST, "/api/accounts/123/transactions/move"),
         (Method::POST, "/api/accounts/123/transactions/clear"),
         (Method::POST, "/api/accounts/sync-balances"),
+        (Method::POST, "/api/tags/batch"),
         (Method::OPTIONS, "/api/auth/register"),
         (Method::GET, "/api/categories/virtual_food"),
         (Method::PUT, "/api/categories/virtual_food"),
