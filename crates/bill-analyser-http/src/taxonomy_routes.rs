@@ -19,6 +19,7 @@ use bill_analyser_db::{
     },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
+use rusqlite::{params, Connection};
 use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
@@ -115,8 +116,13 @@ pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/reorder"),
 ];
 
+pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
+
+pub const TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
+
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
     Router::new()
+        .route("/api/rules/overview", get(rules_overview_handler))
         .route(
             "/api/accounts",
             get(list_accounts_handler).post(create_account_handler),
@@ -1466,6 +1472,48 @@ async fn test_category_rule_handler(
     }
 }
 
+async fn rules_overview_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy rules overview") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = db_user_id(user_id);
+
+    let learning_count =
+        count_rules_overview_learning_rules(runtime.connection_mut(), user_id).unwrap_or(0);
+    let learning_rules =
+        list_rules_overview_learning_rules(runtime.connection_mut(), user_id).unwrap_or_default();
+    let category_rule_count = {
+        let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+        repository
+            .list_rules(user_id, None, true)
+            .map(|rules| rules.len() as i64)
+            .unwrap_or(0)
+    };
+    let recurring_rules =
+        list_rules_overview_recurring_rules(runtime.connection_mut(), user_id).unwrap_or_default();
+    let recurring_rule_count = recurring_rules.len() as i64;
+
+    json_response(
+        StatusCode::OK,
+        json!({
+            "success": true,
+            "data": {
+                "learningRules": learning_rules,
+                "learningRuleCount": learning_count,
+                "categoryRuleCount": category_rule_count,
+                "recurringRules": recurring_rules,
+                "recurringRuleCount": recurring_rule_count,
+                "totalRuleCount": learning_count + category_rule_count + recurring_rule_count,
+            }
+        }),
+    )
+}
+
 async fn import_categories_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2566,6 +2614,72 @@ fn format_category_rules_response(rules: Vec<CategoryRuleRecord>) -> Value {
         "data": Value::Array(rules.into_iter().map(Value::Object).collect()),
         "total": total,
     })
+}
+
+fn count_rules_overview_learning_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<i64> {
+    connection.query_row(
+        "SELECT COUNT(*) FROM import_learning_rules WHERE user_id = ?1",
+        params![user_id],
+        |row| row.get(0),
+    )
+}
+
+fn list_rules_overview_learning_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, match_type, match_value, learned_type, learned_category_id,
+               enabled, applied_count
+        FROM import_learning_rules
+        WHERE user_id = ?1
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 500
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(json!({
+            "id": row.get::<_, i64>("id")?,
+            "matchType": row.get::<_, Option<String>>("match_type")?,
+            "matchValue": row.get::<_, Option<String>>("match_value")?,
+            "learnedType": row.get::<_, Option<String>>("learned_type")?,
+            "learnedCategoryId": row.get::<_, Option<i64>>("learned_category_id")?,
+            "enabled": row.get::<_, i64>("enabled")? != 0,
+            "appliedCount": row.get::<_, Option<i64>>("applied_count")?.unwrap_or(0),
+            "source": "learning",
+        }))
+    })?;
+    rows.collect()
+}
+
+fn list_rules_overview_recurring_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT id, name, amount, frequency, enabled, next_date
+        FROM recurring_bills
+        WHERE user_id = ?1
+        ORDER BY COALESCE(display_order, 0), name
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(json!({
+            "id": row.get::<_, i64>("id")?,
+            "name": row.get::<_, Option<String>>("name")?,
+            "amount": row.get::<_, Option<f64>>("amount")?,
+            "frequency": row.get::<_, Option<String>>("frequency")?,
+            "enabled": row.get::<_, Option<i64>>("enabled")?.unwrap_or(1) != 0,
+            "nextDate": row.get::<_, Option<String>>("next_date")?,
+            "source": "recurring",
+        }))
+    })?;
+    rows.collect()
 }
 
 fn category_rules_enabled_only(query: &CategoryRulesQuery) -> bool {

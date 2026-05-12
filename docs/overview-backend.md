@@ -4,10 +4,10 @@
 - `auth/`：认证同名 package；按 session、registration/password、profile/external-auth、tokens、2FA、step-up、user-data 等功能域拆分，`auth.bp` 和既有 route URL/method 保持稳定
 - `bills/`：账单同名 package；按 CRUD/pictures、通用导入解析、导入配置、导入学习、reconciliation、v2 session/preview/decision 等功能域拆分，`bills.bp` 和 `/api/bills/*` 契约保持稳定
 - `matching/`：matching 同名 package；导入会话级 matching candidate 投影、preview family generic accept/reject、历史正式账单后配对与 pair 列表接口，以及规则中心 investment pairing settings 的 canonical REST 读写接口
-- `rules.py`：规则中心 legacy 兼容聚合口；当前 overview 只聚合 learning rules、category rule count 与 recurring rules，不再把 legacy `category_keywords` 作为运行时总览来源
+- `rules.py`：规则中心 legacy 兼容聚合口；默认 `import_db_runtime` 下 `GET /api/rules/overview` 已由 Rust taxonomy runtime 汇总 learning rules、启用的 category rule count 与 recurring rules，不再把 legacy `category_keywords` 作为运行时总览来源
 - `accounts/`：账户同名 package；账户 CRUD、余额同步、显示顺序与账户交易迁移/清空接口
 - `categories/`：分类同名 package；分类列表/树、创建更新删除、移动、统计、导入导出与规则维护接口
-- `category_rules.py`：分类规则的 canonical CRUD / migrate / defaults / test 接口；默认 `import_db_runtime` 下 `GET /api/category-rules/` 与 `POST /api/category-rules/{rule_id}/test` 已由 Rust taxonomy runtime 读取普通应用 SQLite，写操作、defaults、migrate、reorder 和 engine reload 仍由 Python 维护；category rules 是当前分类规则体系的正式入口，`POST /api/category-rules/defaults` 会幂等补齐内置日常分类和分类识别规则
+- `category_rules.py`：分类规则的 canonical CRUD / migrate / defaults / test 接口；默认 `import_db_runtime` 下 `GET /api/category-rules/`、`POST /api/category-rules/{rule_id}/test` 与规则中心 `GET /api/rules/overview` 已由 Rust taxonomy runtime 读取普通应用 SQLite，写操作、defaults、migrate、reorder 和 engine reload 仍由 Python 维护；category rules 是当前分类规则体系的正式入口，`POST /api/category-rules/defaults` 会幂等补齐内置日常分类和分类识别规则
 - `tags.py`：标签管理与关联
 - `budgets/`：预算同名 package；预算 CRUD、执行统计、历史、预测、导入导出接口
 - `statistics/`：统计同名 package；统计总览、趋势、分类/商户分析、资产趋势与汇率接口；默认 Rust `import_db_runtime` 下，category statistics、category trends、asset trends、category pie、top merchants、amounts 已由 Rust HTTP/DB 读取路径接管，Analyzer overview/trends/comparison/category/trend 与 exchange-rate provider/custom-rate 仍由 Python sidecar 运行

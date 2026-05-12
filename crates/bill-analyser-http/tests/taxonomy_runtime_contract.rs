@@ -10,6 +10,7 @@ use bill_analyser_http::{
     TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
     TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
     TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
+    TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS, TAXONOMY_RULE_CENTER_ROUTE_PATTERNS,
     TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
     TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
@@ -1664,6 +1665,57 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
 }
 
 #[tokio::test]
+async fn taxonomy_rules_overview_runtime_aggregates_user_scoped_rule_sources(
+) -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_RULE_CENTER_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/rules/overview")));
+    assert!(TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS.is_empty());
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/rules/overview",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let data = &body["data"];
+    assert_eq!(body["success"], true);
+    assert_eq!(data["learningRuleCount"], 2);
+    assert_eq!(data["categoryRuleCount"], 1);
+    assert_eq!(data["recurringRuleCount"], 1);
+    assert_eq!(data["totalRuleCount"], 4);
+
+    let learning_rules = data["learningRules"].as_array().expect("learning rules");
+    assert_eq!(learning_rules[0]["id"], 71);
+    assert_eq!(learning_rules[0]["matchType"], "description");
+    assert_eq!(learning_rules[0]["matchValue"], "基金定投");
+    assert_eq!(learning_rules[0]["learnedCategoryId"], 31);
+    assert_eq!(learning_rules[0]["enabled"], false);
+    assert_eq!(learning_rules[0]["source"], "learning");
+
+    let recurring_rules = data["recurringRules"].as_array().expect("recurring rules");
+    assert_eq!(recurring_rules[0]["id"], 41);
+    assert_eq!(recurring_rules[0]["name"], "房租模板");
+    assert_eq!(recurring_rules[0]["amount"], 3000.0);
+    assert_eq!(recurring_rules[0]["frequency"], "monthly");
+    assert_eq!(recurring_rules[0]["nextDate"], "2026-02-01");
+    assert_eq!(recurring_rules[0]["source"], "recurring");
+
+    let serialized = serde_json::to_string(&body)?;
+    assert!(!serialized.contains("其他用户规则"));
+    assert!(!serialized.contains("其他用户学习规则"));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn taxonomy_categories_runtime_covers_legacy_aliases_virtual_and_batch_edges(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
@@ -2744,6 +2796,17 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             updated_at TEXT,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
         );
+        CREATE TABLE import_learning_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            match_type TEXT NOT NULL,
+            match_value TEXT NOT NULL,
+            learned_type TEXT,
+            learned_category_id INTEGER,
+            enabled INTEGER DEFAULT 1,
+            applied_count INTEGER DEFAULT 0,
+            updated_at TEXT
+        );
         CREATE TABLE bill_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -2852,6 +2915,17 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (60, 42, 31, '午餐规则', 10, 'OR={午餐,饭}', 0, 1, 2, '2026-01-02T00:00:00', 'now', 'now'),
             (61, 42, 31, '禁用规则', 20, 'OR={禁用}', 0, 0, 0, NULL, 'now', 'now'),
             (96, 77, 97, '其他用户规则', 1, 'OR={其他}', 0, 1, 1, NULL, 'now', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO import_learning_rules(
+            id, user_id, match_type, match_value, learned_type,
+            learned_category_id, enabled, applied_count, updated_at
+        )
+        VALUES
+            (70, 42, 'counterparty', '招商银行', 'expense', 31, 1, 3, '2026-01-01T00:00:00'),
+            (71, 42, 'description', '基金定投', 'expense', 31, 0, 1, '2026-01-02T00:00:00'),
+            (95, 77, 'description', '其他用户学习规则', 'expense', 97, 1, 5, '2026-01-03T00:00:00')",
         [],
     )?;
     connection.execute(

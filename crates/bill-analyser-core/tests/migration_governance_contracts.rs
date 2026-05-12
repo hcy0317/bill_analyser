@@ -59,6 +59,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
+    assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -267,7 +268,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics, category-rule list/test, and templates routes are Rust-owned"));
+            .contains("category master-data/statistics, category-rule list/test, rule overview, and templates routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -299,6 +300,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
     for endpoint in [
         "GET /api/category-rules/",
         "POST /api/category-rules/{rule_id}/test",
+        "GET /api/rules/overview",
     ] {
         let entry = manifest
             .iter()
