@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, put},
@@ -14,6 +14,7 @@ use bill_analyser_db::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord},
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
+        templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
@@ -59,6 +60,19 @@ pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
 ];
 
 pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
+
+pub const TAXONOMY_TEMPLATE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/templates"),
+    ("GET", "/api/templates/"),
+    ("POST", "/api/templates"),
+    ("POST", "/api/templates/"),
+    ("GET", "/api/templates/{template_id}"),
+    ("PUT", "/api/templates/{template_id}"),
+    ("DELETE", "/api/templates/{template_id}"),
+    ("PUT", "/api/templates/display-orders"),
+];
+
+pub const TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories"),
@@ -127,6 +141,24 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
             get(get_tag_handler)
                 .put(update_tag_handler)
                 .delete(delete_tag_handler),
+        )
+        .route(
+            "/api/templates",
+            get(list_templates_handler).post(create_template_handler),
+        )
+        .route(
+            "/api/templates/",
+            get(list_templates_handler).post(create_template_handler),
+        )
+        .route(
+            "/api/templates/display-orders",
+            put(update_template_display_orders_handler),
+        )
+        .route(
+            "/api/templates/:template_id",
+            get(get_template_handler)
+                .put(update_template_handler)
+                .delete(delete_template_handler),
         )
         .route(
             "/api/categories",
@@ -659,6 +691,178 @@ async fn batch_create_tags_handler(
     }
 
     success_result(StatusCode::CREATED, Value::Array(created_tags))
+}
+
+async fn list_templates_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, None, None);
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+
+    match repository.list_templates(db_user_id(user_id), template_type) {
+        Ok(templates) => success_result(StatusCode::OK, format_template_list_response(templates)),
+        Err(_) => template_db_error_response(),
+    }
+}
+
+async fn get_template_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+    Path(template_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, None, None);
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+
+    match repository.get_template_by_id(template_id, db_user_id(user_id), template_type) {
+        Ok(Some(template)) => success_result(StatusCode::OK, Value::Object(template)),
+        Ok(None) => not_found("Template not found"),
+        Err(_) => template_db_error_response(),
+    }
+}
+
+async fn create_template_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, Some(&body), Some(1));
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    let template_id = match repository.create_template(&body, user_id) {
+        Ok(value) => value,
+        Err(_) => return template_db_error_response(),
+    };
+    match repository.get_template_by_id(template_id, user_id, template_type) {
+        Ok(Some(template)) => success_result(StatusCode::CREATED, Value::Object(template)),
+        Ok(None) => success_result(
+            StatusCode::CREATED,
+            json!({ "id": template_id.to_string() }),
+        ),
+        Err(_) => template_db_error_response(),
+    }
+}
+
+async fn update_template_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+    Path(template_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, Some(&body), Some(1));
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    match repository.update_template(template_id, &body, user_id, template_type) {
+        Ok(true) => match repository.get_template_by_id(template_id, user_id, template_type) {
+            Ok(Some(template)) => success_result(StatusCode::OK, Value::Object(template)),
+            Ok(None) => success_result(StatusCode::OK, Value::Null),
+            Err(_) => template_db_error_response(),
+        },
+        Ok(false) => not_found("Template not found"),
+        Err(_) => template_db_error_response(),
+    }
+}
+
+async fn delete_template_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+    Path(template_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, None, Some(1));
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+
+    match repository.delete_template(template_id, db_user_id(user_id), template_type) {
+        Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(false) => not_found("Template not found"),
+        Err(_) => template_db_error_response(),
+    }
+}
+
+async fn update_template_display_orders_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Query(query): Query<BTreeMap<String, String>>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let orders = match template_display_orders_from_body(&body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let template_type = template_type_from_query_body(&query, Some(&body), Some(1)).unwrap_or(1);
+    let mut runtime = match open_runtime(&state, "taxonomy templates") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TemplatesRepository::new(runtime.connection_mut());
+
+    match repository.update_display_orders(&orders, template_type, db_user_id(user_id)) {
+        Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
+        Ok(false) => template_db_error_response(),
+        Err(_) => template_db_error_response(),
+    }
 }
 
 async fn list_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -1504,6 +1708,10 @@ fn format_tag_list_response(tags: Vec<TagRecord>) -> Value {
     )
 }
 
+fn format_template_list_response(templates: Vec<TemplateRecord>) -> Value {
+    Value::Array(templates.into_iter().map(Value::Object).collect())
+}
+
 fn backend_tag_to_frontend(tag: TagRecord) -> Map<String, Value> {
     let hidden = tag.hidden != 0;
     let mut result = Map::new();
@@ -2313,6 +2521,13 @@ fn category_db_error_response() -> Response {
     )
 }
 
+fn template_db_error_response() -> Response {
+    error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Rust taxonomy templates route runtime DB error",
+    )
+}
+
 fn error_response(status: StatusCode, message: impl ToString) -> Response {
     json_response(
         status,
@@ -2368,6 +2583,61 @@ fn python_value_text(value: &Value) -> String {
         Value::String(text) => text.clone(),
         Value::Number(_) | Value::Array(_) | Value::Object(_) => value.to_string(),
     }
+}
+
+fn template_type_from_query_body(
+    query: &BTreeMap<String, String>,
+    body: Option<&Value>,
+    default: Option<i64>,
+) -> Option<i64> {
+    if let Some(value) = query.get("templateType") {
+        return parse_template_type_text(value).or(default);
+    }
+    if let Some(value) = body.and_then(|value| value.get("templateType")) {
+        return parse_template_type_text(&python_value_text(value)).or(default);
+    }
+    default
+}
+
+fn parse_template_type_text(value: &str) -> Option<i64> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    value.parse::<i64>().ok()
+}
+
+fn template_display_orders_from_body(body: &Value) -> RouteResult<Vec<TemplateDisplayOrder>> {
+    let Some(items) = body
+        .get("newDisplayOrders")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty())
+    else {
+        return Err(Box::new(bad_request("Missing newDisplayOrders")));
+    };
+    let mut orders = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(object) = item.as_object() else {
+            return Err(Box::new(bad_request(
+                "Each item must have id and displayOrder",
+            )));
+        };
+        let Some(template_id) = object.get("id").and_then(parse_python_int) else {
+            return Err(Box::new(bad_request(
+                "Each item must have id and displayOrder",
+            )));
+        };
+        let Some(display_order) = object.get("displayOrder").and_then(parse_python_int) else {
+            return Err(Box::new(bad_request(
+                "Each item must have id and displayOrder",
+            )));
+        };
+        orders.push(TemplateDisplayOrder {
+            template_id,
+            display_order,
+        });
+    }
+    Ok(orders)
 }
 
 fn tag_name_is_present(payload: &Value) -> bool {

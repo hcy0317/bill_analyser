@@ -55,6 +55,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/data/export.{file_type}")));
     assert!(rust_owned.contains(&("POST", "/api/data/clear/transactions")));
     assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
+    assert!(rust_owned.contains(&("GET", "/api/templates/")));
+    assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -212,7 +214,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("templates, category rules"));
+            .contains("templates routes are Rust-owned"));
     }
 
     for endpoint in [
@@ -262,13 +264,33 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data routes are Rust-owned"));
+            .contains("category master-data, and templates routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
         assert!(entry
             .deletion_blockers
             .contains(&"account_transaction_operations_parity"));
+    }
+
+    for endpoint in [
+        "GET /api/templates/",
+        "POST /api/templates/",
+        "GET /api/templates/{template_id}",
+        "PUT /api/templates/{template_id}",
+        "DELETE /api/templates/{template_id}",
+        "PUT /api/templates/display-orders",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy template route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
+        assert!(entry
+            .unsupported_behavior
+            .contains("templates routes are Rust-owned"));
     }
 
     for (method, pattern) in [

@@ -10,6 +10,7 @@ use bill_analyser_http::{
     TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS, TAXONOMY_ACCOUNT_ROUTE_PATTERNS,
     TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
     TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
+    TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
 use rusqlite::Connection;
 use serde_json::{json, Value};
@@ -936,6 +937,323 @@ async fn taxonomy_tags_runtime_reports_db_errors_for_missing_tag_schema(
         read_json(response).await["error"],
         "Rust taxonomy tags route runtime DB error"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_templates_runtime_serves_crud_and_frontend_contract() -> Result<(), Box<dyn Error>>
+{
+    assert!(TAXONOMY_TEMPLATE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/templates/")));
+    assert!(TAXONOMY_TEMPLATE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("PUT", "/api/templates/display-orders")));
+    assert!(TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS.is_empty());
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let list_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/templates?templateType=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = read_json(list_response).await;
+    assert_eq!(list_body["success"], true);
+    let templates = list_body["result"].as_array().expect("template list");
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0]["id"], "40");
+    assert_eq!(templates[0]["name"], "午餐模板");
+    assert_eq!(templates[0]["templateType"], 1);
+    assert_eq!(templates[0]["type"], 3);
+    assert_eq!(templates[0]["tagIds"], json!(["20", "21"]));
+    assert!(!serde_json::to_string(&list_body)?.contains("其他用户模板"));
+
+    let recurring_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/templates/?templateType=2",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(recurring_response.status(), StatusCode::OK);
+    let recurring_body = read_json(recurring_response).await;
+    assert_eq!(recurring_body["result"][0]["id"], "41");
+    assert_eq!(recurring_body["result"][0]["scheduledFrequency"], "monthly");
+
+    let get_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(get_response.status(), StatusCode::OK);
+    assert_eq!(read_json(get_response).await["result"]["categoryId"], "31");
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/templates",
+            json!({
+                "templateType": 1,
+                "name": "咖啡模板",
+                "type": 3,
+                "categoryId": "31",
+                "sourceAccountId": "10",
+                "destinationAccountId": "0",
+                "sourceAmount": 18.5,
+                "destinationAmount": 0,
+                "hideAmount": false,
+                "tagIds": ["20"],
+                "comment": "下午",
+                "hidden": false,
+                "utcOffset": 480
+            }),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = read_json(create_response).await;
+    assert_eq!(create_body["success"], true);
+    assert_eq!(create_body["result"]["name"], "咖啡模板");
+    assert_eq!(create_body["result"]["templateType"], 1);
+    let created_id = create_body["result"]["id"]
+        .as_str()
+        .expect("created template id")
+        .parse::<i64>()?;
+    assert!(template_exists(&fixture.db_path, created_id)?);
+
+    let update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/templates/{created_id}?templateType=1"),
+            json!({
+                "name": "咖啡模板更新",
+                "sourceAmount": 20.0,
+                "tagIds": ["20", "21"],
+                "hidden": true,
+                "displayOrder": 4
+            }),
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    assert_eq!(update_body["result"]["name"], "咖啡模板更新");
+    assert_eq!(update_body["result"]["sourceAmount"], 20.0);
+    assert_eq!(update_body["result"]["tagIds"], json!(["20", "21"]));
+    assert_eq!(update_body["result"]["hidden"], true);
+
+    let orders_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/templates/display-orders?templateType=1",
+            json!({"newDisplayOrders": [
+                {"id": created_id, "displayOrder": 1},
+                {"id": 40, "displayOrder": 3}
+            ]}),
+        ))
+        .await?;
+    assert_eq!(orders_response.status(), StatusCode::OK);
+    assert_eq!(read_json(orders_response).await["result"], true);
+    assert_eq!(template_display_order(&fixture.db_path, created_id)?, 1);
+    assert_eq!(template_display_order(&fixture.db_path, 40)?, 3);
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/templates/{created_id}?templateType=1"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["result"], true);
+    assert!(!template_exists(&fixture.db_path, created_id)?);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_templates_runtime_validates_payloads_user_scope_and_db_config(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let unauth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/templates/")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauth_response.status(), StatusCode::UNAUTHORIZED);
+
+    let missing_create = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/templates/",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_create.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(missing_create).await["error"], "No data provided");
+
+    let missing_update = app
+        .clone()
+        .oneshot(authed_request(
+            Method::PUT,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_update.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(read_json(missing_update).await["error"], "No data provided");
+
+    let missing_template = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/templates/999?templateType=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(missing_template.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(missing_template).await["error"],
+        "Template not found"
+    );
+
+    let cross_user_delete = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/templates/96?templateType=1",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(cross_user_delete.status(), StatusCode::NOT_FOUND);
+    assert!(template_exists(&fixture.db_path, 96)?);
+
+    let missing_orders = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/templates/display-orders",
+            json!({"newDisplayOrders": []}),
+        ))
+        .await?;
+    assert_eq!(missing_orders.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_orders).await["error"],
+        "Missing newDisplayOrders"
+    );
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    for (method, uri, body) in [
+        (Method::GET, "/api/templates/", Body::empty()),
+        (
+            Method::GET,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ),
+        (
+            Method::POST,
+            "/api/templates/",
+            Body::from(r#"{"name":"NoDb","templateType":1}"#),
+        ),
+        (
+            Method::PUT,
+            "/api/templates/40?templateType=1",
+            Body::from(r#"{"name":"NoDb"}"#),
+        ),
+        (
+            Method::DELETE,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ),
+        (
+            Method::PUT,
+            "/api/templates/display-orders",
+            Body::from(r#"{"newDisplayOrders":[{"id":40,"displayOrder":1}]}"#),
+        ),
+    ] {
+        let response = no_db_app
+            .clone()
+            .oneshot(authed_request(method, uri, body))
+            .await?;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+        assert_eq!(
+            read_json(response).await["error"],
+            "Rust taxonomy templates DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_templates_runtime_reports_db_errors_for_missing_schema(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE bill_templates", [])?;
+    let app = runtime_router(&fixture);
+
+    for (method, uri, body) in [
+        (Method::GET, "/api/templates/?templateType=1", Body::empty()),
+        (
+            Method::GET,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ),
+        (
+            Method::POST,
+            "/api/templates/",
+            Body::from(r#"{"name":"Broken","templateType":1}"#),
+        ),
+        (
+            Method::PUT,
+            "/api/templates/40?templateType=1",
+            Body::from(r#"{"name":"Broken"}"#),
+        ),
+        (
+            Method::DELETE,
+            "/api/templates/40?templateType=1",
+            Body::empty(),
+        ),
+        (
+            Method::PUT,
+            "/api/templates/display-orders?templateType=1",
+            Body::from(r#"{"newDisplayOrders":[{"id":40,"displayOrder":1}]}"#),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authed_request(method, uri, body))
+            .await?;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{uri}"
+        );
+        assert_eq!(
+            read_json(response).await["error"],
+            "Rust taxonomy templates route runtime DB error"
+        );
+    }
 
     Ok(())
 }
@@ -2221,6 +2539,57 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             created_at TEXT NOT NULL,
             UNIQUE(user_id, main_category, sub_category)
         );
+        CREATE TABLE bill_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            description TEXT,
+            type TEXT NOT NULL,
+            category TEXT,
+            amount REAL,
+            account TEXT,
+            counterparty TEXT,
+            tag TEXT,
+            comment TEXT,
+            is_favorite BOOLEAN DEFAULT 0,
+            use_count INTEGER DEFAULT 0,
+            last_used_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            destination_amount REAL DEFAULT 0,
+            hide_amount INTEGER DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            utc_offset INTEGER DEFAULT 0
+        );
+        CREATE TABLE recurring_bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            template_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT,
+            type TEXT NOT NULL,
+            category TEXT,
+            amount REAL NOT NULL,
+            account TEXT,
+            counterparty TEXT,
+            tag TEXT,
+            comment TEXT,
+            frequency TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT,
+            next_date TEXT NOT NULL,
+            enabled BOOLEAN DEFAULT 1,
+            auto_create BOOLEAN DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            destination_amount REAL DEFAULT 0,
+            hide_amount INTEGER DEFAULT 0,
+            display_order INTEGER DEFAULT 0,
+            hidden INTEGER DEFAULT 0,
+            utc_offset INTEGER DEFAULT 0,
+            scheduled_frequency_type INTEGER DEFAULT 0
+        );
         ",
     )?;
     connection.execute(
@@ -2258,6 +2627,30 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (30, 42, 3, '餐饮', '', '主分类', 1, '', 0, 'mdi-food', '#ff6600', 'now'),
             (31, 42, 3, '餐饮', '午餐', '子分类', 2, '饭', 1, 'mdi-food', '#ff6600', 'now'),
             (97, 77, 3, '其他用户分类', '', '', 0, '', 0, '', '', 'now')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO bill_templates(
+            id, user_id, name, description, type, category, amount, account,
+            counterparty, tag, comment, is_favorite, use_count, last_used_at,
+            created_at, updated_at, destination_amount, hide_amount,
+            display_order, hidden, utc_offset
+        )
+        VALUES
+            (40, 42, '午餐模板', '工作日午餐', '支出', '31', 12.5, '10', '0', '20,21', '常用', 1, 2, '2026-01-03T00:00:00', 'now', 'now', 0, 0, 2, 0, 480),
+            (96, 77, '其他用户模板', '', '支出', '97', 99.0, '99', '0', '', '', 0, 0, NULL, 'now', 'now', 0, 0, 1, 0, 480)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO recurring_bills(
+            id, user_id, template_id, name, description, type, category,
+            amount, account, counterparty, tag, comment, frequency,
+            scheduled_frequency_type, start_date, end_date, next_date,
+            enabled, auto_create, display_order, hidden, utc_offset,
+            created_at, updated_at, destination_amount, hide_amount
+        )
+        VALUES
+            (41, 42, NULL, '房租模板', '每月房租', '支出', '30', 3000.0, '10', '0', '', '租金', 'monthly', 2, '2026-01-01', NULL, '2026-02-01', 1, 0, 1, 0, 480, 'now', 'now', 0, 0)",
         [],
     )?;
     Ok(())
@@ -2329,6 +2722,22 @@ fn tag_display_order(path: &Path, tag_id: i64) -> Result<i64, Box<dyn Error>> {
     Ok(Connection::open(path)?.query_row(
         "SELECT display_order FROM tags WHERE id = ?1",
         [tag_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn template_exists(path: &Path, template_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM bill_templates WHERE id = ?1",
+        [template_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn template_display_order(path: &Path, template_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT display_order FROM bill_templates WHERE id = ?1",
+        [template_id],
         |row| row.get::<_, i64>(0),
     )?)
 }

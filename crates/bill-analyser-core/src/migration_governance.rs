@@ -1897,28 +1897,60 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy runtime owns user-scoped tag display-order updates.",
     },
-    python_proxy_route!("GET", "/api/templates/", "taxonomy-rules-settings"),
-    python_proxy_route!("POST", "/api/templates/", "taxonomy-rules-settings"),
-    python_proxy_route!(
-        "DELETE",
-        "/api/templates/{template_id}",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "GET",
-        "/api/templates/{template_id}",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "PUT",
-        "/api/templates/{template_id}",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "PUT",
-        "/api/templates/display-orders",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/templates/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime lists authenticated user bill and recurring templates with templateType filtering.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/templates/",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime creates authenticated user bill or recurring templates and returns the Flask-compatible template DTO.",
+    },
+    EndpointOwnership {
+        method: "DELETE",
+        pattern: "/api/templates/{template_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime deletes authenticated user templates with templateType scoping.",
+    },
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/templates/{template_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime reads authenticated user template details with templateType filtering.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/templates/{template_id}",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime updates authenticated user bill or recurring template fields.",
+    },
+    EndpointOwnership {
+        method: "PUT",
+        pattern: "/api/templates/display-orders",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy templates runtime persists authenticated user template display ordering.",
+    },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/auth/login",
@@ -2724,7 +2756,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order, tag CRUD/display-order/batch-create, and category master-data routes are Rust-owned. Account transaction move/clear, balance sync, templates, category rules, category statistics, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data, and templates routes are Rust-owned. Account transaction move/clear, balance sync, category rules, category statistics, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3166,7 +3198,7 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order, tag CRUD/display-order/batch-create, and category master-data routes are Rust-owned; account transaction move/clear, balance sync, templates, category rules, category statistics, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order, tag CRUD/display-order/batch-create, category master-data, and templates routes are Rust-owned; account transaction move/clear, balance sync, category rules, category statistics, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,
