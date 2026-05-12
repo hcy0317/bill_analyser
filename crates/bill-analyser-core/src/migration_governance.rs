@@ -1879,7 +1879,15 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy runtime owns tag content and visibility updates for the authenticated user.",
     },
-    python_proxy_route!("POST", "/api/tags/batch", "taxonomy-rules-settings"),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/tags/batch",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy runtime owns user-scoped tag batch creation with duplicate skip/409 semantics.",
+    },
     EndpointOwnership {
         method: "PUT",
         pattern: "/api/tags/display-orders",
@@ -1887,7 +1895,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy runtime owns user-scoped tag display-order updates; batch tag creation remains proxied.",
+        notes: "Rust taxonomy runtime owns user-scoped tag display-order updates.",
     },
     python_proxy_route!("GET", "/api/templates/", "taxonomy-rules-settings"),
     python_proxy_route!("POST", "/api/templates/", "taxonomy-rules-settings"),
@@ -2249,7 +2257,7 @@ const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
     "2fa_oauth_parity",
 ];
 const TAXONOMY_DELETION_BLOCKERS: &[&str] = &[
-    "tag_batch_templates_category_rules_settings_parity",
+    "templates_category_rules_settings_parity",
     "account_transaction_operations_parity",
 ];
 const IMPORT_DELETION_BLOCKERS: &[&str] = &[
@@ -2716,7 +2724,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order, tag CRUD/display-order, and category master-data routes are Rust-owned. Account transaction move/clear, balance sync, tag batch create, templates, category rules, category statistics, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order, tag CRUD/display-order/batch-create, and category master-data routes are Rust-owned. Account transaction move/clear, balance sync, templates, category rules, category statistics, and settings bundle routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3158,7 +3166,7 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order, tag CRUD/display-order, and category master-data routes are Rust-owned; account transaction move/clear, balance sync, tag batch create, templates, category rules, category statistics, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order, tag CRUD/display-order/batch-create, and category master-data routes are Rust-owned; account transaction move/clear, balance sync, templates, category rules, category statistics, and settings bundle routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

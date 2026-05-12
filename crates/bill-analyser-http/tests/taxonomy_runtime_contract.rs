@@ -429,9 +429,12 @@ async fn taxonomy_tags_runtime_serves_crud_and_frontend_contract() -> Result<(),
     assert!(TAXONOMY_TAG_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("PUT", "/api/tags/display-orders")));
-    assert!(TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS
+    assert!(TAXONOMY_TAG_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/tags/batch")));
+    assert!(TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/tags/batch")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -523,6 +526,52 @@ async fn taxonomy_tags_runtime_serves_crud_and_frontend_contract() -> Result<(),
     assert_eq!(read_json(delete_response).await["result"], true);
     assert!(!tag_exists(&fixture.db_path, created_id)?);
 
+    let duplicate_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/tags/batch",
+            json!({"tags": [{"name": "午饭"}], "skipExists": false}),
+        ))
+        .await?;
+    assert_eq!(duplicate_response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        read_json(duplicate_response).await["error"],
+        "Tag already exists: 午饭"
+    );
+
+    let batch_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/tags/batch",
+            json!({
+                "tags": [
+                    {"name": "通勤"},
+                    {"name": "批量新增", "color": "#224466", "icon": "batch", "hidden": true}
+                ],
+                "skipExists": true
+            }),
+        ))
+        .await?;
+    assert_eq!(batch_response.status(), StatusCode::CREATED);
+    let batch_body = read_json(batch_response).await;
+    let batch_tags = batch_body["result"].as_array().expect("batch tags");
+    assert_eq!(
+        batch_tags
+            .iter()
+            .map(|tag| tag["name"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["通勤", "批量新增"]
+    );
+    assert_eq!(batch_tags[1]["color"], "#224466");
+    assert_eq!(batch_tags[1]["hidden"], true);
+    let batch_id = batch_tags[1]["id"]
+        .as_str()
+        .expect("batch id")
+        .parse::<i64>()?;
+    assert!(tag_exists(&fixture.db_path, batch_id)?);
+
     Ok(())
 }
 
@@ -559,6 +608,11 @@ async fn taxonomy_tags_runtime_validates_payloads_and_user_scope() -> Result<(),
             Method::PUT,
             "/api/tags/display-orders",
             Body::from(json!({"newDisplayOrders": []}).to_string()),
+        ),
+        (
+            Method::POST,
+            "/api/tags/batch",
+            Body::from(json!({"tags": [{"name": "未授权"}]}).to_string()),
         ),
     ] {
         let response = app
@@ -670,6 +724,34 @@ async fn taxonomy_tags_runtime_validates_payloads_and_user_scope() -> Result<(),
         .await?;
     assert_eq!(invalid_json.status(), StatusCode::BAD_REQUEST);
     assert_eq!(read_json(invalid_json).await["error"], "Invalid JSON");
+
+    let invalid_batch_shape = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/tags/batch",
+            json!({"tags": "bad"}),
+        ))
+        .await?;
+    assert_eq!(invalid_batch_shape.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_batch_shape).await["error"],
+        "tags is required and must be a non-empty array"
+    );
+
+    let invalid_batch_item = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/tags/batch",
+            json!({"tags": [{}]}),
+        ))
+        .await?;
+    assert_eq!(invalid_batch_item.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_batch_item).await["error"],
+        "Each tag item must contain a non-empty name"
+    );
 
     Ok(())
 }
@@ -822,6 +904,11 @@ async fn taxonomy_tags_runtime_reports_config_errors_before_db_work() -> Result<
             Method::PUT,
             "/api/tags/display-orders",
             Body::from(json!({"newDisplayOrders": [{"id": 20, "displayOrder": 1}]}).to_string()),
+        ),
+        (
+            Method::POST,
+            "/api/tags/batch",
+            Body::from(json!({"tags": [{"name": "无库"}]}).to_string()),
         ),
     ] {
         let response = app

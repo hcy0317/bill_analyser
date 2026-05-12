@@ -51,13 +51,14 @@ pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/tags/"),
     ("POST", "/api/tags"),
     ("POST", "/api/tags/"),
+    ("POST", "/api/tags/batch"),
     ("GET", "/api/tags/{tag_id}"),
     ("PUT", "/api/tags/{tag_id}"),
     ("DELETE", "/api/tags/{tag_id}"),
     ("PUT", "/api/tags/display-orders"),
 ];
 
-pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[("POST", "/api/tags/batch")];
+pub const TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories"),
@@ -119,7 +120,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/tags/batch",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(batch_create_tags_handler),
         )
         .route(
             "/api/tags/:tag_id",
@@ -580,6 +581,84 @@ async fn update_tag_display_orders_handler(
         Ok(false) => tag_db_error_response(),
         Err(_) => tag_db_error_response(),
     }
+}
+
+async fn batch_create_tags_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(tags) = body
+        .get("tags")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty())
+    else {
+        return bad_request("tags is required and must be a non-empty array");
+    };
+    let skip_exists = body.get("skipExists").is_some_and(value_truthy);
+
+    let mut runtime = match open_runtime(&state, "taxonomy tags") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = TagsRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+    let mut existing_by_name = match repository.list_tags(user_id) {
+        Ok(existing_tags) => existing_tags
+            .into_iter()
+            .map(|tag| {
+                let key = tag.name.trim().to_lowercase();
+                let value = Value::Object(backend_tag_to_frontend(tag));
+                (key, value)
+            })
+            .collect::<BTreeMap<_, _>>(),
+        Err(_) => return tag_db_error_response(),
+    };
+    let mut created_tags = Vec::new();
+
+    for item in tags {
+        let Some(normalized_name) = tag_batch_normalized_name(item) else {
+            return bad_request("Each tag item must contain a non-empty name");
+        };
+        if let Some(existing_tag) = existing_by_name.get(&normalized_name) {
+            if skip_exists {
+                created_tags.push(existing_tag.clone());
+                continue;
+            }
+            return error_response(
+                StatusCode::CONFLICT,
+                format!("Tag already exists: {}", tag_batch_display_name(item)),
+            );
+        }
+
+        let payload = match frontend_tag_to_backend(item) {
+            Ok(value) => Value::Object(value),
+            Err(_) => return bad_request("Each tag item must contain a non-empty name"),
+        };
+        let tag_id = match repository.create_tag(&payload, user_id) {
+            Ok(value) => value,
+            Err(_) => return tag_db_error_response(),
+        };
+        match repository.get_tag(tag_id, user_id) {
+            Ok(Some(tag)) => {
+                let tag_value = Value::Object(backend_tag_to_frontend(tag));
+                existing_by_name.insert(normalized_name, tag_value.clone());
+                created_tags.push(tag_value);
+            }
+            Ok(None) => {}
+            Err(_) => return tag_db_error_response(),
+        }
+    }
+
+    success_result(StatusCode::CREATED, Value::Array(created_tags))
 }
 
 async fn list_categories_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {
@@ -2298,6 +2377,24 @@ fn tag_name_is_present(payload: &Value) -> bool {
         .and_then(Value::as_str)
         .map(str::trim)
         .is_some_and(|value| !value.is_empty())
+}
+
+fn tag_batch_normalized_name(payload: &Value) -> Option<String> {
+    let object = payload.as_object()?;
+    let name = value_string(object.get("name"), "");
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_lowercase())
+    }
+}
+
+fn tag_batch_display_name(payload: &Value) -> String {
+    payload
+        .as_object()
+        .map(|object| value_string(object.get("name"), ""))
+        .unwrap_or_default()
 }
 
 fn frontend_tag_to_backend(payload: &Value) -> Result<Map<String, Value>, String> {

@@ -212,7 +212,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("tag batch create, templates"));
+            .contains("templates, category rules"));
     }
 
     for endpoint in [
@@ -221,6 +221,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         "GET /api/tags/{tag_id}",
         "PUT /api/tags/{tag_id}",
         "DELETE /api/tags/{tag_id}",
+        "POST /api/tags/batch",
         "PUT /api/tags/display-orders",
     ] {
         let entry = manifest
@@ -230,7 +231,9 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.state, MigrationState::RustOwnedVerified);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
-        assert!(entry.unsupported_behavior.contains("tag batch create"));
+        assert!(entry
+            .unsupported_behavior
+            .contains("tag CRUD/display-order/batch-create"));
     }
 
     for endpoint in [
@@ -262,7 +265,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
             .contains("category master-data routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
-            .contains(&"tag_batch_templates_category_rules_settings_parity"));
+            .contains(&"templates_category_rules_settings_parity"));
         assert!(entry
             .deletion_blockers
             .contains(&"account_transaction_operations_parity"));
@@ -272,7 +275,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         ("POST", "/api/accounts/{account_id}/transactions/clear"),
         ("POST", "/api/accounts/{account_id}/transactions/move"),
         ("POST", "/api/accounts/sync-balances"),
-        ("POST", "/api/tags/batch"),
         ("GET", "/api/categories/rules"),
         ("PUT", "/api/categories/rules"),
         ("GET", "/api/categories/statistics"),
