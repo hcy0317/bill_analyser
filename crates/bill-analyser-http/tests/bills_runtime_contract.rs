@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr, path::Path, time::Duration};
+use std::{error::Error, fs, net::SocketAddr, path::Path, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -8,6 +8,7 @@ use axum::{
     routing::any,
     Router,
 };
+use base64::Engine as _;
 use bill_analyser_http::{
     build_router, HttpShellConfig, ImportRouteMode, ProxyState, BILL_CRUD_PROXIED_ROUTE_PATTERNS,
     BILL_CRUD_ROUTE_PATTERNS,
@@ -316,9 +317,24 @@ async fn bills_runtime_covers_batch_month_filters_and_error_edges() -> Result<()
 
 #[tokio::test]
 async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), Box<dyn Error>> {
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/bills/pictures")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
+        .all(|route| route != &("POST", "/api/bills/pictures")));
+    assert!(BILL_CRUD_ROUTE_PATTERNS
+        .iter()
         .any(|route| route == &("POST", "/api/bills/pictures/unused")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/bills/pictures/unused")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/bills/export")));
+    assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/bills/reconciliation_statements")));
     assert!(BILL_CRUD_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("DELETE", "/api/bills/{bill_id}/recurring-match")));
@@ -328,8 +344,6 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
 
     for (method, path) in [
         (Method::GET, "/api/bills/export?format=csv"),
-        (Method::POST, "/api/bills/pictures"),
-        (Method::POST, "/api/bills/pictures/unused"),
         (Method::GET, "/api/bills/reconciliation_statements"),
         (Method::GET, "/api/bills/123/recurring-candidates"),
         (Method::PUT, "/api/bills/123/recurring-match"),
@@ -355,6 +369,220 @@ async fn bills_runtime_keeps_unmigrated_bill_subdomains_proxied() -> Result<(), 
 }
 
 #[tokio::test]
+async fn bills_runtime_serves_transaction_picture_upload_and_cleanup() -> Result<(), Box<dyn Error>>
+{
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let unauthenticated_upload_response = app
+        .clone()
+        .oneshot(unauthenticated_multipart_picture_request(
+            "/api/bills/pictures",
+            "picture",
+            Some("receipt.png"),
+            b"not-authed",
+        ))
+        .await?;
+    assert_eq!(
+        unauthenticated_upload_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let missing_response = app
+        .clone()
+        .oneshot(multipart_picture_request(
+            "/api/bills/pictures",
+            "not_picture",
+            Some("receipt.png"),
+            b"ignored",
+        ))
+        .await?;
+    assert_eq!(missing_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(missing_response).await["error"],
+        "Missing picture file"
+    );
+
+    let invalid_name_response = app
+        .clone()
+        .oneshot(multipart_picture_request(
+            "/api/bills/pictures",
+            "picture",
+            Some(""),
+            b"empty-name",
+        ))
+        .await?;
+    assert_eq!(invalid_name_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_name_response).await["error"],
+        "Invalid picture file"
+    );
+
+    let unsupported_response = app
+        .clone()
+        .oneshot(multipart_picture_request(
+            "/api/bills/pictures",
+            "picture",
+            Some("receipt.txt"),
+            b"plain text",
+        ))
+        .await?;
+    assert_eq!(unsupported_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(unsupported_response).await["error"],
+        "Picture type not allowed. Supported: bmp, gif, jpeg, jpg, png, webp"
+    );
+
+    let malformed_response = app
+        .clone()
+        .oneshot(malformed_multipart_picture_request("/api/bills/pictures"))
+        .await?;
+    assert_eq!(
+        malformed_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let malformed_header_response = app
+        .clone()
+        .oneshot(malformed_multipart_header_request("/api/bills/pictures"))
+        .await?;
+    assert_eq!(
+        malformed_header_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let blocked_upload_app = runtime_router_with_uploads_dir(&fixture, &fixture.db_path);
+    let blocked_upload_response = blocked_upload_app
+        .oneshot(multipart_picture_request(
+            "/api/bills/pictures",
+            "picture",
+            Some("receipt.png"),
+            b"blocked",
+        ))
+        .await?;
+    assert_eq!(
+        blocked_upload_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    let picture_bytes = b"\x89PNG";
+    let upload_response = app
+        .clone()
+        .oneshot(multipart_picture_request(
+            "/api/bills/pictures",
+            "picture",
+            Some("../receipt.png"),
+            picture_bytes,
+        ))
+        .await?;
+    assert_eq!(upload_response.status(), StatusCode::OK);
+    let upload_body = read_json(upload_response).await;
+    assert_eq!(upload_body["success"], true);
+    let picture_id = upload_body["result"]["pictureId"]
+        .as_str()
+        .expect("picture id");
+    assert!(picture_id.ends_with(".png"));
+    assert_eq!(
+        upload_body["result"]["originalUrl"],
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(picture_bytes)
+        )
+    );
+    let stored_path = fixture.uploads_dir.join(picture_id);
+    assert_eq!(fs::read(&stored_path)?, picture_bytes);
+
+    let unauthenticated_delete_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/bills/pictures/unused")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))?,
+        )
+        .await?;
+    assert_eq!(
+        unauthenticated_delete_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let empty_body_delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(empty_body_delete_response.status(), StatusCode::BAD_REQUEST);
+
+    let delete_missing_id_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(delete_missing_id_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(delete_missing_id_response).await["error"],
+        "Missing picture id"
+    );
+
+    let object_id_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            json!({"id": {}}),
+        ))
+        .await?;
+    assert_eq!(object_id_response.status(), StatusCode::BAD_REQUEST);
+
+    fs::create_dir_all(&fixture.uploads_dir)?;
+    let numeric_picture_path = fixture.uploads_dir.join("123");
+    fs::write(&numeric_picture_path, b"stale")?;
+    let numeric_delete_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            json!({"id": 123}),
+        ))
+        .await?;
+    assert_eq!(numeric_delete_response.status(), StatusCode::OK);
+    assert!(!numeric_picture_path.exists());
+
+    let boolean_picture_path = fixture.uploads_dir.join("true");
+    fs::write(&boolean_picture_path, b"stale")?;
+    let boolean_delete_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            json!({"id": true}),
+        ))
+        .await?;
+    assert_eq!(boolean_delete_response.status(), StatusCode::OK);
+    assert!(!boolean_picture_path.exists());
+
+    let delete_response = app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/bills/pictures/unused",
+            json!({"id": picture_id}),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["result"], true);
+    assert!(!stored_path.exists());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -367,11 +595,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
-        "import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "import-db-runtime+bills-crud-runtime+bills-picture-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial+auth-login-register-token-session-personal-refresh-logout-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
 
     let health_response = app
@@ -383,6 +611,10 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("owned routes")
         .contains("bills CRUD runtime routes"));
+    assert!(health["details"]["owned_routes"]
+        .as_str()
+        .expect("owned routes")
+        .contains("bills picture runtime routes"));
     assert!(health["details"]["bills_crud_runtime"].as_str().is_some());
     assert!(health["details"]["budgets_crud_runtime"].as_str().is_some());
     assert!(health["details"]["statistics_read_runtime"]
@@ -396,6 +628,7 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
 struct RuntimeFixture {
     _temp_dir: TempDir,
     db_path: std::path::PathBuf,
+    uploads_dir: std::path::PathBuf,
     upstream: String,
 }
 
@@ -407,16 +640,22 @@ impl RuntimeFixture {
     fn new_with_upstream(upstream: String) -> Result<Self, Box<dyn Error>> {
         let temp_dir = tempfile::tempdir()?;
         let db_path = temp_dir.path().join("bills-http.db");
+        let uploads_dir = temp_dir.path().join("uploads");
         init_schema(&db_path)?;
         Ok(Self {
             _temp_dir: temp_dir,
             db_path,
+            uploads_dir,
             upstream,
         })
     }
 }
 
 fn runtime_router(fixture: &RuntimeFixture) -> Router {
+    runtime_router_with_uploads_dir(fixture, &fixture.uploads_dir)
+}
+
+fn runtime_router_with_uploads_dir(fixture: &RuntimeFixture, uploads_dir: &Path) -> Router {
     let config = HttpShellConfig::new_with_import_route_mode(
         fixture.upstream.clone(),
         Duration::from_secs(5),
@@ -425,6 +664,7 @@ fn runtime_router(fixture: &RuntimeFixture) -> Router {
     )
     .expect("config")
     .with_sqlite_db_path(fixture.db_path.display().to_string())
+    .with_uploads_dir(uploads_dir.display().to_string())
     .with_trusted_user_header_secret(TEST_AUTH_SECRET);
     let state = ProxyState::new(config).expect("proxy state");
     build_router(state)
@@ -542,6 +782,102 @@ fn authed_request(method: Method, uri: &str, body: Body) -> Request<Body> {
         .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
         .body(body)
         .expect("request builds")
+}
+
+fn multipart_picture_request(
+    uri: &str,
+    field_name: &str,
+    filename: Option<&str>,
+    file_bytes: &[u8],
+) -> Request<Body> {
+    let boundary = "bill-analyser-picture-test-boundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"{field_name}\"").as_bytes(),
+    );
+    if let Some(filename) = filename {
+        body.extend_from_slice(format!("; filename=\"{filename}\"").as_bytes());
+    }
+    body.extend_from_slice(b"\r\nContent-Type: image/png\r\n\r\n");
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("x-user-id", TEST_USER_ID)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .body(Body::from(body))
+        .expect("multipart request builds")
+}
+
+fn unauthenticated_multipart_picture_request(
+    uri: &str,
+    field_name: &str,
+    filename: Option<&str>,
+    file_bytes: &[u8],
+) -> Request<Body> {
+    let boundary = "bill-analyser-picture-test-boundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"{field_name}\"").as_bytes(),
+    );
+    if let Some(filename) = filename {
+        body.extend_from_slice(format!("; filename=\"{filename}\"").as_bytes());
+    }
+    body.extend_from_slice(b"\r\nContent-Type: image/png\r\n\r\n");
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .expect("multipart request builds")
+}
+
+fn malformed_multipart_picture_request(uri: &str) -> Request<Body> {
+    let boundary = "bill-analyser-broken-boundary";
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("x-user-id", TEST_USER_ID)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .body(Body::from(format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"picture\"; filename=\"receipt.png\"\r\n\r\nbroken"
+        )))
+        .expect("multipart request builds")
+}
+
+fn malformed_multipart_header_request(uri: &str) -> Request<Body> {
+    let boundary = "bill-analyser-bad-header-boundary";
+    Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .header("x-user-id", TEST_USER_ID)
+        .header("x-bill-analyser-trusted-user-secret", TEST_AUTH_SECRET)
+        .body(Body::from(format!(
+            "--{boundary}\r\nContent-Disposition\r\n\r\nbroken\r\n--{boundary}--\r\n"
+        )))
+        .expect("multipart request builds")
 }
 
 struct FakeUpstream {

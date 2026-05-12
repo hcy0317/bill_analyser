@@ -108,6 +108,18 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         assert!(endpoint.is_import_deletion_blocked());
     }
 
+    for (method, pattern) in [
+        ("POST", "/api/bills/pictures"),
+        ("POST", "/api/bills/pictures/unused"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern).unwrap_or_else(|| {
+            panic!("missing Rust-owned bills picture endpoint {method} {pattern}")
+        });
+        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
+        assert!(!endpoint.is_python_runtime_owner());
+        assert!(!endpoint.is_import_deletion_blocked());
+    }
+
     let receipt_recognition = find_endpoint_ownership("POST", "/api/ml/receipt-recognition")
         .expect("receipt OCR recognition route is governed");
     assert_eq!(receipt_recognition.state, MigrationState::PythonProxied);
@@ -116,8 +128,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 
     for (method, pattern) in [
         ("GET", "/api/bills/export"),
-        ("POST", "/api/bills/pictures"),
-        ("POST", "/api/bills/pictures/unused"),
         ("GET", "/api/bills/reconciliation_statements"),
         ("GET", "/api/bills/{bill_id}/recurring-candidates"),
         ("PUT", "/api/bills/{bill_id}/recurring-match"),

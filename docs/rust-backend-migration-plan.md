@@ -146,7 +146,11 @@ S9d wires JSON parse -> parse_generic -> dedup -> confirm and frontend FormData 
 
 ## S9e Bills and Transactions CRUD Runtime
 
-S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Bills export, pictures, reconciliation statements, recurring candidates/match, and category actions stay Python-proxied. Python bills CRUD/import deletion remains blocked because residual route, frontend, test, and docs references still exist.
+S9e makes Rust the runtime owner for core bills/transactions CRUD routes in `import_db_runtime`, including `GET/POST /api/bills`, by-month/get aliases, single update/delete, legacy modify/delete, and batch create/update/delete. Bills export, reconciliation statements, recurring candidates/match, and category actions stay Python-proxied. Python bills CRUD/import deletion remains blocked because residual route, frontend, test, and docs references still exist.
+
+## S9f Transaction Picture Runtime
+
+S9f makes Rust the runtime owner for `POST /api/bills/pictures` and `POST /api/bills/pictures/unused` in `import_db_runtime`. The Rust path preserves Flask-compatible `success/result` envelopes, `pictureId/originalUrl` data URL responses, extension allow-list errors, secure filename cleanup, and configurable upload storage through `BILL_ANALYSER_UPLOADS_DIR` with `data/uploads` as the default. Bills export, reconciliation statements, recurring candidates/match, and category actions remain Python-proxied.
 
 ## S10 Rust Primary HTTP Runtime and Frontend Auth Bridge
 
@@ -176,7 +180,7 @@ S13i makes Rust the runtime owner for `POST /api/budgets/import` in `import_db_r
 
 S14a makes Rust the runtime owner for DB-backed statistics read routes in `import_db_runtime`: `GET /api/statistics/category-statistics`, `GET /api/statistics/category-statistics/trends`, `GET /api/statistics/asset-trends`, `GET /api/statistics/category-pie`, `GET /api/statistics/top-merchants`, and `GET /api/statistics/amounts`. The Rust path reads `bills/accounts/categories` directly, keeps `user_id` scope, timestamp/year-month/all-mode parsing, keyword/date/type filters, asset-trends 365-day guard, category-statistics and amounts cents output, and category-pie/top-merchants yuan output. Analyzer overview/trends/comparison/category/trend plus live exchange-rate provider/custom-rate routes remain Python-proxied until the Analyzer/provider execution boundary is ported as a complete follow-up.
 
-Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`; the `partial` suffix remains because Analyzer and exchange-rate provider/custom-rate routes are still Python-proxied.
+Runtime metadata now reports `business_migration=import-db-runtime+bills-crud-runtime+bills-picture-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime-partial`; the `partial` suffix remains because Analyzer and exchange-rate provider/custom-rate routes are still Python-proxied.
 
 ## Deletion Gate
 

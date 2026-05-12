@@ -7,6 +7,7 @@ use thiserror::Error;
 pub const DEFAULT_PYTHON_UPSTREAM: &str = "http://127.0.0.1:5001";
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+pub const DEFAULT_UPLOADS_DIR: &str = "data/uploads";
 pub const DEFAULT_AUTH_JWT_ALGORITHM: &str = "HS256";
 pub const DEFAULT_AUTH_JWT_EXPIRATION_DAYS: i64 = 7;
 pub const DEFAULT_AUTH_REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 30;
@@ -28,6 +29,7 @@ pub struct HttpShellConfig {
     pub python_upstream: String,
     pub timeout: Duration,
     pub body_limit_bytes: usize,
+    pub uploads_dir: String,
     pub import_route_mode: ImportRouteMode,
     pub sqlite_db_path: Option<String>,
     pub trusted_user_header_secret: Option<String>,
@@ -75,6 +77,7 @@ impl HttpShellConfig {
             python_upstream,
             timeout,
             body_limit_bytes,
+            uploads_dir: DEFAULT_UPLOADS_DIR.to_string(),
             import_route_mode,
             sqlite_db_path: None,
             trusted_user_header_secret: None,
@@ -99,6 +102,16 @@ impl HttpShellConfig {
 
     pub fn with_sqlite_db_path(mut self, sqlite_db_path: impl Into<String>) -> Self {
         self.sqlite_db_path = Some(sqlite_db_path.into());
+        self
+    }
+
+    pub fn with_uploads_dir(mut self, uploads_dir: impl Into<String>) -> Self {
+        let uploads_dir = uploads_dir.into().trim().to_string();
+        self.uploads_dir = if uploads_dir.is_empty() {
+            DEFAULT_UPLOADS_DIR.to_string()
+        } else {
+            uploads_dir
+        };
         self
     }
 
@@ -202,6 +215,10 @@ impl HttpShellConfig {
         let sqlite_db_path = lookup("BILL_ANALYSER_SQLITE_DB_PATH")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let uploads_dir = lookup("BILL_ANALYSER_UPLOADS_DIR")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_UPLOADS_DIR.to_string());
         let trusted_user_header_secret = lookup("BILL_ANALYSER_TRUSTED_USER_HEADER_SECRET")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
@@ -319,6 +336,7 @@ impl HttpShellConfig {
             import_route_mode,
         )?;
         config.sqlite_db_path = sqlite_db_path;
+        config.uploads_dir = uploads_dir;
         config.trusted_user_header_secret = trusted_user_header_secret;
         config.auth_jwt_secret = auth_jwt_secret;
         config.auth_jwt_algorithm = auth_jwt_algorithm;

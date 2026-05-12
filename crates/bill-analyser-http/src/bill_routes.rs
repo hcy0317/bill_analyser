@@ -1,10 +1,14 @@
+use std::{fmt::Write as _, fs, path::Path as FsPath};
+
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{any, delete, get, post, put},
     Json, Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use bill_analyser_core::adapters::transaction::{
     apply_create_category_contract, apply_legacy_modify_preserved_fields,
     apply_manual_create_defaults, batch_create_persist_error_route_response,
@@ -12,9 +16,15 @@ use bill_analyser_core::adapters::transaction::{
     batch_create_transaction_items, batch_delete_success_payload, batch_update_response,
     delete_bill_success_payload, frontend_transaction_from_backend,
     frontend_transaction_mutation_to_backend, frontend_transaction_type_from_backend,
+    invalid_transaction_picture_file_response, is_allowed_transaction_picture_filename,
     legacy_delete_bill_success_payload, legacy_modify_bill_success_payload,
-    normalize_bill_create_aliases, transaction_list_type_filter, BackendTransactionView,
-    FrontendTransactionTag, RouteResponseContract,
+    missing_transaction_picture_file_response, missing_unused_transaction_picture_id_response,
+    normalize_bill_create_aliases, remove_unused_transaction_picture_success_response,
+    transaction_list_type_filter, transaction_picture_data_url_from_base64,
+    transaction_picture_delete_path, transaction_picture_internal_error_response,
+    transaction_picture_upload_id, transaction_picture_upload_success_response,
+    unsupported_transaction_picture_type_response, BackendTransactionView, FrontendTransactionTag,
+    RouteResponseContract,
 };
 use bill_analyser_core::{Money, RuntimeError, UserId, UtcOffsetMinutes};
 use bill_analyser_db::{
@@ -24,6 +34,7 @@ use bill_analyser_db::{
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use chrono::{DateTime, Local};
+use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::Deserialize;
@@ -55,12 +66,12 @@ pub const BILL_CRUD_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/bills/batch"),
     ("PUT", "/api/bills/batch/update"),
     ("DELETE", "/api/bills/batch/delete"),
+    ("POST", "/api/bills/pictures"),
+    ("POST", "/api/bills/pictures/unused"),
 ];
 
 pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/bills/export"),
-    ("POST", "/api/bills/pictures"),
-    ("POST", "/api/bills/pictures/unused"),
     ("GET", "/api/bills/reconciliation_statements"),
     ("GET", "/api/bills/{bill_id}/recurring-candidates"),
     ("PUT", "/api/bills/{bill_id}/recurring-match"),
@@ -72,7 +83,14 @@ pub const BILL_CRUD_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
 pub fn bill_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route("/api/bills/export", any(ownership_aware_proxy_handler))
-        .route("/api/bills/pictures", any(ownership_aware_proxy_handler))
+        .route(
+            "/api/bills/pictures",
+            post(upload_transaction_picture_handler),
+        )
+        .route(
+            "/api/bills/pictures/unused",
+            post(remove_unused_transaction_picture_handler),
+        )
         .route(
             "/api/bills/pictures/*path",
             any(ownership_aware_proxy_handler),
@@ -267,6 +285,112 @@ async fn bills_by_month_handler(
         Ok(body) => json_response(StatusCode::OK, body),
         Err(_) => db_error_response(),
     }
+}
+
+async fn upload_transaction_picture_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    mut multipart: axum::extract::Multipart,
+) -> Response {
+    if let Err(response) = user_id_from_headers(&headers, &state.config) {
+        return *response;
+    }
+
+    loop {
+        let next_field = match multipart.next_field().await {
+            Ok(value) => value,
+            Err(error) => {
+                return route_contract_response(transaction_picture_internal_error_response(
+                    error.to_string(),
+                ));
+            }
+        };
+        let Some(field) = next_field else {
+            return route_contract_response(missing_transaction_picture_file_response());
+        };
+        if field.name() != Some("picture") {
+            continue;
+        }
+
+        let Some(filename) = field
+            .file_name()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+        else {
+            return route_contract_response(invalid_transaction_picture_file_response());
+        };
+        if !is_allowed_transaction_picture_filename(&filename) {
+            return route_contract_response(unsupported_transaction_picture_type_response());
+        }
+
+        let picture_bytes = match field.bytes().await {
+            Ok(value) => value,
+            Err(error) => {
+                return route_contract_response(transaction_picture_internal_error_response(
+                    error.to_string(),
+                ));
+            }
+        };
+        let picture_uuid = match random_picture_uuid_hex() {
+            Ok(value) => value,
+            Err(response) => return *response,
+        };
+        let picture_id = match transaction_picture_upload_id(&picture_uuid, &filename) {
+            Ok(value) => value,
+            Err(error) => return bad_request(error.to_string()),
+        };
+        let upload_root = FsPath::new(&state.config.uploads_dir);
+        if let Err(error) = fs::create_dir_all(upload_root) {
+            return route_contract_response(transaction_picture_internal_error_response(
+                error.to_string(),
+            ));
+        }
+        let file_path = upload_root.join(&picture_id);
+        if let Err(error) = fs::write(&file_path, picture_bytes.as_ref()) {
+            return route_contract_response(transaction_picture_internal_error_response(
+                error.to_string(),
+            ));
+        }
+
+        let encoded = general_purpose::STANDARD.encode(picture_bytes.as_ref());
+        let original_url = transaction_picture_data_url_from_base64(&picture_id, encoded);
+        return route_contract_response(transaction_picture_upload_success_response(
+            picture_id,
+            original_url,
+        ));
+    }
+}
+
+async fn remove_unused_transaction_picture_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = user_id_from_headers(&headers, &state.config) {
+        return *response;
+    }
+
+    let payload = if body.is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_slice(&body).unwrap_or_else(|_| Value::Object(Map::new()))
+    };
+    let Some(picture_id) = picture_id_from_payload(&payload) else {
+        return route_contract_response(missing_unused_transaction_picture_id_response());
+    };
+
+    let file_path =
+        transaction_picture_delete_path(FsPath::new(&state.config.uploads_dir), &picture_id);
+    if file_path.is_file() {
+        if let Err(error) = fs::remove_file(&file_path) {
+            return route_contract_response(transaction_picture_internal_error_response(
+                error.to_string(),
+            ));
+        }
+    }
+
+    route_contract_response(remove_unused_transaction_picture_success_response())
 }
 
 async fn create_bill_handler(
@@ -874,6 +998,35 @@ fn table_exists(connection: &Connection, table_name: &str) -> rusqlite::Result<b
         )
         .optional()
         .map(|value| value.is_some())
+}
+
+fn random_picture_uuid_hex() -> RouteResult<String> {
+    let rng = SystemRandom::new();
+    let mut bytes = [0_u8; 16];
+    rng.fill(&mut bytes).map_err(|_| {
+        Box::new(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Rust bills picture runtime random generation failed",
+        ))
+    })?;
+
+    let mut hex = String::with_capacity(32);
+    for byte in bytes {
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Ok(hex)
+}
+
+fn picture_id_from_payload(payload: &Value) -> Option<String> {
+    let value = payload.as_object()?.get("id")?;
+    let raw_value = match value {
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        _ => String::new(),
+    };
+    let picture_id = raw_value.trim().to_string();
+    (!picture_id.is_empty()).then_some(picture_id)
 }
 
 fn open_runtime(state: &ProxyState) -> RouteResult<SqliteRuntime> {

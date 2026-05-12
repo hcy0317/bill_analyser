@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     response::Json,
     routing::{any, get},
     Router,
@@ -18,6 +18,7 @@ use crate::{
 
 pub fn build_router(state: ProxyState) -> Router {
     let import_route_mode = state.config.import_route_mode;
+    let body_limit_bytes = state.config.body_limit_bytes;
     let router = Router::new()
         .route("/api/health", get(health_handler))
         .route("/api/runtime", get(metadata_handler));
@@ -37,7 +38,10 @@ pub fn build_router(state: ProxyState) -> Router {
         ImportRouteMode::ImportRouteSkeleton | ImportRouteMode::ProxyOnly => any(proxy_handler),
     };
 
-    router.fallback(fallback).with_state(state)
+    router
+        .fallback(fallback)
+        .layer(DefaultBodyLimit::max(body_limit_bytes))
+        .with_state(state)
 }
 
 pub async fn health_handler(State(state): State<ProxyState>) -> Json<HttpShellHealth> {

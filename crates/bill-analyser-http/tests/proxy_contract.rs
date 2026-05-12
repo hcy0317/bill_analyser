@@ -25,6 +25,7 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert_eq!(config.python_upstream, "http://127.0.0.1:5001");
     assert_eq!(config.timeout, Duration::from_millis(30_000));
     assert_eq!(config.body_limit_bytes, 10 * 1024 * 1024);
+    assert_eq!(config.uploads_dir, "data/uploads");
     assert_eq!(config.import_route_mode, ImportRouteMode::ProxyOnly);
     assert_eq!(config.public_base_url, None);
     assert_eq!(config.auth_max_login_attempts, 5);
@@ -44,6 +45,7 @@ fn config_defaults_keep_python_as_proxy_fallback() {
         .with_auth_enable_user_forget_password(true)
         .with_auth_enable_oauth2(true)
         .with_auth_oauth2_provider(" github ")
+        .with_uploads_dir(" C:/temp/uploads ")
         .with_auth_password_policy(PasswordPolicy {
             min_length: 12,
             require_uppercase: true,
@@ -58,7 +60,12 @@ fn config_defaults_keep_python_as_proxy_fallback() {
     assert!(tuned_config.auth_enable_user_forget_password);
     assert!(tuned_config.auth_enable_oauth2);
     assert_eq!(tuned_config.auth_oauth2_provider, "github");
+    assert_eq!(tuned_config.uploads_dir, "C:/temp/uploads");
     assert_eq!(tuned_config.auth_password_policy.min_length, 12);
+    assert_eq!(
+        config.clone().with_uploads_dir("  ").uploads_dir,
+        "data/uploads"
+    );
     assert_eq!(
         health.identity.runtime_boundary,
         "rust-http-shell:proxy-only"
@@ -96,6 +103,7 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
     let config = HttpShellConfig::from_env_with(|name| match name {
         "BILL_ANALYSER_HTTP_IMPORT_ROUTE_MODE" => Some("import_db_runtime".to_string()),
         "BILL_ANALYSER_SQLITE_DB_PATH" => Some("  C:/temp/bill-runtime.db  ".to_string()),
+        "BILL_ANALYSER_UPLOADS_DIR" => Some("  C:/temp/uploads  ".to_string()),
         "BILL_ANALYSER_TRUSTED_USER_HEADER_SECRET" => Some("  route-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_SECRET" => Some("  jwt-secret  ".to_string()),
         "BILL_ANALYSER_AUTH_JWT_ALGORITHM" => Some("HS256".to_string()),
@@ -123,6 +131,7 @@ fn config_from_env_reads_import_db_runtime_and_sqlite_path() {
         config.sqlite_db_path.as_deref(),
         Some("C:/temp/bill-runtime.db")
     );
+    assert_eq!(config.uploads_dir, "C:/temp/uploads");
     assert_eq!(
         config.trusted_user_header_secret.as_deref(),
         Some("route-secret")
