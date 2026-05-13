@@ -282,6 +282,12 @@ struct CategoryRefreshResult {
     still_uncategorized: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CategoryRecategorizeResult {
+    pub total: usize,
+    pub updated: usize,
+}
+
 async fn list_bills_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -1244,6 +1250,36 @@ fn refresh_category_for_bills(
     })
 }
 
+pub(crate) fn recategorize_bills_with_category_rules(
+    connection: &mut Connection,
+    user_id: UserId,
+    force: bool,
+) -> bill_analyser_db::DbResult<CategoryRecategorizeResult> {
+    let rules = load_category_runtime_rules(connection, user_id)?;
+    let bills = load_all_category_refresh_bills(connection, user_id)?;
+    let total = bills.len();
+    let mut updated = 0_usize;
+
+    for (bill_id, bill) in bills {
+        if !force && !record_text(&bill, "main_category").trim().is_empty() {
+            continue;
+        }
+        if let Some((main_category, sub_category)) = match_category_for_bill(&bill, &rules) {
+            let mut fields = Map::new();
+            fields.insert("main_category".to_string(), Value::String(main_category));
+            fields.insert("sub_category".to_string(), Value::String(sub_category));
+            let draft = BillUpdateDraft {
+                fields,
+                tag_ids: None,
+            };
+            update_bill(connection, user_id, bill_id, &draft)?;
+            updated += 1;
+        }
+    }
+
+    Ok(CategoryRecategorizeResult { total, updated })
+}
+
 fn load_category_runtime_rules(
     connection: &Connection,
     user_id: UserId,
@@ -1311,6 +1347,27 @@ fn load_category_refresh_bills(
         "AND (main_category IS NULL OR main_category = '') ORDER BY date DESC"
     ))?;
     let rows = statement.query_map(params![user_id.get() as i64], row_to_bill_record)?;
+    let mut bills = Vec::new();
+    for row in rows {
+        bills.push(row?);
+    }
+    Ok(bills)
+}
+
+fn load_all_category_refresh_bills(
+    connection: &Connection,
+    user_id: UserId,
+) -> bill_analyser_db::DbResult<Vec<(i64, BillRecord)>> {
+    let mut statement = connection.prepare(concat!(
+        "SELECT id, user_id, date, type, amount, counterparty, description, ",
+        "payment_method, main_category, sub_category, batch_id, hash, created_at, updated_at, ",
+        "source_account_id, destination_account_id, destination_amount, created_from_template, ",
+        "created_from_recurring, import_history_id ",
+        "FROM bills WHERE user_id = ?1 ORDER BY date DESC"
+    ))?;
+    let rows = statement.query_map(params![user_id.get() as i64], |row| {
+        Ok((row.get::<_, i64>(0)?, row_to_bill_record(row)?))
+    })?;
     let mut bills = Vec::new();
     for row in rows {
         bills.push(row?);

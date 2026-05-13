@@ -1272,12 +1272,18 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
     assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/categories/statistics")));
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/categories/update-all")));
     assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/categories/rules")));
     assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/categories/statistics")));
+    assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/categories/update-all")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -1489,6 +1495,28 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
     );
     assert_eq!(statistics_body["result"]["交通"]["total_amount"], 3.0);
     assert!(statistics_body["result"].get("其他用户分类").is_none());
+
+    let recategorize_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/update-all",
+            json!({"force": false}),
+        ))
+        .await?;
+    assert_eq!(recategorize_response.status(), StatusCode::OK);
+    let recategorize_body = read_json(recategorize_response).await;
+    assert_eq!(recategorize_body["success"], true);
+    assert_eq!(recategorize_body["result"]["total"], 6);
+    assert_eq!(recategorize_body["result"]["updated"], 1);
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 54)?,
+        ("餐饮".to_string(), "午餐".to_string())
+    );
+    assert_eq!(
+        bill_category_pair(&fixture.db_path, 96)?,
+        ("".to_string(), "".to_string())
+    );
 
     let delete_response = app
         .clone()
@@ -2701,6 +2729,20 @@ async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), 
         .await?;
     assert_eq!(unauth_response.status(), StatusCode::UNAUTHORIZED);
 
+    let update_all_unauth_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/categories/update-all")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(
+        update_all_unauth_response.status(),
+        StatusCode::UNAUTHORIZED
+    );
+
     let missing_create = app
         .clone()
         .oneshot(authed_request(
@@ -2758,8 +2800,23 @@ async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), 
         "No categories provided"
     );
 
+    let invalid_update_all_json = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/categories/update-all",
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(invalid_update_all_json.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(invalid_update_all_json).await["error"],
+        "Invalid JSON"
+    );
+
     let no_db_app = runtime_router_without_db(&fixture);
     let no_db_response = no_db_app
+        .clone()
         .oneshot(authed_request(
             Method::GET,
             "/api/categories/",
@@ -2769,6 +2826,22 @@ async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), 
     assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
         read_json(no_db_response).await["error"],
+        "Rust taxonomy categories DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    let no_db_update_all_response = no_db_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/update-all",
+            json!({"force": true}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_update_all_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        read_json(no_db_update_all_response).await["error"],
         "Rust taxonomy categories DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
     );
 
@@ -2842,6 +2915,24 @@ async fn taxonomy_categories_runtime_reports_db_errors_for_missing_schema(
             "Rust taxonomy categories route runtime DB error"
         );
     }
+
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE bills", [])?;
+    let update_all_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/categories/update-all",
+            json!({"force": true}),
+        ))
+        .await?;
+    assert_eq!(
+        update_all_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(update_all_response).await["error"],
+        "Rust taxonomy categories route runtime DB error"
+    );
 
     Ok(())
 }
@@ -3030,8 +3121,21 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             type TEXT,
             amount REAL NOT NULL,
             date TEXT NOT NULL,
+            counterparty TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            payment_method TEXT DEFAULT '',
             main_category TEXT,
-            sub_category TEXT
+            sub_category TEXT,
+            batch_id TEXT,
+            hash TEXT,
+            created_at TEXT NOT NULL DEFAULT 'now',
+            updated_at TEXT NOT NULL DEFAULT 'now',
+            source_account_id INTEGER DEFAULT 0,
+            destination_account_id INTEGER DEFAULT 0,
+            destination_amount REAL DEFAULT 0,
+            created_from_template INTEGER,
+            created_from_recurring INTEGER,
+            import_history_id INTEGER
         );
         CREATE TABLE llm_configs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3141,14 +3245,17 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
     )?;
     connection.execute(
         "INSERT INTO bills(
-            id, user_id, type, amount, date, main_category, sub_category
+            id, user_id, type, amount, date, counterparty, description,
+            main_category, sub_category
         )
         VALUES
-            (50, 42, '支出', -12.5, '2026-01-05', '餐饮', '午餐'),
-            (51, 42, '支出', -7.5, '2026-01-08', '餐饮', '午餐'),
-            (52, 42, '支出', -3.0, '2026-01-10', '交通', '公交'),
-            (53, 42, '支出', -99.0, '2025-12-31', '餐饮', '晚餐'),
-            (97, 77, '支出', -99.0, '2026-01-10', '其他用户分类', '')",
+            (50, 42, '支出', -12.5, '2026-01-05', '食堂', '午餐套餐', '餐饮', '午餐'),
+            (51, 42, '支出', -7.5, '2026-01-08', '饭馆', '午餐', '餐饮', '午餐'),
+            (52, 42, '支出', -3.0, '2026-01-10', '公交', '通勤', '交通', '公交'),
+            (53, 42, '支出', -99.0, '2025-12-31', '餐厅', '晚餐', '餐饮', '晚餐'),
+            (54, 42, '支出', -15.0, '2026-01-11', '食堂', '午餐套餐', '', ''),
+            (96, 42, '支出', -2.0, '2026-01-12', '无人匹配', '空规则', '', ''),
+            (97, 77, '支出', -99.0, '2026-01-10', '其他', '午餐', '其他用户分类', '')",
         [],
     )?;
     connection.execute(
@@ -3272,5 +3379,13 @@ fn category_priority(path: &Path, category_id: i64) -> Result<i64, Box<dyn Error
         "SELECT priority FROM categories WHERE id = ?1",
         [category_id],
         |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn bill_category_pair(path: &Path, bill_id: i64) -> Result<(String, String), Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COALESCE(main_category, ''), COALESCE(sub_category, '') FROM bills WHERE id = ?1",
+        [bill_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
     )?)
 }

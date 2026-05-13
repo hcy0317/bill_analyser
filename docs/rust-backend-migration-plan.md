@@ -212,6 +212,8 @@ S15c.2 makes Rust the runtime owner for `GET /api/category-rules/`, `POST /api/c
 
 S15c.3 makes Rust the runtime owner for settings bundle export in `import_db_runtime`: `GET /api/settings/bundle/export` and `GET|POST /api/settings/bundle/sections/{section_key}/export`. The Rust path builds the current user's JSON attachment from taxonomy repositories, category rules, LLM config skeletons, and OCR app settings, preserves section filtering, LLM API Key redaction, and current-password verification for sensitive `llmConfigs`/`ocrConfig` section exports. Settings bundle import/preview remains Python-proxied because it still performs cross-section upsert transactions and refreshes Python runtime services.
 
+S15c.4 makes Rust the runtime owner for `POST /api/categories/update-all`. The Rust path reads current-user bills and canonical enabled `category_rules` directly, preserves the legacy `force` flag semantics, keeps the Flask-compatible `success/result.total/updated` envelope, and continues to leave category-rule mutation reload side effects in Python until their write path is ported.
+
 ## Deletion Gate
 
 Python import route disabling/deletion is blocked unless all five evidence gates pass together: Rust route runtime, DB write semantics, frontend import flow, full coverage, and no residual references. Current import and budget runtime slices pass the Rust route/runtime and DB evidence for their owned endpoints, but deletion stays blocked where residual Python route imports, frontend calls, tests, or docs still reference the Python path.

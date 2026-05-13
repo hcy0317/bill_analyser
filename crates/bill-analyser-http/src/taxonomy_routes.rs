@@ -30,6 +30,7 @@ use serde_json::{json, Map, Number, Value};
 
 use crate::{
     auth::resolve_user_id_from_headers,
+    bill_routes::recategorize_bills_with_category_rules,
     config::HttpShellConfig,
     proxy::{ownership_aware_proxy_handler, ProxyState},
 };
@@ -109,6 +110,7 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/categories/move"),
     ("GET", "/api/categories/statistics"),
     ("GET", "/api/categories/tree"),
+    ("POST", "/api/categories/update-all"),
     ("GET", "/api/categories/{category_id}"),
     ("PUT", "/api/categories/{category_id}"),
     ("DELETE", "/api/categories/{category_id}"),
@@ -117,7 +119,6 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
 pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/rules"),
     ("PUT", "/api/categories/rules"),
-    ("POST", "/api/categories/update-all"),
 ];
 
 pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
@@ -278,7 +279,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/categories/update-all",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(recategorize_all_bills_handler),
         )
         .route(
             "/api/category-rules/",
@@ -1458,6 +1459,41 @@ async fn category_statistics_handler(
         Ok(statistics) => success_result(
             StatusCode::OK,
             format_category_statistics_response(statistics),
+        ),
+        Err(_) => category_db_error_response(),
+    }
+}
+
+async fn recategorize_all_bills_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let force = body
+        .as_object()
+        .and_then(|object| object.get("force"))
+        .is_some_and(value_truthy);
+
+    let mut runtime = match open_runtime(&state, "taxonomy categories") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+
+    match recategorize_bills_with_category_rules(runtime.connection_mut(), user_id, force) {
+        Ok(result) => success_result(
+            StatusCode::OK,
+            json!({
+                "total": result.total,
+                "updated": result.updated,
+            }),
         ),
         Err(_) => category_db_error_response(),
     }
