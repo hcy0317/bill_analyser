@@ -40,7 +40,7 @@ Use this skill when you are:
 
 ## Verification Baseline
 
-- `src/bill_analyser/**`: first run affected pytest and pylint; before delivery run `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v`, and require total coverage above 90% plus changed business code coverage above 90%.
+- `src/bill_analyser/**`: first run affected pytest and pylint; before delivery run `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`, and require total coverage above 90% plus changed business code coverage above 90%.
 - `crates/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
 - `src/web/**`: at least run `npm run lint` in `src/web`; frontend delivery also requires `npm run test:coverage` and coverage above 90%.
 - `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run `./.venv/Scripts/python.exe -m pytest tests/test_gitea_workflows.py -v`, YAML parsing for `.gitea/workflows/ci.yml`, and `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`.
@@ -55,7 +55,7 @@ Use this skill when you are:
 - If staged diff exists, base the title on staged diff first; otherwise use the full working diff.
 - For one coherent commit that still has multiple notable subchanges, keep the subject to one line like `type(scope): main title`; put reviewable subtopics in newline body bullets instead of appending them to the subject.
 - For plan-driven or OMX slices, prefer multiple small commits in one PR when rules, implementation, tests, and docs are independently reviewable.
-- PR titles must use a Conventional Commit heading format like `type(scope): main title` while describing the functional-domain outcome; do not blindly copy the first commit title. PR bodies should include Summary, Test plan, and Open gates when any gate remains blocked.
+- PR titles must use a Conventional Commit heading format like `type(scope): main title` while describing the functional-domain outcome; do not blindly copy the first commit title. PR bodies must use `### 目标`, `### 变更范围`, `### 验证证据`, and `### 风险与开放门禁`; use checklist bullets for verification and gates, and do not use the old bare `Summary` / `Test plan` / `Open gates` format.
 - Prefer squash merge when merging a PR. After a PR is merged, delete the source feature branch through the forge auto-delete option when available, otherwise delete the remote branch after merge is confirmed.
 - Do not require or automatically append `Co-authored-by: OmX <omx@oh-my-codex.dev>`; add that trailer only when the user explicitly asks for it.
 
@@ -68,8 +68,8 @@ Use this skill when you are:
 
 ## Common Commands
 
-- `./.venv/Scripts/python.exe -m pytest tests/ -v`
-- `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v`
+- `./.venv/Scripts/python.exe -m pytest tests/ -v -n auto --dist loadfile`
+- `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`

@@ -66,6 +66,9 @@ PR_TITLE_INVALID_EXAMPLES = (
     "Feat(rust): 接管账号恢复路由",
     "feat(rust): ",
 )
+PR_BODY_TEMPLATE_SCRIPT = "scripts/pr_body_template.py"
+PR_BODY_SECTION_REQUIREMENTS = ("### 目标", "### 变更范围", "### 验证证据", "### 风险与开放门禁")
+PR_BODY_LEGACY_HEADINGS = ("Summary", "Test plan", "Open gates")
 
 
 @dataclass(frozen=True)
@@ -435,6 +438,52 @@ def scan_repo(repo_root: Path) -> list[CheckResult]:
                 "pass",
                 "PR 标题格式校验器要求 `type(scope): 主标题` 并拒绝无 scope 或非小写 type。",
                 [*PR_TITLE_VALID_EXAMPLES],
+            )
+        )
+
+    pr_body_contract_paths = {
+        "AGENTS.md": repo_root / "AGENTS.md",
+        "docs/AI_WORKFLOW.md": repo_root / "docs" / "AI_WORKFLOW.md",
+        ".agents/skills/bill-analyser-conventions/SKILL.md": (
+            repo_root / ".agents" / "skills" / "bill-analyser-conventions" / "SKILL.md"
+        ),
+        PR_BODY_TEMPLATE_SCRIPT: repo_root / PR_BODY_TEMPLATE_SCRIPT,
+    }
+    pr_body_evidence: list[str] = []
+    pr_body_failures: list[str] = []
+    for relative_path, path in pr_body_contract_paths.items():
+        if not path.exists():
+            pr_body_failures.append(f"{relative_path}: missing")
+            continue
+        text = _read_text(path)
+        missing_sections = [section for section in PR_BODY_SECTION_REQUIREMENTS if section not in text]
+        if missing_sections:
+            pr_body_failures.append(f"{relative_path}: missing_sections={missing_sections}")
+        pr_body_evidence.append(relative_path)
+
+    template_text = _read_text(repo_root / PR_BODY_TEMPLATE_SCRIPT) if (repo_root / PR_BODY_TEMPLATE_SCRIPT).exists() else ""
+    if not all(heading in template_text for heading in PR_BODY_LEGACY_HEADINGS):
+        pr_body_failures.append("scripts/pr_body_template.py: legacy heading denylist missing")
+
+    if pr_body_failures:
+        checks.append(
+            _result(
+                "repo.pr-body-template-gate",
+                "repo",
+                "fail",
+                "PR body 标准章节没有形成可检查合同。",
+                pr_body_failures,
+                "同步 AGENTS、AI_WORKFLOW、bill-analyser-conventions，并保留 scripts/pr_body_template.py 校验器。",
+            )
+        )
+    else:
+        checks.append(
+            _result(
+                "repo.pr-body-template-gate",
+                "repo",
+                "pass",
+                "PR body 使用标准章节并禁止旧 Summary/Test plan/Open gates 裸格式。",
+                pr_body_evidence,
             )
         )
 

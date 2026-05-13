@@ -61,7 +61,7 @@ dev = [
 universal = true
 
 [tool.poe.tasks]
-test = "pytest --cov=src/bill_analyser --cov-report xml --cov-report term-missing --cov-fail-under=90 --junitxml=./junit.xml -n auto"
+test = "pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile"
 bump = "bump-my-version bump"
 show-bump = "bump-my-version show-bump"
 

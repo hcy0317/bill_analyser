@@ -182,7 +182,7 @@
 
 Plan-driven 或 OMX 切面不默认把本地历史 squash 成一个大提交。一个切面内如果存在可独立评审的规则、实现、测试、文档步骤，优先拆成多个小 commits，再建立同一个功能域 PR。
 
-PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标题格式，并写功能域结果，不直接照搬第一个 commit 标题。PR body 至少包含 Summary、Test plan；如果 CI、覆盖率、Gitea Actions 或外部凭据存在阻塞，补 Open gates。PR 合并时优先 squash / 压缩提交；合并后删除来源分支，平台能自动删除就启用自动删除，否则确认 merge 后删除远端 feature branch。hooks / gate / commit 模板不得强制或自动追加 `Co-authored-by: OmX <omx@oh-my-codex.dev>`。
+PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标题格式，并写功能域结果，不直接照搬第一个 commit 标题。PR body 统一使用 `### 目标`、`### 变更范围`、`### 验证证据`、`### 风险与开放门禁`，验证与门禁用 checklist；不要再使用裸 `Summary` / `Test plan` / `Open gates` 旧格式。可用 `python scripts/pr_body_template.py --template` 生成模板，用 `python scripts/pr_body_template.py --validate <body.md>` 校验。PR 合并时优先 squash / 压缩提交；合并后删除来源分支，平台能自动删除就启用自动删除，否则确认 merge 后删除远端 feature branch。hooks / gate / commit 模板不得强制或自动追加 `Co-authored-by: OmX <omx@oh-my-codex.dev>`。
 
 ### `/hooks`
 

@@ -16,8 +16,8 @@
     "structure:check": "node ./scripts/check-frontend-structure.mjs",
     "lint": "vue-tsc --noEmit && eslint . --fix",
     "lint:ci": "vue-tsc --noEmit && eslint .",
-    "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand",
-    "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --runInBand --coverage",
+    "test": "cross-env CI=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50%",
+    "test:coverage": "npm run test && cross-env CI=1 COVERAGE_GATE=1 TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --maxWorkers=50% --coverage",
     "test:watch": "cross-env TS_NODE_PROJECT=\"./tsconfig.jest.json\" jest --watch"
   },
   "dependencies": {

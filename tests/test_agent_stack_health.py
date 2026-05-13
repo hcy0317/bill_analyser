@@ -181,6 +181,7 @@ def test_repo_scan_reports_expected_contracts() -> None:
     assert checks["repo.hooks-baseline"]["status"] == "pass"
     assert checks["repo.diff-commit-skill"]["status"] == "pass"
     assert checks["repo.pr-title-format-gate"]["status"] == "pass"
+    assert checks["repo.pr-body-template-gate"]["status"] == "pass"
     assert checks["repo.session-resume-skill"]["status"] == "pass"
     assert checks["repo.workflow-entrypoints"]["status"] == "pass"
     assert checks["repo.ui-style-skill"]["status"] == "pass"

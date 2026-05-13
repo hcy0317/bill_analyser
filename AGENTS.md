@@ -99,8 +99,8 @@ Across Copilot-, Claude-, and Codex-adjacent reviewer assets, treat review scope
 .\停止服务器.ps1
 
 # 测试
-.\.venv\Scripts\python.exe -m pytest tests/ -v
-.\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v
+.\.venv\Scripts\python.exe -m pytest tests/ -v -n auto --dist loadfile
+.\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
 
 # Python 静态检查
 .\.venv\Scripts\python.exe -m pylint src/bill_analyser/core/*.py src/bill_analyser/api/routes/*.py
@@ -127,7 +127,7 @@ npm run test:coverage
 
 ## Audit gate for business-code changes
 
-- 任何业务代码变更（包括 `src/bill_analyser/**` 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次完整测试套件，并拿到总覆盖率 > 90% 的真实结果：`./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v`
+- 任何业务代码变更（包括 `src/bill_analyser/**` 运行时代码，以及会影响业务行为、导入链路、预算/统计结果、API 契约的相关实现）在准备验收前，必须至少执行一次完整测试套件，并拿到总覆盖率 > 90% 的真实结果：`./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile`
 - 业务源码改动还必须单独核算被改代码覆盖率：优先用 `coverage.json` / `lcov.info` 按 diff 新增/修改的可执行行计算，改动行覆盖率必须 > 90%；缺少行级数据时，被改文件的文件级覆盖率必须 > 90%。
 - 开发过程中可以先跑受影响用例做快速反馈，但这不能替代最终的全量测试验收。
 - 只有在全量 pytest 套件执行完成、全部通过、总覆盖率 > 90%，且被改业务代码覆盖率 > 90% 时，才可以视为通过审计验收。
@@ -163,7 +163,7 @@ npm run test:coverage
 - 生成结果必须给出一条基于当前 diff 的中文 Conventional Commit 标题；如果 staged diff 非空，优先基于 staged diff 生成。
 - 多主题但仍属于同一提交意图的 diff，提交标题保持一行 `type(scope): 主标题`；关键子变更写到提交正文里的换行小标题 / bullet，不要堆在标题里。
 - Plan-driven / OMX 切面进入 PR 前，若一个切面内存在可独立评审的规则、实现、测试或文档步骤，应优先拆成多个小 commits；不要为了省事把所有内容压成一个大提交。
-- PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标题格式，并描述功能域切面的最终结果；不要直接复用第一个 commit 标题。PR body 必须列出 Summary、Test plan 和仍未关闭的 Open gates。
+- PR 标题必须使用 `type(scope): 主标题` 这种 Conventional Commit 大标题格式，并描述功能域切面的最终结果；不要直接复用第一个 commit 标题。PR body 必须使用标准章节 `### 目标`、`### 变更范围`、`### 验证证据`、`### 风险与开放门禁`，验证与门禁用 checklist；不要再使用裸 `Summary` / `Test plan` / `Open gates` 旧格式。
 - PR 合并时优先使用 squash / 压缩提交；合并后应删除来源分支，平台支持自动删除时启用自动删除，否则在确认合并完成后删除远端 feature branch。
 - hooks / gate / commit 模板不得强制或自动追加 `Co-authored-by: OmX <omx@oh-my-codex.dev>`；只有用户明确要求时才可添加该 trailer。
 - 只有在确认没有任何 diff 时，才可以跳过这一步。

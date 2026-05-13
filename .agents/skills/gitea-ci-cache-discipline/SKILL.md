@@ -18,11 +18,12 @@ Use this skill when you need to:
 - cache Rust stable setup, `llvm-tools-preview`, `cargo-llvm-cov`, pip, npm, or Cargo dependency metadata
 - move cleanup relative to Rust coverage, pytest coverage, frontend coverage, or job completion
 - explain whether existing cache blobs can be cleaned by workflow changes or require runner/cache storage cleanup
+- keep local developer test scripts aligned with the CI parallel pytest and cache-trim contract
 
 Do not use this skill for:
 
 - business-code coverage policy changes outside CI workflow wiring
-- local developer `.venv`, `target`, or `node_modules` cleanup unrelated to CI
+- ad hoc local `.venv`, `target`, or `node_modules` cleanup unrelated to CI parity
 - changing Gitea runner deployment, service units, or external cache storage without explicit operator scope
 
 ## Read First
@@ -31,7 +32,10 @@ Before editing anything, read these files:
 
 - `AGENTS.md`
 - `.gitea/workflows/ci.yml`
+- `scripts/run_ci_local.ps1`
+- `scripts/trim_ci_caches.ps1`
 - `tests/test_gitea_workflows.py`
+- `tests/test_local_ci_scripts.py`
 - `docs/AI_WORKFLOW.md` if changing entrypoint documentation
 - the current `git diff`, because CI cache changes often happen while unrelated Rust or frontend work is active
 
@@ -41,6 +45,7 @@ Cleanup must happen after the artifacts that need the files have already run.
 
 - Backend cleanup belongs after `Run Rust coverage` and `Run pytest coverage`, before cache save or job completion.
 - Frontend cleanup belongs after `npm run test:coverage` and `npm run build`, before cache save or job completion.
+- Local cleanup belongs in `scripts/trim_ci_caches.ps1`; `scripts/run_ci_local.ps1` should call it after local CI-equivalent checks unless explicitly skipped.
 - Do not delete coverage inputs before the corresponding coverage gate has finished.
 - Keep the workflow's cleanup step names recognizable: `Trim backend caches before cache save` and `Trim frontend caches before cache save`.
 

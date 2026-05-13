@@ -134,8 +134,9 @@ npm run dev
 ### 后端测试
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -v
-.\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing tests/ -v
+.\.venv\Scripts\python.exe -m pytest tests/ -v -n auto --dist loadfile
+.\.venv\Scripts\python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
+.\scripts\trim_ci_caches.ps1
 ```
 
 ### Python 静态检查

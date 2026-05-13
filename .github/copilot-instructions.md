@@ -75,7 +75,7 @@ This file is the Copilot / VS Code discovery adapter for this repository and sho
 
 - Before ending a session, check whether the workspace still has staged or unstaged git diff.
 - If any git diff remains, invoke `zh-conventional-commit-from-diff` and produce a Chinese Conventional Commit title for the current change set.
-- Follow `AGENTS.md` for the full commit/PR closeout policy: keep commit subjects one line, put subtopics in newline body bullets, prefer multiple commits per reviewable slice, require PR titles to use a `type(scope): title` heading based on domain outcome, prefer squash merge, delete the source branch after merge, and never force an OmX co-author trailer.
+- Follow `AGENTS.md` for the full commit/PR closeout policy: keep commit subjects one line, put subtopics in newline body bullets, prefer multiple commits per reviewable slice, require PR titles to use a `type(scope): title` heading based on domain outcome, use the standard PR body sections `### 目标` / `### 变更范围` / `### 验证证据` / `### 风险与开放门禁`, prefer squash merge, delete the source branch after merge, and never force an OmX co-author trailer.
 - Only skip this step when there is no staged or unstaged diff left.
 
 ## Interrupted-session recovery
