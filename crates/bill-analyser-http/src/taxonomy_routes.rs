@@ -11,7 +11,10 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use bill_analyser_core::{category_rules::match_rule_expression, UserId};
+use bill_analyser_core::{
+    category_rules::match_rule_expression, encryption_status_response, normalize_sqlcipher_status,
+    UserId,
+};
 use bill_analyser_db::{
     get_app_setting, set_app_setting, sync_all_account_balances,
     taxonomy::{
@@ -138,6 +141,7 @@ pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api
 pub const TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/settings/encryption/status"),
     ("GET", "/api/settings/bundle/export"),
     ("POST", "/api/settings/bundle/import"),
     ("POST", "/api/settings/bundle/import/preview"),
@@ -155,6 +159,10 @@ pub const TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[]
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route("/api/rules/overview", get(rules_overview_handler))
+        .route(
+            "/api/settings/encryption/status",
+            get(encryption_status_handler),
+        )
         .route(
             "/api/settings/bundle/export",
             get(export_settings_bundle_handler),
@@ -331,6 +339,13 @@ struct CategoryStatisticsQuery {
 struct CategoryRulesQuery {
     category_id: Option<i64>,
     enabled_only: Option<String>,
+}
+
+async fn encryption_status_handler() -> Response {
+    let encrypt_raw = std::env::var("BILL_DB_ENCRYPT").ok();
+    let key_raw = std::env::var("BILL_DB_KEY").ok();
+    let status = normalize_sqlcipher_status(encrypt_raw.as_deref(), key_raw.as_deref(), false);
+    json_response(StatusCode::OK, encryption_status_response(&status))
 }
 
 async fn list_accounts_handler(State(state): State<ProxyState>, headers: HeaderMap) -> Response {

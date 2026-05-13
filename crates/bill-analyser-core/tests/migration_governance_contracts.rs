@@ -69,6 +69,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/reorder")));
     assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
+    assert!(rust_owned.contains(&("GET", "/api/settings/encryption/status")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -218,7 +219,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("settings bundle import/preview/export routes are Rust-owned"));
+            .contains("settings encryption status routes are Rust-owned"));
     }
 
     for endpoint in [
@@ -272,7 +273,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned"));
+            .contains("category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -295,7 +296,34 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("settings bundle import/preview/export routes are Rust-owned"));
+            .contains("settings encryption status routes are Rust-owned"));
+    }
+
+    for endpoint in [
+        "GET /api/settings/encryption/status",
+        "GET /api/settings/bundle/export",
+        "POST /api/settings/bundle/import",
+        "POST /api/settings/bundle/import/preview",
+        "GET /api/settings/bundle/sections/{section_key}/export",
+        "POST /api/settings/bundle/sections/{section_key}/export",
+        "POST /api/settings/bundle/sections/{section_key}/import",
+        "POST /api/settings/bundle/sections/{section_key}/import/preview",
+    ] {
+        let entry = manifest
+            .iter()
+            .find(|entry| entry.endpoint == endpoint)
+            .unwrap_or_else(|| panic!("taxonomy settings route is present: {endpoint}"));
+        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
+        assert!(matches!(
+            entry.envelope,
+            ResponseEnvelopeFamily::FlaskRawPassthrough
+                | ResponseEnvelopeFamily::FlaskSuccessData
+                | ResponseEnvelopeFamily::FlaskSuccessResult
+        ));
+        assert!(entry
+            .unsupported_behavior
+            .contains("settings encryption status routes are Rust-owned"));
     }
 
     for endpoint in [

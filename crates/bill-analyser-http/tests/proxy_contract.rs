@@ -523,6 +523,22 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         .expect("response");
     assert_eq!(settings_import_response.status(), StatusCode::UNAUTHORIZED);
 
+    let encryption_status_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/settings/encryption/status")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(encryption_status_response.status(), StatusCode::OK);
+    let encryption_status_body = read_json(encryption_status_response).await;
+    assert_eq!(encryption_status_body["success"], true);
+    assert_eq!(encryption_status_body["data"]["sqlcipher_available"], false);
+
     let unknown_response = app
         .clone()
         .oneshot(

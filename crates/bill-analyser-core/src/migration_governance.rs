@@ -1946,11 +1946,16 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         notes:
             "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes.",
     },
-    python_proxy_route!(
-        "GET",
-        "/api/settings/encryption/status",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "GET",
+        pattern: "/api/settings/encryption/status",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes:
+            "Rust taxonomy settings runtime owns the unauthenticated SQLCipher status projection for the current Rust runtime.",
+    },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/tags/",
@@ -3309,10 +3314,10 @@ fn route_contract_details(
         },
         ("taxonomy-rules-settings", MigrationState::RustOwnedVerified) => RouteContractDetails {
             handler: RouteHandlerId::TaxonomyRuntime,
-        deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
-        blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned.",
+            deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior:
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

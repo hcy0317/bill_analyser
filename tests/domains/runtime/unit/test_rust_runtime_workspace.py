@@ -97,6 +97,9 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "S15c.4 makes Rust the runtime owner for settings bundle import and preview" in migration_plan
     assert "S15c.5 makes Rust the runtime owner for `POST /api/categories/update-all`" in migration_plan
     assert "S15c.6 makes Rust the runtime owner for legacy `GET|PUT /api/categories/rules`" in migration_plan
+    assert "S15c.7 makes Rust the runtime owner for `GET /api/settings/encryption/status`" in migration_plan
+    assert "设置加密状态 `GET /api/settings/encryption/status` 已由 Rust taxonomy/settings runtime 直接响应" in api_routes
+    assert "Rust taxonomy settings runtime 还直接负责无鉴权 `GET /api/settings/encryption/status`" in project_overview
     assert "标签 list/get/create/update/delete/display-order/batch-create 路由由 Rust HTTP taxonomy runtime 直接接管" in api_routes
     assert "批量创建 `POST /api/tags/batch` 仍由 Python 处理" not in api_routes
     assert "S10 switches the local startup boundary from Python-primary to Rust-primary HTTP" in migration_plan

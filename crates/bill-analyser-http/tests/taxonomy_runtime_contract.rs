@@ -2869,6 +2869,9 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
 ) -> Result<(), Box<dyn Error>> {
     assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
+        .any(|route| route == &("GET", "/api/settings/encryption/status")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
         .any(|route| route == &("GET", "/api/settings/bundle/export")));
     assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
         .iter()
@@ -3031,6 +3034,38 @@ async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive
         read_json(no_db_response).await["error"],
         "Rust taxonomy settings bundle export DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_settings_encryption_status_runtime_reports_rust_sqlcipher_projection(
+) -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/settings/encryption/status")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS.is_empty());
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/settings/encryption/status")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["encrypted"], false);
+    assert_eq!(body["data"]["sqlcipher_available"], false);
+    assert_eq!(body["data"]["kdf_iter"], 256_000);
+    assert_eq!(body["data"]["cipher_page_size"], 4096);
 
     Ok(())
 }
