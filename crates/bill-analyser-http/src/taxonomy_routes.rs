@@ -124,16 +124,16 @@ pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
 
 pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/category-rules/"),
-    ("POST", "/api/category-rules/{rule_id}/test"),
-];
-
-pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/"),
     ("DELETE", "/api/category-rules/{rule_id}"),
     ("PUT", "/api/category-rules/{rule_id}"),
+    ("POST", "/api/category-rules/{rule_id}/test"),
+    ("POST", "/api/category-rules/reorder"),
+];
+
+pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/category-rules/defaults"),
     ("POST", "/api/category-rules/migrate"),
-    ("POST", "/api/category-rules/reorder"),
 ];
 
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
@@ -292,11 +292,11 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/category-rules/",
-            get(list_category_rules_handler).post(ownership_aware_proxy_handler),
+            get(list_category_rules_handler).post(create_category_rule_handler),
         )
         .route(
             "/api/category-rules/reorder",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(reorder_category_rules_handler),
         )
         .route(
             "/api/category-rules/defaults",
@@ -308,7 +308,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/category-rules/:rule_id",
-            put(ownership_aware_proxy_handler).delete(ownership_aware_proxy_handler),
+            put(update_category_rule_handler).delete(delete_category_rule_handler),
         )
         .route(
             "/api/category-rules/:rule_id/test",
@@ -1779,6 +1779,147 @@ async fn list_category_rules_handler(
     }
 }
 
+async fn create_category_rule_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(object) = body.as_object() else {
+        return bad_request("No data provided");
+    };
+    if !object.contains_key("category_id")
+        || object.get("rule_expression").is_none_or(Value::is_null)
+    {
+        return bad_request("category_id and rule_expression are required");
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    let rule_id = match repository.create_rule(&body, user_id) {
+        Ok(Some(value)) => value,
+        Ok(None) => return bad_request("Failed to create rule"),
+        Err(_) => return category_rule_db_error_response(),
+    };
+    match repository.get_rule(rule_id, user_id) {
+        Ok(Some(rule)) => category_rule_data_response(StatusCode::CREATED, rule),
+        Ok(None) => category_rule_db_error_response(),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn update_category_rule_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(rule_id): Path<i64>,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match required_json_body(body, "No data provided") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if body
+        .as_object()
+        .and_then(|object| object.get("rule_expression"))
+        .is_some_and(Value::is_null)
+    {
+        return bad_request("rule_expression is required");
+    }
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+    let user_id = db_user_id(user_id);
+
+    match repository.update_rule(rule_id, &body, user_id) {
+        Ok(true) => match repository.get_rule(rule_id, user_id) {
+            Ok(Some(rule)) => category_rule_data_response(StatusCode::OK, rule),
+            Ok(None) => category_rule_db_error_response(),
+            Err(_) => category_rule_db_error_response(),
+        },
+        Ok(false) => not_found("Rule not found or no change"),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn delete_category_rule_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(rule_id): Path<i64>,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+
+    match repository.delete_rule(rule_id, db_user_id(user_id)) {
+        Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+        Ok(false) => not_found("Rule not found"),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn reorder_category_rules_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(rule_ids) = body.get("rule_ids") else {
+        return bad_request("rule_ids is required");
+    };
+    let Some(rule_ids) = rule_ids.as_array() else {
+        return bad_request("rule_ids must be a list");
+    };
+    let mut parsed_rule_ids = Vec::with_capacity(rule_ids.len());
+    for value in rule_ids {
+        let Some(rule_id) = parse_python_int(value) else {
+            return bad_request("rule_ids must be a list");
+        };
+        parsed_rule_ids.push(rule_id);
+    }
+
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+    match repository.reorder_rules(&parsed_rule_ids, db_user_id(user_id)) {
+        Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
+        Ok(false) => category_rule_db_error_response(),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
 async fn test_category_rule_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -3094,6 +3235,16 @@ fn format_category_rules_response(rules: Vec<CategoryRuleRecord>) -> Value {
         "data": Value::Array(rules.into_iter().map(Value::Object).collect()),
         "total": total,
     })
+}
+
+fn category_rule_data_response(status: StatusCode, rule: CategoryRuleRecord) -> Response {
+    json_response(
+        status,
+        json!({
+            "success": true,
+            "data": Value::Object(rule),
+        }),
+    )
 }
 
 fn build_settings_bundle(connection: &mut Connection, user_id: i64) -> Result<Value, String> {

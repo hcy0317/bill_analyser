@@ -61,7 +61,11 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
     assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
+    assert!(rust_owned.contains(&("POST", "/api/category-rules/")));
+    assert!(rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
+    assert!(rust_owned.contains(&("DELETE", "/api/category-rules/{rule_id}")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
+    assert!(rust_owned.contains(&("POST", "/api/category-rules/reorder")));
     assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
@@ -270,7 +274,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics/update-all, category-rule list/test, rule overview, templates, and settings bundle export routes are Rust-owned"));
+            .contains("category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/test, rule overview, templates, and settings bundle export routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -298,7 +302,11 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
 
     for endpoint in [
         "GET /api/category-rules/",
+        "POST /api/category-rules/",
+        "PUT /api/category-rules/{rule_id}",
+        "DELETE /api/category-rules/{rule_id}",
         "POST /api/category-rules/{rule_id}/test",
+        "POST /api/category-rules/reorder",
         "GET /api/rules/overview",
     ] {
         let entry = manifest
@@ -310,18 +318,14 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
         assert!(entry
             .unsupported_behavior
-            .contains("category rule mutations"));
+            .contains("legacy /api/categories/rules config/cache"));
     }
 
     for (method, pattern) in [
         ("GET", "/api/categories/rules"),
         ("PUT", "/api/categories/rules"),
-        ("POST", "/api/category-rules/"),
-        ("DELETE", "/api/category-rules/{rule_id}"),
-        ("PUT", "/api/category-rules/{rule_id}"),
         ("POST", "/api/category-rules/defaults"),
         ("POST", "/api/category-rules/migrate"),
-        ("POST", "/api/category-rules/reorder"),
     ] {
         let endpoint = find_endpoint_ownership(method, pattern)
             .unwrap_or_else(|| panic!("taxonomy proxied route is present: {method} {pattern}"));

@@ -2008,13 +2008,34 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         .any(|route| route == &("GET", "/api/category-rules/")));
     assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
         .iter()
+        .any(|route| route == &("POST", "/api/category-rules/")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("PUT", "/api/category-rules/{rule_id}")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("DELETE", "/api/category-rules/{rule_id}")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
         .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("POST", "/api/category-rules/")));
+        .all(|route| route != &("POST", "/api/category-rules/")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("POST", "/api/category-rules/reorder")));
+        .all(|route| route != &("PUT", "/api/category-rules/{rule_id}")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("DELETE", "/api/category-rules/{rule_id}")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/category-rules/reorder")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/defaults")));
+    assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/migrate")));
     assert!(!TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
@@ -2069,6 +2090,322 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert_eq!(missing_category_response.status(), StatusCode::OK);
     assert_eq!(read_json(missing_category_response).await["total"], 0);
 
+    let missing_create_fields_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({"category_id": 31}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_create_fields_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_create_fields_response).await["error"],
+        "category_id and rule_expression are required"
+    );
+
+    let null_create_expression_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({"category_id": 31, "rule_expression": null}),
+        ))
+        .await?;
+    assert_eq!(
+        null_create_expression_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(null_create_expression_response).await["error"],
+        "category_id and rule_expression are required"
+    );
+
+    let invalid_create_json_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/",
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_create_json_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_create_json_response).await["error"],
+        "Invalid JSON"
+    );
+
+    let scalar_create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!(["bad"]),
+        ))
+        .await?;
+    assert_eq!(scalar_create_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(scalar_create_response).await["error"],
+        "No data provided"
+    );
+
+    let cross_category_create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({
+                "category_id": 97,
+                "rule_expression": "OR={其他用户分类}"
+            }),
+        ))
+        .await?;
+    assert_eq!(
+        cross_category_create_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(cross_category_create_response).await["error"],
+        "Failed to create rule"
+    );
+
+    let invalid_create_field_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({
+                "category_id": 31,
+                "rule_expression": "OR={午餐}",
+                "regex_enabled": ["bad"]
+            }),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_create_field_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(invalid_create_field_response).await["error"],
+        "Rust taxonomy category rules route runtime DB error"
+    );
+
+    let create_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({
+                "category_id": 31,
+                "name": "晚餐规则",
+                "priority": 15,
+                "rule_expression": "OR={晚餐}",
+                "regex_enabled": false,
+                "enabled": true
+            }),
+        ))
+        .await?;
+    assert_eq!(create_response.status(), StatusCode::CREATED);
+    let create_body = read_json(create_response).await;
+    assert_eq!(create_body["success"], true);
+    assert_eq!(create_body["data"]["name"], "晚餐规则");
+    assert_eq!(create_body["data"]["category_id"], 31);
+    assert_eq!(create_body["data"]["main_category"], "餐饮");
+    let created_rule_id = create_body["data"]["id"].as_i64().expect("rule id");
+
+    let update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/category-rules/{created_rule_id}"),
+            json!({
+                "name": "晚餐规则更新",
+                "priority": 5,
+                "rule_expression": "OR={晚餐,夜宵}",
+                "enabled": false
+            }),
+        ))
+        .await?;
+    assert_eq!(update_response.status(), StatusCode::OK);
+    let update_body = read_json(update_response).await;
+    assert_eq!(update_body["data"]["name"], "晚餐规则更新");
+    assert_eq!(update_body["data"]["priority"], 5);
+    assert_eq!(update_body["data"]["enabled"], 0);
+
+    let invalid_update_json_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::PUT,
+            &format!("/api/category-rules/{created_rule_id}"),
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_update_json_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_update_json_response).await["error"],
+        "Invalid JSON"
+    );
+
+    let null_update_expression_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/category-rules/{created_rule_id}"),
+            json!({"rule_expression": null}),
+        ))
+        .await?;
+    assert_eq!(
+        null_update_expression_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(null_update_expression_response).await["error"],
+        "rule_expression is required"
+    );
+
+    let cross_category_update_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/category-rules/{created_rule_id}"),
+            json!({"category_id": 97}),
+        ))
+        .await?;
+    assert_eq!(
+        cross_category_update_response.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        read_json(cross_category_update_response).await["error"],
+        "Rule not found or no change"
+    );
+
+    let invalid_update_field_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            &format!("/api/category-rules/{created_rule_id}"),
+            json!({"enabled": ["bad"]}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_update_field_response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(
+        read_json(invalid_update_field_response).await["error"],
+        "Rust taxonomy category rules route runtime DB error"
+    );
+
+    let cross_user_update = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/category-rules/96",
+            json!({"name": "越权更新"}),
+        ))
+        .await?;
+    assert_eq!(cross_user_update.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(cross_user_update).await["error"],
+        "Rule not found or no change"
+    );
+
+    let invalid_reorder_json_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            Body::from("{"),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_reorder_json_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_reorder_json_response).await["error"],
+        "Invalid JSON"
+    );
+
+    let missing_reorder_ids_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_reorder_ids_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_reorder_ids_response).await["error"],
+        "rule_ids is required"
+    );
+
+    let scalar_reorder_ids_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({"rule_ids": 60}),
+        ))
+        .await?;
+    assert_eq!(
+        scalar_reorder_ids_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(scalar_reorder_ids_response).await["error"],
+        "rule_ids must be a list"
+    );
+
+    let invalid_reorder_id_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({"rule_ids": [60, "bad"]}),
+        ))
+        .await?;
+    assert_eq!(
+        invalid_reorder_id_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(invalid_reorder_id_response).await["error"],
+        "rule_ids must be a list"
+    );
+
+    let reorder_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({"rule_ids": [created_rule_id, 60, 61, 96]}),
+        ))
+        .await?;
+    assert_eq!(reorder_response.status(), StatusCode::OK);
+    assert_eq!(read_json(reorder_response).await["success"], true);
+    assert_eq!(
+        category_rule_priority(&fixture.db_path, created_rule_id)?,
+        1
+    );
+    assert_eq!(category_rule_priority(&fixture.db_path, 60)?, 2);
+    assert_eq!(category_rule_priority(&fixture.db_path, 61)?, 3);
+    assert_eq!(category_rule_priority(&fixture.db_path, 96)?, 1);
+
     let match_response = app
         .clone()
         .oneshot(json_request(
@@ -2119,6 +2456,33 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         "text is required"
     );
 
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            &format!("/api/category-rules/{created_rule_id}"),
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["success"], true);
+    assert!(!category_rule_exists(&fixture.db_path, created_rule_id)?);
+
+    let cross_user_delete = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/category-rules/96",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(cross_user_delete.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        read_json(cross_user_delete).await["error"],
+        "Rule not found"
+    );
+    assert!(category_rule_exists(&fixture.db_path, 96)?);
+
     let unauthenticated_response = app
         .clone()
         .oneshot(
@@ -2129,6 +2493,23 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         )
         .await?;
     assert_eq!(unauthenticated_response.status(), StatusCode::UNAUTHORIZED);
+    for (method, uri) in [
+        (Method::POST, "/api/category-rules/"),
+        (Method::PUT, "/api/category-rules/60"),
+        (Method::DELETE, "/api/category-rules/60"),
+        (Method::POST, "/api/category-rules/reorder"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 
     let no_db_app = runtime_router_without_db(&fixture);
     let no_db_response = no_db_app
@@ -2145,6 +2526,7 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         "Rust taxonomy category rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
     );
     let no_db_test_response = no_db_app
+        .clone()
         .oneshot(json_request(
             Method::POST,
             "/api/category-rules/60/test",
@@ -2153,6 +2535,53 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         .await?;
     assert_eq!(
         no_db_test_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_create_response = no_db_app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/",
+            json!({"category_id": 31, "rule_expression": "OR={测试}"}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_create_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_update_response = no_db_app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/category-rules/60",
+            json!({"name": "missing db"}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_update_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_delete_response = no_db_app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/category-rules/60",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_delete_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_reorder_response = no_db_app
+        .oneshot(json_request(
+            Method::POST,
+            "/api/category-rules/reorder",
+            json!({"rule_ids": [60]}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_reorder_response.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
 
@@ -3897,6 +4326,22 @@ fn category_priority(path: &Path, category_id: i64) -> Result<i64, Box<dyn Error
     Ok(Connection::open(path)?.query_row(
         "SELECT priority FROM categories WHERE id = ?1",
         [category_id],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
+fn category_rule_exists(path: &Path, rule_id: i64) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM category_rules WHERE id = ?1",
+        [rule_id],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn category_rule_priority(path: &Path, rule_id: i64) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT priority FROM category_rules WHERE id = ?1",
+        [rule_id],
         |row| row.get::<_, i64>(0),
     )?)
 }
