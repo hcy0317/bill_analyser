@@ -2023,55 +2023,55 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/templates/",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime lists authenticated user bill and recurring templates with templateType filtering.",
+        notes: "Rust taxonomy templates runtime lists authenticated user bill and recurring templates with templateType filtering; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/templates/",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime creates authenticated user bill or recurring templates and returns the Flask-compatible template DTO.",
+        notes: "Rust taxonomy templates runtime creates authenticated user bill or recurring templates and returns the Flask-compatible template DTO; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "DELETE",
         pattern: "/api/templates/{template_id}",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime deletes authenticated user templates with templateType scoping.",
+        notes: "Rust taxonomy templates runtime deletes authenticated user templates with templateType scoping; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/templates/{template_id}",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime reads authenticated user template details with templateType filtering.",
+        notes: "Rust taxonomy templates runtime reads authenticated user template details with templateType filtering; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
         pattern: "/api/templates/{template_id}",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime updates authenticated user bill or recurring template fields.",
+        notes: "Rust taxonomy templates runtime updates authenticated user bill or recurring template fields; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "PUT",
         pattern: "/api/templates/display-orders",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Rust taxonomy templates runtime persists authenticated user template display ordering.",
+        notes: "Rust taxonomy templates runtime persists authenticated user template display ordering; the old Flask templates.py shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2410,7 +2410,7 @@ const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
     "profile_user_data_parity",
     "2fa_oauth_parity",
 ];
-const TAXONOMY_DELETION_BLOCKERS: &[&str] = &["templates_settings_parity"];
+const TAXONOMY_DELETION_BLOCKERS: &[&str] = &["settings_bundle_parity"];
 const IMPORT_DELETION_BLOCKERS: &[&str] = &[
     "rust_route_runtime",
     "db_write_semantics",
@@ -2852,7 +2852,6 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     DomainGovernancePolicy {
         domain: "taxonomy-rules-settings",
         python_owner_files: &[
-            "src/bill_analyser/api/routes/templates.py",
             "src/bill_analyser/api/routes/settings_bundle.py",
         ],
         rust_owner_files: &[
@@ -2871,7 +2870,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; the old Flask templates.py route shell has been removed.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3313,7 +3312,7 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; the old Flask templates.py route shell has been removed.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

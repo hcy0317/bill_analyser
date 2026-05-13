@@ -58,8 +58,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/data/export.{file_type}")));
     assert!(rust_owned.contains(&("POST", "/api/data/clear/transactions")));
     assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
-    assert!(rust_owned.contains(&("GET", "/api/templates/")));
-    assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
+    assert!(!rust_owned.contains(&("GET", "/api/templates/")));
+    assert!(!rust_owned.contains(&("PUT", "/api/templates/display-orders")));
     assert!(!rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
     assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
     assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
@@ -109,6 +109,12 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(python_deleted_routes.contains(&("DELETE", "/api/tags/{tag_id}")));
     assert!(python_deleted_routes.contains(&("POST", "/api/tags/batch")));
     assert!(python_deleted_routes.contains(&("PUT", "/api/tags/display-orders")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/templates/")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/templates/")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/templates/{template_id}")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/templates/{template_id}")));
+    assert!(python_deleted_routes.contains(&("DELETE", "/api/templates/{template_id}")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/templates/display-orders")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -337,12 +343,11 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy template route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
-        assert!(entry
-            .unsupported_behavior
-            .contains("settings encryption status routes are Rust-owned"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
     let encryption_status = manifest
@@ -487,7 +492,13 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("GET", "/api/tags/{tag_id}"),
             ("PUT", "/api/tags/{tag_id}"),
             ("POST", "/api/tags/batch"),
-            ("PUT", "/api/tags/display-orders")
+            ("PUT", "/api/tags/display-orders"),
+            ("GET", "/api/templates/"),
+            ("POST", "/api/templates/"),
+            ("DELETE", "/api/templates/{template_id}"),
+            ("GET", "/api/templates/{template_id}"),
+            ("PUT", "/api/templates/{template_id}"),
+            ("PUT", "/api/templates/display-orders")
         ]
     );
     assert!(endpoints_by_owner(MigrationState::Planned).is_empty());

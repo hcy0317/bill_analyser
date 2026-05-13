@@ -177,7 +177,9 @@ def _build_isolated_auth_headers(client, prefix: str) -> dict[str, str]:
 def _create_test_recurring_template(client, auth_headers, *, name, account_id, category_id,
                                     amount_cents, start_date, frequency_type, frequency):
     """创建测试用定时交易模板。"""
-    response = client.post("/api/templates/", json={
+    from bill_analyser.api.app import db
+
+    payload = {
         "templateType": 2,
         "name": name,
         "type": 3,
@@ -194,9 +196,20 @@ def _create_test_recurring_template(client, auth_headers, *, name, account_id, c
         "scheduledStartDate": start_date,
         "scheduledEndDate": "",
         "utcOffset": 480
-    }, headers=auth_headers)
-    assert response.status_code == 201
-    return response.get_json()["result"]
+    }
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create():
+        template_id = await db.create_template(payload, user_id=user_id)
+        template = await db.get_template_by_id(
+            template_id,
+            user_id=user_id,
+            template_type=2,
+        )
+        assert template is not None
+        return template
+
+    return asyncio.run(_create())
 
 
 def _create_test_bill_for_recurring(client, auth_headers, *, account_id, category_id,

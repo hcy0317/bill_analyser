@@ -90,9 +90,22 @@ def _create_template(
                 "scheduledEndDate": "",
             }
         )
-    response = client.post("/api/templates/", headers=auth_headers, json=payload)
-    assert response.status_code == 201, response.get_data(as_text=True)
-    return response.get_json()["result"]
+
+    from bill_analyser.api.app import db
+
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create() -> dict[str, Any]:
+        template_id = await db.create_template(payload, user_id=user_id)
+        template = await db.get_template_by_id(
+            template_id,
+            user_id=user_id,
+            template_type=template_type,
+        )
+        assert template is not None
+        return template
+
+    return asyncio.run(_create())
 
 
 def _create_category_rule_via_db(

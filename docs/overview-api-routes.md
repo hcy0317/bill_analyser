@@ -5,7 +5,6 @@
   - `/api/bills`
   - `/api/matching`
   - `/api/statistics`
-  - `/api/templates`
   - `/api/budgets`
   - `/api/backup`
   - `/api/settings/bundle`
@@ -28,7 +27,7 @@
 - 模板域已完成契约梳理，但被重新评估为非低风险域：
   - 该域已完成首轮收口：前端模板调用统一走 REST，后端补齐 `templateType` 过滤、双表 DTO 映射、隐藏/排序与 `user_id` 收口；
   - 模板 rewrite 映射、`templates.bp_v1` 注册与实现均已移除；
-  - 模板域当前保留 REST 主链路；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Rust taxonomy runtime / `bill_taxonomy_bridge` 处理，settings bundle taxonomy sections 的 normalization、导出 DTO、模板引用解析与最终导入事务也通过 Rust helper/runtime；Rust HTTP 保持既有 route envelope，`:memory:`、SQLCipher、recurring 匹配/绑定与 suggestion/import 写路径仍由 Python 维护。
+  - `import_db_runtime` 下模板主数据 CRUD/display-order 路由由 Rust HTTP taxonomy runtime 直接接管，旧 Flask `templates.py` route shell 已删除；普通文件库上的模板主数据 CRUD/排序/DTO 读取经 Rust taxonomy runtime / `bill_taxonomy_bridge` 处理，settings bundle taxonomy sections 的 normalization、导出 DTO、模板引用解析与最终导入事务也通过 Rust helper/runtime；Rust HTTP 保持既有 route envelope，`:memory:`、SQLCipher、recurring 匹配/绑定与 suggestion/import 写路径仍由 Python 维护。
 - 预算域主链已完成 REST 收口：
   - 前端 `services.ts` 已将列表/详情/创建/更新/删除/执行统计/预测/导入导出统一切换到 `/api/budgets/*`；
   - 服务层新增预算 REST ↔ 前端旧结构兼容映射，避免直接重写 `budget store` 与页面；
@@ -63,4 +62,4 @@
 - 分类主数据 REST URL、状态码与响应 envelope 保持兼容；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，旧 Flask `categories/` route package 已删除，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:` 与 SQLCipher 仍由 Python 路径处理。
 - 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、legacy `GET|PUT /api/categories/rules` config/cache、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，旧 Flask `category_rules.py` route shell 已删除；保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、legacy rules payload 的用户隔离 `app_settings` cache、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入。
 - 设置加密状态 `GET /api/settings/encryption/status` 已由 Rust taxonomy/settings runtime 直接响应，无鉴权，返回 Flask-compatible `success/data` SQLCipher 状态投影；当前 Rust SQLite runtime 未启用 SQLCipher provider，因此该状态会报告 `sqlcipher_available=false` 与 `encrypted=false`，真实 SQLCipher 连接/迁移仍由后续 ops 切面处理。
-- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分；账户、分类与分类规则 REST 主链由 Rust taxonomy runtime 提供，不再保留 Flask `accounts/` / `categories/` route package 或 `category_rules.py` route shell。
+- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分；账户、分类、分类规则、标签与模板 REST 主链由 Rust taxonomy runtime 提供，不再保留 Flask `accounts/` / `categories/` route package、`category_rules.py`、`tags.py` 或 `templates.py` route shell。

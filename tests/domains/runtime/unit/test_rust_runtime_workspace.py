@@ -121,6 +121,8 @@ def test_architecture_docs_record_rust_primary_http_and_import_runtime_gates() -
     assert "标签 list/get/create/update/delete/display-order/batch-create 路由由 Rust HTTP taxonomy runtime 直接接管" in api_routes
     assert "旧 Flask `tags.py` route shell 已删除" in api_routes
     assert "旧 Flask `tags.py` route shell 已删除" in project_overview
+    assert "旧 Flask `templates.py` route shell 已删除" in api_routes
+    assert "旧 Flask `templates.py` route shell 已删除" in project_overview
     assert "批量创建 `POST /api/tags/batch` 仍由 Python 处理" not in api_routes
     assert "S10 switches the local startup boundary from Python-primary to Rust-primary HTTP" in migration_plan
     assert "BILL_ANALYSER_PYTHON_UPSTREAM=http://127.0.0.1:5001" in migration_plan

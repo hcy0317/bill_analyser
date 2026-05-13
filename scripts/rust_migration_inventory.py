@@ -39,7 +39,6 @@ FACADE_PATHS = {
     "src/bill_analyser/__init__.py",
     "src/bill_analyser/api/__init__.py",
     "src/bill_analyser/api/app.py",
-    "src/bill_analyser/api/routes/templates.py",
     "src/bill_analyser/core/__init__.py",
     "src/bill_analyser/core/db.py",
     "src/bill_analyser/core/report.py",
@@ -79,7 +78,6 @@ ROUTE_DOMAIN_BY_FILE = {
     "recurring.py": "recurring-calendar",
     "request_context_helpers.py": "api-runtime-shell",
     "settings_bundle.py": "settings-bundle",
-    "templates.py": "tags-templates",
 }
 
 DATABASE_DOMAIN_BY_SEGMENT = {
