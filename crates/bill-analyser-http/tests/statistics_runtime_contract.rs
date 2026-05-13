@@ -367,11 +367,10 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
     ] {
         assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
     }
-    for route in [("GET", "/api/statistics/overview")] {
-        assert!(STATISTICS_PROXIED_ROUTE_PATTERNS
-            .iter()
-            .any(|item| item == &route));
-    }
+    let proxied_route = ("GET", "/api/statistics/overview");
+    assert!(STATISTICS_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|item| item == &proxied_route));
     assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|item| item == &("GET", "/api/statistics/exchange-rates")));

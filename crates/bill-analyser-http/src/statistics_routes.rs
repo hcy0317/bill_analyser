@@ -443,7 +443,7 @@ async fn update_user_custom_exchange_rate_handler(
     }
     let rate = match parse_exchange_rate_value(body.rate.as_ref()) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(message) => return invalid_request(message),
     };
     if rate <= 0.0 {
         return invalid_request("rate must be greater than 0");
@@ -919,9 +919,8 @@ fn is_missing_json_value(value: Option<&Value>) -> bool {
     }
 }
 
-fn parse_exchange_rate_value(value: Option<&Value>) -> Result<f64, Response> {
-    json_number(value.ok_or_else(|| invalid_request("currency and rate are required"))?)
-        .ok_or_else(|| invalid_request("rate must be numeric"))
+fn parse_exchange_rate_value(value: Option<&Value>) -> Result<f64, &'static str> {
+    json_number(value.ok_or("currency and rate are required")?).ok_or("rate must be numeric")
 }
 
 fn invalid_request(message: &str) -> Response {

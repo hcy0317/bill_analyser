@@ -1950,11 +1950,11 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/settings/encryption/status",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessData,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings runtime owns the unauthenticated SQLCipher status projection for the current Rust runtime.",
+            "Rust taxonomy settings runtime owns the unauthenticated SQLCipher status projection; the old Flask encryption status route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -3247,10 +3247,10 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         "statistics-read" => RouteHandlerId::StatisticsReadRuntime,
         "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerProxyPassthrough,
         "statistics-exchange" => RouteHandlerId::StatisticsExchangeRuntime,
-        "auth-security-user-data"
-        | "taxonomy-rules-settings"
-        | "matching-recurring-calendar-networth"
-        | "backup-ops" => RouteHandlerId::LegacyPythonProxyPassthrough,
+        "taxonomy-rules-settings" => RouteHandlerId::TaxonomyRuntime,
+        "auth-security-user-data" | "matching-recurring-calendar-networth" | "backup-ops" => {
+            RouteHandlerId::LegacyPythonProxyPassthrough
+        }
         "database-schema" | "database-repositories" | "database-facade" => {
             RouteHandlerId::DatabaseFacadeContractOracle
         }
@@ -3319,6 +3319,15 @@ fn route_contract_details(
                 "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
+            transition_evidence: DB_RUNTIME_EVIDENCE,
+        },
+        ("taxonomy-rules-settings", MigrationState::PythonDeleted) => RouteContractDetails {
+            handler: RouteHandlerId::TaxonomyRuntime,
+            deletion_blockers: EMPTY_STRINGS,
+            blocked_status: MigrationBlockedStatus::None,
+            unsupported_behavior: "",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,
         },
         ("bills-crud-adjacent", MigrationState::RustOwnedVerified) => RouteContractDetails {

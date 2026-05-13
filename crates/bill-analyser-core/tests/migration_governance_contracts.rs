@@ -72,7 +72,11 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/reorder")));
     assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
-    assert!(rust_owned.contains(&("GET", "/api/settings/encryption/status")));
+    assert!(!rust_owned.contains(&("GET", "/api/settings/encryption/status")));
+    assert!(endpoints_by_owner(MigrationState::PythonDeleted)
+        .into_iter()
+        .any(|endpoint| endpoint.method == "GET"
+            && endpoint.pattern == "/api/settings/encryption/status"));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
     assert!(rust_owned.contains(&("GET", "/api/ml/receipt-recognition/config")));
     assert!(!rust_owned.contains(&("GET", "/api/learning/rules")));
@@ -315,8 +319,20 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .contains("settings encryption status routes are Rust-owned"));
     }
 
+    let encryption_status = manifest
+        .iter()
+        .find(|entry| entry.endpoint == "GET /api/settings/encryption/status")
+        .expect("taxonomy settings encryption status route is present");
+    assert_eq!(encryption_status.state, MigrationState::PythonDeleted);
+    assert_eq!(encryption_status.handler, RouteHandlerId::TaxonomyRuntime);
+    assert_eq!(
+        encryption_status.envelope,
+        ResponseEnvelopeFamily::FlaskSuccessData
+    );
+    assert!(encryption_status.deletion_blockers.is_empty());
+    assert_eq!(encryption_status.decision_required, DecisionRequired::None);
+
     for endpoint in [
-        "GET /api/settings/encryption/status",
         "GET /api/settings/bundle/export",
         "POST /api/settings/bundle/import",
         "POST /api/settings/bundle/import/preview",
@@ -383,7 +399,14 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
         ]
     );
 
-    assert!(endpoints_by_owner(MigrationState::PythonDeleted).is_empty());
+    let python_deleted: Vec<_> = endpoints_by_owner(MigrationState::PythonDeleted)
+        .into_iter()
+        .map(|endpoint| (endpoint.method, endpoint.pattern))
+        .collect();
+    assert_eq!(
+        python_deleted,
+        vec![("GET", "/api/settings/encryption/status")]
+    );
     assert!(endpoints_by_owner(MigrationState::Planned).is_empty());
     assert!(endpoints_by_owner(MigrationState::RustImplemented).is_empty());
 }

@@ -6,10 +6,10 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 321
+- Python backend files: 320
 - Rust backend files: 101
 - Migration domains: 22
-- Files marked port: 253
+- Files marked port: 252
 - Files marked facade: 68
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -25,7 +25,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | ai-ocr | 4 | 1 | 0 |
 | api-contract-adapters | 0 | 4 | 0 |
 | api-runtime-shell | 3 | 8 | 0 |
-| auth-security | 19 | 2 | 0 |
+| auth-security | 18 | 2 | 0 |
 | backup-operations | 5 | 1 | 0 |
 | bills-import | 53 | 7 | 0 |
 | budgets | 16 | 6 | 0 |
@@ -53,7 +53,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/adapters/account_adapter.py | api-contract-adapters | api-adapter | facade | 125 |
 | src/bill_analyser/api/adapters/category_adapter.py | api-contract-adapters | api-adapter | facade | 85 |
 | src/bill_analyser/api/adapters/transaction_adapter.py | api-contract-adapters | api-adapter | facade | 242 |
-| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 363 |
+| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 361 |
 | src/bill_analyser/api/config/__init__.py | api-runtime-shell | package-marker | facade | 1 |
 | src/bill_analyser/api/config/auth.py | api-runtime-shell | api-config | facade | 148 |
 | src/bill_analyser/api/config/bills.py | api-runtime-shell | api-config | facade | 132 |
@@ -118,7 +118,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/categories/rules.py | classification-rules | api-route | port | 84 |
 | src/bill_analyser/api/routes/categories/support.py | classification-rules | api-route | port | 95 |
 | src/bill_analyser/api/routes/category_rules.py | classification-rules | api-route | port | 277 |
-| src/bill_analyser/api/routes/encryption.py | auth-security | api-route | port | 24 |
 | src/bill_analyser/api/routes/insights.py | statistics-reporting | api-route | port | 178 |
 | src/bill_analyser/api/routes/learning.py | ai-learning-llm | api-route | port | 256 |
 | src/bill_analyser/api/routes/llm/__init__.py | ai-learning-llm | package-marker | facade | 40 |

@@ -22,7 +22,6 @@ from bill_analyser.api.routes import (
     budgets,
     categories,
     category_rules,
-    encryption,
     insights,
     learning,
     llm,
@@ -167,7 +166,6 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(llm.bp, url_prefix="/api/llm")
     flask_app.register_blueprint(receipt_ocr.bp, url_prefix="/api/ml")
     flask_app.register_blueprint(settings_bundle.bp, url_prefix="/api/settings/bundle")
-    flask_app.register_blueprint(encryption.bp, url_prefix="/api/settings/encryption")
 
     # 健康检查端点
     @flask_app.route("/api/health", methods=["GET"])

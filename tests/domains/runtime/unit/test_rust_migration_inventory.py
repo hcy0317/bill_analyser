@@ -18,8 +18,8 @@ def test_inventory_covers_all_backend_python_files_and_current_rust_count(repo_r
         sorted(path.relative_to(repo_root).as_posix() for path in (repo_root / "src/bill_analyser").rglob("*.py"))
     )
 
-    assert len(expected_python_paths) == 321
-    assert inventory.summary["python_backend_files"] == 321
+    assert len(expected_python_paths) == 320
+    assert inventory.summary["python_backend_files"] == 320
     assert tuple(record.path for record in inventory.python_files) == expected_python_paths
     assert inventory.summary["rust_backend_files"] == 101
     assert "crates/bill-analyser-core/src/ai_ocr_llm.rs" in inventory.rust_files
@@ -113,6 +113,7 @@ def test_every_python_file_has_migration_domain_status_and_no_verified_dead(repo
     assert records["src/bill_analyser/core/settings_bundle_rust_bridge.py"].domain == "settings-bundle"
     assert records["src/bill_analyser/core/tag_rust_bridge.py"].domain == "tags-templates"
     assert records["src/bill_analyser/core/template_rust_bridge.py"].domain == "tags-templates"
+    assert "src/bill_analyser/api/routes/encryption.py" not in records
     assert records["src/bill_analyser/api/routes/templates.py"].initial_status == "facade"
     assert records["src/bill_analyser/core/database/templates/recurring.py"].initial_status == "facade"
     assert records["src/bill_analyser/core/database/templates/schedule.py"].initial_status == "facade"
@@ -128,7 +129,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
 
     assert first_render == second_render
     assert "# Rust Backend Migration Inventory" in first_render
-    assert "- Python backend files: 321" in first_render
+    assert "- Python backend files: 320" in first_render
     assert "- Rust backend files: 101" in first_render
     assert "- Verified dead files: 0" in first_render
     assert "Route/domain cutover state lives separately in the Rust governance manifest" in first_render
@@ -145,6 +146,7 @@ def test_inventory_markdown_is_deterministic_and_contains_auditable_counts(repo_
     assert "| src/bill_analyser/core/tag_rust_bridge.py | tags-templates | core-service | port |" in first_render
     assert "| src/bill_analyser/core/template_rust_bridge.py | tags-templates | core-service | port |" in first_render
     assert "| src/bill_analyser/api/routes/templates.py | tags-templates | api-route | facade |" in first_render
+    assert "src/bill_analyser/api/routes/encryption.py" not in first_render
     assert (
         "| src/bill_analyser/core/database/templates/schedule.py | tags-templates | database-access | facade |"
         in first_render
