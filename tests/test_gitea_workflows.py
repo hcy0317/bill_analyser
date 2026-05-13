@@ -91,11 +91,23 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     text = _read('ci.yml')
 
     assert 'python scripts/check_rust_workspace_dependencies.py --json' in text
+    assert 'uses: https://github.com/actions/cache@v4' in text
+    assert '~/.cargo/registry/index' in text
+    assert '~/.cargo/registry/cache' in text
+    assert '~/.cargo/registry/src' in text
+    assert '~/.cargo/git/db' in text
+    assert '~/.cargo/bin/cargo-llvm-cov' in text
+    assert 'target' in text
+    assert "key: ${{ runner.os }}-cargo-stable-${{ hashFiles('Cargo.lock') }}" in text
+    assert '~/.cache/pip' in text
     assert 'cargo install cargo-llvm-cov --locked' in text
+    assert 'if ! command -v cargo-llvm-cov >/dev/null 2>&1; then' in text
     assert 'cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90' in text
     assert (
         'python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile'
         in text
     )
     assert 'pytest-xdist' in text
+    assert 'cache: npm' in text
+    assert 'cache-dependency-path: src/web/package-lock.json' in text
     assert 'npm run test:coverage' in text

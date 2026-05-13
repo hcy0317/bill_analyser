@@ -80,6 +80,30 @@ jobs:
       - name: Setup Rust stable
         uses: https://github.com/dtolnay/rust-toolchain@stable
 
+      - name: Restore Cargo cache
+        uses: https://github.com/actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/bin/cargo-llvm-cov
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            target
+          key: ${{ runner.os }}-cargo-stable-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-stable-
+
+      - name: Restore pip cache
+        uses: https://github.com/actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'uv.lock', '.python-version') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
@@ -107,7 +131,9 @@ jobs:
       - name: Install Rust coverage tool
         run: |
           rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --locked
+          if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+            cargo install cargo-llvm-cov --locked
+          fi
 
       - name: Run Rust coverage
         run: cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90
@@ -126,6 +152,8 @@ jobs:
         uses: https://github.com/actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
 
       - name: Install dependencies
         working-directory: src/web
