@@ -439,7 +439,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri("/api/statistics/exchange-rates?base=CNY")
+                .uri("/api/statistics/overview?period=month")
                 .body(Body::empty())
                 .expect("request builds"),
         )
@@ -448,7 +448,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
     assert_eq!(proxied_response.status(), StatusCode::OK);
     assert_eq!(
         read_json(proxied_response).await["path"],
-        "/api/statistics/exchange-rates"
+        "/api/statistics/overview"
     );
 
     let login_preflight_response = app

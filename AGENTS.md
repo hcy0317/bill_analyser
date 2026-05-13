@@ -122,6 +122,7 @@ npm run test:coverage
 - 按改动路径选择验证动作：
 	- `src/bill_analyser/**`：先跑受影响 pytest / pylint；代码交付前必须运行带 coverage JSON 与 fail-under 的全量 pytest，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
 	- `src/web/**`：至少运行 `npm run lint`；若交付前端代码，还必须运行 `npm run test:coverage`，并满足总覆盖率 > 90% 以及被改业务代码自身覆盖率 > 90%
+	- `.gitea/**`：先读 `.agents/skills/gitea-ci-cache-discipline/SKILL.md`，运行 `tests/test_gitea_workflows.py`、YAML 解析与 repo agent-stack 健康检查
 	- `.github/**`、`.agents/**`、`.claude/**`、`scripts/hooks/**`：运行 `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` 与相关 hook / 健康检查 pytest
 
 ## Audit gate for business-code changes

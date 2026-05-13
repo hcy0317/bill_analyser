@@ -86,9 +86,9 @@ pub enum RouteHandlerId {
     )]
     StatisticsAnalyzerProxyPassthrough,
     #[serde(
-        rename = "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
+        rename = "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
     )]
-    StatisticsExchangeProxyPassthrough,
+    StatisticsExchangeRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime")]
     AuthTokenRuntime,
     #[serde(rename = "crates/bill-analyser-http/src/taxonomy_routes.rs::taxonomy_runtime")]
@@ -142,8 +142,8 @@ impl RouteHandlerId {
             Self::StatisticsAnalyzerProxyPassthrough => {
                 "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_analyzer"
             }
-            Self::StatisticsExchangeProxyPassthrough => {
-                "crates/bill-analyser-http/src/statistics_routes.rs::python_proxy_passthrough_statistics_exchange"
+            Self::StatisticsExchangeRuntime => {
+                "crates/bill-analyser-http/src/statistics_routes.rs::statistics_exchange_runtime"
             }
             Self::AuthTokenRuntime => {
                 "crates/bill-analyser-http/src/auth_routes.rs::auth_token_runtime"
@@ -828,28 +828,28 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/statistics/exchange-rates",
         domain: "statistics-exchange",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Live exchange provider fetch and custom-rate precedence remain Python-proxied until Rust owns provider execution and custom-rate persistence.",
+        notes: "Rust statistics exchange runtime owns provider selection, provider fallback, user custom-rate precedence, and Flask-compatible result envelope.",
     },
     EndpointOwnership {
         method: "PUT",
         pattern: "/api/statistics/exchange-rates/custom",
         domain: "statistics-exchange",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Custom exchange-rate writes remain Python-proxied until Rust owns provider execution and custom-rate persistence together.",
+        notes: "Rust statistics exchange runtime validates and persists authenticated user custom exchange rates.",
     },
     EndpointOwnership {
         method: "DELETE",
         pattern: "/api/statistics/exchange-rates/custom/{currency}",
         domain: "statistics-exchange",
-        state: MigrationState::PythonProxied,
+        state: MigrationState::RustOwnedVerified,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
-        notes: "Custom exchange-rate deletion remains Python-proxied until Rust owns provider execution and custom-rate persistence together.",
+        notes: "Rust statistics exchange runtime deletes authenticated user custom exchange rates for the current default base currency.",
     },
     EndpointOwnership {
         method: "POST",
@@ -2810,12 +2810,11 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         fixtures: EMPTY_STRINGS,
         db_invariant_ids: SQLITE_DB_INVARIANT_IDS,
         coverage_evidence: COVERAGE_EVIDENCE_CONTRACT,
-        deletion_blockers: &["exchange_provider_parity", "custom_rate_write_parity"],
+        deletion_blockers: &["no_residual_references"],
         blocked_status: MigrationBlockedStatus::None,
-        unsupported_behavior:
-            "Live exchange-rate provider resolution and custom-rate write/delete routes remain Python-proxied.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+        unsupported_behavior: "",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: PROVIDER_ROUTE_EVIDENCE,
     },
     DomainGovernancePolicy {
@@ -3247,7 +3246,7 @@ fn route_handler_for_domain(domain: &str) -> RouteHandlerId {
         "budgets-import" => RouteHandlerId::BudgetsImportRuntime,
         "statistics-read" => RouteHandlerId::StatisticsReadRuntime,
         "statistics-analyzer" => RouteHandlerId::StatisticsAnalyzerProxyPassthrough,
-        "statistics-exchange" => RouteHandlerId::StatisticsExchangeProxyPassthrough,
+        "statistics-exchange" => RouteHandlerId::StatisticsExchangeRuntime,
         "auth-security-user-data"
         | "taxonomy-rules-settings"
         | "matching-recurring-calendar-networth"

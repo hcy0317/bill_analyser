@@ -104,10 +104,12 @@ pub use schema::{
     SchemaDryRun, SchemaDryRunReport, SchemaResponsibility,
 };
 pub use statistics::{
-    find_statistics_all_date_range, query_asset_trends_payload, query_category_pie_payload,
-    query_category_statistics_payload, query_category_trends_payload, query_net_worth_payload,
-    query_top_merchants_payload, query_transaction_amount_period, StatisticsAllDateRange,
-    StatisticsBillFilters,
+    delete_user_custom_exchange_rate, find_statistics_all_date_range,
+    get_statistics_user_default_currency, list_user_custom_exchange_rates,
+    query_asset_trends_payload, query_category_pie_payload, query_category_statistics_payload,
+    query_category_trends_payload, query_net_worth_payload, query_top_merchants_payload,
+    query_transaction_amount_period, upsert_user_custom_exchange_rate, StatisticsAllDateRange,
+    StatisticsBillFilters, UserCustomExchangeRateUpsert,
 };
 pub use transaction::run_transaction;
 pub use user_data::{

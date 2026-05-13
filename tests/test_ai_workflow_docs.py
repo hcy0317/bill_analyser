@@ -19,6 +19,7 @@ def test_ai_workflow_doc_exists_and_explains_default_entrypoints() -> None:
     assert ".git/ai/task-state.json" in text
     assert "session-resume" in text
     assert "/hooks" in text
+    assert "gitea-ci-cache-discipline" in text
 
 
 def test_verification_assets_define_non_overlapping_roles() -> None:
@@ -77,3 +78,38 @@ def test_ai_workflow_doc_lists_ui_style_reference_skill_in_entry_table() -> None
     assert "颜色" in row
     assert "Vuetify" in row
     assert "Framework7" in row
+
+
+def test_ai_workflow_doc_lists_gitea_ci_cache_discipline_skill_in_entry_table() -> None:
+    doc_text = (REPO_ROOT / "docs" / "AI_WORKFLOW.md").read_text(encoding="utf-8")
+    matching_rows = [
+        line.strip()
+        for line in doc_text.splitlines()
+        if line.strip().startswith("|") and "`gitea-ci-cache-discipline` skill" in line
+    ]
+
+    assert matching_rows, "AI_WORKFLOW must list gitea-ci-cache-discipline in the entry table"
+    row = matching_rows[0]
+    assert "Gitea CI 缓存治理" in row
+    assert ".gitea/workflows/ci.yml" in row
+    assert "actions/cache" in row
+    assert "act_runner" in row
+    assert "远端 runner 存储清理" in row
+
+
+def test_gitea_ci_cache_discipline_skill_locks_cache_contract() -> None:
+    skill_path = REPO_ROOT / ".agents" / "skills" / "gitea-ci-cache-discipline" / "SKILL.md"
+    text = skill_path.read_text(encoding="utf-8")
+
+    assert skill_path.exists()
+    assert "target" in text
+    assert "node_modules" in text
+    assert "~/.cargo/registry/src" in text
+    assert "~/.cargo/git/checkouts" in text
+    assert "Trim backend caches before cache save" in text
+    assert "rust_toolchain_cache_save=true" in text
+    assert "cargo-llvm-cov" in text
+    assert "tests/test_gitea_workflows.py" in text
+    assert "agent_stack_health.py --mode repo" in text
+    assert "actcache" in text
+    assert "runner/cache storage cleanup" in text

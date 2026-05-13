@@ -1,14 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bill_analyser_core::statistics::{
     build_asset_trend_legend, build_asset_trends, build_category_pie_data,
     build_category_statistics_items, build_category_trend_statistics, build_net_worth_snapshot,
     build_top_merchants_data, build_transaction_amount_period_result, NameValueStatisticItem,
     StatisticsAccountInput, StatisticsBillInput, StatisticsCategoryInput, StatisticsYearMonthRange,
-    TopMerchantStatisticItem, TransactionAmountPeriodResult,
+    TopMerchantStatisticItem, TransactionAmountPeriodResult, UserCustomExchangeRateInput,
 };
 use bill_analyser_core::UserId;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, SecondsFormat};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -27,6 +27,11 @@ pub struct StatisticsBillFilters {
 pub struct StatisticsAllDateRange {
     pub start_date: String,
     pub end_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserCustomExchangeRateUpsert {
+    pub update_time: i64,
 }
 
 pub fn query_category_statistics_payload(
@@ -124,6 +129,135 @@ pub fn query_net_worth_payload(connection: &Connection, user_id: UserId) -> DbRe
     let user_id = UserScope::new(user_id).bind_value()?;
     let accounts = load_statistics_accounts(connection, user_id)?;
     Ok(json!(build_net_worth_snapshot(&accounts)))
+}
+
+pub fn get_statistics_user_default_currency(
+    connection: &Connection,
+    user_id: UserId,
+) -> DbResult<String> {
+    if !table_exists(connection, "users")?
+        || !column_exists(connection, "users", "default_currency")?
+    {
+        return Ok("CNY".to_string());
+    }
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let currency = connection
+        .query_row(
+            "SELECT default_currency FROM users WHERE id = ?1 LIMIT 1",
+            params![user_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .unwrap_or_else(|| "CNY".to_string());
+    let normalized = currency.trim().to_uppercase();
+    Ok(if normalized.is_empty() {
+        "CNY".to_string()
+    } else {
+        normalized
+    })
+}
+
+pub fn list_user_custom_exchange_rates(
+    connection: &Connection,
+    user_id: UserId,
+    base_currency: &str,
+) -> DbResult<Vec<UserCustomExchangeRateInput>> {
+    if !table_exists(connection, "user_exchange_rates")? {
+        return Ok(Vec::new());
+    }
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let base_currency = base_currency.trim().to_uppercase();
+    let mut statement = connection.prepare(
+        "
+        SELECT to_currency, rate, effective_date
+        FROM user_exchange_rates
+        WHERE user_id = ?1 AND UPPER(from_currency) = ?2
+        ORDER BY effective_date DESC, updated_at DESC, created_at DESC, id DESC
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id, base_currency], |row| {
+        let effective_date = row.get::<_, Option<String>>(2)?;
+        Ok(UserCustomExchangeRateInput {
+            to_currency: row
+                .get::<_, Option<String>>(0)?
+                .unwrap_or_default()
+                .trim()
+                .to_uppercase(),
+            rate: sqlite_number_text(row.get::<_, Option<f64>>(1)?.unwrap_or(1.0)),
+            effective_timestamp: effective_date
+                .as_deref()
+                .and_then(sqlite_effective_date_timestamp),
+            effective_date,
+        })
+    })?;
+    let mut seen = BTreeSet::new();
+    let mut result = Vec::new();
+    for row in rows {
+        let item = row?;
+        if item.to_currency.is_empty() || !seen.insert(item.to_currency.clone()) {
+            continue;
+        }
+        result.push(item);
+    }
+    Ok(result)
+}
+
+pub fn upsert_user_custom_exchange_rate(
+    connection: &Connection,
+    user_id: UserId,
+    base_currency: &str,
+    currency: &str,
+    rate: f64,
+) -> DbResult<UserCustomExchangeRateUpsert> {
+    if !table_exists(connection, "user_exchange_rates")? {
+        return Err(DbError::InvalidOperation(
+            "user_exchange_rates table is not initialized".to_string(),
+        ));
+    }
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let base_currency = base_currency.trim().to_uppercase();
+    let currency = currency.trim().to_uppercase();
+    let now = chrono::Utc::now();
+    let update_time = now.timestamp();
+    let effective_date = now.date_naive().to_string();
+    let timestamp = now.to_rfc3339_opts(SecondsFormat::Secs, true);
+    connection.execute(
+        "
+        INSERT INTO user_exchange_rates(
+            user_id, from_currency, to_currency, rate, source, effective_date, created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, 'manual', ?5, ?6, ?6)
+        ON CONFLICT(user_id, from_currency, to_currency, effective_date)
+        DO UPDATE SET rate = excluded.rate, source = excluded.source, updated_at = excluded.updated_at
+        ",
+        params![user_id, base_currency, currency, rate, effective_date, timestamp],
+    )?;
+    Ok(UserCustomExchangeRateUpsert { update_time })
+}
+
+pub fn delete_user_custom_exchange_rate(
+    connection: &Connection,
+    user_id: UserId,
+    base_currency: &str,
+    currency: &str,
+) -> DbResult<bool> {
+    if !table_exists(connection, "user_exchange_rates")? {
+        return Ok(false);
+    }
+    let user_id = UserScope::new(user_id).bind_value()?;
+    let changed = connection.execute(
+        "
+        DELETE FROM user_exchange_rates
+        WHERE user_id = ?1 AND UPPER(from_currency) = ?2 AND UPPER(to_currency) = ?3
+        ",
+        params![
+            user_id,
+            base_currency.trim().to_uppercase(),
+            currency.trim().to_uppercase()
+        ],
+    )?;
+    Ok(changed > 0)
 }
 
 pub fn find_statistics_all_date_range(
@@ -440,6 +574,26 @@ fn sqlite_number_text(value: f64) -> String {
     } else {
         text
     }
+}
+
+fn sqlite_effective_date_timestamp(value: &str) -> Option<i64> {
+    let text = value.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Ok(timestamp) = text.parse::<i64>() {
+        return Some(timestamp);
+    }
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(text) {
+        return Some(datetime.timestamp());
+    }
+    if let Ok(datetime) = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S") {
+        return Some(datetime.and_utc().timestamp());
+    }
+    NaiveDate::parse_from_str(text.get(0..10)?, "%Y-%m-%d")
+        .ok()
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .map(|datetime| datetime.and_utc().timestamp())
 }
 
 fn is_expense_type(value: &str) -> bool {

@@ -361,25 +361,116 @@ async fn statistics_runtime_covers_error_edges_auth_and_proxy_boundaries(
     assert_eq!(read_json(empty_asset_response).await["result"], json!([]));
 
     for route in [
-        ("GET", "/api/statistics/overview"),
         ("GET", "/api/statistics/exchange-rates"),
         ("PUT", "/api/statistics/exchange-rates/custom"),
+        ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
     ] {
+        assert!(STATISTICS_ROUTE_PATTERNS.iter().any(|item| item == &route));
+    }
+    for route in [("GET", "/api/statistics/overview")] {
         assert!(STATISTICS_PROXIED_ROUTE_PATTERNS
             .iter()
             .any(|item| item == &route));
     }
+    assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|item| item == &("GET", "/api/statistics/exchange-rates")));
+    assert!(!STATISTICS_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|item| item == &("PUT", "/api/statistics/exchange-rates/custom")));
+
+    let invalid_provider_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/exchange-rates?provider=unknown_provider",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_provider_response.status(), StatusCode::BAD_REQUEST);
+    let invalid_provider_body = read_json(invalid_provider_response).await;
+    assert_eq!(invalid_provider_body["success"], false);
+    assert_eq!(
+        invalid_provider_body["error"],
+        "Unsupported exchange rate provider: unknown_provider"
+    );
+
+    let exchange_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/statistics/exchange-rates",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(exchange_response.status(), StatusCode::OK);
+    let exchange_body = read_json(exchange_response).await;
+    assert_eq!(exchange_body["success"], true);
+    assert_eq!(exchange_body["result"]["providerKey"], "user_custom");
+    assert_eq!(exchange_body["result"]["baseCurrency"], "CNY");
+    let exchange_rates = exchange_body["result"]["exchangeRates"]
+        .as_array()
+        .expect("exchange rates");
+    assert!(exchange_rates
+        .iter()
+        .any(|rate| rate["currency"] == "CNY" && rate["rate"] == "1.0"));
+    assert!(exchange_rates
+        .iter()
+        .any(|rate| rate["currency"] == "USD" && rate["rate"] == "7.12"));
+
+    let upsert_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::PUT,
+            "/api/statistics/exchange-rates/custom",
+            Body::from(json!({"currency": "eur", "rate": "8.5"}).to_string()),
+        ))
+        .await?;
+    assert_eq!(upsert_response.status(), StatusCode::OK);
+    let upsert_body = read_json(upsert_response).await;
+    assert_eq!(upsert_body["success"], true);
+    assert_eq!(upsert_body["result"]["currency"], "EUR");
+    assert_eq!(upsert_body["result"]["rate"], "8.5");
+    assert!(upsert_body["result"]["updateTime"].as_i64().is_some());
+
+    let invalid_upsert_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::PUT,
+            "/api/statistics/exchange-rates/custom",
+            Body::from(json!({"currency": "EUR", "rate": 0}).to_string()),
+        ))
+        .await?;
+    assert_eq!(invalid_upsert_response.status(), StatusCode::BAD_REQUEST);
+    let invalid_upsert_body = read_json(invalid_upsert_response).await;
+    assert_eq!(invalid_upsert_body["error"], "Invalid request");
+    assert_eq!(
+        invalid_upsert_body["message"],
+        "rate must be greater than 0"
+    );
+
+    let delete_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::DELETE,
+            "/api/statistics/exchange-rates/custom/EUR",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(delete_response.status(), StatusCode::OK);
+    assert_eq!(read_json(delete_response).await["result"], true);
+
     let proxied_response = app
         .oneshot(authed_request(
             Method::GET,
-            "/api/statistics/exchange-rates?base=CNY",
+            "/api/statistics/overview?period=month",
             Body::empty(),
         ))
         .await?;
     assert_eq!(proxied_response.status(), StatusCode::OK);
     let proxied_body = read_json(proxied_response).await;
     assert_eq!(proxied_body["runtime"], "python-sidecar");
-    assert_eq!(proxied_body["path"], "/api/statistics/exchange-rates");
+    assert_eq!(proxied_body["path"], "/api/statistics/overview");
 
     Ok(())
 }
@@ -487,7 +578,8 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         "
         CREATE TABLE users(
             id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL
+            username TEXT NOT NULL,
+            default_currency TEXT DEFAULT 'CNY'
         );
         CREATE TABLE accounts(
             id INTEGER PRIMARY KEY,
@@ -526,9 +618,24 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             destination_account_id INTEGER DEFAULT 0,
             destination_amount REAL DEFAULT 0
         );
+        CREATE TABLE user_exchange_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            from_currency TEXT NOT NULL,
+            to_currency TEXT NOT NULL,
+            rate REAL NOT NULL,
+            source TEXT NOT NULL,
+            effective_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, from_currency, to_currency, effective_date)
+        );
         ",
     )?;
-    connection.execute("INSERT INTO users(id, username) VALUES (42, 'owner')", [])?;
+    connection.execute(
+        "INSERT INTO users(id, username, default_currency) VALUES (42, 'owner', 'CNY')",
+        [],
+    )?;
     connection.execute(
         "INSERT INTO accounts(id, user_id, name, type, balance, initial_balance, currency, icon, hidden, created_at, updated_at)
          VALUES (10, 42, 'cash', 'cash', 87.66, 100.0, 'CNY', 'wallet', 0, 'now', 'now'),
@@ -547,6 +654,11 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
                 (42, '2026-03-20 09:00:00', '收入', 100.0, 'ACME', 'salary', 'bank', '工资', '', 11),
                 (42, '2026-04-01 09:00:00', '支出', -9.0, 'Cafe', 'coffee april', 'cash', '餐饮', '午餐', 10),
                 (77, '2026-03-16 09:00:00', '支出', -999.0, 'Other', 'other user', 'cash', '餐饮', '午餐', 10)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO user_exchange_rates(user_id, from_currency, to_currency, rate, source, effective_date, created_at, updated_at)
+         VALUES (42, 'CNY', 'USD', 7.12, 'manual', '2026-03-01T12:00:00+00:00', 'now', 'now')",
         [],
     )?;
     Ok(())

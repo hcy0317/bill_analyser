@@ -43,6 +43,7 @@ Use this skill when you are:
 - `src/bill_analyser/**`: first run affected pytest and pylint; before delivery run `./.venv/Scripts/python.exe -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v`, and require total coverage above 90% plus changed business code coverage above 90%.
 - `crates/**`: run focused `cargo test`, then `cargo clippy --workspace --all-targets -- -D warnings`; business Rust changes require `cargo llvm-cov --workspace --lcov --output-path workspace.lcov --fail-under-lines 90`.
 - `src/web/**`: at least run `npm run lint` in `src/web`; frontend delivery also requires `npm run test:coverage` and coverage above 90%.
+- `.gitea/**`: load `.agents/skills/gitea-ci-cache-discipline/SKILL.md`, then run `./.venv/Scripts/python.exe -m pytest tests/test_gitea_workflows.py -v`, YAML parsing for `.gitea/workflows/ci.yml`, and `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo`.
 - `.github/**`, `.agents/**`, `.claude/**`, `.codex/**`, and `scripts/hooks/**`: run `./.venv/Scripts/python.exe scripts/agent_stack_health.py --mode repo` plus relevant hook or health pytest.
 - API route or contract changes require checking `src/web/src/lib/services.ts` and related stores.
 - Amount, statistics, and import-chain changes require manual yuan/cents and call-order review.

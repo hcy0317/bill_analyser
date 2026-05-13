@@ -38,6 +38,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("GET", "/api/statistics/category-pie")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/top-merchants")));
     assert!(rust_owned.contains(&("GET", "/api/statistics/amounts")));
+    assert!(rust_owned.contains(&("GET", "/api/statistics/exchange-rates")));
+    assert!(rust_owned.contains(&("PUT", "/api/statistics/exchange-rates/custom")));
+    assert!(rust_owned.contains(&("DELETE", "/api/statistics/exchange-rates/custom/{currency}")));
     assert!(rust_owned.contains(&("GET", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens")));
     assert!(rust_owned.contains(&("DELETE", "/api/tokens/{token_id}")));
@@ -96,6 +99,10 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         .iter()
         .any(|endpoint| endpoint.pattern == "/api/statistics/amounts"
             && endpoint.envelope == ResponseEnvelopeFamily::StatisticsRead));
+    assert!(matrix.iter().any(
+        |endpoint| endpoint.pattern == "/api/statistics/exchange-rates"
+            && endpoint.envelope == ResponseEnvelopeFamily::FlaskSuccessResult
+    ));
 }
 
 #[test]
@@ -154,9 +161,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
         ("GET", "/api/statistics/comparison"),
         ("GET", "/api/statistics/category"),
         ("GET", "/api/statistics/trend"),
-        ("GET", "/api/statistics/exchange-rates"),
-        ("PUT", "/api/statistics/exchange-rates/custom"),
-        ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
         ("POST", "/api/llm/preview-recommend"),
         ("POST", "/api/llm/analyze-transactions"),
         ("POST", "/api/llm/rule-synthesis"),
@@ -174,6 +178,18 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
             .unwrap_or_else(|| panic!("missing provider-owned endpoint {method} {pattern}"));
         assert_eq!(endpoint.state, MigrationState::PythonProxied);
         assert!(endpoint.is_python_runtime_owner());
+        assert!(!endpoint.is_import_deletion_blocked());
+    }
+
+    for (method, pattern) in [
+        ("GET", "/api/statistics/exchange-rates"),
+        ("PUT", "/api/statistics/exchange-rates/custom"),
+        ("DELETE", "/api/statistics/exchange-rates/custom/{currency}"),
+    ] {
+        let endpoint = find_endpoint_ownership(method, pattern)
+            .unwrap_or_else(|| panic!("missing Rust-owned exchange endpoint {method} {pattern}"));
+        assert_eq!(endpoint.state, MigrationState::RustOwnedVerified);
+        assert!(!endpoint.is_python_runtime_owner());
         assert!(!endpoint.is_import_deletion_blocked());
     }
 }
