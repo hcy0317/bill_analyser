@@ -100,8 +100,11 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     assert "~/.rustup/toolchains" in text
     assert "~/.rustup/update-hashes" in text
     assert "~/.rustup/settings.toml" in text
-    assert "key: ${{ runner.os }}-rust-toolchain-slim-v1-bootstrap" in text
-    assert "${{ runner.os }}-rust-toolchain-slim-v1-" in text
+    assert "~/.cargo/bin/rustup" in text
+    assert "~/.cargo/bin/cargo" in text
+    assert "~/.cargo/bin/rustc" in text
+    assert "key: ${{ runner.os }}-rust-toolchain-slim-v2-bootstrap" in text
+    assert "${{ runner.os }}-rust-toolchain-slim-v2-" in text
     assert "~/.cargo/registry/index" in text
     assert "~/.cargo/registry/cache" in text
     assert re.search(r"(?m)^            ~/.cargo/registry/src$", text) is None
@@ -126,11 +129,15 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     assert "pip_cache_mb=" in text
     assert "python -m pip cache purge || rm -rf ~/.cache/pip" in text
     assert "rustup_cache_mb=" in text
-    assert "cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml" in text
+    assert (
+        "cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes "
+        "~/.rustup/settings.toml ~/.cargo/bin/rustup ~/.cargo/bin/cargo"
+    ) in text
     assert 'if [ "$rustup_cache_mb" -gt 1450 ]; then' in text
     assert "rust_toolchain_cache_save=false" in text
     assert "rust_toolchain_cache_save=true" in text
     assert "rm -rf ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml" in text
+    assert "rm -f ~/.cargo/bin/rustup ~/.cargo/bin/cargo" in text
     assert "Resolve Rust toolchain cache key" in text
     assert "steps.rust-toolchain.outputs.cachekey" in text
     assert "Save Rust toolchain cache" in text

@@ -63,12 +63,14 @@ Prefer small reusable cache inputs:
 - pip download cache: `~/.cache/pip`
 - npm download cache: `~/.npm`
 - Rustup toolchain cache: `~/.rustup/toolchains`, `~/.rustup/update-hashes`, `~/.rustup/settings.toml`
+- Rustup bootstrap proxies: `~/.cargo/bin/rustup`, `~/.cargo/bin/cargo`, `~/.cargo/bin/rustc`, `~/.cargo/bin/rustdoc`, and related rustup proxy binaries
 
 ## Rust Toolchain and Coverage Tool
 
 Rust toolchain caching must stay separate from Cargo dependency caching.
 
 - Restore rustup paths before `Setup Rust stable`.
+- Cache the rustup executable and proxy binaries with the rustup toolchain paths; caching only `~/.rustup/**` still lets `dtolnay/rust-toolchain` download the rustup installer every run.
 - Give `dtolnay/rust-toolchain@stable` an `id`, then use its `cachekey` output when saving the rustup cache.
 - Save the rustup cache only after the backend trim step has measured the cache size.
 - Guard save with an output such as `rust_toolchain_cache_save=true`; if the measured rustup cache is over budget, delete the rustup paths and skip save.
@@ -131,5 +133,6 @@ Avoid these mistakes:
 - deleting backend caches before Rust or pytest coverage completes
 - relying on setup-node's implicit npm cache when explicit Gitea cache behavior is needed
 - using a static rustup cache key that cannot track stable toolchain changes
+- caching `~/.rustup` without `~/.cargo/bin/rustup` and its proxies, which leaves `Setup Rust stable` stuck reinstalling rustup
 - saving rustup cache after deleting the paths without a conditional save guard
 - telling the user old actcache storage is cleaned when only future workflow behavior changed

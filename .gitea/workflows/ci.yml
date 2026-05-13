@@ -85,9 +85,17 @@ jobs:
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
             ~/.rustup/settings.toml
-          key: ${{ runner.os }}-rust-toolchain-slim-v1-bootstrap
+            ~/.cargo/bin/rustup
+            ~/.cargo/bin/cargo
+            ~/.cargo/bin/cargo-clippy
+            ~/.cargo/bin/cargo-fmt
+            ~/.cargo/bin/clippy-driver
+            ~/.cargo/bin/rustc
+            ~/.cargo/bin/rustdoc
+            ~/.cargo/bin/rustfmt
+          key: ${{ runner.os }}-rust-toolchain-slim-v2-bootstrap
           restore-keys: |
-            ${{ runner.os }}-rust-toolchain-slim-v1-
+            ${{ runner.os }}-rust-toolchain-slim-v2-
 
       - name: Setup Rust stable
         id: rust-toolchain
@@ -184,17 +192,18 @@ jobs:
             python -m pip cache purge || rm -rf ~/.cache/pip
           fi
 
-          rustup_cache_mb="$(cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml)"
+          rustup_cache_mb="$(cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml ~/.cargo/bin/rustup ~/.cargo/bin/cargo ~/.cargo/bin/cargo-clippy ~/.cargo/bin/cargo-fmt ~/.cargo/bin/clippy-driver ~/.cargo/bin/rustc ~/.cargo/bin/rustdoc ~/.cargo/bin/rustfmt)"
           if [ "$rustup_cache_mb" -gt 1450 ]; then
             echo "rust_toolchain_cache_save=false" >> "$GITHUB_OUTPUT"
             rm -rf ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml
+            rm -f ~/.cargo/bin/rustup ~/.cargo/bin/cargo ~/.cargo/bin/cargo-clippy ~/.cargo/bin/cargo-fmt ~/.cargo/bin/clippy-driver ~/.cargo/bin/rustc ~/.cargo/bin/rustdoc ~/.cargo/bin/rustfmt
           else
             echo "rust_toolchain_cache_save=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve Rust toolchain cache key
         id: rust-toolchain-cache-key
-        run: echo "key=${{ runner.os }}-rust-toolchain-slim-v1-${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=${{ runner.os }}-rust-toolchain-slim-v2-${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"
 
       - name: Save Rust toolchain cache
         if: steps.backend-cache-trim.outputs.rust_toolchain_cache_save == 'true' && steps.rust-toolchain-cache.outputs.cache-matched-key != steps.rust-toolchain-cache-key.outputs.key
@@ -204,6 +213,14 @@ jobs:
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
             ~/.rustup/settings.toml
+            ~/.cargo/bin/rustup
+            ~/.cargo/bin/cargo
+            ~/.cargo/bin/cargo-clippy
+            ~/.cargo/bin/cargo-fmt
+            ~/.cargo/bin/clippy-driver
+            ~/.cargo/bin/rustc
+            ~/.cargo/bin/rustdoc
+            ~/.cargo/bin/rustfmt
           key: ${{ steps.rust-toolchain-cache-key.outputs.key }}
 
   frontend-ci:
