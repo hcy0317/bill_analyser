@@ -62,7 +62,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         "owned_routes".to_string(),
         if config.import_route_mode.intercepts_import_routes() {
             if config.import_route_mode == ImportRouteMode::ImportDbRuntime {
-                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,taxonomy account CRUD/display-order runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle-export runtime routes,taxonomy templates CRUD/display-order runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
+                "/api/health,/api/runtime,import/preview-adjacent runtime routes,bills CRUD runtime routes,bills picture runtime routes,bills export runtime route,bills recurring runtime routes,bills reconciliation runtime route,bills category actions runtime routes,budgets CRUD/execution/forecast/history/import runtime routes,statistics read runtime routes,taxonomy account CRUD/display-order/sync-balances runtime routes,taxonomy tag CRUD/display-order runtime routes,taxonomy category master-data/statistics/category-rule-list-test/rule-overview/settings-bundle-export runtime routes,taxonomy templates CRUD/display-order runtime routes,auth login/register/token/account-recovery/profile/cloud/external-auth/system/user-data-statistics-export-clear/2fa-status/2fa-verify/2fa-recovery-verify/2fa-write/step-up runtime routes".to_string()
             } else {
                 "/api/health,/api/runtime,import/preview-adjacent runtime routes".to_string()
             }
@@ -107,7 +107,7 @@ pub fn http_shell_health(config: &HttpShellConfig) -> HttpShellHealth {
         );
         details.insert(
             "taxonomy_accounts_runtime".to_string(),
-            "owned account list/detail/create/update/delete/display-order routes with frontend cents to SQLite yuan conversion; transaction move/clear and balance sync remain proxied".to_string(),
+            "owned account list/detail/create/update/delete/display-order and balance sync routes with frontend cents to SQLite yuan conversion plus bill-derived SQLite yuan balance recalculation; transaction move/clear remain proxied".to_string(),
         );
         details.insert(
             "taxonomy_tags_runtime".to_string(),

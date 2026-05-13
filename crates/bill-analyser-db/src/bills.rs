@@ -82,6 +82,31 @@ pub struct BillRecurringBindResult {
     pub next_scheduled_date: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AccountBalanceDiscrepancy {
+    pub account_id: i64,
+    pub name: String,
+    pub old_balance: f64,
+    pub new_balance: f64,
+    pub diff: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SyncAllAccountBalancesResult {
+    pub total_accounts: usize,
+    pub synced_accounts: usize,
+    pub discrepancies: Vec<AccountBalanceDiscrepancy>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct AccountBalanceSyncTarget {
+    id: i64,
+    name: String,
+    balance: f64,
+    initial_balance: f64,
+}
+
 const BILL_SELECT_COLUMNS: &[&str] = &[
     "id",
     "user_id",
@@ -538,6 +563,53 @@ pub fn get_first_account_id(connection: &Connection, user_id: UserId) -> DbResul
         .map_err(DbError::from)
 }
 
+pub fn sync_all_account_balances(
+    connection: &mut Connection,
+    user_id: UserId,
+) -> DbResult<SyncAllAccountBalancesResult> {
+    let user_id = UserScope::new(user_id).bind_value()?;
+    run_transaction(connection, |tx| {
+        let accounts = load_account_balance_sync_targets(tx, user_id)?;
+        let now = now_text();
+        let mut result = SyncAllAccountBalancesResult {
+            total_accounts: accounts.len(),
+            ..SyncAllAccountBalancesResult::default()
+        };
+
+        for account in accounts {
+            match calculate_account_balance_yuan_on_tx(
+                tx,
+                user_id,
+                account.id,
+                account.initial_balance,
+            ) {
+                Ok(new_balance) => {
+                    let diff = new_balance - account.balance;
+                    if diff.abs() > 0.001 {
+                        result.discrepancies.push(AccountBalanceDiscrepancy {
+                            account_id: account.id,
+                            name: account.name.clone(),
+                            old_balance: round2(account.balance),
+                            new_balance: round2(new_balance),
+                            diff: round2(diff),
+                        });
+                    }
+                    tx.execute(
+                        "UPDATE accounts SET balance = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
+                        params![new_balance, now, account.id, user_id],
+                    )?;
+                    result.synced_accounts += 1;
+                }
+                Err(error) => result.errors.push(format!(
+                    "账户 '{}' (ID={}) 同步失败: {error}",
+                    account.name, account.id
+                )),
+            }
+        }
+        Ok(result)
+    })
+}
+
 fn insert_bill_on_tx(
     tx: &Transaction<'_>,
     user_id: i64,
@@ -887,22 +959,59 @@ fn sync_account_balances(
         else {
             continue;
         };
-        let balance_bills = load_account_balance_bills(tx, user_id, account_id)?;
-        let pnl_correction =
-            calculate_same_account_investment_pnl_correction(tx, user_id, account_id)?;
-        let balance = calculate_account_balance_from_bills(
-            account_id,
-            money_from_yuan(initial_balance)?,
-            &balance_bills,
-            pnl_correction,
-        )
-        .map_err(runtime_error)?;
+        let balance =
+            calculate_account_balance_yuan_on_tx(tx, user_id, account_id, initial_balance)?;
         tx.execute(
             "UPDATE accounts SET balance = ?1, updated_at = ?2 WHERE id = ?3 AND user_id = ?4",
-            params![money_to_yuan_f64(balance)?, now, account_id, user_id],
+            params![balance, now, account_id, user_id],
         )?;
     }
     Ok(())
+}
+
+fn load_account_balance_sync_targets(
+    tx: &Transaction<'_>,
+    user_id: i64,
+) -> DbResult<Vec<AccountBalanceSyncTarget>> {
+    let mut statement = tx.prepare(
+        "
+        SELECT id, name, COALESCE(balance, 0), COALESCE(initial_balance, 0)
+        FROM accounts
+        WHERE user_id = ?1
+        ORDER BY id
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(AccountBalanceSyncTarget {
+            id: row.get::<_, i64>(0)?,
+            name: row.get::<_, String>(1)?,
+            balance: row.get::<_, f64>(2)?,
+            initial_balance: row.get::<_, f64>(3)?,
+        })
+    })?;
+    let mut accounts = Vec::new();
+    for row in rows {
+        accounts.push(row?);
+    }
+    Ok(accounts)
+}
+
+fn calculate_account_balance_yuan_on_tx(
+    tx: &Transaction<'_>,
+    user_id: i64,
+    account_id: i64,
+    initial_balance: f64,
+) -> DbResult<f64> {
+    let balance_bills = load_account_balance_bills(tx, user_id, account_id)?;
+    let pnl_correction = calculate_same_account_investment_pnl_correction(tx, user_id, account_id)?;
+    let balance = calculate_account_balance_from_bills(
+        account_id,
+        money_from_yuan(initial_balance)?,
+        &balance_bills,
+        pnl_correction,
+    )
+    .map_err(runtime_error)?;
+    money_to_yuan_f64(balance)
 }
 
 fn load_account_balance_bills(
@@ -1796,6 +1905,10 @@ fn money_to_yuan_f64(value: Money) -> DbResult<f64> {
         .to_yuan_string()
         .parse::<f64>()
         .map_err(|_| DbError::InvalidOperation("money amount cannot be stored".to_string()))
+}
+
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn python_float_text(value: f64) -> String {

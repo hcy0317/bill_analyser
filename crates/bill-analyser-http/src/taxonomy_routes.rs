@@ -13,6 +13,7 @@ use axum::{
 };
 use bill_analyser_core::{category_rules::match_rule_expression, UserId};
 use bill_analyser_db::{
+    sync_all_account_balances,
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
@@ -21,7 +22,8 @@ use bill_analyser_db::{
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    AccountBalanceDiscrepancy, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -61,12 +63,12 @@ pub const TAXONOMY_ACCOUNT_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("PUT", "/api/accounts/{account_id}"),
     ("DELETE", "/api/accounts/{account_id}"),
     ("PUT", "/api/accounts/display-orders"),
+    ("POST", "/api/accounts/sync-balances"),
 ];
 
 pub const TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("POST", "/api/accounts/{account_id}/transactions/clear"),
     ("POST", "/api/accounts/{account_id}/transactions/move"),
-    ("POST", "/api/accounts/sync-balances"),
 ];
 
 pub const TAXONOMY_TAG_ROUTE_PATTERNS: &[(&str, &str)] = &[
@@ -197,7 +199,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/accounts/sync-balances",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(sync_account_balances_handler),
         )
         .route(
             "/api/accounts/:account_id",
@@ -537,6 +539,28 @@ async fn update_account_display_orders_handler(
     match repository.update_display_orders(&orders, db_user_id(user_id)) {
         Ok(true) => success_result(StatusCode::OK, Value::Bool(true)),
         Ok(false) => db_error_response(),
+        Err(_) => db_error_response(),
+    }
+}
+
+async fn sync_account_balances_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy accounts") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+
+    match sync_all_account_balances(runtime.connection_mut(), user_id) {
+        Ok(result) => success_result(
+            StatusCode::OK,
+            format_sync_account_balances_response(result),
+        ),
         Err(_) => db_error_response(),
     }
 }
@@ -1896,6 +1920,29 @@ fn format_account_list_response(accounts: Vec<AccountRecord>) -> Value {
     }
 
     Value::Array(top_level.into_iter().map(Value::Object).collect())
+}
+
+fn format_sync_account_balances_response(result: SyncAllAccountBalancesResult) -> Value {
+    json!({
+        "total_accounts": result.total_accounts,
+        "synced_accounts": result.synced_accounts,
+        "discrepancies": result
+            .discrepancies
+            .into_iter()
+            .map(format_account_balance_discrepancy)
+            .collect::<Vec<_>>(),
+        "errors": result.errors,
+    })
+}
+
+fn format_account_balance_discrepancy(discrepancy: AccountBalanceDiscrepancy) -> Value {
+    json!({
+        "account_id": discrepancy.account_id,
+        "name": discrepancy.name,
+        "old_balance": json_number(discrepancy.old_balance),
+        "new_balance": json_number(discrepancy.new_balance),
+        "diff": json_number(discrepancy.diff),
+    })
 }
 
 fn frontend_account_to_backend(payload: &Value) -> Result<Map<String, Value>, String> {

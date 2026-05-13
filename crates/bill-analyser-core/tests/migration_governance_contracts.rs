@@ -57,6 +57,7 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
     assert!(rust_owned.contains(&("GET", "/api/templates/")));
     assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
+    assert!(rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/{rule_id}/test")));
     assert!(rust_owned.contains(&("GET", "/api/rules/overview")));
@@ -207,6 +208,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         "PUT /api/accounts/{account_id}",
         "DELETE /api/accounts/{account_id}",
         "PUT /api/accounts/display-orders",
+        "POST /api/accounts/sync-balances",
     ] {
         let entry = manifest
             .iter()
@@ -318,7 +320,6 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
     for (method, pattern) in [
         ("POST", "/api/accounts/{account_id}/transactions/clear"),
         ("POST", "/api/accounts/{account_id}/transactions/move"),
-        ("POST", "/api/accounts/sync-balances"),
         ("GET", "/api/categories/rules"),
         ("PUT", "/api/categories/rules"),
         ("POST", "/api/category-rules/"),

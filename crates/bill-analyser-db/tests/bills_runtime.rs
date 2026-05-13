@@ -4,9 +4,9 @@ use bill_analyser_core::UserId;
 use bill_analyser_db::{
     batch_create_bills, batch_delete_bills, batch_update_bills, bind_bill_to_recurring,
     calculate_bill_hash_from_fields, create_bill, delete_bill, get_bill_by_id,
-    get_bill_recurring_candidates, get_bill_tags, query_bills, unbind_bill_from_recurring,
-    update_bill, BillCategoryFilter, BillCreateDraft, BillFilters, BillRecord, BillUpdateDraft,
-    SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
+    get_bill_recurring_candidates, get_bill_tags, query_bills, sync_all_account_balances,
+    unbind_bill_from_recurring, update_bill, BillCategoryFilter, BillCreateDraft, BillFilters,
+    BillRecord, BillUpdateDraft, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
 use serde_json::{json, Map, Value};
 
@@ -569,6 +569,43 @@ fn create_bill_is_user_scoped_hashes_tags_and_syncs_balance() -> Result<(), Box<
         page.bills[0].get("id").and_then(Value::as_i64),
         Some(owner_bill_id)
     );
+    Ok(())
+}
+
+#[test]
+fn sync_all_account_balances_reports_discrepancies_errors_and_user_scope(
+) -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut runtime = runtime_for(&temp_dir.path().join("bills-sync-all-balances.db"))?;
+    init_schema(&runtime)?;
+
+    runtime.connection().execute(
+        "INSERT INTO bills(
+            id, user_id, date, type, amount, counterparty, description,
+            source_account_id, destination_account_id, destination_amount, created_at, updated_at
+         ) VALUES
+            (1001, 42, '2026-05-08 10:00:00', '收入', 25.0, 'ACME', 'Salary', 10, 0, 0, 'now', 'now'),
+            (1002, 42, '2026-05-08 11:00:00', '未知', 5.0, 'Bad', 'Unsupported type', 20, 0, 0, 'now', 'now'),
+            (1003, 77, '2026-05-08 12:00:00', '收入', 50.0, 'Other', 'Other user', 90, 0, 0, 'now', 'now')",
+        [],
+    )?;
+
+    let result = sync_all_account_balances(runtime.connection_mut(), user_id(42))?;
+
+    assert_eq!(result.total_accounts, 2);
+    assert_eq!(result.synced_accounts, 1);
+    assert_eq!(result.discrepancies.len(), 1);
+    assert_eq!(result.discrepancies[0].account_id, 10);
+    assert_eq!(result.discrepancies[0].name, "cash");
+    assert_eq!(result.discrepancies[0].old_balance, 100.0);
+    assert_eq!(result.discrepancies[0].new_balance, 125.0);
+    assert_eq!(result.discrepancies[0].diff, 25.0);
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].contains("broker"));
+    assert_eq!(balance(&runtime, 10)?, 125.0);
+    assert_eq!(balance(&runtime, 20)?, 0.0);
+    assert_eq!(balance(&runtime, 90)?, 100.0);
+
     Ok(())
 }
 

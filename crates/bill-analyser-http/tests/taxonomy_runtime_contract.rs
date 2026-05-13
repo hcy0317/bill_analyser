@@ -32,9 +32,15 @@ async fn taxonomy_accounts_runtime_serves_crud_and_frontend_contract() -> Result
     assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("PUT", "/api/accounts/display-orders")));
+    assert!(TAXONOMY_ACCOUNT_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/accounts/sync-balances")));
     assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/accounts/{account_id}/transactions/move")));
+    assert!(TAXONOMY_ACCOUNT_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("POST", "/api/accounts/sync-balances")));
 
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -164,6 +170,17 @@ async fn taxonomy_accounts_runtime_validates_payloads_and_user_scope() -> Result
         )
         .await?;
     assert_eq!(unauth_response.status(), StatusCode::UNAUTHORIZED);
+
+    let unauth_sync_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/accounts/sync-balances")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(unauth_sync_response.status(), StatusCode::UNAUTHORIZED);
 
     let missing_create = app
         .clone()
@@ -306,6 +323,54 @@ async fn taxonomy_account_display_orders_update_only_current_user() -> Result<()
 }
 
 #[tokio::test]
+async fn taxonomy_account_sync_balances_recalculates_current_user_accounts(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    let connection = Connection::open(&fixture.db_path)?;
+    connection.execute(
+        "INSERT INTO bills(
+            id, user_id, type, amount, date, counterparty, description,
+            source_account_id, destination_account_id, destination_amount,
+            main_category, sub_category, created_at, updated_at
+        )
+        VALUES
+            (55, 42, '收入', 5.0, '2026-01-13', '公司', '工资入账', 10, 0, 0, '', '', 'now', 'now'),
+            (98, 77, '收入', 50.0, '2026-01-13', '其他公司', '其他用户入账', 99, 0, 0, '', '', 'now', 'now')",
+        [],
+    )?;
+    drop(connection);
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/accounts/sync-balances",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["result"]["total_accounts"], 2);
+    assert_eq!(body["result"]["synced_accounts"], 2);
+    assert_eq!(body["result"]["errors"], json!([]));
+    let discrepancies = body["result"]["discrepancies"]
+        .as_array()
+        .expect("discrepancy list");
+    assert_eq!(discrepancies.len(), 1);
+    assert_eq!(discrepancies[0]["account_id"], 10);
+    assert_eq!(discrepancies[0]["name"], "工资卡");
+    assert_eq!(discrepancies[0]["old_balance"], 12.34);
+    assert_eq!(discrepancies[0]["new_balance"], 17.34);
+    assert_eq!(discrepancies[0]["diff"], 5.0);
+    assert_eq!(account_balance(&fixture.db_path, 10)?, 17.34);
+    assert_eq!(account_balance(&fixture.db_path, 11)?, 0.50);
+    assert_eq!(account_balance(&fixture.db_path, 99)?, 99.0);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn taxonomy_account_update_reconciles_direct_subaccounts() -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
     let app = runtime_router(&fixture);
@@ -414,6 +479,7 @@ async fn taxonomy_accounts_runtime_reports_config_errors_before_db_work(
     );
 
     let display_response = app
+        .clone()
         .oneshot(json_request(
             Method::PUT,
             "/api/accounts/display-orders",
@@ -421,6 +487,42 @@ async fn taxonomy_accounts_runtime_reports_config_errors_before_db_work(
         ))
         .await?;
     assert_eq!(display_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let sync_response = app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/accounts/sync-balances",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(sync_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(sync_response).await["error"],
+        "Rust taxonomy accounts DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxonomy_account_sync_balances_reports_db_errors_for_missing_schema(
+) -> Result<(), Box<dyn Error>> {
+    let fixture = RuntimeFixture::new()?;
+    Connection::open(&fixture.db_path)?.execute("DROP TABLE accounts", [])?;
+    let app = runtime_router(&fixture);
+
+    let response = app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/accounts/sync-balances",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        read_json(response).await["error"],
+        "Rust taxonomy accounts route runtime DB error"
+    );
 
     Ok(())
 }
