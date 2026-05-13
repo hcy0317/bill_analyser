@@ -9,6 +9,7 @@ from typing import Any
 
 from tests.new_ui.test_bills_api import (
     _build_isolated_auth_headers,
+    _create_account_via_db,
     _ensure_test_expense_category,
     _get_current_user_id,
 )
@@ -17,10 +18,10 @@ ISOLATED_USER_PASSWORD = "Test123456!"
 
 
 def _create_account(client, auth_headers, *, name: str) -> dict[str, Any]:
-    response = client.post(
-        "/api/accounts/",
-        headers=auth_headers,
-        json={
+    return _create_account_via_db(
+        client,
+        auth_headers,
+        {
             "name": name,
             "category": 1,
             "type": 1,
@@ -34,8 +35,6 @@ def _create_account(client, auth_headers, *, name: str) -> dict[str, Any]:
             "aliases": ["settings-bundle-alias"],
         },
     )
-    assert response.status_code == 201, response.get_data(as_text=True)
-    return response.get_json()["result"]
 
 
 def _create_tag(client, auth_headers, *, name: str) -> dict[str, Any]:

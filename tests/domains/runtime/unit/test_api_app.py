@@ -222,7 +222,7 @@ def test_create_app_logs_authorized_accounts_and_v1_requests(
     client = flask_app.test_client()
 
     accounts_response = client.get("/api/accounts/", headers={"Authorization": "Bearer token-1234567890"})
-    assert accounts_response.status_code in (200, 401, 500)
+    assert accounts_response.status_code in (401, 404, 500)
 
     legacy_response = client.get("/api/v1/legacy.json")
     assert legacy_response.status_code == 404

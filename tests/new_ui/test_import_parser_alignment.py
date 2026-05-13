@@ -18,6 +18,7 @@ from bill_analyser.api.routes.bills import (
     _trim_generic_import_rows_to_header,
 )
 from bill_analyser.parsers.factory import ParserFactory
+from tests.new_ui.test_bills_api import _create_account_via_db
 from tests.real_sample_support import discover_parser_comparison_cases
 from tests.user_cleanup_support import register_test_user_for_cleanup
 
@@ -249,9 +250,10 @@ def _ensure_alignment_category(client, auth_headers, *, family: str, keywords: l
 
 def _ensure_alignment_account(client, auth_headers, *, family: str, aliases: list[str]) -> None:
     normalized_aliases = [str(alias or "").strip() for alias in aliases if str(alias or "").strip()]
-    response = client.post(
-        "/api/accounts/",
-        json={
+    _create_account_via_db(
+        client,
+        auth_headers,
+        {
             "name": f"pytest对齐账户{family}",
             "category": 1,
             "type": 1,
@@ -263,9 +265,7 @@ def _ensure_alignment_account(client, auth_headers, *, family: str, aliases: lis
             "hidden": False,
             "aliases": list(dict.fromkeys(normalized_aliases)),
         },
-        headers=auth_headers,
     )
-    assert response.status_code in (200, 201), response.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("case", PARSER_ALIGNMENT_CASES, ids=[case["id"] for case in PARSER_ALIGNMENT_CASES])

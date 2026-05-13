@@ -15,7 +15,6 @@ from bill_analyser import __version__
 # pylint: disable=wrong-import-position
 # 导入蓝图
 from bill_analyser.api.routes import (
-    accounts,
     auth,
     backup,
     bills,
@@ -150,7 +149,6 @@ def create_app():  # pylint: disable=too-many-statements
     flask_app.register_blueprint(categories.bp, url_prefix="/api/categories")
     flask_app.register_blueprint(category_rules.bp, url_prefix="/api/category-rules")
     flask_app.register_blueprint(statistics.bp, url_prefix="/api/statistics")
-    flask_app.register_blueprint(accounts.bp, url_prefix="/api/accounts")
     flask_app.register_blueprint(tags.bp, url_prefix="/api/tags")
     flask_app.register_blueprint(templates.bp, url_prefix="/api/templates")
     flask_app.register_blueprint(budgets.bp, url_prefix="/api/budgets")

@@ -40,17 +40,42 @@ def _pick_first_expense_category(category_groups):
     return first
 
 
+def _create_account_via_db(client, auth_headers, payload):
+    """Create an account directly in the DB after the Flask accounts route shell is removed."""
+    from bill_analyser.api.adapters.account_adapter import AccountAdapter
+    from bill_analyser.api.app import db
+
+    adapter = AccountAdapter()
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _create():
+        backend_payload = adapter.frontend_to_backend(dict(payload))
+        account_id = await db.create_account(backend_payload, user_id=user_id)
+        account = await db.get_account_by_id(account_id, user_id=user_id)
+        assert account is not None
+        return adapter.backend_to_frontend(account)
+
+    return asyncio.run(_create())
+
+
 def _ensure_test_account(client, auth_headers):
     """确保存在可用账户。"""
-    account_response = client.get("/api/accounts/", headers=auth_headers)
-    assert account_response.status_code == 200
-    account_data = json.loads(account_response.data)
-    source_account = _pick_first_account(account_data.get("result") or [])
+    from bill_analyser.api.adapters.account_adapter import AccountAdapter
+    from bill_analyser.api.app import db
+
+    adapter = AccountAdapter()
+    user_id = _get_current_user_id(client, auth_headers)
+
+    async def _list_accounts():
+        accounts = await db.get_all_accounts(user_id=user_id)
+        return adapter.format_list_response(accounts or []).get("result") or []
+
+    source_account = _pick_first_account(asyncio.run(_list_accounts()))
 
     if source_account:
         return source_account
 
-    create_response = client.post("/api/accounts/", json={
+    return _create_account_via_db(client, auth_headers, {
         "name": "pytest批量账户",
         "category": 1,
         "type": 1,
@@ -61,9 +86,7 @@ def _ensure_test_account(client, auth_headers):
         "comment": "pytest 批量创建账单账户",
         "hidden": False,
         "aliases": []
-    }, headers=auth_headers)
-    assert create_response.status_code == 201
-    return create_response.get_json()["result"]
+    })
 
 
 def _ensure_test_expense_category(client, auth_headers):

@@ -60,9 +60,9 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/data/clear/all")));
     assert!(rust_owned.contains(&("GET", "/api/templates/")));
     assert!(rust_owned.contains(&("PUT", "/api/templates/display-orders")));
-    assert!(rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
-    assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
-    assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
+    assert!(!rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
+    assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
+    assert!(!rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
     assert!(rust_owned.contains(&("GET", "/api/categories/rules")));
     assert!(rust_owned.contains(&("PUT", "/api/categories/rules")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
@@ -77,6 +77,19 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
         .into_iter()
         .map(|endpoint| (endpoint.method, endpoint.pattern))
         .collect();
+    assert!(python_deleted_routes.contains(&("GET", "/api/accounts/")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/accounts/")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/accounts/{account_id}")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/accounts/{account_id}")));
+    assert!(python_deleted_routes.contains(&("DELETE", "/api/accounts/{account_id}")));
+    assert!(python_deleted_routes.contains(&("PUT", "/api/accounts/display-orders")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/accounts/sync-balances")));
+    assert!(
+        python_deleted_routes.contains(&("POST", "/api/accounts/{account_id}/transactions/clear"))
+    );
+    assert!(
+        python_deleted_routes.contains(&("POST", "/api/accounts/{account_id}/transactions/move"))
+    );
     assert!(python_deleted_routes.contains(&("GET", "/api/rules/overview")));
     assert!(python_deleted_routes.contains(&("GET", "/api/settings/encryption/status")));
     assert!(rust_owned.contains(&("POST", "/api/llm/preview-recommend/accept")));
@@ -236,12 +249,11 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy account route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
-        assert!(entry
-            .unsupported_behavior
-            .contains("settings encryption status routes are Rust-owned"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
     for endpoint in [
@@ -420,6 +432,15 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
     assert_eq!(
         python_deleted,
         vec![
+            ("GET", "/api/accounts/"),
+            ("POST", "/api/accounts/"),
+            ("DELETE", "/api/accounts/{account_id}"),
+            ("GET", "/api/accounts/{account_id}"),
+            ("PUT", "/api/accounts/{account_id}"),
+            ("POST", "/api/accounts/{account_id}/transactions/clear"),
+            ("POST", "/api/accounts/{account_id}/transactions/move"),
+            ("PUT", "/api/accounts/display-orders"),
+            ("POST", "/api/accounts/sync-balances"),
             ("GET", "/api/rules/overview"),
             ("GET", "/api/settings/encryption/status")
         ]
