@@ -850,7 +850,7 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
     );
     assert!(auth_oauth2_authorize
         .unsupported_behavior
-        .contains("real OAuth provider exchange"));
+        .contains("OAuth2 provider exchange is explicitly disabled-safe/not-implemented"));
 
     let auth_user_data_statistics = manifest
         .iter()

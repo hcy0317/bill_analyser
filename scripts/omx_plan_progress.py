@@ -169,11 +169,19 @@ def audit_early_phases(repo_root: Path) -> list[PhaseAudit]:
     )
 
     governance = (repo_root / "crates/bill-analyser-core/src/migration_governance.rs").read_text(encoding="utf-8")
+    auth_runtime = (repo_root / "crates/bill-analyser-http/src/runtime.rs").read_text(encoding="utf-8")
+    auth_tests = (repo_root / "crates/bill-analyser-http/tests/auth_runtime_contract.rs").read_text(encoding="utf-8")
     p3_gaps: list[str] = []
-    if "real OAuth provider exchange remains Python-proxied" in governance:
-        p3_gaps.append("P3 still records real OAuth provider exchange as Python-proxied")
+    if "real OAuth provider exchange remains Python-proxied" in governance or "real OAuth provider exchange remains Python-owned" in governance:
+        p3_gaps.append("P3 still records real OAuth provider exchange as Python-owned/proxied")
     if "auth-security-user-data" not in governance:
         p3_gaps.append("missing auth-security-user-data governance domain")
+    if "OAuth2 provider exchange is explicitly disabled-safe/not-implemented" not in governance:
+        p3_gaps.append("missing Rust-owned OAuth2 disabled/not-implemented governance contract")
+    if "no OAuth provider exchange proxy remains" not in auth_runtime:
+        p3_gaps.append("runtime metadata still lacks the no-proxy OAuth2 authorize contract")
+    if "POST\", \"/api/auth/oauth2/authorize" not in auth_tests or "POST\", \"/api/profile/external-auths/unlink" not in auth_tests:
+        p3_gaps.append("missing P3 OAuth/external-auth Rust route contract tests")
     audits.append(
         PhaseAudit(
             "P3",

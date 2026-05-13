@@ -2151,7 +2151,7 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust auth runtime owns the OAuth2 callback authorize disabled-safe/not-implemented response contract; real provider exchange remains deferred.",
+            "Rust auth runtime owns the OAuth2 callback authorize disabled-safe/not-implemented response contract; the current workspace build has no live provider exchange implementation or Python proxy remainder for this route.",
     },
     EndpointOwnership {
         method: "DELETE",
@@ -2844,7 +2844,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: &["auth_session_parity", "profile_user_data_parity"],
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange remains Python-proxied until a later P3 cutover.",
+            "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; OAuth2 provider exchange is explicitly disabled-safe/not-implemented in the current workspace build.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: DB_RUNTIME_EVIDENCE,
@@ -3305,7 +3305,7 @@ fn route_contract_details(
             deletion_blockers: AUTH_TOKEN_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; real OAuth provider exchange remains Python-owned.",
+                "Login, registration, token session list/revoke, API/MCP personal token generation, refresh token exchange, logout, account recovery email verification/resend/password forgot/reset, OAuth2 callback authorize disabled-safe/not-implemented response, profile, avatar, profile cloud settings, profile external-auth list/unlink, profile verification-email resend, system version, user-data statistics, user-data CSV/TSV export, destructive user-data clear, authenticated 2FA status, TOTP login verification, recovery-code login verification, 2FA write management, and step-up verification routes are Rust-owned; OAuth2 provider exchange is explicitly disabled-safe/not-implemented in the current workspace build.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

@@ -40,7 +40,7 @@ def test_mark_slice_persists_pr_and_merge_commit(tmp_path: Path) -> None:
     assert persisted["plan_progress"]["phases"]["P4"]["slices"][0]["pr"] == "68"
 
 
-def test_early_phase_audit_reports_known_parser_and_auth_gaps() -> None:
+def test_early_phase_audit_reports_completed_parser_and_auth_gates() -> None:
     audits = {audit.phase: audit for audit in omx_plan_progress.audit_early_phases(Path.cwd())}
 
     assert audits["P0"].status == "completed"
@@ -48,5 +48,5 @@ def test_early_phase_audit_reports_known_parser_and_auth_gaps() -> None:
     assert audits["P2"].status == "completed"
     assert audits["P6"].status == "completed"
     assert audits["P6"].gaps == ()
-    assert audits["P3"].status == "blocked"
-    assert any("OAuth" in gap for gap in audits["P3"].gaps)
+    assert audits["P3"].status == "completed"
+    assert audits["P3"].gaps == ()

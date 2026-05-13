@@ -1212,7 +1212,7 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
     let metadata = read_json(metadata_response).await;
     assert_eq!(
         metadata["runtime_boundary"],
-        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+auth-login-register-token-account-recovery-profile-cloud-external-auth-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
+        "rust-http-shell:import-db-runtime+bills-crud-runtime+bills-picture-runtime+bills-export-runtime+bills-recurring-runtime+bills-reconciliation-runtime+bills-category-actions-runtime+budgets-crud-execution-forecast-history-import-runtime+statistics-read-runtime+statistics-exchange-runtime+taxonomy-accounts-runtime+taxonomy-tags-runtime+taxonomy-tags-batch-runtime+taxonomy-categories-runtime+taxonomy-templates-runtime+taxonomy-settings-bundle-runtime+auth-login-register-token-account-recovery-oauth2-authorize-profile-cloud-external-auth-system-user-data-statistics-2fa-status-verify-recovery-write-step-up-export-clear-runtime"
     );
     assert_eq!(
         metadata["business_migration"],
@@ -1265,7 +1265,11 @@ async fn runtime_metadata_declares_import_and_bills_crud_boundary() -> Result<()
         .as_str()
         .expect("taxonomy categories runtime")
         .contains("category statistics,"));
-    assert!(health["details"]["auth_token_runtime"].as_str().is_some());
+    let auth_runtime = health["details"]["auth_token_runtime"]
+        .as_str()
+        .expect("auth token runtime");
+    assert!(auth_runtime.contains("OAuth2 authorize disabled-safe/not-implemented"));
+    assert!(auth_runtime.contains("no OAuth provider exchange proxy remains"));
 
     Ok(())
 }
