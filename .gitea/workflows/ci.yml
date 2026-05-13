@@ -77,7 +77,20 @@ jobs:
           python-version: '3.14'
           allow-prereleases: true
 
+      - name: Restore Rust toolchain cache
+        id: rust-toolchain-cache
+        uses: https://github.com/actions/cache/restore@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+            ~/.rustup/settings.toml
+          key: ${{ runner.os }}-rust-toolchain-slim-v1-bootstrap
+          restore-keys: |
+            ${{ runner.os }}-rust-toolchain-slim-v1-
+
       - name: Setup Rust stable
+        id: rust-toolchain
         uses: https://github.com/dtolnay/rust-toolchain@stable
 
       - name: Restore Cargo cache
@@ -140,6 +153,7 @@ jobs:
         run: python -m pytest --cov=src/bill_analyser --cov-report=term-missing --cov-report=json:coverage.json --cov-fail-under=90 tests/ -v -n auto --dist loadfile
 
       - name: Trim backend caches before cache save
+        id: backend-cache-trim
         if: always()
         run: |
           cache_size_mb() {
@@ -169,6 +183,28 @@ jobs:
           if [ "$pip_cache_mb" -gt 300 ]; then
             python -m pip cache purge || rm -rf ~/.cache/pip
           fi
+
+          rustup_cache_mb="$(cache_size_mb ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml)"
+          if [ "$rustup_cache_mb" -gt 1450 ]; then
+            echo "rust_toolchain_cache_save=false" >> "$GITHUB_OUTPUT"
+            rm -rf ~/.rustup/toolchains ~/.rustup/update-hashes ~/.rustup/settings.toml
+          else
+            echo "rust_toolchain_cache_save=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve Rust toolchain cache key
+        id: rust-toolchain-cache-key
+        run: echo "key=${{ runner.os }}-rust-toolchain-slim-v1-${{ steps.rust-toolchain.outputs.cachekey }}" >> "$GITHUB_OUTPUT"
+
+      - name: Save Rust toolchain cache
+        if: steps.backend-cache-trim.outputs.rust_toolchain_cache_save == 'true' && steps.rust-toolchain-cache.outputs.cache-matched-key != steps.rust-toolchain-cache-key.outputs.key
+        uses: https://github.com/actions/cache/save@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+            ~/.rustup/settings.toml
+          key: ${{ steps.rust-toolchain-cache-key.outputs.key }}
 
   frontend-ci:
     name: frontend-ci
