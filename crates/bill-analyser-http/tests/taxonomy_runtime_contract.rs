@@ -11,6 +11,7 @@ use bill_analyser_http::{
     TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_ROUTE_PATTERNS,
     TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS, TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS,
     TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS, TAXONOMY_RULE_CENTER_ROUTE_PATTERNS,
+    TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS, TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS,
     TAXONOMY_TAG_PROXIED_ROUTE_PATTERNS, TAXONOMY_TAG_ROUTE_PATTERNS,
     TAXONOMY_TEMPLATE_PROXIED_ROUTE_PATTERNS, TAXONOMY_TEMPLATE_ROUTE_PATTERNS,
 };
@@ -1716,6 +1717,170 @@ async fn taxonomy_rules_overview_runtime_aggregates_user_scoped_rule_sources(
 }
 
 #[tokio::test]
+async fn taxonomy_settings_bundle_export_runtime_serves_raw_bundle_and_sensitive_sections(
+) -> Result<(), Box<dyn Error>> {
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("GET", "/api/settings/bundle/export")));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| { route == &("POST", "/api/settings/bundle/sections/{section_key}/export") }));
+    assert!(TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/settings/bundle/import")));
+
+    let fixture = RuntimeFixture::new()?;
+    let app = runtime_router(&fixture);
+
+    let export_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/settings/bundle/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(export_response.status(), StatusCode::OK);
+    assert_eq!(
+        export_response
+            .headers()
+            .get("content-disposition")
+            .and_then(|value| value.to_str().ok()),
+        Some("attachment; filename=\"bill-analyser-settings.json\"")
+    );
+    let bundle = read_json(export_response).await;
+    assert_eq!(bundle["schemaVersion"], 1);
+    assert_eq!(bundle["secretsPolicy"]["llmApiKeys"], "redacted");
+    assert_eq!(bundle["counts"]["accounts"], 2);
+    assert_eq!(bundle["counts"]["transactionTags"], 2);
+    assert_eq!(bundle["counts"]["categoryRecognitionRules"], 2);
+    assert_eq!(bundle["counts"]["llmConfigs"], 1);
+    assert_eq!(bundle["sections"]["accounts"][0]["name"], "工资卡");
+    assert_eq!(
+        bundle["sections"]["accounts"][0]["aliases"],
+        json!(["主卡", "工资"])
+    );
+    assert_eq!(
+        bundle["sections"]["transactionTemplates"][0]["categoryRef"],
+        "category:31"
+    );
+    assert_eq!(
+        bundle["sections"]["transactionTemplates"][0]["tagNames"],
+        json!(["午饭", "通勤"])
+    );
+    assert_eq!(
+        bundle["sections"]["scheduledTransactions"][0]["nextDate"],
+        "2026-02-01"
+    );
+    assert_eq!(
+        bundle["sections"]["categoryRecognitionRules"][0]["ruleExpression"],
+        "OR={午餐,饭}"
+    );
+    assert_eq!(bundle["sections"]["llmConfigs"][0]["apiKey"], "");
+    assert_eq!(bundle["sections"]["llmConfigs"][0]["hasApiKey"], true);
+    assert_eq!(
+        bundle["sections"]["llmConfigs"][0]["advancedSettings"]["reasoning_depth"],
+        "high"
+    );
+    assert_eq!(bundle["sections"]["ocrConfig"][0]["provider"], "cloud_stub");
+    assert_eq!(bundle["sections"]["ocrConfig"][0]["lang"], "eng");
+    let serialized = serde_json::to_string(&bundle)?;
+    assert!(!serialized.contains("secret-key"));
+    assert!(!serialized.contains("其他用户"));
+
+    let tag_section_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/settings/bundle/sections/transactionTags/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(tag_section_response.status(), StatusCode::OK);
+    let tag_section = read_json(tag_section_response).await;
+    assert_eq!(
+        tag_section["sections"]
+            .as_object()
+            .expect("section object")
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["transactionTags"]
+    );
+    assert_eq!(tag_section["counts"]["transactionTags"], 2);
+
+    let sensitive_get_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/settings/bundle/sections/llmConfigs/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(sensitive_get_response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        read_json(sensitive_get_response).await["error"],
+        "password is required"
+    );
+
+    let wrong_password_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/sections/llmConfigs/export",
+            json!({"password": "wrong"}),
+        ))
+        .await?;
+    assert_eq!(wrong_password_response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        read_json(wrong_password_response).await["error"],
+        "Invalid password"
+    );
+
+    let sensitive_post_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/api/settings/bundle/sections/llmConfigs/export",
+            json!({"password": "correct horse battery staple"}),
+        ))
+        .await?;
+    assert_eq!(sensitive_post_response.status(), StatusCode::OK);
+    let sensitive_section = read_json(sensitive_post_response).await;
+    assert_eq!(sensitive_section["counts"]["llmConfigs"], 1);
+    assert_eq!(
+        sensitive_section["sections"]["llmConfigs"][0]["hasApiKey"],
+        true
+    );
+    assert!(!serde_json::to_string(&sensitive_section)?.contains("secret-key"));
+
+    let invalid_section_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/settings/bundle/sections/notASection/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(invalid_section_response.status(), StatusCode::NOT_FOUND);
+
+    let no_db_app = runtime_router_without_db(&fixture);
+    let no_db_response = no_db_app
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/settings/bundle/export",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(no_db_response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        read_json(no_db_response).await["error"],
+        "Rust taxonomy settings bundle export DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn taxonomy_categories_runtime_covers_legacy_aliases_virtual_and_batch_edges(
 ) -> Result<(), Box<dyn Error>> {
     let fixture = RuntimeFixture::new()?;
@@ -2732,7 +2897,8 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         "
         CREATE TABLE users(
             id INTEGER PRIMARY KEY,
-            username TEXT NOT NULL
+            username TEXT NOT NULL,
+            password_hash TEXT DEFAULT ''
         );
         CREATE TABLE accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2867,11 +3033,32 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             main_category TEXT,
             sub_category TEXT
         );
+        CREATE TABLE llm_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            provider TEXT DEFAULT 'openai',
+            model TEXT,
+            api_key TEXT,
+            base_url TEXT,
+            advanced_settings TEXT,
+            is_active INTEGER DEFAULT 0
+        );
+        CREATE TABLE app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            value_type TEXT,
+            description TEXT,
+            is_encrypted INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
         ",
     )?;
+    let password_hash = bcrypt::hash("correct horse battery staple", 4)?;
     connection.execute(
-        "INSERT INTO users(id, username) VALUES (42, 'owner'), (77, 'other')",
-        [],
+        "INSERT INTO users(id, username, password_hash) VALUES (42, 'owner', ?1), (77, 'other', '')",
+        [&password_hash],
     )?;
     connection.execute(
         "INSERT INTO accounts(
@@ -2962,6 +3149,25 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
             (52, 42, '支出', -3.0, '2026-01-10', '交通', '公交'),
             (53, 42, '支出', -99.0, '2025-12-31', '餐饮', '晚餐'),
             (97, 77, '支出', -99.0, '2026-01-10', '其他用户分类', '')",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO llm_configs(
+            id, user_id, name, provider, model, api_key, base_url, advanced_settings, is_active
+        )
+        VALUES
+            (80, 42, '主 LLM', 'openai', 'gpt-test', 'secret-key', 'https://llm.example.test',
+             '{\"reasoning_depth\":\"High\",\"temperature\":0.3,\"max_tokens\":2048,\"ignored\":true}', 1),
+            (81, 77, '其他用户 LLM', 'openai', 'other', 'other-secret', '', '{}', 0)",
+        [],
+    )?;
+    connection.execute(
+        "INSERT INTO app_settings(
+            key, value, value_type, description, is_encrypted, created_at, updated_at
+        )
+        VALUES
+            ('receipt_ocr_config', '{\"provider\":\"cloud_stub\",\"lang\":\"eng\"}', 'json',
+             'Receipt OCR runtime configuration', 0, 'now', 'now')",
         [],
     )?;
     Ok(())

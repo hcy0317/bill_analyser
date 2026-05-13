@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use axum::{
     body::Bytes,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{
+        header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderMap, StatusCode,
+    },
     response::{IntoResponse, Response},
     routing::{get, put},
     Json, Router,
@@ -14,12 +17,14 @@ use bill_analyser_db::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
         category_rules::{CategoryRuleRecord, CategoryRulesRepository},
+        settings_bundle::export_taxonomy_sections,
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
     SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
 };
-use rusqlite::{params, Connection};
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
@@ -30,6 +35,19 @@ use crate::{
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
+const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
+const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
+const SETTINGS_BUNDLE_SECTION_KEYS: &[&str] = &[
+    "accounts",
+    "transactionCategories",
+    "transactionTags",
+    "transactionTemplates",
+    "scheduledTransactions",
+    "categoryRecognitionRules",
+    "llmConfigs",
+    "ocrConfig",
+];
+const SENSITIVE_EXPORT_SECTIONS: &[&str] = &["llmConfigs", "ocrConfig"];
 
 type RouteResult<T> = Result<T, Box<Response>>;
 
@@ -120,9 +138,50 @@ pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api
 
 pub const TAXONOMY_RULE_CENTER_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
+pub const TAXONOMY_SETTINGS_BUNDLE_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("GET", "/api/settings/bundle/export"),
+    ("GET", "/api/settings/bundle/sections/{section_key}/export"),
+    ("POST", "/api/settings/bundle/sections/{section_key}/export"),
+];
+
+pub const TAXONOMY_SETTINGS_BUNDLE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
+    ("POST", "/api/settings/bundle/import"),
+    ("POST", "/api/settings/bundle/import/preview"),
+    ("POST", "/api/settings/bundle/sections/{section_key}/import"),
+    (
+        "POST",
+        "/api/settings/bundle/sections/{section_key}/import/preview",
+    ),
+];
+
 pub fn taxonomy_runtime_router() -> Router<ProxyState> {
     Router::new()
         .route("/api/rules/overview", get(rules_overview_handler))
+        .route(
+            "/api/settings/bundle/export",
+            get(export_settings_bundle_handler),
+        )
+        .route(
+            "/api/settings/bundle/import",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/settings/bundle/import/preview",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/settings/bundle/sections/:section_key/export",
+            get(export_settings_bundle_section_get_handler)
+                .post(export_settings_bundle_section_post_handler),
+        )
+        .route(
+            "/api/settings/bundle/sections/:section_key/import",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
+        .route(
+            "/api/settings/bundle/sections/:section_key/import/preview",
+            axum::routing::post(ownership_aware_proxy_handler),
+        )
         .route(
             "/api/accounts",
             get(list_accounts_handler).post(create_account_handler),
@@ -1514,6 +1573,113 @@ async fn rules_overview_handler(State(state): State<ProxyState>, headers: Header
     )
 }
 
+async fn export_settings_bundle_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+
+    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id)) {
+        Ok(bundle) => settings_bundle_download_response(bundle, "bill-analyser-settings.json"),
+        Err(_) => settings_bundle_db_error_response(),
+    }
+}
+
+async fn export_settings_bundle_section_get_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(section_key): Path<String>,
+) -> Response {
+    if !is_valid_settings_bundle_section(&section_key) {
+        return settings_bundle_section_not_found(&section_key);
+    }
+    if is_sensitive_settings_export_section(&section_key) {
+        return bad_request("password is required");
+    }
+    export_settings_bundle_section(&state, &headers, &section_key)
+}
+
+async fn export_settings_bundle_section_post_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    Path(section_key): Path<String>,
+    body: Bytes,
+) -> Response {
+    if !is_valid_settings_bundle_section(&section_key) {
+        return settings_bundle_section_not_found(&section_key);
+    }
+
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy settings bundle export") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = db_user_id(user_id);
+
+    if is_sensitive_settings_export_section(&section_key) {
+        let payload = optional_json_body(body);
+        let password = payload
+            .as_ref()
+            .and_then(|value| value.get("password"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if password.is_empty() {
+            return bad_request("password is required");
+        }
+        match verify_sensitive_export_password(runtime.connection_mut(), user_id, password) {
+            Ok(true) => {}
+            Ok(false) => {
+                return json_response(
+                    StatusCode::UNAUTHORIZED,
+                    json!({"success": false, "error": "Invalid password"}),
+                )
+            }
+            Err(_) => return settings_bundle_db_error_response(),
+        }
+    }
+
+    match build_settings_bundle(runtime.connection_mut(), user_id) {
+        Ok(bundle) => settings_bundle_download_response(
+            filter_settings_bundle_section(&bundle, &section_key),
+            &format!("bill-analyser-settings-{section_key}.json"),
+        ),
+        Err(_) => settings_bundle_db_error_response(),
+    }
+}
+
+fn export_settings_bundle_section(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    section_key: &str,
+) -> Response {
+    let user_id = match user_id_from_headers(headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(state, "taxonomy settings bundle export") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+
+    match build_settings_bundle(runtime.connection_mut(), db_user_id(user_id)) {
+        Ok(bundle) => settings_bundle_download_response(
+            filter_settings_bundle_section(&bundle, section_key),
+            &format!("bill-analyser-settings-{section_key}.json"),
+        ),
+        Err(_) => settings_bundle_db_error_response(),
+    }
+}
+
 async fn import_categories_handler(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -2614,6 +2780,559 @@ fn format_category_rules_response(rules: Vec<CategoryRuleRecord>) -> Value {
         "data": Value::Array(rules.into_iter().map(Value::Object).collect()),
         "total": total,
     })
+}
+
+fn build_settings_bundle(connection: &mut Connection, user_id: i64) -> Result<Value, String> {
+    let accounts = {
+        let mut repository = AccountsRepository::new(connection);
+        repository
+            .list_accounts(user_id)
+            .map_err(|error| error.to_string())?
+    };
+    let categories = {
+        let mut repository = CategoriesRepository::new(connection);
+        repository
+            .list_categories(user_id)
+            .map_err(|error| error.to_string())?
+    };
+    let tags = {
+        let mut repository = TagsRepository::new(connection);
+        repository
+            .list_tags(user_id)
+            .map_err(|error| error.to_string())?
+    };
+    let templates = list_settings_templates(connection, user_id, 1)?;
+    let scheduled = list_settings_templates(connection, user_id, 2)?;
+    let category_refs = category_ref_map(&categories);
+
+    let taxonomy_sections = export_taxonomy_sections(&json!({
+        "accounts": records_to_array(&accounts),
+        "categories": records_to_array(&categories),
+        "tags": tags_to_array(&tags),
+        "templates": records_to_array(&templates),
+        "scheduled": records_to_array(&scheduled),
+    }))
+    .map_err(|error| error.to_string())?;
+
+    let mut sections = taxonomy_sections
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "settings taxonomy sections must be an object".to_string())?;
+
+    let category_rules = {
+        let mut repository = CategoryRulesRepository::new(connection);
+        repository
+            .list_rules(user_id, None, false)
+            .map_err(|error| error.to_string())?
+    };
+    sections.insert(
+        "categoryRecognitionRules".to_string(),
+        Value::Array(
+            category_rules
+                .iter()
+                .map(|rule| export_settings_category_rule(rule, &category_refs))
+                .collect(),
+        ),
+    );
+    sections.insert(
+        "llmConfigs".to_string(),
+        Value::Array(list_settings_llm_configs(connection, user_id)?),
+    );
+    sections.insert(
+        "ocrConfig".to_string(),
+        Value::Array(vec![export_settings_ocr_config(connection)?]),
+    );
+
+    let counts = SETTINGS_BUNDLE_SECTION_KEYS
+        .iter()
+        .map(|key| {
+            let count = sections
+                .get(*key)
+                .and_then(Value::as_array)
+                .map(|items| items.len() as i64)
+                .unwrap_or(0);
+            ((*key).to_string(), Value::Number(Number::from(count)))
+        })
+        .collect::<Map<_, _>>();
+
+    Ok(json!({
+        "schemaVersion": SETTINGS_BUNDLE_SCHEMA_VERSION,
+        "exportedAt": Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%S%.f").to_string(),
+        "secretsPolicy": {"llmApiKeys": "redacted"},
+        "sections": Value::Object(sections),
+        "counts": Value::Object(counts),
+    }))
+}
+
+fn list_settings_templates(
+    connection: &Connection,
+    user_id: i64,
+    template_type: i64,
+) -> Result<Vec<Map<String, Value>>, String> {
+    let table_name = if template_type == 2 {
+        "recurring_bills"
+    } else {
+        "bill_templates"
+    };
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT * FROM {table_name} WHERE user_id = ?1 ORDER BY COALESCE(display_order, 0), name"
+        ))
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![user_id], |row| {
+            let mut item = Map::new();
+            let row_ref = row.as_ref();
+            for index in 0..row_ref.column_count() {
+                let name = row_ref.column_name(index)?.to_string();
+                item.insert(name, sqlite_ref_to_json(row.get_ref(index)?));
+            }
+            Ok(item)
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.map(|row| {
+        row.map(|raw| serialize_settings_template_row(&raw, template_type))
+            .map_err(|error| error.to_string())
+    })
+    .collect()
+}
+
+fn serialize_settings_template_row(
+    row: &Map<String, Value>,
+    template_type: i64,
+) -> Map<String, Value> {
+    let mut result = Map::new();
+    result.insert(
+        "id".to_string(),
+        Value::String(value_string(row.get("id"), "")),
+    );
+    result.insert("timeSequenceId".to_string(), Value::String(String::new()));
+    result.insert(
+        "templateType".to_string(),
+        Value::Number(Number::from(template_type)),
+    );
+    result.insert(
+        "name".to_string(),
+        Value::String(string_or_default(row.get("name"), "")),
+    );
+    result.insert(
+        "description".to_string(),
+        Value::String(string_or_default(row.get("description"), "")),
+    );
+    result.insert(
+        "type".to_string(),
+        Value::Number(Number::from(normalize_template_transaction_type(
+            row.get("type"),
+        ))),
+    );
+    result.insert(
+        "categoryId".to_string(),
+        Value::String(value_string(row.get("category"), "")),
+    );
+    result.insert("time".to_string(), Value::Number(Number::from(0)));
+    result.insert(
+        "utcOffset".to_string(),
+        Value::Number(Number::from(value_as_i64_or(row.get("utc_offset"), 0))),
+    );
+    result.insert(
+        "sourceAccountId".to_string(),
+        Value::String(value_string(row.get("account"), "0")),
+    );
+    result.insert(
+        "destinationAccountId".to_string(),
+        Value::String(value_string(row.get("counterparty"), "0")),
+    );
+    result.insert(
+        "sourceAmount".to_string(),
+        json_number(row.get("amount").and_then(value_as_f64).unwrap_or_default()),
+    );
+    result.insert(
+        "destinationAmount".to_string(),
+        json_number(
+            row.get("destination_amount")
+                .and_then(value_as_f64)
+                .unwrap_or_default(),
+        ),
+    );
+    result.insert(
+        "hideAmount".to_string(),
+        Value::Bool(row.get("hide_amount").is_some_and(value_truthy)),
+    );
+    result.insert(
+        "tagIds".to_string(),
+        Value::Array(template_tag_ids(row.get("tag"))),
+    );
+    result.insert(
+        "comment".to_string(),
+        Value::String(string_or_default(row.get("comment"), "")),
+    );
+    result.insert("editable".to_string(), Value::Bool(true));
+    result.insert(
+        "displayOrder".to_string(),
+        Value::Number(Number::from(value_as_i64_or(row.get("display_order"), 0))),
+    );
+    result.insert(
+        "hidden".to_string(),
+        Value::Bool(row.get("hidden").is_some_and(value_truthy)),
+    );
+    result.insert(
+        "scheduledFrequencyType".to_string(),
+        if template_type == 2 {
+            Value::Number(Number::from(value_as_i64_or(
+                row.get("scheduled_frequency_type"),
+                0,
+            )))
+        } else {
+            Value::Null
+        },
+    );
+    result.insert(
+        "scheduledFrequency".to_string(),
+        recurring_string_or_null(row, template_type, "frequency"),
+    );
+    result.insert(
+        "scheduledStartDate".to_string(),
+        recurring_string_or_null(row, template_type, "start_date"),
+    );
+    result.insert(
+        "scheduledEndDate".to_string(),
+        recurring_string_or_null(row, template_type, "end_date"),
+    );
+    result.insert("scheduledAt".to_string(), Value::Null);
+    if template_type == 2 {
+        result.insert(
+            "enabled".to_string(),
+            Value::Bool(row.get("enabled").is_some_and(value_truthy)),
+        );
+        result.insert(
+            "autoCreate".to_string(),
+            Value::Bool(row.get("auto_create").is_some_and(value_truthy)),
+        );
+        result.insert(
+            "nextDate".to_string(),
+            row.get("next_date").cloned().unwrap_or(Value::Null),
+        );
+    }
+    result
+}
+
+fn list_settings_llm_configs(connection: &Connection, user_id: i64) -> Result<Vec<Value>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, name, provider, model, api_key, base_url, advanced_settings, is_active
+             FROM llm_configs
+             WHERE user_id = ?1
+             ORDER BY id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![user_id], |row| {
+            let api_key = row.get::<_, Option<String>>("api_key")?.unwrap_or_default();
+            let advanced_settings = row
+                .get::<_, Option<String>>("advanced_settings")?
+                .unwrap_or_default();
+            Ok(json!({
+                "externalRef": format!("llmConfig:{}", row.get::<_, i64>("id")?),
+                "name": row.get::<_, Option<String>>("name")?.unwrap_or_default(),
+                "provider": row.get::<_, Option<String>>("provider")?.unwrap_or_else(|| "openai".to_string()),
+                "model": row.get::<_, Option<String>>("model")?.unwrap_or_default(),
+                "apiKey": "",
+                "hasApiKey": !api_key.is_empty(),
+                "baseUrl": row.get::<_, Option<String>>("base_url")?.unwrap_or_default(),
+                "advancedSettings": normalize_llm_advanced_settings(&advanced_settings),
+                "activeInSource": row.get::<_, Option<i64>>("is_active")?.unwrap_or(0) != 0,
+            }))
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+fn export_settings_ocr_config(connection: &Connection) -> Result<Value, String> {
+    let raw_value = connection
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![OCR_CONFIG_SETTING_KEY],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .unwrap_or_default();
+    let loaded = serde_json::from_str::<Value>(&raw_value).unwrap_or_else(|_| json!({}));
+    let normalized = normalize_ocr_config(&loaded);
+    Ok(json!({
+        "externalRef": "ocrConfig:receipt-recognition",
+        "provider": normalized["provider"],
+        "lang": normalized["lang"],
+    }))
+}
+
+fn export_settings_category_rule(
+    rule: &Map<String, Value>,
+    category_refs: &BTreeMap<i64, String>,
+) -> Value {
+    let category_id = value_as_i64_or(rule.get("category_id"), 0);
+    json!({
+        "externalRef": format!("categoryRule:{}", value_string(rule.get("id"), "")),
+        "categoryRef": category_refs.get(&category_id).cloned().unwrap_or_default(),
+        "mainCategory": string_or_default(rule.get("main_category"), ""),
+        "subCategory": string_or_default(rule.get("sub_category"), ""),
+        "name": string_or_default(rule.get("name"), ""),
+        "priority": value_as_i64_or(rule.get("priority"), 100),
+        "ruleExpression": string_or_default(rule.get("rule_expression"), ""),
+        "regexEnabled": rule.get("regex_enabled").is_some_and(value_truthy),
+        "enabled": rule.get("enabled").map(value_truthy).unwrap_or(true),
+    })
+}
+
+fn category_ref_map(categories: &[CategoryRecord]) -> BTreeMap<i64, String> {
+    categories
+        .iter()
+        .filter_map(|category| {
+            let id = category
+                .get("id")
+                .and_then(value_as_i64)
+                .unwrap_or_default();
+            (id > 0).then(|| (id, format!("category:{id}")))
+        })
+        .collect()
+}
+
+fn records_to_array(records: &[Map<String, Value>]) -> Value {
+    Value::Array(records.iter().cloned().map(Value::Object).collect())
+}
+
+fn tags_to_array(tags: &[TagRecord]) -> Value {
+    Value::Array(
+        tags.iter()
+            .map(|tag| serde_json::to_value(tag).unwrap_or(Value::Null))
+            .collect(),
+    )
+}
+
+fn filter_settings_bundle_section(bundle: &Value, section_key: &str) -> Value {
+    let section_items = bundle
+        .get("sections")
+        .and_then(Value::as_object)
+        .and_then(|sections| sections.get(section_key))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let item_count = section_items.len() as i64;
+    let mut sections = Map::new();
+    sections.insert(section_key.to_string(), Value::Array(section_items));
+    let mut counts = Map::new();
+    counts.insert(
+        section_key.to_string(),
+        Value::Number(Number::from(item_count)),
+    );
+
+    json!({
+        "schemaVersion": bundle
+            .get("schemaVersion")
+            .cloned()
+            .unwrap_or_else(|| Value::Number(Number::from(SETTINGS_BUNDLE_SCHEMA_VERSION))),
+        "exportedAt": bundle.get("exportedAt").cloned().unwrap_or(Value::Null),
+        "secretsPolicy": bundle
+            .get("secretsPolicy")
+            .cloned()
+            .unwrap_or_else(|| json!({"llmApiKeys": "redacted"})),
+        "sections": Value::Object(sections),
+        "counts": Value::Object(counts),
+    })
+}
+
+fn settings_bundle_download_response(bundle: Value, filename: &str) -> Response {
+    let body = serde_json::to_string(&bundle).unwrap_or_else(|_| "{}".to_string());
+    (
+        StatusCode::OK,
+        [
+            (CONTENT_TYPE, "application/json".to_string()),
+            (
+                CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+fn is_valid_settings_bundle_section(section_key: &str) -> bool {
+    SETTINGS_BUNDLE_SECTION_KEYS.contains(&section_key)
+}
+
+fn is_sensitive_settings_export_section(section_key: &str) -> bool {
+    SENSITIVE_EXPORT_SECTIONS.contains(&section_key)
+}
+
+fn settings_bundle_section_not_found(section_key: &str) -> Response {
+    json_response(
+        StatusCode::NOT_FOUND,
+        json!({
+            "success": false,
+            "error": format!("Unsupported settings bundle section: {section_key}"),
+        }),
+    )
+}
+
+fn settings_bundle_db_error_response() -> Response {
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        json!({"success": false, "error": "Failed to export settings bundle"}),
+    )
+}
+
+fn verify_sensitive_export_password(
+    connection: &Connection,
+    user_id: i64,
+    password: &str,
+) -> rusqlite::Result<bool> {
+    let password_hash = connection.query_row(
+        "SELECT password_hash FROM users WHERE id = ?1",
+        params![user_id],
+        |row| row.get::<_, Option<String>>(0),
+    )?;
+    Ok(password_hash
+        .filter(|value| !value.is_empty())
+        .is_some_and(|hash| bcrypt::verify(password, &hash).unwrap_or(false)))
+}
+
+fn optional_json_body(body: Bytes) -> Option<Value> {
+    if body.is_empty() {
+        return None;
+    }
+    serde_json::from_slice(&body).ok()
+}
+
+fn template_tag_ids(value: Option<&Value>) -> Vec<Value> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    if let Some(values) = value.as_array() {
+        return values
+            .iter()
+            .map(|item| Value::String(string_or_default(Some(item), "")))
+            .filter(|item| item.as_str().is_some_and(|text| !text.is_empty()))
+            .collect();
+    }
+    string_or_default(Some(value), "")
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| Value::String(item.to_string()))
+        .collect()
+}
+
+fn recurring_string_or_null(row: &Map<String, Value>, template_type: i64, key: &str) -> Value {
+    if template_type != 2 {
+        return Value::Null;
+    }
+    row.get(key).cloned().unwrap_or(Value::Null)
+}
+
+fn normalize_template_transaction_type(value: Option<&Value>) -> i64 {
+    let text = string_or_default(value, "").to_ascii_lowercase();
+    match text.as_str() {
+        "2" | "income" | "收入" => 2,
+        "4" | "transfer" | "转账" => 4,
+        "5" | "investment" | "投资" => 5,
+        _ => 3,
+    }
+}
+
+fn normalize_llm_advanced_settings(raw_value: &str) -> Value {
+    let loaded = serde_json::from_str::<Value>(raw_value).unwrap_or_else(|_| json!({}));
+    let object = loaded.as_object();
+    let mut normalized = Map::new();
+
+    if let Some(reasoning_depth) = object
+        .and_then(|settings| settings.get("reasoning_depth"))
+        .map(|value| string_or_default(Some(value), "").to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "low" | "medium" | "high"))
+    {
+        normalized.insert(
+            "reasoning_depth".to_string(),
+            Value::String(reasoning_depth),
+        );
+    }
+    if let Some(temperature) = object
+        .and_then(|settings| settings.get("temperature"))
+        .and_then(value_as_f64)
+        .filter(|value| (0.0..=2.0).contains(value))
+    {
+        normalized.insert("temperature".to_string(), json_number(temperature));
+    }
+    if let Some(max_tokens) = object
+        .and_then(|settings| settings.get("max_tokens"))
+        .and_then(value_as_i64)
+        .filter(|value| (1..=200_000).contains(value))
+    {
+        normalized.insert(
+            "max_tokens".to_string(),
+            Value::Number(Number::from(max_tokens)),
+        );
+    }
+    for key in [
+        "system_prompt",
+        "classification_prompt_template",
+        "rule_prompt_template",
+    ] {
+        if let Some(text) = object
+            .and_then(|settings| settings.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            normalized.insert(key.to_string(), Value::String(text.to_string()));
+        }
+    }
+    Value::Object(normalized)
+}
+
+fn normalize_ocr_config(raw_value: &Value) -> Value {
+    let provider = raw_value
+        .get("provider")
+        .map(|value| string_or_default(Some(value), "disabled").to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "disabled" | "tesseract" | "cloud_stub"))
+        .unwrap_or_else(|| "disabled".to_string());
+    let lang = raw_value
+        .get("lang")
+        .map(|value| string_or_default(Some(value), "chi_sim+eng"))
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '+' | '.' | '-'))
+        })
+        .unwrap_or_else(|| "chi_sim+eng".to_string());
+    json!({
+        "provider": provider,
+        "lang": lang,
+    })
+}
+
+fn sqlite_ref_to_json(value: rusqlite::types::ValueRef<'_>) -> Value {
+    match value {
+        rusqlite::types::ValueRef::Null => Value::Null,
+        rusqlite::types::ValueRef::Integer(number) => Value::Number(Number::from(number)),
+        rusqlite::types::ValueRef::Real(number) => {
+            Number::from_f64(number).map_or(Value::Null, Value::Number)
+        }
+        rusqlite::types::ValueRef::Text(text) => {
+            Value::String(String::from_utf8_lossy(text).to_string())
+        }
+        rusqlite::types::ValueRef::Blob(blob) => {
+            Value::String(String::from_utf8_lossy(blob).to_string())
+        }
+    }
+}
+
+fn value_as_i64_or(value: Option<&Value>, default: i64) -> i64 {
+    value.and_then(value_as_i64).unwrap_or(default)
 }
 
 fn count_rules_overview_learning_rules(

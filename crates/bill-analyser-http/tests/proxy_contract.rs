@@ -481,7 +481,7 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
         (Method::POST, "/api/category-rules/defaults"),
         (Method::POST, "/api/category-rules/migrate"),
         (Method::POST, "/api/category-rules/reorder"),
-        (Method::GET, "/api/settings/bundle/export"),
+        (Method::POST, "/api/settings/bundle/import"),
         (Method::GET, "/api/llm/config"),
         (Method::POST, "/api/matching/candidates/session/12/accept"),
     ] {
