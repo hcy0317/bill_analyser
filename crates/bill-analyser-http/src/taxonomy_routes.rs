@@ -128,13 +128,12 @@ pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/category-rules/{rule_id}"),
     ("PUT", "/api/category-rules/{rule_id}"),
     ("POST", "/api/category-rules/{rule_id}/test"),
+    ("POST", "/api/category-rules/defaults"),
+    ("POST", "/api/category-rules/migrate"),
     ("POST", "/api/category-rules/reorder"),
 ];
 
-pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("POST", "/api/category-rules/defaults"),
-    ("POST", "/api/category-rules/migrate"),
-];
+pub const TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_RULE_CENTER_ROUTE_PATTERNS: &[(&str, &str)] = &[("GET", "/api/rules/overview")];
 
@@ -300,11 +299,11 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/category-rules/defaults",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(ensure_category_rule_defaults_handler),
         )
         .route(
             "/api/category-rules/migrate",
-            axum::routing::post(ownership_aware_proxy_handler),
+            axum::routing::post(migrate_category_keywords_handler),
         )
         .route(
             "/api/category-rules/:rule_id",
@@ -1916,6 +1915,71 @@ async fn reorder_category_rules_handler(
     match repository.reorder_rules(&parsed_rule_ids, db_user_id(user_id)) {
         Ok(true) => json_response(StatusCode::OK, json!({"success": true})),
         Ok(false) => category_rule_db_error_response(),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn ensure_category_rule_defaults_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+
+    match repository.ensure_default_seed(db_user_id(user_id)) {
+        Ok(summary) => json_response(
+            StatusCode::OK,
+            json!({
+                "success": true,
+                "data": {
+                    "categories": {
+                        "created": summary.categories_created,
+                        "skipped": summary.categories_skipped,
+                    },
+                    "rules": {
+                        "created": summary.rules_created,
+                        "skipped": summary.rules_skipped,
+                        "missingCategories": summary.rules_missing_categories,
+                    }
+                }
+            }),
+        ),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn migrate_category_keywords_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut repository = CategoryRulesRepository::new(runtime.connection_mut());
+
+    match repository.migrate_keywords_to_rules(db_user_id(user_id)) {
+        Ok(summary) => json_response(
+            StatusCode::OK,
+            json!({
+                "success": true,
+                "data": {
+                    "migrated": summary.migrated,
+                    "skipped": summary.skipped,
+                }
+            }),
+        ),
         Err(_) => category_rule_db_error_response(),
     }
 }

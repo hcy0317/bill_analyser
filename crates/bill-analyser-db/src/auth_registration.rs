@@ -1082,7 +1082,7 @@ fn insert_register_preset_categories(
     Ok(true)
 }
 
-fn ensure_default_category_seed(
+pub(crate) fn ensure_default_category_seed(
     connection: &Connection,
     user_id: i64,
     created_at: &str,

@@ -2018,6 +2018,12 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/defaults")));
+    assert!(TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("POST", "/api/category-rules/migrate")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
         .all(|route| route != &("POST", "/api/category-rules/")));
@@ -2032,10 +2038,10 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         .all(|route| route != &("POST", "/api/category-rules/reorder")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("POST", "/api/category-rules/defaults")));
+        .all(|route| route != &("POST", "/api/category-rules/defaults")));
     assert!(TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("POST", "/api/category-rules/migrate")));
+        .all(|route| route != &("POST", "/api/category-rules/migrate")));
     assert!(!TAXONOMY_CATEGORY_RULE_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("POST", "/api/category-rules/{rule_id}/test")));
@@ -2483,6 +2489,113 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
     );
     assert!(category_rule_exists(&fixture.db_path, 96)?);
 
+    let defaults_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/defaults",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(defaults_response.status(), StatusCode::OK);
+    let defaults_body = read_json(defaults_response).await;
+    assert_eq!(defaults_body["success"], true);
+    assert!(
+        defaults_body["data"]["categories"]["created"]
+            .as_i64()
+            .expect("created categories")
+            > 80
+    );
+    assert!(
+        defaults_body["data"]["rules"]["created"]
+            .as_i64()
+            .expect("created rules")
+            > 30
+    );
+    assert_eq!(defaults_body["data"]["rules"]["missingCategories"], 0);
+    let seeded_delivery_id = category_id_by_name(&fixture.db_path, 42, "餐饮", "外卖")?;
+    assert_eq!(
+        category_rule_expression_by_name(
+            &fixture.db_path,
+            42,
+            seeded_delivery_id,
+            "default:餐饮/外卖"
+        )?,
+        "(OR={美团外卖,饿了么,外卖,饭团}/REGEX={(美团|饿了么).*(外卖|订单)})+NOT={退款,退货,取消,冲正}"
+    );
+
+    let defaults_repeat_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/defaults",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(defaults_repeat_response.status(), StatusCode::OK);
+    let defaults_repeat_body = read_json(defaults_repeat_response).await;
+    assert_eq!(defaults_repeat_body["data"]["categories"]["created"], 0);
+    assert_eq!(defaults_repeat_body["data"]["rules"]["created"], 0);
+    assert_eq!(
+        defaults_repeat_body["data"]["rules"]["missingCategories"],
+        0
+    );
+
+    insert_legacy_category_rule_migration_rows(&fixture.db_path)?;
+    let migrate_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/migrate",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(migrate_response.status(), StatusCode::OK);
+    let migrate_body = read_json(migrate_response).await;
+    assert_eq!(migrate_body["success"], true);
+    assert_eq!(migrate_body["data"], json!({"migrated": 5, "skipped": 0}));
+    assert_eq!(
+        category_rule_expression_by_name(&fixture.db_path, 42, 500, "migrated:迁移测试/咖啡")?,
+        "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}"
+    );
+    assert_eq!(
+        category_rule_expression_by_name(
+            &fixture.db_path,
+            42,
+            501,
+            "migrated:特殊字符迁移测试/完整字面量"
+        )?,
+        r"OR={商户A\,咖啡\+拿铁\{热\}\|杯}"
+    );
+    assert_eq!(
+        category_rule_expression_by_name(
+            &fixture.db_path,
+            42,
+            504,
+            "migrated:investment-recognition"
+        )?,
+        "OR={蚂蚁财富,天天基金}+OR={基金,ETF}+NOT={还款,账单}"
+    );
+    assert!(!category_rule_name_exists(
+        &fixture.db_path,
+        77,
+        "migrated:跨用户迁移测试/隔离"
+    )?);
+
+    let migrate_repeat_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/migrate",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(migrate_repeat_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(migrate_repeat_response).await["data"],
+        json!({"migrated": 0, "skipped": 5})
+    );
+
     let unauthenticated_response = app
         .clone()
         .oneshot(
@@ -2498,6 +2611,8 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         (Method::PUT, "/api/category-rules/60"),
         (Method::DELETE, "/api/category-rules/60"),
         (Method::POST, "/api/category-rules/reorder"),
+        (Method::POST, "/api/category-rules/defaults"),
+        (Method::POST, "/api/category-rules/migrate"),
     ] {
         let response = app
             .clone()
@@ -2574,6 +2689,7 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         StatusCode::SERVICE_UNAVAILABLE
     );
     let no_db_reorder_response = no_db_app
+        .clone()
         .oneshot(json_request(
             Method::POST,
             "/api/category-rules/reorder",
@@ -2582,6 +2698,29 @@ async fn taxonomy_category_rules_runtime_lists_canonical_rules_contract(
         .await?;
     assert_eq!(
         no_db_reorder_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_defaults_response = no_db_app
+        .clone()
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/defaults",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_defaults_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let no_db_migrate_response = no_db_app
+        .oneshot(authed_request(
+            Method::POST,
+            "/api/category-rules/migrate",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_migrate_response.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
 
@@ -3884,7 +4023,10 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
         CREATE TABLE users(
             id INTEGER PRIMARY KEY,
             username TEXT NOT NULL,
-            password_hash TEXT DEFAULT ''
+            password_hash TEXT DEFAULT '',
+            investment_platform_keywords TEXT,
+            investment_product_keywords TEXT,
+            investment_exclude_keywords TEXT
         );
         CREATE TABLE accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4107,7 +4249,13 @@ fn init_schema(path: &Path) -> Result<(), Box<dyn Error>> {
     )?;
     let password_hash = bcrypt::hash("correct horse battery staple", 4)?;
     connection.execute(
-        "INSERT INTO users(id, username, password_hash) VALUES (42, 'owner', ?1), (77, 'other', '')",
+        "INSERT INTO users(
+            id, username, password_hash,
+            investment_platform_keywords, investment_product_keywords, investment_exclude_keywords
+        )
+        VALUES
+            (42, 'owner', ?1, '[\"蚂蚁财富\", \"天天基金\", \"蚂蚁财富\"]', '[\"基金\", \"ETF\"]', '[\"还款\", \"账单\"]'),
+            (77, 'other', '', NULL, NULL, NULL)",
         [&password_hash],
     )?;
     connection.execute(
@@ -4330,6 +4478,20 @@ fn category_priority(path: &Path, category_id: i64) -> Result<i64, Box<dyn Error
     )?)
 }
 
+fn category_id_by_name(
+    path: &Path,
+    user_id: i64,
+    main_category: &str,
+    sub_category: &str,
+) -> Result<i64, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT id FROM categories
+         WHERE user_id = ?1 AND main_category = ?2 AND sub_category = ?3",
+        rusqlite::params![user_id, main_category, sub_category],
+        |row| row.get::<_, i64>(0),
+    )?)
+}
+
 fn category_rule_exists(path: &Path, rule_id: i64) -> Result<bool, Box<dyn Error>> {
     Ok(Connection::open(path)?.query_row(
         "SELECT COUNT(*) > 0 FROM category_rules WHERE id = ?1",
@@ -4344,6 +4506,56 @@ fn category_rule_priority(path: &Path, rule_id: i64) -> Result<i64, Box<dyn Erro
         [rule_id],
         |row| row.get::<_, i64>(0),
     )?)
+}
+
+fn category_rule_expression_by_name(
+    path: &Path,
+    user_id: i64,
+    category_id: i64,
+    name: &str,
+) -> Result<String, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT rule_expression FROM category_rules
+         WHERE user_id = ?1 AND category_id = ?2 AND name = ?3",
+        rusqlite::params![user_id, category_id, name],
+        |row| row.get::<_, String>(0),
+    )?)
+}
+
+fn category_rule_name_exists(
+    path: &Path,
+    user_id: i64,
+    name: &str,
+) -> Result<bool, Box<dyn Error>> {
+    Ok(Connection::open(path)?.query_row(
+        "SELECT COUNT(*) > 0 FROM category_rules WHERE user_id = ?1 AND name = ?2",
+        rusqlite::params![user_id, name],
+        |row| row.get::<_, bool>(0),
+    )?)
+}
+
+fn insert_legacy_category_rule_migration_rows(path: &Path) -> Result<(), Box<dyn Error>> {
+    Connection::open(path)?.execute_batch(
+        "
+        INSERT INTO categories(
+            id, user_id, type, main_category, sub_category, description,
+            priority, keywords, hidden, icon, color, created_at
+        )
+        VALUES
+            (500, 42, 3, '迁移测试', '咖啡', '', 11, 'OR:星巴克|咖啡&AND:早餐&NOT:退款', 0, '', '', 'now'),
+            (501, 42, 3, '特殊字符迁移测试', '完整字面量', '', 10, '商户A,咖啡+拿铁{热}|杯', 0, '', '', 'now'),
+            (502, 42, 3, '已有迁移', '已有规则', '', 12, 'OR:不应重复迁移', 0, '', '', 'now'),
+            (503, 77, 3, '跨用户迁移测试', '隔离', '', 13, 'OR:跨用户关键词', 0, '', '', 'now'),
+            (504, 42, 5, '投资理财', '基金', '', 8, '', 0, '', '', 'now');
+        INSERT INTO category_rules(
+            id, user_id, category_id, name, priority, rule_expression,
+            regex_enabled, enabled, applied_count, last_applied_at, created_at, updated_at
+        )
+        VALUES
+            (700, 42, 502, 'manual existing rule', 3, 'OR={手工规则}', 0, 1, 0, NULL, 'now', 'now');
+        ",
+    )?;
+    Ok(())
 }
 
 fn bill_category_pair(path: &Path, bill_id: i64) -> Result<(String, String), Box<dyn Error>> {

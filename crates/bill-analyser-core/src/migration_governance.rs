@@ -1700,16 +1700,24 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         deletion_blocked_until_all_import_gates: false,
         notes: "Rust taxonomy category-rules runtime tests a stored user-scoped rule expression against request text without mutating rule state.",
     },
-    python_proxy_route!(
-        "POST",
-        "/api/category-rules/defaults",
-        "taxonomy-rules-settings"
-    ),
-    python_proxy_route!(
-        "POST",
-        "/api/category-rules/migrate",
-        "taxonomy-rules-settings"
-    ),
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/category-rules/defaults",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy category-rules runtime creates missing built-in default daily categories and canonical rules for the authenticated user.",
+    },
+    EndpointOwnership {
+        method: "POST",
+        pattern: "/api/category-rules/migrate",
+        domain: "taxonomy-rules-settings",
+        state: MigrationState::RustOwnedVerified,
+        envelope: ResponseEnvelopeFamily::FlaskSuccessData,
+        deletion_blocked_until_all_import_gates: false,
+        notes: "Rust taxonomy category-rules runtime migrates legacy category keywords and investment keyword settings into canonical user-scoped rules.",
+    },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/category-rules/reorder",
@@ -2826,7 +2834,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/test, rule overview, templates, and settings bundle export routes are Rust-owned. Legacy /api/categories/rules config/cache, category rule defaults/migrate, and settings bundle import/preview routes remain Python-proxied until the rest of P4 ports runtime handlers.",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle export routes are Rust-owned. Legacy /api/categories/rules config/cache and settings bundle import/preview routes remain Python-proxied until the rest of P4 ports runtime handlers.",
         decision_required: DecisionRequired::Port,
         decision_owner: "migration-program",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
@@ -3268,7 +3276,7 @@ fn route_contract_details(
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/test, rule overview, templates, and settings bundle export routes are Rust-owned; legacy /api/categories/rules config/cache, category rule defaults/migrate, and settings bundle import/preview routes remain Python-owned until the rest of P4 is ported.",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle export routes are Rust-owned; legacy /api/categories/rules config/cache and settings bundle import/preview routes remain Python-owned until the rest of P4 is ported.",
             decision_required: DecisionRequired::Port,
             decision_owner: "migration-program",
             transition_evidence: DB_RUNTIME_EVIDENCE,

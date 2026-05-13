@@ -1,5 +1,8 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use bill_analyser_core::{
+    build_user_investment_keyword_settings, category_rules::escape_rule_expression_term,
+};
 use chrono::{TimeZone, Utc};
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{
@@ -7,9 +10,45 @@ use rusqlite::{
 };
 use serde_json::{Map, Number, Value};
 
-use crate::{run_transaction, DbError, DbResult};
+use crate::{
+    auth_registration::{ensure_default_category_seed, RegisterDefaultSeedSummary},
+    run_transaction, DbError, DbResult,
+};
 
 pub type CategoryRuleRecord = Map<String, Value>;
+
+const LEGACY_RULE_OPERATORS: &[(&str, &str, Option<char>)] = &[
+    ("OR:", "OR", Some('|')),
+    ("AND:", "AND", Some('|')),
+    ("NOT:", "NOT", Some('|')),
+    ("REGEX:", "REGEX", None),
+];
+const LEGACY_RULE_PREFIXES: &[&str] = &["OR:", "AND:", "NOT:", "REGEX:"];
+const MIGRATED_INVESTMENT_RULE_NAME: &str = "migrated:investment-recognition";
+const INVESTMENT_CATEGORY_TYPE: i64 = 5;
+const INVESTMENT_CATEGORY_PREFERENCE_TOKENS: &[&str] = &[
+    "基金",
+    "fund",
+    "投资理财",
+    "投资本金",
+    "investment principal",
+    "investment",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CategoryRuleMigrationSummary {
+    pub migrated: i64,
+    pub skipped: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LegacyKeywordCategory {
+    id: i64,
+    main_category: String,
+    sub_category: String,
+    priority: i64,
+    keywords: String,
+}
 
 pub struct CategoryRulesRepository<'conn> {
     connection: &'conn mut Connection,
@@ -221,6 +260,61 @@ impl<'conn> CategoryRulesRepository<'conn> {
         Ok(true)
     }
 
+    pub fn ensure_default_seed(&mut self, user_id: i64) -> DbResult<RegisterDefaultSeedSummary> {
+        let now = utc_now_iso();
+        ensure_default_category_seed(self.connection, user_id, &now)
+    }
+
+    pub fn migrate_keywords_to_rules(
+        &mut self,
+        user_id: i64,
+    ) -> DbResult<CategoryRuleMigrationSummary> {
+        let categories = self.legacy_keyword_categories(user_id)?;
+        let now = utc_now_iso();
+        let mut summary = CategoryRuleMigrationSummary {
+            migrated: 0,
+            skipped: 0,
+        };
+
+        for category in categories {
+            let rule_expression = convert_old_keyword_syntax(&category.keywords);
+            if self.category_rule_expression_exists(user_id, category.id, &rule_expression)? {
+                summary.skipped += 1;
+                continue;
+            }
+
+            let result = self.connection.execute(
+                "INSERT INTO category_rules (
+                    user_id, category_id, name, priority, rule_expression,
+                    regex_enabled, enabled, created_at, updated_at
+                 )
+                 VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)",
+                params![
+                    user_id,
+                    category.id,
+                    format!(
+                        "migrated:{}/{}",
+                        category.main_category, category.sub_category
+                    ),
+                    category.priority,
+                    rule_expression,
+                    now,
+                    now,
+                ],
+            );
+            match result {
+                Ok(_) => summary.migrated += 1,
+                Err(error) if is_constraint_error(&error) => summary.skipped += 1,
+                Err(error) => return Err(DbError::from(error)),
+            }
+        }
+
+        let investment_summary = self.migrate_investment_settings_to_rules(user_id, &now)?;
+        summary.migrated += investment_summary.migrated;
+        summary.skipped += investment_summary.skipped;
+        Ok(summary)
+    }
+
     fn category_belongs_to_user(&self, category_id: i64, user_id: i64) -> DbResult<bool> {
         self.connection
             .query_row(
@@ -231,6 +325,167 @@ impl<'conn> CategoryRulesRepository<'conn> {
             .optional()
             .map(|value| value.is_some())
             .map_err(DbError::from)
+    }
+
+    fn legacy_keyword_categories(&self, user_id: i64) -> DbResult<Vec<LegacyKeywordCategory>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, main_category, sub_category, priority, keywords
+             FROM categories
+             WHERE user_id = ? AND keywords IS NOT NULL AND keywords != ''
+             ORDER BY priority ASC, id ASC",
+        )?;
+        let rows = statement.query_map(params![user_id], |row| {
+            Ok(LegacyKeywordCategory {
+                id: row.get("id")?,
+                main_category: row
+                    .get::<_, Option<String>>("main_category")?
+                    .unwrap_or_default(),
+                sub_category: row
+                    .get::<_, Option<String>>("sub_category")?
+                    .unwrap_or_default(),
+                priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(0),
+                keywords: row
+                    .get::<_, Option<String>>("keywords")?
+                    .unwrap_or_default(),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
+
+    fn category_rule_expression_exists(
+        &self,
+        user_id: i64,
+        category_id: i64,
+        rule_expression: &str,
+    ) -> DbResult<bool> {
+        self.connection
+            .query_row(
+                "SELECT 1 FROM category_rules
+                 WHERE user_id = ? AND category_id = ?
+                   AND rule_expression = ? AND regex_enabled = 0
+                 LIMIT 1",
+                params![user_id, category_id, rule_expression],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|value| value.is_some())
+            .map_err(DbError::from)
+    }
+
+    fn migrate_investment_settings_to_rules(
+        &mut self,
+        user_id: i64,
+        now: &str,
+    ) -> DbResult<CategoryRuleMigrationSummary> {
+        let Some(user_keywords) = self.user_investment_keyword_source(user_id)? else {
+            return Ok(CategoryRuleMigrationSummary {
+                migrated: 0,
+                skipped: 0,
+            });
+        };
+        let Some(target_category) = self.select_investment_rule_category(user_id)? else {
+            return Ok(CategoryRuleMigrationSummary {
+                migrated: 0,
+                skipped: 0,
+            });
+        };
+        let rule_expression = investment_settings_to_rule_expression(
+            &build_user_investment_keyword_settings(Some(&user_keywords)),
+        );
+        if rule_expression.is_empty() {
+            return Ok(CategoryRuleMigrationSummary {
+                migrated: 0,
+                skipped: 1,
+            });
+        }
+        if self.category_rule_expression_exists(user_id, target_category.id, &rule_expression)? {
+            return Ok(CategoryRuleMigrationSummary {
+                migrated: 0,
+                skipped: 1,
+            });
+        }
+
+        let result = self.connection.execute(
+            "INSERT INTO category_rules (
+                user_id, category_id, name, priority, rule_expression,
+                regex_enabled, enabled, created_at, updated_at
+             )
+             VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)",
+            params![
+                user_id,
+                target_category.id,
+                MIGRATED_INVESTMENT_RULE_NAME,
+                target_category.priority,
+                rule_expression,
+                now,
+                now,
+            ],
+        );
+        match result {
+            Ok(_) => Ok(CategoryRuleMigrationSummary {
+                migrated: 1,
+                skipped: 0,
+            }),
+            Err(error) if is_constraint_error(&error) => Ok(CategoryRuleMigrationSummary {
+                migrated: 0,
+                skipped: 1,
+            }),
+            Err(error) => Err(DbError::from(error)),
+        }
+    }
+
+    fn user_investment_keyword_source(&self, user_id: i64) -> DbResult<Option<Map<String, Value>>> {
+        self.connection
+            .query_row(
+                "SELECT investment_platform_keywords, investment_product_keywords,
+                        investment_exclude_keywords
+                 FROM users
+                 WHERE id = ? LIMIT 1",
+                params![user_id],
+                |row| {
+                    let mut source = Map::new();
+                    for column in [
+                        "investment_platform_keywords",
+                        "investment_product_keywords",
+                        "investment_exclude_keywords",
+                    ] {
+                        let value = row.get::<_, Option<String>>(column)?;
+                        source.insert(column.to_string(), value.map_or(Value::Null, Value::String));
+                    }
+                    Ok(source)
+                },
+            )
+            .optional()
+            .map_err(DbError::from)
+    }
+
+    fn select_investment_rule_category(
+        &self,
+        user_id: i64,
+    ) -> DbResult<Option<LegacyKeywordCategory>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, main_category, sub_category, priority, COALESCE(keywords, '') AS keywords
+             FROM categories
+             WHERE user_id = ? AND type = ?
+             ORDER BY priority ASC, id ASC",
+        )?;
+        let rows = statement.query_map(params![user_id, INVESTMENT_CATEGORY_TYPE], |row| {
+            Ok(LegacyKeywordCategory {
+                id: row.get("id")?,
+                main_category: row
+                    .get::<_, Option<String>>("main_category")?
+                    .unwrap_or_default(),
+                sub_category: row
+                    .get::<_, Option<String>>("sub_category")?
+                    .unwrap_or_default(),
+                priority: row.get::<_, Option<i64>>("priority")?.unwrap_or(0),
+                keywords: row
+                    .get::<_, Option<String>>("keywords")?
+                    .unwrap_or_default(),
+            })
+        })?;
+        let categories = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(categories.into_iter().min_by_key(investment_category_score))
     }
 }
 
@@ -349,6 +604,159 @@ fn sql_text_value(value: &Value) -> DbResult<String> {
             "text field must be scalar".to_string(),
         )),
     }
+}
+
+fn split_legacy_delimited_text(text: &str, separator: char) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut escape_pending = false;
+    for value in text.chars() {
+        if escape_pending {
+            if value == separator {
+                current.push(separator);
+            } else {
+                current.push('\\');
+                current.push(value);
+            }
+            escape_pending = false;
+            continue;
+        }
+        if value == '\\' {
+            escape_pending = true;
+            continue;
+        }
+        if value == separator {
+            parts.push(current);
+            current = String::new();
+            continue;
+        }
+        current.push(value);
+    }
+    if escape_pending {
+        current.push('\\');
+    }
+    parts.push(current);
+    parts
+}
+
+fn has_legacy_rule_prefix(keyword_text: &str) -> bool {
+    split_legacy_delimited_text(keyword_text, '&')
+        .into_iter()
+        .any(|part| {
+            let normalized = part.trim().to_ascii_uppercase();
+            LEGACY_RULE_PREFIXES
+                .iter()
+                .any(|prefix| normalized.starts_with(prefix))
+        })
+}
+
+fn format_rule_clause(operator: &str, keywords: impl IntoIterator<Item = String>) -> String {
+    let escaped_keywords = keywords
+        .into_iter()
+        .map(|keyword| keyword.trim().to_string())
+        .filter(|keyword| !keyword.is_empty())
+        .map(|keyword| escape_rule_expression_term(&keyword))
+        .collect::<Vec<_>>();
+    if escaped_keywords.is_empty() {
+        String::new()
+    } else {
+        format!("{operator}={{{}}}", escaped_keywords.join(","))
+    }
+}
+
+fn convert_old_keyword_syntax(old_keywords: &str) -> String {
+    let old_keywords = old_keywords.trim();
+    if old_keywords.is_empty() {
+        return String::new();
+    }
+    if !has_legacy_rule_prefix(old_keywords) {
+        return format_rule_clause("OR", [old_keywords.to_string()]);
+    }
+
+    let mut blocks = Vec::new();
+    for part in split_legacy_delimited_text(old_keywords, '&') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let normalized = part.to_ascii_uppercase();
+        let mut matched_operator = false;
+        for (prefix, operator, separator) in LEGACY_RULE_OPERATORS {
+            if !normalized.starts_with(prefix) {
+                continue;
+            }
+            let payload = &part[prefix.len()..];
+            let keywords = separator.map_or_else(
+                || vec![payload.trim().to_string()],
+                |separator| split_legacy_delimited_text(payload, separator),
+            );
+            let clause = format_rule_clause(operator, keywords);
+            if !clause.is_empty() {
+                blocks.push(clause);
+            }
+            matched_operator = true;
+            break;
+        }
+        if !matched_operator {
+            let clause = format_rule_clause("OR", [part.to_string()]);
+            if !clause.is_empty() {
+                blocks.push(clause);
+            }
+        }
+    }
+
+    if blocks.is_empty() {
+        old_keywords.to_string()
+    } else {
+        blocks.join("+")
+    }
+}
+
+fn investment_settings_to_rule_expression(settings: &Value) -> String {
+    let platform_clause =
+        format_rule_clause("OR", value_array_strings(settings.get("platform_keywords")));
+    let product_clause =
+        format_rule_clause("OR", value_array_strings(settings.get("product_keywords")));
+    let exclude_clause =
+        format_rule_clause("NOT", value_array_strings(settings.get("exclude_keywords")));
+    let positive_clauses = [platform_clause, product_clause]
+        .into_iter()
+        .filter(|clause| !clause.is_empty())
+        .collect::<Vec<_>>();
+    if positive_clauses.is_empty() {
+        return String::new();
+    }
+    let mut blocks = vec![positive_clauses.join("+")];
+    if !exclude_clause.is_empty() {
+        blocks.push(exclude_clause);
+    }
+    blocks.join("+")
+}
+
+fn value_array_strings(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items.iter().map(json_value_to_string).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn json_value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Null => String::new(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+fn investment_category_score(category: &LegacyKeywordCategory) -> (usize, i64) {
+    let text = format!("{} {}", category.main_category, category.sub_category).to_lowercase();
+    let token_score = INVESTMENT_CATEGORY_PREFERENCE_TOKENS
+        .iter()
+        .position(|token| text.contains(token))
+        .unwrap_or(INVESTMENT_CATEGORY_PREFERENCE_TOKENS.len());
+    (token_score, category.priority)
 }
 
 #[cfg(test)]
@@ -605,6 +1013,211 @@ mod tests {
             .contains("priority must be an integer-compatible value"));
     }
 
+    #[test]
+    fn default_seed_and_keyword_migration_are_user_scoped_and_idempotent() {
+        let mut connection = full_seed_connection();
+
+        {
+            let mut repository = CategoryRulesRepository::new(&mut connection);
+            let seeded = repository.ensure_default_seed(42).expect("seed defaults");
+            assert!(seeded.categories_created > 80);
+            assert!(seeded.rules_created > 30);
+            assert_eq!(seeded.rules_missing_categories, 0);
+
+            let repeated_seed = repository.ensure_default_seed(42).expect("repeat seed");
+            assert_eq!(repeated_seed.categories_created, 0);
+            assert_eq!(repeated_seed.rules_created, 0);
+            assert_eq!(repeated_seed.rules_missing_categories, 0);
+            assert!(repeated_seed.categories_skipped > 80);
+            assert!(repeated_seed.rules_skipped > 30);
+        }
+
+        let delivery_id = category_id(&connection, 42, "餐饮", "外卖");
+        {
+            let mut repository = CategoryRulesRepository::new(&mut connection);
+            let delivery_rules = repository
+                .list_rules(42, Some(delivery_id), false)
+                .expect("delivery rules");
+            assert_eq!(delivery_rules[0]["name"], "default:餐饮/外卖");
+        }
+
+        connection
+            .execute_batch(
+                "
+                INSERT INTO categories(
+                    id, user_id, type, main_category, sub_category, description,
+                    priority, keywords, hidden, icon, color, created_at
+                )
+                VALUES
+                    (500, 42, 3, '迁移测试', '咖啡', '', 11, 'OR:星巴克|咖啡&AND:早餐&NOT:退款', 0, '', '', 'now'),
+                    (501, 42, 3, '特殊字符迁移测试', '完整字面量', '', 10, '商户A,咖啡+拿铁{热}|杯', 0, '', '', 'now'),
+                    (502, 42, 3, '已有迁移', '已有规则', '', 12, 'OR:不应重复迁移', 0, '', '', 'now'),
+                    (503, 77, 3, '跨用户迁移测试', '隔离', '', 13, 'OR:跨用户关键词', 0, '', '', 'now'),
+                    (504, 42, 5, '投资理财', '基金', '', 8, '', 0, '', '', 'now');
+                INSERT INTO category_rules(
+                    id, user_id, category_id, name, priority, rule_expression,
+                    regex_enabled, enabled, applied_count, last_applied_at, created_at, updated_at
+                )
+                VALUES
+                    (700, 42, 502, 'manual existing rule', 3, 'OR={手工规则}', 0, 1, 0, NULL, 'now', 'now');
+                ",
+            )
+            .expect("legacy rows");
+
+        let mut repository = CategoryRulesRepository::new(&mut connection);
+        let migrated = repository
+            .migrate_keywords_to_rules(42)
+            .expect("migrate keywords");
+        assert_eq!(migrated.migrated, 4);
+        assert_eq!(migrated.skipped, 0);
+
+        let coffee_rules = repository
+            .list_rules(42, Some(500), false)
+            .expect("coffee rules");
+        assert_eq!(
+            coffee_rules[0]["rule_expression"],
+            "OR={星巴克,咖啡}+AND={早餐}+NOT={退款}"
+        );
+        let literal_rules = repository
+            .list_rules(42, Some(501), false)
+            .expect("literal rules");
+        assert_eq!(
+            literal_rules[0]["rule_expression"],
+            r"OR={商户A\,咖啡\+拿铁\{热\}\|杯}"
+        );
+        let existing_rules = repository
+            .list_rules(42, Some(502), false)
+            .expect("existing rules");
+        assert_eq!(existing_rules.len(), 2);
+        assert!(existing_rules
+            .iter()
+            .any(|rule| rule["rule_expression"] == "OR={手工规则}"));
+        assert!(existing_rules
+            .iter()
+            .any(|rule| rule["rule_expression"] == "OR={不应重复迁移}"));
+
+        let investment_rules = repository
+            .list_rules(42, Some(504), false)
+            .expect("investment rules");
+        assert_eq!(
+            investment_rules[0]["name"],
+            "migrated:investment-recognition"
+        );
+        assert_eq!(
+            investment_rules[0]["rule_expression"],
+            "OR={蚂蚁财富,天天基金}+OR={基金,ETF}+NOT={还款,账单}"
+        );
+        assert!(repository
+            .list_rules(77, Some(503), false)
+            .expect("other user rules")
+            .is_empty());
+
+        let repeated = repository
+            .migrate_keywords_to_rules(42)
+            .expect("repeat migrate");
+        assert_eq!(repeated.migrated, 0);
+        assert_eq!(repeated.skipped, 4);
+    }
+
+    #[test]
+    fn legacy_keyword_conversion_covers_escape_and_scalar_edges() {
+        assert_eq!(
+            super::split_legacy_delimited_text("a\\|b|c\\&d|tail\\", '|'),
+            vec!["a|b", "c\\&d", "tail\\"]
+        );
+        assert_eq!(
+            super::split_legacy_delimited_text("a\\&b&c", '&'),
+            vec!["a&b", "c"]
+        );
+        assert_eq!(super::convert_old_keyword_syntax("  "), "");
+        assert_eq!(super::convert_old_keyword_syntax("OR:"), "OR:");
+        assert_eq!(
+            super::convert_old_keyword_syntax("OR:咖啡&&AND:早餐&NOTE"),
+            "OR={咖啡}+AND={早餐}+OR={NOTE}"
+        );
+        assert_eq!(
+            super::convert_old_keyword_syntax("OR:星巴克\\|臻选|咖啡"),
+            r"OR={星巴克\|臻选,咖啡}"
+        );
+
+        assert!(super::value_array_strings(None).is_empty());
+        assert_eq!(super::json_value_to_string(&serde_json::json!(123)), "123");
+        assert_eq!(
+            super::json_value_to_string(&serde_json::json!(true)),
+            "true"
+        );
+        assert_eq!(super::json_value_to_string(&serde_json::Value::Null), "");
+        assert_eq!(
+            super::json_value_to_string(&serde_json::json!(["nested"])),
+            "[\"nested\"]"
+        );
+        assert_eq!(
+            super::json_value_to_string(&serde_json::json!({"kind": "fund"})),
+            "{\"kind\":\"fund\"}"
+        );
+
+        let expression = super::investment_settings_to_rule_expression(&serde_json::json!({
+            "platform_keywords": [123, true, null, ["nested"], {"kind": "fund"}],
+            "product_keywords": [],
+            "exclude_keywords": ["账单"]
+        }));
+        assert_eq!(
+            expression,
+            r#"OR={123,true,["nested"],\{"kind":"fund"\}}+NOT={账单}"#
+        );
+        assert_eq!(
+            super::investment_settings_to_rule_expression(&serde_json::json!({
+                "platform_keywords": [],
+                "product_keywords": [],
+                "exclude_keywords": ["账单"]
+            })),
+            ""
+        );
+    }
+
+    #[test]
+    fn investment_keyword_migration_skips_missing_user_target_and_empty_rules() {
+        let mut connection = full_seed_connection();
+        connection
+            .execute_batch(
+                "
+                INSERT INTO users(
+                    id, investment_platform_keywords,
+                    investment_product_keywords, investment_exclude_keywords
+                )
+                VALUES
+                    (88, '[\"平台\"]', '[]', '[]'),
+                    (89, '[]', '[]', '[\"账单\"]');
+                INSERT INTO categories(
+                    id, user_id, type, main_category, sub_category, description,
+                    priority, keywords, hidden, icon, color, created_at
+                )
+                VALUES
+                    (589, 89, 5, '投资', '空规则', '', 1, '', 0, '', '', 'now');
+                ",
+            )
+            .expect("edge fixture");
+
+        let mut repository = CategoryRulesRepository::new(&mut connection);
+        let missing_user = repository
+            .migrate_keywords_to_rules(404)
+            .expect("missing user");
+        assert_eq!(missing_user.migrated, 0);
+        assert_eq!(missing_user.skipped, 0);
+
+        let missing_target = repository
+            .migrate_keywords_to_rules(88)
+            .expect("missing investment category");
+        assert_eq!(missing_target.migrated, 0);
+        assert_eq!(missing_target.skipped, 0);
+
+        let empty_rule = repository
+            .migrate_keywords_to_rules(89)
+            .expect("empty investment rule");
+        assert_eq!(empty_rule.migrated, 0);
+        assert_eq!(empty_rule.skipped, 1);
+    }
+
     fn fixture_connection() -> Connection {
         let connection = Connection::open_in_memory().expect("open");
         connection
@@ -647,5 +1260,68 @@ mod tests {
             )
             .expect("schema");
         connection
+    }
+
+    fn full_seed_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    investment_platform_keywords TEXT,
+                    investment_product_keywords TEXT,
+                    investment_exclude_keywords TEXT
+                );
+                CREATE TABLE categories (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    type INTEGER DEFAULT 1,
+                    main_category TEXT NOT NULL,
+                    sub_category TEXT NOT NULL,
+                    description TEXT,
+                    priority INTEGER DEFAULT 0,
+                    keywords TEXT,
+                    hidden INTEGER DEFAULT 0,
+                    icon TEXT,
+                    color TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, main_category, sub_category)
+                );
+                CREATE TABLE category_rules (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    category_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    priority INTEGER DEFAULT 0,
+                    rule_expression TEXT NOT NULL,
+                    regex_enabled INTEGER DEFAULT 0,
+                    enabled INTEGER DEFAULT 1,
+                    applied_count INTEGER DEFAULT 0,
+                    last_applied_at TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+                INSERT INTO users(
+                    id, investment_platform_keywords,
+                    investment_product_keywords, investment_exclude_keywords
+                )
+                VALUES
+                    (42, '[\"蚂蚁财富\", \"天天基金\", \"蚂蚁财富\"]', '[\"基金\", \"ETF\"]', '[\"还款\", \"账单\"]'),
+                    (77, NULL, NULL, NULL);
+                ",
+            )
+            .expect("schema");
+        connection
+    }
+
+    fn category_id(connection: &Connection, user_id: i64, main: &str, sub: &str) -> i64 {
+        connection
+            .query_row(
+                "SELECT id FROM categories WHERE user_id = ? AND main_category = ? AND sub_category = ?",
+                rusqlite::params![user_id, main, sub],
+                |row| row.get(0),
+            )
+            .expect("category exists")
     }
 }

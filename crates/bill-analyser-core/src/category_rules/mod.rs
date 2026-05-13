@@ -62,6 +62,17 @@ pub fn match_rule_expression(text: &str, expr: &str, regex_enabled: bool) -> boo
     match_compiled_rule(text, &compiled)
 }
 
+pub fn escape_rule_expression_term(term: &str) -> String {
+    let mut output = String::new();
+    for value in term.chars() {
+        if is_escapable_char(value) {
+            output.push('\\');
+        }
+        output.push(value);
+    }
+    output
+}
+
 pub fn match_compiled_rule(text: &str, compiled: &CompiledRuleDto) -> bool {
     if compiled.is_empty || text.is_empty() {
         return false;
