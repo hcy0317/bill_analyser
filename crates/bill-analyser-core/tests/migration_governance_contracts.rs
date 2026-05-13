@@ -60,6 +60,8 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(rust_owned.contains(&("POST", "/api/accounts/sync-balances")));
     assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/move")));
     assert!(rust_owned.contains(&("POST", "/api/accounts/{account_id}/transactions/clear")));
+    assert!(rust_owned.contains(&("GET", "/api/categories/rules")));
+    assert!(rust_owned.contains(&("PUT", "/api/categories/rules")));
     assert!(rust_owned.contains(&("GET", "/api/category-rules/")));
     assert!(rust_owned.contains(&("POST", "/api/category-rules/")));
     assert!(rust_owned.contains(&("PUT", "/api/category-rules/{rule_id}")));
@@ -178,7 +180,6 @@ fn import_and_preview_adjacent_routes_are_rust_owned_but_python_deletion_is_stil
 #[test]
 fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
     for (method, pattern, domain) in [
-        ("GET", "/api/categories/rules", "taxonomy-rules-settings"),
         ("GET", "/api/llm/config", "ai-learning-llm"),
         (
             "POST",
@@ -195,7 +196,7 @@ fn live_python_sidecar_routes_are_manifested_for_import_db_runtime_proxy() {
 }
 
 #[test]
-fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied() {
+fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder() {
     let manifest = expanded_route_manifest();
     for endpoint in [
         "GET /api/accounts/",
@@ -257,6 +258,8 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         "POST /api/categories/move",
         "GET /api/categories/export",
         "POST /api/categories/import",
+        "GET /api/categories/rules",
+        "PUT /api/categories/rules",
         "GET /api/categories/statistics",
         "POST /api/categories/update-all",
     ] {
@@ -269,7 +272,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessResult);
         assert!(entry
             .unsupported_behavior
-            .contains("category master-data/statistics/update-all, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned"));
+            .contains("category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned"));
         assert!(entry
             .deletion_blockers
             .contains(&"templates_category_rules_settings_parity"));
@@ -315,17 +318,7 @@ fn taxonomy_master_data_routes_are_rust_owned_while_p4_remainder_stays_proxied()
         assert_eq!(entry.envelope, ResponseEnvelopeFamily::FlaskSuccessData);
         assert!(entry
             .unsupported_behavior
-            .contains("legacy /api/categories/rules config/cache"));
-    }
-
-    for (method, pattern) in [
-        ("GET", "/api/categories/rules"),
-        ("PUT", "/api/categories/rules"),
-    ] {
-        let endpoint = find_endpoint_ownership(method, pattern)
-            .unwrap_or_else(|| panic!("taxonomy proxied route is present: {method} {pattern}"));
-        assert_eq!(endpoint.state, MigrationState::PythonProxied);
-        assert_eq!(endpoint.domain, "taxonomy-rules-settings");
+            .contains("category-rule list/create/update/delete/reorder/defaults/migrate/test"));
     }
 }
 

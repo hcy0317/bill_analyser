@@ -13,7 +13,7 @@ use axum::{
 };
 use bill_analyser_core::{category_rules::match_rule_expression, UserId};
 use bill_analyser_db::{
-    sync_all_account_balances,
+    get_app_setting, set_app_setting, sync_all_account_balances,
     taxonomy::{
         accounts::{AccountDisplayOrder, AccountRecord, AccountsRepository},
         categories::{CategoriesRepository, CategoryRecord, CategoryStatistic},
@@ -22,8 +22,8 @@ use bill_analyser_db::{
         tags::{TagDisplayOrder, TagRecord, TagsRepository},
         templates::{TemplateDisplayOrder, TemplateRecord, TemplatesRepository},
     },
-    AccountBalanceDiscrepancy, SqliteConnectionConfig, SqliteDbPath, SqliteRuntime,
-    SyncAllAccountBalancesResult,
+    AccountBalanceDiscrepancy, AppSettingDraft, SqliteConnectionConfig, SqliteDbPath,
+    SqliteRuntime, SyncAllAccountBalancesResult,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -31,15 +31,14 @@ use serde::Deserialize;
 use serde_json::{json, Map, Number, Value};
 
 use crate::{
-    auth::resolve_user_id_from_headers,
-    bill_routes::recategorize_bills_with_category_rules,
-    config::HttpShellConfig,
-    proxy::{ownership_aware_proxy_handler, ProxyState},
+    auth::resolve_user_id_from_headers, bill_routes::recategorize_bills_with_category_rules,
+    config::HttpShellConfig, proxy::ProxyState,
 };
 
 const TRUSTED_USER_SECRET_HEADER: &str = "x-bill-analyser-trusted-user-secret";
 const SETTINGS_BUNDLE_SCHEMA_VERSION: i64 = 1;
 const OCR_CONFIG_SETTING_KEY: &str = "receipt_ocr_config";
+const LEGACY_CATEGORY_RULES_CONFIG_KEY_PREFIX: &str = "legacy_category_rules_config:user:";
 const SETTINGS_BUNDLE_SECTION_KEYS: &[&str] = &[
     "accounts",
     "transactionCategories",
@@ -109,6 +108,8 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/categories/flat"),
     ("POST", "/api/categories/import"),
     ("POST", "/api/categories/move"),
+    ("GET", "/api/categories/rules"),
+    ("PUT", "/api/categories/rules"),
     ("GET", "/api/categories/statistics"),
     ("GET", "/api/categories/tree"),
     ("POST", "/api/categories/update-all"),
@@ -117,10 +118,7 @@ pub const TAXONOMY_CATEGORY_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("DELETE", "/api/categories/{category_id}"),
 ];
 
-pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[
-    ("GET", "/api/categories/rules"),
-    ("PUT", "/api/categories/rules"),
-];
+pub const TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS: &[(&str, &str)] = &[];
 
 pub const TAXONOMY_CATEGORY_RULE_ROUTE_PATTERNS: &[(&str, &str)] = &[
     ("GET", "/api/category-rules/"),
@@ -278,7 +276,7 @@ pub fn taxonomy_runtime_router() -> Router<ProxyState> {
         )
         .route(
             "/api/categories/rules",
-            get(ownership_aware_proxy_handler).put(ownership_aware_proxy_handler),
+            get(get_legacy_category_rules_handler).put(update_legacy_category_rules_handler),
         )
         .route(
             "/api/categories/statistics",
@@ -1814,6 +1812,78 @@ async fn create_category_rule_handler(
     match repository.get_rule(rule_id, user_id) {
         Ok(Some(rule)) => category_rule_data_response(StatusCode::CREATED, rule),
         Ok(None) => category_rule_db_error_response(),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn get_legacy_category_rules_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy legacy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let user_id = db_user_id(user_id);
+    let config_key = legacy_category_rules_setting_key(user_id);
+
+    match get_app_setting(runtime.connection_mut(), &config_key) {
+        Ok(Some(stored)) => {
+            if let Ok(rules) = serde_json::from_str::<Value>(&stored) {
+                return success_result(StatusCode::OK, rules);
+            }
+        }
+        Ok(None) => {}
+        Err(_) => return category_rule_db_error_response(),
+    }
+
+    match list_legacy_category_engine_rules(runtime.connection_mut(), user_id) {
+        Ok(rules) => success_result(StatusCode::OK, Value::Array(rules)),
+        Err(_) => category_rule_db_error_response(),
+    }
+}
+
+async fn update_legacy_category_rules_handler(
+    State(state): State<ProxyState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let user_id = match user_id_from_headers(&headers, &state.config) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let body = match parse_json_body(body) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let Some(rules) = body.as_object().and_then(|object| object.get("rules")) else {
+        return bad_request("rules are required");
+    };
+    let stored_value = match serde_json::to_string(rules) {
+        Ok(value) => value,
+        Err(_) => return category_rule_db_error_response(),
+    };
+    let mut runtime = match open_runtime(&state, "taxonomy legacy category rules") {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    let draft = AppSettingDraft {
+        key: legacy_category_rules_setting_key(db_user_id(user_id)),
+        value: stored_value,
+        value_type: "json".to_string(),
+        description: Some("Legacy category rules config cache".to_string()),
+        is_encrypted: false,
+    };
+
+    match set_app_setting(runtime.connection_mut(), &draft) {
+        Ok(_) => json_response(
+            StatusCode::OK,
+            json!({"success": true, "message": "Category rules updated successfully"}),
+        ),
         Err(_) => category_rule_db_error_response(),
     }
 }
@@ -4230,6 +4300,100 @@ fn category_rules_enabled_only(query: &CategoryRulesQuery) -> bool {
         .as_deref()
         .unwrap_or("true")
         .eq_ignore_ascii_case("false")
+}
+
+#[derive(Debug)]
+struct LegacyCategoryEngineRuleRow {
+    id: i64,
+    category_id: i64,
+    main_category: String,
+    sub_category: String,
+    category_type: i64,
+    category_priority: i64,
+    rule_priority: i64,
+    rule_expression: String,
+}
+
+fn legacy_category_rules_setting_key(user_id: i64) -> String {
+    format!("{LEGACY_CATEGORY_RULES_CONFIG_KEY_PREFIX}{user_id}")
+}
+
+fn list_legacy_category_engine_rules(
+    connection: &Connection,
+    user_id: i64,
+) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = connection.prepare(
+        "
+        SELECT
+            cr.id,
+            cr.category_id,
+            cr.priority AS rule_priority,
+            cr.rule_expression,
+            c.main_category,
+            c.sub_category,
+            c.type AS category_type,
+            c.priority AS category_priority
+        FROM category_rules cr
+        JOIN categories c ON cr.category_id = c.id
+        WHERE cr.user_id = ?1 AND c.user_id = ?1 AND cr.enabled = 1
+        ORDER BY COALESCE(c.priority, cr.priority, 999999), cr.category_id, cr.id
+        ",
+    )?;
+    let rows = statement.query_map(params![user_id], |row| {
+        Ok(LegacyCategoryEngineRuleRow {
+            id: row.get("id")?,
+            category_id: row.get("category_id")?,
+            main_category: row
+                .get::<_, Option<String>>("main_category")?
+                .unwrap_or_default(),
+            sub_category: row
+                .get::<_, Option<String>>("sub_category")?
+                .unwrap_or_default(),
+            category_type: row.get::<_, Option<i64>>("category_type")?.unwrap_or(3),
+            category_priority: row
+                .get::<_, Option<i64>>("category_priority")?
+                .unwrap_or(999_999),
+            rule_priority: row.get::<_, Option<i64>>("rule_priority")?.unwrap_or(100),
+            rule_expression: row
+                .get::<_, Option<String>>("rule_expression")?
+                .unwrap_or_default(),
+        })
+    })?;
+
+    let mut rules = Vec::new();
+    for (load_order, row) in rows.enumerate() {
+        let row = row?;
+        let Some(rule_type) = normalize_legacy_category_rule_type(row.category_type) else {
+            continue;
+        };
+        if row.category_id <= 0
+            || row.main_category.trim().is_empty()
+            || row.sub_category.trim().is_empty()
+        {
+            continue;
+        }
+        rules.push(json!({
+            "id": row.id,
+            "category_id": row.category_id,
+            "main": row.main_category.trim(),
+            "sub": row.sub_category.trim(),
+            "priority": row.category_priority,
+            "category_priority": row.category_priority,
+            "rule_priority": row.rule_priority,
+            "keywords": row.rule_expression,
+            "type": rule_type,
+            "_load_order": load_order,
+        }));
+    }
+    Ok(rules)
+}
+
+fn normalize_legacy_category_rule_type(raw_type: i64) -> Option<i64> {
+    match raw_type {
+        1 => Some(3),
+        2..=5 => Some(raw_type),
+        _ => None,
+    }
 }
 
 fn category_export_record(category: &CategoryRecord) -> Map<String, Value> {

@@ -469,8 +469,6 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
 
     for (method, path) in [
         (Method::OPTIONS, "/api/auth/register"),
-        (Method::GET, "/api/categories/rules"),
-        (Method::PUT, "/api/categories/rules"),
         (Method::GET, "/api/llm/config"),
         (Method::POST, "/api/matching/candidates/session/12/accept"),
     ] {
@@ -491,6 +489,24 @@ async fn import_db_runtime_proxies_only_manifest_python_owned_routes() {
             path.split('?').next().unwrap_or(path),
             "{path}"
         );
+    }
+
+    for (method, path) in [
+        (Method::GET, "/api/categories/rules"),
+        (Method::PUT, "/api/categories/rules"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
     }
 
     let settings_import_response = app

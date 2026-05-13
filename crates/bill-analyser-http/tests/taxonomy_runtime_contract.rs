@@ -1740,10 +1740,19 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
         .any(|route| route == &("GET", "/api/categories/statistics")));
     assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
         .iter()
+        .any(|route| route == &("GET", "/api/categories/rules")));
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
+        .any(|route| route == &("PUT", "/api/categories/rules")));
+    assert!(TAXONOMY_CATEGORY_ROUTE_PATTERNS
+        .iter()
         .any(|route| route == &("POST", "/api/categories/update-all")));
     assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
-        .any(|route| route == &("GET", "/api/categories/rules")));
+        .all(|route| route != &("GET", "/api/categories/rules")));
+    assert!(TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
+        .iter()
+        .all(|route| route != &("PUT", "/api/categories/rules")));
     assert!(!TAXONOMY_CATEGORY_PROXIED_ROUTE_PATTERNS
         .iter()
         .any(|route| route == &("GET", "/api/categories/statistics")));
@@ -1903,6 +1912,83 @@ async fn taxonomy_categories_runtime_serves_master_data_contract() -> Result<(),
         .expect("flat categories")
         .iter()
         .any(|category| category["name"] == "公交"));
+
+    let legacy_rules_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/rules",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(legacy_rules_response.status(), StatusCode::OK);
+    let legacy_rules_body = read_json(legacy_rules_response).await;
+    assert_eq!(legacy_rules_body["success"], true);
+    let legacy_rules = legacy_rules_body["result"]
+        .as_array()
+        .expect("legacy rules");
+    assert_eq!(legacy_rules.len(), 1);
+    assert_eq!(legacy_rules[0]["id"], 60);
+    assert_eq!(legacy_rules[0]["category_id"], 31);
+    assert_eq!(legacy_rules[0]["main"], "餐饮");
+    assert_eq!(legacy_rules[0]["sub"], "午餐");
+    assert_eq!(legacy_rules[0]["keywords"], "OR={午餐,饭}");
+    assert_eq!(legacy_rules[0]["type"], 3);
+    assert!(!serde_json::to_string(&legacy_rules_body)?.contains("其他用户规则"));
+
+    let missing_legacy_rules_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/rules",
+            json!({}),
+        ))
+        .await?;
+    assert_eq!(
+        missing_legacy_rules_response.status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        read_json(missing_legacy_rules_response).await["error"],
+        "rules are required"
+    );
+
+    let update_legacy_rules_response = app
+        .clone()
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/rules",
+            json!({"rules": [{"keyword": "咖啡", "category": "餐饮"}]}),
+        ))
+        .await?;
+    assert_eq!(update_legacy_rules_response.status(), StatusCode::OK);
+    let update_legacy_rules_body = read_json(update_legacy_rules_response).await;
+    assert_eq!(update_legacy_rules_body["success"], true);
+    assert_eq!(
+        update_legacy_rules_body["message"],
+        "Category rules updated successfully"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&app_setting_value(
+            &fixture.db_path,
+            "legacy_category_rules_config:user:42"
+        )?)?,
+        json!([{"keyword": "咖啡", "category": "餐饮"}])
+    );
+
+    let cached_legacy_rules_response = app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/rules",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(cached_legacy_rules_response.status(), StatusCode::OK);
+    assert_eq!(
+        read_json(cached_legacy_rules_response).await["result"],
+        json!([{"keyword": "咖啡", "category": "餐饮"}])
+    );
 
     let export_response = app
         .clone()
@@ -3685,6 +3771,8 @@ async fn taxonomy_categories_runtime_covers_error_edges_and_orphan_fallbacks(
         (Method::POST, "/api/categories/batch"),
         (Method::GET, "/api/categories/export"),
         (Method::POST, "/api/categories/import"),
+        (Method::GET, "/api/categories/rules"),
+        (Method::PUT, "/api/categories/rules"),
     ] {
         let response = app
             .clone()
@@ -3705,6 +3793,7 @@ async fn taxonomy_categories_runtime_covers_error_edges_and_orphan_fallbacks(
         (Method::POST, "/api/categories/move"),
         (Method::POST, "/api/categories/batch"),
         (Method::POST, "/api/categories/import"),
+        (Method::PUT, "/api/categories/rules"),
     ] {
         let response = app
             .clone()
@@ -4258,6 +4347,7 @@ async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), 
     );
 
     let no_db_update_all_response = no_db_app
+        .clone()
         .oneshot(json_request(
             Method::POST,
             "/api/categories/update-all",
@@ -4271,6 +4361,39 @@ async fn taxonomy_categories_runtime_validates_edges_and_config() -> Result<(), 
     assert_eq!(
         read_json(no_db_update_all_response).await["error"],
         "Rust taxonomy categories DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    let no_db_legacy_rules_response = no_db_app
+        .clone()
+        .oneshot(authed_request(
+            Method::GET,
+            "/api/categories/rules",
+            Body::empty(),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_legacy_rules_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        read_json(no_db_legacy_rules_response).await["error"],
+        "Rust taxonomy legacy category rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
+    );
+
+    let no_db_update_legacy_rules_response = no_db_app
+        .oneshot(json_request(
+            Method::PUT,
+            "/api/categories/rules",
+            json!({"rules": []}),
+        ))
+        .await?;
+    assert_eq!(
+        no_db_update_legacy_rules_response.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        read_json(no_db_update_legacy_rules_response).await["error"],
+        "Rust taxonomy legacy category rules DB runtime requires BILL_ANALYSER_SQLITE_DB_PATH"
     );
 
     Ok(())
