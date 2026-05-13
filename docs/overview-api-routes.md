@@ -7,7 +7,6 @@
   - `/api/statistics`
   - `/api/budgets`
   - `/api/backup`
-  - `/api/settings/bundle`
 - 小票识图入口由 `api/routes/receipt_ocr.py` 提供并在 `app.py` 注册：`POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`；运行时复用 `core/ai/ocr` 下配置的 OCR provider，并在 OCR 文本层对支付宝 / 微信支付截图抽取金额、时间、商户/备注和 `payment_platform`。该域的 Rust `ai_ocr_llm` 合同层只固定配置、错误 envelope 与解析规则，不接管 Flask route 或 provider 调用。
 
 ## 5.1.1 当前 REST 收口进展（2026-03-06）
@@ -43,6 +42,7 @@
   - `POST /api/settings/bundle/import` 按稳定键 merge/upsert，完成跨域 ID 重映射，不依赖 Python service reload；
   - `GET|POST /api/settings/bundle/sections/<section_key>/export` 由 Rust taxonomy runtime 提供单 section JSON 导出；`POST /api/settings/bundle/sections/<section_key>/import/preview`、`POST /api/settings/bundle/sections/<section_key>/import` 也由 Rust 为账户、分类、标签、模板、定时交易、分类识别规则、LLM 配置和 OCR 配置页面提供 section 导入；section 导入只写当前 section，preview 使用 rollback-only 事务；
   - `llmConfigs` 与 `ocrConfig` 的单 section 导出必须使用 `POST /sections/<section_key>/export` 并携带当前登录密码；Rust 导出不包含 API Key 明文，导入后不自动激活。
+  - 旧 Flask `settings_bundle.py` route shell 已删除，Flask sidecar 不再注册 `/api/settings/bundle` 蓝图。
 - 账单路由层已完成一轮适配器收敛，账户与分类 Flask route package 后续已删除：
   - `bills/` 已拆分基础上下文与 adapter 上下文，非转换型路由不再默认构造交易适配器；
   - `bills/` 已统一改从中性适配器模块导入。
@@ -60,6 +60,6 @@
   - Python-proxied：`GET /api/statistics/overview`、`GET /api/statistics/trends`、`GET /api/statistics/comparison`、`GET /api/statistics/category`、`GET /api/statistics/trend`；
   - 统计读取路径直接读 `bills/accounts/categories`，保持 `user_id` 隔离、timestamp/year-month/all-mode 范围解析、关键词过滤、资产趋势 365 天边界、category/amounts 响应分单位，以及 category-pie/top-merchants 响应元单位。
 - 分类主数据 REST URL、状态码与响应 envelope 保持兼容；`import_db_runtime` 下 Rust HTTP taxonomy runtime 直接接管普通文件 SQLite 库的分类 list/tree/flat/all/get/create/update/delete/batch/move/import/export master-data 持久化，旧 Flask `categories/` route package 已删除，并保持 default seed 的批量 ensure 语义；`GET /api/categories/statistics` 也由 Rust 读取当前用户账单并返回旧树形统计结果；`:memory:` 与 SQLCipher 仍由 Python 路径处理。
-- 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、legacy `GET|PUT /api/categories/rules` config/cache、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，旧 Flask `category_rules.py` route shell 已删除；保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、legacy rules payload 的用户隔离 `app_settings` cache、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入。
+- 分类规则列表 `GET /api/category-rules/`、创建/更新/删除 `POST /api/category-rules/`、`PUT|DELETE /api/category-rules/<rule_id>`、重排 `POST /api/category-rules/reorder`、默认种子 `POST /api/category-rules/defaults`、旧关键词迁移 `POST /api/category-rules/migrate`、无写副作用的 `POST /api/category-rules/<rule_id>/test`、legacy `GET|PUT /api/categories/rules` config/cache、规则中心概览 `GET /api/rules/overview` 与设置包导入/预览/导出路由已由 Rust taxonomy runtime 读写普通应用 SQLite，旧 Flask `category_rules.py` 与 `settings_bundle.py` route shell 已删除；保留 Flask-compatible envelope、当前用户隔离、分类规则筛选、默认分类/规则幂等补齐、legacy keywords/investment settings 到 canonical 规则的幂等迁移、规则表达式测试响应、规则计数、legacy rules payload 的用户隔离 `app_settings` cache、JSON attachment、LLM API Key 脱敏、敏感 section 当前密码校验、导入 preview rollback、跨 section upsert、LLM masked secret 保留与 OCR app_settings 写入。
 - 设置加密状态 `GET /api/settings/encryption/status` 已由 Rust taxonomy/settings runtime 直接响应，无鉴权，返回 Flask-compatible `success/data` SQLCipher 状态投影；当前 Rust SQLite runtime 未启用 SQLCipher provider，因此该状态会报告 `sqlcipher_available=false` 与 `encrypted=false`，真实 SQLCipher 连接/迁移仍由后续 ops 切面处理。
-- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分；账户、分类、分类规则、标签与模板 REST 主链由 Rust taxonomy runtime 提供，不再保留 Flask `accounts/` / `categories/` route package、`category_rules.py`、`tags.py` 或 `templates.py` route shell。
+- 主要 Python REST route 文件当前按同名 package 组织：`bills/`、`auth/`、`statistics/`、`budgets/`、`backup/`、`matching/`、`llm/` 均保留原 `bp` 导出与 URL/method 契约，内部按 CRUD、查询、导入、候选、配置、用户数据等功能域拆分；账户、分类、分类规则、标签、模板与设置包 REST 主链由 Rust taxonomy runtime 提供，不再保留 Flask `accounts/` / `categories/` route package、`category_rules.py`、`tags.py`、`templates.py` 或 `settings_bundle.py` route shell。

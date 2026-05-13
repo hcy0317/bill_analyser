@@ -108,6 +108,11 @@ class TestAPIBlueprints:
         response = client.get("/api/templates/")
         assert response.status_code == 404
 
+    def test_settings_bundle_blueprint_removed_from_flask_sidecar(self, client):
+        """设置包 REST 主链已由 Rust runtime 接管，不再注册 Flask sidecar 蓝图。"""
+        response = client.get("/api/settings/bundle/export")
+        assert response.status_code == 404
+
     def test_statistics_blueprint_registered(self, client):
         """测试statistics蓝图已注册"""
         response = client.get("/api/statistics/overview")

@@ -102,6 +102,19 @@ fn rust_owned_verified_runtime_routes_include_health_metadata_and_first_phase_im
     assert!(python_deleted_routes.contains(&("POST", "/api/category-rules/reorder")));
     assert!(python_deleted_routes.contains(&("GET", "/api/rules/overview")));
     assert!(python_deleted_routes.contains(&("GET", "/api/settings/encryption/status")));
+    assert!(python_deleted_routes.contains(&("GET", "/api/settings/bundle/export")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/settings/bundle/import")));
+    assert!(python_deleted_routes.contains(&("POST", "/api/settings/bundle/import/preview")));
+    assert!(python_deleted_routes
+        .contains(&("GET", "/api/settings/bundle/sections/{section_key}/export")));
+    assert!(python_deleted_routes
+        .contains(&("POST", "/api/settings/bundle/sections/{section_key}/export")));
+    assert!(python_deleted_routes
+        .contains(&("POST", "/api/settings/bundle/sections/{section_key}/import")));
+    assert!(python_deleted_routes.contains(&(
+        "POST",
+        "/api/settings/bundle/sections/{section_key}/import/preview"
+    )));
     assert!(python_deleted_routes.contains(&("GET", "/api/tags/")));
     assert!(python_deleted_routes.contains(&("POST", "/api/tags/")));
     assert!(python_deleted_routes.contains(&("GET", "/api/tags/{tag_id}")));
@@ -376,7 +389,7 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
             .iter()
             .find(|entry| entry.endpoint == endpoint)
             .unwrap_or_else(|| panic!("taxonomy settings route is present: {endpoint}"));
-        assert_eq!(entry.state, MigrationState::RustOwnedVerified);
+        assert_eq!(entry.state, MigrationState::PythonDeleted);
         assert_eq!(entry.handler, RouteHandlerId::TaxonomyRuntime);
         assert!(matches!(
             entry.envelope,
@@ -384,9 +397,8 @@ fn taxonomy_master_data_routes_are_rust_owned_with_no_p4_config_proxy_remainder(
                 | ResponseEnvelopeFamily::FlaskSuccessData
                 | ResponseEnvelopeFamily::FlaskSuccessResult
         ));
-        assert!(entry
-            .unsupported_behavior
-            .contains("settings encryption status routes are Rust-owned"));
+        assert!(entry.deletion_blockers.is_empty());
+        assert_eq!(entry.decision_required, DecisionRequired::None);
     }
 
     let rules_overview = manifest
@@ -485,6 +497,16 @@ fn contract_only_surfaces_do_not_claim_runtime_business_ownership() {
             ("POST", "/api/category-rules/migrate"),
             ("POST", "/api/category-rules/reorder"),
             ("GET", "/api/rules/overview"),
+            ("GET", "/api/settings/bundle/export"),
+            ("POST", "/api/settings/bundle/import"),
+            ("POST", "/api/settings/bundle/import/preview"),
+            ("GET", "/api/settings/bundle/sections/{section_key}/export"),
+            ("POST", "/api/settings/bundle/sections/{section_key}/export"),
+            ("POST", "/api/settings/bundle/sections/{section_key}/import"),
+            (
+                "POST",
+                "/api/settings/bundle/sections/{section_key}/import/preview",
+            ),
             ("GET", "/api/settings/encryption/status"),
             ("GET", "/api/tags/"),
             ("POST", "/api/tags/"),
@@ -738,19 +760,21 @@ fn p0_state_machine_and_manifest_schema_are_machine_checkable() {
         settings_export.envelope,
         ResponseEnvelopeFamily::FlaskRawPassthrough
     );
-    assert_eq!(settings_export.state, MigrationState::RustOwnedVerified);
+    assert_eq!(settings_export.state, MigrationState::PythonDeleted);
     assert_eq!(settings_export.handler, RouteHandlerId::TaxonomyRuntime);
+    assert!(settings_export.deletion_blockers.is_empty());
 
     let settings_import = manifest
         .iter()
         .find(|entry| entry.endpoint == "POST /api/settings/bundle/import")
         .expect("settings bundle import route is present");
-    assert_eq!(settings_import.state, MigrationState::RustOwnedVerified);
+    assert_eq!(settings_import.state, MigrationState::PythonDeleted);
     assert_eq!(
         settings_import.envelope,
         ResponseEnvelopeFamily::FlaskSuccessResult
     );
     assert_eq!(settings_import.handler, RouteHandlerId::TaxonomyRuntime);
+    assert!(settings_import.deletion_blockers.is_empty());
 
     let bills_export = manifest
         .iter()
@@ -1007,6 +1031,14 @@ fn domain_policies_record_provider_and_deletion_blockers() {
     assert!(database_repositories
         .unsupported_behavior
         .contains("2FA recovery-code DB primitives"));
+
+    let taxonomy = find_domain_policy("taxonomy-rules-settings").expect("taxonomy policy exists");
+    assert_eq!(taxonomy.decision_required, DecisionRequired::None);
+    assert!(taxonomy.python_owner_files.is_empty());
+    assert!(taxonomy.deletion_blockers.is_empty());
+    assert!(taxonomy
+        .unsupported_behavior
+        .contains("all old Flask taxonomy route shells have been removed"));
 
     let database_schema_writer = database_schema_db_writer_policy();
     assert!(database_schema_writer

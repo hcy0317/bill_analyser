@@ -77,7 +77,6 @@ ROUTE_DOMAIN_BY_FILE = {
     "receipt_ocr.py": "ai-ocr",
     "recurring.py": "recurring-calendar",
     "request_context_helpers.py": "api-runtime-shell",
-    "settings_bundle.py": "settings-bundle",
 }
 
 DATABASE_DOMAIN_BY_SEGMENT = {

@@ -6,10 +6,10 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 
 ## Summary
 
-- Python backend files: 304
+- Python backend files: 303
 - Rust backend files: 101
 - Migration domains: 22
-- Files marked port: 239
+- Files marked port: 238
 - Files marked facade: 65
 - Files marked deferred: 0
 - Verified dead files: 0
@@ -36,7 +36,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | import-parsers | 8 | 2 | 0 |
 | matching-reconciliation | 22 | 5 | 0 |
 | recurring-calendar | 4 | 0 | 0 |
-| settings-bundle | 9 | 1 | 0 |
+| settings-bundle | 8 | 1 | 0 |
 | shared-primitives | 5 | 3 | 0 |
 | smart-dedup | 9 | 1 | 0 |
 | statistics-reporting | 26 | 4 | 0 |
@@ -53,7 +53,7 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/adapters/account_adapter.py | api-contract-adapters | api-adapter | facade | 125 |
 | src/bill_analyser/api/adapters/category_adapter.py | api-contract-adapters | api-adapter | facade | 85 |
 | src/bill_analyser/api/adapters/transaction_adapter.py | api-contract-adapters | api-adapter | facade | 242 |
-| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 349 |
+| src/bill_analyser/api/app.py | api-runtime-shell | api-shell | facade | 347 |
 | src/bill_analyser/api/config/__init__.py | api-runtime-shell | package-marker | facade | 1 |
 | src/bill_analyser/api/config/auth.py | api-runtime-shell | api-config | facade | 148 |
 | src/bill_analyser/api/config/bills.py | api-runtime-shell | api-config | facade | 132 |
@@ -122,7 +122,6 @@ Route/domain cutover state lives separately in the Rust governance manifest and 
 | src/bill_analyser/api/routes/receipt_ocr.py | ai-ocr | api-route | port | 185 |
 | src/bill_analyser/api/routes/recurring.py | recurring-calendar | api-route | port | 210 |
 | src/bill_analyser/api/routes/request_context_helpers.py | api-runtime-shell | api-route | port | 40 |
-| src/bill_analyser/api/routes/settings_bundle.py | settings-bundle | api-route | port | 279 |
 | src/bill_analyser/api/routes/statistics/__init__.py | statistics-reporting | package-marker | facade | 43 |
 | src/bill_analyser/api/routes/statistics/asset_trends.py | statistics-reporting | api-route | port | 323 |
 | src/bill_analyser/api/routes/statistics/basic.py | statistics-reporting | api-route | port | 341 |

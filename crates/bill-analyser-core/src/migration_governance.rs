@@ -1880,71 +1880,71 @@ const OWNERSHIP_MATRIX: &[EndpointOwnership] = &[
         method: "GET",
         pattern: "/api/settings/bundle/export",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime returns the current user's unified JSON settings bundle with redacted LLM secrets.",
+            "Rust taxonomy settings-bundle export runtime returns the current user's unified JSON settings bundle with redacted LLM secrets; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/settings/bundle/import",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle import runtime applies one transaction of current-user upserts across accounts, categories, tags, templates, rules, LLM config skeletons, and OCR config.",
+            "Rust taxonomy settings-bundle import runtime applies one transaction of current-user upserts across accounts, categories, tags, templates, rules, LLM config skeletons, and OCR config; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/settings/bundle/import/preview",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle preview runtime runs the same cross-section upsert flow inside a rollback-only transaction.",
+            "Rust taxonomy settings-bundle preview runtime runs the same cross-section upsert flow inside a rollback-only transaction; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
         pattern: "/api/settings/bundle/sections/{section_key}/export",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime returns one non-sensitive section and preserves the Flask password-required response for sensitive sections.",
+            "Rust taxonomy settings-bundle export runtime returns one non-sensitive section and preserves the Flask password-required response for sensitive sections; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/settings/bundle/sections/{section_key}/export",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskRawPassthrough,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle export runtime validates the current password before exporting sensitive LLM/OCR sections.",
+            "Rust taxonomy settings-bundle export runtime validates the current password before exporting sensitive LLM/OCR sections; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/settings/bundle/sections/{section_key}/import",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle section import wraps the requested section only before running current-user upsert semantics.",
+            "Rust taxonomy settings-bundle section import wraps the requested section only before running current-user upsert semantics; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "POST",
         pattern: "/api/settings/bundle/sections/{section_key}/import/preview",
         domain: "taxonomy-rules-settings",
-        state: MigrationState::RustOwnedVerified,
+        state: MigrationState::PythonDeleted,
         envelope: ResponseEnvelopeFamily::FlaskSuccessResult,
         deletion_blocked_until_all_import_gates: false,
         notes:
-            "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes.",
+            "Rust taxonomy settings-bundle section preview wraps the requested section only and rolls back all writes; the old Flask settings_bundle.py route shell has been removed.",
     },
     EndpointOwnership {
         method: "GET",
@@ -2410,7 +2410,7 @@ const AUTH_TOKEN_DELETION_BLOCKERS: &[&str] = &[
     "profile_user_data_parity",
     "2fa_oauth_parity",
 ];
-const TAXONOMY_DELETION_BLOCKERS: &[&str] = &["settings_bundle_parity"];
+const TAXONOMY_DELETION_BLOCKERS: &[&str] = EMPTY_STRINGS;
 const IMPORT_DELETION_BLOCKERS: &[&str] = &[
     "rust_route_runtime",
     "db_write_semantics",
@@ -2851,9 +2851,7 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
     },
     DomainGovernancePolicy {
         domain: "taxonomy-rules-settings",
-        python_owner_files: &[
-            "src/bill_analyser/api/routes/settings_bundle.py",
-        ],
+        python_owner_files: EMPTY_STRINGS,
         rust_owner_files: &[
             "crates/bill-analyser-http/src/taxonomy_routes.rs",
             "crates/bill-analyser-http/src/proxy.rs",
@@ -2870,9 +2868,9 @@ const DOMAIN_GOVERNANCE_POLICIES: &[DomainGovernancePolicy] = &[
         deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
         blocked_status: MigrationBlockedStatus::None,
         unsupported_behavior:
-            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; the old Flask templates.py route shell has been removed.",
-        decision_required: DecisionRequired::Port,
-        decision_owner: "migration-program",
+            "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, and settings bundle import/preview/export routes are Rust-owned; all old Flask taxonomy route shells have been removed. Python CategoryEngine matcher cache remains only for later import/learning matching paths.",
+        decision_required: DecisionRequired::None,
+        decision_owner: "none",
         transition_evidence: ROUTE_MATRIX_ONLY_EVIDENCE,
     },
     DomainGovernancePolicy {
@@ -3312,9 +3310,9 @@ fn route_contract_details(
             deletion_blockers: TAXONOMY_DELETION_BLOCKERS,
             blocked_status: MigrationBlockedStatus::None,
             unsupported_behavior:
-                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; the old Flask templates.py route shell has been removed.",
-            decision_required: DecisionRequired::Port,
-            decision_owner: "migration-program",
+                "Account CRUD/display-order/balance sync/transaction move-clear, tag CRUD/display-order/batch-create, category master-data/statistics/update-all, legacy category rules config/cache, category-rule list/create/update/delete/reorder/defaults/migrate/test, rule overview, templates, settings bundle import/preview/export, and settings encryption status routes are Rust-owned; all old Flask taxonomy route shells have been removed.",
+            decision_required: DecisionRequired::None,
+            decision_owner: "none",
             transition_evidence: DB_RUNTIME_EVIDENCE,
         },
         ("taxonomy-rules-settings", MigrationState::PythonDeleted) => RouteContractDetails {

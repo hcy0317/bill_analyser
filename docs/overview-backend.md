@@ -10,9 +10,9 @@
 - 分类规则 canonical CRUD / migrate / defaults / test 接口已由 Rust taxonomy runtime 接管：默认 `import_db_runtime` 下 `GET|POST /api/category-rules/`、`PUT|DELETE /api/category-rules/{rule_id}`、`POST /api/category-rules/reorder`、`POST /api/category-rules/defaults`、`POST /api/category-rules/migrate`、`POST /api/category-rules/{rule_id}/test`、legacy `GET|PUT /api/categories/rules` config/cache 与规则中心 `GET /api/rules/overview` 均读取或写入普通应用 SQLite；旧 Flask `category_rules.py` route shell 已删除，category rules 是当前分类规则体系的正式入口，`POST /api/category-rules/defaults` 会幂等补齐内置日常分类和分类识别规则
 - `GET|POST /api/tags/`、`GET|PUT|DELETE /api/tags/{tag_id}`、`POST /api/tags/batch` 与 `PUT /api/tags/display-orders` 已由 Rust taxonomy runtime 接管，旧 Flask `tags.py` route shell 已删除
 - `GET|POST /api/templates/`、`GET|PUT|DELETE /api/templates/{template_id}` 与 `PUT /api/templates/display-orders` 已由 Rust taxonomy runtime 接管，旧 Flask `templates.py` route shell 已删除
+- `GET /api/settings/bundle/export`、`GET|POST /api/settings/bundle/sections/{section_key}/export`、`POST /api/settings/bundle/import`、`POST /api/settings/bundle/import/preview`、`POST /api/settings/bundle/sections/{section_key}/import` 与 `POST /api/settings/bundle/sections/{section_key}/import/preview` 已由 Rust taxonomy runtime 接管，旧 Flask `settings_bundle.py` route shell 已删除
 - `budgets/`：预算同名 package；预算 CRUD、执行统计、历史、预测、导入导出接口
 - `statistics/`：统计同名 package；统计总览、趋势、分类/商户分析、资产趋势与汇率接口；默认 Rust `import_db_runtime` 下，category statistics、category trends、asset trends、category pie、top merchants、amounts 以及 exchange-rate provider/custom-rate 已由 Rust HTTP/DB 读取写入路径接管，Analyzer overview/trends/comparison/category/trend 仍由 Python sidecar 运行
-- `settings_bundle.py`：设置 JSON 包导入导出；统一覆盖账户、交易分类、交易标签、交易模板、定时交易、分类识别规则、LLM 配置与 OCR 配置，并提供各页面使用的 section-scoped export / preview import / import，导入只做非破坏性 upsert；LLM/OCR 单 section 导出必须校验当前登录密码
 - `backup/`：备份同名 package；备份文件、恢复、任务与清理接口
 - `llm/`：LLM 同名 package；配置、导入会话分析、候选审核、预览推荐与 memory 事件接口
 - `receipt_ocr.py`：小票/支付截图 OCR REST 蓝图，继续提供 `POST /api/ml/receipt-recognition` 与 `GET/PUT /api/ml/receipt-recognition/config`
