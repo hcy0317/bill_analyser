@@ -6,6 +6,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/stop_commit_title_hint.py",
         "powershell": "python -X utf8 scripts/hooks/stop_commit_title_hint.py",
+        "statusMessage": "repo:stop_commit_title_hint - Preparing Bill Analyser commit title hint",
         "cwd": ".",
         "timeoutSec": 15
       },
@@ -13,6 +14,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
         "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
+        "statusMessage": "repo:copilot_global_hook_bridge:stop - Bridging global stop hooks",
         "cwd": ".",
         "timeoutSec": 15
       }

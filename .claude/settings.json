@@ -7,11 +7,13 @@
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/pre_tool_repo_guard.py",
+            "statusMessage": "repo:pre_tool_repo_guard - Checking Bill Analyser repo guard",
             "timeout": 20
           },
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+            "statusMessage": "repo:copilot_global_hook_bridge:pre-tool - Bridging global pre-tool hooks",
             "timeout": 20
           }
         ]
@@ -24,11 +26,13 @@
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/post_tool_validation_hint.py",
+            "statusMessage": "repo:post_tool_validation_hint - Updating Bill Analyser validation hints",
             "timeout": 15
           },
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
+            "statusMessage": "repo:copilot_global_hook_bridge:post-tool - Bridging global post-tool hooks",
             "timeout": 15
           }
         ]
@@ -40,11 +44,13 @@
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/stop_commit_title_hint.py",
+            "statusMessage": "repo:stop_commit_title_hint - Preparing Bill Analyser commit title hint",
             "timeout": 15
           },
           {
             "type": "command",
             "command": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py stop",
+            "statusMessage": "repo:copilot_global_hook_bridge:stop - Bridging global stop hooks",
             "timeout": 15
           }
         ]

@@ -6,6 +6,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/post_tool_validation_hint.py",
         "powershell": "python -X utf8 scripts/hooks/post_tool_validation_hint.py",
+        "statusMessage": "repo:post_tool_validation_hint - Updating Bill Analyser validation hints",
         "cwd": ".",
         "timeoutSec": 15
       },
@@ -13,6 +14,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
         "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py post-tool",
+        "statusMessage": "repo:copilot_global_hook_bridge:post-tool - Bridging global post-tool hooks",
         "cwd": ".",
         "timeoutSec": 15
       }

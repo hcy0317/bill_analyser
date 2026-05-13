@@ -6,6 +6,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/pre_tool_repo_guard.py",
         "powershell": "python -X utf8 scripts/hooks/pre_tool_repo_guard.py",
+        "statusMessage": "repo:pre_tool_repo_guard - Checking Bill Analyser repo guard",
         "cwd": ".",
         "timeoutSec": 20
       },
@@ -13,6 +14,7 @@
         "type": "command",
         "bash": "python3 -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
         "powershell": "python -X utf8 scripts/hooks/copilot_global_hook_bridge.py pre-tool",
+        "statusMessage": "repo:copilot_global_hook_bridge:pre-tool - Bridging global pre-tool hooks",
         "cwd": ".",
         "timeoutSec": 20
       }
