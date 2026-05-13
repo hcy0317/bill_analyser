@@ -99,6 +99,9 @@ def test_ci_workflow_enforces_backend_rust_and_frontend_coverage_gates() -> None
     assert '~/.cargo/bin/cargo-llvm-cov' in text
     assert 'target' in text
     assert "key: ${{ runner.os }}-cargo-stable-${{ hashFiles('Cargo.lock') }}" in text
+    assert 'Clean Rust coverage artifacts before cache save' in text
+    assert 'rm -rf target/llvm-cov-target target/llvm-cov-*-target' in text
+    assert 'rm -f workspace.lcov' in text
     assert '~/.cache/pip' in text
     assert 'cargo install cargo-llvm-cov --locked' in text
     assert 'if ! command -v cargo-llvm-cov >/dev/null 2>&1; then' in text
